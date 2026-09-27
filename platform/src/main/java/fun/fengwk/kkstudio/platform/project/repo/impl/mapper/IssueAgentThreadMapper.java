@@ -12,6 +12,7 @@ import org.apache.ibatis.annotations.Select;
 
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueAgentThreadDO;
 
+import java.util.List;
 import java.util.UUID;
 
 /** {@code project_issue_agent_thread} 稳定绑定的 SQL 入口。 */
@@ -49,9 +50,34 @@ public interface IssueAgentThreadMapper extends BaseMapper {
   @ResultMap("issueAgentThreadMap")
   IssueAgentThreadDO findByThreadId(@Param("threadId") UUID threadId);
 
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_agent_thread where issue_id = #{issueId}"
+          + " order by agent_name asc")
+  @ResultMap("issueAgentThreadMap")
+  List<IssueAgentThreadDO> listByIssueId(@Param("issueId") UUID issueId);
+
   @Delete(
       "delete from project_issue_agent_thread"
           + " where issue_id = #{issueId} and agent_name = #{agentName}")
   int deleteByIssueIdAndAgentName(
       @Param("issueId") UUID issueId, @Param("agentName") String agentName);
+
+  /**
+   * 该 Thread 自身或其 Harness Session 内的任一 Thread 是否已被 Issue+Agent 绑定。
+   *
+   * <p>Session 归属是只读事实：兄弟分支没有自己的绑定行，只能由同一 Session 的已绑定 Thread 判定。
+   */
+  @Select(
+      """
+      select exists(
+          select 1
+          from project_issue_agent_thread binding
+          join harness_thread thread on thread.id = binding.thread_id
+          where binding.thread_id = #{threadId}
+             or thread.session_id = (select session_id from harness_thread where id = #{threadId})
+      )
+      """)
+  boolean isIssueAgentBranch(@Param("threadId") UUID threadId);
 }

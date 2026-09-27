@@ -23,5 +23,13 @@ public interface IssueWorkRepository {
   boolean deleteIfWakeMatches(
       UUID issueId, String leaseToken, long claimedWakeVersion, Instant now);
 
+  /**
+   * 归还当前 claim 的 lease 并把下一次检查延后到 {@code dueAt}。
+   *
+   * <p>只以调用方自己的 lease token 围栏，因此即使处理期间到达了新唤醒（wake_version 已推进）也能立即归还；{@code due_at}
+   * 只取更早值，不会把别的唤醒推后。围栏失败（lease 已过期或已被接管）返回 false，由 lease 自愈兜底。
+   */
+  boolean releaseLease(UUID issueId, String leaseToken, Instant dueAt);
+
   int deleteByIssueId(UUID issueId);
 }

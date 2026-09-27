@@ -7,7 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 更新 Issue 请求 DTO，含 expectedVersion CAS 版本。 */
+/** 更新 Issue 请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -15,16 +15,12 @@ import lombok.NoArgsConstructor;
 public class UpdateIssueRequestDTO {
 
   private String expectedVersion;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String title;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String description;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String assigneeAgentName;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String reviewerAgentName;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

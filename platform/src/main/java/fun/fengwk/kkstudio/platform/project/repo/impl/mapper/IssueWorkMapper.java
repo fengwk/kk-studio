@@ -111,6 +111,21 @@ public interface IssueWorkMapper extends BaseMapper {
       @Param("claimedWakeVersion") long claimedWakeVersion,
       @Param("now") Instant now);
 
+  @Update(
+      """
+      update project_issue_work
+      set lease_token = null,
+          lease_until = null,
+          due_at = least(due_at, #{dueAt}),
+          updated_at = clock_timestamp()
+      where issue_id = #{issueId}
+        and lease_token = #{leaseToken}
+      """)
+  int releaseLease(
+      @Param("issueId") UUID issueId,
+      @Param("leaseToken") String leaseToken,
+      @Param("dueAt") Instant dueAt);
+
   @Delete("delete from project_issue_work where issue_id = #{issueId}")
   int deleteByIssueId(@Param("issueId") UUID issueId);
 }

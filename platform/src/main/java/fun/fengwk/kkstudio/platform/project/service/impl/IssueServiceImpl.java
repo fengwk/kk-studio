@@ -15,15 +15,19 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueActivityIdempotency.Identity;
 import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
@@ -31,7 +35,9 @@ import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -49,11 +55,16 @@ public class IssueServiceImpl implements IssueService {
 
   private static final int MAX_REQUEST_KEY_LENGTH = 128;
 
+  /** 单次活动窗口上限：读取面与投递面都只检视有界窗口，绝不无界加载整条事实流。 */
+  private static final int MAX_ACTIVITY_LIMIT = 200;
+
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueActivityRepository issueActivityRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueWorkStore issueWorkStore;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
 
@@ -112,6 +123,145 @@ public class IssueServiceImpl implements IssueService {
 
   @Override
   @Transactional
+  public Issue updateIssue(UUID issueId, long expectedVersion, String title, String description) {
+    Objects.requireNonNull(issueId, "issueId");
+    Locked locked = lock(issueId, expectedVersion, false);
+    locked
+        .issue()
+        .setTitle(
+            ProjectValidationUtils.requireDisplayName(
+                title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH));
+    locked
+        .issue()
+        .setDescription(
+            ProjectValidationUtils.optionalUtf8Text(
+                description == null ? "" : description,
+                "description",
+                ProjectValidationUtils.MAX_LARGE_TEXT_BYTES));
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue archiveIssue(UUID issueId, long expectedVersion) {
+    Objects.requireNonNull(issueId, "issueId");
+    // 允许读取已归档事实：缺少响应后的重试必须能回到「归档已是当前事实」的分支，而不是被归档门禁拒绝。
+    Locked locked = lock(issueId, expectedVersion, true);
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException(
+          "issue", "Cannot archive an issue while it has an active run; stop or settle it first");
+    }
+    if (locked.issue().isArchived()) {
+      // 缺少响应后的重试：归档已经是当前事实，不重复写行。
+      return locked.issue();
+    }
+    locked.issue().setArchivedAt(Instant.now());
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue unarchiveIssue(UUID issueId, long expectedVersion) {
+    Objects.requireNonNull(issueId, "issueId");
+    Locked locked = lock(issueId, expectedVersion, true);
+    if (!locked.issue().isArchived()) {
+      // 缺少响应后的重试：已经是可编辑状态，不重复写行。
+      return locked.issue();
+    }
+    locked.issue().setArchivedAt(null);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue appendComment(UUID issueId, long expectedVersion, String requestKey, String body) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    String validBody =
+        ProjectValidationUtils.requireUtf8Text(
+            body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.COMMENT, "COMMENT", key, validBody);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion, false);
+    appendActivity(
+        locked.issue(),
+        identity,
+        IssueActivityActorType.HUMAN,
+        null,
+        null,
+        validBody,
+        objectMapper.createObjectNode());
+    persist(locked, expectedVersion);
+    // 普通评论不自动唤醒 Agent（设计 §4.6）。
+    return issueRepository.getById(issueId);
+  }
+
+  @Override
+  @Transactional
+  public Issue appendInstruction(
+      UUID issueId, long expectedVersion, String requestKey, String body) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    String validBody =
+        ProjectValidationUtils.requireUtf8Text(
+            body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.INSTRUCTION, "INSTRUCTION", key, validBody);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion, false);
+    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
+    if (activeRun == null) {
+      // 没有活动 Run 时不构造隐藏的未来阶段消息队列：先明确启动或恢复。
+      throw new AiValidationException(
+          "issue",
+          "Cannot deliver an instruction without an active run; start or resume the issue first");
+    }
+    appendActivity(
+        locked.issue(),
+        identity,
+        IssueActivityActorType.HUMAN,
+        null,
+        activeRun.getId(),
+        validBody,
+        objectMapper.createObjectNode());
+    persist(locked, expectedVersion);
+    // 指示已持久接受，由 mailbox 在安全点投递给明确的当前 Run。
+    issueWorkStore.requestWork(issueId, Instant.now());
+    return issueRepository.getById(issueId);
+  }
+
+  @Override
+  public List<IssueActivity> listActivities(UUID issueId, long afterSequence, int limit) {
+    Objects.requireNonNull(issueId, "issueId");
+    getIssue(issueId);
+    if (afterSequence < 0) {
+      throw new AiValidationException("afterSequence", "afterSequence must be non-negative");
+    }
+    return issueActivityRepository.listPage(issueId, afterSequence, clampLimit(limit));
+  }
+
+  @Override
+  public List<IssueAgentThread> listAgentThreads(UUID issueId) {
+    Objects.requireNonNull(issueId, "issueId");
+    getIssue(issueId);
+    return issueAgentThreadRepository.listByIssueId(issueId);
+  }
+
+  private static int clampLimit(int limit) {
+    if (limit <= 0) {
+      throw new AiValidationException("limit", "limit must be positive");
+    }
+    return Math.min(limit, MAX_ACTIVITY_LIMIT);
+  }
+
+  @Override
+  @Transactional
   public Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason) {
     Objects.requireNonNull(issueId, "issueId");
     String key = requireRequestKey(requestKey);
@@ -123,7 +273,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectValidationUtils.validate(
         "issue",
@@ -149,7 +299,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     Issue issue = locked.issue();
     if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
       throw new AiValidationException("issue", "Issue is not blocked");
@@ -168,7 +318,10 @@ public class IssueServiceImpl implements IssueService {
     issue.setState(recovered.value());
     issue.setBlockedFromState(null);
     issue.setBlockReason(null);
-    return persist(locked, expectedVersion);
+    Issue persisted = persist(locked, expectedVersion);
+    // 恢复到仍需要执行的工作阶段时唤醒 mailbox；已有活动 Run 由该 Run 自己收尾。
+    wakeIfExecutable(persisted, locked.project());
+    return persisted;
   }
 
   @Override
@@ -187,7 +340,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ObjectNode data = objectMapper.createObjectNode();
     data.put("action", "PAUSE");
     data.put("reason", reason.name());
@@ -206,14 +359,17 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ObjectNode data = objectMapper.createObjectNode();
     data.put("action", "RESUME");
     data.put("reason", locked.issue().getPauseReason());
     appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
     locked.issue().setPauseReason(null);
     locked.issue().setPauseDetail(null);
-    return persist(locked, expectedVersion);
+    Issue persisted = persist(locked, expectedVersion);
+    // 门禁解除后重新登记 Work；额度限制新建 Run，但不限制已接受 Run 的恢复。
+    wakeIfExecutable(persisted, locked.project());
+    return persisted;
   }
 
   @Override
@@ -228,14 +384,17 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectStateCode to = ProjectStateCode.of(toState);
     ProjectValidationUtils.validate(
         "issue", () -> new IssueStateTransitions(locked.workflow()).requireTransition(from, to));
     appendStateChange(locked.issue(), identity, "TRANSITION", from.value(), to.value());
     locked.issue().setState(to.value());
-    return persist(locked, expectedVersion);
+    Issue persisted = persist(locked, expectedVersion);
+    // 进入有 Agent 的工作阶段时登记 Work；保留阶段与人工阶段不产生执行。
+    wakeIfExecutable(persisted, locked.project());
+    return persisted;
   }
 
   @Override
@@ -248,7 +407,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectStateCode to =
         ProjectValidationUtils.resolve(
@@ -271,7 +430,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     ProjectStateCode code = ProjectStateCode.of(state);
     IssueStageBudget authorized =
         ProjectValidationUtils.resolve(
@@ -311,7 +470,7 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lock(issueId, expectedVersion);
+    Locked locked = lock(issueId, expectedVersion, false);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new AiValidationException(
           "stage_budget", "Cannot reset stage budget while an active run exists");
@@ -436,7 +595,8 @@ public class IssueServiceImpl implements IssueService {
     }
   }
 
-  private Locked lock(UUID issueId, long expectedVersion) {
+  /** 以 Project FOR KEY SHARE → Issue FOR UPDATE 的固定锁序加锁，并做版本与归属校验。归档 Issue 默认拒绝写，恢复归档时显式放行。 */
+  private Locked lock(UUID issueId, long expectedVersion, boolean allowArchivedIssue) {
     Objects.requireNonNull(issueId, "issueId");
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
@@ -456,7 +616,7 @@ public class IssueServiceImpl implements IssueService {
     if (!issue.getProjectId().equals(project.getId())) {
       throw new AiValidationException("issue", "Issue hierarchy is inconsistent");
     }
-    if (issue.isArchived()) {
+    if (issue.isArchived() && !allowArchivedIssue) {
       throw new AiValidationException("issue", "Cannot modify an archived issue");
     }
     if (issue.getVersion() != expectedVersion) {
@@ -464,6 +624,27 @@ public class IssueServiceImpl implements IssueService {
           "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
     }
     return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
+  }
+
+  /**
+   * 状态或门禁变化后，若当前阶段是启用且有 Agent 的工作阶段就登记一次 Work。
+   *
+   * <p>mailbox 只表达「重新检查当前 Issue」，因此这里只登记事实，不预判额度或派发决定；保留阶段、人工阶段与暂停门禁都不产生 Work。
+   */
+  private void wakeIfExecutable(Issue issue, Project project) {
+    if (issue.isPaused()) {
+      return;
+    }
+    ProjectStateCode state = ProjectStateCode.of(issue.getState());
+    if (ProjectWorkflowReservedState.isReserved(state)) {
+      return;
+    }
+    ProjectWorkflowState stage =
+        workflowCodec.decode(project.getWorkflowJson()).find(state).orElse(null);
+    if (stage == null || !stage.enabled() || !stage.hasAgent()) {
+      return;
+    }
+    issueWorkStore.requestWork(issue.getId(), Instant.now());
   }
 
   private Issue persist(Locked locked, long expectedVersion) {

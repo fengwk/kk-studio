@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -42,6 +43,14 @@ public class StudioProjectErrorAdvice {
         "PROJECT_VERSION_CONFLICT",
         "Version conflict for " + error.resource(),
         ctx);
+  }
+
+  @ExceptionHandler(AiDuplicateException.class)
+  public ResponseEntity<Result<Void>> handleDuplicate(AiDuplicateException error) {
+    Map<String, Object> ctx = new LinkedHashMap<>();
+    ctx.put("resource", error.resource());
+    ctx.put("detail", error.getMessage());
+    return build(HttpStatus.CONFLICT, "PROJECT_DUPLICATE_CONFLICT", error.getMessage(), ctx);
   }
 
   @ExceptionHandler(HarnessRuntimeConflictException.class)

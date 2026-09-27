@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.project.repo;
 
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -15,6 +16,9 @@ public interface IssueAgentThreadRepository {
 
   /** 读取稳定绑定；不存在返回 {@code null}。 */
   IssueAgentThread findByIssueIdAndAgentName(UUID issueId, String agentName);
+
+  /** 读取该 Issue 的全部稳定绑定：Thread 查询面按 Agent 名称顺序返回，不泄漏别的 Issue。 */
+  List<IssueAgentThread> listByIssueId(UUID issueId);
 
   /**
    * 按 Harness Thread 反向读取稳定绑定；该 Thread 未绑定时返回 {@code null}。
@@ -35,4 +39,12 @@ public interface IssueAgentThreadRepository {
 
   /** 删除稳定绑定并返回删除行数（深删除时必须先于 harness_thread 行删除）。 */
   int deleteByIssueIdAndAgentName(UUID issueId, String agentName);
+
+  /**
+   * 判定一个 Harness Thread 是否属于任何 Issue+Agent 稳定归属：包含同一 Session 的兄弟分支。
+   *
+   * <p>只读取持久化归属事实（{@code project_issue_agent_thread} 与其 Harness Session 归属），不触达运行中的 Runtime；Thread
+   * 不存在或没有任何归属都返回 false，绝不猜成别的 owner。
+   */
+  boolean isIssueAgentBranch(UUID threadId);
 }

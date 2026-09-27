@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.project;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -18,12 +17,15 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
-import fun.fengwk.kkstudio.share.project.ProjectArchiveRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
-import fun.fengwk.kkstudio.share.project.ProjectUnarchiveRequestDTO;
+import fun.fengwk.kkstudio.share.project.ProjectVersionRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
+import fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO;
+import fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO;
 
 import java.util.List;
 import java.util.Objects;
@@ -32,23 +34,38 @@ import java.util.UUID;
 /**
  * Project 领域 REST 控制器。
  *
- * <p>Project 只拥有配置（YOLO 启动策略与打回阈值）与 Issue 集合；Issue Agent Session 归属按 {@code (issueId, agentName)} 由
- * Issue 详情暴露，因此本控制器不提供项目级 Session 路由。
+ * <p>提供项目配置、工作流、YOLO 执行策略、归档/解归档/删除以及聚合快照的权威 HTTP 操作面。
  */
-@AllArgsConstructor
 @RestController
 @RequestMapping("/api/projects")
 public class StudioProjectController {
 
-  /** 未显式指定时，新项目开启 YOLO。 */
+  /** 未显式指定时，新项目默认开启 YOLO。 */
   private static final boolean DEFAULT_YOLO_ENABLED = true;
-
-  /** 未显式指定时，正式审查连续打回阈值取 3。 */
-  private static final int DEFAULT_MAX_REVIEW_REJECTIONS = 3;
 
   private final ProjectService projectService;
   private final ProjectSnapshotAssembler projectSnapshotAssembler;
   private final ProjectDtoMapper mapper;
+  private final ProjectWorkflowJsonCodec workflowCodec;
+
+  public StudioProjectController(
+      ProjectService projectService,
+      ProjectSnapshotAssembler projectSnapshotAssembler,
+      ProjectDtoMapper mapper,
+      ProjectWorkflowJsonCodec workflowCodec) {
+    this.projectService = Objects.requireNonNull(projectService, "projectService");
+    this.projectSnapshotAssembler =
+        Objects.requireNonNull(projectSnapshotAssembler, "projectSnapshotAssembler");
+    this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
+  }
+
+  public StudioProjectController(
+      ProjectService projectService,
+      ProjectSnapshotAssembler projectSnapshotAssembler,
+      ProjectDtoMapper mapper) {
+    this(projectService, projectSnapshotAssembler, mapper, new ProjectWorkflowJsonCodec());
+  }
 
   @GetMapping
   public Result<List<ProjectDTO>> listProjects(
@@ -64,13 +81,8 @@ public class StudioProjectController {
     Objects.requireNonNull(request, "request");
     boolean yoloEnabled =
         request.getYoloEnabled() == null ? DEFAULT_YOLO_ENABLED : request.getYoloEnabled();
-    int maxReviewRejections =
-        request.getMaxReviewRejections() == null
-            ? DEFAULT_MAX_REVIEW_REJECTIONS
-            : request.getMaxReviewRejections();
     Project created =
-        projectService.createProject(
-            request.getTitle(), request.getDescription(), yoloEnabled, maxReviewRejections);
+        projectService.createProject(request.getTitle(), request.getDescription(), yoloEnabled);
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -93,13 +105,41 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project updated =
-        projectService.updateProject(
-            projectId,
-            expectedVersion,
-            request.getTitle(),
-            request.getDescription(),
-            request.getYoloEnabled(),
-            request.getMaxReviewRejections());
+        projectService.updateConfiguration(
+            projectId, expectedVersion, request.getTitle(), request.getDescription());
+    return Results.ok(mapper.toDto(updated));
+  }
+
+  @PutMapping("/{projectId}/workflow")
+  public Result<ProjectDTO> updateWorkflow(
+      @PathVariable("projectId") String projectIdStr,
+      @RequestBody UpdateProjectWorkflowRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    if (request.getWorkflow() == null) {
+      throw new IllegalArgumentException("workflow must not be null");
+    }
+    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    ProjectWorkflow workflow = mapper.toWorkflow(request.getWorkflow());
+    String workflowJson = workflowCodec.encode(workflow);
+    Project updated = projectService.updateWorkflow(projectId, expectedVersion, workflowJson);
+    return Results.ok(mapper.toDto(updated));
+  }
+
+  @PutMapping("/{projectId}/yolo")
+  public Result<ProjectDTO> updateYolo(
+      @PathVariable("projectId") String projectIdStr,
+      @RequestBody UpdateProjectYoloRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    if (request.getYoloEnabled() == null) {
+      throw new IllegalArgumentException("yoloEnabled must not be null");
+    }
+    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    Project updated =
+        projectService.updateYolo(projectId, expectedVersion, request.getYoloEnabled());
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -117,7 +157,8 @@ public class StudioProjectController {
   @PostMapping("/{projectId}/archive")
   public Result<ProjectDTO> archiveProject(
       @PathVariable("projectId") String projectIdStr,
-      @RequestBody ProjectArchiveRequestDTO request) {
+      @RequestBody ProjectVersionRequestDTO request) {
+    Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
@@ -128,7 +169,8 @@ public class StudioProjectController {
   @PostMapping("/{projectId}/unarchive")
   public Result<ProjectDTO> unarchiveProject(
       @PathVariable("projectId") String projectIdStr,
-      @RequestBody ProjectUnarchiveRequestDTO request) {
+      @RequestBody ProjectVersionRequestDTO request) {
+    Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");

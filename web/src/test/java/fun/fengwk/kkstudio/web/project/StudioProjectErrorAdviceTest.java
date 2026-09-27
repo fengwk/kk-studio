@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -43,6 +44,21 @@ class StudioProjectErrorAdviceTest {
     assertEquals("Version conflict for project", body.getMessage());
     assertEquals(
         Map.of("resource", "project", "expectedVersion", "1", "actualVersion", "2"),
+        body.getErrors());
+  }
+
+  @Test
+  void handlesDuplicateConflict() {
+    AiDuplicateException ex =
+        new AiDuplicateException("stage_budget", "Stage budget is already authorized");
+    ResponseEntity<Result<Void>> response = advice.handleDuplicate(ex);
+
+    assertEquals(409, response.getStatusCode().value());
+    Result<Void> body = response.getBody();
+    assertNotNull(body);
+    assertEquals("PROJECT_DUPLICATE_CONFLICT", body.getCode());
+    assertEquals(
+        Map.of("resource", "stage_budget", "detail", "Stage budget is already authorized"),
         body.getErrors());
   }
 
@@ -102,17 +118,12 @@ class StudioProjectErrorAdviceTest {
     assertNotNull(internalBody);
     assertEquals("PROJECT_INTERNAL_ERROR", internalBody.getCode());
     assertEquals(Map.of("detail", "Project operation failed"), internalBody.getErrors());
-  }
 
-  @Test
-  void handlesBinding() {
-    BindException ex = new BindException(new Object(), "target");
-    ResponseEntity<Result<Void>> response = advice.handleBinding(ex);
-
-    assertEquals(400, response.getStatusCode().value());
-    Result<Void> body = response.getBody();
-    assertNotNull(body);
-    assertEquals("PROJECT_VALIDATION_ERROR", body.getCode());
-    assertEquals(Map.of("detail", "Request validation failed"), body.getErrors());
+    BindException binding = new BindException(new Object(), "target");
+    ResponseEntity<Result<Void>> bindResponse = advice.handleBinding(binding);
+    assertEquals(400, bindResponse.getStatusCode().value());
+    Result<Void> bindBody = bindResponse.getBody();
+    assertNotNull(bindBody);
+    assertEquals("PROJECT_VALIDATION_ERROR", bindBody.getCode());
   }
 }

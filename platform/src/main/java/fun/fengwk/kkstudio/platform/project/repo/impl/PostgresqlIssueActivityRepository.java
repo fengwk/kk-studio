@@ -43,6 +43,13 @@ public class PostgresqlIssueActivityRepository implements IssueActivityRepositor
   }
 
   @Override
+  public List<IssueActivity> listPage(UUID issueId, long afterSequence, int limit) {
+    return mapper.listPage(issueId, afterSequence, limit).stream()
+        .map(PostgresqlIssueActivityRepository::toModel)
+        .toList();
+  }
+
+  @Override
   public int deleteByIssueId(UUID issueId) {
     return mapper.deleteByIssueId(issueId);
   }

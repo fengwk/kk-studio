@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueAgentThreadMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueAgentThreadDO;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -32,6 +33,14 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   }
 
   @Override
+  public List<IssueAgentThread> listByIssueId(UUID issueId) {
+    Objects.requireNonNull(issueId, "issueId");
+    return mapper.listByIssueId(issueId).stream()
+        .map(PostgresqlIssueAgentThreadRepository::toModel)
+        .toList();
+  }
+
+  @Override
   public boolean insert(IssueAgentThread binding) {
     Objects.requireNonNull(binding, "binding");
     return mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;
@@ -40,6 +49,12 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   @Override
   public int deleteByIssueIdAndAgentName(UUID issueId, String agentName) {
     return mapper.deleteByIssueIdAndAgentName(issueId, agentName);
+  }
+
+  @Override
+  public boolean isIssueAgentBranch(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return mapper.isIssueAgentBranch(threadId);
   }
 
   private static IssueAgentThread toModel(IssueAgentThreadDO row) {

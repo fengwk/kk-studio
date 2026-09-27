@@ -1,25 +1,35 @@
 package fun.fengwk.kkstudio.web.project;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
-import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
+import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
-import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
 import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunSummaryDTO;
+import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
+import fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO;
+import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -33,6 +43,18 @@ public class ProjectDtoMapper {
           "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           Pattern.CASE_INSENSITIVE);
   private static final Pattern DECIMAL_LONG_PATTERN = Pattern.compile("^(0|[1-9][0-9]*)$");
+
+  private final ProjectWorkflowJsonCodec workflowCodec;
+  private final ObjectMapper objectMapper;
+
+  public ProjectDtoMapper(ProjectWorkflowJsonCodec workflowCodec, ObjectMapper objectMapper) {
+    this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+  }
+
+  public ProjectDtoMapper() {
+    this(new ProjectWorkflowJsonCodec(), new ObjectMapper());
+  }
 
   public static UUID parseUuid(String value, String fieldName) {
     if (value == null || !UUID_PATTERN.matcher(value.trim()).matches()) {
@@ -73,14 +95,72 @@ public class ProjectDtoMapper {
     return instant == null ? null : instant.toString();
   }
 
+  public ProjectWorkflow toWorkflow(ProjectWorkflowDTO dto) {
+    Objects.requireNonNull(dto, "dto");
+    if (dto.getStates() == null) {
+      throw new IllegalArgumentException("workflow states must not be null");
+    }
+    List<ProjectWorkflowState> states = new ArrayList<>();
+    for (ProjectWorkflowStateDTO stateDto : dto.getStates()) {
+      if (stateDto == null) {
+        throw new IllegalArgumentException("workflow state must not be null");
+      }
+      ProjectStateCode stateCode = ProjectStateCode.of(stateDto.getState());
+      String name = stateDto.getName();
+      String agent = stateDto.getAgent();
+      String environment = stateDto.getEnvironment();
+      String instructions = stateDto.getInstructions();
+      Integer maxRuns = null;
+      if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
+        maxRuns = (int) parseNonNegativeLong(stateDto.getMaxRuns(), "maxRuns");
+      }
+      boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
+      List<ProjectStateCode> next =
+          stateDto.getNext() == null
+              ? List.of()
+              : stateDto.getNext().stream().map(ProjectStateCode::of).toList();
+      states.add(
+          new ProjectWorkflowState(
+              stateCode, name, agent, environment, instructions, maxRuns, enabled, next));
+    }
+    return new ProjectWorkflow(states);
+  }
+
+  public ProjectWorkflowDTO toWorkflowDto(ProjectWorkflow workflow) {
+    if (workflow == null) {
+      return null;
+    }
+    List<ProjectWorkflowStateDTO> states =
+        workflow.states().stream()
+            .map(
+                state ->
+                    ProjectWorkflowStateDTO.builder()
+                        .state(state.state().value())
+                        .name(state.name())
+                        .agent(state.agent())
+                        .environment(state.environment())
+                        .instructions(state.instructions())
+                        .maxRuns(state.maxRuns() != null ? String.valueOf(state.maxRuns()) : null)
+                        .enabled(state.enabled())
+                        .next(state.next().stream().map(ProjectStateCode::value).toList())
+                        .build())
+            .toList();
+    return ProjectWorkflowDTO.builder().states(states).build();
+  }
+
   public ProjectDTO toDto(Project project) {
     Objects.requireNonNull(project, "project");
+    ProjectWorkflowDTO workflowDto = null;
+    if (project.getWorkflowJson() != null && !project.getWorkflowJson().isBlank()) {
+      ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
+      workflowDto = toWorkflowDto(workflow);
+    }
     return ProjectDTO.builder()
         .id(formatUuid(project.getId()))
         .title(project.getTitle())
         .description(project.getDescription())
+        .workflow(workflowDto)
         .yoloEnabled(project.isYoloEnabled())
-        .maxReviewRejections(formatLong((long) project.getMaxReviewRejections()))
         .nextIssueNumber(formatLong(project.getNextIssueNumber()))
         .version(formatLong(project.getVersion()))
         .archivedAt(formatInstant(project.getArchivedAt()))
@@ -97,23 +177,15 @@ public class ProjectDtoMapper {
         .number(formatLong(issue.getNumber()))
         .title(issue.getTitle())
         .description(issue.getDescription())
-        .status(issue.getStatus() != null ? issue.getStatus().name() : null)
-        .assigneeAgentName(issue.getAssigneeAgentName())
-        .reviewerAgentName(issue.getReviewerAgentName())
+        .state(issue.getState())
+        .blockedFromState(issue.getBlockedFromState())
+        .blockReason(issue.getBlockReason())
+        .pauseReason(issue.getPauseReason())
+        .pauseDetail(issue.getPauseDetail())
         .version(formatLong(issue.getVersion()))
         .archivedAt(formatInstant(issue.getArchivedAt()))
         .createdAt(formatInstant(issue.getCreatedAt()))
         .updatedAt(formatInstant(issue.getUpdatedAt()))
-        .build();
-  }
-
-  public IssueDependencyDTO toDto(IssueDependency dep) {
-    Objects.requireNonNull(dep, "dep");
-    return IssueDependencyDTO.builder()
-        .issueId(formatUuid(dep.getIssueId()))
-        .dependsOnIssueId(formatUuid(dep.getDependsOnIssueId()))
-        .projectId(formatUuid(dep.getProjectId()))
-        .createdAt(formatInstant(dep.getCreatedAt()))
         .build();
   }
 
@@ -125,12 +197,9 @@ public class ProjectDtoMapper {
         .kind(activity.getKind() != null ? activity.getKind().name() : null)
         .actorType(activity.getActorType() != null ? activity.getActorType().name() : null)
         .actorAgentName(activity.getActorAgentName())
-        .targetRole(activity.getTargetRole() != null ? activity.getTargetRole().name() : null)
         .runId(formatUuid(activity.getRunId()))
-        .submissionRunId(formatUuid(activity.getSubmissionRunId()))
-        .decision(activity.getDecision() != null ? activity.getDecision().name() : null)
         .body(activity.getBody())
-        .idempotencyKey(activity.getIdempotencyKey())
+        .data(decodeJsonData(activity.getData()))
         .createdAt(formatInstant(activity.getCreatedAt()))
         .build();
   }
@@ -142,30 +211,38 @@ public class ProjectDtoMapper {
         .issueId(formatUuid(evidence.getIssueId()))
         .blobId(formatUuid(evidence.getBlobId()))
         .uri(SessionResourceUri.format(evidence.getBlobId()))
-        .origin(evidence.getOrigin() != null ? evidence.getOrigin().name() : null)
         .name(evidence.getName())
+        .actorAgentName(evidence.getActorAgentName())
         .runId(formatUuid(evidence.getRunId()))
-        .publishedAt(formatInstant(evidence.getCreatedAt()))
+        .createdAt(formatInstant(evidence.getCreatedAt()))
         .build();
   }
 
-  /** 投影 Issue + Agent 的稳定归属；{@code role} 由 Issue 当前职责配置推导。 */
-  public IssueAgentSessionDTO toDto(IssueAgentSession agentSession, String role) {
-    if (agentSession == null) {
-      return null;
-    }
-    return IssueAgentSessionDTO.builder()
-        .id(formatUuid(agentSession.getId()))
-        .issueId(formatUuid(agentSession.getIssueId()))
-        .agentName(agentSession.getAgentName())
-        .role(role)
-        .sessionId(formatUuid(agentSession.getSessionId()))
-        .branchId(formatUuid(agentSession.getThreadId()))
-        .createdAt(formatInstant(agentSession.getCreatedAt()))
+  public IssueAgentThreadDTO toDto(IssueAgentThread agentThread) {
+    Objects.requireNonNull(agentThread, "agentThread");
+    return IssueAgentThreadDTO.builder()
+        .issueId(formatUuid(agentThread.issueId()))
+        .agentName(agentThread.agentName())
+        .threadId(formatUuid(agentThread.threadId()))
+        .build();
+  }
+
+  public IssueStageBudgetDTO toDto(StageBudgetView budget) {
+    Objects.requireNonNull(budget, "budget");
+    return IssueStageBudgetDTO.builder()
+        .state(budget.state())
+        .maxRuns(budget.maxRuns())
+        .budgetAfterOrdinal(formatLong(budget.budgetAfterOrdinal()))
+        .usedRuns(formatLong(budget.usedRuns()))
+        .remainingRuns(formatLong(budget.remainingRuns()))
         .build();
   }
 
   public IssueRunSummaryDTO toSummaryDto(IssueRun run) {
+    return toSummaryDto(run, null);
+  }
+
+  public IssueRunSummaryDTO toSummaryDto(IssueRun run, String agentName) {
     if (run == null) {
       return null;
     }
@@ -173,22 +250,19 @@ public class ProjectDtoMapper {
         .id(formatUuid(run.getId()))
         .issueId(formatUuid(run.getIssueId()))
         .ordinal(formatLong(run.getOrdinal()))
-        .role(run.getRole() != null ? run.getRole().name() : null)
-        .agentName(run.getAgentName())
-        .submissionRunId(formatUuid(run.getSubmissionRunId()))
+        .state(run.getState())
         .status(run.getStatus() != null ? run.getStatus().name() : null)
-        .outcome(run.getOutcome() != null ? run.getOutcome().name() : null)
-        .waitingReason(run.getWaitingReason())
-        .createdAt(formatInstant(run.getCreatedAt()))
-        .completedAt(formatInstant(run.getCompletedAt()))
+        .agentName(agentName)
+        .startedAt(formatInstant(run.getStartedAt()))
+        .endedAt(formatInstant(run.getEndedAt()))
         .build();
   }
 
-  /**
-   * 完整 Run 投影：Session 与归属取自同一 {@code (issueId, agentName)} 的稳定 {@link IssueAgentSession}， 因此同一
-   * Agent 的多次 Run 共享 sessionId，权限则随当前 Run 变化。
-   */
-  public IssueRunDTO toDetailDto(IssueRun run, IssueAgentSession agentSession) {
+  public IssueRunDTO toDto(IssueRun run) {
+    return toDto(run, null);
+  }
+
+  public IssueRunDTO toDto(IssueRun run, String agentName) {
     if (run == null) {
       return null;
     }
@@ -196,24 +270,32 @@ public class ProjectDtoMapper {
         .id(formatUuid(run.getId()))
         .issueId(formatUuid(run.getIssueId()))
         .ordinal(formatLong(run.getOrdinal()))
-        .role(run.getRole() != null ? run.getRole().name() : null)
-        .agentName(run.getAgentName())
-        .agentSessionId(agentSession != null ? formatUuid(agentSession.getId()) : null)
-        .sessionId(agentSession != null ? formatUuid(agentSession.getSessionId()) : null)
-        .submissionRunId(formatUuid(run.getSubmissionRunId()))
+        .state(run.getState())
+        .agentName(agentName)
+        .sessionId(formatUuid(run.getSessionId()))
+        .threadId(formatUuid(run.getThreadId()))
         .status(run.getStatus() != null ? run.getStatus().name() : null)
-        .outcome(run.getOutcome() != null ? run.getOutcome().name() : null)
+        .startEntryId(formatUuid(run.getStartEntryId()))
+        .endEntryId(formatUuid(run.getEndEntryId()))
+        .finalAnswerEntryId(formatUuid(run.getFinalAnswerEntryId()))
+        .nextState(run.getNextState())
         .observedActivitySequence(formatLong(run.getObservedActivitySequence()))
-        .continuationCount(run.getContinuationCount())
-        .maxContinuations(run.getMaxContinuations())
-        .deadline(formatInstant(run.getDeadline()))
-        .waitingReason(run.getWaitingReason())
-        .result(run.getResult())
-        .terminalActionId(run.getTerminalActionId())
+        .remainingExecutionMs(formatLong(run.getRemainingExecutionMs()))
+        .error(run.getError())
         .version(formatLong(run.getVersion()))
-        .createdAt(formatInstant(run.getCreatedAt()))
-        .updatedAt(formatInstant(run.getUpdatedAt()))
-        .completedAt(formatInstant(run.getCompletedAt()))
+        .startedAt(formatInstant(run.getStartedAt()))
+        .endedAt(formatInstant(run.getEndedAt()))
         .build();
+  }
+
+  private Object decodeJsonData(String data) {
+    if (data == null || data.isBlank()) {
+      return null;
+    }
+    try {
+      return objectMapper.readValue(data, Object.class);
+    } catch (JsonProcessingException error) {
+      return null;
+    }
   }
 }

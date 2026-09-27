@@ -49,6 +49,11 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   }
 
   @Override
+  public boolean releaseLease(UUID issueId, String leaseToken, Instant dueAt) {
+    return mapper.releaseLease(issueId, leaseToken, dueAt) == 1;
+  }
+
+  @Override
   public int deleteByIssueId(UUID issueId) {
     return mapper.deleteByIssueId(issueId);
   }

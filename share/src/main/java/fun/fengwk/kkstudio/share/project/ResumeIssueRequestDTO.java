@@ -6,15 +6,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 添加 Issue 依赖请求 DTO。 */
+/** 恢复暂停的 Issue 请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AddIssueDependencyRequestDTO {
+public class ResumeIssueRequestDTO {
 
-  private String dependsOnIssueId;
   private String expectedVersion;
+  private String requestKey;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

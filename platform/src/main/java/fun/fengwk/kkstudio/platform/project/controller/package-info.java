@@ -1,9 +1,11 @@
 /**
- * Issue Controller 的部署级配置属性。
+ * Issue Controller 的部署级配置与确定性调度。
  *
- * <p>本包当前只保留 {@link fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties}
- * 供宿主装配与测试上下文引用；确定性的 Run 接受与收尾编排位于 {@code fun.fengwk.kkstudio.platform.project.service}， Work
- * 邮箱的领取/租约位于 {@code fun.fengwk.kkstudio.platform.project.service.IssueWorkStore}。旧的角色调谐器与
- * IssueAgentSession 调度器已随目标模型移除。
+ * <p>{@link fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher} 只做 {@code
+ * project_issue_work} 的 claim、bounded handoff 与 poll 生命周期；{@link
+ * fun.fengwk.kkstudio.platform.project.controller.IssueReconciler} 在 Project −&gt; Issue −&gt; 活动
+ * Run 的固定锁序下推进目标语义（安全等待、Run 收尾、交接、失败暂停与迟到回调拒绝）。Run 接受与收尾的原子编排仍在 {@code
+ * fun.fengwk.kkstudio.platform.project.service}，Work 邮箱的租约与唤醒在 {@code
+ * fun.fengwk.kkstudio.platform.project.service.IssueWorkStore}。
  */
 package fun.fengwk.kkstudio.platform.project.controller;

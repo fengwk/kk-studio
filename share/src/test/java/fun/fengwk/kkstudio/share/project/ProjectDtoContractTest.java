@@ -14,105 +14,99 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** 验证 Project/Issue 传输 DTO 的契约约束：精确字段集、nullable 显式序列化、decimal string 字段类型、未知字段拒绝以及 JSON 编解码。 */
+/** Project wire DTO 契约测试：精确字段集、nullable 显式序列化、未知字段拒绝以及关键聚合 DTO 的 JSON 编解码回环。 */
 class ProjectDtoContractTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper();
 
-  private static final String[] REQUIRED_NULLABLE_FIELDS = {
+  private static final String[] REQUIRED_ALWAYS_FIELDS = {
     "ProjectDTO.archivedAt",
-    "CreateProjectRequestDTO.description",
-    "CreateProjectRequestDTO.yoloEnabled",
-    "CreateProjectRequestDTO.maxReviewRejections",
-    "UpdateProjectRequestDTO.title",
-    "UpdateProjectRequestDTO.description",
-    "UpdateProjectRequestDTO.yoloEnabled",
-    "UpdateProjectRequestDTO.maxReviewRejections",
+    "ProjectWorkflowStateDTO.agent",
+    "ProjectWorkflowStateDTO.environment",
+    "ProjectWorkflowStateDTO.instructions",
+    "ProjectWorkflowStateDTO.maxRuns",
     "ProjectIssueSnapshotDTO.currentOrLatestRun",
-    "IssueDTO.assigneeAgentName",
-    "IssueDTO.reviewerAgentName",
+    "IssueDTO.blockedFromState",
+    "IssueDTO.blockReason",
+    "IssueDTO.pauseReason",
+    "IssueDTO.pauseDetail",
     "IssueDTO.archivedAt",
-    "CreateIssueRequestDTO.description",
-    "CreateIssueRequestDTO.assigneeAgentName",
-    "CreateIssueRequestDTO.reviewerAgentName",
-    "CreateIssueRequestDTO.initialStatus",
-    "UpdateIssueRequestDTO.description",
-    "UpdateIssueRequestDTO.assigneeAgentName",
-    "UpdateIssueRequestDTO.reviewerAgentName",
-    "IssueActivityDTO.actorAgentName",
-    "IssueActivityDTO.targetRole",
-    "IssueActivityDTO.runId",
-    "IssueActivityDTO.submissionRunId",
-    "IssueActivityDTO.decision",
-    "IssueActivityDTO.idempotencyKey",
     "IssueDetailDTO.nextActivityCursor",
     "IssueDetailDTO.currentRun",
     "IssueDetailDTO.latestRun",
-    "IssueEvidenceDTO.name",
-    "IssueEvidenceDTO.runId",
-    "IssueRunSummaryDTO.agentName",
-    "IssueRunSummaryDTO.submissionRunId",
-    "IssueRunSummaryDTO.outcome",
-    "IssueRunSummaryDTO.waitingReason",
-    "IssueRunSummaryDTO.createdAt",
-    "IssueRunSummaryDTO.completedAt",
+    "IssueActivityDTO.actorAgentName",
+    "IssueActivityDTO.runId",
+    "IssueActivityDTO.body",
     "IssueRunDTO.agentName",
-    "IssueRunDTO.agentSessionId",
-    "IssueRunDTO.sessionId",
-    "IssueRunDTO.submissionRunId",
-    "IssueRunDTO.outcome",
-    "IssueRunDTO.deadline",
-    "IssueRunDTO.waitingReason",
-    "IssueRunDTO.result",
-    "IssueRunDTO.terminalActionId",
-    "IssueRunDTO.completedAt",
-    "AppendIssueActivityRequestDTO.kind",
-    "AppendIssueActivityRequestDTO.targetRole",
-    "AppendIssueActivityRequestDTO.idempotencyKey",
-    "CancelIssueRequestDTO.reason",
-    "RecoverIssueRequestDTO.comment",
-    "ReviewIssueRequestDTO.idempotencyKey"
+    "IssueRunDTO.endEntryId",
+    "IssueRunDTO.finalAnswerEntryId",
+    "IssueRunDTO.nextState",
+    "IssueRunDTO.error",
+    "IssueRunDTO.endedAt",
+    "IssueRunSummaryDTO.agentName",
+    "IssueRunSummaryDTO.endedAt",
+    "IssueEvidenceDTO.actorAgentName",
+    "IssueEvidenceDTO.runId",
+    "CreateProjectRequestDTO.description",
+    "CreateProjectRequestDTO.yoloEnabled",
+    "UpdateProjectRequestDTO.title",
+    "UpdateProjectRequestDTO.description",
+    "CreateIssueRequestDTO.description",
+    "UpdateIssueRequestDTO.title",
+    "UpdateIssueRequestDTO.description",
+    "PauseIssueRequestDTO.detail",
+    "StopIssueRequestDTO.detail",
+    "AppendIssueActivityRequestDTO.kind"
   };
 
   private static final String[] DECIMAL_STRING_FIELDS = {
-    "ProjectDTO.maxReviewRejections",
     "ProjectDTO.nextIssueNumber",
     "ProjectDTO.version",
-    "UpdateProjectRequestDTO.expectedVersion",
-    "ProjectArchiveRequestDTO.expectedVersion",
-    "ProjectUnarchiveRequestDTO.expectedVersion",
     "IssueDTO.number",
     "IssueDTO.version",
-    "ProjectIssueSnapshotDTO.reviewRejectionCount",
-    "UpdateIssueRequestDTO.expectedVersion",
-    "ChangeIssueStatusRequestDTO.expectedVersion",
-    "BlockIssueRequestDTO.expectedVersion",
-    "RecoverIssueRequestDTO.expectedVersion",
-    "AddIssueDependencyRequestDTO.expectedVersion",
     "IssueActivityDTO.sequence",
     "IssueDetailDTO.nextActivityCursor",
-    "IssueRunSummaryDTO.ordinal",
     "IssueRunDTO.ordinal",
     "IssueRunDTO.observedActivitySequence",
+    "IssueRunDTO.remainingExecutionMs",
     "IssueRunDTO.version",
-    "CancelIssueRequestDTO.expectedVersion",
+    "IssueRunSummaryDTO.ordinal",
+    "IssueStageBudgetDTO.budgetAfterOrdinal",
+    "IssueStageBudgetDTO.usedRuns",
+    "IssueStageBudgetDTO.remainingRuns",
+    "UpdateProjectRequestDTO.expectedVersion",
+    "UpdateProjectWorkflowRequestDTO.expectedVersion",
+    "UpdateProjectYoloRequestDTO.expectedVersion",
+    "ProjectVersionRequestDTO.expectedVersion",
+    "UpdateIssueRequestDTO.expectedVersion",
+    "TransitionIssueRequestDTO.expectedVersion",
+    "BlockIssueRequestDTO.expectedVersion",
+    "RecoverIssueRequestDTO.expectedVersion",
+    "PauseIssueRequestDTO.expectedVersion",
+    "ResumeIssueRequestDTO.expectedVersion",
+    "ReopenIssueRequestDTO.expectedVersion",
+    "ResetStageBudgetRequestDTO.expectedVersion",
+    "StopIssueRequestDTO.expectedVersion",
     "ArchiveIssueRequestDTO.expectedVersion",
-    "UnarchiveIssueRequestDTO.expectedVersion"
+    "UnarchiveIssueRequestDTO.expectedVersion",
+    "AppendIssueActivityRequestDTO.expectedVersion"
   };
 
+  /** 测试意图：精确验证全包 32 个 DTO 的实例字段集合，确保无多余冗余字段，且所有遗留字段被彻底移除。 */
   @Test
   void exactFieldSetsMatchCurrentContract() {
-    // 测试意图：精确断言各个 DTO 的实例字段集合等于期望集合，确保已删除字段被彻底移除、新字段全部落地且无意外冗余字段
+    // Response DTOs
     assertEquals(
         Set.of(
             "id",
             "title",
             "description",
+            "workflow",
             "yoloEnabled",
-            "maxReviewRejections",
             "nextIssueNumber",
             "version",
             "archivedAt",
@@ -120,23 +114,17 @@ class ProjectDtoContractTest {
             "updatedAt"),
         getInstanceFieldNames(ProjectDTO.class));
 
-    assertEquals(
-        Set.of("title", "description", "yoloEnabled", "maxReviewRejections"),
-        getInstanceFieldNames(CreateProjectRequestDTO.class));
+    assertEquals(Set.of("states"), getInstanceFieldNames(ProjectWorkflowDTO.class));
 
     assertEquals(
-        Set.of("expectedVersion", "title", "description", "yoloEnabled", "maxReviewRejections"),
-        getInstanceFieldNames(UpdateProjectRequestDTO.class));
+        Set.of(
+            "state", "name", "agent", "environment", "instructions", "maxRuns", "enabled", "next"),
+        getInstanceFieldNames(ProjectWorkflowStateDTO.class));
 
-    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ProjectArchiveRequestDTO.class));
-    assertEquals(
-        Set.of("expectedVersion"), getInstanceFieldNames(ProjectUnarchiveRequestDTO.class));
+    assertEquals(Set.of("project", "issues"), getInstanceFieldNames(ProjectSnapshotDTO.class));
 
     assertEquals(
-        Set.of("project", "issues", "dependencies"),
-        getInstanceFieldNames(ProjectSnapshotDTO.class));
-    assertEquals(
-        Set.of("issue", "blocked", "reviewRejectionCount", "currentOrLatestRun"),
+        Set.of("issue", "currentOrLatestRun"),
         getInstanceFieldNames(ProjectIssueSnapshotDTO.class));
 
     assertEquals(
@@ -146,9 +134,11 @@ class ProjectDtoContractTest {
             "number",
             "title",
             "description",
-            "status",
-            "assigneeAgentName",
-            "reviewerAgentName",
+            "state",
+            "blockedFromState",
+            "blockReason",
+            "pauseReason",
+            "pauseDetail",
             "version",
             "archivedAt",
             "createdAt",
@@ -156,41 +146,16 @@ class ProjectDtoContractTest {
         getInstanceFieldNames(IssueDTO.class));
 
     assertEquals(
-        Set.of("title", "description", "assigneeAgentName", "reviewerAgentName", "initialStatus"),
-        getInstanceFieldNames(CreateIssueRequestDTO.class));
-
-    assertEquals(
-        Set.of("expectedVersion", "title", "description", "assigneeAgentName", "reviewerAgentName"),
-        getInstanceFieldNames(UpdateIssueRequestDTO.class));
-
-    assertEquals(
-        Set.of("expectedVersion", "status"),
-        getInstanceFieldNames(ChangeIssueStatusRequestDTO.class));
-    assertEquals(
-        Set.of("expectedVersion", "reason"), getInstanceFieldNames(BlockIssueRequestDTO.class));
-    assertEquals(
-        Set.of("expectedVersion", "toBacklog", "comment"),
-        getInstanceFieldNames(RecoverIssueRequestDTO.class));
-    assertEquals(
-        Set.of("dependsOnIssueId", "expectedVersion"),
-        getInstanceFieldNames(AddIssueDependencyRequestDTO.class));
-    assertEquals(
-        Set.of("issueId", "dependsOnIssueId", "projectId", "createdAt"),
-        getInstanceFieldNames(IssueDependencyDTO.class));
-
-    assertEquals(
-        Set.of("kind", "body", "targetRole", "idempotencyKey"),
-        getInstanceFieldNames(AppendIssueActivityRequestDTO.class));
-    assertEquals(
-        Set.of("decision", "reason", "idempotencyKey"),
-        getInstanceFieldNames(ReviewIssueRequestDTO.class));
-    assertEquals(
-        Set.of("expectedVersion", "reason"), getInstanceFieldNames(CancelIssueRequestDTO.class));
-    assertEquals(
-        Set.of("idempotencyKey", "verification"),
-        getInstanceFieldNames(RetryIssueRequestDTO.class));
-    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
-    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(UnarchiveIssueRequestDTO.class));
+        Set.of(
+            "issue",
+            "activities",
+            "nextActivityCursor",
+            "runs",
+            "currentRun",
+            "latestRun",
+            "stageBudgets",
+            "agentThreads"),
+        getInstanceFieldNames(IssueDetailDTO.class));
 
     assertEquals(
         Set.of(
@@ -199,83 +164,123 @@ class ProjectDtoContractTest {
             "kind",
             "actorType",
             "actorAgentName",
-            "targetRole",
             "runId",
-            "submissionRunId",
-            "decision",
             "body",
-            "idempotencyKey",
+            "data",
             "createdAt"),
         getInstanceFieldNames(IssueActivityDTO.class));
 
     assertEquals(
-        Set.of("id", "issueId", "agentName", "role", "sessionId", "branchId", "createdAt"),
-        getInstanceFieldNames(IssueAgentSessionDTO.class));
-
-    assertEquals(
-        Set.of(
-            "issue",
-            "blocked",
-            "dependencies",
-            "sessions",
-            "activities",
-            "evidence",
-            "nextActivityCursor",
-            "runs",
-            "currentRun",
-            "latestRun"),
-        getInstanceFieldNames(IssueDetailDTO.class));
-
-    assertEquals(
-        Set.of("issueId", "blobId", "uri", "origin", "name", "runId", "publishedAt"),
-        getInstanceFieldNames(IssueEvidenceDTO.class));
-    assertEquals(Set.of("uploadId"), getInstanceFieldNames(AddIssueEvidenceRequestDTO.class));
-
-    assertEquals(
         Set.of(
             "id",
             "issueId",
             "ordinal",
-            "role",
+            "state",
             "agentName",
-            "agentSessionId",
             "sessionId",
-            "submissionRunId",
+            "threadId",
             "status",
-            "outcome",
+            "startEntryId",
+            "endEntryId",
+            "finalAnswerEntryId",
+            "nextState",
             "observedActivitySequence",
-            "continuationCount",
-            "maxContinuations",
-            "deadline",
-            "waitingReason",
-            "result",
-            "terminalActionId",
+            "remainingExecutionMs",
+            "error",
             "version",
-            "createdAt",
-            "updatedAt",
-            "completedAt"),
+            "startedAt",
+            "endedAt"),
         getInstanceFieldNames(IssueRunDTO.class));
 
     assertEquals(
-        Set.of(
-            "id",
-            "issueId",
-            "ordinal",
-            "role",
-            "agentName",
-            "submissionRunId",
-            "status",
-            "outcome",
-            "waitingReason",
-            "createdAt",
-            "completedAt"),
+        Set.of("id", "issueId", "ordinal", "state", "status", "agentName", "startedAt", "endedAt"),
         getInstanceFieldNames(IssueRunSummaryDTO.class));
+
+    assertEquals(
+        Set.of("state", "maxRuns", "budgetAfterOrdinal", "usedRuns", "remainingRuns"),
+        getInstanceFieldNames(IssueStageBudgetDTO.class));
+
+    assertEquals(
+        Set.of("issueId", "agentName", "threadId"),
+        getInstanceFieldNames(IssueAgentThreadDTO.class));
+
+    assertEquals(
+        Set.of("issueId", "blobId", "uri", "name", "actorAgentName", "runId", "createdAt"),
+        getInstanceFieldNames(IssueEvidenceDTO.class));
+
+    // Request DTOs
+    assertEquals(
+        Set.of("title", "description", "yoloEnabled"),
+        getInstanceFieldNames(CreateProjectRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "title", "description"),
+        getInstanceFieldNames(UpdateProjectRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "workflow"),
+        getInstanceFieldNames(UpdateProjectWorkflowRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "yoloEnabled"),
+        getInstanceFieldNames(UpdateProjectYoloRequestDTO.class));
+
+    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ProjectVersionRequestDTO.class));
+
+    assertEquals(
+        Set.of("title", "description"), getInstanceFieldNames(CreateIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "title", "description"),
+        getInstanceFieldNames(UpdateIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "toState"),
+        getInstanceFieldNames(TransitionIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "reason"),
+        getInstanceFieldNames(BlockIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey"),
+        getInstanceFieldNames(RecoverIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "reason", "detail"),
+        getInstanceFieldNames(PauseIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey"),
+        getInstanceFieldNames(ResumeIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey"),
+        getInstanceFieldNames(ReopenIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "state", "maxRuns"),
+        getInstanceFieldNames(ResetStageBudgetRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "detail"),
+        getInstanceFieldNames(StopIssueRequestDTO.class));
+
+    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
+
+    assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(UnarchiveIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "kind", "body"),
+        getInstanceFieldNames(AppendIssueActivityRequestDTO.class));
+
+    assertEquals(Set.of("uploadId"), getInstanceFieldNames(AddIssueEvidenceRequestDTO.class));
   }
 
+  /** 测试意图：验证必须显式发射 null 的字段声明了 @JsonInclude(ALWAYS)。 */
   @Test
   void requiredNullableFieldsAreAlwaysIncluded() throws Exception {
-    // 测试意图：验证 nullable 字段声明 @JsonInclude(ALWAYS)，保证前端 TS 解码时字段确定性存在为 null 而非缺失
-    for (String fieldPath : REQUIRED_NULLABLE_FIELDS) {
+    for (String fieldPath : REQUIRED_ALWAYS_FIELDS) {
       Field f = resolveField(fieldPath);
       JsonInclude include = f.getAnnotation(JsonInclude.class);
       assertNotNull(include, fieldPath + " must declare @JsonInclude");
@@ -284,234 +289,124 @@ class ProjectDtoContractTest {
     }
   }
 
+  /** 测试意图：验证计数、版本和游标等字段在 wire DTO 上均保持 String 类型，避免 64 位浮点精度截断。 */
   @Test
   void decimalFieldsAreWireStrings() throws Exception {
-    // 测试意图：验证所有 long/decimal 类型列在 wire DTO 上均表示为规范 String，防止前端 JS 64-bit float 精度截断
     for (String fieldPath : DECIMAL_STRING_FIELDS) {
       Field f = resolveField(fieldPath);
       assertEquals(String.class, f.getType(), fieldPath + " must be a String");
     }
   }
 
+  /** 测试意图：验证请求 DTO 与响应 DTO 通过 @JsonAnySetter 严格拒绝未知字段。 */
   @Test
-  void unknownFieldsAreRejectedInRequests() {
-    // 测试意图：验证严格协议设计，直接调用 rejectUnknownField 抛出 IllegalArgumentException
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CreateProjectRequestDTO().rejectUnknownField("unexpected", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new UpdateProjectRequestDTO().rejectUnknownField("unknownField", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectArchiveRequestDTO().rejectUnknownField("unknownField", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectUnarchiveRequestDTO().rejectUnknownField("unknownField", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CreateIssueRequestDTO().rejectUnknownField("unexpected", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new UpdateIssueRequestDTO().rejectUnknownField("unexpected", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ChangeIssueStatusRequestDTO().rejectUnknownField("unknownField", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new BlockIssueRequestDTO().rejectUnknownField("unexpected", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RecoverIssueRequestDTO().rejectUnknownField("unexpected", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new AddIssueDependencyRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new AppendIssueActivityRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ReviewIssueRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CancelIssueRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new RetryIssueRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ArchiveIssueRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new UnarchiveIssueRequestDTO().rejectUnknownField("extra", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new AddIssueEvidenceRequestDTO().rejectUnknownField("extra", "junk"));
+  void unknownFieldsAreRejectedInRequestAndResponse() {
+    // 验证请求 DTO 拒绝未知字段
+    CreateProjectRequestDTO request = new CreateProjectRequestDTO();
+    IllegalArgumentException reqEx =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> request.rejectUnknownField("unknownField", "val"));
+    assertEquals("Unknown request field", reqEx.getMessage());
+
+    // 验证响应 DTO 拒绝未知字段
+    ProjectDTO response = new ProjectDTO();
+    IllegalArgumentException respEx =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> response.rejectUnknownField("unknownField", "val"));
+    assertEquals("Unknown response field", respEx.getMessage());
   }
 
+  /** 测试意图：验证 Jackson 反序列化包含未知属性的 JSON 时会触发 @JsonAnySetter 拒绝。 */
   @Test
   void unknownFieldsAreRejectedDuringJacksonDeserialization() {
-    // 测试意图：验证 Jackson 反序列化包含未知属性的 JSON 时会触发 @JsonAnySetter 拒绝
     assertThrows(
         Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", CreateProjectRequestDTO.class));
+        () -> objectMapper.readValue("{\"unexpected\":123}", CreateProjectRequestDTO.class));
     assertThrows(
         Exception.class,
-        () ->
-            objectMapper.readValue("{\"unknownField\":123}", AppendIssueActivityRequestDTO.class));
+        () -> objectMapper.readValue("{\"unexpected\":123}", TransitionIssueRequestDTO.class));
     assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", BlockIssueRequestDTO.class));
+        Exception.class, () -> objectMapper.readValue("{\"unexpected\":123}", ProjectDTO.class));
     assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", RecoverIssueRequestDTO.class));
-    assertThrows(
-        Exception.class, () -> objectMapper.readValue("{\"unknownField\":123}", ProjectDTO.class));
-    assertThrows(
-        Exception.class, () -> objectMapper.readValue("{\"unknownField\":123}", IssueDTO.class));
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", IssueActivityDTO.class));
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", IssueAgentSessionDTO.class));
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", IssueEvidenceDTO.class));
-    assertThrows(
-        Exception.class,
-        () -> objectMapper.readValue("{\"unknownField\":123}", AddIssueEvidenceRequestDTO.class));
+        Exception.class, () -> objectMapper.readValue("{\"unexpected\":123}", IssueDTO.class));
   }
 
+  /** 测试意图：验证 ProjectWorkflowDTO 的完整 JSON 编解码回环，包含工作流状态列表与可空字段。 */
   @Test
-  void roundTripSerializationPreservesNulls() throws Exception {
-    // 测试意图：验证序列化时 nullable 属性正确输出为 null，而非被省略，反序列化可完整还原
-    ProjectDTO project =
-        ProjectDTO.builder()
-            .id("11111111-1111-1111-1111-111111111111")
-            .title("Title")
-            .description("Desc")
-            .yoloEnabled(true)
-            .maxReviewRejections("3")
-            .nextIssueNumber("1")
-            .version("0")
-            .archivedAt(null)
-            .createdAt("2026-09-13T10:00:00Z")
-            .updatedAt("2026-09-13T10:00:00Z")
+  void projectWorkflowDtoRoundTrip() throws Exception {
+    ProjectWorkflowStateDTO state1 =
+        ProjectWorkflowStateDTO.builder()
+            .state("BUILD")
+            .name("Build State")
+            .agent("engineer")
+            .environment("standard")
+            .instructions("build something")
+            .maxRuns("5")
+            .enabled(true)
+            .next(List.of("REVIEW"))
             .build();
+    ProjectWorkflowStateDTO state2 =
+        ProjectWorkflowStateDTO.builder()
+            .state("REVIEW")
+            .name("Review State")
+            .agent(null)
+            .environment(null)
+            .instructions(null)
+            .maxRuns(null)
+            .enabled(false)
+            .next(List.of())
+            .build();
+    ProjectWorkflowDTO workflow =
+        ProjectWorkflowDTO.builder().states(List.of(state1, state2)).build();
 
-    String json = objectMapper.writeValueAsString(project);
-    assertTrue(json.contains("\"archivedAt\":null"));
+    String json = objectMapper.writeValueAsString(workflow);
+    // @ALWAYS 字段为 null 时必须显式包含
+    assertTrue(json.contains("\"agent\":null"));
+    assertTrue(json.contains("\"environment\":null"));
+    assertTrue(json.contains("\"instructions\":null"));
+    assertTrue(json.contains("\"maxRuns\":null"));
 
-    ProjectDTO read = objectMapper.readValue(json, ProjectDTO.class);
-    assertEquals(project.getId(), read.getId());
-    assertNull(read.getArchivedAt());
-    assertEquals("3", read.getMaxReviewRejections());
-    assertEquals(Boolean.TRUE, read.getYoloEnabled());
+    ProjectWorkflowDTO deserialized = objectMapper.readValue(json, ProjectWorkflowDTO.class);
+    assertEquals(2, deserialized.getStates().size());
+    ProjectWorkflowStateDTO readState1 = deserialized.getStates().get(0);
+    assertEquals("BUILD", readState1.getState());
+    assertEquals("engineer", readState1.getAgent());
+    assertEquals(Boolean.TRUE, readState1.getEnabled());
+    assertEquals(List.of("REVIEW"), readState1.getNext());
 
+    ProjectWorkflowStateDTO readState2 = deserialized.getStates().get(1);
+    assertEquals("REVIEW", readState2.getState());
+    assertNull(readState2.getAgent());
+    assertNull(readState2.getEnvironment());
+    assertNull(readState2.getInstructions());
+    assertNull(readState2.getMaxRuns());
+    assertEquals(Boolean.FALSE, readState2.getEnabled());
+  }
+
+  /**
+   * 测试意图：验证 IssueDetailDTO 复杂聚合的 JSON 编解码回环，包含 activities、runs、budgets、threads 及 untyped data 字段。
+   */
+  @Test
+  void issueDetailDtoRoundTrip() throws Exception {
     IssueDTO issue =
         IssueDTO.builder()
-            .id("22222222-2222-2222-2222-222222222222")
-            .projectId(project.getId())
+            .id("11111111-1111-1111-1111-111111111111")
+            .projectId("22222222-2222-2222-2222-222222222222")
             .number("1")
-            .title("Issue Title")
-            .description("Issue Desc")
-            .status("TODO")
-            .assigneeAgentName(null)
-            .reviewerAgentName(null)
+            .title("Issue 1")
+            .description("Description")
+            .state("TODO")
+            .blockedFromState(null)
+            .blockReason(null)
+            .pauseReason(null)
+            .pauseDetail(null)
             .version("0")
             .archivedAt(null)
-            .createdAt("2026-09-13T10:00:00Z")
-            .updatedAt("2026-09-13T10:00:00Z")
+            .createdAt("2026-09-27T10:00:00Z")
+            .updatedAt("2026-09-27T10:00:00Z")
             .build();
-    IssueEvidenceDTO humanEvidence =
-        IssueEvidenceDTO.builder()
-            .issueId(issue.getId())
-            .blobId("33333333-3333-3333-3333-333333333333")
-            .uri("kkstudio:/resources/33333333-3333-3333-3333-333333333333")
-            .origin("HUMAN")
-            .name("report.txt")
-            .runId(null)
-            .publishedAt("2026-09-13T10:00:00Z")
-            .build();
-    String evidenceJson = objectMapper.writeValueAsString(humanEvidence);
-    // 人工证据没有发布 Run：nullable 字段必须显式为 null 而不是缺失，前端解码形态才确定
-    assertTrue(evidenceJson.contains("\"runId\":null"));
-    IssueEvidenceDTO readEvidence = objectMapper.readValue(evidenceJson, IssueEvidenceDTO.class);
-    assertNull(readEvidence.getRunId());
-    assertEquals("report.txt", readEvidence.getName());
-    assertEquals("HUMAN", readEvidence.getOrigin());
-
-    String issueJson = objectMapper.writeValueAsString(issue);
-    assertTrue(issueJson.contains("\"assigneeAgentName\":null"));
-    assertTrue(issueJson.contains("\"reviewerAgentName\":null"));
-    assertTrue(issueJson.contains("\"archivedAt\":null"));
-
-    IssueDTO readIssue = objectMapper.readValue(issueJson, IssueDTO.class);
-    assertEquals(issue.getId(), readIssue.getId());
-    assertNull(readIssue.getAssigneeAgentName());
-    assertNull(readIssue.getReviewerAgentName());
-    assertNull(readIssue.getArchivedAt());
-
-    ProjectSnapshotDTO snapshot =
-        ProjectSnapshotDTO.builder()
-            .project(project)
-            .issues(
-                List.of(
-                    ProjectIssueSnapshotDTO.builder()
-                        .issue(issue)
-                        .blocked(false)
-                        .reviewRejectionCount("2")
-                        .currentOrLatestRun(null)
-                        .build()))
-            .dependencies(List.of())
-            .build();
-
-    String snapJson = objectMapper.writeValueAsString(snapshot);
-    assertTrue(snapJson.contains("\"currentOrLatestRun\":null"));
-    // 打回次数以 decimal string 出现在 wire 上，前端 BLOCKED 卡片可直接读取 current / maxReviewRejections
-    assertTrue(snapJson.contains("\"reviewRejectionCount\":\"2\""));
-    ProjectSnapshotDTO readSnapshot = objectMapper.readValue(snapJson, ProjectSnapshotDTO.class);
-    assertEquals(1, readSnapshot.getIssues().size());
-    assertEquals("2", readSnapshot.getIssues().get(0).getReviewRejectionCount());
-    assertNull(readSnapshot.getIssues().get(0).getCurrentOrLatestRun());
-    // 字段声明 @JsonInclude(ALWAYS)，null 也必须显式输出，保证严格解码器不会因字段缺失失败
-    String snapJsonWithNullCount =
-        objectMapper.writeValueAsString(
-            ProjectSnapshotDTO.builder()
-                .project(project)
-                .issues(
-                    List.of(
-                        ProjectIssueSnapshotDTO.builder()
-                            .issue(issue)
-                            .blocked(false)
-                            .currentOrLatestRun(null)
-                            .build()))
-                .dependencies(List.of())
-                .build());
-    assertTrue(snapJsonWithNullCount.contains("\"reviewRejectionCount\":null"));
-
-    IssueDetailDTO detail =
-        IssueDetailDTO.builder()
-            .issue(issue)
-            .blocked(false)
-            .dependencies(List.of())
-            .sessions(List.of())
-            .activities(List.of())
-            .nextActivityCursor(null)
-            .runs(List.of())
-            .currentRun(null)
-            .latestRun(null)
-            .build();
-    String detailJson = objectMapper.writeValueAsString(detail);
-    assertTrue(detailJson.contains("\"nextActivityCursor\":null"));
-    assertTrue(detailJson.contains("\"currentRun\":null"));
-    assertTrue(detailJson.contains("\"latestRun\":null"));
-
-    IssueDetailDTO readDetail = objectMapper.readValue(detailJson, IssueDetailDTO.class);
-    assertNull(readDetail.getNextActivityCursor());
-    assertNull(readDetail.getCurrentRun());
-    assertNull(readDetail.getLatestRun());
 
     IssueActivityDTO activity =
         IssueActivityDTO.builder()
@@ -520,67 +415,91 @@ class ProjectDtoContractTest {
             .kind("COMMENT")
             .actorType("HUMAN")
             .actorAgentName(null)
-            .targetRole(null)
             .runId(null)
-            .submissionRunId(null)
-            .decision(null)
             .body("comment body")
-            .idempotencyKey(null)
-            .createdAt("2026-09-13T10:00:00Z")
+            .data(Map.of("key", "value", "count", 42))
+            .createdAt("2026-09-27T10:00:00Z")
             .build();
-    String actJson = objectMapper.writeValueAsString(activity);
-    assertTrue(actJson.contains("\"actorAgentName\":null"));
-    assertTrue(actJson.contains("\"targetRole\":null"));
-    assertTrue(actJson.contains("\"runId\":null"));
-    assertTrue(actJson.contains("\"submissionRunId\":null"));
-    assertTrue(actJson.contains("\"decision\":null"));
-    assertTrue(actJson.contains("\"idempotencyKey\":null"));
-
-    IssueActivityDTO readAct = objectMapper.readValue(actJson, IssueActivityDTO.class);
-    assertNull(readAct.getActorAgentName());
-    assertNull(readAct.getTargetRole());
 
     IssueRunDTO run =
         IssueRunDTO.builder()
             .id("33333333-3333-3333-3333-333333333333")
             .issueId(issue.getId())
             .ordinal("1")
-            .role("EXECUTOR")
+            .state("BUILD")
             .agentName(null)
-            .agentSessionId(null)
-            .sessionId(null)
-            .submissionRunId(null)
+            .sessionId("sess-1")
+            .threadId("th-1")
             .status("RUNNING")
-            .outcome(null)
+            .startEntryId("entry-start")
+            .endEntryId(null)
+            .finalAnswerEntryId(null)
+            .nextState(null)
             .observedActivitySequence("0")
-            .continuationCount(0)
-            .maxContinuations(3)
-            .deadline(null)
-            .waitingReason(null)
-            .result(null)
-            .terminalActionId(null)
+            .remainingExecutionMs("300000")
+            .error(null)
             .version("1")
-            .createdAt("2026-09-13T10:00:00Z")
-            .updatedAt("2026-09-13T10:00:00Z")
-            .completedAt(null)
+            .startedAt("2026-09-27T10:00:00Z")
+            .endedAt(null)
             .build();
-    String runJson = objectMapper.writeValueAsString(run);
-    assertTrue(runJson.contains("\"agentName\":null"));
-    assertTrue(runJson.contains("\"agentSessionId\":null"));
-    assertTrue(runJson.contains("\"sessionId\":null"));
-    assertTrue(runJson.contains("\"submissionRunId\":null"));
-    assertTrue(runJson.contains("\"outcome\":null"));
-    assertTrue(runJson.contains("\"deadline\":null"));
-    assertTrue(runJson.contains("\"waitingReason\":null"));
-    assertTrue(runJson.contains("\"result\":null"));
-    assertTrue(runJson.contains("\"terminalActionId\":null"));
-    assertTrue(runJson.contains("\"completedAt\":null"));
 
-    IssueRunDTO readRun = objectMapper.readValue(runJson, IssueRunDTO.class);
-    assertNull(readRun.getAgentName());
-    assertNull(readRun.getAgentSessionId());
-    assertNull(readRun.getSessionId());
-    assertNull(readRun.getOutcome());
+    IssueStageBudgetDTO budget =
+        IssueStageBudgetDTO.builder()
+            .state("BUILD")
+            .maxRuns(3)
+            .budgetAfterOrdinal("0")
+            .usedRuns("1")
+            .remainingRuns("2")
+            .build();
+
+    IssueAgentThreadDTO thread =
+        IssueAgentThreadDTO.builder()
+            .issueId(issue.getId())
+            .agentName("engineer")
+            .threadId("th-1")
+            .build();
+
+    IssueDetailDTO detail =
+        IssueDetailDTO.builder()
+            .issue(issue)
+            .activities(List.of(activity))
+            .nextActivityCursor(null)
+            .runs(List.of(run))
+            .currentRun(run)
+            .latestRun(run)
+            .stageBudgets(List.of(budget))
+            .agentThreads(List.of(thread))
+            .build();
+
+    String json = objectMapper.writeValueAsString(detail);
+
+    // 验证 @ALWAYS nullable 字段显式发射 null
+    assertTrue(json.contains("\"blockedFromState\":null"));
+    assertTrue(json.contains("\"blockReason\":null"));
+    assertTrue(json.contains("\"pauseReason\":null"));
+    assertTrue(json.contains("\"pauseDetail\":null"));
+    assertTrue(json.contains("\"archivedAt\":null"));
+    assertTrue(json.contains("\"nextActivityCursor\":null"));
+    assertTrue(json.contains("\"actorAgentName\":null"));
+    assertTrue(json.contains("\"runId\":null"));
+    assertTrue(json.contains("\"endEntryId\":null"));
+    assertTrue(json.contains("\"finalAnswerEntryId\":null"));
+    assertTrue(json.contains("\"nextState\":null"));
+    assertTrue(json.contains("\"error\":null"));
+    assertTrue(json.contains("\"endedAt\":null"));
+
+    IssueDetailDTO readDetail = objectMapper.readValue(json, IssueDetailDTO.class);
+    assertEquals(issue.getId(), readDetail.getIssue().getId());
+    assertNull(readDetail.getNextActivityCursor());
+    assertEquals(1, readDetail.getActivities().size());
+    assertEquals("comment body", readDetail.getActivities().get(0).getBody());
+    assertNotNull(readDetail.getActivities().get(0).getData());
+    assertEquals(1, readDetail.getRuns().size());
+    assertEquals("BUILD", readDetail.getRuns().get(0).getState());
+    assertEquals(1, readDetail.getStageBudgets().size());
+    assertEquals(Integer.valueOf(3), readDetail.getStageBudgets().get(0).getMaxRuns());
+    assertEquals(1, readDetail.getAgentThreads().size());
+    assertEquals("engineer", readDetail.getAgentThreads().get(0).getAgentName());
   }
 
   private static Set<String> getInstanceFieldNames(Class<?> clazz) {

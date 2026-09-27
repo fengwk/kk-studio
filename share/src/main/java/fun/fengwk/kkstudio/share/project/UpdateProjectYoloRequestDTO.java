@@ -1,23 +1,20 @@
 package fun.fengwk.kkstudio.share.project;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 取消 Issue 请求 DTO。 */
+/** 更新项目 YOLO 模式请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CancelIssueRequestDTO {
+public class UpdateProjectYoloRequestDTO {
 
   private String expectedVersion;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String reason;
+  private Boolean yoloEnabled;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

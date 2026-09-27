@@ -6,14 +6,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 项目归档请求 DTO。 */
+/** 更新项目工作流请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProjectArchiveRequestDTO {
+public class UpdateProjectWorkflowRequestDTO {
 
   private String expectedVersion;
+  private ProjectWorkflowDTO workflow;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

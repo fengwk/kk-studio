@@ -7,23 +7,19 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Issue 人工评审请求 DTO。
- *
- * <p>人工审查与 Agent 审查执行同一业务动作：明确选择 {@code APPROVE} 或 {@code REQUEST_CHANGES} 并给出理由；被审查的 提交由服务端按当前
- * {@code IN_REVIEW} 的合格提交确定。{@code idempotencyKey} 用于重放同一审查动作：相同键的重复请求幂等， 与已落库决定矛盾的请求被拒绝。
- */
+/** 暂停 Issue 请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ReviewIssueRequestDTO {
+public class PauseIssueRequestDTO {
 
-  private String decision;
+  private String expectedVersion;
+  private String requestKey;
   private String reason;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String idempotencyKey;
+  private String detail;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

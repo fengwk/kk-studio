@@ -90,13 +90,21 @@ public class IssueWorkStoreImpl implements IssueWorkStore {
 
   @Override
   @Transactional
-  public void completeWork(UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
+  public boolean completeWork(
+      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
     Objects.requireNonNull(issueId, "issueId");
     String token = requireLeaseToken(leaseToken);
     Objects.requireNonNull(now, "now");
-    if (!repository.deleteIfWakeMatches(issueId, token, claimedWakeVersion, now)) {
-      throw new AiValidationException("issue_work", "Failed to complete issue work claim");
-    }
+    return repository.deleteIfWakeMatches(issueId, token, claimedWakeVersion, now);
+  }
+
+  @Override
+  @Transactional
+  public boolean rescheduleWork(UUID issueId, String leaseToken, Instant dueAt) {
+    Objects.requireNonNull(issueId, "issueId");
+    String token = requireLeaseToken(leaseToken);
+    Objects.requireNonNull(dueAt, "dueAt");
+    return repository.releaseLease(issueId, token, dueAt);
   }
 
   private static String requireLeaseToken(String leaseToken) {

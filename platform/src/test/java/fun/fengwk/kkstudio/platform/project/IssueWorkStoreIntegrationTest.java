@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -91,9 +92,7 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
         issueWorkStore.claimNext(now, firstToken, now.plusSeconds(30)).orElseThrow();
     issueWorkStore.requestWork(issueId, now.plusSeconds(5));
 
-    assertThrows(
-        AiValidationException.class,
-        () -> issueWorkStore.completeWork(issueId, firstToken, claimed.getWakeVersion(), now));
+    assertFalse(issueWorkStore.completeWork(issueId, firstToken, claimed.getWakeVersion(), now));
 
     IssueWork survived = issueWorkStore.getWork(issueId);
     assertEquals(2L, survived.getWakeVersion());
@@ -103,7 +102,8 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     IssueWork reclaimed =
         issueWorkStore.claimNext(later, secondToken, later.plusSeconds(30)).orElseThrow();
     assertEquals(2L, reclaimed.getWakeVersion());
-    issueWorkStore.completeWork(issueId, secondToken, reclaimed.getWakeVersion(), later);
+    assertTrue(
+        issueWorkStore.completeWork(issueId, secondToken, reclaimed.getWakeVersion(), later));
 
     assertThrows(AiResourceNotFoundException.class, () -> issueWorkStore.getWork(issueId));
     assertTrue(issueWorkStore.claimNext(later, key("lease"), later.plusSeconds(30)).isEmpty());

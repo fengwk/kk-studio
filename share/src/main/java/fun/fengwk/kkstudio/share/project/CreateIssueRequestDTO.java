@@ -19,15 +19,6 @@ public class CreateIssueRequestDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String description;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String assigneeAgentName;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String reviewerAgentName;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String initialStatus;
-
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
     throw new IllegalArgumentException("Unknown request field");

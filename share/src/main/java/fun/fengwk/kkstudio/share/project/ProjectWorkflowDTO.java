@@ -6,17 +6,16 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Issue 依赖关系边 DTO。 */
+import java.util.List;
+
+/** Project 工作流定义 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class IssueDependencyDTO {
+public class ProjectWorkflowDTO {
 
-  private String issueId;
-  private String dependsOnIssueId;
-  private String projectId;
-  private String createdAt;
+  private List<ProjectWorkflowStateDTO> states;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
