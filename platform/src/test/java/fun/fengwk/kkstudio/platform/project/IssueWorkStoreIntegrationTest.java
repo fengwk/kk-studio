@@ -33,7 +33,8 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
   @Test
   void requestWorkBumpsWakeVersionAndKeepsEarliestDueAt() {
     UUID issueId = newIssueId();
-    Instant now = Instant.now();
+    // 使用数据库列的毫秒精度，避免 PostgreSQL 时间舍入影响最早时间的精确断言。
+    Instant now = Instant.ofEpochMilli(System.currentTimeMillis());
 
     IssueWork first = issueWorkStore.requestWork(issueId, now.plusSeconds(10));
     IssueWork second = issueWorkStore.requestWork(issueId, now.plusSeconds(2));
@@ -41,7 +42,7 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, first.getWakeVersion());
     assertEquals(2L, second.getWakeVersion());
     assertEquals(second.getDueAt(), issueWorkStore.getWork(issueId).getDueAt());
-    assertTrue(!second.getDueAt().isAfter(now.plusSeconds(2)));
+    assertEquals(now.plusSeconds(2), second.getDueAt());
     assertNull(second.getLeaseToken());
     assertNull(second.getLeaseUntil());
     // 未到期的工作不能被领取。
