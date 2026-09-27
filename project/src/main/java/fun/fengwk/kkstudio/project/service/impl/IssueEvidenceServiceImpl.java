@@ -7,13 +7,20 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.EvidenceBlobPort;
+import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueEvidenceRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.impl.IssueActivityIdempotency.Identity;
 
 import java.util.List;
 import java.util.Objects;
@@ -24,9 +31,14 @@ import java.util.UUID;
 @Service
 public class IssueEvidenceServiceImpl implements IssueEvidenceService {
 
+  /** 托管资源 URI 前缀：与平台 {@code SessionResourceUri} 的规范形态一致；project 不反向依赖 platform，故只在此保留协议常量。 */
+  private static final String RESOURCE_URI_PREFIX = "kkstudio:/resources/";
+
   private final IssueEvidenceRepository issueEvidenceRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
+  private final IssueActivityRepository issueActivityRepository;
+  private final ProjectRepository projectRepository;
 
   private final EvidenceBlobPort blobPort;
 
@@ -36,9 +48,26 @@ public class IssueEvidenceServiceImpl implements IssueEvidenceService {
     Objects.requireNonNull(issueId, "issueId");
     Objects.requireNonNull(uploadId, "uploadId");
 
-    Issue issue = issueRepository.getById(issueId);
+    // 与 IssueService/RunService 统一的锁序：Project FOR KEY SHARE -> Issue FOR UPDATE。Issue 行锁同时保证事实流游标
+    // （next_activity_sequence）在并发发布下单调且只推进一次。
+    Issue initial = issueRepository.getById(issueId);
+    if (initial == null) {
+      throw new ProjectNotFoundException("issue");
+    }
+    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
+    if (project == null) {
+      throw new ProjectNotFoundException("project");
+    }
+    if (project.isArchived()) {
+      throw new ProjectValidationException(
+          "project", "Cannot publish evidence in an archived project");
+    }
+    Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new ProjectNotFoundException("issue");
+    }
+    if (!issue.getProjectId().equals(project.getId())) {
+      throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
     }
     if (issue.isArchived()) {
       throw new ProjectValidationException(
@@ -49,12 +78,14 @@ public class IssueEvidenceServiceImpl implements IssueEvidenceService {
     UUID blobId = ready.blobId();
     IssueEvidence existing = issueEvidenceRepository.get(issueId, blobId);
     if (existing != null) {
+      // 证据行已存在：重复交付不双计，也不再补写人为事实。
       blobPort.deleteUpload(uploadId);
       return existing;
     }
 
     String validatedName = ProjectValidationUtils.requireDisplayName(ready.filename(), "name", 512);
 
+    long version = issue.getVersion();
     blobPort.retainBlob(blobId);
     IssueEvidence evidence =
         IssueEvidence.builder()
@@ -67,9 +98,42 @@ public class IssueEvidenceServiceImpl implements IssueEvidenceService {
     boolean inserted = issueEvidenceRepository.insert(evidence);
     if (!inserted) {
       blobPort.releaseBlob(blobId);
+      return issueEvidenceRepository.get(issueId, blobId);
+    }
+    appendPublicationActivity(issue, blobId, validatedName);
+    if (!issueRepository.updateById(issue, version)) {
+      throw new IllegalStateException("failed to advance issue activity cursor");
     }
     blobPort.deleteUpload(uploadId);
     return issueEvidenceRepository.get(issueId, blobId);
+  }
+
+  /**
+   * 人工公开附件是人为事实：在发布同一事务内向该 Issue 的有序时间线追加一条 HUMAN COMMENT。
+   *
+   * <p>身份由证据 {@code (issue_id, blob_id)} 唯一性决定（一个 Blob 只发布一次，也只留痕一次）。执行者发表的证据由来源 Run 的结果与证据行本身溯源，
+   * 不重复制造人为事实。
+   */
+  private void appendPublicationActivity(Issue issue, UUID blobId, String name) {
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.COMMENT, "EVIDENCE_PUBLISHED", "evidence:" + blobId, blobId, name);
+    long sequence = issue.getNextActivitySequence();
+    IssueActivity activity =
+        IssueActivity.builder()
+            .issueId(issue.getId())
+            .sequence(sequence)
+            .kind(identity.kind())
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Published issue evidence " + RESOURCE_URI_PREFIX + blobId + " (" + name + ")")
+            .data("{}")
+            .idempotencyKey(identity.key())
+            .requestHash(identity.requestHash())
+            .build();
+    if (!issueActivityRepository.insert(activity)) {
+      throw new IllegalStateException("failed to insert issue activity");
+    }
+    issue.setNextActivitySequence(sequence + 1);
   }
 
   @Override

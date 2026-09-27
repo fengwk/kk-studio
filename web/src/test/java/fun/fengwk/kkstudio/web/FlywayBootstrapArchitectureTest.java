@@ -29,6 +29,18 @@ class FlywayBootstrapArchitectureTest {
           "schema/src/main/resources/db/seed/dev/R__dev_seed.sql",
           "schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql");
 
+  /**
+   * 唯一允许的非 seed SQL：schema 模块测试自己的 fresh-install 契约探针。
+   *
+   * <p>它只是断言脚本——在 {@code FreshInstallSchemaContractTest} 一次性的隔离容器里对已建好的 V1 基线逐条验证约束与拒绝路径，既不是第二份
+   * DDL， 也不属于任何生产引导路径；因此它只允许出现在这个固定的 test fixture 位置，且绝不能被任何 bootstrap 配置或 Flyway location 引用。
+   */
+  private static final String SCHEMA_TEST_PROBE =
+      "schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
+
+  /** schema 模块测试资源目录：除唯一探针外不允许再引入任何其它 SQL。 */
+  private static final String SCHEMA_TEST_SQL_PREFIX = "schema/src/test/";
+
   private static final Pattern VERSIONED_MIGRATION =
       Pattern.compile("^V(?<version>\\d+)__(?<description>[A-Za-z0-9_]+)\\.sql$");
   private static final Pattern REPEATABLE_SEED = Pattern.compile("^R__[a-z0-9_]+\\.sql$");
@@ -62,6 +74,10 @@ class FlywayBootstrapArchitectureTest {
         repositorySqlFiles.stream().filter(path -> path.startsWith(MIGRATION_DIR + "/")).toList();
     List<String> otherSqlFiles =
         repositorySqlFiles.stream().filter(path -> !path.startsWith(MIGRATION_DIR + "/")).toList();
+    List<String> testFixtureSqlFiles =
+        otherSqlFiles.stream().filter(path -> path.startsWith(SCHEMA_TEST_SQL_PREFIX)).toList();
+    List<String> seedSqlFiles =
+        otherSqlFiles.stream().filter(path -> !path.startsWith(SCHEMA_TEST_SQL_PREFIX)).toList();
 
     assertEquals(
         List.of(BASELINE_MIGRATION),
@@ -75,14 +91,30 @@ class FlywayBootstrapArchitectureTest {
     }
 
     assertEquals(
+        List.of(SCHEMA_TEST_PROBE),
+        testFixtureSqlFiles,
+        "schema test SQL is limited to the single fresh-install contract probe fixture");
+    assertEquals(
         SEED_RESOURCES,
-        otherSqlFiles,
+        seedSqlFiles,
         "every non-migration sql file must be one of the three constrained profile seeds");
-    for (String seed : otherSqlFiles) {
+    for (String seed : seedSqlFiles) {
       String filename = Path.of(seed).getFileName().toString();
       assertTrue(
           REPEATABLE_SEED.matcher(filename).matches(),
           () -> "profile seed must stay a repeatable migration: " + seed);
+    }
+  }
+
+  /** schema 测试探针只能被它自己的容器测试执行，任何 bootstrap 配置或 Flyway location 都不得引用它。 */
+  @Test
+  void schemaTestProbeIsNeverReferencedByBootstrap() throws IOException {
+    Path root = repositoryRoot();
+    for (String config : BOOTSTRAP_CONFIGS) {
+      String text = Files.readString(root.resolve(config), StandardCharsets.UTF_8);
+      assertFalse(
+          text.contains("fresh-install-probes"),
+          () -> config + " must not reference the schema test-only SQL probe fixture");
     }
   }
 

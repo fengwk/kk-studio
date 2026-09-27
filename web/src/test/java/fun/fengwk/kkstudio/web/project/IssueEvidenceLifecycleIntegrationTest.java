@@ -13,6 +13,17 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
@@ -60,6 +71,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
 
   private static final AtomicLong FIXTURE_COUNTER = new AtomicLong();
   private static final String EVIDENCE_CONTENT = "published evidence body";
+  private static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS =
+      new HistoryEntryPayloadJsonCodec();
 
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ProjectService projectService;
@@ -98,6 +111,12 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     UUID endEntryId = appendHistoryEntry(run.getThreadId(), run.getSessionId());
     issueRunService.completeRun(
         run.getId(), run.getVersion(), "req:comp:" + UUID.randomUUID(), endEntryId, null, null);
+    // 深删除 Run 前必须先移除引用它的 RUN 事实（fk_project_issue_activity_run 为 RESTRICT），
+    // 与 Project 深删除 Activities -> Runs 的顺序一致。
+    jdbc.update(
+        "delete from project_issue_activity where issue_id = ? and run_id = ?",
+        fixture.issueId(),
+        run.getId());
     jdbc.update("delete from project_issue_run where id = ?", run.getId());
 
     sessionDeletionOrchestrator.deleteSessionsByOwner(
@@ -204,21 +223,57 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
   }
 
   private UUID appendHistoryEntry(UUID threadId, UUID sessionId) {
-    UUID parentEntryId =
+    // 收尾需要冻结一个完整、合法的 Turn：沿用 Thread ROOT entry 里的真实 branch settings，并用真实 codec 编码，
+    // 绝不手填 JSON 破坏 root->TURN_START->...->TURN_END 的顺序约束。按 TURN_START -> USER MESSAGE -> TURN_END
+    // 构造一个可安全截断（CANCELLED/HISTORY_CUT）的完整 Turn，并推进 head 到 TURN_END。
+    String rootPayload =
         jdbc.queryForObject(
-            "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
+            "select payload from harness_entry where session_id = ? and entry_type = 'ROOT'",
+            String.class,
+            sessionId);
+    RootPayload root = (RootPayload) ENTRY_PAYLOADS.decode(EntryType.ROOT, rootPayload);
+
+    UUID turnStartId =
+        insertEntry(
+            sessionId,
+            headEntryId(threadId),
+            new TurnStartPayload(TurnStartReason.INPUT, root.settings(), threadId));
+    UUID messageId =
+        insertEntry(
+            sessionId,
+            turnStartId,
+            new MessagePayload(AgentMessage.user("Reviewed the issue"), null, null));
+    UUID turnEndId =
+        insertEntry(
+            sessionId,
+            messageId,
+            new TurnEndPayload(
+                turnStartId, TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null));
+
+    jdbc.update(
+        "update harness_thread set head_entry_id = ?, updated_at = now() where id = ?",
+        turnEndId,
+        threadId);
+    return turnEndId;
+  }
+
+  /** 用真实 codec 编码并以给定的父 Entry 写入一行 harness_entry，返回新 Entry id。 */
+  private UUID insertEntry(UUID sessionId, UUID parentEntryId, EntryPayload payload) {
     UUID entryId = UUID.randomUUID();
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
-            + " created_at) values (?, ?, ?, 'MESSAGE', '{}'::jsonb, now())",
+            + " created_at) values (?, ?, ?, ?, ?::jsonb, now())",
         entryId,
         sessionId,
-        parentEntryId);
-    jdbc.update(
-        "update harness_thread set head_entry_id = ?, updated_at = now() where id = ?",
-        entryId,
-        threadId);
+        parentEntryId,
+        payload.type().name(),
+        ENTRY_PAYLOADS.encode(payload));
     return entryId;
+  }
+
+  private UUID headEntryId(UUID threadId) {
+    return jdbc.queryForObject(
+        "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
   }
 
   private Fixture createIssue(String executor) {
