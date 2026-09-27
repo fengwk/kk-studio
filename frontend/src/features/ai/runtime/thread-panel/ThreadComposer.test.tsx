@@ -52,7 +52,7 @@ describe('ThreadComposer and commands', () => {
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
     const blank = threadCommandsForTarget(
       { kind: 'NEW_SESSION_DRAFT' },
-      { owner: { type: 'CHAT', id: 'chat-1' } },
+      { owner: { type: 'CHAT', chatId: 'chat-1' } },
     )
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/debug`/`/compact`
@@ -84,18 +84,19 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
-  it('projects the same command matrix for Chat and Canvas bound targets', () => {
+  it('keeps navigation commands disabled for controlled Issue threads', () => {
     const chatBound = threadCommandsForTarget(
       { kind: 'BOUND_THREAD', threadId: 't1' },
-      { owner: { type: 'CHAT', id: 'chat-1' } },
+      { owner: { type: 'CHAT', chatId: 'chat-1' } },
     )
-    const canvasBound = threadCommandsForTarget(
+    const issueBound = threadCommandsForTarget(
       { kind: 'BOUND_THREAD', threadId: 't1' },
-      { owner: { type: 'CANVAS', id: 'canvas-1' } },
+      { owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }, allowBranching: false },
     )
-    expect(canvasBound.map((command) => command.id)).toEqual(chatBound.map((command) => command.id))
-    expect(canvasBound.filter((command) => !command.disabled).map((command) => command.id))
-      .toEqual(THREAD_COMMANDS.map((command) => command.id))
+    expect(chatBound.find((command) => command.id === 'thread')?.disabled).toBe(false)
+    expect(issueBound.some((command) => command.id === 'thread')).toBe(false)
+    expect(issueBound.some((command) => command.id === 'new')).toBe(false)
+    expect(issueBound.some((command) => command.id === 'goal')).toBe(false)
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {

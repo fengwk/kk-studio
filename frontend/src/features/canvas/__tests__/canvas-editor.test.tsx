@@ -41,12 +41,9 @@ function renderEditor(options: {
   snapshot?: CanvasSnapshotDTO | null
   query?: Partial<EditorQueryState>
   commandPending?: boolean
-  threadOpen?: boolean
   withLibraryRoute?: boolean
 } = {}) {
   const refetch = vi.fn(async () => undefined)
-  const openThread = vi.fn()
-  const collapseThread = vi.fn()
   const state = {
     view: 'editor' as const,
     canvasId: CANVAS_ID,
@@ -57,7 +54,6 @@ function renderEditor(options: {
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,
-    threadOpen: options.threadOpen ?? false,
     uploadProgress: {},
     commandPending: options.commandPending ?? false,
     conflictMessage: null,
@@ -74,8 +70,6 @@ function renderEditor(options: {
     state,
     snapshot: options.snapshot ?? null,
     snapshotQuery: query,
-    openThread,
-    collapseThread,
   } as unknown as CanvasController
   const tree = (nextState: typeof state, nextQuery: EditorQueryState) => (
     <MemoryRouter initialEntries={['/canvas/abc']}>
@@ -96,8 +90,6 @@ function renderEditor(options: {
   const view = render(tree(state, query))
   return {
     refetch,
-    openThread,
-    collapseThread,
     rerenderWith: (patch: Partial<typeof state>, queryPatch: Partial<EditorQueryState> = {}) => {
       view.rerender(tree({ ...state, ...patch }, { ...query, ...queryPatch }))
     },
@@ -147,9 +139,8 @@ describe('CanvasEditor state rendering', () => {
     expect(await screen.findByTestId('library')).toBeInTheDocument()
   })
 
-  it('renders the loaded document and toggles the thread panel', async () => {
-    const user = userEvent.setup()
-    const { openThread, collapseThread, rerenderWith } = renderEditor({
+  it('renders the loaded document without an unsupported Agent dock', () => {
+    const { rerenderWith } = renderEditor({
       snapshot: snapshotDTO(),
       query: { isLoading: false },
     })
@@ -160,18 +151,7 @@ describe('CanvasEditor state rendering', () => {
     expect(screen.getByTestId('canvas-stage')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回画布库' })).toHaveAttribute('href', '/canvas')
 
-    const toggle = screen.getByRole('button', { name: '切换对话面板' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    await user.click(toggle)
-    expect(openThread).toHaveBeenCalledTimes(1)
-
-    rerenderWith({ threadOpen: true })
-    expect(screen.getByRole('button', { name: '切换对话面板' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
-    await user.click(screen.getByRole('button', { name: '切换对话面板' }))
-    expect(collapseThread).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: '切换对话面板' })).not.toBeInTheDocument()
 
     rerenderWith({ commandPending: true })
     expect(screen.getByText('保存中…')).toBeInTheDocument()

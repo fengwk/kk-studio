@@ -97,8 +97,8 @@ export function ProjectDetailPage({
   // 门禁验证：目标 thread 必须属于 detail.agentThreads 或 detail.runs
   const matchedAgentThread = issueDetail?.agentThreads?.find((t) => t.threadId === queryThreadId)
   const matchedRun = issueDetail?.runs?.find((r) => r.threadId === queryThreadId)
-  const isThreadValid = Boolean(matchedAgentThread || matchedRun)
   const matchedAgentName = matchedAgentThread?.agentName || matchedRun?.agentName || null
+  const isThreadValid = Boolean((matchedAgentThread || matchedRun) && matchedAgentName)
 
   const handleSelectIssue = (id: string | null) => {
     setSelectedIssueId(id)
@@ -490,7 +490,7 @@ export function ProjectDetailPage({
               ) : (
                 <AgentPane
                   key={queryThreadId}
-                  owner={{ type: 'ISSUE_AGENT_SESSION', id: issueDetail!.issue.id }}
+                  owner={{ type: 'ISSUE_AGENT', issueId: issueDetail!.issue.id, agentName: matchedAgentName! }}
                   paneId={`project-issue-${queryThreadId}`}
                   agents={agentsQuery.data?.results ?? []}
                   environments={environmentsQuery.data ?? []}

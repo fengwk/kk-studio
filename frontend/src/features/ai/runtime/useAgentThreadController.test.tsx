@@ -161,7 +161,7 @@ function buildBatchFor(
   draft: BranchDraft,
 ): (parts: ComposerPart[]) => CommandBatchPlan | null {
   return (parts) =>
-    buildMessageBatchPlan({ thread: currentThread, effectiveBase: base, draft, parts })
+    buildMessageBatchPlan({ owner: { type: 'CHAT', chatId: 'chat-1' }, thread: currentThread, effectiveBase: base, draft, parts })
 }
 
 describe('useAgentThreadController', () => {
@@ -470,7 +470,7 @@ describe('useAgentThreadController', () => {
   it('only retries stale batches that contain USER_MESSAGE commands on the same branch', () => {
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
-    const messagePlan = buildMessageBatchPlan({
+    const messagePlan = buildMessageBatchPlan({ owner: { type: 'CHAT', chatId: 'chat-1' },
       thread: currentThread,
       effectiveBase: base,
       draft: base,
@@ -494,7 +494,7 @@ describe('useAgentThreadController', () => {
     )
     expect(canRetryStaleMessageBatch(messagePlan, advanced)).toBe(true)
 
-    const settingsPlan = buildMessageBatchPlan({
+    const settingsPlan = buildMessageBatchPlan({ owner: { type: 'CHAT', chatId: 'chat-1' },
       thread: currentThread,
       effectiveBase: base,
       draft: { ...base, agentName: 'coder' },
@@ -628,7 +628,7 @@ describe('useAgentThreadController', () => {
     const draftB = { ...baseA, agentName: 'coder' }
     let projectionApplied = false
     const buildBatch = (parts: ComposerPart[]) =>
-      buildMessageBatchPlan({
+      buildMessageBatchPlan({ owner: { type: 'CHAT', chatId: 'chat-1' },
         // 投影之后 effectiveBase 等于 draft：粗略的 {content,base,draft}
         // 身份判定无法匹配；不可变意图层面的身份仍需命中。
         thread: currentThread,
@@ -1637,7 +1637,7 @@ describe('useAgentThreadController', () => {
   it('refuses stale retry when cursors are unchanged, commands are empty, or the target is not a THREAD', () => {
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
-    const messagePlan = buildMessageBatchPlan({
+    const messagePlan = buildMessageBatchPlan({ owner: { type: 'CHAT', chatId: 'chat-1' },
       thread: currentThread,
       effectiveBase: base,
       draft: base,

@@ -218,7 +218,7 @@ describe('ChatWorkspacePage', () => {
 
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
     const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(request.owner).toEqual({ type: 'CHAT', id: CHAT_ID })
+    expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.commands).toHaveLength(1)
     expect(request.commands[0]?.type).toBe('USER_MESSAGE')

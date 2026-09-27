@@ -82,6 +82,9 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
  * contains only USER_MESSAGE: the final draft is encoded directly in rootSettings.
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
+  if (input.owner.type === 'ISSUE_AGENT') {
+    throw new Error('Controlled Issue threads cannot accept generic command batches')
+  }
   const createId = input.createId ?? createIdempotencyKey
   const payloadParts = trimMessageParts(input.parts)
   const composerParts = trimMessageParts(input.localParts ?? input.parts)
@@ -133,6 +136,9 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
 }
 
 export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): FrozenCommandBatchRequest {
+  if (input.owner.type !== 'CHAT') {
+    throw new Error('Goal commands require a Chat owner')
+  }
   const createId = input.createId ?? createIdempotencyKey
   const text = input.goalText
   if (text !== null) {

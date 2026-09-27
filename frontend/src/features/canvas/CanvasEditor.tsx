@@ -1,11 +1,11 @@
-import { ArrowLeft, MessageSquare } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { Link, useNavigate } from 'react-router'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { useI18n } from '@/shared/i18n'
 
 export function CanvasEditor() {
-  const { state, snapshot, snapshotQuery, openThread, collapseThread } = useCanvasRuntime()
+  const { state, snapshot, snapshotQuery } = useCanvasRuntime()
   const { t } = useI18n()
   const navigate = useNavigate()
   const openLibrary = () => navigate('/canvas')
@@ -52,23 +52,6 @@ export function CanvasEditor() {
             v{snapshot.document.revision}
           </span>
         </div>
-        <button
-          type="button"
-          className={`thread-toggle${state.threadOpen ? ' active' : ''}`}
-          aria-label={t('canvas.editor.threadAria')}
-          aria-expanded={state.threadOpen}
-          aria-controls="agentPanel"
-          onClick={() => {
-            if (state.threadOpen) {
-              collapseThread()
-            } else {
-              openThread()
-            }
-          }}
-        >
-          <MessageSquare aria-hidden="true" />
-          <span>{t('canvas.editor.thread')}</span>
-        </button>
       </header>
       <CanvasStage />
     </section>

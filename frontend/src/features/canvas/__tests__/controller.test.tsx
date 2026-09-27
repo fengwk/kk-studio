@@ -581,8 +581,6 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.toggleAddMenu()
       result.current.closeAddMenu()
       result.current.setAddMenuIndex(2)
-      result.current.openThread()
-      result.current.collapseThread()
       result.current.setViewport({ x: 1, y: 2, zoom: 0.5 })
     })
     expect(result.current.state.viewport).toEqual({ x: 1, y: 2, zoom: 0.5 })

@@ -30,12 +30,18 @@ export interface PendingAcceptance {
 const TARGET_STORAGE_PREFIX = 'kk-studio.agent-pane-target.'
 const PENDING_STORAGE_PREFIX = 'kk-studio.agent-pane-acceptance.'
 
+export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
+  return owner.type === 'CHAT'
+    ? `CHAT:${owner.chatId}`
+    : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
+}
+
 function storageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
-  return `${TARGET_STORAGE_PREFIX}${owner.type}:${owner.id}:${paneId}`
+  return `${TARGET_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
 }
 
 function pendingStorageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
-  return `${PENDING_STORAGE_PREFIX}${owner.type}:${owner.id}:${paneId}`
+  return `${PENDING_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,9 +69,12 @@ function isEnvironmentName(value: unknown): value is string | null {
 }
 
 function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
-  return isRecord(value)
-    && (value.type === 'CHAT' || value.type === 'CANVAS' || value.type === 'ISSUE_AGENT_SESSION')
-    && nonBlank(value.id)
+  return isRecord(value) && (
+    (value.type === 'CHAT' && hasExactKeys(value, ['type', 'chatId']) && nonBlank(value.chatId))
+    || (value.type === 'ISSUE_AGENT'
+      && hasExactKeys(value, ['type', 'issueId', 'agentName'])
+      && nonBlank(value.issueId) && nonBlank(value.agentName))
+  )
 }
 
 function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
@@ -376,6 +385,9 @@ export function loadPendingAcceptance(
   storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
 ): PendingAcceptance | null {
   try {
+    if (owner.type === 'ISSUE_AGENT') {
+      return null
+    }
     const raw = storage.getItem(pendingStorageKey(owner, paneId))
     if (!raw) {
       return null
@@ -386,9 +398,8 @@ export function loadPendingAcceptance(
     }
     if (
       parsed.owner.type !== owner.type
-      || parsed.owner.id !== owner.id
-      || parsed.request.owner.type !== owner.type
-      || parsed.request.owner.id !== owner.id
+      || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
+      || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
     ) {
       return null
     }
@@ -404,6 +415,9 @@ export function savePendingAcceptance(
   pending: PendingAcceptance,
   storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
 ): void {
+  if (owner.type === 'ISSUE_AGENT') {
+    return
+  }
   try {
     storage.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
   } catch {

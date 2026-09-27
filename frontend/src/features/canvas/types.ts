@@ -39,7 +39,6 @@ export interface CanvasLocalState {
   toast: string | null
   addMenuOpen: boolean
   addMenuIndex: number
-  threadOpen: boolean
   uploadProgress: Record<string, number>
   commandPending: boolean
   conflictMessage: string | null

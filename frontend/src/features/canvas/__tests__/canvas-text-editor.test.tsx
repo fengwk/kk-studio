@@ -80,7 +80,6 @@ function renderTextEditor(options: {
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,
-    threadOpen: false,
     uploadProgress: {},
     commandPending: false,
     conflictMessage: null,

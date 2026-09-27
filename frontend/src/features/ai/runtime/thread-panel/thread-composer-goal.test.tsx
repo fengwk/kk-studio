@@ -29,7 +29,7 @@ describe('ThreadComposer /goal interactions', () => {
         onSubmit={onSubmit}
         onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
-        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', id: 'c1' } })}
+        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', chatId: 'c1' } })}
       />,
     )
 
@@ -71,7 +71,7 @@ describe('ThreadComposer /goal interactions', () => {
         onSubmit={onSubmit}
         onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
-        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', id: 'c1' } })}
+        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', chatId: 'c1' } })}
       />,
     )
 
@@ -106,7 +106,7 @@ describe('ThreadComposer /goal interactions', () => {
         onSubmit={onSubmit}
         onSubmitGoal={onSubmitGoal}
         onCommand={onCommand}
-        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', id: 'c1' } })}
+        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', chatId: 'c1' } })}
       />,
     )
 
@@ -143,7 +143,7 @@ describe('ThreadComposer /goal interactions', () => {
         onSubmit={onSubmit}
         onSubmitGoal={onSubmitGoal}
         onCommand={vi.fn()}
-        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', id: 'c1' } })}
+        commands={threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' }, { owner: { type: 'CHAT', chatId: 'c1' } })}
       />,
     )
 

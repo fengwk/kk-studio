@@ -24,7 +24,7 @@ export function ChatWorkspacePane({
 }) {
   return (
     <AgentPane
-      owner={{ type: 'CHAT', id: chat.id }}
+      owner={{ type: 'CHAT', chatId: chat.id }}
       paneId={pane.id}
       agents={agents}
       environments={environments}

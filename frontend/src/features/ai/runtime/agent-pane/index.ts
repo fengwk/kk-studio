@@ -8,6 +8,7 @@ export {
   loadPaneTarget,
   loadPendingAcceptance,
   normalizePaneTarget,
+  ownerIdentity,
   samePaneTarget,
   savePaneTarget,
   savePendingAcceptance,

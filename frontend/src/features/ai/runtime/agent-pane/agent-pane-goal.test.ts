@@ -40,9 +40,9 @@ describe('AgentPane Goal pipeline and owner gating', () => {
       expect(commands.some((c) => c.id === 'goal')).toBe(false)
     })
 
-    it('enables goal command for CHAT and CANVAS owners', () => {
-      const chatOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', id: 'chat-1' }
-      const canvasOwner: AgentRuntimeOwnerDTO = { type: 'CANVAS', id: 'canvas-1' }
+    it('enables goal for Chat but rejects controlled Issue owners', () => {
+      const chatOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
+      const issueOwner: AgentRuntimeOwnerDTO = { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }
 
       const chatCommands = threadCommandsForTarget(
         { kind: 'BOUND_THREAD', threadId: 't-1' },
@@ -50,15 +50,15 @@ describe('AgentPane Goal pipeline and owner gating', () => {
       )
       expect(chatCommands.some((c) => c.id === 'goal')).toBe(true)
 
-      const canvasCommands = threadCommandsForTarget(
+      const issueCommands = threadCommandsForTarget(
         { kind: 'BOUND_THREAD', threadId: 't-1' },
-        { owner: canvasOwner },
+        { owner: issueOwner },
       )
-      expect(canvasCommands.some((c) => c.id === 'goal')).toBe(true)
+      expect(issueCommands.some((c) => c.id === 'goal')).toBe(false)
     })
 
-    it('hides goal command for other owners like ISSUE_AGENT_SESSION', () => {
-      const issueOwner: AgentRuntimeOwnerDTO = { type: 'ISSUE_AGENT_SESSION', id: 'issue-1' }
+    it('hides goal command for ISSUE_AGENT in every target', () => {
+      const issueOwner: AgentRuntimeOwnerDTO = { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }
 
       for (const target of [
         { kind: 'NEW_SESSION_DRAFT' as const },
@@ -74,7 +74,7 @@ describe('AgentPane Goal pipeline and owner gating', () => {
   describe('buildGoalBatchPlan', () => {
     it('emits typed GOAL command when setting a goal on a bound thread', () => {
       const plan = buildGoalBatchPlan({
-        owner: { type: 'CHAT', id: 'chat-1' },
+        owner: { type: 'CHAT', chatId: 'chat-1' },
         thread: mockThread,
         effectiveBase: baseDraft,
         draft: baseDraft,
@@ -98,7 +98,7 @@ describe('AgentPane Goal pipeline and owner gating', () => {
 
     it('emits typed GOAL with null text when clearing a goal on a bound thread', () => {
       const plan = buildGoalBatchPlan({
-        owner: { type: 'CHAT', id: 'chat-1' },
+        owner: { type: 'CHAT', chatId: 'chat-1' },
         thread: mockThread,
         effectiveBase: baseDraft,
         draft: baseDraft,
@@ -116,7 +116,7 @@ describe('AgentPane Goal pipeline and owner gating', () => {
 
     it('always preserves rootSettings.goal as null on NEW_SESSION target', () => {
       const frozen = buildGoalAcceptanceRequest({
-        owner: { type: 'CHAT', id: 'chat-1' },
+        owner: { type: 'CHAT', chatId: 'chat-1' },
         target: { kind: 'NEW_SESSION_DRAFT' },
         draft: baseDraft,
         base: baseDraft,
@@ -155,7 +155,7 @@ describe('AgentPane Goal pipeline and owner gating', () => {
         }
       })()
 
-      const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', id: 'chat-1' }
+      const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
       const attachment = createAttachmentPart('upload-uuid', 'test.png')
       const textPart = createTextPart('/goal New goal')
 
