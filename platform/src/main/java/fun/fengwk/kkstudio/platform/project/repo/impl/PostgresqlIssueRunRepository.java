@@ -70,6 +70,11 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
     return mapper.deleteById(id, expectedVersion) == 1;
   }
 
+  @Override
+  public int deleteByIssueId(UUID issueId) {
+    return mapper.deleteByIssueId(issueId);
+  }
+
   private static IssueRunDO toDO(IssueRun run) {
     IssueRunDO row = new IssueRunDO();
     row.setId(run.getId());

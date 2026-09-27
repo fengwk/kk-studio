@@ -38,6 +38,11 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
   }
 
   @Override
+  public int deleteByIssueId(UUID issueId) {
+    return mapper.deleteByIssueId(issueId);
+  }
+
+  @Override
   public List<IssueStageBudgetRow> listByIssueId(UUID issueId) {
     return mapper.listByIssueId(issueId).stream()
         .map(PostgresqlIssueStageBudgetRepository::toModel)

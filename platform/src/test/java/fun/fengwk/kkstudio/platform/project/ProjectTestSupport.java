@@ -216,6 +216,15 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     ? Optional.of(mock(Session.class))
                     : Optional.empty();
               });
+      when(transaction.lockSessionForUpdate(any(UUID.class)))
+          .thenAnswer(
+              invocation -> {
+                UUID sessionId = invocation.getArgument(0);
+                return count(jdbc, "select count(*) from harness_session where id = ?", sessionId)
+                        > 0
+                    ? Optional.of(mock(Session.class))
+                    : Optional.empty();
+              });
       when(transaction.findThread(any(UUID.class)))
           .thenAnswer(
               invocation -> {
@@ -227,6 +236,52 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   return Optional.empty();
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
+              });
+      when(transaction.listThreadsBySession(any(UUID.class)))
+          .thenAnswer(
+              invocation -> {
+                UUID sessionId = invocation.getArgument(0);
+                List<Map<String, Object>> rows =
+                    jdbc.queryForList(
+                        "select id from harness_thread where session_id = ?", sessionId);
+                return rows.stream().map(r -> threadState((UUID) r.get("id"), sessionId)).toList();
+              });
+      when(transaction.lockThread(any(UUID.class)))
+          .thenAnswer(
+              invocation -> {
+                UUID threadId = invocation.getArgument(0);
+                Map<String, Object> row =
+                    queryThread(
+                        jdbc, "select session_id from harness_thread where id = ?", threadId);
+                if (row == null) {
+                  return Optional.empty();
+                }
+                return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
+              });
+      when(transaction.deleteThreads(any()))
+          .thenAnswer(
+              invocation -> {
+                List<UUID> threadIds = invocation.getArgument(0);
+                int deleted = 0;
+                for (UUID threadId : threadIds) {
+                  deleted += jdbc.update("delete from harness_thread where id = ?", threadId);
+                }
+                return deleted;
+              });
+      when(transaction.deleteEntries(any(UUID.class)))
+          .thenAnswer(
+              invocation -> {
+                UUID sessionId = invocation.getArgument(0);
+                jdbc.update(
+                    "update harness_thread set head_entry_id = null where session_id = ?",
+                    sessionId);
+                return jdbc.update("delete from harness_entry where session_id = ?", sessionId);
+              });
+      when(transaction.deleteSession(any(UUID.class)))
+          .thenAnswer(
+              invocation -> {
+                UUID sessionId = invocation.getArgument(0);
+                return jdbc.update("delete from harness_session where id = ?", sessionId) > 0;
               });
       doAnswer(
               invocation -> {

@@ -128,4 +128,7 @@ public interface IssueRunMapper extends BaseMapper {
 
   @Delete("delete from project_issue_run where id = #{id} and version = #{expectedVersion}")
   int deleteById(@Param("id") UUID id, @Param("expectedVersion") long expectedVersion);
+
+  @Delete("delete from project_issue_run where issue_id = #{issueId}")
+  int deleteByIssueId(@Param("issueId") UUID issueId);
 }

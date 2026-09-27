@@ -35,6 +35,6 @@ public interface ProjectService {
   /** 恢复归档项目：只回到可编辑状态，不自动新建 Run。 */
   Project unarchiveProject(UUID projectId, long expectedVersion);
 
-  /** 删除项目：要求项目下已无任何 Issue（含已归档），不删除跨域事实。 */
+  /** 深删除项目：严格要求所有 Issue 无活动 Run 且无未核查的 UNKNOWN，按依赖顺序深删除全部 Issue 后删除项目。 */
   void deleteProject(UUID projectId, long expectedVersion);
 }

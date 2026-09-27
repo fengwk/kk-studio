@@ -21,5 +21,7 @@ public interface IssueStageBudgetRepository {
 
   boolean delete(UUID issueId, String state);
 
+  int deleteByIssueId(UUID issueId);
+
   List<IssueStageBudgetRow> listByIssueId(UUID issueId);
 }

@@ -59,6 +59,15 @@ public interface IssueService {
   /** 显式解除控制暂停门禁。 */
   Issue resumeIssue(UUID issueId, long expectedVersion, String requestKey);
 
+  /** 人工终止 Issue 执行：活动 Run 收尾为 CANCELLED 并保留 USER 暂停门禁；在途副作用不明则进入 UNKNOWN。 */
+  Issue stopIssue(UUID issueId, long expectedVersion, String requestKey, String detail);
+
+  /** 记录人工核查依据并解除 UNKNOWN 门禁（转为 USER 暂停门禁，需显式 resumeIssue 唤醒）。 */
+  Issue resolveUnknown(UUID issueId, long expectedVersion, String requestKey, String verification);
+
+  /** 深删除 Issue：严格要求无活动 Run 且无未核查的 UNKNOWN，按依赖顺序清理各表与 Harness Session。 */
+  void deleteIssue(UUID issueId, long expectedVersion);
+
   /** 正常转移：目标是当前阶段 workflow {@code next} 白名单成员且处于启用状态。 */
   Issue transition(UUID issueId, long expectedVersion, String requestKey, String toState);
 

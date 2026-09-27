@@ -67,4 +67,7 @@ public interface IssueStageBudgetMapper extends BaseMapper {
 
   @Delete("delete from project_issue_stage_budget where issue_id = #{issueId} and state = #{state}")
   int delete(@Param("issueId") UUID issueId, @Param("state") String state);
+
+  @Delete("delete from project_issue_stage_budget where issue_id = #{issueId}")
+  int deleteByIssueId(@Param("issueId") UUID issueId);
 }

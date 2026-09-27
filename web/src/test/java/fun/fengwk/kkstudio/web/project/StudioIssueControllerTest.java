@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -46,7 +47,9 @@ import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
@@ -476,6 +479,87 @@ class StudioIssueControllerTest {
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.blobId").value(blobId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.name").value("upload.png"));
+  }
+
+  @Test
+  void testStopIssue() throws Exception {
+    StopIssueRequestDTO req =
+        StopIssueRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("stop-1")
+            .detail("Manual stop")
+            .build();
+    Issue stopped =
+        Issue.builder()
+            .id(issueId)
+            .projectId(projectId)
+            .number(1L)
+            .title("Task")
+            .description("Desc")
+            .state("INIT")
+            .pauseReason(PauseReason.USER.name())
+            .pauseDetail("Manual stop")
+            .version(2L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+    when(issueService.stopIssue(issueId, 1L, "stop-1", "Manual stop")).thenReturn(stopped);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/stop")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.pauseReason").value("USER"))
+        .andExpect(jsonPath("$.data.pauseDetail").value("Manual stop"));
+
+    verify(issueService).stopIssue(issueId, 1L, "stop-1", "Manual stop");
+  }
+
+  @Test
+  void testResolveUnknown() throws Exception {
+    ResolveUnknownIssueRequestDTO req =
+        ResolveUnknownIssueRequestDTO.builder()
+            .expectedVersion("2")
+            .requestKey("res-1")
+            .verification("Verified clean")
+            .build();
+    Issue resolved =
+        Issue.builder()
+            .id(issueId)
+            .projectId(projectId)
+            .number(1L)
+            .title("Task")
+            .description("Desc")
+            .state("INIT")
+            .pauseReason(PauseReason.USER.name())
+            .pauseDetail("Verified clean")
+            .version(3L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+    when(issueService.resolveUnknown(issueId, 2L, "res-1", "Verified clean")).thenReturn(resolved);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/resolve-unknown")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.pauseReason").value("USER"))
+        .andExpect(jsonPath("$.data.pauseDetail").value("Verified clean"));
+
+    verify(issueService).resolveUnknown(issueId, 2L, "res-1", "Verified clean");
+  }
+
+  @Test
+  void testDeleteIssue() throws Exception {
+    mockMvc
+        .perform(delete("/api/issues/" + issueId).param("expectedVersion", "3"))
+        .andExpect(status().isNoContent());
+
+    verify(issueService).deleteIssue(issueId, 3L);
   }
 
   @Test

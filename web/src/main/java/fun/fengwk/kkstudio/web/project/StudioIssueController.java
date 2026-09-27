@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -46,7 +47,9 @@ import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResolveUnknownIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
@@ -310,6 +313,44 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue resumed = issueService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
     return Results.ok(mapper.toDto(resumed));
+  }
+
+  @PostMapping("/api/issues/{issueId}/stop")
+  public Result<IssueDTO> stop(
+      @PathVariable("issueId") String issueIdStr, @RequestBody StopIssueRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    Issue stopped =
+        issueService.stopIssue(
+            issueId, expectedVersion, request.getRequestKey(), request.getDetail());
+    return Results.ok(mapper.toDto(stopped));
+  }
+
+  @PostMapping("/api/issues/{issueId}/resolve-unknown")
+  public Result<IssueDTO> resolveUnknown(
+      @PathVariable("issueId") String issueIdStr,
+      @RequestBody ResolveUnknownIssueRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    Issue resolved =
+        issueService.resolveUnknown(
+            issueId, expectedVersion, request.getRequestKey(), request.getVerification());
+    return Results.ok(mapper.toDto(resolved));
+  }
+
+  @DeleteMapping("/api/issues/{issueId}")
+  public ResponseEntity<Void> deleteIssue(
+      @PathVariable("issueId") String issueIdStr,
+      @RequestParam("expectedVersion") String expectedVersionStr) {
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
+    issueService.deleteIssue(issueId, expectedVersion);
+    return ResponseEntity.noContent().build();
   }
 
   @PostMapping("/api/issues/{issueId}/reopen")
