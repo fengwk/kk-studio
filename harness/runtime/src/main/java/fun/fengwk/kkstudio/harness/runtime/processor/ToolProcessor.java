@@ -5,11 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -54,6 +57,12 @@ import java.util.function.BiFunction;
  * markRunning；Listener 回调在持久化 RUNNING 落地前由回调门控缓冲。heartbeat 只 renew 当前 Work lease；进程内 registry 以
  * invocationId 为键，{@link #cancel} 提供唯一本地取消入口，{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的
  * scheduler），closed 后 {@link #process} 拒绝新 claim。
+ *
+ * <p>宿主派发准入（{@link WorkDispatchAdmission}）：只有真正要写 READY -&gt; DISPATCHING 的短事务才会询问宿主（completed
+ * approval 直连路径与 preflight Allow 续段），并且在同一物理事务内、在任何 Harness 行锁之前先问，由宿主先取产品行锁再执行转换 （见 {@link
+ * WorkDispatchAdmission#executeIfAdmitted}）；外部 Tool 调用仍在 commit 之后。preflight 本身只是权限评估（外部调用前 不持有任何
+ * Harness 事务与行锁），人工输入冻结、等待态、在途与终态都不产生新的对外执行，结构性不询问。宿主拒绝时 invocation 事实一概不变，只在所有权围栏内按 {@code
+ * admissionDeferral} durable reschedule（不热循环）。
  */
 @Slf4j
 public final class ToolProcessor implements AutoCloseable {
@@ -65,10 +74,12 @@ public final class ToolProcessor implements AutoCloseable {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
+  private final WorkDispatchAdmission admission;
   private final ConcurrentHashMap<UUID, ToolExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
 
+  /** 没有宿主策略的纯 Harness 部署 / 测试：放行一切新的对外执行。 */
   public ToolProcessor(
       HarnessStore store,
       ToolGateway gateway,
@@ -77,6 +88,26 @@ public final class ToolProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker) {
+    this(
+        store,
+        gateway,
+        realtimeEventSink,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        WorkDispatchAdmission.ALLOW_ALL);
+  }
+
+  public ToolProcessor(
+      HarnessStore store,
+      ToolGateway gateway,
+      RealtimeEventSink realtimeEventSink,
+      ToolProcessorConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
+      WorkDispatchAdmission admission) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -84,6 +115,7 @@ public final class ToolProcessor implements AutoCloseable {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
+    this.admission = Objects.requireNonNull(admission, "admission");
   }
 
   /**
@@ -126,6 +158,7 @@ public final class ToolProcessor implements AutoCloseable {
         Prepare prepare = store.transaction(tx -> prepare(tx, claim));
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
+          case Prepare.Rejected ignored -> deferRejected(claim);
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
           case Prepare.Input input -> requestInput(claim, input.threadId());
           case Prepare.Preflight preflight -> preflight(claim, preflight);
@@ -185,8 +218,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
-  private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
-    Instant now = clock.instant();
+  private Prepare prepareLocked(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ToolInvocation peek = tx.findToolInvocation(invocationId).orElse(null);
     if (peek == null) {
@@ -214,6 +246,76 @@ public final class ToolProcessor implements AutoCloseable {
       case DISPATCHING, RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };
+  }
+
+  /**
+   * 唯一的持久意图边界：只有「READY + 已完成审批且不是人工输入工具」的 claim 会直接写 READY -&gt; DISPATCHING，因此在同一物理事务内、 且在任何
+   * Harness 行锁之前先询问宿主，由宿主先取产品行锁再执行转换；审批前的 preflight / YOLO 路径在 {@link #applyPreflightAllow}
+   * 处询问。人工输入冻结、等待态、在途与终态都不产生新的对外执行，结构性放行。
+   */
+  private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
+    Instant now = clock.instant();
+    UUID invocationId = claim.target().id();
+    ToolInvocation peek = tx.findToolInvocation(invocationId).orElse(null);
+    if (peek == null
+        || peek.status() != ToolInvocationStatus.READY
+        || peek.approval() == null
+        || HumanInputTool.isHumanInputTool(peek.binding())) {
+      return prepareLocked(tx, claim, now);
+    }
+    WorkDispatchRequest request =
+        dispatchRequest(tx, invocationId, peek.modelInvocationId(), peek.binding());
+    if (request == null) {
+      return prepareLocked(tx, claim, now);
+    }
+    return admission
+        .executeIfAdmitted(request, () -> prepareLocked(tx, claim, now))
+        .orElseGet(Prepare.Rejected::new);
+  }
+
+  /** 宿主拒绝派发：invocation 事实一概不变，只在所有权围栏内按 {@code admissionDeferral} 重排 Work，禁止热循环。 */
+  private ProcessResult deferRejected(ClaimedWork claim) {
+    Instant now = clock.instant();
+    boolean rescheduled =
+        Boolean.TRUE.equals(
+            store.transaction(
+                tx -> {
+                  if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                    return false;
+                  }
+                  tx.rescheduleWork(claim, now, now.plus(config.admissionDeferral()));
+                  return true;
+                }));
+    return rescheduled ? ProcessResult.RESCHEDULED : ProcessResult.LOST_OWNERSHIP;
+  }
+
+  /**
+   * 构造宿主可见的 TOOL 派发请求：坐标是 owning Thread 与其 Session（经 owning ModelInvocation 解析）；Thread 行缺失等归属损坏返回
+   * {@code null}，调用方不做宿主判定、交给锁内分支完整 no-op。
+   */
+  private static WorkDispatchRequest dispatchRequest(
+      HarnessStore.Transaction tx, UUID invocationId, UUID modelInvocationId, ToolBinding binding) {
+    return tx.findModelInvocation(modelInvocationId)
+        .flatMap(model -> tx.findThread(model.threadId()))
+        .map(
+            thread ->
+                new WorkDispatchRequest(
+                    WorkTargetType.TOOL, invocationId, thread.id(), thread.sessionId(), binding))
+        .orElse(null);
+  }
+
+  /**
+   * 构造宿主可见的 TOOL 派发请求（已知 owning Thread）：坐标就是该 Thread 与其 Session；Thread 行缺失等归属损坏返回 {@code
+   * null}，调用方绝不因此跳过宿主判定继续执行。
+   */
+  private static WorkDispatchRequest dispatchRequestOfThread(
+      HarnessStore.Transaction tx, UUID invocationId, UUID threadId, ToolBinding binding) {
+    return tx.findThread(threadId)
+        .map(
+            thread ->
+                new WorkDispatchRequest(
+                    WorkTargetType.TOOL, invocationId, thread.id(), thread.sessionId(), binding))
+        .orElse(null);
   }
 
   /**
@@ -461,29 +563,28 @@ public final class ToolProcessor implements AutoCloseable {
       ToolInvocationRequest request,
       ToolExecution execution) {
     Instant now = clock.instant();
-    boolean dispatched =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  ThreadState thread = tx.lockThread(threadId).orElse(null);
-                  if (thread == null) {
-                    return false;
-                  }
-                  ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-                  if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
-                    return false;
-                  }
-                  if (tool.status() != ToolInvocationStatus.READY
-                      || tool.attempt() != attempt
-                      || tool.approval() != null) {
-                    return false;
-                  }
-                  ToolInvocation approved = tool.markApprovalNotRequired(now);
-                  tx.updateToolInvocations(List.of(approved));
-                  tx.updateToolInvocations(List.of(approved.beginDispatch(now)));
-                  tx.updateThread(thread.touchVersion(now));
-                  return true;
-                }));
+    UUID invocationId = claim.target().id();
+    Boolean dispatched =
+        store.transaction(
+            tx -> {
+              WorkDispatchRequest dispatchRequest =
+                  dispatchRequestOfThread(tx, invocationId, threadId, request.binding());
+              if (dispatchRequest == null) {
+                // 归属损坏：不做宿主判定、也不允许执行（allowIntent 同样会因 Thread 缺失失败）。
+                return false;
+              }
+              // 唯一决策边界：宿主许可与 READY -> DISPATCHING 在同一物理事务；null 表示宿主拒绝。
+              return admission
+                  .executeIfAdmitted(
+                      dispatchRequest, () -> allowIntent(tx, claim, threadId, attempt, now))
+                  .orElse(null);
+            });
+    if (dispatched == null) {
+      if (execution != null) {
+        execution.abandon();
+      }
+      return deferRejected(claim);
+    }
     if (!dispatched) {
       if (execution != null) {
         execution.abandon();
@@ -492,6 +593,32 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return dispatch(
         claim, new Prepare.Dispatched(threadId, assistantEntryId, attempt, request), execution);
+  }
+
+  /**
+   * Allow 的持久意图：二次校验 claim + READY + attempt + approval null 后 markApprovalNotRequired -&gt;
+   * beginDispatch。
+   */
+  private boolean allowIntent(
+      HarnessStore.Transaction tx, ClaimedWork claim, UUID threadId, int attempt, Instant now) {
+    ThreadState thread = tx.lockThread(threadId).orElse(null);
+    if (thread == null) {
+      return false;
+    }
+    ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
+    if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+      return false;
+    }
+    if (tool.status() != ToolInvocationStatus.READY
+        || tool.attempt() != attempt
+        || tool.approval() != null) {
+      return false;
+    }
+    ToolInvocation approved = tool.markApprovalNotRequired(now);
+    tx.updateToolInvocations(List.of(approved));
+    tx.updateToolInvocations(List.of(approved.beginDispatch(now)));
+    tx.updateThread(thread.touchVersion(now));
+    return true;
   }
 
   /**
@@ -837,6 +964,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   private sealed interface Prepare
       permits Prepare.Lost,
+          Prepare.Rejected,
           Prepare.Input,
           Prepare.Preflight,
           Prepare.Allowed,
@@ -844,6 +972,9 @@ public final class ToolProcessor implements AutoCloseable {
           Prepare.Terminated {
 
     record Lost() implements Prepare {}
+
+    /** 宿主拒绝本次新的对外执行：未做任何 Harness 变更，调用方只允许 durable reschedule。 */
+    record Rejected() implements Prepare {}
 
     /** 内部人工输入工具：READY 边界已冻结为 WAITING_INPUT，不再进入 preflight / gateway。 */
     record Input(UUID threadId) implements Prepare {}

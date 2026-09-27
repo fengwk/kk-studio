@@ -203,12 +203,14 @@ public class HarnessRuntimeConfiguration {
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot,
-      ToolHistoryActionResolver toolHistoryActionResolver) {
+      ToolHistoryActionResolver toolHistoryActionResolver,
+      HarnessDispatcherProperties dispatcherProperties) {
     return new ModelProcessorConfig(
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(
             systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
+        dispatcherProperties.getAdmissionDeferral(),
         StreamFlushConfig.DEFAULT,
         toolHistoryActionResolver);
   }
@@ -217,13 +219,15 @@ public class HarnessRuntimeConfiguration {
   public ToolProcessorConfig toolProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      HarnessDispatcherProperties dispatcherProperties) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
-        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()));
+        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()),
+        dispatcherProperties.getAdmissionDeferral());
   }
 
   /**
@@ -275,7 +279,8 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
+      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor,
+      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -284,7 +289,8 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        flushExecutor);
+        flushExecutor,
+        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
   }
 
   @Bean(destroyMethod = "close")
@@ -295,9 +301,17 @@ public class HarnessRuntimeConfiguration {
       ToolProcessorConfig config,
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
-      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker) {
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
+      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
     return new ToolProcessor(
-        store, toolGateway, realtimeEventSink, config, clock, scheduler, heartbeatWorker);
+        store,
+        toolGateway,
+        realtimeEventSink,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
   }
 
   @Bean
@@ -366,8 +380,7 @@ public class HarnessRuntimeConfiguration {
       @Qualifier("harnessDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor,
-      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
+      ToolProcessor toolProcessor) {
     Duration dispatcherLease = dispatcherProperties.getLeaseDuration();
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
@@ -376,7 +389,6 @@ public class HarnessRuntimeConfiguration {
             dispatcherLease,
             dispatcherProperties.getPollInterval(),
             dispatcherProperties.getRejectionDelay(),
-            dispatcherProperties.getAdmissionDeferral(),
             dispatcherProperties.getMaxDispatchTasks());
     return new HarnessWorkDispatcher(
         nodeInstanceId,
@@ -388,8 +400,7 @@ public class HarnessRuntimeConfiguration {
         pollScheduler,
         threadProcessor,
         modelProcessor,
-        toolProcessor,
-        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
+        toolProcessor);
   }
 
   /**

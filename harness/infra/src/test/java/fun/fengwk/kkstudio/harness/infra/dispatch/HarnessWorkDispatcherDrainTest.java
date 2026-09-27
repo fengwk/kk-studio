@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.MutableC
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.RecordingScheduler;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ThreadSeed;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ToolSeed;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -80,16 +79,7 @@ class HarnessWorkDispatcherDrainTest {
       int maxDispatchTasks,
       Consumer<ClaimedWork> handler) {
     return new HarnessWorkDispatcher(
-        store,
-        config(maxDispatchTasks),
-        clock,
-        drain,
-        worker,
-        poll,
-        handler,
-        handler,
-        handler,
-        WorkDispatchAdmission.ALLOW_ALL);
+        store, config(maxDispatchTasks), clock, drain, worker, poll, handler, handler, handler);
   }
 
   @Test
@@ -463,8 +453,7 @@ class HarnessWorkDispatcherDrainTest {
             new RecordingScheduler(),
             otherClaims::add,
             otherClaims::add,
-            otherClaims::add,
-            WorkDispatchAdmission.ALLOW_ALL);
+            otherClaims::add);
 
     otherDispatcher.start();
     // otherDispatcher should not claim the tool work because its nodeInstanceId does not match the
@@ -486,8 +475,7 @@ class HarnessWorkDispatcherDrainTest {
             new RecordingScheduler(),
             allowedClaims::add,
             allowedClaims::add,
-            allowedClaims::add,
-            WorkDispatchAdmission.ALLOW_ALL);
+            allowedClaims::add);
 
     allowedDispatcher.start();
     awaitTrue(() -> !allowedClaims.isEmpty());
