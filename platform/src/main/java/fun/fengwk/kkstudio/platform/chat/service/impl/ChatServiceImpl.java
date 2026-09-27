@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
@@ -115,7 +114,7 @@ public class ChatServiceImpl implements ChatService {
       throw new AiResourceNotFoundException(RESOURCE);
     }
     ensureExpectedVersion(locked, id, expectedVersion, expected);
-    sessionDeletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, locked.getId()));
+    sessionDeletionService.deleteSessionsByOwner(new OwnerRef.Chat(locked.getId()));
     if (!repository.deleteById(locked.getId(), expected)) {
       throw new IllegalStateException("chat " + id + " changed under lock");
     }
