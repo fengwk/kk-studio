@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 
-/** Config 校验：正整毫秒 Duration（含宿主准入重排延迟）、maxDispatchTasks 与三类型 lease lookup。 */
+/** Config 校验：正整毫秒 Duration、maxDispatchTasks 与三类型 lease lookup。 */
 class HarnessWorkDispatcherConfigTest {
 
   private static final Duration VALID = Duration.ofMillis(10);
@@ -23,14 +23,12 @@ class HarnessWorkDispatcherConfigTest {
             Duration.ofMinutes(1),
             Duration.ofSeconds(5),
             Duration.ofMillis(500),
-            Duration.ofSeconds(2),
             3);
     assertEquals(Duration.ofSeconds(30), config.threadLeaseDuration());
     assertEquals(Duration.ofMillis(1), config.modelLeaseDuration());
     assertEquals(Duration.ofMinutes(1), config.toolLeaseDuration());
     assertEquals(Duration.ofSeconds(5), config.periodicPollInterval());
     assertEquals(Duration.ofMillis(500), config.executorRejectionDelay());
-    assertEquals(Duration.ofSeconds(2), config.admissionDeferral());
     assertEquals(3, config.maxDispatchTasks());
   }
 
@@ -38,7 +36,7 @@ class HarnessWorkDispatcherConfigTest {
   void rejectsNullZeroNegativeAndSubMillisecondDurations() {
     Duration halfMillisecond = Duration.ofNanos(500_000);
     Duration oneAndHalfMillisecond = Duration.ofNanos(1_500_000);
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 5; i++) {
       int index = i;
       Duration nullValue = null;
       Duration zero = Duration.ZERO;
@@ -78,7 +76,6 @@ class HarnessWorkDispatcherConfigTest {
             Duration.ofSeconds(60),
             VALID,
             VALID,
-            VALID,
             1);
     assertEquals(Duration.ofSeconds(30), config.leaseDuration(WorkTargetType.THREAD));
     assertEquals(Duration.ofSeconds(45), config.leaseDuration(WorkTargetType.MODEL));
@@ -88,15 +85,13 @@ class HarnessWorkDispatcherConfigTest {
 
   private static HarnessWorkDispatcherConfig configWith(
       int index, Duration value, Duration fallback) {
-    Duration[] durations =
-        new Duration[] {fallback, fallback, fallback, fallback, fallback, fallback};
+    Duration[] durations = new Duration[] {fallback, fallback, fallback, fallback, fallback};
     durations[index] = value;
     return new HarnessWorkDispatcherConfig(
-        durations[0], durations[1], durations[2], durations[3], durations[4], durations[5], 1);
+        durations[0], durations[1], durations[2], durations[3], durations[4], 1);
   }
 
   private static HarnessWorkDispatcherConfig configWithMax(int maxDispatchTasks) {
-    return new HarnessWorkDispatcherConfig(
-        VALID, VALID, VALID, VALID, VALID, VALID, maxDispatchTasks);
+    return new HarnessWorkDispatcherConfig(VALID, VALID, VALID, VALID, VALID, maxDispatchTasks);
   }
 }

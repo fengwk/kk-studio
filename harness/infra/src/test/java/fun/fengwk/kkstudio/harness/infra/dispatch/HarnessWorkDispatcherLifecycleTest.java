@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.MutableC
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.RecordingScheduler;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.RecordingScheduler.ScheduledTask;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ThreadSeed;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -73,16 +72,7 @@ class HarnessWorkDispatcherLifecycleTest {
       Consumer<ClaimedWork> modelHandler,
       Consumer<ClaimedWork> toolHandler) {
     return new HarnessWorkDispatcher(
-        store,
-        config(),
-        clock,
-        drain,
-        worker,
-        poll,
-        threadHandler,
-        modelHandler,
-        toolHandler,
-        WorkDispatchAdmission.ALLOW_ALL);
+        store, config(), clock, drain, worker, poll, threadHandler, modelHandler, toolHandler);
   }
 
   @Test

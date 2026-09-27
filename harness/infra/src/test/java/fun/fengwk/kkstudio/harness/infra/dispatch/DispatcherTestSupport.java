@@ -95,7 +95,6 @@ final class DispatcherTestSupport {
   static final Duration TOOL_LEASE = Duration.ofSeconds(60);
   static final Duration POLL_INTERVAL = Duration.ofMillis(20);
   static final Duration REJECTION_DELAY = Duration.ofSeconds(2);
-  static final Duration ADMISSION_DEFERRAL = Duration.ofSeconds(3);
   static final Duration AWAIT_TIMEOUT = Duration.ofSeconds(10);
   static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
@@ -107,13 +106,7 @@ final class DispatcherTestSupport {
 
   static HarnessWorkDispatcherConfig config(int maxDispatchTasks) {
     return new HarnessWorkDispatcherConfig(
-        THREAD_LEASE,
-        MODEL_LEASE,
-        TOOL_LEASE,
-        POLL_INTERVAL,
-        REJECTION_DELAY,
-        ADMISSION_DEFERRAL,
-        maxDispatchTasks);
+        THREAD_LEASE, MODEL_LEASE, TOOL_LEASE, POLL_INTERVAL, REJECTION_DELAY, maxDispatchTasks);
   }
 
   static MutableClock clock() {

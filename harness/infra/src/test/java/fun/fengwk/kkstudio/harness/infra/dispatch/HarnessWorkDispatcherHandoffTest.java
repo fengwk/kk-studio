@@ -41,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
@@ -115,8 +114,7 @@ class HarnessWorkDispatcherHandoffTest {
         poll,
         threadHandler,
         modelHandler,
-        toolHandler,
-        WorkDispatchAdmission.ALLOW_ALL);
+        toolHandler);
   }
 
   @Test
@@ -442,8 +440,7 @@ class HarnessWorkDispatcherHandoffTest {
             new RecordingScheduler(),
             threadProcessor,
             modelProcessor,
-            toolProcessor,
-            WorkDispatchAdmission.ALLOW_ALL);
+            toolProcessor);
 
     dispatcher.start();
     awaitTrue(
@@ -500,8 +497,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -514,8 +510,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -528,8 +523,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -542,8 +536,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -556,8 +549,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -570,8 +562,7 @@ class HarnessWorkDispatcherHandoffTest {
                 null,
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -584,8 +575,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 null,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -598,8 +588,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 null,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -612,8 +601,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                null,
-                WorkDispatchAdmission.ALLOW_ALL));
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -626,8 +614,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 (ThreadProcessor) null,
                 null,
-                null,
-                WorkDispatchAdmission.ALLOW_ALL));
+                null));
   }
 
   @Test
@@ -673,8 +660,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -687,8 +673,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -701,8 +686,7 @@ class HarnessWorkDispatcherHandoffTest {
                 new RecordingScheduler(),
                 handler,
                 handler,
-                handler,
-                WorkDispatchAdmission.ALLOW_ALL));
+                handler));
   }
 
   /** 给指定 logger 临时挂一个 logback ListAppender，用于断言日志的 level、格式化消息与 throwable。 */

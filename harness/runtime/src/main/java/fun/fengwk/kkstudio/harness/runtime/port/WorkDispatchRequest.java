@@ -14,6 +14,9 @@ import java.util.UUID;
  * claim 只收敛 durable 事实，THREAD claim 只物化历史并规划 turn。后三类一律不询问宿主（见 {@link
  * WorkDispatchAdmission}），否则暂停/阻塞会让在途执行的收尾本身被卡住。
  *
+ * <p>本记录只在「READY -&gt; DISPATCHING」的持久意图事务内构造，因此其中的坐标与绑定就是宿主要复验的那一次执行的事实；宿主据此取产品行锁并 与状态转换同事务决策 （见
+ * {@link WorkDispatchAdmission#executeIfAdmitted}）。
+ *
  * <p>坐标口径：{@code threadId}/{@code sessionId} 是该调用所属 Thread 与其 Session，宿主据此校验该 Thread 是否仍是当前活动 Run 的
  * Agent 坐标；{@code toolBinding} 是 TOOL 调用冻结的完整绑定（含 {@code descriptor().sideEffect()}），宿主据此判断工具是否只读，
  * 不需要再查目录，也不会因目录变化而改变已冻结调用的能力判定。

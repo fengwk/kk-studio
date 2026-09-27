@@ -3,20 +3,13 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchRequest;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
@@ -26,7 +19,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionHandler;
@@ -41,15 +33,13 @@ import java.util.function.Consumer;
 /**
  * Work dispatcher：{@code HarnessStore.Transaction.claimNextWork} 的首个生产调用方。
  *
- * <p>职责边界（KISS）：dispatcher 只做 Work claim、按类型路由、宿主派发准入、bounded handoff、合并 wake、periodic poll 与 stop
+ * <p>职责边界（KISS）：dispatcher 只做 Work claim、按类型路由、bounded handoff、合并 wake、periodic poll 与 stop
  * 生命周期。它绝不解释 Processor 的 typed 结果改写 durable 状态 —— handoff 类型是 {@link Consumer}，Processor 的 complete
  * / reschedule / delete 由 Processor 自己在所有权围栏保护下决定。
  *
- * <p>宿主派发准入：claim 之后、handoff 之前，dispatcher 只对「可能首次对外执行」的 claim（READY 的 MODEL / TOOL 调用）用 {@link
- * WorkDispatchAdmission} 询问宿主是否允许开始新的对外执行；判定需要在只读短事务内解析该调用的 Thread / Session / 冻结工具绑定（不写任何 durable
- * 事实），拒绝时按 {@code admissionDeferral} 归还并重排 claim —— 绝不派发、绝不丢弃、绝不改写 invocation。在途（
- * DISPATCHING/RUNNING）、等待态、终态与 THREAD claim 结构性放行：它们不会开始新的对外执行，拒绝只会让在途执行无法收尾。没有宿主策略时 使用 {@link
- * WorkDispatchAdmission#ALLOW_ALL}。
+ * <p>宿主派发准入不在 dispatcher：许可判定必须与 Processor 的 READY -&gt; DISPATCHING 持久意图同处一个物理事务，因此由 Processor 在
+ * prepare 短事务内调用 {@link WorkDispatchAdmission} 与状态转换一起决策（见该端口的调用契约）；dispatcher 既不参与判定，也不可能用 claim 与
+ * handoff 之间的无锁预检代替它。
  *
  * <p>Work claim 协议：每次 claim 使用 {@link HarnessStoreTime#millisecondClock} 包装后的新毫秒 now、新 UUID token
  * 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link #nodeInstanceId}，以驱动 Environment route
@@ -96,7 +86,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   private final Executor workerExecutor;
   private final ScheduledExecutorService pollScheduler;
   private final Map<WorkTargetType, Consumer<ClaimedWork>> handlers;
-  private final WorkDispatchAdmission admission;
   private final AtomicBoolean wakeRequested = new AtomicBoolean();
   private final AtomicBoolean drainRunning = new AtomicBoolean();
   private final AtomicInteger dispatchCapacity = new AtomicInteger();
@@ -119,8 +108,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor,
-      WorkDispatchAdmission admission) {
+      ToolProcessor toolProcessor) {
     this(
         UUID.randomUUID(),
         store,
@@ -131,8 +119,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         pollScheduler,
         threadProcessor,
         modelProcessor,
-        toolProcessor,
-        admission);
+        toolProcessor);
   }
 
   /** 显式指定 nodeInstanceId 的生产 wiring 构造，用于绑定节点特定的 Environment route 路由围栏。 */
@@ -146,8 +133,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor,
-      WorkDispatchAdmission admission) {
+      ToolProcessor toolProcessor) {
     this(
         nodeInstanceId,
         store,
@@ -159,8 +145,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         routing(
             Objects.requireNonNull(threadProcessor, "threadProcessor")::process,
             Objects.requireNonNull(modelProcessor, "modelProcessor")::process,
-            Objects.requireNonNull(toolProcessor, "toolProcessor")::process),
-        admission);
+            Objects.requireNonNull(toolProcessor, "toolProcessor")::process));
   }
 
   /** 包级组合 / 测试构造：直接把 claim handoff 给三个显式 consumer（全部 fail-fast non-null）。自动分配随机 nodeInstanceId。 */
@@ -173,8 +158,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       ScheduledExecutorService pollScheduler,
       Consumer<ClaimedWork> threadHandler,
       Consumer<ClaimedWork> modelHandler,
-      Consumer<ClaimedWork> toolHandler,
-      WorkDispatchAdmission admission) {
+      Consumer<ClaimedWork> toolHandler) {
     this(
         UUID.randomUUID(),
         store,
@@ -185,8 +169,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         pollScheduler,
         threadHandler,
         modelHandler,
-        toolHandler,
-        admission);
+        toolHandler);
   }
 
   /** 显式指定 nodeInstanceId 的包级组合 / 测试构造。 */
@@ -200,8 +183,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       ScheduledExecutorService pollScheduler,
       Consumer<ClaimedWork> threadHandler,
       Consumer<ClaimedWork> modelHandler,
-      Consumer<ClaimedWork> toolHandler,
-      WorkDispatchAdmission admission) {
+      Consumer<ClaimedWork> toolHandler) {
     this(
         nodeInstanceId,
         store,
@@ -213,8 +195,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         routing(
             Objects.requireNonNull(threadHandler, "threadHandler"),
             Objects.requireNonNull(modelHandler, "modelHandler"),
-            Objects.requireNonNull(toolHandler, "toolHandler")),
-        admission);
+            Objects.requireNonNull(toolHandler, "toolHandler")));
   }
 
   private HarnessWorkDispatcher(
@@ -225,8 +206,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
-      Map<WorkTargetType, Consumer<ClaimedWork>> handlers,
-      WorkDispatchAdmission admission) {
+      Map<WorkTargetType, Consumer<ClaimedWork>> handlers) {
     this.nodeInstanceId = Objects.requireNonNull(nodeInstanceId, "nodeInstanceId");
     this.store = Objects.requireNonNull(store, "store");
     this.config = Objects.requireNonNull(config, "config");
@@ -235,7 +215,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.workerExecutor = requireFailFastExecutor(workerExecutor, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
     this.handlers = handlers;
-    this.admission = Objects.requireNonNull(admission, "admission");
   }
 
   public UUID nodeInstanceId() {
@@ -369,11 +348,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         returnClaim(claim);
         break;
       }
-      if (!admits(claim)) {
-        // 宿主拒绝派发：只延后执行（按 admissionDeferral 重排），Work 与 invocation 事实保持不变。
-        deferClaim(claim);
-        continue;
-      }
       if (!handoff(claim)) {
         // worker executor rejection：结束当前 drain，禁止 claim -> reject 热循环。
         returnClaim(claim);
@@ -455,83 +429,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     } finally {
       dispatchCapacity.decrementAndGet();
       wake();
-    }
-  }
-
-  /**
-   * 宿主派发准入：只对「可能首次对外执行」的 claim 询问宿主策略。
-   *
-   * <p>只读解析（不写 durable 事实）：READY 的 MODEL / TOOL 调用解析出所属 Thread 与 Session 后交给宿主。其余 claim 结构性放行：
-   * 在途（DISPATCHING/RUNNING）只观察或收敛已有对外执行、等待态与终态只收敛 durable 事实、THREAD 只物化历史与规划 turn；拒绝这些会让
-   * 暂停/阻塞永远无法安全收尾，却阻止不了任何新的对外调用。Work 对应的调用行已经不存在的（例如已被处理或删除）无法判定归属，交由 Processor 自己的所有权围栏处理，因此放行而不吞掉
-   * claim。
-   */
-  private boolean admits(ClaimedWork claim) {
-    WorkTarget target = claim.target();
-    Optional<WorkDispatchRequest> request =
-        store.transaction(tx -> resolveNewExecution(tx, target));
-    return request.isEmpty() || admission.admits(request.get());
-  }
-
-  /** READY 调用才可能首次对外执行；返回空表示该 claim 不需要宿主判定。 */
-  private static Optional<WorkDispatchRequest> resolveNewExecution(
-      HarnessStore.Transaction tx, WorkTarget target) {
-    return switch (target.type()) {
-      case THREAD -> Optional.empty();
-      case MODEL -> {
-        ModelInvocation model = tx.findModelInvocation(target.id()).orElse(null);
-        if (model == null || model.status() != ModelInvocationStatus.READY) {
-          yield Optional.empty();
-        }
-        yield sessionOf(tx, model.threadId())
-            .map(
-                sessionId ->
-                    new WorkDispatchRequest(
-                        WorkTargetType.MODEL, model.id(), model.threadId(), sessionId, null));
-      }
-      case TOOL -> {
-        ToolInvocation tool = tx.findToolInvocation(target.id()).orElse(null);
-        if (tool == null || tool.status() != ToolInvocationStatus.READY) {
-          yield Optional.empty();
-        }
-        ModelInvocation model = tx.findModelInvocation(tool.modelInvocationId()).orElse(null);
-        if (model == null) {
-          yield Optional.empty();
-        }
-        yield sessionOf(tx, model.threadId())
-            .map(
-                sessionId ->
-                    new WorkDispatchRequest(
-                        WorkTargetType.TOOL,
-                        tool.id(),
-                        model.threadId(),
-                        sessionId,
-                        tool.binding()));
-      }
-    };
-  }
-
-  private static Optional<UUID> sessionOf(HarnessStore.Transaction tx, UUID threadId) {
-    return tx.findThread(threadId).map(ThreadState::sessionId);
-  }
-
-  /** 宿主拒绝后的归还重排（Ownership-fenced）：同短事务校验仍 owned 才按 admissionDeferral 重排；lost 则 no-op。 */
-  private void deferClaim(ClaimedWork claim) {
-    try {
-      store.transaction(
-          tx -> {
-            Instant now = clock.instant();
-            if (tx.lockClaimedWork(claim, now).isEmpty()) {
-              return null;
-            }
-            tx.rescheduleWork(claim, now, now.plus(config.admissionDeferral()));
-            return null;
-          });
-    } catch (RuntimeException error) {
-      log.warn(
-          "failed to defer claim {}; its lease will expire and the work will be re-claimed",
-          claim.target(),
-          error);
     }
   }
 

@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -56,6 +58,11 @@ import java.util.function.BiFunction;
  * DISPATCHING / RUNNING 状态恢复 UNKNOWN。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无状态写入
  * 的陈旧启动围栏（stale-start fence：持久化仍 DISPATCHING + attempt 匹配 + claim 仍 owned），失败立即 abandon 并 LOST，绝不启动
  * Provider（覆盖另一 JVM 实例 recovery 后本实例本地 abandoned 检查不可见的场景）。
+ *
+ * <p>宿主派发准入（{@link WorkDispatchAdmission}）：READY 调用会开始一次新的对外执行，因此在 prepare 短事务内、且在任何 Harness
+ * 行锁之前先询问宿主（{@link WorkDispatchAdmission#executeIfAdmitted}）；实现先取产品行锁，再在同一物理事务内完成 READY -&gt;
+ * DISPATCHING，外部 Provider 调用仍在 commit 之后。宿主拒绝时 invocation 事实一概不变，只在所有权围栏内按 {@code
+ * admissionDeferral} durable reschedule（不热循环）。其余状态不产生新的对外执行，结构性不询问。
  */
 @Slf4j
 public final class ModelProcessor implements AutoCloseable {
@@ -68,11 +75,13 @@ public final class ModelProcessor implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final Executor flushExecutor;
+  private final WorkDispatchAdmission admission;
   private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
   private volatile boolean closed;
 
+  /** 没有宿主策略的纯 Harness 部署 / 测试：放行一切新的对外执行。 */
   public ModelProcessor(
       HarnessStore store,
       ModelGateway gateway,
@@ -82,6 +91,28 @@ public final class ModelProcessor implements AutoCloseable {
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       Executor flushExecutor) {
+    this(
+        store,
+        gateway,
+        realtimeEventSink,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        flushExecutor,
+        WorkDispatchAdmission.ALLOW_ALL);
+  }
+
+  public ModelProcessor(
+      HarnessStore store,
+      ModelGateway gateway,
+      RealtimeEventSink realtimeEventSink,
+      ModelProcessorConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
+      Executor flushExecutor,
+      WorkDispatchAdmission admission) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -90,6 +121,7 @@ public final class ModelProcessor implements AutoCloseable {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
+    this.admission = Objects.requireNonNull(admission, "admission");
   }
 
   /**
@@ -135,6 +167,7 @@ public final class ModelProcessor implements AutoCloseable {
         Prepare prepare = store.transaction(tx -> prepare(tx, claim));
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
+          case Prepare.Rejected ignored -> deferRejected(claim);
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
           case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
         };
@@ -339,8 +372,7 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /** 在事务内按 Thread -> Model -> Work 锁序锁定并校验状态，依据 durable status 路由准备结果。 */
-  private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
-    Instant now = clock.instant();
+  private Prepare prepareLocked(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
@@ -359,6 +391,46 @@ public final class ModelProcessor implements AutoCloseable {
       case DISPATCHING, RUNNING -> recoverUnknown(tx, claim, thread, model, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, model, now);
     };
+  }
+
+  /**
+   * 唯一的持久意图边界：READY 调用会开始一次新的对外执行，因此在同一物理事务内、且在任何 Harness 行锁之前先询问宿主，由宿主先取产品行锁 （Project SHARE -&gt;
+   * Issue UPDATE）再执行 {@link #prepareLocked} 内的 READY -&gt; DISPATCHING 转换；其余状态不产生新的对外执行， 结构性放行。
+   */
+  private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
+    Instant now = clock.instant();
+    UUID invocationId = claim.target().id();
+    ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
+    if (peek == null || peek.status() != ModelInvocationStatus.READY) {
+      return prepareLocked(tx, claim, now);
+    }
+    ThreadState threadPeek = tx.findThread(peek.threadId()).orElse(null);
+    if (threadPeek == null) {
+      // 归属事实已损坏：锁内分支会完整 no-op，无法构造宿主可见坐标。
+      return prepareLocked(tx, claim, now);
+    }
+    WorkDispatchRequest request =
+        new WorkDispatchRequest(
+            WorkTargetType.MODEL, invocationId, peek.threadId(), threadPeek.sessionId(), null);
+    return admission
+        .executeIfAdmitted(request, () -> prepareLocked(tx, claim, now))
+        .orElseGet(Prepare.Rejected::new);
+  }
+
+  /** 宿主拒绝派发：invocation 事实一概不变，只在所有权围栏内按 {@code admissionDeferral} 重排 Work，禁止热循环。 */
+  private ProcessResult deferRejected(ClaimedWork claim) {
+    Instant now = clock.instant();
+    boolean rescheduled =
+        Boolean.TRUE.equals(
+            store.transaction(
+                tx -> {
+                  if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                    return false;
+                  }
+                  tx.rescheduleWork(claim, now, now.plus(config.admissionDeferral()));
+                  return true;
+                }));
+    return rescheduled ? ProcessResult.RESCHEDULED : ProcessResult.LOST_OWNERSHIP;
   }
 
   private Prepare prepareReady(
@@ -558,9 +630,13 @@ public final class ModelProcessor implements AutoCloseable {
     }
   }
 
-  private sealed interface Prepare permits Prepare.Lost, Prepare.Dispatched, Prepare.Terminated {
+  private sealed interface Prepare
+      permits Prepare.Lost, Prepare.Rejected, Prepare.Dispatched, Prepare.Terminated {
 
     record Lost() implements Prepare {}
+
+    /** 宿主拒绝本次新的对外执行：未做任何 Harness 变更，调用方只允许 durable reschedule。 */
+    record Rejected() implements Prepare {}
 
     record Dispatched(
         UUID threadId,

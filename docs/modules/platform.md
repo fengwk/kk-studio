@@ -533,6 +533,22 @@ Project 模块声明的 4 个端口；它们都运行在调用方已有的物理
 模块的 `ProjectWorkflowJsonCodec` 与 `IssueStateTransitions` 而不是复制状态机，工具边界把 Project
 错误译成平台错误类型；包级约定见
 [project/tool 包约定](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/package-info.java)。
+
+### 派发准入门禁
+
+[harness/dispatch](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch) 里的
+[`IssueAgentWorkDispatchAdmission`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/IssueAgentWorkDispatchAdmission.java)
+是 Harness 唯一询问「能否开始一次新的对外执行」的宿主实现。Harness 在
+`READY -> DISPATCHING` 的持久意图事务内、任何 Harness 行锁之前调用它，本实现以
+`PROPAGATION_REQUIRED` 加入同一个物理事务，按 `Project FOR SHARE -> Issue FOR UPDATE -> 活动 Run
+FOR UPDATE` 取锁后复验全部产品事实（绑定、Issue/Project 归档与暂停、阶段职责与 Agent、活动 Run 的
+Thread/Session/阶段坐标、`next_state` 收尾期只读约束），只有通过才执行状态转换意图；拒绝时 Harness
+一概不改写 invocation，只把 Work durable 重排到部署级 `admissionDeferral` 之后。
+
+因此「人工暂停」与「首次派发」争用同一把 Issue 行锁：暂停先提交时派发读到已提交的暂停事实并被拒绝，
+派发先提交时暂停只能在其后生效、在途执行照常收尾。门禁只被首次派发询问，
+在途、等待态、终态与 Chat/内部委派 Thread 结构性放行，所以暂停永远不会卡住执行收敛；外部
+Provider / Tool 调用仍在事务提交之后发生，不在持锁状态下等待 I/O。
 ## SystemSettings
 
 `system_setting` 恰好一行（存在 `id = 1` 的 check 约束），`config` 是六个必填 section
