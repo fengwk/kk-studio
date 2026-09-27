@@ -24,7 +24,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
@@ -74,10 +73,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     runtime = mock(HarnessRuntime.class);
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime,
-            mock(ModelRequestDebugService.class),
-            projectThreadOwnerResolver,
-            mock(SubagentTaskActivity.class));
+            runtime, mock(ModelRequestDebugService.class), projectThreadOwnerResolver);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -192,8 +188,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
         sessionId,
         """
         {"settings":{"agentName":"default-assistant","model":{"providerName":"openai",\
-        "modelName":"gpt-test","variant":"default"},"environmentName":null,"goal":null},\
-        "subagentContext":null}
+        "modelName":"gpt-test","variant":"default"},"environmentName":null,"goal":null}}
         """);
     UUID threadId = UUID.randomUUID();
     insertThread(sessionId, threadId, "standalone-branch");
@@ -207,9 +202,11 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
             UUID.class,
             sessionId);
     jdbcTemplate.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, false, 1, 0, current_timestamp, current_timestamp)",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+            + " creation_request_hash, name, yolo_enabled, status, next_command_sequence, version,"
+            + " created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, ?, false, 'IDLE', 1, 0, current_timestamp,"
+            + " current_timestamp)",
         threadId,
         sessionId,
         headEntryId,
