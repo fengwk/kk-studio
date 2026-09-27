@@ -1,4 +1,4 @@
-import { assert, assertDecimalVersion, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -111,7 +111,7 @@ registerCase({
               nodeId: dataNodeId,
               name: 'plain',
               transform: { x: 0, y: 0, width: 100, height: 100 },
-              resources: [],
+              resources: [{ kind: 'TEXT', name: 'body', textContent: 'plain node' }],
             },
           ],
         })

@@ -64,7 +64,17 @@ registerCase({
         config: model.config,
       }))
       .sort(compareModel)
-    const expectedCatalog = [...PI_MODEL_CATALOG].sort(compareModel)
+    // Pi 的原始快照未包含持久层对空协议选项规范化后必需的 wire 字段。
+    const expectedCatalog = PI_MODEL_CATALOG.map((model) => ({
+      ...model,
+      config: {
+        ...model.config,
+        variants: model.config.variants.map((variant) => ({
+          ...variant,
+          protocolOptionsJson: '{}',
+        })),
+      },
+    })).sort(compareModel)
     assert(
       actualCatalog.length === expectedCatalog.length,
       `expected ${expectedCatalog.length} Pi models, got ${actualCatalog.length}`,

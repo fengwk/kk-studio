@@ -7,7 +7,7 @@
  */
 import { createServer } from 'node:http'
 
-import { assert, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
 import {
   branchSettingsOf,
   chatOwner,
@@ -40,6 +40,18 @@ const INTERACTION_FIELDS = [
 const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
 
+function instantMillis(value) {
+  if (typeof value === 'number') {
+    assert(Number.isFinite(value) && value >= 0, `invalid epoch-second instant: ${value}`)
+    return value * 1000
+  }
+  assert(
+    typeof value === 'string' && Number.isFinite(Date.parse(value)),
+    `invalid ISO instant: ${JSON.stringify(value)}`,
+  )
+  return Date.parse(value)
+}
+
 function parseArguments(interaction) {
   assert(typeof interaction.argumentsJson === 'string', JSON.stringify(interaction))
   return JSON.parse(interaction.argumentsJson)
@@ -56,7 +68,7 @@ function assertInteraction(interaction, { threadId, sessionId, chatId, questionn
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
       && interaction.approvalJson === null
-      && Number.isFinite(Date.parse(interaction.createTime)),
+      && instantMillis(interaction.createTime) >= 0,
     JSON.stringify(interaction),
   )
   assertExactFields(interaction.owner, OWNER_FIELDS, `${label} interaction owner`)
@@ -94,7 +106,7 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20 } = {}) 
       seen.add(interaction.interactionId)
       if (index > 0) {
         const previous = page$.items[index - 1]
-        const order = Date.parse(previous.createTime) - Date.parse(interaction.createTime)
+        const order = instantMillis(previous.createTime) - instantMillis(interaction.createTime)
         assert(
           order <= 0
             || (order === 0 && previous.interactionId <= interaction.interactionId),
@@ -308,12 +320,14 @@ registerCase({
           && receipt.submissionId === submissionId
           && typeof receipt.actor === 'string'
           && receipt.actor.trim().length > 0
-          && Number.isFinite(Date.parse(receipt.acceptedAt))
+          && instantMillis(receipt.acceptedAt) >= 0
           && receipt.materialized === false,
         JSON.stringify(receipt),
       )
 
-      // 同 submissionId 精确重放：返回同一份 durable 回执，切换为已物化来源。
+      // 回答先物化为 ToolResult，再检查已物化事实的同 submissionId 精确重放。
+      // 立即重放可能仍处于 accepted-but-not-materialized，不用时序猜测代替门禁。
+      await waitForInteractionGone(ctx, pending.interactionId)
       const replayed = envelopeData(
         (
           await ctx.call('POST', inputPath, {
@@ -343,8 +357,7 @@ registerCase({
         { status: 409 },
       )
 
-      // 回答物化后交互不再是待处理项，Thread 以 ToolResult 收敛到终态。
-      await waitForInteractionGone(ctx, pending.interactionId)
+      // 回答物化后 Thread 以 ToolResult 收敛到终态。
       const thread = await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
         intervalMs: 200,

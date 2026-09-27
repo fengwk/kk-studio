@@ -135,7 +135,7 @@ registerCase({
           nodeId: secondNodeId,
           name: 'second',
           transform: transform(120, 2),
-          resources: [],
+          resources: [{ kind: 'TEXT', name: 'body', textContent: 'second node' }],
         },
       ],
     })
@@ -146,6 +146,7 @@ registerCase({
       JSON.stringify(createPatch.nodes),
     )
     const createdNode = upsertedNode(createPatch, nodeId)?.node
+    const secondResourceId = upsertedNode(createPatch, secondNodeId)?.node.resources[0].id
     assertExactFields(createdNode, NODE_FIELDS, 'created node')
     assert(
       createdNode.canvasId === canvas.id
@@ -394,7 +395,7 @@ registerCase({
         {
           type: 'DELETE_NODE',
           nodeId: secondNodeId,
-          expectedResourceIds: [],
+          expectedResourceIds: [secondResourceId],
           expectedFunction: null,
         },
         { type: 'DELETE_GROUP', groupId, expectedMemberNodeIds: [] },
@@ -455,7 +456,7 @@ registerCase({
           nodeId: consumerNodeId,
           name: 'consumer',
           transform: transform(200, 0),
-          resources: [],
+          resources: [{ kind: 'TEXT', name: 'body', textContent: 'consumer' }],
         },
         { type: 'CREATE_GROUP', groupId, title: 'Conflict Group', transform: transform(0, 0, 400, 300) },
         { type: 'SET_NODE_GROUP', nodeId: consumerNodeId, expectedGroupId: null, groupId },
@@ -504,7 +505,7 @@ registerCase({
         nodeId: upstreamNodeId,
         name: 'duplicate',
         transform: transform(0, 0),
-        resources: [],
+        resources: [{ kind: 'TEXT', name: 'body', textContent: 'duplicate' }],
       },
       { type: 'CREATE_GROUP', groupId, title: 'duplicate group', transform: transform(0, 0, 10, 10) },
     ])
