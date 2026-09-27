@@ -145,6 +145,7 @@ public final class HistoryPayloadMapper {
     }
     ToolResultMetadata metadata =
         new ToolResultMetadata(
+            invocation.id(),
             invocation.assistantEntryId(),
             invocation.call().id(),
             invocation.callIndex(),
@@ -173,12 +174,14 @@ public final class HistoryPayloadMapper {
             EMPTY_DETAILS_JSON);
     ToolResultMetadata metadata =
         new ToolResultMetadata(
+            null,
             assistantEntryId,
             call.toolCallId(),
             callIndex,
             ToolResultStatus.UNKNOWN,
             true,
-            ToolResultReason.HISTORY_CUT);
+            ToolResultReason.HISTORY_CUT,
+            null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
@@ -216,6 +219,7 @@ public final class HistoryPayloadMapper {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)),
         null,
         new ToolResultMetadata(
+            invocation.id(),
             invocation.assistantEntryId(),
             invocation.call().id(),
             invocation.callIndex(),

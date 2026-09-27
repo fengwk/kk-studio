@@ -7,6 +7,9 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
+import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -20,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -56,6 +60,7 @@ import java.util.function.Consumer;
 public final class HarnessRuntime {
 
   private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
+  private static final ToolApprovalJsonCodec APPROVAL_JSON = new ToolApprovalJsonCodec();
 
   private final HarnessStore store;
   private final Clock clock;
@@ -311,8 +316,56 @@ public final class HarnessRuntime {
    * ToolResult。答案非法为 INPUT_SUBMISSION_INVALID，目标不适用为 INPUT_SUBMISSION_NOT_APPLICABLE，另一个提交身份或不同答案为
    * INPUT_SUBMISSION_MISMATCH；provenance 由触发 WAITING_INPUT 时的冻结 binding 决定，本入口绝不接受 approval。
    */
-  public ToolInvocation submitToolInput(ToolInputSubmissionCommand command) {
+  public ToolInputAcceptance submitToolInput(ToolInputSubmissionCommand command) {
     return toolInputControl.submit(command);
+  }
+
+  /**
+   * 在单个短事务内读取一页待处理 Interaction（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}），按 {@code
+   * (createdAt, id)} 稳定升序的 keyset 游标分页。
+   *
+   * <p>{@code afterCreatedAt} / {@code afterId} 是游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；
+   * storage 多取一条判定 {@code hasMore}，因此调用方按 {@code hasMore} 翻页不会提前漏项。这里只投影 Invocation 自身事实，产品 owner 与
+   * Pane 跳转由上层按 Session/Thread 解析。
+   */
+  public PendingInteractionPage listPendingInteractions(
+      Instant afterCreatedAt, UUID afterId, int limit) {
+    Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
+    Objects.requireNonNull(afterId, "afterId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
+    return store.transaction(
+        tx -> {
+          List<PendingToolInvocationRow> rows =
+              tx.listPendingToolInvocations(afterCreatedAt, afterId, probeSize);
+          boolean hasMore = rows.size() > limit;
+          List<PendingInteraction> interactions = new ArrayList<>(Math.min(rows.size(), limit));
+          for (PendingToolInvocationRow row : rows) {
+            if (interactions.size() == limit) {
+              break;
+            }
+            interactions.add(toPendingInteraction(row));
+          }
+          return new PendingInteractionPage(interactions, hasMore);
+        });
+  }
+
+  private static PendingInteraction toPendingInteraction(PendingToolInvocationRow row) {
+    ToolInvocation invocation = row.invocation();
+    ToolApproval approval = invocation.approval();
+    String approvalJson = approval == null ? null : APPROVAL_JSON.encode(approval);
+    return new PendingInteraction(
+        invocation.id(),
+        row.threadId(),
+        row.sessionId(),
+        invocation.status(),
+        invocation.call().id(),
+        invocation.call().toolName(),
+        invocation.call().argumentsJson(),
+        approvalJson,
+        invocation.createdAt());
   }
 
   /**

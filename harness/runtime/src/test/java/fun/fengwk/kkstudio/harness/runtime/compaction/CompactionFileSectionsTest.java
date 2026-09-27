@@ -326,11 +326,13 @@ class CompactionFileSectionsTest {
                                 "{}"))),
                     null,
                     new ToolResultMetadata(
+                        id(9201L + callIndex),
                         assistantEntryId,
                         call.toolCallId(),
                         callIndex++,
                         ToolResultStatus.SUCCEEDED,
                         false,
+                        null,
                         null)),
                 BASE));
       }

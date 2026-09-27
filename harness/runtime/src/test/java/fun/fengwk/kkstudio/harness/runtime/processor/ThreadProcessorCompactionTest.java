@@ -1151,7 +1151,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                                   "{}"))),
                       null,
                       new ToolResultMetadata(
-                          assistantEntryId, callId, 0, ToolResultStatus.SUCCEEDED, false, null)),
+                          new UUID(0L, 8888L),
+                          assistantEntryId,
+                          callId,
+                          0,
+                          ToolResultStatus.SUCCEEDED,
+                          false,
+                          null,
+                          null)),
                   NOW));
           UUID turnEndEntryId = tx.nextId();
           tx.insertEntry(

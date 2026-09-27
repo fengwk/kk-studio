@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,7 +34,8 @@ class HistoryEntryPayloadTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
   private static final ToolResultMetadata TOOL_METADATA =
-      new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null);
+      new ToolResultMetadata(
+          id(22L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null);
 
   @Test
   void messagePayloadEnforcesRoleMetadataMatrix() {
@@ -80,7 +82,7 @@ class HistoryEntryPayloadTest {
                 toolMessage("call-1"),
                 null,
                 new ToolResultMetadata(
-                    id(2L), "call-9", 0, ToolResultStatus.SUCCEEDED, false, null)));
+                    id(22L), id(2L), "call-9", 0, ToolResultStatus.SUCCEEDED, false, null, null)));
     assertThrows(NullPointerException.class, () -> new MessagePayload(null, null, null));
   }
 
@@ -339,54 +341,101 @@ class HistoryEntryPayloadTest {
   void toolResultMetadataValidatesSyntheticRuleAndCanonicalValues() {
     ToolResultMetadata synthetic =
         new ToolResultMetadata(
-            id(2L), "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT);
+            null,
+            id(2L),
+            "call-1",
+            1,
+            ToolResultStatus.UNKNOWN,
+            true,
+            ToolResultReason.HISTORY_CUT,
+            null);
+    assertNull(synthetic.invocationId());
     assertEquals(ToolResultReason.HISTORY_CUT, synthetic.reason());
     assertTrue(synthetic.synthetic());
 
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolResultMetadata(null, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResultMetadata(id(2L), " ", 0, ToolResultStatus.SUCCEEDED, false, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResultMetadata(id(2L), " call", 0, ToolResultStatus.SUCCEEDED, false, null));
+    // 真实结果必须携带产生它的 invocation id：缺失即为非法历史。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                id(2L), "c".repeat(257), 0, ToolResultStatus.SUCCEEDED, false, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolResultMetadata(id(2L), "call-1", -1, ToolResultStatus.SUCCEEDED, false, null));
-    assertThrows(
-        NullPointerException.class,
-        () -> new ToolResultMetadata(id(2L), "call-1", 0, null, false, null));
+                null, id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+    // synthetic 结果没有原调用，不允许伪造 invocation id。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
+                id(22L),
+                id(2L),
+                "call-1",
+                0,
+                ToolResultStatus.UNKNOWN,
+                true,
+                ToolResultReason.HISTORY_CUT,
+                null));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L), null, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L), id(2L), " ", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L), id(2L), " call", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L),
+                id(2L),
+                "c".repeat(257),
+                0,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L), id(2L), "call-1", -1, ToolResultStatus.SUCCEEDED, false, null, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolResultMetadata(id(22L), id(2L), "call-1", 0, null, false, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                null,
                 id(2L),
                 "call-1",
                 0,
                 ToolResultStatus.SUCCEEDED,
                 true,
-                ToolResultReason.HISTORY_CUT));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.UNKNOWN, true, null));
+                ToolResultReason.HISTORY_CUT,
+                null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
+                null, id(2L), "call-1", 0, ToolResultStatus.UNKNOWN, true, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                id(22L),
                 id(2L),
                 "call-1",
                 0,
                 ToolResultStatus.UNKNOWN,
                 false,
-                ToolResultReason.HISTORY_CUT));
+                ToolResultReason.HISTORY_CUT,
+                null));
   }
 
   @Test

@@ -184,6 +184,7 @@ final class StoreTestSupport {
       UUID sessionId,
       UUID parentId,
       Instant createdAt,
+      UUID toolInvocationId,
       UUID assistantEntryId,
       int callIndex,
       String toolCallId) {
@@ -191,7 +192,7 @@ final class StoreTestSupport {
         id,
         sessionId,
         parentId,
-        toolResultPayload(assistantEntryId, callIndex, toolCallId),
+        toolResultPayload(toolInvocationId, assistantEntryId, callIndex, toolCallId),
         createdAt);
   }
 
@@ -282,17 +283,25 @@ final class StoreTestSupport {
   }
 
   /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / callIndex / call id 匹配。 */
-  static EntryPayload toolResultPayload(UUID assistantEntryId, int callIndex, String toolCallId) {
-    return toolResultPayload(assistantEntryId, callIndex, toolCallId, ToolResultStatus.SUCCEEDED);
+  static EntryPayload toolResultPayload(
+      UUID toolInvocationId, UUID assistantEntryId, int callIndex, String toolCallId) {
+    return toolResultPayload(
+        toolInvocationId, assistantEntryId, callIndex, toolCallId, ToolResultStatus.SUCCEEDED);
   }
 
   /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
   static EntryPayload toolResultPayload(
-      UUID assistantEntryId, int callIndex, String toolCallId, ToolResultStatus status) {
-    return toolResultPayload(assistantEntryId, callIndex, toolCallId, status, "bash");
+      UUID toolInvocationId,
+      UUID assistantEntryId,
+      int callIndex,
+      String toolCallId,
+      ToolResultStatus status) {
+    return toolResultPayload(
+        toolInvocationId, assistantEntryId, callIndex, toolCallId, status, "bash");
   }
 
   static EntryPayload toolResultPayload(
+      UUID toolInvocationId,
       UUID assistantEntryId,
       int callIndex,
       String toolCallId,
@@ -302,7 +311,8 @@ final class StoreTestSupport {
         new ToolResultMessageContent(
             toolCallId, "bash", rendererKey, List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
-        new ToolResultMetadata(assistantEntryId, toolCallId, callIndex, status, false, null);
+        new ToolResultMetadata(
+            toolInvocationId, assistantEntryId, toolCallId, callIndex, status, false, null, null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
@@ -315,12 +325,14 @@ final class StoreTestSupport {
             toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
+            null,
             assistantEntryId,
             toolCallId,
             callIndex,
             ToolResultStatus.UNKNOWN,
             true,
-            ToolResultReason.HISTORY_CUT);
+            ToolResultReason.HISTORY_CUT,
+            null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }

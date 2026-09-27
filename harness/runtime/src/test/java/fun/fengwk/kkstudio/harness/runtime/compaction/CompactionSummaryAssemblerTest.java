@@ -290,7 +290,14 @@ class CompactionSummaryAssemblerTest {
                     "{}"))),
         null,
         new ToolResultMetadata(
-            assistantEntryId, callId, callIndex, ToolResultStatus.SUCCEEDED, false, null));
+            id(9101L),
+            assistantEntryId,
+            callId,
+            callIndex,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null));
   }
 
   private static AssistantMessageMetadata metadata() {

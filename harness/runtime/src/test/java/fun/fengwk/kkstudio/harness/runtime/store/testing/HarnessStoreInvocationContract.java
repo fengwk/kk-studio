@@ -588,7 +588,7 @@ public abstract class HarnessStoreInvocationContract {
             store,
             baseline.sessionId(),
             assistantEntryId,
-            toolResultPayload(assistantEntryId, 0, "call-1"));
+            toolResultPayload(new UUID(0L, 9501L), assistantEntryId, 0, "call-1"));
     // 链 B：root -> turnStartB -> userB -> errorB
     UUID thread5 = store.transaction(HarnessStore.Transaction::nextId);
     UUID turnStartB =
@@ -783,7 +783,10 @@ public abstract class HarnessStoreInvocationContract {
         insertChildEntry(store, baseline.sessionId(), userA, assistantPayload("call-1"));
     UUID toolResultA =
         insertChildEntry(
-            store, baseline.sessionId(), assistantA, toolResultPayload(assistantA, 0, "call-1"));
+            store,
+            baseline.sessionId(),
+            assistantA,
+            toolResultPayload(new UUID(0L, 9502L), assistantA, 0, "call-1"));
     // 将 thread head 迁到 tool result 并在那里创建 model
     inTransaction(
         store,

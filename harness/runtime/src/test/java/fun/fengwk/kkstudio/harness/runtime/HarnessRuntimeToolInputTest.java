@@ -81,7 +81,7 @@ class HarnessRuntimeToolInputTest {
     parkForInput(store, baseline, T3);
     UUID submissionId = TestIds.id(11);
 
-    ToolInvocation accepted =
+    ToolInputAcceptance accepted =
         runtime.submitToolInput(
             command(
                 baseline.threadId(),
@@ -90,20 +90,26 @@ class HarnessRuntimeToolInputTest {
                 "alice",
                 List.of(List.of("fast"), List.of("c", "a"))));
 
-    assertEquals(ToolInvocationStatus.SUCCEEDED, accepted.status());
+    assertEquals(baseline.threadId(), accepted.threadId());
+    assertEquals(baseline.toolId(), accepted.toolInvocationId());
+    assertEquals(submissionId, accepted.receipt().submissionId());
+    assertEquals("alice", accepted.receipt().actor());
+    assertEquals(T5, accepted.receipt().acceptedAt());
+    assertFalse(accepted.materialized());
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
     // 人工作答不是执行：attempt 保持 0，且绝不携带 approval。
-    assertEquals(0, accepted.attempt());
-    assertNull(accepted.approval());
-    assertNull(accepted.error());
-    assertFalse(accepted.result().error());
+    assertEquals(0, stored.attempt());
+    assertNull(stored.approval());
+    assertNull(stored.error());
+    assertFalse(stored.result().error());
     // 答案按冻结问卷规范化：多选按选项顺序、单选保持单一值。
-    assertEquals("{\"answers\":[[\"fast\"],[\"a\",\"c\"]]}", accepted.result().detailsJson());
-    assertEquals(submissionId, accepted.inputReceipt().submissionId());
-    assertEquals("alice", accepted.inputReceipt().actor());
-    assertEquals(T5, accepted.inputReceipt().acceptedAt());
-    assertEquals(T5, accepted.updatedAt());
-    assertEquals(
-        accepted, store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow()));
+    assertEquals("{\"answers\":[[\"fast\"],[\"a\",\"c\"]]}", stored.result().detailsJson());
+    assertEquals(submissionId, stored.inputReceipt().submissionId());
+    assertEquals("alice", stored.inputReceipt().actor());
+    assertEquals(T5, stored.inputReceipt().acceptedAt());
+    assertEquals(T5, stored.updatedAt());
     // baseline 推进一次 head（1），冻结等待再 +1（2），接受回答再 +1（3）。
     ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(3L, thread.version());
@@ -126,7 +132,7 @@ class HarnessRuntimeToolInputTest {
     ToolBaseline baseline = seedAskUserBaseline(store);
     parkForInput(store, baseline, T3);
     UUID submissionId = TestIds.id(12);
-    ToolInvocation accepted =
+    ToolInputAcceptance accepted =
         runtime.submitToolInput(
             command(
                 baseline.threadId(),
@@ -136,7 +142,7 @@ class HarnessRuntimeToolInputTest {
                 List.of(List.of("safe"), List.of("b"))));
     clock.advance(T2);
 
-    ToolInvocation replayed =
+    ToolInputAcceptance replayed =
         runtime.submitToolInput(
             command(
                 baseline.threadId(),
@@ -147,7 +153,8 @@ class HarnessRuntimeToolInputTest {
 
     assertEquals(accepted, replayed);
     // replay 不触碰 durable 事实：acceptedAt / updatedAt / Thread version / Work 全部保持。
-    assertEquals(T5, replayed.updatedAt());
+    assertEquals(T5, replayed.receipt().acceptedAt());
+    assertFalse(replayed.materialized());
     assertEquals(
         3L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version());
     assertEquals(
@@ -167,9 +174,8 @@ class HarnessRuntimeToolInputTest {
     parkForInput(store, baseline, T3);
     UUID submissionId = TestIds.id(13);
     List<List<String>> answers = List.of(List.of("fast"), List.of("a"));
-    ToolInvocation accepted =
-        runtime.submitToolInput(
-            command(baseline.threadId(), baseline.toolId(), submissionId, "alice", answers));
+    runtime.submitToolInput(
+        command(baseline.threadId(), baseline.toolId(), submissionId, "alice", answers));
 
     HarnessRuntimeConflictException anotherSubmission =
         assertThrows(
@@ -186,8 +192,10 @@ class HarnessRuntimeToolInputTest {
                 runtime.submitToolInput(
                     command(baseline.threadId(), baseline.toolId(), submissionId, "bob", answers)));
     assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherActor.reason());
-    assertEquals(
-        accepted, store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow()));
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    assertEquals(submissionId, stored.inputReceipt().submissionId());
+    assertEquals("{\"answers\":[[\"fast\"],[\"a\"]]}", stored.result().detailsJson());
   }
 
   /** 同一提交身份携带不同答案：mismatch（重试必须携带相同答案才会被接受为原回执）。 */
@@ -252,14 +260,17 @@ class HarnessRuntimeToolInputTest {
     ToolBaseline baseline = seedAskUserBaseline(store);
     parkForInput(store, baseline, T3);
 
-    ToolInvocation declined =
+    ToolInputAcceptance declined =
         runtime.submitToolInput(
             declined(baseline.threadId(), baseline.toolId(), TestIds.id(17), "alice"));
 
-    assertEquals(ToolInvocationStatus.SUCCEEDED, declined.status());
-    assertFalse(declined.result().error());
-    assertEquals("{\"declined\":true}", declined.result().detailsJson());
-    assertEquals(TestIds.id(17), declined.inputReceipt().submissionId());
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
+    assertFalse(stored.result().error());
+    assertEquals("{\"declined\":true}", stored.result().detailsJson());
+    assertEquals(TestIds.id(17), declined.receipt().submissionId());
+    assertEquals(TestIds.id(17), stored.inputReceipt().submissionId());
   }
 
   /** 非等待目标一律不适用：READY、审批中、Stop 后 CANCELLED、以及不属于该 Thread 的调用。 */
@@ -379,13 +390,13 @@ class HarnessRuntimeToolInputTest {
             List.of(List.of("fast"), List.of("a")));
     CountDownLatch start = new CountDownLatch(1);
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-      Future<ToolInvocation> first = executor.submit(() -> submitAfter(start, concurrent));
-      Future<ToolInvocation> second = executor.submit(() -> submitAfter(start, concurrent));
+      Future<ToolInputAcceptance> first = executor.submit(() -> submitAfter(start, concurrent));
+      Future<ToolInputAcceptance> second = executor.submit(() -> submitAfter(start, concurrent));
       start.countDown();
-      ToolInvocation firstResult = first.get(10, TimeUnit.SECONDS);
-      ToolInvocation secondResult = second.get(10, TimeUnit.SECONDS);
+      ToolInputAcceptance firstResult = first.get(10, TimeUnit.SECONDS);
+      ToolInputAcceptance secondResult = second.get(10, TimeUnit.SECONDS);
       assertEquals(firstResult, secondResult);
-      assertEquals(submissionId, firstResult.inputReceipt().submissionId());
+      assertEquals(submissionId, firstResult.receipt().submissionId());
     }
     // 恰好一次接受：Thread version 只 +1（冻结等待 2 -> 接受 3），答案只归一化一次。
     assertEquals(
@@ -435,7 +446,8 @@ class HarnessRuntimeToolInputTest {
     assertTrue(waiting.binding().contributor().contributorId().equals("builtin"));
   }
 
-  private ToolInvocation submitAfter(CountDownLatch start, ToolInputSubmissionCommand command) {
+  private ToolInputAcceptance submitAfter(
+      CountDownLatch start, ToolInputSubmissionCommand command) {
     try {
       if (!start.await(10, TimeUnit.SECONDS)) {
         throw new IllegalStateException("timed out waiting for concurrent start");

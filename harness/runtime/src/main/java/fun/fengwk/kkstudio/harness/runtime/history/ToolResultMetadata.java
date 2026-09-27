@@ -8,16 +8,20 @@ import java.util.UUID;
 /**
  * ToolResult MESSAGE 的稳定 metadata。
  *
+ * <p>{@code invocationId} 是产生本结果的 ToolInvocation ID：Runtime 物化任何真实结果（成功或失败/取消）时都从权威 invocation
+ * 事实写入，Terminal 调用行随后被物理删除，因此它是清理后按原调用 ID 反查历史、核验原 Thread/父链的唯一坐标。synthetic 结果（history
+ * normalization 补写）没有原调用，必须为 null。
+ *
  * <p>{@code assistantEntryId} 是产生 ToolCall 的 ASSISTANT Entry；{@code toolCallId} 与 Assistant
- * ToolCall 关联；{@code callIndex} 是该 Assistant response 内 ToolCall 的位置下标。synthetic 结果（history
- * normalization 补写）必须是 {@code status=UNKNOWN} + {@code reason=HISTORY_CUT}，且不关联任何 ToolInvocation； 非
- * synthetic 结果不允许携带 reason。
+ * ToolCall 关联； {@code callIndex} 是该 Assistant response 内 ToolCall 的位置下标。synthetic 结果必须是 {@code
+ * status=UNKNOWN} + {@code reason=HISTORY_CUT}；非 synthetic 结果不允许携带 reason。
  *
  * <p>{@code inputReceipt} 是内部人工输入工具（{@code ask_user}）回答的 durable 提交回执：Invocation 行在结果物化后被物理删除，
  * 因此已接受回答的 submissionId / actor / acceptedAt 随结果一起迁入 Entry 元数据，绝不写入业务 {@code detailsJson}。synthetic
  * 结果不携带回执。
  */
 public record ToolResultMetadata(
+    UUID invocationId,
     UUID assistantEntryId,
     String toolCallId,
     int callIndex,
@@ -26,21 +30,10 @@ public record ToolResultMetadata(
     ToolResultReason reason,
     ToolInputReceipt inputReceipt) {
 
-  /** 构造不携带人工输入回执的 metadata；普通结果与 synthetic 结果使用此便捷入口。 */
-  public ToolResultMetadata(
-      UUID assistantEntryId,
-      String toolCallId,
-      int callIndex,
-      ToolResultStatus status,
-      boolean synthetic,
-      ToolResultReason reason) {
-    this(assistantEntryId, toolCallId, callIndex, status, synthetic, reason, null);
-  }
-
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
   public ToolResultMetadata {
-    Objects.requireNonNull(assistantEntryId, "assistantEntryId");
+    assistantEntryId = Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     toolCallId = requireCanonicalName(toolCallId, "toolCallId");
     if (callIndex < 0) {
       throw new IllegalArgumentException("callIndex must not be negative");
@@ -51,11 +44,22 @@ public record ToolResultMetadata(
         throw new IllegalArgumentException(
             "synthetic tool results must be UNKNOWN with HISTORY_CUT reason");
       }
-    } else if (reason != null) {
-      throw new IllegalArgumentException("non-synthetic tool results must not carry a reason");
-    }
-    if (synthetic && inputReceipt != null) {
-      throw new IllegalArgumentException("synthetic tool results must not carry an input receipt");
+      if (invocationId != null) {
+        throw new IllegalArgumentException(
+            "synthetic tool results must not carry an invocation id");
+      }
+      if (inputReceipt != null) {
+        throw new IllegalArgumentException(
+            "synthetic tool results must not carry an input receipt");
+      }
+    } else {
+      if (invocationId == null) {
+        throw new IllegalArgumentException(
+            "real tool results must carry the originating invocation id");
+      }
+      if (reason != null) {
+        throw new IllegalArgumentException("non-synthetic tool results must not carry a reason");
+      }
     }
   }
 

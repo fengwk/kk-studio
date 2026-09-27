@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledUserMessageDTO;
@@ -174,6 +176,18 @@ public final class HarnessRuntimeResponseMapper {
         invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
     dto.setCreateTime(invocation.createdAt());
     dto.setUpdateTime(invocation.updatedAt());
+    return dto;
+  }
+
+  public static HarnessToolInputResultDTO toToolInputResultDto(ToolInputAcceptance acceptance) {
+    Objects.requireNonNull(acceptance, "acceptance");
+    HarnessToolInputResultDTO dto = new HarnessToolInputResultDTO();
+    dto.setThreadId(acceptance.threadId().toString());
+    dto.setInteractionId(acceptance.toolInvocationId().toString());
+    dto.setSubmissionId(acceptance.receipt().submissionId().toString());
+    dto.setActor(acceptance.receipt().actor());
+    dto.setAcceptedAt(acceptance.receipt().acceptedAt());
+    dto.setMaterialized(acceptance.materialized());
     return dto;
   }
 
