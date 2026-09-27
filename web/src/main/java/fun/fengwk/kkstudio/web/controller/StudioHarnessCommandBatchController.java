@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -33,16 +32,11 @@ public class StudioHarnessCommandBatchController {
 
   private final HarnessCommandAcceptanceOrchestrator acceptanceService;
   private final HarnessRuntime runtime;
-  private final SubagentTaskActivity subagentTaskActivity;
 
   public StudioHarnessCommandBatchController(
-      HarnessCommandAcceptanceOrchestrator acceptanceService,
-      HarnessRuntime runtime,
-      SubagentTaskActivity subagentTaskActivity) {
+      HarnessCommandAcceptanceOrchestrator acceptanceService, HarnessRuntime runtime) {
     this.acceptanceService = Objects.requireNonNull(acceptanceService, "acceptanceService");
     this.runtime = Objects.requireNonNull(runtime, "runtime");
-    this.subagentTaskActivity =
-        Objects.requireNonNull(subagentTaskActivity, "subagentTaskActivity");
   }
 
   /** 接受一个 owner-aware 用户命令批；202 仅表示 durable acceptance 已提交。 */
@@ -60,10 +54,7 @@ public class StudioHarnessCommandBatchController {
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               AcceptedCommands accepted = acceptanceService.accept(owner, command);
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
-              return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(
-                  accepted,
-                  currentSnapshot,
-                  subagentTaskActivity.hasPendingDelegatedWork(currentSnapshot.thread().id()));
+              return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
             }));
   }
 }

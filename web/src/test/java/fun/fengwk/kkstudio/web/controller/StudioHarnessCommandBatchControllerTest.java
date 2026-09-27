@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -51,16 +50,14 @@ class StudioHarnessCommandBatchControllerTest {
 
   private HarnessCommandAcceptanceOrchestrator acceptanceService;
   private HarnessRuntime runtime;
-  private SubagentTaskActivity subagentTaskActivity;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     acceptanceService = mock(HarnessCommandAcceptanceOrchestrator.class);
     runtime = mock(HarnessRuntime.class);
-    subagentTaskActivity = mock(SubagentTaskActivity.class);
     StudioHarnessCommandBatchController controller =
-        new StudioHarnessCommandBatchController(acceptanceService, runtime, subagentTaskActivity);
+        new StudioHarnessCommandBatchController(acceptanceService, runtime);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
