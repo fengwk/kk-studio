@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.Inspection;
@@ -673,10 +674,12 @@ class IssueReconcilerTest {
         new ThreadState(
             UUID.randomUUID(),
             UUID.randomUUID(),
+            null,
             UUID.randomUUID(),
             "0".repeat(64),
             "main",
             yoloEnabled,
+            ThreadLifecycleStatus.IDLE,
             1L,
             0L,
             NOW,
