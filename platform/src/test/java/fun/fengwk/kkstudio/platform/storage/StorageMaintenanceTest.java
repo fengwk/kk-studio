@@ -321,6 +321,11 @@ class StorageMaintenanceTest {
     public ReadyUpload lockReady(UUID uploadId) {
       throw new UnsupportedOperationException();
     }
+
+    @Override
+    public ReadyUpload peekReady(UUID uploadId) {
+      throw new UnsupportedOperationException();
+    }
   }
 
   private static final class BlockingUploadService extends CountingUploadService {

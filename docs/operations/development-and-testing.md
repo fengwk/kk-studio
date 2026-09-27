@@ -290,7 +290,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `canvas.storage_upload_contract` 需要 S3，`canvas.function_fake_runtime` 还需要
 `--with-canvas-function` 打开 fake adapter。
 
-Goal 工具目录与 Branch 设置命令也由 L1 覆盖。真实 Agent 的 Issue 接受、阶段交接与
+Goal 工具目录、Branch 设置命令以及草稿请求预览的拒绝与零写入边界也由 L1 覆盖；
+预览的 Provider wire body 与附件等价性由本地数据库/S3 集成测试覆盖。真实 Agent 的 Issue 接受、阶段交接与
 Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。

@@ -111,12 +111,12 @@ result status 对齐。
 | Plugin | `/api/plugins`、`/{pluginId}`、`/{pluginId}/auth/prepare|complete`、`DELETE /{pluginId}/auth` | 已安装 classpath Plugin、安全状态与固定 deep-link 认证动作；认证响应 `no-store` |
 | MCP Server | `/api/ai/mcp-servers`、`/{name}`、`/{name}/config`、`/{name}/discover` | name-keyed 显式 HTTP CRUD（name 不可变、无改名端点）；显式配置查询附带 `Cache-Control: no-store`；发现同步返回 200 |
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
-| Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
+| Harness command | `POST /api/harness/command-batches` | Chat 用户 command write path（202 accepted）；Issue 输入走工作流 |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批；Issue Agent Branch 的公开 YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
+| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/provider-request-preview`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、草稿协议请求预览、命名、运行控制与人工审批；Issue Agent Branch 的公开预览、YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
 | Interaction | `GET /api/interactions`、`POST /api/interactions/{interactionId}/input` | 问卷等待与审批等待合并的待处理列表（`(createTime, interactionId)` 稳定升序）与唯一人工提交入口；`interactionId` 就是待处理列表给出的 Tool invocation ID，actor 只来自服务端认证上下文 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
-| Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
+| Canvas document | `/api/canvases`、`/{canvasId}`、`POST /{canvasId}/commands` | document snapshot/list/create/delete 与 typed command batch；Canvas 不持有 Session |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
 | Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/outputs/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
@@ -128,8 +128,13 @@ result status 对齐。
 [StudioHarnessCommandBatchController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchController.java)
 返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
 progression 由 Work dispatcher 异步完成。Canvas
-command 返回带 `baseVersion/version` 的 Patch，实时收敛另走 `/api/events/v1`。
-公开 `command-batches` 仅接纳 Chat/Canvas owner；Issue Agent 的用户输入、分叉和停止不能绕过 Issue Activity、Run 权限与交互提交入口。
+command 返回带 `baseRevision/revision` 的 Patch，实时收敛另走 `/api/events/v1`。
+公开 `command-batches` 仅接纳 Chat owner；Issue Agent 的用户输入、分叉和停止不能绕过 Issue Activity、Run 权限与交互提交入口。
+`POST /api/harness/threads/{threadId}/provider-request-preview` 接收与发送相同的 command batch，
+仅支持 Chat 的已有空闲 Thread，以及「设置命令前缀 + 末尾 USER_MESSAGE」。
+返回当前快照的 Provider 协议请求体 JSON、字节数与模型标识，不包含认证 Header；
+草稿、历史和已 READY 的附件参与规划与内联编码，但不提交命令、不消费上传、不调用模型。
+游标漂移、队列未清空、下一步需压缩或附件尚未就绪时返回 409；预览与随后发送不具备原子性。
 `POST /api/issues/{issueId}/evidence` 只接收已 READY 的 `uploadId`（浏览器先经 `/api/storage/uploads`
 reserve/PUT/complete），服务端在单个事务内转移引用并返回规范 `kkstudio:/resources/<blobId>`；请求与响应
 都不接受/不暴露客户端声明的文件名、bucket 或对象 key；Issue 证据与其它受管资源一样只以规范
@@ -141,7 +146,7 @@ no-op），不产生 Command、Entry 或 Work。
 
 - [HarnessRuntimeRequestMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java)
   要求 UUID 经 `UUID.fromString` 往返 canonical，version/cursor/sequence 使用 canonical
-  decimal（拒绝符号、前导零和超出 long）；owner discriminator 只允许 `CHAT`/`CANVAS`；
+  decimal（拒绝符号、前导零和超出 long）；owner discriminator 只允许 `CHAT`/`ISSUE_AGENT`，公开命令与预览入口拒绝 `ISSUE_AGENT`；
   target 只允许 `NEW_SESSION`、`NEW_THREAD`、`THREAD` 且每种 target 的字段集严格互斥
   （`NEW_SESSION` 携带 `{sessionId, threadId, rootSettings, yoloEnabled}`，`NEW_THREAD`
   携带 `{sessionId, startEntryId, threadId, yoloEnabled}`，二者都不接 name 输入；

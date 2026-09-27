@@ -238,3 +238,15 @@ export interface ThreadModelRequestDebugFrozenInvocation {
   kind: 'FROZEN_INVOCATION'
   requestJson: string
 }
+
+/** Portable Thread Panel 消费的草稿请求预览投影；不依赖 API DTO。 */
+export interface ThreadProviderRequestPreviewData {
+  kind: 'DRAFT_REQUEST_PREVIEW'
+  providerType: string
+  modelName: string
+  bodyByteSize: number
+  bodyJson: string
+  sourceHeadEntryId: string | null
+  generatedAt: string
+  snapshotNotice?: string | null
+}

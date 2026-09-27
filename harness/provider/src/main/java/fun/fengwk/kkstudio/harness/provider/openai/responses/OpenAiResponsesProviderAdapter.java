@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
@@ -30,6 +31,9 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
   private final JdkHttpSseTransport transport;
   private final String apiKey;
   private final OpenAiResponsesConfig config;
+
+  /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 encoder 的请求编码器，供无网络预览复用。 */
+  private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
   public OpenAiResponsesProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
     this(transport, apiKey, OpenAiResponsesConfig.defaultConfig());
@@ -66,6 +70,11 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
     }
     URI responsesUri = OpenAiResponsesEndpoints.resolveResponsesUri(descriptor.endpoint());
     return new OpenAiResponsesModelProvider(transport, descriptor, apiKey, responsesUri, config);
+  }
+
+  @Override
+  public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
+    return encoder.encode(request, descriptor, config).bodyUtf8Bytes();
   }
 
   /**
