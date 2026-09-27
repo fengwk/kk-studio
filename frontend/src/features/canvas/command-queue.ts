@@ -1,6 +1,7 @@
 import { ApiError } from '@/shared/api/client'
 import type {
   ApplyCanvasCommandsRequestDTO,
+  CanvasCommandDTO,
   CanvasConflictDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
@@ -11,6 +12,15 @@ import {
   postCanvasCommands,
 } from '@/shared/api/studio-service'
 import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
+import { getCurrentUserId } from '@/features/canvas/canvas-local-store'
+import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
+import {
+  buildPendingOperation,
+  createCanvasOperationStore,
+  type CanvasDraftAck,
+  type CanvasPendingOperation,
+  type CanvasPendingOperationStore,
+} from '@/features/canvas/canvas-operation-storage'
 import { applyEntityPatch } from '@/features/canvas/entity-patch'
 
 export class CanvasCommandConflictError extends Error {
@@ -35,21 +45,45 @@ export interface CanvasCommandQueueOptions {
   refetch?: typeof getCanvas
   createCommandId?: () => UUIDString
   onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
+  /** 冻结操作的持久化存储；未提供时按 canvasId + 编辑会话使用 IndexedDB operation store。 */
+  operationStore?: CanvasPendingOperationStore
+  userId?: string
+  editingSessionId?: string
+}
+
+/** 重载后按冻结顺序重放待确认操作的结果统计。 */
+export interface CanvasCommandRecoveryResult {
+  replayed: number
+  conflicted: number
+  failed: number
+  /** 重放成功且需要按 generation 精准清除的草稿范围 */
+  ackedDrafts: CanvasDraftAck[]
 }
 
 /**
- * Canvas graph 变更按浏览器顺序串行化。每个批次提交带有客户端生成的 idempotencyKey；
- * 每条命令显式携带编辑起点的语义前置条件（expected*）；
- * 命令响应是 graph patch，直接通过本地 reducer 应用。
- * 已知 409 会刷新快照但绝不自动重放语义命令。
+ * Canvas graph 变更按浏览器顺序串行化。
+ *
+ * durability 契约（docs/canvas-project.md §2.4）：
+ * - 入队瞬间即深拷贝并冻结命令体、idempotencyKey 与编辑基线 revision；
+ * - 发送前先把冻结操作写入独立 operation store，且等待事务 complete；
+ * - 网络 / 瞬时失败保留冻结操作，重载后按原顺序、原 key、原 body 精确重放（服务端按 key 去重）；
+ * - 语义 409 是确定终态：绝不盲重放，保留草稿交由 UI 明确解决后生成新 key；
+ * - ACK 只清除与本次 operation 完全匹配的持久记录，旧响应不会清掉后来的输入；
+ * - 响应 revision 与本地快照存在缺口时，绝不假装增量 patch 完整，必须重取权威快照。
  */
 export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
+  private sequence = 0
+  private recovery: Promise<CanvasCommandRecoveryResult> | null = null
+  private readonly operations = new Map<string, CanvasPendingOperation>()
   private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
   private readonly createCommandId: () => UUIDString
   private readonly onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
+  private readonly store: CanvasPendingOperationStore
+  private readonly userId: string
+  private readonly editingSessionId: string
 
   constructor(
     private readonly canvasId: UUIDString,
@@ -60,6 +94,12 @@ export class CanvasCommandQueue {
     this.refetch = options.refetch ?? getCanvas
     this.createCommandId = options.createCommandId ?? (() => crypto.randomUUID())
     this.onSnapshot = options.onSnapshot
+    this.userId = options.userId ?? getCurrentUserId()
+    this.editingSessionId = options.editingSessionId ?? getEditingSessionId()
+    this.store = options.operationStore ?? createCanvasOperationStore(canvasId, {
+      userId: this.userId,
+      editingSessionId: this.editingSessionId,
+    })
   }
 
   currentSnapshot(): CanvasSnapshotDTO {
@@ -77,42 +117,136 @@ export class CanvasCommandQueue {
     return snapshot
   }
 
+  /**
+   * 入队一个命令批：立即冻结 id / body / 基线，发送前先落盘，再按序提交。
+   * `ack` 描述本操作成功后需要按 generation 精准清除的草稿范围。
+   */
   enqueue(
     commands: ApplyCanvasCommandsRequestDTO['commands'],
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; ack?: CanvasDraftAck[] },
   ): Promise<CanvasSnapshotDTO> {
     if (commands.length === 0) {
       return Promise.resolve(this.snapshot)
     }
-    const operation = this.tail.then(() => this.execute(commands, options?.signal))
-    this.tail = operation.then(
+    const operation = this.freeze(commands, options?.ack ?? [])
+    this.operations.set(operation.id, operation)
+    const result = this.tail.then(() => this.persistAndSend(operation, options?.signal))
+    this.tail = result.then(
       () => undefined,
       () => undefined,
     )
-    return operation
+    return result
   }
 
-  private async execute(
-    commands: ApplyCanvasCommandsRequestDTO['commands'],
+  /**
+   * 重载 / 重连后按冻结顺序重放本会话残留的待确认操作。
+   * 同一实例只执行一次；重放失败（网络）不丢弃记录，冲突（409）作为终态移除。
+   */
+  recover(): Promise<CanvasCommandRecoveryResult> {
+    if (!this.recovery) {
+      const run = this.tail.then(() => this.runRecovery())
+      this.tail = run.then(
+        () => undefined,
+        () => undefined,
+      )
+      this.recovery = run
+    }
+    return this.recovery
+  }
+
+  private freeze(commands: CanvasCommandDTO[], ack: CanvasDraftAck[]): CanvasPendingOperation {
+    return buildPendingOperation({
+      canvasId: this.canvasId,
+      userId: this.userId,
+      editingSessionId: this.editingSessionId,
+      idempotencyKey: this.createCommandId(),
+      commands: freezeCommands(commands),
+      baselineRevision: this.snapshot.document.revision,
+      ack,
+      sequence: this.sequence++,
+      createdAt: Date.now(),
+    })
+  }
+
+  private async persistAndSend(
+    operation: CanvasPendingOperation,
+    signal?: AbortSignal,
+  ): Promise<CanvasSnapshotDTO> {
+    try {
+      // 发送前必须完成落盘：无法完成事务时绝不发送，避免产生无法恢复的在途请求。
+      await this.store.save(operation)
+    } catch (error) {
+      this.operations.delete(operation.id)
+      throw error
+    }
+    return this.send(operation, signal)
+  }
+
+  private async send(
+    operation: CanvasPendingOperation,
     signal?: AbortSignal,
   ): Promise<CanvasSnapshotDTO> {
     try {
       const patch = await this.apply(
         this.canvasId,
         {
-          idempotencyKey: this.createCommandId(),
-          commands,
+          idempotencyKey: operation.idempotencyKey,
+          commands: operation.commands,
         },
         { signal },
       )
-      return await this.ingestPatch(patch, signal)
+      const snapshot = await this.ingestPatch(patch, signal)
+      await this.settle(operation)
+      return snapshot
     } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 409) {
+      if (isCanvasConflict(error)) {
+        // 语义冲突是终态：清除该操作，绝不盲重放；草稿与远端内容都保留，交由 UI 明确解决。
+        await this.settle(operation)
+        const latest = await this.refetch(this.canvasId, { signal })
+        const authoritative = this.replaceSnapshot(latest)
+        throw new CanvasCommandConflictError(authoritative, error)
+      }
+      if (isTerminalClientError(error)) {
+        await this.settle(operation)
         throw error
       }
-      const latest = await this.refetch(this.canvasId, { signal })
-      const authoritative = this.replaceSnapshot(latest)
-      throw new CanvasCommandConflictError(authoritative, error)
+      // 网络 / 服务端瞬时失败：保留冻结操作，重载后按原 key/body 幂等重放。
+      throw error
+    }
+  }
+
+  private async runRecovery(): Promise<CanvasCommandRecoveryResult> {
+    const result: CanvasCommandRecoveryResult = { replayed: 0, conflicted: 0, failed: 0, ackedDrafts: [] }
+    let pending: CanvasPendingOperation[]
+    try {
+      pending = await this.store.list()
+    } catch {
+      return result
+    }
+    for (const operation of pending) {
+      this.sequence = Math.max(this.sequence, operation.sequence + 1)
+      this.operations.set(operation.id, operation)
+      try {
+        await this.send(operation)
+        result.replayed += 1
+        result.ackedDrafts.push(...operation.ack)
+      } catch (error) {
+        if (error instanceof CanvasCommandConflictError) {
+          result.conflicted += 1
+        } else {
+          result.failed += 1
+        }
+      }
+    }
+    return result
+  }
+
+  private async settle(operation: CanvasPendingOperation): Promise<void> {
+    this.operations.delete(operation.id)
+    try {
+      await this.store.remove(operation.id)
+    } catch {
+      // operation store 已通过 onCanvasStorageError 告警；ACK 不因清理失败而回滚内存状态。
     }
   }
 
@@ -127,15 +261,27 @@ export class CanvasCommandQueue {
       return this.replaceSnapshot(latest)
     }
 
+    const relation = compareCanvasRevisions(patch.revision, this.snapshot.document.revision)
+    if (relation <= 0) {
+      // 重复 / 过期 patch（revision 未前进）直接忽略。
+      return this.snapshot
+    }
+    const contiguous = compareCanvasRevisions(
+      this.snapshot.document.revision,
+      decrementRevision(patch.revision),
+    ) >= 0
+    if (!contiguous) {
+      // revision 缺口：本地快照落后于 patch 前驱，绝不用增量 patch 假装完整。
+      const latest = await this.refetch(this.canvasId, { signal })
+      return this.replaceSnapshot(latest)
+    }
+
     const next = applyEntityPatch(this.snapshot, patch)
     if (next) {
       this.adopt(next)
       return next
     }
-    // 重复/过期 patch（revision 未前进）直接忽略；其余情况视为 gap。
-    if (compareCanvasRevisions(patch.revision, this.snapshot.document.revision) <= 0) {
-      return this.snapshot
-    }
+    // 理论不可达的兜底：无法应用则重取权威快照。
     const latest = await this.refetch(this.canvasId, { signal })
     return this.replaceSnapshot(latest)
   }
@@ -143,5 +289,45 @@ export class CanvasCommandQueue {
   private adopt(snapshot: CanvasSnapshotDTO): void {
     this.snapshot = snapshot
     this.onSnapshot?.(snapshot)
+  }
+}
+
+function isCanvasConflict(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 409
+}
+
+function isTerminalClientError(error: unknown): boolean {
+  return error instanceof ApiError
+    && typeof error.status === 'number'
+    && error.status >= 400
+    && error.status < 500
+}
+
+/** bigint-safe 的“前驱 revision”，仅用于判断 patch 是否与本地快照连续。 */
+function decrementRevision(revision: string): string {
+  try {
+    const value = BigInt(revision)
+    return value > 0n ? (value - 1n).toString() : '0'
+  } catch {
+    return '0'
+  }
+}
+
+/** 深拷贝并递归冻结命令体：入队后外部再修改入参也不会影响已冻结 / 已落盘的请求。 */
+function freezeCommands(commands: CanvasCommandDTO[]): CanvasCommandDTO[] {
+  const clone = typeof structuredClone === 'function'
+    ? structuredClone(commands)
+    : (JSON.parse(JSON.stringify(commands)) as CanvasCommandDTO[])
+  deepFreeze(clone)
+  return clone
+}
+
+function deepFreeze(value: unknown): void {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) {
+    return
+  }
+  Object.freeze(value)
+  for (const nested of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(nested)
   }
 }
