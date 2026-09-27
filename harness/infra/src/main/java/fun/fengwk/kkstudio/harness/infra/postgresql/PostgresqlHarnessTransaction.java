@@ -383,7 +383,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public Optional<Session> lockSessionForKeyShare(UUID id) {
     checkOpen();
-    requireCanLockRank(LockRank.SESSION);
+    // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
+    if (!locked.contains(LockKey.session(id))) {
+      requireCanLockRank(LockRank.SESSION);
+    }
     Optional<Session> session =
         queryOne(
             "select * from harness_session where id = ? for key share",
@@ -396,7 +399,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public Optional<Session> lockSessionForUpdate(UUID id) {
     checkOpen();
-    requireCanLockRank(LockRank.SESSION);
+    if (!locked.contains(LockKey.session(id))) {
+      requireCanLockRank(LockRank.SESSION);
+    }
     Optional<Session> session =
         queryOne(
             "select * from harness_session where id = ? for update",
@@ -1039,6 +1044,45 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public int deleteJoinsForThreads(List<UUID> threadIds) {
+    checkOpen();
+    Objects.requireNonNull(threadIds, "threadIds");
+    List<UUID> copied = List.copyOf(threadIds);
+    Set<UUID> deleting = Set.copyOf(copied);
+    for (UUID threadId : copied) {
+      requireLocked(LockKey.thread(threadId));
+      if (!isInLockedTree(threadId)) {
+        throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+      }
+    }
+    List<ThreadJoin> joins =
+        queryList(
+            "select * from harness_thread_join where child_thread_id in ("
+                + placeholders(copied.size())
+                + ")",
+            PostgresqlHarnessRows.JOIN,
+            copied.toArray());
+    List<UUID> pendingDelete = new ArrayList<>();
+    for (ThreadJoin join : joins) {
+      boolean parentAlsoDeleted =
+          join.parentThreadId() == null || deleting.contains(join.parentThreadId());
+      if (!parentAlsoDeleted && (!join.matched() || join.deliveryCommandSequence() == null)) {
+        throw new IllegalArgumentException(
+            "cannot delete join pending delivery " + join.invocationId());
+      }
+      pendingDelete.add(join.invocationId());
+    }
+    if (pendingDelete.isEmpty()) {
+      return 0;
+    }
+    return update(
+        "delete from harness_thread_join where invocation_id in ("
+            + placeholders(pendingDelete.size())
+            + ")",
+        pendingDelete.toArray());
+  }
+
+  @Override
   public Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
     checkOpen();
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
@@ -1653,13 +1697,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       return 0;
     }
 
-    Map<UUID, UUID> threadParentMap = new HashMap<>();
     for (UUID threadId : copied) {
-      ThreadState thread =
-          findThread(threadId)
-              .orElseThrow(
-                  () -> new IllegalArgumentException("thread " + threadId + " does not exist"));
-      threadParentMap.put(threadId, thread.parentThreadId());
+      findThread(threadId)
+          .orElseThrow(
+              () -> new IllegalArgumentException("thread " + threadId + " does not exist"));
     }
 
     for (UUID threadId : copied) {
@@ -1781,32 +1822,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (ModelInvocation model : lockedModels) {
       deleteModelInvocation(model.id());
     }
-    List<UUID> deletionOrder = new ArrayList<>(copied.size());
-    Set<UUID> remaining = new HashSet<>(copied);
-    while (!remaining.isEmpty()) {
-      UUID leaf = null;
-      for (UUID id : remaining) {
-        boolean isParentOfRemaining = false;
-        for (UUID other : remaining) {
-          if (id.equals(threadParentMap.get(other))) {
-            isParentOfRemaining = true;
-            break;
-          }
-        }
-        if (!isParentOfRemaining) {
-          leaf = id;
-          break;
-        }
-      }
-      if (leaf == null) {
-        throw new IllegalStateException("cycle detected among threads to delete");
-      }
-      deletionOrder.add(leaf);
-      remaining.remove(leaf);
-    }
-    for (UUID threadId : deletionOrder) {
-      int deleted = update("delete from harness_thread where id = ?", threadId);
-      requireSingleUpdate(deleted, "thread", threadId);
+    // 自引用 parent FK 为 NO ACTION（语句级校验）：同一 DELETE 语句删除整批 parent/child 时约束天然满足，
+    // 无需在应用层做 O(n^2) 拓扑排序。批外存活子线程已在上面显式拒绝。
+    int deletedThreads =
+        update(
+            "delete from harness_thread where id in (" + placeholders(copied.size()) + ")",
+            copied.toArray());
+    if (deletedThreads != copied.size()) {
+      throw new IllegalStateException(
+          "expected to delete " + copied.size() + " threads but deleted " + deletedThreads);
     }
     return copied.size();
   }
@@ -2060,7 +2084,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     notifyWorkAvailable();
   }
 
-  private Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
+  @Override
+  public Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
     return queryOne(
         "select * from harness_thread_command where thread_id = ? and sequence = ?",
         PostgresqlHarnessRows.COMMAND,
@@ -2558,6 +2585,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
+  /** 构造由 count 个 {@code ?} 组成的 JDBC 参数占位符列表，供可变长 IN 子句使用。 */
+  private static String placeholders(int count) {
+    StringBuilder sql = new StringBuilder(count * 3);
+    for (int i = 0; i < count; i++) {
+      if (i > 0) {
+        sql.append(", ");
+      }
+      sql.append('?');
+    }
+    return sql.toString();
+  }
+
   private <T> Optional<T> writeOne(String sql, RowMapper<T> mapper, Object... arguments) {
     return queryOne(sql, mapper, arguments);
   }
@@ -2585,19 +2624,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  /** 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。 */
+  /**
+   * 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。
+   *
+   * <p>唯一例外是同一执行树内、已持有该树事务级锁的前提下回写 COMMAND（父 Thread 结果交付）：交付命令可能在 Model/Tool 收敛过程中（Work 之前）或 Work
+   * fencing 之后（Stop 收尾）写入。缺少树锁的例外会让普通调用方绕过树锁协议， 因此这里与 {@code insertCommands} 一样要求 {@code
+   * lockedTrees} 非空。
+   */
   private void requireCanLockRank(LockRank rank) {
     if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
-      if (rank == LockRank.COMMAND) {
-        if (highestLockRank.ordinal() < LockRank.WORK.ordinal()) {
-          // Parent delivery commands can be enqueued during Model/Tool turn closure before WORK
-          return;
-        }
-        if (highestLockRank == LockRank.WORK && !lockedTrees.isEmpty()) {
-          // Parent delivery commands can be enqueued during Stop post-processing when active parent
-          // delivery occurs after Work fencing, provided the tree lock is held.
-          return;
-        }
+      if (rank == LockRank.COMMAND && !lockedTrees.isEmpty()) {
+        return;
       }
       throw new IllegalStateException(
           "lock order violation: cannot acquire " + rank + " after " + highestLockRank);

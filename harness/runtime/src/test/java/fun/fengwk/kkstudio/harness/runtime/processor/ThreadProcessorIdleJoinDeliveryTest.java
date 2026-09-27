@@ -21,6 +21,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -965,18 +966,33 @@ class ThreadProcessorIdleJoinDeliveryTest extends ThreadProcessorTestBase {
     UUID threadId =
         createThread(fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.IDLE);
 
-    UUID missingTurnStartId = UUID.randomUUID();
-    ThreadCommand cmdWithMissingStart =
-        new ThreadCommand(
-            threadId,
-            1L,
-            new UserMessageCommandPayload(userMessage("task")),
-            UUID.randomUUID(),
-            CREATION_REQUEST_HASH,
-            missingTurnStartId,
-            null,
-            null,
-            NOW);
+    UUID turnStartId = UUID.randomUUID();
+    fixture.store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), threadId),
+                  NOW));
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadCommand cmd =
+              new ThreadCommand(
+                  threadId,
+                  1L,
+                  new UserMessageCommandPayload(userMessage("task")),
+                  UUID.randomUUID(),
+                  CREATION_REQUEST_HASH,
+                  null,
+                  null,
+                  null,
+                  NOW);
+          tx.insertCommands(List.of(cmd));
+          tx.updateCommands(List.of(cmd.markApplied(turnStartId)));
+          tx.updateThread(thread.reserveCommandSequences(1, NOW));
+          return null;
+        });
 
     ThreadJoin join =
         new ThreadJoin(
@@ -996,10 +1012,11 @@ class ThreadProcessorIdleJoinDeliveryTest extends ThreadProcessorTestBase {
             NOW);
 
     EntryPath rootOnlyPath = fixture.store.transaction(tx -> tx.loadEntryPath(rootEntryId));
-    assertEquals(
-        0,
-        ThreadLifecycleCoordinator.countActualTurns(
-            List.of(cmdWithMissingStart), rootOnlyPath, join));
+    fixture.store.transaction(
+        tx -> {
+          assertEquals(0, ThreadLifecycleCoordinator.countActualTurns(tx, rootOnlyPath, join));
+          return null;
+        });
 
     // 测试 remindSoftBudgetIfDue 当 join.maxTurns 为空时跳过
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("task")));

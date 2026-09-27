@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelAttemptFailureAppender;
-import fun.fengwk.kkstudio.harness.runtime.processor.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -54,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -155,9 +155,19 @@ final class StopControl {
       }
     }
 
-    ThreadState outsideParent = null;
-    if (targetThread.parentThreadId() != null) {
-      outsideParent = tx.findThread(targetThread.parentThreadId()).orElse(null);
+    // 停止子树之外的祖先全部纳入锁序：settle 阶段可能需要向上收敛其递归状态（WAITING_CHILDREN -> IDLE），
+    // 因此必须与停止集合一起按规范锁序提前加锁，不能在已锁 Work 之后再偷锁父级。
+    List<UUID> ancestorIds = new ArrayList<>();
+    List<UUID> ancestorSessionIds = new ArrayList<>();
+    for (UUID ancestorId : tx.findAncestorChain(targetThread.id())) {
+      if (visited.contains(ancestorId)) {
+        continue;
+      }
+      ThreadState ancestor = tx.findThread(ancestorId).orElse(null);
+      if (ancestor != null) {
+        ancestorIds.add(ancestor.id());
+        ancestorSessionIds.add(ancestor.sessionId());
+      }
     }
 
     // 规范锁序：Sessions (KEY SHARE) -> Threads (FOR UPDATE, UuidOrder) -> Commands -> Models -> Tools
@@ -166,9 +176,7 @@ final class StopControl {
     for (ThreadStopCandidate c : candidates) {
       sessionIdsList.add(c.thread().sessionId());
     }
-    if (outsideParent != null) {
-      sessionIdsList.add(outsideParent.sessionId());
-    }
+    sessionIdsList.addAll(ancestorSessionIds);
     List<UUID> sessionIds =
         sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sessionIds) {
@@ -183,9 +191,7 @@ final class StopControl {
     for (ThreadStopCandidate c : candidates) {
       threadIdsToLock.add(c.thread().id());
     }
-    if (outsideParent != null) {
-      threadIdsToLock.add(outsideParent.id());
-    }
+    threadIdsToLock.addAll(ancestorIds);
     List<UUID> sortedThreadIds =
         threadIdsToLock.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
@@ -208,7 +214,7 @@ final class StopControl {
     StopResult targetReplay =
         findReplay(tx, lockedTarget.sessionId(), command.stopRequestId(), lockedTarget);
     if (targetReplay != null) {
-      return new Commit(targetReplay, null, List.of());
+      return new Commit(targetReplay, List.of(), List.of());
     }
 
     if (lockedTarget.version() != command.expectedVersion()) {
@@ -320,8 +326,8 @@ final class StopControl {
 
     // 收敛阶段：取消 Commands，写 Entry 屏障，推进 Thread head，删除 Model/Tool 行
     StopResult targetResult = null;
-    UUID modelExecutionId = null;
-    List<UUID> toolExecutionIds = new ArrayList<>();
+    Set<UUID> modelExecutionIds = new LinkedHashSet<>();
+    Set<UUID> toolExecutionIds = new LinkedHashSet<>();
     List<ThreadState> stoppedThreads = new ArrayList<>();
     Instant lastNow = null;
 
@@ -341,16 +347,13 @@ final class StopControl {
       int cancelledCommandCount = cancelledCommands.size();
 
       if (ctx.context() instanceof ThreadContext.ModelActive active) {
-        if (modelExecutionId == null || ctx.isTarget()) {
-          modelExecutionId = active.model().id();
-        }
+        modelExecutionIds.add(active.model().id());
       } else if (ctx.context() instanceof ThreadContext.ToolActive active) {
-        List<UUID> activeToolIds =
-            active.siblings().stream()
-                .filter(sibling -> !sibling.status().isTerminal())
-                .map(ToolInvocation::id)
-                .toList();
-        toolExecutionIds.addAll(activeToolIds);
+        for (ToolInvocation sibling : active.siblings()) {
+          if (!sibling.status().isTerminal()) {
+            toolExecutionIds.add(sibling.id());
+          }
+        }
       }
 
       int activeChildren = tx.countActiveChildren(ctx.thread().id());
@@ -429,18 +432,7 @@ final class StopControl {
       }
     }
 
-    if (modelExecutionId != null && !toolExecutionIds.isEmpty()) {
-      // Commit 仅支持单一类型本地取消，优先保留 target 线程的执行，否则保留 Model
-      if (targetResult.thread() != null
-          && contexts.stream()
-              .anyMatch(c -> c.isTarget() && c.context() instanceof ThreadContext.ToolActive)) {
-        modelExecutionId = null;
-      } else {
-        toolExecutionIds.clear();
-      }
-    }
-
-    return new Commit(targetResult, modelExecutionId, toolExecutionIds);
+    return new Commit(targetResult, List.copyOf(modelExecutionIds), List.copyOf(toolExecutionIds));
   }
 
   /**
@@ -999,15 +991,14 @@ final class StopControl {
     return new HarnessRuntimeConflictException(reason, message);
   }
 
-  /** Durable Stop 结果，加上 transaction 提交后需取消的 process-local execution。 */
-  record Commit(StopResult result, UUID modelExecutionId, List<UUID> toolExecutionIds) {
+  /** Durable Stop 结果，加上 transaction 提交后需取消的全部 process-local execution。 */
+  record Commit(StopResult result, List<UUID> modelExecutionIds, List<UUID> toolExecutionIds) {
 
     Commit {
       result = Objects.requireNonNull(result, "result");
+      modelExecutionIds =
+          List.copyOf(Objects.requireNonNull(modelExecutionIds, "modelExecutionIds"));
       toolExecutionIds = List.copyOf(Objects.requireNonNull(toolExecutionIds, "toolExecutionIds"));
-      if (modelExecutionId != null && !toolExecutionIds.isEmpty()) {
-        throw new IllegalArgumentException("a Stop commit cannot cancel Model and Tool executions");
-      }
     }
   }
 }

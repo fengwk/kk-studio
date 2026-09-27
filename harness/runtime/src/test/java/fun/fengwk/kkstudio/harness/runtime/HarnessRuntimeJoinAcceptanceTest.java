@@ -140,9 +140,20 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(39)).isEmpty()));
   }
 
+  /**
+   * 复刻真实 Stop 的 durable 结果：取消该 Thread 全部排队命令（真实 Stop 会取消它们），再写 STOP 屏障并推进 head。 只有“STOPPED head
+   * 且没有排队真实用户输入”的父 Thread 才算暂停交付。
+   */
   private UUID seedClosedStopTurn(UUID sessionId, UUID rootEntryId, UUID threadId) {
     return store.transaction(
         tx -> {
+          tx.lockTree(threadId);
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          List<ThreadCommand> queued = tx.loadQueuedCommands(threadId);
+          if (!queued.isEmpty()) {
+            tx.updateCommands(
+                queued.stream().map(command -> command.cancel(TestIds.id(9), T0)).toList());
+          }
           UUID turnStartId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -173,7 +184,6 @@ class HarnessRuntimeJoinAcceptanceTest {
                       TurnEndReason.USER_STOP,
                       TestIds.id(9)),
                   T0));
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
           tx.updateThread(thread.advanceHead(turnEndId, T0));
           return turnEndId;
         });

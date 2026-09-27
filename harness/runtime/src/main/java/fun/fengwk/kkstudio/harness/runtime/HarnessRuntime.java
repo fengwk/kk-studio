@@ -323,12 +323,8 @@ public final class HarnessRuntime {
    */
   public StopResult stop(StopCommand command) {
     StopControl.Commit commit = stopControl.stop(command);
-    if (commit.modelExecutionId() != null) {
-      cancelLocalExecution(modelExecutionCanceller, "Model", commit.modelExecutionId());
-    }
-    for (UUID toolExecutionId : commit.toolExecutionIds()) {
-      cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
-    }
+    cancelLocalExecutions(modelExecutionCanceller, "Model", commit.modelExecutionIds());
+    cancelLocalExecutions(toolExecutionCanceller, "Tool", commit.toolExecutionIds());
     return commit.result();
   }
 
@@ -596,6 +592,14 @@ public final class HarnessRuntime {
   private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
     Objects.requireNonNull(processor, "toolProcessor");
     return processor::cancel;
+  }
+
+  /** 逐个 best-effort 取消本地执行；单个取消失败只记录日志，绝不中断其余取消，也不改变已 commit 的 Stop 结果。 */
+  private static void cancelLocalExecutions(
+      Consumer<UUID> canceller, String executionType, List<UUID> invocationIds) {
+    for (UUID invocationId : invocationIds) {
+      cancelLocalExecution(canceller, executionType, invocationId);
+    }
   }
 
   private static void cancelLocalExecution(
