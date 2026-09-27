@@ -508,6 +508,27 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.name").value("upload.png"));
   }
 
+  /** 刷新详情后仍能读取持久证据，而不是只显示本页刚上传的内容。 */
+  @Test
+  void listsPersistedEvidenceForIssue() throws Exception {
+    UUID blobId = UUID.randomUUID();
+    when(issueEvidenceService.listEvidence(issueId))
+        .thenReturn(
+            List.of(
+                IssueEvidence.builder()
+                    .issueId(issueId)
+                    .blobId(blobId)
+                    .name("deliverable.txt")
+                    .createdAt(now)
+                    .build()));
+    mockMvc
+        .perform(get("/api/issues/" + issueId + "/evidence"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].blobId").value(blobId.toString()))
+        .andExpect(jsonPath("$.data[0].name").value("deliverable.txt"));
+    verify(issueService).getIssue(issueId);
+  }
+
   @Test
   void testStopIssue() throws Exception {
     StopIssueRequestDTO req =
