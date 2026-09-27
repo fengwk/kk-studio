@@ -109,6 +109,11 @@ public final class HarnessRuntimeTestFixtures {
     return thread(id, null, ThreadLifecycleStatus.IDLE, headEntryId);
   }
 
+  /** ACTIVE 生命周期的 Thread：本地仍有执行，只有这种 Thread 才会投影出模型/工具/排队等非 IDLE 状态。 */
+  public static ThreadState activeThread(UUID id, UUID headEntryId) {
+    return thread(id, null, ThreadLifecycleStatus.ACTIVE, headEntryId);
+  }
+
   /** 显式指定不可变执行父关系与递归生命周期状态的 Thread（根 Thread 传 null 父）。 */
   public static ThreadState thread(
       UUID id, UUID parentThreadId, ThreadLifecycleStatus status, UUID headEntryId) {
@@ -193,13 +198,14 @@ public final class HarnessRuntimeTestFixtures {
         List.of());
   }
 
-  /** CONTINUATION_DUE 快照：ROOT -> TURN_START -> USER -> ASSISTANT -> continueModel TURN_END。 */
-  public static ThreadSnapshot continuationDueSnapshot() {
-    return continuationDueSnapshot(id(1));
-  }
-
-  /** CONTINUATION_DUE 快照（指定 thread id）。 */
-  public static ThreadSnapshot continuationDueSnapshot(UUID threadId) {
+  /**
+   * 尚有 continuation 义务的 Thread 快照：ROOT -&gt; TURN_START -&gt; USER -&gt; ASSISTANT -&gt;
+   * continueModel TURN_END，durable 生命周期为 ACTIVE。
+   *
+   * <p>运行时状态投影只看 durable 生命周期与本地活跃调用，因此历史里的 continueModel 义务以 {@code QUEUED} 暴露（等待调度启动下一个 turn），
+   * 不再由 web 层根据历史自行推断出独立状态。
+   */
+  public static ThreadSnapshot continuationPendingSnapshot(UUID threadId) {
     Entry turnEnd =
         new Entry(
             id(5),
@@ -211,7 +217,8 @@ public final class HarnessRuntimeTestFixtures {
         new EntryPath(
             List.of(
                 rootEntry(), turnStartEntry(), userMessageEntry(), plainAssistantEntry(), turnEnd));
-    return new ThreadSnapshot(thread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
   }
 
   public static ModelUsage usage() {
