@@ -68,7 +68,6 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -172,13 +171,11 @@ class ProviderRequestPreviewServiceTest {
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
-  /**
-   * 测试意图：preview 只覆盖既有 THREAD（path 与 target 必须一致）且只服务 CHAT/CANVAS，命令形状只允许 SET_* + 末尾 USER_MESSAGE。
-   */
+  /** 测试意图：preview 只覆盖既有 THREAD（path 与 target 必须一致）且只服务 CHAT，命令形状只允许 SET_* + 末尾 USER_MESSAGE。 */
   @Test
   void rejectsForeignTargetOwnerAndNonUserMessageShape() {
-    OwnerRef chat = new OwnerRef(OwnerType.CHAT, id(20L));
-    OwnerRef issueAgent = new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, id(21L));
+    OwnerRef chat = new OwnerRef.Chat(id(20L));
+    OwnerRef issueAgent = new OwnerRef.IssueAgent(id(21L), "executor");
 
     // target 不是 THREAD：草稿预览不接受新建语义。
     assertThrows(
@@ -248,7 +245,7 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：owner 授权复用只读入口；cursor 漂移与非空 queued 都在任何规划之前 fail closed。 */
   @Test
   void rejectsStaleCursorAndQueuedCommandsAfterReusingReadOnlyOwnerCheck() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(30L));
+    OwnerRef owner = new OwnerRef.Chat(id(30L));
     ThreadState thread = thread(TURN_TWO_END_ID, 1L);
     EntryPath idlePath = closedTurnPath(OVER_THRESHOLD_USAGE);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot(thread, idlePath, List.of()));
@@ -314,7 +311,7 @@ class ProviderRequestPreviewServiceTest {
    */
   @Test
   void rejectsThreadThatIsNotIdle() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(40L));
+    OwnerRef owner = new OwnerRef.Chat(id(40L));
     EntryPath continuationDue = continuationDuePath();
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(TURN_TWO_END_ID, 1L), continuationDue, List.of()));
@@ -335,7 +332,7 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：下一步必定是自动压缩时明确拒绝（不运行压缩模型）；阈值以下的历史则继续走到真实规划边界。 */
   @Test
   void rejectsWhenNextStepIsAutomaticCompaction() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(50L));
+    OwnerRef owner = new OwnerRef.Chat(id(50L));
     ThreadState thread = thread(TURN_TWO_END_ID, 1L);
 
     when(runtime.getThreadSnapshot(THREAD_ID))
@@ -378,7 +375,7 @@ class ProviderRequestPreviewServiceTest {
    */
   @Test
   void peeksAttachmentWithoutConsumingAndProjectsFinalBody() {
-    OwnerRef owner = new OwnerRef(OwnerType.CANVAS, id(60L));
+    OwnerRef owner = new OwnerRef.Chat(id(60L));
     EntryPath idle = closedTurnPath(BELOW_THRESHOLD_USAGE);
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(TURN_TWO_END_ID, 3L), idle, List.of()));
@@ -454,7 +451,7 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：未 READY 的附件与跨 Session 资源分别以 409（不可预览）与 400（越权）拒绝，绝不先物化再失败。 */
   @Test
   void rejectsPendingUploadAndCrossSessionResource() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(70L));
+    OwnerRef owner = new OwnerRef.Chat(id(70L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(
@@ -505,7 +502,7 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：adapter 未实现预览能力时明确拒绝（绝不伪装成空体），Provider 编码失败只回显稳定类别而不外泄原因文本。 */
   @Test
   void rejectsUnsupportedAdapterAndSanitizesProviderFailure() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(80L));
+    OwnerRef owner = new OwnerRef.Chat(id(80L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(
@@ -556,7 +553,7 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：Provider 解析漂移（generation/type 变化）与缺失 factory 一律确定性拒绝，绝不越过解析直接编码。 */
   @Test
   void rejectsProviderResolutionDrift() {
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, id(90L));
+    OwnerRef owner = new OwnerRef.Chat(id(90L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(

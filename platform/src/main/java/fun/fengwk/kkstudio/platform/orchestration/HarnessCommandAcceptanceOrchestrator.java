@@ -140,7 +140,8 @@ public class HarnessCommandAcceptanceOrchestrator {
   public void authorizeThread(OwnerRef owner, UUID threadId) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(threadId, "threadId");
-    authorize(owner, new AcceptCommandsTarget.Thread(threadId));
+    // 授权只读取 threadId；cursor 由预览在授权后通过只读快照独立校验。
+    authorize(owner, new AcceptCommandsTarget.Thread(threadId, new UUID(0, 0), 1));
   }
 
   /**

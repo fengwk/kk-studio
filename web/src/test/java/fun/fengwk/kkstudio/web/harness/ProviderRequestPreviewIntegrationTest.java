@@ -55,7 +55,6 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
@@ -363,11 +362,11 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             () ->
                 previewService.preview(
                     fixture.threadId(),
-                    new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, UUID.randomUUID()),
+                    new OwnerRef.IssueAgent(UUID.randomUUID(), "executor"),
                     new AcceptCommandsCommand(
                         fixture.threadTarget(),
                         draftCommands(userMessage(List.of(new TextMessageContent("x")))))));
-    assertTrue(rejection.getMessage().contains("limited to CHAT and CANVAS"));
+    assertTrue(rejection.getMessage().contains("limited to CHAT owners"));
     assertEquals(before, durableState(fixture, null));
   }
 
@@ -416,7 +415,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   /** 真实 DB 路径 fixture：一个由生产 Processor 处理完成的 turn（历史消息 + 会话资源 ref）。 */
   private Fixture fixtureWithCompletedTurn() {
     UUID chatId = createChat("preview-fixture");
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, chatId);
+    OwnerRef owner = new OwnerRef.Chat(chatId);
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     // 每个 fixture 必须用不同内容：存储按内容寻址去重，而本测试需要「另一个 Session 独有的 blob」。

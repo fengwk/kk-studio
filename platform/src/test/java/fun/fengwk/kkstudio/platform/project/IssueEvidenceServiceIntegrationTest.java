@@ -550,13 +550,18 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     }
 
     @Override
-    public ReadyUpload lockReady(UUID uploadId) {
-      locked.add(uploadId);
+    public ReadyUpload peekReady(UUID uploadId) {
       ReadyUpload ready = readyMap.get(uploadId);
       if (ready == null) {
         throw new StorageResourceNotFoundException("upload", uploadId.toString());
       }
       return ready;
+    }
+
+    @Override
+    public ReadyUpload lockReady(UUID uploadId) {
+      locked.add(uploadId);
+      return peekReady(uploadId);
     }
 
     @Override

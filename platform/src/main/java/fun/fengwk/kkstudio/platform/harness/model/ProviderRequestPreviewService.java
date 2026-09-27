@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.orchestration.UserMessageContentPreparer;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
@@ -49,9 +48,9 @@ import java.util.UUID;
  * ProviderAdapter#encodeRequestBody}。 因此只要前置事实一致，预览体与实际发送体逐字节一致。
  *
  * <p>预览 fail-closed：草稿只允许「SET_* 设置前缀 + 恰好一条末尾 USER_MESSAGE」（GOAL / CUSTOM_MESSAGE 是各自的专属功能，
- * 不属于本预览），owner 只允许 CHAT / CANVAS 且必须复用 {@link HarnessCommandAcceptanceOrchestrator} 的只读归属校验，
- * Thread 必须空闲、无 queued 命令且 cursor（head + next command sequence）一致，下一步必定是自动压缩时明确拒绝。附件只做 READY 的只读
- * peek（不 retain、不删除、不增 Session ref），RESOURCE 仍必须由目标 Session 持有。
+ * 不属于本预览），owner 只允许 CHAT 且必须复用 {@link HarnessCommandAcceptanceOrchestrator} 的只读归属校验， Thread 必须空闲、无
+ * queued 命令且 cursor（head + next command sequence）一致，下一步必定是自动压缩时明确拒绝。附件只做 READY 的只读 peek（不
+ * retain、不删除、不增 Session ref），RESOURCE 仍必须由目标 Session 持有。
  *
  * <p>预览是点击时快照：它与随后真正发送之间没有任何 CAS，因此绝不声称发送结果与预览相同；{@link
  * HarnessProviderRequestPreviewDTO#snapshotNotice} 是响应契约的一部分。所有拒绝消息都是稳定且安全的文本，不回显 credential、
@@ -102,7 +101,7 @@ public final class ProviderRequestPreviewService {
    * 现算一次草稿的 Provider 协议请求体预览。
    *
    * @param threadId path 中的目标 Thread，必须与 batch target 的 threadId 完全一致
-   * @param owner 产品 owner：只接受 CHAT / CANVAS
+   * @param owner 产品 owner：只接受 CHAT
    * @param command 与发送完全相同的 owner-aware 命令批（target 必须是 THREAD）
    * @return 最终请求体、UTF-8 字节数、providerType/modelName、source head cursor 与快照提示
    * @throws ProviderRequestPreviewUnavailableException 当前事实不允许精确预览（快照漂移、非空闲、queued、压缩、附件未 READY、
@@ -169,11 +168,10 @@ public final class ProviderRequestPreviewService {
     return thread;
   }
 
-  /** 预览只服务 Chat / Canvas 草稿：Issue Agent Session 的命令由 Issue 业务工作流拥有。 */
+  /** 预览只服务 Chat 草稿：Issue Agent Session 的命令由 Issue 业务工作流拥有。 */
   private static void requireProductOwner(OwnerRef owner) {
-    if (owner.type() != OwnerType.CHAT && owner.type() != OwnerType.CANVAS) {
-      throw new IllegalArgumentException(
-          "provider request preview is limited to CHAT and CANVAS owners");
+    if (!(owner instanceof OwnerRef.Chat)) {
+      throw new IllegalArgumentException("provider request preview is limited to CHAT owners");
     }
   }
 
