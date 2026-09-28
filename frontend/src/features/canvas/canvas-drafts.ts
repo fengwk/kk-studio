@@ -30,8 +30,6 @@ export interface CanvasNodeDraft {
   text?: { name?: string; markdown: string }
   /** 本地未保存的通用函数配置草稿 */
   function?: CanvasFunctionDTO | null
-  /** 兼容旧模型字段访问 */
-  config?: { modelKey: string; config: unknown }
   /** 本地未保存的分组归属草稿 */
   groupId?: UUIDString | null
   /** 编辑起点基线（Snapshot 修订号及初始内容），用于冲突检测与对比；解决冲突必须明确对比，绝不可自动重试 */
@@ -66,7 +64,6 @@ export function hasDraftContent(draft?: CanvasNodeDraft | null): boolean {
     draft.position ||
     draft.text ||
     draft.function !== undefined ||
-    draft.config !== undefined ||
     draft.groupId !== undefined,
   )
 }
@@ -130,17 +127,6 @@ export function overlayNodeWithDraft(node: ResourceNode, draft?: CanvasNodeDraft
           : JSON.stringify(draft.function.args ?? {}),
       } : null,
     }
-  } else if (draft.config && transformedNode.function) {
-    transformedNode = {
-      ...transformedNode,
-      function: {
-        ...transformedNode.function,
-        name: draft.config.modelKey,
-        args: { config: draft.config.config },
-        modelKey: draft.config.modelKey,
-        configJson: JSON.stringify(draft.config.config),
-      },
-    }
   }
 
   // 叠加分组归属草稿
@@ -161,7 +147,7 @@ export function overlayNodeWithDraft(node: ResourceNode, draft?: CanvasNodeDraft
  */
 export function removeDraftField(
   draft: CanvasNodeDraft,
-  field: 'position' | 'text' | 'function' | 'config' | 'groupId',
+  field: 'position' | 'text' | 'function' | 'groupId',
   ackGeneration?: number,
 ): CanvasNodeDraft | null {
   if (ackGeneration !== undefined && draft.generation > ackGeneration) {
@@ -179,7 +165,6 @@ export function removeDraftField(
     next.position ||
     next.text ||
     next.function !== undefined ||
-    next.config !== undefined ||
     next.groupId !== undefined ||
     next.conflict
   ) {
@@ -193,7 +178,7 @@ export function removeDraftField(
  */
 export function isNodeDirty(
   draft?: CanvasNodeDraft | null,
-  field?: 'position' | 'text' | 'function' | 'config' | 'groupId',
+  field?: 'position' | 'text' | 'function' | 'groupId',
 ): boolean {
   if (!draft) {
     return false
@@ -205,7 +190,6 @@ export function isNodeDirty(
     draft.position ||
     draft.text ||
     draft.function !== undefined ||
-    draft.config !== undefined ||
     draft.groupId !== undefined,
   )
 }
