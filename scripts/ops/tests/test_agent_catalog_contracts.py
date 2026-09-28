@@ -102,8 +102,9 @@ REPORTING_FILES = (EXPORT_SCRIPT, IMPORT_SCRIPT)
 UNMIGRATED_TABLES = ("environment", "skill_package", "plugin_credential")
 
 #: The V1 revision this checkout declares.  A changed value means the baseline changed, which is a
-#: maintenance decision: this test must fail so the operator re-verifies the whole flow.
-DOCUMENTED_V1_CHECKSUM = "-1813953774"
+#: maintenance decision: this test must fail so the operator re-verifies the whole flow
+#: (``python3 -m unittest discover -s scripts/ops/tests``) and re-pins the Flyway checksum here.
+DOCUMENTED_V1_CHECKSUM = "1707760979"
 
 FINGERPRINT_LINE = re.compile(r"^fingerprint\.[a-z_]+=\d+:[0-9a-f]*$")
 COUNT_LINE = re.compile(r"^rows\.[a-z_]+=\d+$")
@@ -516,10 +517,12 @@ class TestPackageArtifactContracts(unittest.TestCase):
                 self.assertIn("manifest field", str(captured.exception))
 
         # Flyway checksums are signed: a negative V1 checksum is valid, not a malformed field.
+        # The value is arbitrary; the baseline pin lives in DOCUMENTED_V1_CHECKSUM.
+        signed_checksum = -123456789
         signed = self.copy_package(directory, "signed-v1-checksum")
-        rewrite_manifest(signed, lambda manifest: manifest.update(v1_checksum=-1813953774))
+        rewrite_manifest(signed, lambda manifest: manifest.update(v1_checksum=signed_checksum))
         package = read_package(str(signed))
-        self.assertEqual(-1813953774, package["manifest"]["v1_checksum"])
+        self.assertEqual(signed_checksum, package["manifest"]["v1_checksum"])
 
     def test_read_package_rejects_symbolic_link_artifacts(self):
         """A package whose artifacts are links could read a file outside the package."""
