@@ -1184,6 +1184,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
       // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
       requireLocked(LockKey.thread(command.threadId()));
+      requireCanLockRank(LockRank.COMMAND, command.threadId());
       requireUniqueCommandKey(command);
     }
     for (ThreadCommand command : copied) {

@@ -553,6 +553,24 @@ public abstract class HarnessStoreCommandContract {
   }
 
   @Test
+  void commandRankRejectionHappensBeforeAnyInsertEvenWhenCaught() {
+    // 测试意图：锁序拒绝必须发生在 SQL/内存写入之前，调用方捕获校验异常也不能提交半条命令。
+    Baseline other = seedThreadBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockTree(baseline.threadId());
+          tx.lockThread(other.threadId());
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, other.threadId()), T0);
+          assertThrows(
+              IllegalStateException.class,
+              () -> tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11)))));
+          assertTrue(tx.findCommand(other.threadId(), 1).isEmpty());
+        });
+    assertTrue(store.transaction(tx -> tx.findCommand(other.threadId(), 1)).isEmpty());
+  }
+
+  @Test
   void commandMailboxOperationsRequireTheThreadLockFirst() {
     inTransaction(
         store,
