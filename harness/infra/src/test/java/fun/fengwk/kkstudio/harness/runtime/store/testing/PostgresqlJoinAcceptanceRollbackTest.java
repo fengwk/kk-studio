@@ -8,6 +8,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +52,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -707,5 +709,153 @@ class PostgresqlJoinAcceptanceRollbackTest {
     } finally {
       scheduler.shutdownNow();
     }
+  }
+
+  @Test
+  void globalJoinAdmissionSerializesConcurrentNewSessionsAcrossRootTreesAndEnforcesCap()
+      throws Exception {
+    // 测试意图：task 的全局并发上限在真实 PG 上跨 root 生效——两个不同执行树的子 Session 创建并发到达时，
+    // 第二个必须在全局 Join 准入锁上阻塞（两棵树互不相干，Tree advisory lock 不会相遇）；第一个提交后
+    // 全局活跃子线程已达上限，第二个在准入锁内被确定性拒绝且不留下任何 Session/Entry/Thread/Command/Join/Work 孤儿；
+    // 额度释放后同一请求可成功创建，exact replay 不重复占额度。
+    UUID rootASessionId = TestIds.id(7000);
+    UUID rootARootEntryId = TestIds.id(7001);
+    UUID rootAThreadId = TestIds.id(7002);
+    UUID childASessionId = TestIds.id(7003);
+    UUID childAThreadId = TestIds.id(7004);
+    UUID childACommandKey = TestIds.id(7005);
+    UUID joinAInvocationId = TestIds.id(7006);
+    UUID rootBSessionId = TestIds.id(7010);
+    UUID rootBRootEntryId = TestIds.id(7011);
+    UUID rootBThreadId = TestIds.id(7012);
+    UUID childBSessionId = TestIds.id(7013);
+    UUID childBThreadId = TestIds.id(7014);
+    UUID childBCommandKey = TestIds.id(7015);
+    UUID joinBInvocationId = TestIds.id(7016);
+
+    seedRootThread(rootASessionId, rootARootEntryId, rootAThreadId);
+    seedRootThread(rootBSessionId, rootBRootEntryId, rootBThreadId);
+
+    AcceptCommandsCommand requestA =
+        newSession(childASessionId, childAThreadId, rootAThreadId, childACommandKey, "child A");
+    ThreadJoinRequest joinA =
+        globalJoinRequest(joinAInvocationId, rootAThreadId, rootARootEntryId, 1);
+    AcceptCommandsCommand requestB =
+        newSession(childBSessionId, childBThreadId, rootBThreadId, childBCommandKey, "child B");
+    ThreadJoinRequest joinB =
+        globalJoinRequest(joinBInvocationId, rootBThreadId, rootBRootEntryId, 1);
+
+    CountDownLatch tx1HoldingAdmission = new CountDownLatch(1);
+    CountDownLatch tx1CanCommit = new CountDownLatch(1);
+    CountDownLatch tx2Started = new CountDownLatch(1);
+
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<AcceptedCommands> first =
+          executor.submit(
+              () ->
+                  runtime.acceptCommandsAndJoin(
+                      requestA,
+                      joinA,
+                      (tx, current, commands) -> {
+                        tx1HoldingAdmission.countDown();
+                        awaitOrFail(tx1CanCommit);
+                        return commands;
+                      }));
+      assertTrue(tx1HoldingAdmission.await(10, TimeUnit.SECONDS));
+
+      Future<AcceptedCommands> second =
+          executor.submit(
+              () -> {
+                tx2Started.countDown();
+                return runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+              });
+      assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
+      assertThrows(
+          TimeoutException.class,
+          () -> second.get(250, TimeUnit.MILLISECONDS),
+          "concurrent child admission on another root must block on the global join admission lock");
+
+      tx1CanCommit.countDown();
+      assertFalse(first.get(10, TimeUnit.SECONDS).replayed());
+      ExecutionException rejected =
+          assertThrows(ExecutionException.class, () -> second.get(10, TimeUnit.SECONDS));
+      assertInstanceOf(IllegalArgumentException.class, rejected.getCause());
+    }
+
+    // 额度被 A 树的 childA1 占满，被拒绝的 B 请求零残留
+    assertEquals(1, activeSubagentThreads());
+    assertNoRow("harness_session", "id", childBSessionId);
+    assertNoRow("harness_entry", "session_id", childBSessionId);
+    assertNoRow("harness_thread", "id", childBThreadId);
+    assertNoRow("harness_thread_command", "thread_id", childBThreadId);
+    assertNoRow("harness_thread_join", "invocation_id", joinBInvocationId);
+    assertNoRow("harness_work", "target_id", childBThreadId);
+
+    // 释放额度：childA1 回到 IDLE
+    store.transaction(
+        tx -> {
+          ThreadState child = tx.lockThread(childAThreadId).orElseThrow();
+          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T1));
+          return null;
+        });
+    assertEquals(0, activeSubagentThreads());
+
+    // 同一请求在额度释放后成功创建
+    AcceptedCommands retried =
+        runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+    assertFalse(retried.replayed());
+    assertSingleRow("harness_session", "id", childBSessionId);
+    assertSingleRow("harness_thread", "id", childBThreadId);
+    assertSingleRow("harness_thread_command", "thread_id", childBThreadId);
+    assertSingleRow("harness_thread_join", "invocation_id", joinBInvocationId);
+    assertEquals(1, activeSubagentThreads());
+
+    // exact replay 命中既有 Join，不重复占额度
+    AcceptedCommands replayed =
+        runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+    assertTrue(replayed.replayed());
+    assertEquals(1, activeSubagentThreads());
+  }
+
+  /** 种入一个无父 root Thread（只含 ROOT Entry），用于构造互不相干的执行树。 */
+  private void seedRootThread(UUID sessionId, UUID rootEntryId, UUID threadId) {
+    store.transaction(
+        tx -> {
+          tx.insertSession(StoreTestSupport.session(sessionId));
+          tx.insertEntry(StoreTestSupport.rootEntry(rootEntryId, sessionId));
+          tx.insertThread(
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  null,
+                  rootEntryId,
+                  HASH,
+                  "root",
+                  false,
+                  ThreadLifecycleStatus.IDLE,
+                  1L,
+                  0L,
+                  T0,
+                  T0));
+          return null;
+        });
+  }
+
+  private static ThreadJoinRequest globalJoinRequest(
+      UUID invocationId, UUID parentThreadId, UUID expectedHead, int globalCap) {
+    return new ThreadJoinRequest(
+        invocationId, parentThreadId, expectedHead, HASH, "test-agent", 5, 3, 5, globalCap);
+  }
+
+  private int activeSubagentThreads() {
+    return store.transaction(tx -> tx.countActiveSubagentThreads());
+  }
+
+  private void assertNoRow(String table, String column, UUID id) {
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from " + table + " where " + column + " = ?", Integer.class, id),
+        table + " must not contain any row for " + column + " = " + id);
   }
 }

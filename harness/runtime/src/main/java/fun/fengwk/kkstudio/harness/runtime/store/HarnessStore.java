@@ -35,12 +35,13 @@ import java.util.function.Function;
  * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：若涉及 Session 锁，先锁 Session（{@link #lockSessionForKeyShare}
- * 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其
- * ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work
- * 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning
- * Thread；dispatcher claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
- * IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：携带 frozen task 策略的 Join 准入先获取全局 Join 准入锁（{@link
+ * Transaction#lockJoinAdmission}），再获取执行树锁（{@link Transaction#lockTree}）；若涉及 Session 锁，先锁
+ * Session（{@link #lockSessionForKeyShare} 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁
+ * Thread，再锁其 Commands，再锁其 ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation
+ * siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL
+ * Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher claim、heartbeat/lease 等单 Work
+ * 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
@@ -194,8 +195,18 @@ public interface HarnessStore {
      */
     List<UUID> findAncestorChain(UUID threadId);
 
-    /** 在任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 必须为真实根。 */
+    /** 在 Join 准入锁之后、任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 必须为真实根。 */
     void lockTree(UUID rootThreadId);
+
+    /**
+     * 在任何 tree / Session / Thread / Invocation / Work 锁之前获取全局 Join 准入事务级锁：串行化所有携带 frozen task 策略的
+     * subagent 准入，使「全局活跃 subagent 数」上限的判定与创建无竞态。
+     *
+     * <p>必须在事务内首次加锁前调用，即使本次请求的额度为 unlimited 也必须获取（否则并发的有限额度请求会与之竞态）；同一事务内重复调用幂等。已持有任何 tree
+     * 或业务行锁后再调用抛 {@link IllegalStateException}。该锁只是准入串行化原语，不承载任何持久字段，且与 tree 锁使用相互隔离的 key 空间。root
+     * one-shot（无父）准入不需要它。
+     */
+    void lockJoinAdmission();
 
     /** Join 是源 command 的 FK 约束引用，必须与源 command 在同一事务内创建。 */
     void insertJoin(ThreadJoin join);
@@ -217,13 +228,12 @@ public interface HarnessStore {
     int countActiveChildren(UUID parentThreadId);
 
     /**
-     * 递归统计以 rootThreadId 为根的整棵 Thread 执行树中，所有处于活跃状态（status != IDLE，包含 ACTIVE 与 WAITING_CHILDREN）
-     * 的后代 Thread（descendants，不含 rootThreadId 自身）数量；不产生锁。
+     * 全局统计当前处于活跃状态（status != IDLE，含 ACTIVE 与 WAITING_CHILDREN）且拥有非空 parentThreadId 的 Thread 数量； 跨所有
+     * root 聚合，root 自身（parentThreadId 为空）不计入。不产生锁。用于 subagent 任务的全局并发上限判定。
      *
-     * @param rootThreadId 根 Thread ID，不能为 null
-     * @return 执行树中活跃的后代 Thread 数量
+     * @return 全局活跃执行子 Thread 数量
      */
-    int countActiveThreadsInTree(UUID rootThreadId);
+    int countActiveSubagentThreads();
 
     /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
     void updateJoin(ThreadJoin join);

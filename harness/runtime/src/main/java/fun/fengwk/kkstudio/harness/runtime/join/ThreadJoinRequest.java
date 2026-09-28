@@ -4,7 +4,13 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** 子命令与 join 同事务 admission；空 parent 表示不投递父消息的 root completion ticket。 */
+/**
+ * 子命令与 join 同事务 admission；空 parent 表示不投递父消息的 root completion ticket。
+ *
+ * <p>{@code maxDepth} 与 {@code maxConcurrentChildren} 是执行树内约束；{@code maxConcurrentThreads}
+ * 是<b>全局</b>活跃执行子 Thread（parentThreadId 非空且 status != IDLE，跨所有 root、不含 root 自身）上限，直接来自 task
+ * 的全局并发设置，不按树折算。
+ */
 public record ThreadJoinRequest(
     UUID invocationId,
     UUID parentThreadId,

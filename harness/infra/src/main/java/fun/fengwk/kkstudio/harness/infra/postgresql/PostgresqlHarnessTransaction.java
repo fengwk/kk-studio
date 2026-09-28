@@ -284,6 +284,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       Comparator.comparingInt((WorkTarget target) -> target.type().ordinal())
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
 
+  /** 全局 Join 准入锁的两个 int 键（"{@code kkST}"/"{@code join}"）：与 tree 使用的单 bigint 键空间隔离。 */
+  private static final int JOIN_ADMISSION_LOCK_NAMESPACE = 0x6B6B5354;
+
+  private static final int JOIN_ADMISSION_LOCK_KEY = 0x6A6F696E;
+
   /** 底层 Spring JdbcTemplate，绑定当前事务的数据库连接。 */
   private final JdbcTemplate jdbc;
 
@@ -294,6 +299,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private final Set<LockKey> locked = new HashSet<>();
 
   private final Set<UUID> lockedTrees = new HashSet<>();
+
+  /** 本事务是否已获取全局 Join 准入锁（幂等标记；准入锁不参与行锁阶梯）。 */
+  private boolean joinAdmissionLocked;
 
   /** 记录各 assistantEntryId 下当前已锁定的最高 tool callIndex，防范乱序持锁。 */
   private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
@@ -870,6 +878,25 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public void lockJoinAdmission() {
+    checkOpen();
+    if (joinAdmissionLocked) {
+      return;
+    }
+    if (highestLockRank != null || !lockedTrees.isEmpty()) {
+      throw new IllegalStateException(
+          "join admission lock must precede tree and business row locks");
+    }
+    // 两个 int 键的事务级 advisory lock：与 tree 使用的单 bigint 键空间天然隔离。
+    queryForObject(
+        "select true from pg_advisory_xact_lock(?::int, ?::int)",
+        Boolean.class,
+        JOIN_ADMISSION_LOCK_NAMESPACE,
+        JOIN_ADMISSION_LOCK_KEY);
+    joinAdmissionLocked = true;
+  }
+
+  @Override
   public void insertJoin(ThreadJoin join) {
     checkOpen();
     Objects.requireNonNull(join, "join");
@@ -956,37 +983,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public int countActiveThreadsInTree(UUID rootThreadId) {
+  public int countActiveSubagentThreads() {
     checkOpen();
-    Objects.requireNonNull(rootThreadId, "rootThreadId");
-    TreeActiveCountRow result =
-        queryOne(
-                """
-            with recursive tree as (
-                select id, status, 0 as depth
-                from harness_thread
-                where id = ?
-                union all
-                select t.id, t.status, tree.depth + 1
-                from harness_thread t
-                join tree on t.parent_thread_id = tree.id
-            ) cycle id set is_cycle using path
-            select
-                coalesce(bool_or(t.is_cycle), false) as has_cycle,
-                count(case when t.depth > 0 and t.status <> 'IDLE' then 1 end) as active_count
-            from tree t
+    Integer count =
+        queryForObject(
+            """
+            select count(*)
+            from harness_thread
+            where parent_thread_id is not null and status <> 'IDLE'
             """,
-                (rs, ignored) ->
-                    new TreeActiveCountRow(rs.getBoolean("has_cycle"), rs.getInt("active_count")),
-                rootThreadId)
-            .orElse(new TreeActiveCountRow(false, 0));
-    if (result.hasCycle()) {
-      throw new IllegalStateException("thread parent cycle in tree at " + rootThreadId);
-    }
-    return result.activeCount();
+            Integer.class);
+    return count != null ? count : 0;
   }
-
-  private record TreeActiveCountRow(boolean hasCycle, int activeCount) {}
 
   @Override
   public void updateJoin(ThreadJoin join) {
@@ -1184,6 +1192,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
       // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
       requireLocked(LockKey.thread(command.threadId()));
+      requireCanLockRank(LockRank.COMMAND, command.threadId());
       requireUniqueCommandKey(command);
     }
     for (ThreadCommand command : copied) {
