@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -135,8 +136,8 @@ class SubagentTaskRunnerTest {
     UUID sessionId = UUID.randomUUID();
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
-    when(runtime.acceptCommandsAndJoin(any(), any(), any()))
-        .thenReturn(accepted(sessionId, childThreadId, false));
+    AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
+    when(runtime.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
 
     SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
 
@@ -374,7 +375,9 @@ class SubagentTaskRunnerTest {
         .thenThrow(
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED, "winner"));
+    // 竞争者先提交成功：本进程第一次提交冲突，随后的重读才看到胜者的 join。
     when(runtime.findJoin(invocationId))
+        .thenReturn(Optional.empty())
         .thenReturn(Optional.empty())
         .thenReturn(
             Optional.of(
@@ -435,7 +438,8 @@ class SubagentTaskRunnerTest {
 
   @Test
   void rejectsUnauthorizedSubagentTypeWithAvailableNames() {
-    stubParent(List.of("beta"));
+    // 多个可选 subagent 时错误必须列出全部名字，便于父 Agent 自我纠正。
+    stubParent(List.of("beta", "gamma"));
 
     SubagentTaskRejectedException rejected =
         assertThrows(
@@ -443,8 +447,75 @@ class SubagentTaskRunnerTest {
             () -> runner(config()).accept(request(null, null)));
 
     assertTrue(rejected.getMessage().contains("is not allowed"), rejected.getMessage());
-    assertTrue(rejected.getMessage().contains("beta"), rejected.getMessage());
+    assertTrue(rejected.getMessage().contains("beta / gamma"), rejected.getMessage());
     verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void missingSnapshotsBecomeTypedTaskFailures() {
+    // resume 目标已消失：追加命令前重读失败必须收敛为 typed 失败。
+    stubParent(List.of(AGENT));
+    UUID missingChild = UUID.randomUUID();
+    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+        .when(runtime)
+        .getThreadSnapshot(missingChild);
+    SubagentTaskRejectedException goneChild =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, missingChild)));
+    assertTrue(goneChild.getMessage().contains("was not found"), goneChild.getMessage());
+
+    // 父快照已消失（父线程被删）：同样不得凭 invocationId 继续。
+    stubParent(List.of(AGENT));
+    doThrow(new HarnessRuntimeNotFoundException("parent gone"))
+        .when(runtime)
+        .getThreadSnapshot(parentThreadId);
+    SubagentTaskRejectedException goneParent =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(goneParent.getMessage().contains("no longer attached"), goneParent.getMessage());
+
+    // 回放路径上子 Thread 已消失：无法解析子 Session，必须报出明确的 not found。
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+        .when(runtime)
+        .getThreadSnapshot(childThreadId);
+    SubagentTaskRejectedException replayedMissingChild =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(
+        replayedMissingChild.getMessage().contains("was not found"),
+        replayedMissingChild.getMessage());
+
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void exceptionWithoutMessageStillYieldsTypedFailureWithClassName() {
+    // 无 message 的 Runtime 拒绝也必须给出可读原因（退回异常类名），不能吞成空消息。
+    stubParent(List.of(AGENT));
+    doThrow(new IllegalArgumentException())
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+
+    assertTrue(rejected.getMessage().contains("IllegalArgumentException"), rejected.getMessage());
   }
 
   @Test
@@ -475,8 +546,9 @@ class SubagentTaskRunnerTest {
 
     // Runtime 的额度/深度等业务拒绝（IllegalArgumentException）必须收敛为 typed task 失败，让 tool 报错而不是抛 NPE。
     stubParent(List.of(AGENT));
-    when(runtime.acceptCommandsAndJoin(any(), any(), any()))
-        .thenThrow(new IllegalArgumentException("parent join quota exceeded"));
+    doThrow(new IllegalArgumentException("parent join quota exceeded"))
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
     SubagentTaskRejectedException quota =
         assertThrows(
             SubagentTaskRejectedException.class,
@@ -484,8 +556,9 @@ class SubagentTaskRunnerTest {
     assertTrue(quota.getMessage().contains("quota exceeded"), quota.getMessage());
 
     // 父线程在提交前消失同样收敛为 typed 失败。
-    when(runtime.acceptCommandsAndJoin(any(), any(), any()))
-        .thenThrow(new HarnessRuntimeNotFoundException("parent gone"));
+    doThrow(new HarnessRuntimeNotFoundException("parent gone"))
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
     assertThrows(
         SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
   }

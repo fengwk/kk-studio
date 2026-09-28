@@ -197,8 +197,7 @@ class SessionDeletionOrchestratorTest {
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_2);
     storeOrder.verify(transaction).lockThread(THREAD_1);
     storeOrder.verify(transaction).lockThread(THREAD_2);
-    storeOrder.verify(transaction).deleteJoinsByChild(THREAD_1);
-    storeOrder.verify(transaction).deleteJoinsByChild(THREAD_2);
+    storeOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteEntries(SESSION_1);
     storeOrder.verify(transaction).deleteSession(SESSION_1);
@@ -233,8 +232,7 @@ class SessionDeletionOrchestratorTest {
     verify(transaction).lockSessionForUpdate(SESSION_1);
     verify(transaction).lockSessionForUpdate(SESSION_2);
     verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
-    verify(transaction).deleteJoinsByChild(THREAD_2);
-    verify(transaction).deleteJoinsByChild(THREAD_FORK);
+    verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
     verify(transaction).deleteSession(SESSION_2);
   }
 
@@ -254,7 +252,7 @@ class SessionDeletionOrchestratorTest {
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
 
     verify(transaction, never()).deleteThreads(any());
-    verify(transaction, never()).deleteJoinsByChild(any());
+    verify(transaction, never()).deleteJoinsForThreads(any());
     verify(transaction, never()).deleteEntries(any());
     verify(transaction, never()).deleteSession(any());
   }

@@ -31,11 +31,6 @@ public final class SubagentPrompts {
     return render("task-system.md", Map.of("defaultMaxTurns", Integer.toString(defaultMaxTurns)));
   }
 
-  /** maxTurns 软预算到期的 system reminder。 */
-  public static String maxTurnsReminder() {
-    return render("subagent-max-turns.md", Map.of());
-  }
-
   /** skills 段落外壳模板。 */
   public static PromptTemplate agentSkillsTemplate() {
     return template("agent-skills.md");
