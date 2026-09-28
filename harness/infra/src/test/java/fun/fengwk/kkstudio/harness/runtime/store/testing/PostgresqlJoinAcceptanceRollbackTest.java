@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -381,6 +383,181 @@ class PostgresqlJoinAcceptanceRollbackTest {
       assertTrue(runtime.findJoin(join1Id).isPresent());
       assertTrue(runtime.findJoin(join2Id).isPresent());
     }
+  }
+
+  @Test
+  void concurrentIdenticalChildNewSessionReplayBlocksOnTreeLockWithoutDuplicateRows()
+      throws Exception {
+    // 测试意图：同一父执行树下两个完全相同的 NEW_SESSION(子) 请求并发到达时，第二个必须在 PG 树 advisory lock 上阻塞；
+    // 第一个提交后第二个在树锁内复读到已存在的子线程，走 exact replay：Session/Entry/Thread/Command/Join/Work 均只有一行。
+    // 子 Session/Thread 的 UUID 故意小于父，验证复读后的补锁仍按 UUID 升序完成，不存在“父已锁、回补低 UUID 子”的逆序。
+    UUID childSessionId = TestIds.id(5000);
+    UUID childThreadId = TestIds.id(5001);
+    UUID childCommandKey = TestIds.id(5002);
+    UUID joinInvocationId = TestIds.id(5003);
+    UUID parentSessionId = TestIds.id(5004);
+    UUID parentRootEntryId = TestIds.id(5005);
+    UUID parentThreadId = TestIds.id(5006);
+    assertTrue(UuidOrder.COMPARATOR.compare(childSessionId, parentSessionId) < 0);
+    assertTrue(UuidOrder.COMPARATOR.compare(childThreadId, parentThreadId) < 0);
+
+    store.transaction(
+        tx -> {
+          tx.insertSession(StoreTestSupport.session(parentSessionId));
+          tx.insertEntry(StoreTestSupport.rootEntry(parentRootEntryId, parentSessionId));
+          tx.insertThread(
+              new ThreadState(
+                  parentThreadId,
+                  parentSessionId,
+                  null,
+                  parentRootEntryId,
+                  HASH,
+                  "parent",
+                  false,
+                  ThreadLifecycleStatus.IDLE,
+                  1L,
+                  0L,
+                  T0,
+                  T0));
+          return null;
+        });
+
+    AcceptCommandsCommand request =
+        newSession(childSessionId, childThreadId, parentThreadId, childCommandKey, "child task");
+    ThreadJoinRequest join = joinRequest(joinInvocationId, parentThreadId, parentRootEntryId, 5, 3);
+
+    CountDownLatch tx1HoldingTreeLock = new CountDownLatch(1);
+    CountDownLatch tx1CanCommit = new CountDownLatch(1);
+    CountDownLatch tx2Started = new CountDownLatch(1);
+
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<AcceptedCommands> first =
+          executor.submit(
+              () ->
+                  runtime.acceptCommandsAndJoin(
+                      request,
+                      join,
+                      (tx, current, commands) -> {
+                        tx1HoldingTreeLock.countDown();
+                        awaitOrFail(tx1CanCommit);
+                        return commands;
+                      }));
+      assertTrue(tx1HoldingTreeLock.await(10, TimeUnit.SECONDS));
+
+      Future<AcceptedCommands> second =
+          executor.submit(
+              () -> {
+                tx2Started.countDown();
+                return runtime.acceptCommandsAndJoin(request, join, AcceptancePreflight.IDENTITY);
+              });
+      assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
+      assertThrows(
+          TimeoutException.class,
+          () -> second.get(250, TimeUnit.MILLISECONDS),
+          "identical replay must block on the parent tree advisory lock");
+
+      tx1CanCommit.countDown();
+      AcceptedCommands acceptedFirst = first.get(10, TimeUnit.SECONDS);
+      AcceptedCommands acceptedSecond = second.get(10, TimeUnit.SECONDS);
+
+      assertFalse(acceptedFirst.replayed());
+      assertTrue(acceptedSecond.replayed());
+      assertEquals(childThreadId, acceptedSecond.thread().id());
+    }
+
+    assertSingleRow("harness_session", "id", childSessionId);
+    assertSingleRow("harness_entry", "session_id", childSessionId);
+    assertSingleRow("harness_thread", "id", childThreadId);
+    assertSingleRow("harness_thread_command", "thread_id", childThreadId);
+    assertSingleRow("harness_thread_join", "invocation_id", joinInvocationId);
+    assertSingleRow("harness_work", "target_id", childThreadId);
+    assertEquals(List.of(childThreadId, parentThreadId), runtime.findAncestorChain(childThreadId));
+  }
+
+  @Test
+  void concurrentIdenticalRootNewSessionReplayBlocksOnTreeLockWithoutDuplicateRows()
+      throws Exception {
+    // 测试意图：两个完全相同的 NEW_SESSION(根，无父) 请求并发到达时，第二个阻塞在新建 Thread 自身的树锁上；
+    // 第一个提交后第二个 exact replay，不重复插入 Session/Entry/Thread/Command/Join/Work。
+    UUID sessionId = TestIds.id(6000);
+    UUID threadId = TestIds.id(6001);
+    UUID commandKey = TestIds.id(6002);
+    UUID joinInvocationId = TestIds.id(6003);
+
+    AcceptCommandsCommand request = newSession(sessionId, threadId, null, commandKey, "root task");
+    ThreadJoinRequest ticket =
+        new ThreadJoinRequest(joinInvocationId, null, null, HASH, "test-agent", 5, 3, 3, 3);
+
+    CountDownLatch tx1HoldingTreeLock = new CountDownLatch(1);
+    CountDownLatch tx1CanCommit = new CountDownLatch(1);
+    CountDownLatch tx2Started = new CountDownLatch(1);
+
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<AcceptedCommands> first =
+          executor.submit(
+              () ->
+                  runtime.acceptCommandsAndJoin(
+                      request,
+                      ticket,
+                      (tx, current, commands) -> {
+                        tx1HoldingTreeLock.countDown();
+                        awaitOrFail(tx1CanCommit);
+                        return commands;
+                      }));
+      assertTrue(tx1HoldingTreeLock.await(10, TimeUnit.SECONDS));
+
+      Future<AcceptedCommands> second =
+          executor.submit(
+              () -> {
+                tx2Started.countDown();
+                return runtime.acceptCommandsAndJoin(request, ticket, AcceptancePreflight.IDENTITY);
+              });
+      assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
+      assertThrows(
+          TimeoutException.class,
+          () -> second.get(250, TimeUnit.MILLISECONDS),
+          "identical root replay must block on the root thread's tree advisory lock");
+
+      tx1CanCommit.countDown();
+      assertFalse(first.get(10, TimeUnit.SECONDS).replayed());
+      assertTrue(second.get(10, TimeUnit.SECONDS).replayed());
+    }
+
+    assertSingleRow("harness_session", "id", sessionId);
+    assertSingleRow("harness_entry", "session_id", sessionId);
+    assertSingleRow("harness_thread", "id", threadId);
+    assertSingleRow("harness_thread_command", "thread_id", threadId);
+    assertSingleRow("harness_thread_join", "invocation_id", joinInvocationId);
+    assertSingleRow("harness_work", "target_id", threadId);
+  }
+
+  private static AcceptCommandsCommand newSession(
+      UUID sessionId, UUID threadId, UUID parentThreadId, UUID commandKey, String prompt) {
+    return new AcceptCommandsCommand(
+        new AcceptCommandsTarget.NewSession(
+            sessionId, threadId, branchSettings(), parentThreadId, false),
+        List.of(
+            new NewThreadCommand(
+                new UserMessageCommandPayload(AgentMessage.user(prompt)), commandKey)));
+  }
+
+  private static void awaitOrFail(CountDownLatch latch) {
+    try {
+      if (!latch.await(10, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for the coordinating latch");
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
+  }
+
+  private void assertSingleRow(String table, String column, UUID id) {
+    assertEquals(
+        1,
+        jdbcTemplate.queryForObject(
+            "select count(*) from " + table + " where " + column + " = ?", Integer.class, id),
+        table + " must contain exactly one row for " + column + " = " + id);
   }
 
   @Test
