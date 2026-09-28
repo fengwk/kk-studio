@@ -1330,100 +1330,131 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void countActiveThreadsInTreeCountsAllActiveDescendantsExcludingRoot() {
-    // 测试意图：验证 countActiveThreadsInTree 递归统计整棵树中所有非空闲后代（排除 root 自身），并随状态变更动态更新。
-    UUID rootId = baseline.threadId();
-    UUID nonExistentId = store.transaction(HarnessStore.Transaction::nextId);
+  void countActiveSubagentThreadsCountsActiveExecutionChildrenAcrossAllRoots() {
+    // 测试意图：验证 countActiveSubagentThreads 全局统计所有拥有执行父关系（parentThreadId 非空）且非空闲的 Thread：
+    // 跨 root 聚合、包含 ACTIVE 与 WAITING_CHILDREN、包含更深后代，并排除 root 自身与 IDLE 子 Thread。
+    Baseline other = seedThreadBaseline(store);
+    UUID rootA = baseline.threadId();
+    UUID rootB = other.threadId();
 
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countActiveThreadsInTree(nonExistentId));
-          // 根线程自身即使可能处于 ACTIVE，整树活跃后代数仍为 0
-          assertEquals(0, tx.countActiveThreadsInTree(rootId));
+          assertEquals(0, tx.countActiveSubagentThreads());
           return null;
         });
 
-    // 构造树：Root -> Child1 (WAITING_CHILDREN) -> GrandChild1 (ACTIVE), GrandChild2 (IDLE)
-    //         Root -> Child2 (IDLE)
-    //         Root -> Child3 (ACTIVE)
-    UUID child1 =
+    UUID childWaiting =
         createChildThread(
-            rootId,
+            rootA,
             baseline.sessionId(),
             baseline.rootEntryId(),
             ThreadLifecycleStatus.WAITING_CHILDREN);
-    UUID child2 =
+    // IDLE 子 Thread 不占计数
+    createChildThread(
+        rootA, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
+    UUID grandChildActive =
         createChildThread(
-            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
-    UUID child3 =
+            childWaiting,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            ThreadLifecycleStatus.ACTIVE);
+    UUID otherTreeChild =
         createChildThread(
-            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+            rootB, other.sessionId(), other.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
 
-    UUID grandChild1 =
-        createChildThread(
-            child1, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
-    UUID grandChild2 =
-        createChildThread(
-            child1, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
+    // root 自身即使 ACTIVE 也不计入全局 subagent 计数
+    inTransaction(
+        store,
+        tx ->
+            tx.updateThread(
+                tx.lockThread(rootA)
+                    .orElseThrow()
+                    .changeLifecycleStatus(ThreadLifecycleStatus.ACTIVE, T1)));
 
     store.transaction(
         tx -> {
-          // root 树活跃后代：child1(WAITING) + grandChild1(ACTIVE) + child3(ACTIVE) = 3
-          assertEquals(3, tx.countActiveThreadsInTree(rootId));
-          // child1 子树活跃后代：grandChild1(ACTIVE) = 1
-          assertEquals(1, tx.countActiveThreadsInTree(child1));
-          // child2 子树活跃后代：0
-          assertEquals(0, tx.countActiveThreadsInTree(child2));
-          // child3 子树活跃后代：0
-          assertEquals(0, tx.countActiveThreadsInTree(child3));
+          // childWaiting(WAITING) + grandChildActive(ACTIVE) + otherTreeChild(ACTIVE) = 3
+          assertEquals(3, tx.countActiveSubagentThreads());
           return null;
         });
 
-    // 状态推进：grandChild1 变为空闲
+    inTransaction(
+        store,
+        tx ->
+            tx.updateThread(
+                tx.lockThread(childWaiting)
+                    .orElseThrow()
+                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2)));
+
+    store.transaction(
+        tx -> {
+          // 父空闲但更深的后代仍活跃：grandChildActive + otherTreeChild = 2
+          assertEquals(2, tx.countActiveSubagentThreads());
+          return null;
+        });
+
+    inTransaction(
+        store,
+        tx ->
+            tx.updateThread(
+                tx.lockThread(otherTreeChild)
+                    .orElseThrow()
+                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3)));
+
+    store.transaction(
+        tx -> {
+          assertEquals(1, tx.countActiveSubagentThreads());
+          return null;
+        });
+
+    inTransaction(
+        store,
+        tx ->
+            tx.updateThread(
+                tx.lockThread(grandChildActive)
+                    .orElseThrow()
+                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3)));
+
+    store.transaction(
+        tx -> {
+          assertEquals(0, tx.countActiveSubagentThreads());
+          return null;
+        });
+  }
+
+  @Test
+  void joinAdmissionLockPrecedesTreeAndRowLocks() {
+    // 测试意图：验证全局 Join 准入锁只能在事务内最先获取——准入后再取 tree / Thread 锁合法且准入锁幂等；
+    // 已取 tree 锁或业务行锁后再取准入锁必须确定性拒绝，保证 admission -> tree -> row 的锁序。
+    UUID rootId = baseline.threadId();
     inTransaction(
         store,
         tx -> {
-          ThreadState grandChild = tx.lockThread(grandChild1).orElseThrow();
-          tx.updateThread(grandChild.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T1));
+          tx.lockJoinAdmission();
+          tx.lockJoinAdmission();
+          tx.lockTree(rootId);
+          tx.lockThread(rootId);
         });
 
-    store.transaction(
-        tx -> {
-          // grandChild1 空闲后，root 树活跃后代降为 child1(WAITING) + child3(ACTIVE) = 2
-          assertEquals(2, tx.countActiveThreadsInTree(rootId));
-          assertEquals(0, tx.countActiveThreadsInTree(child1));
-          return null;
-        });
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(rootId);
+                  tx.lockJoinAdmission();
+                }));
 
-    // child1 变为空闲
-    inTransaction(
-        store,
-        tx -> {
-          ThreadState c1 = tx.lockThread(child1).orElseThrow();
-          tx.updateThread(c1.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2));
-        });
-
-    store.transaction(
-        tx -> {
-          // child1 空闲后，root 树活跃后代仅剩 child3(ACTIVE) = 1
-          assertEquals(1, tx.countActiveThreadsInTree(rootId));
-          return null;
-        });
-
-    // child3 变为空闲
-    inTransaction(
-        store,
-        tx -> {
-          ThreadState c3 = tx.lockThread(child3).orElseThrow();
-          tx.updateThread(c3.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3));
-        });
-
-    store.transaction(
-        tx -> {
-          // 全部后代空闲
-          assertEquals(0, tx.countActiveThreadsInTree(rootId));
-          return null;
-        });
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(rootId);
+                  tx.lockJoinAdmission();
+                }));
   }
 
   @Test
@@ -1454,7 +1485,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           // 活跃子线程原语：只有 1 个活跃子线程，不受 2 条 Join 记录影响
           assertEquals(1, tx.countActiveChildren(rootId));
-          assertEquals(1, tx.countActiveThreadsInTree(rootId));
+          assertEquals(1, tx.countActiveSubagentThreads());
           return null;
         });
 
@@ -1469,7 +1500,7 @@ public abstract class HarnessStoreJoinContract {
     store.transaction(
         tx -> {
           assertEquals(1, tx.countActiveChildren(rootId));
-          assertEquals(1, tx.countActiveThreadsInTree(rootId));
+          assertEquals(1, tx.countActiveSubagentThreads());
           return null;
         });
 
@@ -1484,19 +1515,16 @@ public abstract class HarnessStoreJoinContract {
     store.transaction(
         tx -> {
           assertEquals(0, tx.countActiveChildren(rootId));
-          assertEquals(0, tx.countActiveThreadsInTree(rootId));
+          assertEquals(0, tx.countActiveSubagentThreads());
           return null;
         });
   }
 
   @Test
-  void countActiveChildrenAndTreeRejectNullArguments() {
-    // 测试意图：验证 countActiveChildren 与 countActiveThreadsInTree 对 null 参数抛出 NullPointerException。
+  void countActiveChildrenRejectsNullArgument() {
+    // 测试意图：验证 countActiveChildren 对 null 参数抛出 NullPointerException。
     assertThrows(
         NullPointerException.class, () -> inTransaction(store, tx -> tx.countActiveChildren(null)));
-    assertThrows(
-        NullPointerException.class,
-        () -> inTransaction(store, tx -> tx.countActiveThreadsInTree(null)));
   }
 
   @Test
