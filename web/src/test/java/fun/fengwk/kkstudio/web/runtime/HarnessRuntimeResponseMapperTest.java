@@ -23,13 +23,9 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -87,15 +83,17 @@ class HarnessRuntimeResponseMapperTest {
   private static final AgentMessageJsonCodec AGENT_MESSAGES = new AgentMessageJsonCodec();
 
   @Test
-  void projectsEveryStableThreadRuntimeStatus() {
-    // HTTP status 必须覆盖共享 ThreadRuntimeStatus 的完整 vocabulary，而不是自行重复推导。
+  void projectsEveryReachableRuntimeStatusFromThreadSnapshot() {
+    // 测试意图：HTTP status 必须逐字投影 ThreadSnapshot.runtimeStatus() 的全部可达状态；
+    // web 不再自行分类上下文，也就不允许出现 Runtime 投影之外的状态（例如曾经由 web 补出的 CONTINUATION_DUE / APPLYING）。
     Map<ThreadRuntimeStatus, ThreadSnapshot> cases = new LinkedHashMap<>();
+    // 只有完全静止的 IDLE 不是 processing，其余状态一律 processing。
     cases.put(ThreadRuntimeStatus.IDLE, HarnessRuntimeTestFixtures.idleSnapshot());
+    // 生命周期 ACTIVE 但本地没有活跃调用：等待调度启动新 turn，因此排队命令与历史里的 continuation 义务都以 QUEUED 暴露。
     cases.put(ThreadRuntimeStatus.QUEUED, HarnessRuntimeTestFixtures.queuedSnapshot());
     cases.put(
         ThreadRuntimeStatus.WAITING_CHILDREN,
-        HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(1)));
-    cases.put(ThreadRuntimeStatus.CONTINUATION_DUE, continuationDueSnapshot());
+        HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2)));
     cases.put(
         ThreadRuntimeStatus.MODEL_READY, modelSnapshot(ModelInvocationStatus.READY, List.of()));
     cases.put(
@@ -103,7 +101,6 @@ class HarnessRuntimeResponseMapperTest {
         modelSnapshot(ModelInvocationStatus.DISPATCHING, List.of()));
     cases.put(
         ThreadRuntimeStatus.MODEL_RUNNING, modelSnapshot(ModelInvocationStatus.RUNNING, List.of()));
-    cases.put(ThreadRuntimeStatus.APPLYING, modelSnapshot(ModelInvocationStatus.FAILED, List.of()));
     cases.put(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
         toolSnapshot(ToolInvocationStatus.WAITING_APPROVAL));
@@ -117,10 +114,17 @@ class HarnessRuntimeResponseMapperTest {
       assertEquals(entry.getKey().isProcessing(), dto.getProcessing());
     }
 
-    HarnessThreadDTO terminalTool =
-        HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED));
-    assertEquals(ThreadRuntimeStatus.APPLYING.name(), terminalTool.getStatus());
-    assertTrue(terminalTool.getProcessing());
+    // continueModel 的历史义务不再是独立状态：同一 ACTIVE 生命周期下它必须与排队命令投影出同一个 QUEUED。
+    HarnessThreadDTO continuationPending =
+        HarnessRuntimeResponseMapper.toThreadDto(
+            HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
+    assertEquals(ThreadRuntimeStatus.QUEUED.name(), continuationPending.getStatus());
+    assertTrue(continuationPending.getProcessing());
+
+    // 终态调用尚未物化的 ACTIVE 形状属于 Runtime 不变量破坏：web 既不发明状态也不吞掉异常，让 Runtime 的 fail-closed 语义直接暴露。
+    assertThrows(
+        IllegalStateException.class,
+        () -> HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED)));
   }
 
   @Test
@@ -514,34 +518,6 @@ class HarnessRuntimeResponseMapperTest {
         List.of());
   }
 
-  private static ThreadSnapshot continuationDueSnapshot() {
-    Entry turnStart =
-        new Entry(
-            id(2),
-            id(1),
-            id(1),
-            new TurnStartPayload(
-                TurnStartReason.INPUT, HarnessRuntimeTestFixtures.settings(), id(1)),
-            NOW);
-    Entry turnEnd =
-        new Entry(
-            id(5),
-            id(1),
-            id(4),
-            new TurnEndPayload(id(2), TurnEndOutcome.COMPLETED, true, null, null),
-            NOW);
-    EntryPath path =
-        new EntryPath(
-            List.of(
-                HarnessRuntimeTestFixtures.rootEntry(),
-                turnStart,
-                HarnessRuntimeTestFixtures.userMessageEntry(),
-                HarnessRuntimeTestFixtures.plainAssistantEntry(),
-                turnEnd));
-    return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.thread(id(5)), path, List.of(), null, List.of(), List.of());
-  }
-
   private static ThreadSnapshot modelSnapshot(
       ModelInvocationStatus status, List<ModelAttemptFailureProjection> failures) {
     return modelSnapshot(
@@ -561,7 +537,12 @@ class HarnessRuntimeResponseMapperTest {
                 HarnessRuntimeTestFixtures.turnStartEntry(),
                 HarnessRuntimeTestFixtures.userMessageEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.thread(id(3)), path, queued, model, List.of(), failures);
+        HarnessRuntimeTestFixtures.activeThread(id(3), id(3)),
+        path,
+        queued,
+        model,
+        List.of(),
+        failures);
   }
 
   private static ThreadSnapshot toolSnapshot(ToolInvocationStatus status) {
@@ -590,7 +571,12 @@ class HarnessRuntimeResponseMapperTest {
                 HarnessRuntimeTestFixtures.userMessageEntry(),
                 HarnessRuntimeTestFixtures.assistantEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.thread(id(4)), path, List.of(), model, List.of(tool), List.of());
+        HarnessRuntimeTestFixtures.activeThread(id(4), id(4)),
+        path,
+        List.of(),
+        model,
+        List.of(tool),
+        List.of());
   }
 
   private static ModelInvocation modelInvocation(
@@ -726,10 +712,12 @@ class HarnessRuntimeResponseMapperTest {
         new ThreadState(
             thread.id(),
             thread.sessionId(),
+            thread.parentThreadId(),
             thread.headEntryId(),
             thread.creationRequestHash(),
             thread.name(),
             thread.yoloEnabled(),
+            thread.status(),
             thread.nextCommandSequence(),
             version,
             thread.createdAt(),
