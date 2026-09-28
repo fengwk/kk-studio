@@ -439,9 +439,14 @@ final class HarnessRuntimeTestSupport {
 
   /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
   static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return setWaitingApproval(store, baseline.toolId());
+  }
+
+  /** 将指定 id 的 ToolInvocation 推进到 WAITING_APPROVAL（多 sibling 的 TOOL_ACTIVE 上下文）。 */
+  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
           ToolInvocation waiting = tool.requestApproval("tool approval requested", T3);
           tx.updateToolInvocations(List.of(waiting));
           return waiting;

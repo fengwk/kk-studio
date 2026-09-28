@@ -22,11 +22,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.util.Arrays;
 import java.util.List;
@@ -455,6 +458,98 @@ public abstract class HarnessStoreCommandContract {
             inTransaction(
                 store,
                 tx -> tx.insertCommands(List.of(command(TestIds.id(999), 1, TestIds.id(1))))));
+  }
+
+  @Test
+  void findCommandLocatesExactlyTheThreadScopedSequence() {
+    // 测试意图：验证 findCommand 按 (threadId, sequence) 直接定位单条 Command：命中该 Thread 的唯一 sequence，
+    // 另一 Thread 的同 sequence 与不存在的 sequence 均返回 empty；离开 QUEUED（已消费或已取消）后行仍可被读到。
+    Baseline other = seedThreadBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  command(baseline.threadId(), 1, TestIds.id(1)),
+                  command(baseline.threadId(), 2, TestIds.id(2))));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(other.threadId());
+          tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(3))));
+        });
+
+    store.transaction(
+        tx -> {
+          ThreadCommand first = tx.findCommand(baseline.threadId(), 1).orElseThrow();
+          assertEquals(1L, first.sequence());
+          assertEquals(TestIds.id(1), first.idempotencyKey());
+          ThreadCommand second = tx.findCommand(baseline.threadId(), 2).orElseThrow();
+          assertEquals(TestIds.id(2), second.idempotencyKey());
+          // 同名 sequence 在另一 Thread 上是不同行
+          assertEquals(
+              TestIds.id(3), tx.findCommand(other.threadId(), 1).orElseThrow().idempotencyKey());
+          // 不存在的 sequence 与不存在的 Thread 都返回 empty
+          assertTrue(tx.findCommand(baseline.threadId(), 99).isEmpty());
+          assertTrue(tx.findCommand(TestIds.id(999), 1).isEmpty());
+          return null;
+        });
+
+    // 终态 marker 之后仍然可直接按 PK 读到 durable 行（findCommand 不做 queued 过滤）
+    store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+          tx.updateCommands(List.of(withCancelledAt(queued, TestIds.id(7), T2)));
+          return null;
+        });
+    store.transaction(
+        tx -> {
+          assertEquals(
+              ThreadCommandState.CANCELLED,
+              tx.findCommand(baseline.threadId(), 1).orElseThrow().state());
+          return null;
+        });
+  }
+
+  @Test
+  void commandLockRankExceptionRequiresTheSameExecutionTree() {
+    // 测试意图：验证 COMMAND 的锁阶梯例外严格限定在同一执行树内——在已获取高阶 WORK 锁之后回退写 COMMAND 时，
+    // 只有该 COMMAND 所属 Thread 落在已持有的树锁内才被允许；仅仅持有另一棵树的树锁不构成例外，必须拒绝。
+    Baseline other = seedThreadBaseline(store);
+    WorkTarget otherWork = new WorkTarget(WorkTargetType.THREAD, other.threadId());
+
+    // 只持有 baseline 树的树锁：对其它树的 Thread 回退写 COMMAND 必须拒绝
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(baseline.threadId());
+                  tx.lockThread(other.threadId());
+                  tx.requestWork(otherWork, T0);
+                  tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11))));
+                }));
+    assertTrue(store.transaction(tx -> tx.findCommand(other.threadId(), 1)).isEmpty());
+
+    // 同时持有两棵树的树锁（升序）：同一回退写 COMMAND 合法
+    inTransaction(
+        store,
+        tx -> {
+          for (UUID root :
+              List.of(baseline.threadId(), other.threadId()).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            tx.lockTree(root);
+          }
+          tx.lockThread(other.threadId());
+          tx.requestWork(otherWork, T0);
+          tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11))));
+        });
+    assertTrue(store.transaction(tx -> tx.findCommand(other.threadId(), 1)).isPresent());
   }
 
   @Test

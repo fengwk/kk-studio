@@ -104,14 +104,12 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          // 只读预读既有 id（未加锁探测）：若本次复用了旧 Thread id，必须把该 Thread 的 Session/Thread 行一并纳入规范
-          // 锁序，否则 replay 阶段会以逆序补锁 child Session（放弃先锁 parent、后补锁低 UUID child 的逆序）。
-          ThreadState probe = tx.findThread(target.threadId()).orElse(null);
-          Set<UUID> prelocked = probe == null ? Set.of() : Set.of(probe.id());
+          // 子身份必须在树锁内复读：并发重放可能在等待锁期间才看到第一次接受。
           LockedAncestors lockedAncestors =
               target.parentThreadId() != null
-                  ? lockTreeAndAncestors(tx, target.parentThreadId(), true, prelocked)
-                  : lockTreeAndAncestors(tx, target.threadId(), false, prelocked);
+                  ? lockTreeAndAncestors(
+                      tx, target.parentThreadId(), true, Set.of(target.threadId()))
+                  : lockTreeAndAncestors(tx, target.threadId(), false, null);
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
@@ -282,20 +280,9 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
-          List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
           boolean genuineUserInput = isGenuineUserInput(commands);
-          Set<UUID> additionalThreads = new LinkedHashSet<>();
-          if (genuineUserInput && !pending.isEmpty()) {
-            for (ThreadJoin pendingJoin : pending) {
-              additionalThreads.add(pendingJoin.childThreadId());
-            }
-          }
-          LockedAncestors locked =
-              lockTreeAndAncestors(tx, target.threadId(), false, additionalThreads);
-          List<ThreadJoin> confirmedPending = tx.loadPendingDeliveries(target.threadId());
-          if (!pending.equals(confirmedPending)) {
-            throw new IllegalStateException("pending deliveries changed while acquiring tree lock");
-          }
+          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
           ThreadState thread = locked.threads.get(target.threadId());
           if (thread == null) {
             throw new HarnessRuntimeNotFoundException(
@@ -410,18 +397,38 @@ final class AcceptCommandsControl {
       UUID anchorThreadId,
       boolean anchorIsParent,
       Set<UUID> additionalThreadIds) {
-    List<UUID> chain = tx.findAncestorChain(anchorThreadId);
-    if (anchorIsParent && chain.isEmpty()) {
+    List<UUID> hint = tx.findAncestorChain(anchorThreadId);
+    if (anchorIsParent && hint.isEmpty()) {
       throw new IllegalArgumentException("join parent does not exist");
     }
-    UUID root = chain.isEmpty() ? anchorThreadId : chain.get(chain.size() - 1);
+    UUID root = hint.isEmpty() ? anchorThreadId : hint.get(hint.size() - 1);
     tx.lockTree(root);
-    if (!chain.equals(tx.findAncestorChain(anchorThreadId))) {
-      throw new IllegalStateException("execution tree changed while acquiring its lock");
+    List<UUID> chain = tx.findAncestorChain(anchorThreadId);
+    if (anchorIsParent && chain.isEmpty()) {
+      throw new HarnessRuntimeNotFoundException("join parent no longer exists");
+    }
+    if (!chain.isEmpty() && !root.equals(chain.get(chain.size() - 1))) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
+          "thread execution parent differs from the requested tree");
     }
     Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
     if (additionalThreadIds != null) {
-      allThreadIds.addAll(additionalThreadIds);
+      for (UUID id : additionalThreadIds) {
+        ThreadState existing = tx.findThread(id).orElse(null);
+        if (existing != null) {
+          if (!Objects.equals(existing.parentThreadId(), anchorThreadId)) {
+            throw conflict(
+                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
+                "thread " + id + " already belongs to another execution parent");
+          }
+          allThreadIds.add(id);
+        }
+      }
+    }
+    // 先在树锁内确定完整行锁集合，再按 Session/Thread 排序；不能在 Work 后补锁交付子线程。
+    for (ThreadJoin pending : tx.loadPendingDeliveries(anchorThreadId)) {
+      allThreadIds.add(pending.childThreadId());
     }
     Map<UUID, ThreadState> immutableThreads = new HashMap<>();
     Set<UUID> sessionIds = new LinkedHashSet<>();
@@ -708,13 +715,13 @@ final class AcceptCommandsControl {
         for (long seq = expected; seq < firstSequence; seq++) {
           long checkSeq = seq;
           boolean isDelivery =
-              tx.loadCommandsByThread(target.threadId()).stream()
-                  .filter(c -> c.sequence() == checkSeq)
-                  .anyMatch(
-                      c ->
-                          tx.findJoin(c.idempotencyKey())
-                              .map(j -> Objects.equals(j.deliveryCommandSequence(), checkSeq))
-                              .orElse(false));
+              tx.findCommand(target.threadId(), checkSeq)
+                  .flatMap(c -> tx.findJoin(c.idempotencyKey()))
+                  .map(
+                      j ->
+                          target.threadId().equals(j.parentThreadId())
+                              && Objects.equals(j.deliveryCommandSequence(), checkSeq))
+                  .orElse(false);
           if (!isDelivery) {
             allPrecedingWereDeliveries = false;
             break;

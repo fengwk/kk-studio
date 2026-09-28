@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -13,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -26,12 +29,15 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 
 import java.time.Clock;
@@ -574,6 +580,104 @@ class HarnessRuntimeJoinAcceptanceTest {
                 List.of(customMsgCmd)),
             AcceptancePreflight.IDENTITY);
     assertNotNull(customAccepted);
+  }
+
+  @Test
+  void stoppedParentResumesOnlyOnGenuineUserInput() {
+    // 测试意图：STOPPED 边界的父线程只有在排队真实用户输入（USER / GOAL / 非 reminder CUSTOM_MESSAGE）时才解除
+    // 暂停并接受新 join；仅排队运行时 reminder 或 SET_* 等非用户 command 时保持暂停，join 被确定性拒绝。
+    // 每个 payload 用独立父线程隔离，避免“首个 genuine 命令即返回”的早退互相掩盖。
+    assertStoppedParentAcceptsJoinAfterQueueing(
+        2000, 2001, 2003, 2004, 2005, 2006, userMessagePayload("resume"), true);
+    assertStoppedParentAcceptsJoinAfterQueueing(
+        2010, 2011, 2013, 2014, 2015, 2016, new GoalCommandPayload("resume goal"), true);
+    assertStoppedParentAcceptsJoinAfterQueueing(
+        2020,
+        2021,
+        2023,
+        2024,
+        2025,
+        2026,
+        new CustomMessageCommandPayload(AgentMessage.user("plain custom")),
+        true);
+    assertStoppedParentAcceptsJoinAfterQueueing(
+        2030,
+        2031,
+        2033,
+        2034,
+        2035,
+        2036,
+        new CustomMessageCommandPayload(SystemReminder.message("soft budget nudge")),
+        false);
+    assertStoppedParentAcceptsJoinAfterQueueing(
+        2040,
+        2041,
+        2043,
+        2044,
+        2045,
+        2046,
+        new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")),
+        false);
+  }
+
+  /**
+   * 在 STOPPED 边界的父线程上预先排队给定 payload，再尝试为该父线程建立子 Session + Join。
+   *
+   * <p>命令直接写入 store（绕过 acceptCommands 的 batch 形态约束）：join 接受路径只读取父线程 mailbox 判定暂停语义， 不触碰父线程的
+   * nextCommandSequence。
+   */
+  private void assertStoppedParentAcceptsJoinAfterQueueing(
+      int parentSession,
+      int parentThread,
+      int queuedCommandId,
+      int childSession,
+      int childThread,
+      int invocationId,
+      ThreadCommandPayload queuedPayload,
+      boolean resumes) {
+    AcceptedCommands root =
+        runtime.acceptCommands(
+            session(parentSession, parentThread, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = root.thread().id();
+    UUID stoppedHead = seedClosedStopTurn(root.session().id(), root.rootEntry().id(), parentId);
+    seedQueuedCommand(store, parentId, 2L, queuedPayload, TestIds.id(queuedCommandId));
+
+    ThreadJoinRequest join = request(invocationId, parentId, stoppedHead);
+    AcceptCommandsCommand child = session(childSession, childThread, parentId);
+    if (resumes) {
+      AcceptedCommands accepted =
+          runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY);
+      assertFalse(accepted.replayed());
+      assertEquals(parentId, runtime.findJoin(join.invocationId()).orElseThrow().parentThreadId());
+    } else {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY));
+      assertTrue(runtime.findJoin(join.invocationId()).isEmpty());
+    }
+  }
+
+  @Test
+  void replayOfExistingChildSessionWithLowerUuidsLocksInAscendingOrder() {
+    // 测试意图：重放已存在的子 Session（子 Session/Thread 的 UUID 都小于父）时，接受控制面必须在树锁内复读子线程并
+    // 按 UUID 升序补锁；InMemory store 的严格升序 Thread 锁序会直接拒绝“先锁父、再回补低 UUID 子”的逆序补锁。
+    AcceptedCommands root =
+        runtime.acceptCommands(session(2100, 2101, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = root.thread().id();
+    ThreadJoinRequest join = request(2102, parentId, root.thread().headEntryId());
+    AcceptCommandsCommand child = session(1, 2, parentId);
+
+    AcceptedCommands created =
+        runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY);
+    assertFalse(created.replayed());
+    assertTrue(TestIds.id(1).equals(created.session().id()));
+    assertTrue(TestIds.id(2).equals(created.thread().id()));
+
+    AcceptedCommands replayed =
+        runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY);
+    assertTrue(replayed.replayed());
+    assertEquals(created.thread().id(), replayed.thread().id());
+    assertEquals(1, store.transaction(tx -> tx.listChildren(parentId)).size());
   }
 
   @Test
