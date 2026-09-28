@@ -394,14 +394,6 @@ export const settingsCatalog = {
     'en-US': 'Global limit on concurrent subagents across all conversation sessions. Set to 0 for no global cap.',
     'zh-CN': '全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。',
   },
-  'settings.field.aiRuntime.subagentIdleTimeoutMillis': {
-    'en-US': 'Idle timeout (ms)',
-    'zh-CN': '空闲超时（毫秒）',
-  },
-  'settings.field.aiRuntime.subagentIdleTimeoutMillis.hint': {
-    'en-US': 'Idle timeout in milliseconds for inactive subagents. Set to 0 to disable idle timeout detection.',
-    'zh-CN': '子代理无输出或处于等待状态的超时毫秒数。设为 0 表示不启用空闲超时检测。',
-  },
   'settings.field.aiRuntime.subagentMaxTurns': {
     'en-US': 'Max turns',
     'zh-CN': '最大轮数',

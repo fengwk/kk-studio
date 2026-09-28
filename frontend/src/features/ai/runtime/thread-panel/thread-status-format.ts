@@ -181,3 +181,43 @@ function formatCompactNumber(value: number): string {
 function positiveFinite(value: number | undefined): number | null {
   return value != null && Number.isFinite(value) && value > 0 ? value : null
 }
+
+/**
+ * 格式化 Thread 运行状态，为 WAITING_CHILDREN / QUEUED 等提供准确的本地化文案。
+ */
+export function formatThreadStatusLabel(
+  status?: string | null,
+  t: (key: string) => string = translate,
+): string {
+  if (!status) {
+    return ''
+  }
+  switch (status) {
+    case 'WAITING_CHILDREN':
+      return t('ai.runtime.thread.status.WAITING_CHILDREN')
+    case 'QUEUED':
+      return t('ai.runtime.thread.status.QUEUED')
+    case 'IDLE':
+      return t('ai.runtime.thread.status.IDLE')
+    case 'CONTINUATION_DUE':
+      return t('ai.runtime.thread.status.CONTINUATION_DUE')
+    case 'APPLYING':
+      return t('ai.runtime.thread.status.APPLYING')
+    case 'MODEL_READY':
+      return t('ai.runtime.thread.status.MODEL_READY')
+    case 'MODEL_DISPATCHING':
+      return t('ai.runtime.thread.status.MODEL_DISPATCHING')
+    case 'MODEL_RUNNING':
+      return t('ai.runtime.thread.status.MODEL_RUNNING')
+    case 'TOOL_WAITING_APPROVAL':
+      return t('ai.runtime.thread.status.TOOL_WAITING_APPROVAL')
+    case 'TOOL_READY':
+      return t('ai.runtime.thread.status.TOOL_READY')
+    case 'TOOL_DISPATCHING':
+      return t('ai.runtime.thread.status.TOOL_DISPATCHING')
+    case 'TOOL_RUNNING':
+      return t('ai.runtime.thread.status.TOOL_RUNNING')
+    default:
+      return status
+  }
+}
