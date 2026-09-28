@@ -166,15 +166,14 @@ final class AnthropicModelProvider implements ModelProvider {
           @Override
           public void onEvent(ServerSentEvent event) {
             // 每条 transport SSE 帧先 exactly-once 原生回调，再进入 normalized/error 语义处理
+            bridge.emitProtocolEvent(toProtocolEvent(event));
             try {
-              bridge.emitProtocolEvent(toProtocolEvent(event));
               accumulator.handleEvent(event.event(), event.data());
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              // 用户 handler 抛错后先封口，避免 transport 的 CALLBACK_FAILED 再次进入 onError。
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 
@@ -184,10 +183,10 @@ final class AnthropicModelProvider implements ModelProvider {
               ProviderCompletion completion = accumulator.finish();
               bridge.emitComplete(completion);
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 

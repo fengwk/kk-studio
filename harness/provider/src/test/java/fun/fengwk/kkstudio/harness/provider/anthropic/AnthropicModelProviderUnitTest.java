@@ -244,7 +244,7 @@ class AnthropicModelProviderUnitTest {
             new ProviderStreamHandler() {
               @Override
               public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
-                throw new IllegalStateException("user handler failed");
+                throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
               }
 
               @Override
@@ -259,7 +259,7 @@ class AnthropicModelProviderUnitTest {
               }
             });
     assertThrows(
-        IllegalStateException.class,
+        ProviderException.class,
         () -> callbackRef.get().onEvent(new ServerSentEvent("message", "{\"type\":\"ping\"}")));
     callbackRef
         .get()
@@ -267,6 +267,71 @@ class AnthropicModelProviderUnitTest {
             new TransportException(TransportErrorKind.CALLBACK_FAILED, "onEvent callback threw"));
     assertEquals(0, errors.get());
     assertNotNull(stream);
+
+    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
+    AnthropicModelProvider providerExceptionProvider =
+        new AnthropicModelProvider(
+            new JdkHttpSseTransport(client, exec, sched) {
+              @Override
+              public ProviderStream stream(
+                  HttpRequest request,
+                  ModelCallTimeoutPolicy timeoutPolicy,
+                  HttpSseLimits limits,
+                  HttpSseCallback callback) {
+                providerExceptionCallback.set(callback);
+                return new ProviderStream() {
+                  @Override
+                  public void cancel() {}
+
+                  @Override
+                  public boolean isCancelled() {
+                    return false;
+                  }
+                };
+              }
+            },
+            descriptor,
+            "key",
+            URI.create("https://api.anthropic.com/v1/messages"));
+    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
+    providerExceptionProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+          }
+        });
+    providerExceptionCallback
+        .get()
+        .onEvent(
+            new ServerSentEvent(
+                "message_start",
+                "{\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}"));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            providerExceptionCallback
+                .get()
+                .onEvent(
+                    new ServerSentEvent(
+                        "content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"x\"}}")));
+    providerExceptionCallback
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, providerExceptionErrors.get());
   }
 
   @Test

@@ -112,15 +112,15 @@ final class OpenAiChatModelProvider implements ModelProvider {
           @Override
           public void onEvent(ServerSentEvent event) {
             // 每条 transport 帧先原样回调一次 native 事件，再交给规范化累积器；error 帧因此也是「先 raw 后 error」
+            bridge.emitProtocolEvent(
+                new ProviderProtocolEvent(protocolEventType(event), event.data()));
             try {
-              bridge.emitProtocolEvent(
-                  new ProviderProtocolEvent(protocolEventType(event), event.data()));
               accumulator.handleData(event.data());
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 
@@ -130,10 +130,10 @@ final class OpenAiChatModelProvider implements ModelProvider {
               ProviderCompletion completion = accumulator.finish();
               bridge.emitComplete(completion);
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 

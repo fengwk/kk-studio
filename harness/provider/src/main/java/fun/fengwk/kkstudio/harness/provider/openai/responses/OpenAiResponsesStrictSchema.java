@@ -138,33 +138,45 @@ final class OpenAiResponsesStrictSchema {
     return required;
   }
 
-  /** 属性是否已经允许 null：type、类型数组，或组合分支中的 null。 */
+  /**
+   * 属性是否已经明确允许 null。只承认 {@code type:"null"}、类型数组中的 null，以及 anyOf 中的 null；oneOf 与 allOf 不按 any
+   * 语义推断，避免把不能缺省的组合误判成已可空。
+   */
   private static boolean allowsNull(JsonNode property) {
     if (property == null || !property.isObject()) {
       return false;
     }
-    for (String combinator : List.of("anyOf", "oneOf", "allOf")) {
-      JsonNode variants = property.get(combinator);
-      if (variants != null && variants.isArray()) {
-        for (JsonNode variant : variants) {
-          if (allowsNull(variant)) {
-            return true;
-          }
+    JsonNode type = property.get("type");
+    if (type != null && !explicitTypeAllowsNull(type)) {
+      return false;
+    }
+    if (explicitTypeAllowsNull(type)) {
+      return true;
+    }
+    JsonNode anyOf = property.get("anyOf");
+    if (anyOf != null && anyOf.isArray()) {
+      for (JsonNode variant : anyOf) {
+        if (allowsNull(variant)) {
+          return true;
         }
       }
     }
-    JsonNode type = property.get("type");
+    return false;
+  }
+
+  private static boolean explicitTypeAllowsNull(JsonNode type) {
     if (type == null) {
       return false;
     }
     if (type.isTextual()) {
       return "null".equals(type.textValue());
     }
-    if (type.isArray()) {
-      for (JsonNode variant : type) {
-        if (variant.isTextual() && "null".equals(variant.textValue())) {
-          return true;
-        }
+    if (!type.isArray()) {
+      return false;
+    }
+    for (JsonNode variant : type) {
+      if (variant.isTextual() && "null".equals(variant.textValue())) {
+        return true;
       }
     }
     return false;

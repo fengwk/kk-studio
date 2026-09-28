@@ -439,6 +439,33 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(legacy.path("additionalProperties").asBoolean());
   }
 
+  /** 测试意图：allOf 中仅一个分支可空、oneOf 出现多个 null，以及 anyOf 被兄弟 type 禁止 null 时，都不能当成整体已可空；拿不准时安全外包一层 null。 */
+  @Test
+  void test_strictSchemaDoesNotTreatAmbiguousCombinatorsAsNullable() throws Exception {
+    String schema =
+        """
+        {"type":"object","properties":{
+           "mixed":{"allOf":[{"type":"string"},{"type":"null"}]},
+           "exclusive":{"oneOf":[{"type":"null"},{"type":"null"}]},
+           "blocked":{"type":"string","anyOf":[{"type":"string"},{"type":"null"}]}
+         }}
+        """;
+    JsonNode properties =
+        encodedTools(new ProviderToolDefinition("shape", "shape", schema))
+            .get(0)
+            .path("parameters")
+            .path("properties");
+
+    assertEquals("null", properties.path("mixed").path("anyOf").get(1).path("type").asText());
+    assertEquals(
+        "null",
+        properties.path("mixed").path("anyOf").get(0).path("allOf").get(1).path("type").asText());
+    assertEquals("null", properties.path("exclusive").path("anyOf").get(1).path("type").asText());
+    assertEquals(2, properties.path("exclusive").path("anyOf").get(0).path("oneOf").size());
+    assertEquals("null", properties.path("blocked").path("anyOf").get(1).path("type").asText());
+    assertEquals("string", properties.path("blocked").path("anyOf").get(0).path("type").asText());
+  }
+
   /** 验证 prompt_cache_key 直接取自 runtime 派生的 cache affinity identity：稳定、可复现、不同 session 不同。 */
   @Test
   void test_promptCacheKeyComesFromRuntimeAffinityIdentity() throws Exception {

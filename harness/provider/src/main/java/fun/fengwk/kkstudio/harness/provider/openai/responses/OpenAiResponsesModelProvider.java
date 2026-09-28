@@ -97,10 +97,10 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
             try {
               accumulator.handleEvent(event.event(), event.data());
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 
@@ -110,10 +110,10 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
               ProviderCompletion completion = accumulator.finish();
               bridge.emitComplete(completion);
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
-            } catch (RuntimeException handlerFailure) {
-              bridge.sealTerminal();
-              throw handlerFailure;
             }
           }
 
