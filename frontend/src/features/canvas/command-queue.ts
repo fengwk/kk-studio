@@ -85,6 +85,14 @@ export interface CanvasCommandRecoveryResult {
  * - ACK 只清除与本次 operation 完全匹配的持久记录，旧响应不会清掉后来的输入；
  * - 响应 revision 与本地快照存在缺口时，绝不假装增量 patch 完整，必须重取权威快照。
  */
+interface CanvasPendingPayload {
+  idempotencyKey: UUIDString
+  commands: CanvasCommandDTO[]
+  baselineRevision: string
+  ack: CanvasDraftAck[]
+  createdAt: number
+}
+
 export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
@@ -142,8 +150,8 @@ export class CanvasCommandQueue {
   }
 
   /**
-   * 入队一个命令批：立即冻结 id / body / 基线，发送前先落盘，再按序提交。
-   * `ack` 描述本操作成功后需要按 generation 精准清除的草稿范围。
+   * 入队一个命令批：入队瞬间深拷贝并递归冻结 id / body / 基线 / ack；
+   * 发送前落盘并在 tail 流转时按已加载的持久序号分配 sequence，再按序提交。
    */
   enqueue(
     commands: ApplyCanvasCommandsRequestDTO['commands'],
@@ -155,9 +163,23 @@ export class CanvasCommandQueue {
     if (commands.length === 0) {
       return Promise.resolve(this.snapshot)
     }
-    const operation = this.freeze(commands, options?.ack ?? [])
-    this.operations.set(operation.id, operation)
-    const result = this.tail.then(() => this.persistAndSend(operation, options?.signal))
+
+    // 入队瞬间深拷贝并冻结命令体与身份标识，锁定基线与草稿范围，保证不可变性
+    const payload: CanvasPendingPayload = {
+      idempotencyKey: this.createCommandId(),
+      commands: freezeCommands(commands),
+      baselineRevision: this.snapshot.document.revision,
+      ack: Object.freeze([...(options?.ack ?? [])]) as CanvasDraftAck[],
+      createdAt: Date.now(),
+    }
+
+    const result = this.tail.then(() => {
+      // 执行落盘前分配序列号：若前序存在 recovery，此时其 store.list 与序号推进已必定完成
+      const operation = this.freezeOperation(payload)
+      this.operations.set(operation.id, operation)
+      return this.persistAndSend(operation, options?.signal)
+    })
+
     this.tail = result.then(
       () => undefined,
       () => undefined,
@@ -188,17 +210,17 @@ export class CanvasCommandQueue {
     return this.activeRecovery
   }
 
-  private freeze(commands: CanvasCommandDTO[], ack: CanvasDraftAck[]): CanvasPendingOperation {
+  private freezeOperation(payload: CanvasPendingPayload): CanvasPendingOperation {
     return buildPendingOperation({
       canvasId: this.canvasId,
       userId: this.userId,
       editingSessionId: this.editingSessionId,
-      idempotencyKey: this.createCommandId(),
-      commands: freezeCommands(commands),
-      baselineRevision: this.snapshot.document.revision,
-      ack,
+      idempotencyKey: payload.idempotencyKey,
+      commands: payload.commands,
+      baselineRevision: payload.baselineRevision,
+      ack: [...payload.ack],
       sequence: this.sequence++,
-      createdAt: Date.now(),
+      createdAt: payload.createdAt,
     })
   }
 
@@ -266,6 +288,11 @@ export class CanvasCommandQueue {
     } catch (error) {
       this.markBlocked(error)
       throw error
+    }
+
+    // 确保持久化已有序列号完成同步，推进 sequence
+    for (const op of pending) {
+      this.sequence = Math.max(this.sequence, op.sequence + 1)
     }
 
     if (pending.length === 0) {
