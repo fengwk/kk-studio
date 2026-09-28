@@ -39,6 +39,20 @@ export class CanvasCommandConflictError extends Error {
   }
 }
 
+export class CanvasQueueBlockedError extends Error {
+  readonly retryable = true
+  readonly cause?: unknown
+
+  constructor(
+    message = 'Canvas command queue is blocked by an earlier unconfirmed operation; recover and retry.',
+    cause?: unknown,
+  ) {
+    super(message)
+    this.name = 'CanvasQueueBlockedError'
+    this.cause = cause
+  }
+}
+
 export interface CanvasCommandQueueOptions {
   initialSnapshot: CanvasSnapshotDTO
   apply?: typeof postCanvasCommands
@@ -75,7 +89,9 @@ export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
   private sequence = 0
-  private recovery: Promise<CanvasCommandRecoveryResult> | null = null
+  private activeRecovery: Promise<CanvasCommandRecoveryResult> | null = null
+  private blocked = false
+  private blockedError: Error | null = null
   private readonly operations = new Map<string, CanvasPendingOperation>()
   private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
@@ -102,6 +118,14 @@ export class CanvasCommandQueue {
     })
   }
 
+  isBlocked(): boolean {
+    return this.blocked
+  }
+
+  getBlockedError(): Error | null {
+    return this.blockedError
+  }
+
   currentSnapshot(): CanvasSnapshotDTO {
     return this.snapshot
   }
@@ -125,6 +149,9 @@ export class CanvasCommandQueue {
     commands: ApplyCanvasCommandsRequestDTO['commands'],
     options?: { signal?: AbortSignal; ack?: CanvasDraftAck[] },
   ): Promise<CanvasSnapshotDTO> {
+    if (this.blocked) {
+      return Promise.reject(new CanvasQueueBlockedError(undefined, this.blockedError))
+    }
     if (commands.length === 0) {
       return Promise.resolve(this.snapshot)
     }
@@ -140,18 +167,25 @@ export class CanvasCommandQueue {
 
   /**
    * 重载 / 重连后按冻结顺序重放本会话残留的待确认操作。
-   * 同一实例只执行一次；重放失败（网络）不丢弃记录，冲突（409）作为终态移除。
+   * recover 每次可再次调用（仅并发时 singleflight，不永久缓存首次失败），按冻结排序原 key 原 body 发送。
+   * 首个未知结果即停，明确 409 / 确定 4xx 可 settle 并继续。
    */
   recover(): Promise<CanvasCommandRecoveryResult> {
-    if (!this.recovery) {
-      const run = this.tail.then(() => this.runRecovery())
-      this.tail = run.then(
-        () => undefined,
-        () => undefined,
-      )
-      this.recovery = run
+    if (this.activeRecovery) {
+      return this.activeRecovery
     }
-    return this.recovery
+    const run = this.tail.then(() => this.runRecovery())
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    const active = run.finally(() => {
+      if (this.activeRecovery === active) {
+        this.activeRecovery = null
+      }
+    })
+    this.activeRecovery = active
+    return this.activeRecovery
   }
 
   private freeze(commands: CanvasCommandDTO[], ack: CanvasDraftAck[]): CanvasPendingOperation {
@@ -179,6 +213,13 @@ export class CanvasCommandQueue {
       this.operations.delete(operation.id)
       throw error
     }
+
+    if (this.blocked) {
+      // 前序操作已出现未知结果导致队列阻塞：
+      // 本操作已先完成持久化，但绝不得发送越过前序操作；返回清晰可重试错误，不无限挂起 Promise。
+      throw new CanvasQueueBlockedError(undefined, this.blockedError)
+    }
+
     return this.send(operation, signal)
   }
 
@@ -210,7 +251,8 @@ export class CanvasCommandQueue {
         await this.settle(operation)
         throw error
       }
-      // 网络 / 服务端瞬时失败：保留冻结操作，重载后按原 key/body 幂等重放。
+      // 网络 / 服务端瞬时失败：保留冻结操作，标记队列阻塞，等待恢复或重载按原 key/body 幂等重放。
+      this.markBlocked(error)
       throw error
     }
   }
@@ -219,11 +261,29 @@ export class CanvasCommandQueue {
     const result: CanvasCommandRecoveryResult = { replayed: 0, conflicted: 0, failed: 0, ackedDrafts: [] }
     let pending: CanvasPendingOperation[]
     try {
+      // storage.list 失败不能伪装空成功，必须标记阻塞并抛出错误。
       pending = await this.store.list()
-    } catch {
+    } catch (error) {
+      this.markBlocked(error)
+      throw error
+    }
+
+    if (pending.length === 0) {
+      this.blocked = false
+      this.blockedError = null
       return result
     }
-    for (const operation of pending) {
+
+    // 按冻结排序：sequence 升序（相同按 createdAt 升序）
+    const sorted = [...pending].sort((a, b) => {
+      if (a.sequence !== b.sequence) {
+        return a.sequence - b.sequence
+      }
+      return a.createdAt - b.createdAt
+    })
+
+    let hadUnknownFailure = false
+    for (const operation of sorted) {
       this.sequence = Math.max(this.sequence, operation.sequence + 1)
       this.operations.set(operation.id, operation)
       try {
@@ -232,13 +292,34 @@ export class CanvasCommandQueue {
         result.ackedDrafts.push(...operation.ack)
       } catch (error) {
         if (error instanceof CanvasCommandConflictError) {
+          // 409 语义冲突终态：send 内部已 settle(operation)
           result.conflicted += 1
-        } else {
-          result.failed += 1
+          continue
         }
+        if (isTerminalClientError(error)) {
+          // 确定 4xx 终态：send 内部已 settle(operation)
+          result.failed += 1
+          continue
+        }
+        // 未知结果（网络失败 / 5xx 等）：首个未知结果即停，禁止处理后项！
+        result.failed += 1
+        this.markBlocked(error)
+        hadUnknownFailure = true
+        break
       }
     }
+
+    if (!hadUnknownFailure) {
+      this.blocked = false
+      this.blockedError = null
+    }
+
     return result
+  }
+
+  private markBlocked(error: unknown): void {
+    this.blocked = true
+    this.blockedError = error instanceof Error ? error : new Error(String(error))
   }
 
   private async settle(operation: CanvasPendingOperation): Promise<void> {
