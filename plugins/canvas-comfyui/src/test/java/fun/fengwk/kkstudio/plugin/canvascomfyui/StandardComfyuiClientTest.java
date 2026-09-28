@@ -15,19 +15,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
-import java.net.http.HttpRequest;
-import java.nio.ByteBuffer;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -200,36 +196,7 @@ class StandardComfyuiClientTest {
   }
 
   @Test
-  void publisherHonorsSingleUnlimitedDemandAndRepeatedDemandOfTwo() throws Exception {
-    byte[] payload = new byte[] {1, 2, 3, 4, 5};
-    AtomicBoolean closed = new AtomicBoolean();
-    HttpRequest.BodyPublisher publisher =
-        multipart(
-            "once.mp4",
-            "video/mp4",
-            payload.length,
-            tracking(new ByteArrayInputStream(payload), closed));
-    byte[] unlimited = collect(publisher, Long.MAX_VALUE);
-    assertEquals(publisher.contentLength(), unlimited.length);
-    assertTrue(closed.get());
-    assertMultipart("once.mp4", "video/mp4", payload, unlimited);
-
-    byte[] repeatedPayload = new byte[] {3, 3, 3};
-    AtomicBoolean repeatedClosed = new AtomicBoolean();
-    HttpRequest.BodyPublisher repeated =
-        multipart(
-            "two.bin",
-            "application/octet-stream",
-            repeatedPayload.length,
-            tracking(new ByteArrayInputStream(repeatedPayload), repeatedClosed));
-    byte[] batched = collect(repeated, 2L);
-    assertEquals(repeated.contentLength(), batched.length);
-    assertTrue(repeatedClosed.get());
-    assertMultipart("two.bin", "application/octet-stream", repeatedPayload, batched);
-  }
-
-  @Test
-  void cancellingPublisherClosesUploadStreamWithoutReusingIt() throws Exception {
+  void uploadClosesCallerStreamWhenCancelledBeforeContentIsOpened() {
     AtomicBoolean closed = new AtomicBoolean();
     InputStream content =
         tracking(
@@ -240,86 +207,93 @@ class StandardComfyuiClientTest {
               }
             },
             closed);
-    HttpRequest.BodyPublisher publisher =
-        multipart("cancel.bin", "application/octet-stream", 1024L, content);
-    Flow.Subscription[] subscription = new Flow.Subscription[1];
-    AtomicReference<Throwable> error = new AtomicReference<>();
-    AtomicInteger parts = new AtomicInteger();
-    publisher.subscribe(
-        new Flow.Subscriber<>() {
-          @Override
-          public void onSubscribe(Flow.Subscription incoming) {
-            subscription[0] = incoming;
-            incoming.request(1);
-          }
-
-          @Override
-          public void onNext(ByteBuffer item) {
-            if (parts.incrementAndGet() == 1) {
-              subscription[0].request(1);
-              return;
-            }
-            subscription[0].cancel();
-          }
-
-          @Override
-          public void onError(Throwable throwable) {
-            error.set(throwable);
-          }
-
-          @Override
-          public void onComplete() {}
-        });
+    HttpClient cancelling =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(1))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .executor(
+                command -> {
+                  throw new SecurityException("cancelled before request");
+                })
+            .build();
+    StandardComfyuiClient cancellingClient =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            null,
+            Duration.ofSeconds(2),
+            new ObjectMapper(),
+            cancelling);
+    assertThrows(
+        SecurityException.class,
+        () ->
+            cancellingClient.upload(
+                "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
     assertTrue(closed.get());
-    assertEquals(null, error.get());
-    AtomicReference<Throwable> resubscribe = new AtomicReference<>();
-    publisher.subscribe(
-        new Flow.Subscriber<>() {
-          @Override
-          public void onSubscribe(Flow.Subscription incoming) {
-            incoming.request(Long.MAX_VALUE);
-          }
-
-          @Override
-          public void onNext(ByteBuffer item) {}
-
-          @Override
-          public void onError(Throwable throwable) {
-            resubscribe.set(throwable);
-          }
-
-          @Override
-          public void onComplete() {}
-        });
-    assertTrue(resubscribe.get() instanceof IllegalStateException);
+    assertThrows(IOException.class, () -> content.read(new byte[1]));
   }
 
   @Test
-  void fixedLengthStreamSurfacesCloseFailure() throws Exception {
-    AtomicBoolean closeFailed = new AtomicBoolean();
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            collect(
-                multipart(
-                    "bad-close.bin",
+  void rejectsUploadShorterOrLongerThanDeclaredLength() {
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    UncheckedIOException tooShort =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "short.bin",
                     "application/octet-stream",
-                    1L,
-                    tracking(
-                        new InputStream() {
-                          @Override
-                          public int read() throws IOException {
-                            throw new IOException("read failed");
-                          }
+                    8L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                    CANVAS));
+    assertTrue(tooShort.getCause().getMessage().contains("ended after"));
+    assertTrue(shortClosed.get());
+    assertEquals(null, uploadBody.get());
 
-                          @Override
-                          public void close() throws IOException {
-                            throw new IOException("close failed");
-                          }
-                        },
-                        closeFailed)),
-                Long.MAX_VALUE));
-    assertTrue(closeFailed.get());
+    AtomicBoolean longClosed = new AtomicBoolean();
+    UncheckedIOException tooLong =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "long.bin",
+                    "application/octet-stream",
+                    2L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2, 3, 4}), longClosed),
+                    CANVAS));
+    assertTrue(tooLong.getCause().getMessage().contains("longer than declared"));
+    assertTrue(longClosed.get());
+    assertEquals(null, uploadBody.get());
+  }
+
+  @Test
+  void rejectsHeaderBreakingFilenameAndMediaType() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\"name.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\r\nname.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "clip.mp4",
+                "video/mp4\r\nX-Injected: 1",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
   }
 
   @Test
@@ -473,85 +447,28 @@ class StandardComfyuiClientTest {
     json(exchange, uploadStatus.get(), uploadResponse.get());
   }
 
-  private HttpRequest.BodyPublisher multipart(
-      String filename, String mediaType, long length, InputStream content) throws Exception {
-    Method method =
-        StandardComfyuiClient.class.getDeclaredMethod(
-            "multipart",
-            String.class,
-            String.class,
-            String.class,
-            long.class,
-            InputStream.class,
-            String.class);
-    method.setAccessible(true);
-    return (HttpRequest.BodyPublisher)
-        method.invoke(
-            client, "boundary", filename, mediaType, length, content, "kk-studio/" + CANVAS);
-  }
-
-  private static byte[] collect(HttpRequest.BodyPublisher publisher, long demand) throws Exception {
-    ByteArrayOutputStream out = new ByteArrayOutputStream();
-    AtomicReference<Throwable> error = new AtomicReference<>();
-    AtomicBoolean completed = new AtomicBoolean();
-    publisher.subscribe(
-        new Flow.Subscriber<>() {
-          private Flow.Subscription subscription;
-
-          @Override
-          public void onSubscribe(Flow.Subscription incoming) {
-            subscription = incoming;
-            incoming.request(demand);
-          }
-
-          @Override
-          public void onNext(ByteBuffer item) {
-            byte[] chunk = new byte[item.remaining()];
-            item.get(chunk);
-            try {
-              out.write(chunk);
-            } catch (IOException failure) {
-              error.set(failure);
-            }
-            if (demand != Long.MAX_VALUE) {
-              subscription.request(demand);
-            }
-          }
-
-          @Override
-          public void onError(Throwable throwable) {
-            error.set(throwable);
-          }
-
-          @Override
-          public void onComplete() {
-            completed.set(true);
-          }
-        });
-    if (error.get() != null) {
-      throw new IllegalStateException(error.get());
-    }
-    assertTrue(completed.get());
-    return out.toByteArray();
-  }
-
-  private static void assertMultipart(
-      String filename, String mediaType, byte[] payload, byte[] body) {
-    String text = new String(body, StandardCharsets.ISO_8859_1);
-    assertTrue(text.contains("name=\"image\"; filename=\"" + filename + "\""));
-    assertTrue(text.contains("Content-Type: " + mediaType));
-    int payloadAt = indexOf(body, payload);
-    assertTrue(payloadAt > 0);
-    assertEquals(
-        "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
-  }
-
   private static InputStream tracking(InputStream content, AtomicBoolean closed) {
     return new FilterInputStream(content) {
       @Override
       public void close() throws IOException {
         closed.set(true);
         super.close();
+      }
+
+      @Override
+      public int read() throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read();
+      }
+
+      @Override
+      public int read(byte[] buffer, int offset, int length) throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read(buffer, offset, length);
       }
     };
   }
