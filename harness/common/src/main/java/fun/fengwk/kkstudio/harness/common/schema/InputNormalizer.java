@@ -17,8 +17,8 @@ import java.util.regex.Pattern;
  * 输入参数 JSON 的静默归一化：在 schema 校验前将数字字符串容错改写为目标数值类型，并移除 schema 声明的可缺省属性上的显式 {@code null}。
  *
  * <p>{@link IntegerSchema} 字段接受匹配 {@code -?\d+} 的十进制数字字符串并改写为 JSON integer；{@link NumberSchema}
- * 字段接受十进制数字字符串（含小数与指数）并按 {@link BigDecimal} 原值改写为 JSON number。非数字文本、超出 long 范围的整数，以及无法安全写成 JSON
- * number 的值不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
+ * 字段接受十进制数字字符串（含小数与指数）并按 {@link BigDecimal} 原值改写为 JSON number。非数字文本与 {@link BigDecimal}
+ * 无法解析的文本不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
  *
  * <p>显式 {@code null} 只对 schema 声明的可缺省属性（未列入 {@code required}）静默删除，使其语义等同于缺省；{@code required} 属性的
  * {@code null} 与 schema 未声明字段的 {@code null} 保持原样，交由 {@link InputValidator} 严格拒绝。
@@ -30,12 +30,6 @@ public final class InputNormalizer {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final Pattern INTEGER_TEXT = Pattern.compile("-?\\d+");
   private static final Pattern NUMBER_TEXT = Pattern.compile("-?\\d+(\\.\\d+)?([eE][+-]?\\d+)?");
-
-  /** JSON number 展开后允许的最大整数位或小数位，避免巨大 toPlainString。 */
-  private static final int MAX_JSON_NUMBER_DIGITS = 1000;
-
-  /** 小于该正数的值不能由 IEEE-754 double 表示，写出 JSON number 会变成 0。 */
-  private static final BigDecimal MIN_POSITIVE_JSON_NUMBER = new BigDecimal("1e-323");
 
   private InputNormalizer() {}
 
@@ -116,27 +110,10 @@ public final class InputNormalizer {
     if (!NUMBER_TEXT.matcher(text).matches()) {
       return null;
     }
-    BigDecimal value;
     try {
-      value = new BigDecimal(text);
+      return new BigDecimal(text);
     } catch (NumberFormatException invalid) {
       return null;
     }
-    // 超大指数的 plain 展开会生成巨量文本，过小的正数会在 JSON number 中变成 0；都保持原节点。
-    BigDecimal magnitude = value.abs();
-    if (value.precision() - value.scale() > MAX_JSON_NUMBER_DIGITS
-        || value.scale() > MAX_JSON_NUMBER_DIGITS
-        || (value.signum() != 0 && magnitude.compareTo(MIN_POSITIVE_JSON_NUMBER) < 0)) {
-      return null;
-    }
-    // double 已能精确表达时沿用其 JSON 字面量；非有限值保持原文本，避免改写成 Infinity。
-    double asDouble = value.doubleValue();
-    if (!Double.isFinite(asDouble)) {
-      return null;
-    }
-    if (new BigDecimal(Double.toString(asDouble)).compareTo(value) == 0) {
-      return BigDecimal.valueOf(asDouble);
-    }
-    return value;
   }
 }
