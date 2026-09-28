@@ -24,7 +24,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
@@ -42,10 +41,9 @@ import java.util.UUID;
 /**
  * 公开 Thread YOLO 控制面在真实 PostgreSQL 归属数据上的拒绝边界。
  *
- * <p>测试意图：Issue+Agent 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project
- * 启动策略与 Issue 工作流统一维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo}
- * 必须以 409 拒绝且不触达 {@link HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走原 CAS
- * 更新路径。
+ * <p>测试意图：Issue+Agent 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project 启动策略与 Issue
+ * 工作流统一维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo} 必须以 409 拒绝且不触达 {@link
+ * HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走原 CAS 更新路径。
  *
  * <p>归属判定使用真实 Spring {@link ProjectThreadOwnerResolver} bean 与真实归属行，仅 {@link HarnessRuntime} 用 mock
  * 以便断言拒绝路径零调用。
@@ -73,8 +71,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
             runtime,
             mock(ModelRequestDebugService.class),
             projectThreadOwnerResolver,
-            mock(InteractionService.class),
-            mock(SubagentTaskActivity.class));
+            mock(InteractionService.class));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -225,8 +222,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
         sessionId,
         """
         {"settings":{"agentName":"default-assistant","model":{"providerName":"openai",\
-        "modelName":"gpt-test","variant":"default"},"environmentName":null,"goal":null},\
-        "subagentContext":null}
+        "modelName":"gpt-test","variant":"default"},"environmentName":null,"goal":null}}
         """);
     UUID threadId = UUID.randomUUID();
     insertThread(sessionId, threadId, "standalone-branch");
@@ -240,9 +236,11 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
             UUID.class,
             sessionId);
     jdbcTemplate.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, false, 1, 0, current_timestamp, current_timestamp)",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+            + " creation_request_hash, name, yolo_enabled, status, next_command_sequence, version,"
+            + " created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, ?, false, 'IDLE', 1, 0, current_timestamp,"
+            + " current_timestamp)",
         threadId,
         sessionId,
         headEntryId,

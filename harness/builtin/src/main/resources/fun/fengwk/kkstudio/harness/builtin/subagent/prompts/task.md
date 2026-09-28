@@ -15,7 +15,7 @@ Acceptance:
 
 Continuing an existing child:
 - Pass `thread_id` from an earlier receipt or completion message to continue exactly that child thread on its existing history. Continuing may switch `subagent_type`, and the new agent runs with its own configuration and permissions.
-- Only continue a child of the current parent thread, and only while it is settled (not queued, running or waiting). Continue while its context is still useful; otherwise start a new `task`.
+- Only continue a child of the current parent thread. A busy child accepts your new prompt as an additional queued input; this does not block for the earlier task's report. Continue while its context is still useful; otherwise start a new `task`.
 - Adjust the prompt based on the child's progress, current blocker, and new context instead of merely repeating the original request. After 2-3 well-directed attempts without meaningful progress, take over the work, switch approaches, or report the blocker.
 
 Budget:

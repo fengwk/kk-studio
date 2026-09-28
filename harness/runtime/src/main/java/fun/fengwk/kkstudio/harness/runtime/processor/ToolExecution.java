@@ -538,6 +538,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              lockTreeForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -562,6 +563,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              lockTreeForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -586,6 +588,7 @@ final class ToolExecution implements ToolGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                lockTreeForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -617,6 +620,7 @@ final class ToolExecution implements ToolGateway.Listener {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                lockTreeForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -752,5 +756,16 @@ final class ToolExecution implements ToolGateway.Listener {
 
     /** 收敛为结果不确定的终态。 */
     UNKNOWN
+  }
+
+  private static void lockTreeForThread(HarnessStore.Transaction tx, UUID threadId) {
+    Objects.requireNonNull(tx, "tx");
+    Objects.requireNonNull(threadId, "threadId");
+    List<UUID> chain = tx.findAncestorChain(threadId);
+    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
+    tx.lockTree(root);
+    if (!chain.equals(tx.findAncestorChain(threadId))) {
+      throw new IllegalStateException("execution tree changed while acquiring its lock");
+    }
   }
 }

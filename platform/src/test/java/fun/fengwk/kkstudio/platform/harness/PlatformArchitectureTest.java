@@ -41,9 +41,13 @@ class PlatformArchitectureTest {
           "fun.fengwk.kkstudio.web.",
           "fun.fengwk.kkstudio.harness.daemon.");
 
-  /** platform/pom.xml 禁止声明的下游模块 artifactId。 */
+  /** platform/pom.xml 完全禁止声明的组合根模块：platform 永远不是启动入口。 */
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
-      List.of("kk-studio-harness-infra", "kk-studio-web", "kk-studio-harness-daemon");
+      List.of("kk-studio-web", "kk-studio-harness-daemon");
+
+  /** 只允许 test scope 声明的下游基础设施模块：主产物不得依赖它们，测试可用真实实现做集成覆盖。 */
+  private static final List<String> TEST_SCOPED_POM_ARTIFACTS =
+      List.of("kk-studio-harness-infra", "kk-studio-canvas-infra");
 
   /** trusted JAR 发现和 classloader 生命周期只属于 web 组合根。 */
   private static final List<String> FORBIDDEN_TRUSTED_CONTRIBUTOR_REFERENCES =
@@ -54,7 +58,10 @@ class PlatformArchitectureTest {
           "kk-studio.harness.contributors.directory",
           "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY");
 
-  /** platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明对应的下游模块 artifactId。 */
+  /**
+   * platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明 web/daemon，infra 实现只能在 test
+   * scope 声明（主产物不依赖 infra，集成测试可用真实实现）。
+   */
   @Test
   void platformNeverDependsOnInfraOrWebOrDaemon() throws IOException {
     Path main = locatePlatformMainJava();
@@ -107,7 +114,9 @@ class PlatformArchitectureTest {
     assertTrue(
         pomText.contains("<artifactId>kk-studio-harness-provider</artifactId>"),
         "platform/pom.xml must declare kk-studio-harness-provider");
-    assertCanvasInfraIsTestScoped(pomText);
+    for (String artifactId : TEST_SCOPED_POM_ARTIFACTS) {
+      assertDeclaredOnlyInTestScope(pomText, artifactId);
+    }
 
     assertTrue(
         violations.isEmpty(),
@@ -140,21 +149,22 @@ class PlatformArchitectureTest {
         "EnvironmentDaemonGateway must use Environment Capability terminology");
   }
 
-  private static void assertCanvasInfraIsTestScoped(String pomText) {
+  /** 下游基础设施实现只能以 test scope 被声明：主产物不依赖 infra，测试可用真实 PostgreSQL 实现做集成覆盖（如 Session 深删除的外键契约）。 */
+  private static void assertDeclaredOnlyInTestScope(String pomText, String artifactId) {
     Matcher matcher =
         Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(pomText);
     int declarations = 0;
     while (matcher.find()) {
       String dependency = matcher.group(1);
-      if (!dependency.contains("<artifactId>kk-studio-canvas-infra</artifactId>")) {
+      if (!dependency.contains("<artifactId>" + artifactId + "</artifactId>")) {
         continue;
       }
       declarations++;
       assertTrue(
           dependency.contains("<scope>test</scope>"),
-          "platform may depend on kk-studio-canvas-infra only in test scope");
+          "platform may depend on " + artifactId + " only in test scope");
     }
-    assertTrue(declarations == 1, "platform must declare one test-scoped canvas infra dependency");
+    assertEquals(1, declarations, "platform must declare exactly one " + artifactId);
   }
 
   private static String normalizeImport(String importLine) {

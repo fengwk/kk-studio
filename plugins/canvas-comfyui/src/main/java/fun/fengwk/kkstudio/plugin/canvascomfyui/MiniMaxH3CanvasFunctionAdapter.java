@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.platform.harness.oneshot.OneShotTicket;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -216,11 +217,13 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
         UUID threadId;
         try {
           threadId =
-              oneShotService.submit(
-                  requireText(settings.promptAgentName(), "promptAgentName"),
-                  promptBuilder.systemPrompt(),
-                  promptRequest,
-                  preparedMedia.preflight());
+              oneShotService
+                  .submit(
+                      requireText(settings.promptAgentName(), "promptAgentName"),
+                      promptBuilder.systemPrompt(),
+                      promptRequest,
+                      preparedMedia.preflight())
+                  .threadId();
         } catch (RuntimeException failure) {
           preparedMedia.staged().forEach(this::discardBestEffort);
           throw failure;
@@ -232,7 +235,9 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       UUID threadId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
       String enhancedPrompt =
           oneShotService.await(
-              threadId, Duration.ofMillis(settings.promptMaxWaitMillis()), context::isRunning);
+              OneShotTicket.forThread(threadId),
+              Duration.ofMillis(settings.promptMaxWaitMillis()),
+              context::isRunning);
       state = state.withEnhancedPrompt(enhancedPrompt);
       checkpoint(context, PROMPT_READY, state);
     }

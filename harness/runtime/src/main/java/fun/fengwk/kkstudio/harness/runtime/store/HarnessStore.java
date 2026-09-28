@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -34,12 +35,13 @@ import java.util.function.Function;
  * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：若涉及 Session 锁，先锁 Session（{@link #lockSessionForKeyShare}
- * 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其
- * ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work
- * 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning
- * Thread；dispatcher claim、heartbeat/lease 等单 Work 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link
- * IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：携带 frozen task 策略的 Join 准入先获取全局 Join 准入锁（{@link
+ * Transaction#lockJoinAdmission}），再获取执行树锁（{@link Transaction#lockTree}）；若涉及 Session 锁，先锁
+ * Session（{@link #lockSessionForKeyShare} 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁
+ * Thread，再锁其 Commands，再锁其 ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation
+ * siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL
+ * Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher claim、heartbeat/lease 等单 Work
+ * 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
  *
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
@@ -170,6 +172,14 @@ public interface HarnessStore {
     List<ThreadState> listThreadsBySession(UUID sessionId);
 
     /**
+     * 读取指定 parentThreadId 的全部直接子 Thread，按 UUID 升序返回不可变列表；不产生锁。
+     *
+     * @param parentThreadId 父 Thread ID，不能为 null
+     * @return 子 Thread 列表，按 UUID 升序排列
+     */
+    List<ThreadState> listChildren(UUID parentThreadId);
+
+    /**
      * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
      * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
      * creationRequestHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
@@ -179,8 +189,78 @@ public interface HarnessStore {
      */
     void updateThread(ThreadState thread);
 
+    /**
+     * 由不可变 parent 链派生 head-to-root 祖先（包含自身）。不存在返回空列表；环路必须 fail closed。 PG 实现在加锁前可用此查询发现 root，但获取
+     * tree lock 后必须重新读取确认。
+     */
+    List<UUID> findAncestorChain(UUID threadId);
+
+    /** 在 Join 准入锁之后、任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 必须为真实根。 */
+    void lockTree(UUID rootThreadId);
+
+    /**
+     * 在任何 tree / Session / Thread / Invocation / Work 锁之前获取全局 Join 准入事务级锁：串行化所有携带 frozen task 策略的
+     * subagent 准入，使「全局活跃 subagent 数」上限的判定与创建无竞态。
+     *
+     * <p>必须在事务内首次加锁前调用，即使本次请求的额度为 unlimited 也必须获取（否则并发的有限额度请求会与之竞态）；同一事务内重复调用幂等。已持有任何 tree
+     * 或业务行锁后再调用抛 {@link IllegalStateException}。该锁只是准入串行化原语，不承载任何持久字段，且与 tree 锁使用相互隔离的 key 空间。root
+     * one-shot（无父）准入不需要它。
+     */
+    void lockJoinAdmission();
+
+    /** Join 是源 command 的 FK 约束引用，必须与源 command 在同一事务内创建。 */
+    void insertJoin(ThreadJoin join);
+
+    Optional<ThreadJoin> findJoin(UUID invocationId);
+
+    /** 子 Thread 空闲时读取尚未匹配且 afterVersion 小于 idleVersion 的全部 join。 */
+    List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion);
+
+    /** 父 Thread 恢复时读取已匹配未交付 join。 */
+    List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
+
+    /**
+     * 统计指定父 Thread 下当前处于活跃状态（status != IDLE，包含 ACTIVE 与 WAITING_CHILDREN）的直接子 Thread 数量；不产生锁。
+     *
+     * @param parentThreadId 父 Thread ID，不能为 null
+     * @return 活跃的直接子 Thread 数量
+     */
+    int countActiveChildren(UUID parentThreadId);
+
+    /**
+     * 全局统计当前处于活跃状态（status != IDLE，含 ACTIVE 与 WAITING_CHILDREN）且拥有非空 parentThreadId 的 Thread 数量； 跨所有
+     * root 聚合，root 自身（parentThreadId 为空）不计入。不产生锁。用于 subagent 任务的全局并发上限判定。
+     *
+     * @return 全局活跃执行子 Thread 数量
+     */
+    int countActiveSubagentThreads();
+
+    /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
+    void updateJoin(ThreadJoin join);
+
+    /**
+     * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；
+     * 若该子 Thread 下存在任何尚未匹配的 Join（{@code matchedIdleVersion == null}），或存在拥有非空 parentThreadId 且尚未完成向父
+     * Thread 交付结果（{@code deliveryCommandSequence == null}）的 Join，必须抛出 {@link
+     * IllegalArgumentException} 拒绝删除并回滚； 只有已成功交付给父 Thread 的子 Join 以及已匹配完成的根 completion ticket
+     * 方可被显式安全删除。
+     */
+    int deleteJoinsByChild(UUID childThreadId);
+
+    /**
+     * 整体删除一批 Thread 涉及的 Join 记录并返回删除行数（Chat 深删除专用）。要求每个 Thread 已在本事务锁定且位于已加锁的执行树内。
+     *
+     * <p>当 Join 的 child 与（非空）parent 都位于本删除集合内时，两端将在同一事务内被物理删除，任何存活 Thread 都不会再引用该 Join，因此未匹配或未交付的
+     * pending Join 也可一并删除；只有 child 在集合内而 parent 存活时，仍按 {@link #deleteJoinsByChild} 的单边规则拒绝未匹配或未交付的
+     * Join。违反抛 {@link IllegalArgumentException}。
+     */
+    int deleteJoinsForThreads(List<UUID> threadIds);
+
     /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
     Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey);
+
+    /** 按 (threadId, sequence) 直接定位单条 Command；不存在返回 {@link Optional#empty()}。不产生业务行锁。 */
+    Optional<ThreadCommand> findCommand(UUID threadId, long sequence);
 
     /**
      * 读取该 Thread 全部 QUEUED Command，按 sequence 升序。要求该 Thread 已在本事务锁定（{@link #lockThread} 或同事务 {@link

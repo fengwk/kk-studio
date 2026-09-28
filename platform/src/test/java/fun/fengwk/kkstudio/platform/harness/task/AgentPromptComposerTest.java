@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
-import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,7 +23,7 @@ class AgentPromptComposerTest {
   private static final int DEFAULT_MAX_TURNS = 7;
 
   private final AgentPromptComposer composer =
-      new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
+      new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
   private static SkillPromptEntry skill(String name, String description) {
     return new SkillPromptEntry(
@@ -246,12 +245,12 @@ class AgentPromptComposerTest {
   @Test
   void rendersLiveDefaultMaxTurnsInTaskInstructions() {
     AtomicReference<SubagentConfig> liveConfig =
-        new AtomicReference<>(new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
+        new AtomicReference<>(new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
     AgentPromptComposer liveComposer = new AgentPromptComposer(liveConfig::get);
     List<SubagentBinding> subagents = List.of(new SubagentBinding("researcher", "Do research."));
 
     String initial = liveComposer.compose("body", none(), List.of(), subagents);
-    liveConfig.set(new SubagentConfig(2, 10, 0, Duration.ZERO, 13));
+    liveConfig.set(new SubagentConfig(2, 10, 0, 13));
     String updated = liveComposer.compose("body", none(), List.of(), subagents);
 
     assertTrue(initial.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), initial);

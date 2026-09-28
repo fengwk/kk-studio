@@ -55,9 +55,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
-          "harness_subagent_task",
           "harness_thread",
           "harness_thread_command",
+          "harness_thread_join",
           "harness_tool_invocation",
           "harness_work",
           "mcp_server",
@@ -98,7 +98,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
-          "harness_subagent_task");
+          "harness_thread_join");
 
   /** Canvas 完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
   private static final Set<String> CANVAS_UUID_ID_TABLES =
@@ -426,10 +426,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "harness_thread",
         "id",
         "session_id",
+        "parent_thread_id",
         "head_entry_id",
         "creation_request_hash",
         "name",
         "yolo_enabled",
+        "status",
         "next_command_sequence",
         "version",
         "created_at",
@@ -621,13 +623,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_model_invocation.created_at",
             "harness_model_invocation.updated_at",
             "harness_session.created_at",
-            "harness_subagent_task.created_at",
-            "harness_subagent_task.settled_at",
-            "harness_subagent_task.updated_at",
             "harness_thread.created_at",
             "harness_thread.updated_at",
             "harness_thread_command.cancelled_at",
             "harness_thread_command.created_at",
+            "harness_thread_join.created_at",
+            "harness_thread_join.updated_at",
             "harness_tool_invocation.created_at",
             "harness_tool_invocation.updated_at",
             "harness_work.available_at",
@@ -870,7 +871,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_entry_single_root",
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
-            "uk_harness_subagent_task_child_open",
             "uk_harness_thread_command_idempotency",
             "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index",
@@ -885,7 +885,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate"),
         indexes,
-        "the final schema must expose only its declared 24 domain unique keys");
+        "the final schema must expose only its declared 23 domain unique keys");
 
     Set<String> foreignKeys = new TreeSet<>();
     try (Connection conn = newConnection();
@@ -922,10 +922,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_model_invocation_result",
             "fk_harness_model_invocation_thread",
             "fk_harness_model_invocation_turn_start",
-            "fk_harness_subagent_task_parent_thread",
             "fk_harness_thread_command_applied",
             "fk_harness_thread_command_thread",
             "fk_harness_thread_head",
+            "fk_harness_thread_join_child_thread",
+            "fk_harness_thread_join_delivery_command",
+            "fk_harness_thread_join_parent_thread",
+            "fk_harness_thread_join_result_head",
+            "fk_harness_thread_join_source_command",
+            "fk_harness_thread_parent",
             "fk_harness_thread_session",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model",
@@ -954,7 +959,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 53 declared foreign keys must exist in public schema");
+        "all 58 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1022,12 +1027,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "exact set of 36 RESTRICT foreign keys");
 
     assertEquals(
-        Set.of(
-            "fk_environment_connection_environment",
-            "fk_harness_subagent_task_parent_thread",
-            "fk_mcp_tool_server"),
+        Set.of("fk_environment_connection_environment", "fk_mcp_tool_server"),
         cascadeFks,
-        "exact set of 3 CASCADE foreign keys");
+        "exact set of 2 CASCADE foreign keys");
 
     assertEquals(
         Set.of(
@@ -1042,11 +1044,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_command_applied",
             "fk_harness_thread_command_thread",
             "fk_harness_thread_head",
+            "fk_harness_thread_join_child_thread",
+            "fk_harness_thread_join_delivery_command",
+            "fk_harness_thread_join_parent_thread",
+            "fk_harness_thread_join_result_head",
+            "fk_harness_thread_join_source_command",
+            "fk_harness_thread_parent",
             "fk_harness_thread_session",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model"),
         noActionFks,
-        "exact set of 14 NO ACTION foreign keys");
+        "exact set of 20 NO ACTION foreign keys");
   }
 
   @Test
@@ -1269,10 +1277,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " name, yolo_enabled, status, next_command_sequence, version, created_at,"
+                    + " updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', 'schema-structure-test-thread', false, 1, 0, current_timestamp, current_timestamp)")) {
+                    + "', 'schema-structure-test-thread', false, 'IDLE', 1, 0, current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       session.setObject(2, "schema-structure-test-session");
       assertEquals(1, session.executeUpdate());
@@ -1387,6 +1396,90 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         ps.setObject(2, envId);
         ps.executeUpdate();
       }
+    }
+  }
+
+  /** 测试意图：Join 契约记录的列集合精确匹配 runtime 持久协议（无独立状态枚举、无 prompt/report 冗余复制）。 */
+  @Test
+  void harnessThreadJoinContractIsExact() throws SQLException {
+    assertColumns(
+        "harness_thread_join",
+        "invocation_id",
+        "request_hash",
+        "parent_thread_id",
+        "child_thread_id",
+        "source_command_sequence",
+        "after_version",
+        "agent",
+        "max_turns",
+        "reminder_turn",
+        "matched_idle_version",
+        "result_head_entry_id",
+        "delivery_command_sequence",
+        "created_at",
+        "updated_at");
+    assertColumnType("uuid", "harness_thread_join", "invocation_id");
+    assertColumnType("uuid", "harness_thread_join", "parent_thread_id");
+    assertColumnType("uuid", "harness_thread_join", "child_thread_id");
+    assertColumnType("bigint", "harness_thread_join", "after_version");
+    assertColumnType("integer", "harness_thread_join", "max_turns");
+    assertColumnType("bigint", "harness_thread_join", "delivery_command_sequence");
+  }
+
+  /**
+   * 测试意图：递归生命周期 status 只接受声明的三种状态，parent_thread_id 禁止自引用，真实父关系由立即校验的外键保护 —— 父被删除时不允许静默丢失子 Thread
+   * 归属。
+   */
+  @Test
+  void harnessThreadLifecycleAndParentRelationAreStrict() throws SQLException {
+    UUID sessionId = uuid(930_001L);
+    UUID parentThreadId = uuid(930_002L);
+    UUID rootEntryId = uuid(930_003L);
+    UUID childSessionId = uuid(930_004L);
+    UUID childThreadId = uuid(930_005L);
+    UUID childRootEntryId = uuid(930_006L);
+    try (Connection conn = newConnection()) {
+      insertThreadRow(conn, parentThreadId, sessionId, rootEntryId);
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_thread_status",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "update harness_thread set status = 'RUNNING' where id = ?")) {
+              ps.setObject(1, parentThreadId);
+              ps.executeUpdate();
+            }
+          });
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_harness_thread_parent_not_self",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement(
+                    "update harness_thread set parent_thread_id = id where id = ?")) {
+              ps.setObject(1, parentThreadId);
+              ps.executeUpdate();
+            }
+          });
+      insertThreadRow(conn, childThreadId, childSessionId, childRootEntryId);
+      try (PreparedStatement ps =
+          conn.prepareStatement(
+              "update harness_thread set parent_thread_id = ?, status = 'WAITING_CHILDREN' where id = ?")) {
+        ps.setObject(1, parentThreadId);
+        ps.setObject(2, childThreadId);
+        assertEquals(1, ps.executeUpdate());
+      }
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_harness_thread_parent",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement("delete from harness_thread where id = ?")) {
+              ps.setObject(1, parentThreadId);
+              ps.executeUpdate();
+            }
+          });
     }
   }
 

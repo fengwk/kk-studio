@@ -9,7 +9,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
  * aiRuntime section：共享调用重试、自动压缩与 subagent 预算。
  *
  * <p>{@code retryBackoffStrategy} 取值仅为 {@code FIXED}/{@code EXPONENTIAL}；{@code
- * subagentMaxTotalConcurrency} 为 0 表示不额外限制（无 cap），{@code subagentIdleTimeoutMillis} 为 0 表示关闭。
+ * subagentMaxTotalConcurrency} 为 0 表示不额外限制（无 cap）。
  */
 @Data
 public class SystemSettingsAiRuntimeDTO {
@@ -31,8 +31,6 @@ public class SystemSettingsAiRuntimeDTO {
   private Integer subagentMaxConcurrency;
 
   private Integer subagentMaxTotalConcurrency;
-
-  private Long subagentIdleTimeoutMillis;
 
   private Integer subagentMaxTurns;
 

@@ -9,6 +9,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 import java.util.Objects;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * Daemon 端点（WebSocket 路径 `/api/harness/environment-daemon/v1`）的传输注册。
@@ -33,6 +34,22 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
   @Override
   public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
     registry.addHandler(handler, EnvironmentDaemonWebSocketHandler.PATH);
+  }
+
+  /** 全进程共享的 deadline 时钟；取消的帧立即移出队列，随 Spring 上下文关闭。 */
+  @Bean(destroyMethod = "shutdown")
+  public static ScheduledThreadPoolExecutor environmentDaemonSendDeadlineTimer() {
+    ScheduledThreadPoolExecutor timer =
+        new ScheduledThreadPoolExecutor(
+            1,
+            task -> {
+              Thread thread = new Thread(task, "environment-daemon-send-deadline");
+              thread.setDaemon(true);
+              return thread;
+            });
+    timer.setRemoveOnCancelPolicy(true);
+    timer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+    return timer;
   }
 
   /**
