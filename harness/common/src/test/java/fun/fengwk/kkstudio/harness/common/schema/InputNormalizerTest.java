@@ -4,17 +4,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /** {@link InputNormalizer} 的 schema 驱动数字容错归一化测试。 */
 class InputNormalizerTest {
-
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   /** integer 字段的十进制数字字符串被改写为 JSON integer；非数字字符串保持原样。 */
   @Test
@@ -30,36 +30,39 @@ class InputNormalizerTest {
 
   /** number 字段接受十进制数字字符串（含小数/指数）并改写为 JSON number；非数字字符串不改写。 */
   @Test
-  void parsesNumberTextIntoJsonNumber() {
+  void parsesNumberTextIntoJsonNumber() throws Exception {
     InputSchema schema =
         new InputSchema(null, Map.of("ratio", new NumberSchema(null)), Set.of(), false);
-    assertEquals("{\"ratio\":1.5}", InputNormalizer.normalize("{\"ratio\":\"1.5\"}", schema));
-    assertEquals("{\"ratio\":-2.0}", InputNormalizer.normalize("{\"ratio\":\"-2e0\"}", schema));
+    assertDecimalEquals("1.5", "1.5", schema);
+    assertDecimalEquals("-2e0", "-2", schema);
     assertEquals("{\"ratio\":\"abc\"}", InputNormalizer.normalize("{\"ratio\":\"abc\"}", schema));
   }
 
   @Test
   void convertsNumberTextWithoutDoublePrecisionLoss() throws Exception {
-    // 测试意图：NumberSchema 字符串必须按十进制原值转换，不能先变成 double 再丢精度或变成非有限数。
+    // 测试意图：合法 NumberSchema 字符串按 BigDecimal 原值成数，不因 double 范围或字面量回退降精度。
     InputSchema schema =
         new InputSchema(null, Map.of("ratio", new NumberSchema(null)), Set.of(), false);
-    String exactInteger = "9007199254740993";
-    String normalized = InputNormalizer.normalize("{\"ratio\":\"" + exactInteger + "\"}", schema);
-    JsonNode ratio = OBJECT_MAPPER.readTree(normalized).get("ratio");
-    assertEquals(exactInteger, ratio.decimalValue().toPlainString());
-    assertEquals("{\"ratio\":1.25}", InputNormalizer.normalize("{\"ratio\":\"1.25\"}", schema));
+    assertDecimalEquals("9007199254740993", "9007199254740993", schema);
+    assertDecimalEquals("1.25", "1.25", schema);
+    assertDecimalEquals("1e-324", "1E-324", schema);
+    assertDecimalEquals("1e309", "1E+309", schema);
 
-    String subnormal = "{\"ratio\":\"1e-324\"}";
-    assertEquals(subnormal, InputNormalizer.normalize(subnormal, schema));
+    String illegal = "{\"ratio\":\"abc\"}";
+    assertEquals(illegal, InputNormalizer.normalize(illegal, schema));
     assertThrows(
         IllegalArgumentException.class,
-        () -> InputValidator.validate(InputNormalizer.normalize(subnormal, schema), schema));
+        () -> InputValidator.validate(InputNormalizer.normalize(illegal, schema), schema));
+  }
 
-    String hugeExponent = "{\"ratio\":\"1e1000000\"}";
-    assertEquals(hugeExponent, InputNormalizer.normalize(hugeExponent, schema));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> InputValidator.validate(InputNormalizer.normalize(hugeExponent, schema), schema));
+  private static void assertDecimalEquals(String literal, String expected, InputSchema schema)
+      throws Exception {
+    JsonNode ratio =
+        JsonValues.readTree(InputNormalizer.normalize("{\"ratio\":\"" + literal + "\"}", schema))
+            .get("ratio");
+    assertEquals(0, new BigDecimal(expected).compareTo(ratio.decimalValue()));
+    InputValidator.validate(
+        InputNormalizer.normalize("{\"ratio\":\"" + literal + "\"}", schema), schema);
   }
 
   /** string/boolean/enum 字段的数字文本不转换；整数字段的真实 JSON number 不转换。 */
@@ -101,7 +104,7 @@ class InputNormalizerTest {
     String arguments =
         "{\"items\":[{\"path\":\"a.txt\",\"limit\":\"10\"},{\"path\":\"b.txt\",\"limit\":5}]}";
     String normalized = InputNormalizer.normalize(arguments, schema);
-    JsonNode items = OBJECT_MAPPER.readTree(normalized).get("items");
+    JsonNode items = JsonValues.readTree(normalized).get("items");
     assertEquals(2, items.size());
     assertEquals("a.txt", items.get(0).get("path").asText());
     assertEquals(10, items.get(0).get("limit").asInt());
@@ -177,7 +180,7 @@ class InputNormalizerTest {
 
   /** 整数溢出或超 double 范围的文本不改写，仍由校验器拒绝；这是归一化不吞掉非法输入的关键。 */
   @Test
-  void leavesOutOfRangeNumericTextUntouched() {
+  void leavesOutOfRangeNumericTextUntouched() throws Exception {
     InputSchema intSchema =
         new InputSchema(null, Map.of("offset", new IntegerSchema(null)), Set.of(), false);
     String overflow = "{\"offset\":\"9223372036854775808\"}";
@@ -188,14 +191,17 @@ class InputNormalizerTest {
 
     InputSchema numberSchema =
         new InputSchema(null, Map.of("ratio", new NumberSchema(null)), Set.of(), false);
-    // "1e999" 超出 double 可表示范围，改写会变成 Infinity，因此不改写，由校验器拒绝。
-    String tooLarge = "{\"ratio\":\"1e999\"}";
-    assertEquals(tooLarge, InputNormalizer.normalize(tooLarge, numberSchema));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            InputValidator.validate(
-                InputNormalizer.normalize(tooLarge, numberSchema), numberSchema));
+    // 合法大指数仍按 BigDecimal 成数，校验只要求 JSON number，不因超出 double 拒绝。
+    assertEquals(
+        0,
+        new BigDecimal("1e999")
+            .compareTo(
+                JsonValues.readTree(
+                        InputNormalizer.normalize("{\"ratio\":\"1e999\"}", numberSchema))
+                    .get("ratio")
+                    .decimalValue()));
+    InputValidator.validate(
+        InputNormalizer.normalize("{\"ratio\":\"1e999\"}", numberSchema), numberSchema);
   }
 
   /** 验证原始入参字符串不可变，归一化不会对原输入产生任何破坏性副作用。 */
