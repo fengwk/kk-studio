@@ -119,7 +119,7 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 
 接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即用一次成功 `tool_result` 回执唯一 JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)），不重复 prompt，也不提供 XML 或别名形状；结果不经过工具返回，而是由 Runtime 在子执行首次 Idle 匹配 join 后作为父 Thread 的一条独立消息交付，完成消息的 XML 编码与转义由 `runtime.join` 的纯函数负责（见 [Harness Runtime](harness-runtime.md)）。
 
-[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：前三者必须为正，`maxTotalConcurrency` 允许 0 表示不限树级总量，`maxTurns` 必须为正。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
+[`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。全局额度跨所有执行树按非空闲子 Thread 计数，根 Thread 不计入，同一忙碌子上的多个 join 不重复占额；判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
 ## pi-base 委派测试迁移映射
 
