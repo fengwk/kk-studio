@@ -94,21 +94,29 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         token_b = token_b_match.group(1)
         self.assertNotEqual(token_a, token_b)
 
-    def test_ui_smoke_creates_agent_bound_environment_chat(self):
-        """UI smoke must bind Environment through the Agent only and clean up the temporary agent."""
+    def test_ui_smoke_creates_agent_without_implicit_environment(self):
+        """UI smoke must verify creating a chat with an agent does not bind an implicit environment."""
         ui_smoke = UI_SMOKE_MJS.read_text(encoding="utf-8")
         self.assertNotIn("选择 Environment", ui_smoke)
-        self.assertIn("ui.chat.create_agent_bound_environment", ui_smoke)
+        self.assertIn("ui.chat.create_agent_no_implicit_environment", ui_smoke)
+        self.assertNotIn("ui.chat.create_agent_bound_environment", ui_smoke)
+        self.assertIn("{ requiresTools: true }", ui_smoke)
         self.assertIn("tempAgentName", ui_smoke)
-        self.assertIn("environmentId: card.id", ui_smoke)
+        self.assertNotIn("environmentId: card.id", ui_smoke)
         self.assertIn("model: REAL_UI_MODEL_ID", ui_smoke)
         self.assertNotIn("modelProviderName", ui_smoke)
         self.assertIn("agentCreateRes.status === 201", ui_smoke)
         self.assertNotIn("agentCreateRes.status === 200", ui_smoke)
-        self.assertIn("apiDeleteByName(args.backendUrl, 'agents', tempAgentName)", ui_smoke)
-        # Workspace 路径选择器已随 W2-A 删除：UI smoke 只能断言它不存在。
+        self.assertIn("!Object.hasOwn(agentCreateRes.json.data, 'environmentId')", ui_smoke)
+        self.assertIn("!Object.hasOwn(agentCreateRes.json.data, 'branchSettings')", ui_smoke)
         self.assertIn('button[aria-label="工作区路径"]', ui_smoke)
+        self.assertIn("button.environment-binding-trigger", ui_smoke)
         self.assertIn("Create Chat still rendered a workspace path selector", ui_smoke)
+        self.assertIn("environmentText === 'none env'", ui_smoke)
+        self.assertIn("for (const field of ['workspacePath', 'environment', 'environmentId'])", ui_smoke)
+        self.assertIn("!Object.hasOwn(created, field)", ui_smoke)
+        self.assertIn("apiDeleteByName(args.backendUrl, 'chats', title)", ui_smoke)
+        self.assertIn("apiDeleteByName(args.backendUrl, 'agents', tempAgentName)", ui_smoke)
 
     def test_lifecycle_fixture_is_canonical(self):
         """HarnessRuntimePostgresqlLifecycleIntegrationTest must seed canonical branch settings."""
