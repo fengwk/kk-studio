@@ -35,7 +35,8 @@ import java.util.UUID;
 /**
  * Project 配置用例实现：所有写路径先持有 Project 行锁，再以版本 CAS 提交。
  *
- * <p>锁序与设计 §7.1 一致（Project 独占锁下改配置）；配置更新前的活动主 Run 检查只读取项目自身下级 Issue，绝不跨产品写入。
+ * <p>锁序与设计 §7.1 一致（Project 独占锁下改配置）。工作流替换在同一把锁下检查现存 Issue：当前状态与阻塞来源都必须仍在新 workflow 中，包含保留状态与已归档
+ * Issue；未被引用的编码可以删除。活动主 Run 检查只读取项目自身下级 Issue，绝不跨产品写入。
  */
 @Service
 @AllArgsConstructor
@@ -161,6 +162,7 @@ public class ProjectServiceImpl implements ProjectService {
     requireVersion(locked, expectedVersion);
     requireNoActiveRun(projectId);
     ProjectWorkflow workflow = decodeWorkflow(workflowJson);
+    requireReferencedStatesRetained(projectId, workflow);
     locked.setWorkflowJson(workflowCodec.encode(workflow));
     return applyConfiguration(locked, expectedVersion);
   }
@@ -184,7 +186,7 @@ public class ProjectServiceImpl implements ProjectService {
     requireVersion(locked, expectedVersion);
     requireNoActiveRun(projectId);
     if (locked.isArchived()) {
-      // 缺少响应后的重试：归档已经是当前事实，不重复写行。
+      // 当前版本已经归档：不重复写行。陈旧版本在版本校验时已被拒绝。
       return locked;
     }
     if (!projectRepository.updateArchivedAt(projectId, Instant.now(), expectedVersion)) {
@@ -200,7 +202,7 @@ public class ProjectServiceImpl implements ProjectService {
     Project locked = lockProject(projectId);
     requireVersion(locked, expectedVersion);
     if (!locked.isArchived()) {
-      // 缺少响应后的重试：已经是可编辑状态，不重复写行。
+      // 当前版本已经可编辑：不重复写行。陈旧版本在版本校验时已被拒绝。
       return locked;
     }
     if (!projectRepository.updateArchivedAt(projectId, null, expectedVersion)) {
@@ -284,6 +286,28 @@ public class ProjectServiceImpl implements ProjectService {
   private static void requireEditable(Project locked) {
     if (locked.isArchived()) {
       throw new ProjectValidationException("project", "Cannot modify an archived project");
+    }
+  }
+
+  /**
+   * 现存 Issue 的当前状态与阻塞来源都必须继续出现在新 workflow 中。
+   *
+   * <p>检查发生在 Project 排他锁内，因此并发 Issue 写不能在检查后插入新的悬空引用。归档 Issue 同样计入；没有引用的工作阶段可以删除。
+   */
+  private void requireReferencedStatesRetained(UUID projectId, ProjectWorkflow workflow) {
+    for (Issue issue : issueRepository.listByProjectId(projectId)) {
+      requireDeclaredState(workflow, issue.getState(), "state");
+      if (issue.getBlockedFromState() != null) {
+        requireDeclaredState(workflow, issue.getBlockedFromState(), "blockedFromState");
+      }
+    }
+  }
+
+  private static void requireDeclaredState(
+      ProjectWorkflow workflow, String code, String reference) {
+    if (workflow.find(ProjectStateCode.of(code)).isEmpty()) {
+      throw new ProjectValidationException(
+          "workflow", "Cannot remove " + reference + " " + code + " while an issue still uses it");
     }
   }
 

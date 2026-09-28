@@ -56,9 +56,10 @@ import java.util.UUID;
 /**
  * Issue 用例实现：所有写路径先按 Project SHARE → Issue UPDATE 加锁，再以版本 CAS 提交状态、门禁与分配游标。
  *
- * <p>合法的 Issue 写操作与对应 Activity 在同一事务保存（设计 §4.6）。每个动作先按请求键与规范化请求指纹判定：无同键活动才进入版本 CAS
- * 与业务校验；同键同指纹是丢响应后的精确重试，直接返回原结果而不重复应用；同键异指纹确定性冲突。因此精确重试先于版本校验，重试不会重复改变状态、 门禁或额度。阶段额度直接复用领域 {@link
- * IssueStageBudget} 的授权/重置语义，不在 platform 复制一份额度规则。
+ * <p>合法的 Issue 写操作与对应 Activity 在同一事务保存（设计 §4.6）。每个动作按请求键与规范化请求指纹判定：锁前检查只是快速路径； 进入 owner 锁（Project
+ * SHARE → Issue UPDATE）之后、版本与状态校验之前必须再查一次 receipt。同键同指纹是丢响应后的精确重试， 返回当前 Issue
+ * 或当前额度而不重复应用；同键异指纹确定性冲突。因此并发重复请求不会在版本校验处误报冲突，也不会重复改变状态、门禁或额度。阶段额度直接复用领域 {@link IssueStageBudget}
+ * 的授权/重置语义，不在 platform 复制一份额度规则。
  */
 @Service
 @AllArgsConstructor
@@ -162,7 +163,7 @@ public class IssueServiceImpl implements IssueService {
   @Transactional
   public Issue archiveIssue(UUID issueId, long expectedVersion) {
     Objects.requireNonNull(issueId, "issueId");
-    // 允许读取已归档事实：缺少响应后的重试必须能回到「归档已是当前事实」的分支，而不是被归档门禁拒绝。
+    // 允许读取已归档事实：当前版本的重复归档必须能回到「归档已是当前事实」的分支，而不是被归档门禁拒绝。
     Locked locked = lock(issueId, expectedVersion, true);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
@@ -174,7 +175,7 @@ public class IssueServiceImpl implements IssueService {
           "Cannot archive an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
     }
     if (locked.issue().isArchived()) {
-      // 缺少响应后的重试：归档已经是当前事实，不重复写行。
+      // 当前版本已经归档：不重复写行。陈旧版本在加锁时已被拒绝。
       return locked.issue();
     }
     locked.issue().setArchivedAt(Instant.now());
@@ -187,7 +188,7 @@ public class IssueServiceImpl implements IssueService {
     Objects.requireNonNull(issueId, "issueId");
     Locked locked = lock(issueId, expectedVersion, true);
     if (!locked.issue().isArchived()) {
-      // 缺少响应后的重试：已经是可编辑状态，不重复写行。
+      // 当前版本已经可编辑：不重复写行。陈旧版本在加锁时已被拒绝。
       return locked.issue();
     }
     locked.issue().setArchivedAt(null);
@@ -207,7 +208,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     appendActivity(
         locked.issue(),
         identity,
@@ -236,7 +241,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {
       // 没有活动 Run 时不构造隐藏的未来阶段消息队列：先明确启动或恢复。
@@ -295,7 +304,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
           "issue",
@@ -326,7 +339,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     Issue issue = locked.issue();
     if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
       throw new ProjectValidationException("issue", "Issue is not blocked");
@@ -367,7 +384,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     ObjectNode data = objectMapper.createObjectNode();
     data.put("action", "PAUSE");
     data.put("reason", reason.name());
@@ -386,7 +407,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
           "issue",
@@ -419,7 +444,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {
       ObjectNode data = objectMapper.createObjectNode();
@@ -464,7 +493,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     if (!PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
           "issue", "Issue does not carry an unresolved UNKNOWN gate");
@@ -519,7 +552,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
           "issue",
@@ -556,7 +593,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return locked.issue();
+    }
+    requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
           "issue", "Cannot reopen an issue while it has an active run; stop or settle it first");
@@ -622,7 +663,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return getStageBudget(issueId, state);
+    }
+    requireVersion(locked, expectedVersion);
     ProjectStateCode code = ProjectStateCode.of(state);
     IssueStageBudget authorized =
         ProjectValidationUtils.resolve(
@@ -662,7 +707,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lock(issueId, expectedVersion, false);
+    Locked locked = lockOwner(issueId, false);
+    if (replayedUnderLock(issueId, identity)) {
+      return getStageBudget(issueId, state);
+    }
+    requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
           "stage_budget", "Cannot reset stage budget while an active run exists");
@@ -728,12 +777,22 @@ public class IssueServiceImpl implements IssueService {
         budget.getState(), budget.getMaxRuns(), budget.getBudgetAfterOrdinal(), used, remaining);
   }
 
-  /** 精确重试判定：命中同键同指纹时跳过版本与业务校验（请求字段校验仍然生效），返回当前事实而不重复应用。 */
+  /**
+   * 锁前快速路径：命中同键同指纹时跳过加锁与业务校验（请求字段校验仍然生效）。
+   *
+   * <p>未命中不能作为最终结论。并发的首次提交可能发生在本次检查之后、owner 锁之前，调用方必须在持锁后再次判定。
+   */
   private boolean replayed(UUID issueId, Identity identity) {
     if (issueRepository.getById(issueId) == null) {
       throw new ProjectNotFoundException("issue");
     }
     return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity) != null;
+  }
+
+  /** owner 锁内的精确重试判定：同键同指纹返回当前事实，同键异指纹冲突，未命中才继续版本与状态校验。 */
+  private boolean replayedUnderLock(UUID issueId, Identity identity) {
+    return IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity)
+        != null;
   }
 
   private void appendStateChange(
@@ -748,8 +807,8 @@ public class IssueServiceImpl implements IssueService {
   /**
    * 追加一条活动（设计 §4.6 一个动作一条活动）：请求键与指纹来自调用方身份，正文与 Run 引用按动作填写。
    *
-   * <p>调用方必须在任何外部派发之前完成 {@link IssueActivityIdempotency#findApplied 精确重试判定}；本方法只在首次执行路径调用，
-   * 因此同键活动的出现要么来自并发请求（由主键与唯一键兜底失败关闭），要么是编程错误。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
+   * <p>调用方必须在 owner 锁内、版本与状态校验之前完成 {@link IssueActivityIdempotency#findApplied 精确重试判定}；本方法只在首次
+   * 执行路径调用。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
    */
   private void appendActivity(
       Issue issue,
@@ -787,8 +846,19 @@ public class IssueServiceImpl implements IssueService {
     }
   }
 
-  /** 以 Project FOR KEY SHARE → Issue FOR UPDATE 的固定锁序加锁，并做版本与归属校验。归档 Issue 默认拒绝写，恢复归档时显式放行。 */
+  /**
+   * 以 Project FOR KEY SHARE → Issue FOR UPDATE 的固定锁序加锁，并做版本与归属校验。归档 Issue 默认拒绝写，恢复归档时显式放行。
+   *
+   * <p>没有活动 receipt 的写路径使用本方法。带请求键的路径必须先 {@link #lockOwner}，在锁内查 receipt，再做版本校验。
+   */
   private Locked lock(UUID issueId, long expectedVersion, boolean allowArchivedIssue) {
+    Locked locked = lockOwner(issueId, allowArchivedIssue);
+    requireVersion(locked, expectedVersion);
+    return locked;
+  }
+
+  /** 只取得 owner 锁与归属校验，把 receipt 与版本判定留给调用方按固定顺序完成。 */
+  private Locked lockOwner(UUID issueId, boolean allowArchivedIssue) {
     Objects.requireNonNull(issueId, "issueId");
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
@@ -812,11 +882,14 @@ public class IssueServiceImpl implements IssueService {
     if (issue.isArchived() && !allowArchivedIssue) {
       throw new ProjectValidationException("issue", "Cannot modify an archived issue");
     }
-    if (issue.getVersion() != expectedVersion) {
-      throw new ProjectVersionConflictException(
-          "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
-    }
     return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
+  }
+
+  private void requireVersion(Locked locked, long expectedVersion) {
+    if (locked.issue().getVersion() != expectedVersion) {
+      throw new ProjectVersionConflictException(
+          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+    }
   }
 
   /**

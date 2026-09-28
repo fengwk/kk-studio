@@ -67,6 +67,22 @@ public interface IssueActivityMapper extends BaseMapper {
       @Param("issueId") UUID issueId, @Param("idempotencyKey") String idempotencyKey);
 
   @Select(
+      """
+      with locked_issue as (
+          select id from project_issue where id = #{issueId} for update
+      )
+      select activity.issue_id, activity.sequence, activity.kind, activity.actor_type,
+             activity.actor_agent_name, activity.run_id, activity.body, activity.data,
+             activity.idempotency_key, activity.request_hash, activity.created_at
+        from project_issue_activity activity
+       where activity.issue_id = (select id from locked_issue)
+         and activity.idempotency_key = #{idempotencyKey}
+      """)
+  @ResultMap("issueActivityResultMap")
+  IssueActivityDO findByIdempotencyKeyForUpdate(
+      @Param("issueId") UUID issueId, @Param("idempotencyKey") String idempotencyKey);
+
+  @Select(
       "select "
           + COLUMNS
           + " from project_issue_activity where issue_id = #{issueId}"
