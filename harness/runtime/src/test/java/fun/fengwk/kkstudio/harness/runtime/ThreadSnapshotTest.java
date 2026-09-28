@@ -1,67 +1,83 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedTerminalModel;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
-import java.time.Instant;
-import java.util.Arrays;
+import java.time.Clock;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link ThreadSnapshot#runtimeStatus()} 统一细粒度运行时状态投影测试。 */
+/**
+ * {@link ThreadSnapshot#runtimeStatus()} 统一细粒度运行时状态投影测试。
+ *
+ * <p>全部用例都经真实 {@link InMemoryHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot} 读取，保证投影的
+ * {@code thread/entryPath/model/toolSiblings} 满足 {@code ThreadContextClassifier} 的输入契约：终态
+ * Model/Tools 与 continuation 都是正常可达状态（分别投影 APPLYING / CONTINUATION_DUE），只有真正不匹配的形状（例如 Model 不属于本
+ * Thread）才 fail-closed。
+ */
 class ThreadSnapshotTest {
 
-  private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
-  private static final String CREATION_REQUEST_HASH =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final UUID SESSION_ID = UUID.randomUUID();
-  private static final UUID THREAD_ID = UUID.randomUUID();
-  private static final UUID HEAD_ENTRY_ID = UUID.randomUUID();
+  private InMemoryHarnessStore store;
+  private HarnessRuntime runtime;
+
+  @BeforeEach
+  void setUp() {
+    store = new InMemoryHarnessStore();
+    runtime = runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
+  }
 
   @Test
   void waitingChildrenLifecycleMapsToWaitingChildrenStatus() {
-    // 测试意图：验证当生命周期为 WAITING_CHILDREN 时，无论本地快照字段如何均映射为 WAITING_CHILDREN。
-    ThreadState thread = threadState(ThreadLifecycleStatus.WAITING_CHILDREN);
-    ThreadSnapshot snapshot =
-        new ThreadSnapshot(thread, mock(EntryPath.class), List.of(), null, List.of(), List.of());
-    assertEquals(ThreadRuntimeStatus.WAITING_CHILDREN, snapshot.runtimeStatus());
+    // 测试意图：递归生命周期 WAITING_CHILDREN 优先于任何本地上下文，统一投影为 WAITING_CHILDREN。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadLifecycleStatus.WAITING_CHILDREN);
+    assertEquals(
+        ThreadRuntimeStatus.WAITING_CHILDREN,
+        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
   void idleLifecycleMapsToIdleStatus() {
-    // 测试意图：验证当生命周期为 IDLE 时，统一映射为 IDLE 运行时状态。
-    ThreadState thread = threadState(ThreadLifecycleStatus.IDLE);
-    ThreadSnapshot snapshot =
-        new ThreadSnapshot(thread, mock(EntryPath.class), List.of(), null, List.of(), List.of());
-    assertEquals(ThreadRuntimeStatus.IDLE, snapshot.runtimeStatus());
+    // 测试意图：递归生命周期 IDLE 且本地无适用上下文时投影为 IDLE。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    assertEquals(
+        ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
   void activeLifecycleWithModelMapsToModelStatus() {
-    // 测试意图：验证 ACTIVE 生命周期下，若 model 非空且 tools 为空，按 model 状态映射到 MODEL_READY/DISPATCHING/RUNNING。
-    ThreadState thread = threadState(ThreadLifecycleStatus.ACTIVE);
+    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/DISPATCHING/RUNNING。
     for (ModelInvocationStatus status :
         List.of(
             ModelInvocationStatus.READY,
             ModelInvocationStatus.DISPATCHING,
             ModelInvocationStatus.RUNNING)) {
-      ModelInvocation model = model(status);
-      ThreadSnapshot snapshot =
-          new ThreadSnapshot(thread, mock(EntryPath.class), List.of(), model, List.of(), List.of());
+      HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
+      markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
       ThreadRuntimeStatus expected =
           switch (status) {
             case READY -> ThreadRuntimeStatus.MODEL_READY;
@@ -69,147 +85,132 @@ class ThreadSnapshotTest {
             case RUNNING -> ThreadRuntimeStatus.MODEL_RUNNING;
             default -> throw new AssertionError();
           };
-      assertEquals(expected, snapshot.runtimeStatus());
+      assertEquals(expected, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
     }
+  }
+
+  @Test
+  void activeLifecycleWithTerminalModelMapsToApplying() {
+    // 测试意图：终态但结果尚未物化的 Model 是正常可达状态（而不是非法形状），投影为 APPLYING。
+    HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
+    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.APPLYING,
+        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
   void activeLifecycleWithToolsMapsToToolStatusByPriority() {
-    // 测试意图：验证 ACTIVE 生命周期下，toolSiblings 非空时按照 WAITING_APPROVAL > RUNNING > DISPATCHING > READY
-    // 映射。
-    ThreadState thread = threadState(ThreadLifecycleStatus.ACTIVE);
-    ModelInvocation parentModel = model(ModelInvocationStatus.SUCCEEDED);
+    // 测试意图：ACTIVE 生命周期下，非终态 Tool siblings 按 WAITING_APPROVAL > RUNNING > DISPATCHING > READY
+    // 细分，优先级最高的 sibling 决定投影。
+    HarnessRuntimeTestSupport.MultiToolBaseline waitingApproval = seedToolBaseline(store, 4);
+    beginDispatchTool(store, waitingApproval.toolIds().get(1));
+    beginDispatchTool(store, waitingApproval.toolIds().get(2));
+    markRunningTool(store, waitingApproval.toolIds().get(2));
+    setWaitingApproval(store, waitingApproval.toolIds().get(3));
+    markActive(waitingApproval.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
+        runtime.getThreadSnapshot(waitingApproval.threadId()).runtimeStatus());
 
-    ThreadSnapshot waitingApproval =
-        new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
-            List.of(),
-            parentModel,
-            toolInvocations(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
-                ToolInvocationStatus.RUNNING,
-                ToolInvocationStatus.WAITING_APPROVAL),
-            List.of());
-    assertEquals(ThreadRuntimeStatus.TOOL_WAITING_APPROVAL, waitingApproval.runtimeStatus());
+    HarnessRuntimeTestSupport.MultiToolBaseline running = seedToolBaseline(store, 3);
+    beginDispatchTool(store, running.toolIds().get(1));
+    beginDispatchTool(store, running.toolIds().get(2));
+    markRunningTool(store, running.toolIds().get(2));
+    markActive(running.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_RUNNING,
+        runtime.getThreadSnapshot(running.threadId()).runtimeStatus());
 
-    ThreadSnapshot running =
-        new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
-            List.of(),
-            parentModel,
-            toolInvocations(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
-                ToolInvocationStatus.RUNNING),
-            List.of());
-    assertEquals(ThreadRuntimeStatus.TOOL_RUNNING, running.runtimeStatus());
+    HarnessRuntimeTestSupport.MultiToolBaseline dispatching = seedToolBaseline(store, 2);
+    beginDispatchTool(store, dispatching.toolIds().get(1));
+    markActive(dispatching.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_DISPATCHING,
+        runtime.getThreadSnapshot(dispatching.threadId()).runtimeStatus());
 
-    ThreadSnapshot dispatching =
-        new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
-            List.of(),
-            parentModel,
-            toolInvocations(ToolInvocationStatus.READY, ToolInvocationStatus.DISPATCHING),
-            List.of());
-    assertEquals(ThreadRuntimeStatus.TOOL_DISPATCHING, dispatching.runtimeStatus());
-
-    ThreadSnapshot ready =
-        new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
-            List.of(),
-            parentModel,
-            toolInvocations(ToolInvocationStatus.READY),
-            List.of());
-    assertEquals(ThreadRuntimeStatus.TOOL_READY, ready.runtimeStatus());
+    HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
+    markActive(ready.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_READY,
+        runtime.getThreadSnapshot(ready.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithQueuedOnlyMapsToQueuedStatus() {
-    // 测试意图：验证 ACTIVE 生命周期下，若无活跃模型或工具，映射为 QUEUED 状态（等待启动新 turn）。
-    ThreadState thread = threadState(ThreadLifecycleStatus.ACTIVE);
-    ThreadSnapshot snapshotWithoutCommands =
-        new ThreadSnapshot(thread, mock(EntryPath.class), List.of(), null, List.of(), List.of());
-    assertEquals(ThreadRuntimeStatus.QUEUED, snapshotWithoutCommands.runtimeStatus());
-
-    ThreadSnapshot snapshotWithCommands =
-        new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
-            List.of(mock(ThreadCommand.class)),
-            null,
-            List.of(),
-            List.of());
-    assertEquals(ThreadRuntimeStatus.QUEUED, snapshotWithCommands.runtimeStatus());
+  void activeLifecycleWithTerminalToolsMapsToApplying() {
+    // 测试意图：全部 sibling 都已终态但 outcome 尚未物化是正常可达状态（而非非法形状），投影为 APPLYING。
+    HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
+    cancelTool(store, baseline);
+    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.APPLYING,
+        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleRejectsInvalidShapes() {
-    // 测试意图：验证 ACTIVE 生命周期下，非法 active 形状（终态 Model 或全终态 Tools）fail-closed 抛出
-    // IllegalStateException。
-    ThreadState thread = threadState(ThreadLifecycleStatus.ACTIVE);
+  void activeLifecycleWithContinuationMapsToContinuationDue() {
+    // 测试意图：ACTIVE 生命周期下，head 为 continueModel=true 且归属本 Thread 的 TURN_END 时投影为
+    // CONTINUATION_DUE。
+    HarnessRuntimeTestSupport.ContinuationBaseline baseline = seedContinuationChain(store, true);
+    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.CONTINUATION_DUE,
+        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+  }
 
-    for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.SUCCEEDED,
-            ModelInvocationStatus.FAILED,
-            ModelInvocationStatus.CANCELLED,
-            ModelInvocationStatus.UNKNOWN)) {
-      ThreadSnapshot snapshot =
-          new ThreadSnapshot(
-              thread, mock(EntryPath.class), List.of(), model(status), List.of(), List.of());
-      assertThrows(IllegalStateException.class, snapshot::runtimeStatus);
-    }
+  @Test
+  void activeLifecycleWithoutLocalContextMapsToQueuedStatus() {
+    // 测试意图：ACTIVE 生命周期但本地没有 Model/Tool/continuation 时，本地分类为空闲，生命周期映射为 QUEUED
+    // （等待启动新 turn），与是否已有排队命令无关。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.QUEUED, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+  }
 
-    ThreadSnapshot terminalToolsSnapshot =
+  @Test
+  void acceptingUserCommandMakesActiveThreadQueued() {
+    // 测试意图：接受用户命令会把 Thread 置为 ACTIVE（预留 sequence）但尚未推进 head，因此投影必须是 QUEUED。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                baseline.threadId(), before.headEntryId(), before.nextCommandSequence()),
+            List.of(userMessageCommand(TestIds.id(1), "queued"))),
+        AcceptancePreflight.IDENTITY);
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
+    assertEquals(1, snapshot.queuedCommands().size());
+    assertEquals(ThreadRuntimeStatus.QUEUED, snapshot.runtimeStatus());
+  }
+
+  @Test
+  void activeLifecycleRejectsModelOwnedByAnotherThread() {
+    // 测试意图：投影只做统一状态映射，真正的形状不一致（Model 不属于本 Thread）仍 fail-closed 抛
+    // IllegalStateException，不降级为业务状态。
+    HarnessRuntimeTestSupport.ModelBaseline owner = seedModel(store, ModelInvocationStatus.RUNNING);
+    ThreadSnapshot ownerSnapshot = runtime.getThreadSnapshot(owner.threadId());
+    UUID otherThreadId = seedThreadAt(store, ownerSnapshot.thread().headEntryId());
+    markActive(otherThreadId, ThreadLifecycleStatus.ACTIVE);
+    ThreadSnapshot otherSnapshot = runtime.getThreadSnapshot(otherThreadId);
+    ThreadSnapshot forged =
         new ThreadSnapshot(
-            thread,
-            mock(EntryPath.class),
+            otherSnapshot.thread(),
+            otherSnapshot.entryPath(),
             List.of(),
-            null,
-            toolInvocations(
-                ToolInvocationStatus.SUCCEEDED,
-                ToolInvocationStatus.FAILED,
-                ToolInvocationStatus.CANCELLED,
-                ToolInvocationStatus.UNKNOWN),
+            ownerSnapshot.model(),
+            List.of(),
             List.of());
-    assertThrows(IllegalStateException.class, terminalToolsSnapshot::runtimeStatus);
+    assertThrows(IllegalStateException.class, forged::runtimeStatus);
   }
 
-  private static ThreadState threadState(ThreadLifecycleStatus status) {
-    return new ThreadState(
-        THREAD_ID,
-        SESSION_ID,
-        null,
-        HEAD_ENTRY_ID,
-        CREATION_REQUEST_HASH,
-        "main",
-        true,
-        status,
-        1L,
-        0L,
-        CREATED,
-        CREATED);
-  }
-
-  private static ModelInvocation model(ModelInvocationStatus status) {
-    ModelInvocation model = mock(ModelInvocation.class);
-    when(model.status()).thenReturn(status);
-    return model;
-  }
-
-  private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {
-    return Arrays.stream(statuses)
-        .map(
-            status -> {
-              ToolInvocation invocation = mock(ToolInvocation.class);
-              when(invocation.status()).thenReturn(status);
-              return invocation;
-            })
-        .toList();
+  /** 直接设置 Thread 的递归生命周期状态（种子 fixture 一律产出 IDLE）。 */
+  private void markActive(UUID threadId, ThreadLifecycleStatus status) {
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          tx.updateThread(thread.changeLifecycleStatus(status, T5));
+          return null;
+        });
   }
 }

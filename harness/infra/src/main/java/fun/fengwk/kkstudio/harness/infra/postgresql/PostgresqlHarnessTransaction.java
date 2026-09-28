@@ -1101,7 +1101,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public List<ThreadCommand> loadQueuedCommands(UUID threadId) {
     checkOpen();
     requireLocked(LockKey.thread(threadId));
-    requireCanLockRank(LockRank.COMMAND);
+    requireCanLockRank(LockRank.COMMAND, threadId);
     List<ThreadCommand> commands =
         queryList(
             """
@@ -1182,19 +1182,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       if (findThread(command.threadId()).isEmpty()) {
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
       }
+      // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
       requireLocked(LockKey.thread(command.threadId()));
-      if (highestLockRank == LockRank.WORK) {
-        if (lockedTrees.isEmpty() || !isInLockedTree(command.threadId())) {
-          throw new IllegalStateException(
-              "command on thread "
-                  + command.threadId()
-                  + " after WORK requires held tree lock on the same tree");
-        }
-      }
       requireUniqueCommandKey(command);
-    }
-    if (!copied.isEmpty()) {
-      requireCanLockRank(LockRank.COMMAND);
     }
     for (ThreadCommand command : copied) {
       update(
@@ -2627,18 +2617,21 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /**
    * 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。
    *
-   * <p>唯一例外是同一执行树内、已持有该树事务级锁的前提下回写 COMMAND（父 Thread 结果交付）：交付命令可能在 Model/Tool 收敛过程中（Work 之前）或 Work
-   * fencing 之后（Stop 收尾）写入。缺少树锁的例外会让普通调用方绕过树锁协议， 因此这里与 {@code insertCommands} 一样要求 {@code
-   * lockedTrees} 非空。
+   * <p>唯一例外是同一执行树内、已持有<b>该行所属树</b>事务级锁的前提下回写 COMMAND（父 Thread 结果交付）：交付命令可能在 Model/Tool 收敛过程中（Work
+   * 之前）或 Work fencing 之后（Stop 收尾）写入。例外严格限定在「command 所属 Thread 落在已持有的树锁内」， 仅持有其它执行树的树锁不允许逆序加锁。
    */
-  private void requireCanLockRank(LockRank rank) {
+  private void requireCanLockRank(LockRank rank, UUID commandThreadId) {
     if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
-      if (rank == LockRank.COMMAND && !lockedTrees.isEmpty()) {
+      if (rank == LockRank.COMMAND && commandThreadId != null && isInLockedTree(commandThreadId)) {
         return;
       }
       throw new IllegalStateException(
           "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
     }
+  }
+
+  private void requireCanLockRank(LockRank rank) {
+    requireCanLockRank(rank, null);
   }
 
   /** 同阶梯加锁排序防御：多个 Thread 必须严格按 UUID 升序加锁。 */
@@ -2668,7 +2661,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   private void requireCanLock(LockKey key) {
     if (!locked.contains(key)) {
-      requireCanLockRank(key.rank());
+      requireCanLockRank(key.rank(), key.ownerThreadId());
     }
   }
 
@@ -2777,29 +2770,30 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     WORK
   }
 
-  private record LockKey(LockRank rank, String key) {
+  /** 行锁 key；{@code ownerThreadId} 记录 COMMAND 行所属 Thread，用于同树例外判定。 */
+  private record LockKey(LockRank rank, String key, UUID ownerThreadId) {
     static LockKey session(UUID id) {
-      return new LockKey(LockRank.SESSION, "session:" + id);
+      return new LockKey(LockRank.SESSION, "session:" + id, null);
     }
 
     static LockKey thread(UUID id) {
-      return new LockKey(LockRank.THREAD, "thread:" + id);
+      return new LockKey(LockRank.THREAD, "thread:" + id, null);
     }
 
     static LockKey command(UUID threadId, long sequence) {
-      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence);
+      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence, threadId);
     }
 
     static LockKey model(UUID id) {
-      return new LockKey(LockRank.MODEL, "model:" + id);
+      return new LockKey(LockRank.MODEL, "model:" + id, null);
     }
 
     static LockKey tool(UUID id) {
-      return new LockKey(LockRank.TOOL, "tool:" + id);
+      return new LockKey(LockRank.TOOL, "tool:" + id, null);
     }
 
     static LockKey work(WorkTarget target) {
-      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id());
+      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id(), null);
     }
   }
 
