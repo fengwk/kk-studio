@@ -84,16 +84,19 @@ class HarnessRuntimeResponseMapperTest {
 
   @Test
   void projectsEveryReachableRuntimeStatusFromThreadSnapshot() {
-    // 测试意图：HTTP status 必须逐字投影 ThreadSnapshot.runtimeStatus() 的全部可达状态；
-    // web 不再自行分类上下文，也就不允许出现 Runtime 投影之外的状态（例如曾经由 web 补出的 CONTINUATION_DUE / APPLYING）。
+    // 测试意图：HTTP 必须保留 Runtime 的完整状态词汇，包括终态待物化和续写，不能将它们压成排队或异常。
     Map<ThreadRuntimeStatus, ThreadSnapshot> cases = new LinkedHashMap<>();
     // 只有完全静止的 IDLE 不是 processing，其余状态一律 processing。
     cases.put(ThreadRuntimeStatus.IDLE, HarnessRuntimeTestFixtures.idleSnapshot());
-    // 生命周期 ACTIVE 但本地没有活跃调用：等待调度启动新 turn，因此排队命令与历史里的 continuation 义务都以 QUEUED 暴露。
+    // 生命周期 ACTIVE 且尚无本地适用上下文时，等待调度启动新 turn。
     cases.put(ThreadRuntimeStatus.QUEUED, HarnessRuntimeTestFixtures.queuedSnapshot());
     cases.put(
         ThreadRuntimeStatus.WAITING_CHILDREN,
         HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2)));
+    cases.put(
+        ThreadRuntimeStatus.CONTINUATION_DUE,
+        HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
+    cases.put(ThreadRuntimeStatus.APPLYING, modelSnapshot(ModelInvocationStatus.FAILED, List.of()));
     cases.put(
         ThreadRuntimeStatus.MODEL_READY, modelSnapshot(ModelInvocationStatus.READY, List.of()));
     cases.put(
@@ -107,6 +110,7 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(ThreadRuntimeStatus.TOOL_RUNNING, toolSnapshot(ToolInvocationStatus.RUNNING));
     cases.put(ThreadRuntimeStatus.TOOL_DISPATCHING, toolSnapshot(ToolInvocationStatus.DISPATCHING));
     cases.put(ThreadRuntimeStatus.TOOL_READY, toolSnapshot(ToolInvocationStatus.READY));
+    assertEquals(Set.of(ThreadRuntimeStatus.values()), cases.keySet());
 
     for (Map.Entry<ThreadRuntimeStatus, ThreadSnapshot> entry : cases.entrySet()) {
       HarnessThreadDTO dto = HarnessRuntimeResponseMapper.toThreadDto(entry.getValue());
@@ -114,17 +118,10 @@ class HarnessRuntimeResponseMapperTest {
       assertEquals(entry.getKey().isProcessing(), dto.getProcessing());
     }
 
-    // continueModel 的历史义务不再是独立状态：同一 ACTIVE 生命周期下它必须与排队命令投影出同一个 QUEUED。
-    HarnessThreadDTO continuationPending =
-        HarnessRuntimeResponseMapper.toThreadDto(
-            HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
-    assertEquals(ThreadRuntimeStatus.QUEUED.name(), continuationPending.getStatus());
-    assertTrue(continuationPending.getProcessing());
-
-    // 终态调用尚未物化的 ACTIVE 形状属于 Runtime 不变量破坏：web 既不发明状态也不吞掉异常，让 Runtime 的 fail-closed 语义直接暴露。
-    assertThrows(
-        IllegalStateException.class,
-        () -> HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED)));
+    HarnessThreadDTO terminalTool =
+        HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED));
+    assertEquals(ThreadRuntimeStatus.APPLYING.name(), terminalTool.getStatus());
+    assertTrue(terminalTool.getProcessing());
   }
 
   @Test
@@ -537,7 +534,7 @@ class HarnessRuntimeResponseMapperTest {
                 HarnessRuntimeTestFixtures.turnStartEntry(),
                 HarnessRuntimeTestFixtures.userMessageEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.activeThread(id(3), id(3)),
+        HarnessRuntimeTestFixtures.activeThread(model.threadId(), id(3)),
         path,
         queued,
         model,
@@ -571,7 +568,7 @@ class HarnessRuntimeResponseMapperTest {
                 HarnessRuntimeTestFixtures.userMessageEntry(),
                 HarnessRuntimeTestFixtures.assistantEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.activeThread(id(4), id(4)),
+        HarnessRuntimeTestFixtures.activeThread(model.threadId(), id(4)),
         path,
         List.of(),
         model,
