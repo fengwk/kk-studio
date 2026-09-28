@@ -20,6 +20,7 @@ import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { useI18n } from '@/shared/i18n'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
+import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
 
 export type { AgentPaneCapabilities, AgentPaneDefaults }
 
@@ -69,6 +70,11 @@ export function AgentPane({
     ? pane.controller.thread.name
     : null
 
+  const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
+  const boundWorkingLabel = boundStatus === 'WAITING_CHILDREN' || boundStatus === 'QUEUED'
+    ? formatThreadStatusLabel(boundStatus, t)
+    : undefined
+
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
       <ChatPanel
@@ -83,6 +89,7 @@ export function AgentPane({
         composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
+          workingLabel: boundWorkingLabel,
           actionError: pane.error,
           onDismissActionError,
         }}

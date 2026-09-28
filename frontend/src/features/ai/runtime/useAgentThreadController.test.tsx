@@ -88,6 +88,7 @@ function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThread
     threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
@@ -1879,5 +1880,30 @@ describe('useAgentThreadController', () => {
     expect(localStorage.getItem(pendingStopStorageKey(THREAD_ID))).not.toBeNull()
     expect(result.current.actionError).toBeNull()
     expect(result.current.stopReplayPending).toBe(false)
+  })
+
+  it('treats non-IDLE statuses WAITING_CHILDREN and QUEUED as working', async () => {
+    // 测试意图：只要线程状态不是 IDLE（如 WAITING_CHILDREN 或 QUEUED），controller.working 必须为 true。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture({ threadId: THREAD_ID, status: 'WAITING_CHILDREN', processing: false })),
+    )
+    const { result } = renderHook(
+      () => useAgentThreadController(THREAD_ID),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+    expect(result.current.thread?.status).toBe('WAITING_CHILDREN')
+    expect(result.current.working).toBe(true)
+
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture({ threadId: THREAD_ID_2, status: 'QUEUED', processing: false })),
+    )
+    const { result: result2 } = renderHook(
+      () => useAgentThreadController(THREAD_ID_2),
+      { wrapper },
+    )
+    await waitFor(() => expect(result2.current.disabled).toBe(false))
+    expect(result2.current.thread?.status).toBe('QUEUED')
+    expect(result2.current.working).toBe(true)
   })
 })

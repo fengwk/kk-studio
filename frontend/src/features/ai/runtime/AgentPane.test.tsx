@@ -118,6 +118,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     threadId: THREAD_ID,
     sessionId: 'session-1',
     headEntryId: 'head-1',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
@@ -1451,6 +1452,21 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onCommand(testCommand('stop')))
     await waitFor(() => expect(hook.result.current.error).toBe('stop failed'))
+  })
+
+  it('renders localized WAITING_CHILDREN status label when bound thread is waiting for child threads', async () => {
+    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子线程”。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'WAITING_CHILDREN', processing: false })),
+    )
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', id: CHAT_ID })
+    await waitFor(() => {
+      expect(screen.getByText('等待子线程')).toBeInTheDocument()
+    })
   })
 })
 
