@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.project;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -200,5 +201,75 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(2, issueService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
     assertNotEquals(agentA, agentB, "fixtures must be two distinct agents");
+  }
+
+  /**
+   * 终态消耗：FAILED/CANCELLED/UNKNOWN 各按 {@code (issue,state)} 高水位消耗一次，不因收尾状态被豁免。
+   *
+   * <p>意图：锁定真实 SQL 计数的「失败、取消与 UNKNOWN 同样计数」语义——三种终态各消费一次后额度耗尽；人工核查 UNKNOWN 门禁并恢复后，新建 Run
+   * 因额度耗尽被确定性拒绝，而不是被门禁或活动 Run 拒绝。
+   */
+  @Test
+  void terminalRunsOfEveryStatusConsumeBudget() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("终态消耗", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+
+    IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.failRun(
+        failedRun.getId(),
+        failedRun.getVersion(),
+        key("fail"),
+        failedRun.getStartEntryId(),
+        "boom");
+    assertEquals(
+        1L,
+        issueService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
+        "FAILED run consumes one");
+
+    Issue afterFail = issueService.getIssue(issue.getId());
+    issueService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
+
+    IssueRun cancelledRun = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.cancelRun(
+        cancelledRun.getId(),
+        cancelledRun.getVersion(),
+        key("cancel"),
+        appendHistoryEntry(cancelledRun.getThreadId()));
+    assertEquals(
+        2L,
+        issueService.getStageBudget(issue.getId(), "DESIGN").usedRuns(),
+        "CANCELLED run consumes one");
+
+    Issue afterCancel = issueService.getIssue(issue.getId());
+    issueService.resumeIssue(afterCancel.getId(), afterCancel.getVersion(), key("resume"));
+
+    IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.markUnknown(
+        unknownRun.getId(),
+        unknownRun.getVersion(),
+        key("unknown"),
+        appendHistoryEntry(unknownRun.getThreadId()),
+        "side effect lost");
+    StageBudgetView exhausted = issueService.getStageBudget(issue.getId(), "DESIGN");
+    assertEquals(3L, exhausted.usedRuns(), "UNKNOWN run consumes one");
+    assertEquals(0L, exhausted.remainingRuns());
+
+    // UNKNOWN 门禁先由人工核查解除再恢复；此后唯一阻塞新 Run 的因素是额度耗尽。
+    Issue afterUnknown = issueService.getIssue(issue.getId());
+    issueService.resolveUnknown(
+        afterUnknown.getId(), afterUnknown.getVersion(), key("resolve"), "checked");
+    Issue afterResolve = issueService.getIssue(issue.getId());
+    issueService.resumeIssue(afterResolve.getId(), afterResolve.getVersion(), key("resume"));
+
+    ProjectValidationException budgetExhausted =
+        assertThrows(
+            ProjectValidationException.class,
+            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+    assertTrue(
+        budgetExhausted.getMessage().contains("budget is exhausted"), budgetExhausted.getMessage());
+    assertEquals(
+        3L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 }
