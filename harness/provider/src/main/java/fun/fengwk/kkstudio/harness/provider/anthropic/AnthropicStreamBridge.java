@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 /**
  * Anthropic 流式生命周期桥接器。
@@ -33,6 +34,7 @@ final class AnthropicStreamBridge implements ProviderStream {
   private volatile boolean userCancelled = false;
   private boolean transportCancelled = false;
   private boolean terminal = false;
+  private boolean handlerFailed = false;
   private ProviderStream underlyingStream = null;
 
   AnthropicStreamBridge(ProviderStreamHandler handler) {
@@ -80,6 +82,15 @@ final class AnthropicStreamBridge implements ProviderStream {
     }
   }
 
+  boolean handlerFailed() {
+    dispatchLock.lock();
+    try {
+      return this.handlerFailed;
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
   @Override
   public boolean isCancelled() {
     synchronized (bindLock) {
@@ -94,7 +105,7 @@ final class AnthropicStreamBridge implements ProviderStream {
       if (this.userCancelled || this.terminal) {
         return;
       }
-      handler.onEvent(event, this);
+      dispatch(handler -> handler.onEvent(event, this));
     } finally {
       dispatchLock.unlock();
     }
@@ -113,7 +124,7 @@ final class AnthropicStreamBridge implements ProviderStream {
       if (this.userCancelled || this.terminal) {
         return;
       }
-      handler.onProtocolEvent(event, this);
+      dispatch(handler -> handler.onProtocolEvent(event, this));
     } finally {
       dispatchLock.unlock();
     }
@@ -127,17 +138,7 @@ final class AnthropicStreamBridge implements ProviderStream {
         return;
       }
       this.terminal = true;
-      handler.onComplete(completion, this);
-    } finally {
-      dispatchLock.unlock();
-    }
-  }
-
-  /** 用户 handler 自身抛错后封口，后续 CALLBACK_FAILED 不再进入 onError。 */
-  void sealTerminal() {
-    dispatchLock.lock();
-    try {
-      this.terminal = true;
+      dispatch(handler -> handler.onComplete(completion, this));
     } finally {
       dispatchLock.unlock();
     }
@@ -162,9 +163,22 @@ final class AnthropicStreamBridge implements ProviderStream {
         return;
       }
       this.terminal = true;
-      handler.onError(error, this);
+      dispatch(handler -> handler.onError(error, this));
     } finally {
       dispatchLock.unlock();
+    }
+  }
+
+  /**
+   * 只包住 handler 回调。handler 抛出的任何异常（包括 ProviderException）都先封口再抛出，避免随后的 CALLBACK_FAILED 再次进入 onError。
+   */
+  private void dispatch(Consumer<ProviderStreamHandler> callback) {
+    try {
+      callback.accept(handler);
+    } catch (RuntimeException handlerFailure) {
+      this.terminal = true;
+      this.handlerFailed = true;
+      throw handlerFailure;
     }
   }
 }

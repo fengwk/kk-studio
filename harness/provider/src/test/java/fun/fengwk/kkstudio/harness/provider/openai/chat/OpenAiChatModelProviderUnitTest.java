@@ -329,7 +329,7 @@ class OpenAiChatModelProviderUnitTest {
         new ProviderStreamHandler() {
           @Override
           public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
-            throw new IllegalStateException("user handler failed");
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
           }
 
           @Override
@@ -344,7 +344,7 @@ class OpenAiChatModelProviderUnitTest {
           }
         });
     assertThrows(
-        IllegalStateException.class,
+        ProviderException.class,
         () ->
             callbackRef
                 .get()
@@ -354,6 +354,60 @@ class OpenAiChatModelProviderUnitTest {
         .get()
         .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
     assertEquals(0, errors.get());
+
+    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
+    JdkHttpSseTransport providerExceptionTransport =
+        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest request,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            providerExceptionCallback.set(callback);
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
+    new OpenAiChatProviderAdapter(providerExceptionTransport, "sk-test")
+        .create(descriptor).stream(
+            validRequest(),
+            new ProviderStreamHandler() {
+              @Override
+              public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+                throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+              }
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {
+                providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+              }
+            });
+    assertThrows(
+        ProviderException.class,
+        () ->
+            providerExceptionCallback
+                .get()
+                .onEvent(
+                    new ServerSentEvent(null, "{\"choices\":[{\"delta\":{\"content\":\"x\"}}]}")));
+    providerExceptionCallback
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, providerExceptionErrors.get());
   }
 
   private ProviderRequest validRequest() {

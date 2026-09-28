@@ -460,7 +460,7 @@ class GeminiModelProviderUnitTest {
         new ProviderStreamHandler() {
           @Override
           public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
-            throw new IllegalStateException("user handler failed");
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
           }
 
           @Override
@@ -475,12 +475,71 @@ class GeminiModelProviderUnitTest {
           public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
         });
     assertThrows(
-        IllegalStateException.class,
+        ProviderException.class,
         () -> callbackRef.get().onEvent(new ServerSentEvent(null, "{\"candidates\":[]}")));
     callbackRef
         .get()
         .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
     assertEquals(0, errors.get());
+
+    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
+    GeminiModelProvider providerExceptionProvider =
+        new GeminiModelProvider(
+            new JdkHttpSseTransport(client, exec, sched) {
+              @Override
+              public ProviderStream stream(
+                  HttpRequest req,
+                  ModelCallTimeoutPolicy timeout,
+                  HttpSseLimits limits,
+                  HttpSseCallback callback) {
+                providerExceptionCallback.set(callback);
+                return new ProviderStream() {
+                  @Override
+                  public void cancel() {}
+
+                  @Override
+                  public boolean isCancelled() {
+                    return false;
+                  }
+                };
+              }
+            },
+            descriptor,
+            "k",
+            URI.create("https://example.com"));
+    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
+    providerExceptionProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+        });
+    assertThrows(
+        ProviderException.class,
+        () ->
+            providerExceptionCallback
+                .get()
+                .onEvent(
+                    new ServerSentEvent(
+                        null,
+                        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"x\"}]}}]}")));
+    providerExceptionCallback
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, providerExceptionErrors.get());
   }
 
   /** 验证 onEvent 与 onComplete 中捕获 ProviderException 时通过 bridge.emitError 分发。 */
