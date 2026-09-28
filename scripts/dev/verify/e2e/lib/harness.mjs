@@ -61,7 +61,7 @@ function nonNegativeDecimal(value, field) {
  * 发起它的父 Thread。断言父关系才能证明「结果来自同一执行树」，同 Session 的另一条线程不会混淆。
  */
 export function threadParentIdOf(thread) {
-  const parentThreadId = thread?.parentThreadId ?? null
+  const parentThreadId = thread?.parentThreadId
   if (parentThreadId !== null) {
     canonicalUuid(parentThreadId, 'parentThreadId')
   }

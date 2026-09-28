@@ -75,7 +75,7 @@ test('newThreadTarget defaults yoloEnabled to false and validates canonical ids'
 
 test('threadParentIdOf/threadIdOf enforce the immutable execution parent relation', () => {
   // 测试意图：Thread 的执行父关系是不可变事实（根为 null、其余为 canonical UUID），且不再物化进
-  // ROOT payload。委派链路断言必须靠这个字段，所以 helper 要在本地就拒绝缺失以外的畸形值。
+  // ROOT payload。委派链路断言必须靠这个字段，所以 helper 要拒绝缺失字段，根也必须显式返回 null。
   const threadId = '00000000-0000-4000-8000-000000000000'
   const base = {
     threadId,
@@ -87,12 +87,12 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   }
 
   assert.equal(threadParentIdOf({ ...base, parentThreadId: null }), null)
-  assert.equal(threadParentIdOf(base), null, '缺失即根 Thread')
+  assert.throws(() => threadParentIdOf(base), /canonical UUID/)
   const parentThreadId = '33333333-3333-4333-8333-333333333333'
   assert.equal(threadParentIdOf({ ...base, parentThreadId }), parentThreadId)
   assert.equal(threadIdOf({ ...base, parentThreadId }), threadId)
 
-  for (const invalid of ['not-uuid', '33333333333343338333333333333333', '']) {
+  for (const invalid of [undefined, 'not-uuid', '33333333333343338333333333333333', '']) {
     assert.throws(() => threadParentIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
     assert.throws(() => threadIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
   }
