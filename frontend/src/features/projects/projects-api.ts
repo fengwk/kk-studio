@@ -238,17 +238,6 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       return decodeIssue(raw)
     },
 
-    resolveUnknownIssue: async (
-      issueId: string,
-      request: ResolveUnknownIssueRequest,
-    ): Promise<IssueDTO> => {
-      const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/resolve-unknown`,
-        request,
-      )
-      return decodeIssue(raw)
-    },
-
     deleteIssue: async (issueId: string, expectedVersion: string): Promise<void> => {
       await client.delete(`/issues/${encodeURIComponent(issueId)}`, {
         params: { expectedVersion },

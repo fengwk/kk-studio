@@ -114,7 +114,6 @@ describe('IssueDetailModal', () => {
     recoverIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     reopenIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resolveUnknown: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
-    resolveUnknownIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     pauseIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     stopIssue: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
     resetStageBudget: vi.fn().mockResolvedValue(mockActiveIssueDetail.issue),
