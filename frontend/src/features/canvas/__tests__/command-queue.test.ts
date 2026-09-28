@@ -796,6 +796,124 @@ describe('CanvasCommandQueue', () => {
     expect(createCommandId).toHaveBeenCalledTimes(2)
     expect(store.saved.size).toBe(2)
   })
+
+  it('Gate store.list 延迟：旧 A seq 5，recover pending 时 enqueue B，释放 list 且 A 网络失败，断言持久 order B > A 且 reload 不越序', async () => {
+    // 意图：验证新实例创建时（seq 初值为 0），在 initial recover 等待 store.list 延迟期间若用户入队 B，
+    // B 在入队瞬间完成 body/identity 冻结；当 store.list 释放且旧 A (seq 5) 网络失败后，
+    // B 分配到的持久序列号必须严格大于 A (B.sequence > A.sequence = 5)，且 reload 恢复时绝不发生 B 越过 A 越序发送。
+    const storeMap = new Map<string, CanvasPendingOperation>()
+    const opA: CanvasPendingOperation = {
+      id: 'user:canvas:session:key-old-a',
+      userId: 'user',
+      canvasId: CANVAS_ID,
+      editingSessionId: 'session',
+      sessionKey: 'user:canvas:session',
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5' as UUIDString,
+      commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
+      baselineRevision: '1',
+      ack: [],
+      sequence: 5,
+      createdAt: 1000,
+    }
+    storeMap.set(opA.id, opA)
+
+    let releaseListGate!: () => void
+    const listGate = new Promise<void>((resolve) => {
+      releaseListGate = resolve
+    })
+    let listCalls = 0
+
+    const store = {
+      save: vi.fn(async (op: CanvasPendingOperation) => {
+        storeMap.set(op.id, op)
+      }),
+      remove: vi.fn(async (id: string) => {
+        storeMap.delete(id)
+      }),
+      list: vi.fn(async () => {
+        listCalls++
+        if (listCalls === 1) {
+          await listGate
+        }
+        return [...storeMap.values()]
+      }),
+    }
+
+    const applyCalls: ApplyCanvasCommandsRequestDTO[] = []
+    const apply = vi.fn().mockImplementation(async (_canvasId, request: ApplyCanvasCommandsRequestDTO) => {
+      applyCalls.push(request)
+      if (request.idempotencyKey === 'aaaaaaaa-0000-4000-8000-0000000000a5') {
+        throw new ApiError('network down')
+      }
+      return advancePatch(applyCalls.length + 1)
+    })
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b6' as UUIDString,
+      operationStore: store,
+    })
+
+    // 1. 触发 recover()，此时处于 pending 等待 store.list 的 listGate 释放
+    const recPromise = queue.recover()
+    await Promise.resolve()
+    expect(listCalls).toBe(1)
+
+    // 2. 在 recover 还在 pending 期间，用户入队 B
+    const commandsB = [{ type: 'RENAME_NODE' as const, nodeId: NODE_ID, expectedName: 'A', name: 'B' }]
+    const bPromise = queue.enqueue(commandsB)
+    // 验证入队瞬间深拷贝冻结，外部后续修改不影响已入队命令
+    commandsB[0].name = 'tampered'
+
+    // 3. 释放 store.list 延迟门禁
+    releaseListGate()
+
+    // 4. 旧 A 遇到网络失败，recover 结束且队列阻塞
+    const recResult = await recPromise
+    expect(recResult.failed).toBe(1)
+    expect(queue.isBlocked()).toBe(true)
+
+    // 5. B 执行持久化并因队列阻塞被拒绝，但保留在 store 中
+    await expect(bPromise).rejects.toBeInstanceOf(CanvasQueueBlockedError)
+    expect(storeMap.size).toBe(2)
+
+    const savedA = storeMap.get(opA.id)!
+    const savedB = [...storeMap.values()].find((op) => op.id !== opA.id)!
+    expect(savedA).toBeDefined()
+    expect(savedB).toBeDefined()
+    expect(savedB.commands).toEqual([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'B' }])
+
+    // 6. 核心断言：持久化 sequence 必须在确保持久化已有序列号初始化后生成，断言持久 order B > A (B.sequence > A.sequence)
+    expect(savedB.sequence).toBeGreaterThan(savedA.sequence)
+    expect(savedA.sequence).toBe(5)
+    expect(savedB.sequence).toBe(6)
+
+    // 7. 模拟 reload 恢复流程：在网络恢复后重建队列实例并执行 recover
+    const reloadApplyCalls: ApplyCanvasCommandsRequestDTO[] = []
+    const reloadApply = vi.fn().mockImplementation(async (_canvasId, request: ApplyCanvasCommandsRequestDTO) => {
+      reloadApplyCalls.push(request)
+      return advancePatch(reloadApplyCalls.length + 1)
+    })
+    const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: reloadApply,
+      refetch: vi.fn(),
+      operationStore: store,
+    })
+
+    const reloadResult = await reloadedQueue.recover()
+    expect(reloadResult.replayed).toBe(2)
+    expect(reloadResult.failed).toBe(0)
+
+    // 断言 reload 重放顺序严格为先 A (seq 5) 后 B (seq 6)，绝不越序
+    expect(reloadApplyCalls).toHaveLength(2)
+    expect(reloadApplyCalls[0]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000a5')
+    expect(reloadApplyCalls[1]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000b6')
+    expect(storeMap.size).toBe(0)
+    expect(reloadedQueue.isBlocked()).toBe(false)
+  })
 })
 
 function noopStore() {
