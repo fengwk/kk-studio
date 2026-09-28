@@ -7,12 +7,15 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
@@ -29,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.MultiToolBaseline;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -47,7 +51,9 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -751,6 +757,164 @@ class HarnessRuntimeStopRecursivePropagationTest {
             });
     assertTrue(parentCmds.isEmpty());
     assertFalse(hasWork(root.threadId(), WorkTargetType.THREAD));
+  }
+
+  @Test
+  void recursiveStopCancelsMixedModelAndToolExecutionsExactlyOnceWithIsolation() {
+    // 测试意图：验证跨层递归 Stop 同时收集各层活跃的 Model 与 Tool 执行——目标层有 live Tool 兄弟、子层有 live
+    // Model 时，两类本地取消各自恰好收到自己的执行 id（不互相吞并、不重复下发）；
+    // 且某一类本地取消抛异常只记日志，不影响另一类的取消与已提交的 durable Stop。
+    MultiToolBaseline toolRoot = seedToolBaseline(store, 2);
+    UUID rootId = toolRoot.threadId();
+    UUID childId = createChildThread(store, rootId, toolRoot.sessionId(), toolRoot.rootEntryId());
+    UUID childModelId =
+        seedChildRunningModel(store, childId, toolRoot.sessionId(), toolRoot.rootEntryId());
+    seedThreadWork(store, rootId);
+    seedThreadWork(store, childId);
+    seedModelWork(store, childModelId);
+    for (UUID toolId : toolRoot.toolIds()) {
+      seedToolWork(store, toolId);
+    }
+
+    List<UUID> modelCalls = new ArrayList<>();
+    List<UUID> toolCalls = new ArrayList<>();
+    HarnessRuntime runtime =
+        runtime(
+            store,
+            Clock.fixed(T5, ZoneOffset.UTC),
+            invocationId -> {
+              modelCalls.add(invocationId);
+              throw new IllegalStateException("model cancellation failed");
+            },
+            toolCalls::add);
+
+    long version = store.transaction(tx -> tx.findThread(rootId).orElseThrow().version());
+    StopResult result = runtime.stop(new StopCommand(rootId, TestIds.id(30), version));
+
+    assertStopped(result);
+    // 两类执行的取消都在同一棵树的递归 Stop 中被收集，且每次恰好一次
+    assertEquals(List.of(childModelId), modelCalls);
+    assertEquals(toolRoot.toolIds(), toolCalls);
+    // Model 取消失败不影响已提交的 Stop：子层 Model 行与目标层 Tool 行都已删除
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(childModelId)).isEmpty());
+    for (UUID toolId : toolRoot.toolIds()) {
+      assertTrue(store.transaction(tx -> tx.findToolInvocation(toolId)).isEmpty());
+    }
+  }
+
+  @Test
+  void stoppingJoinlessDeepDescendantConvergesEveryAncestorToIdleImmediately() {
+    // 测试意图：验证无 join 的三层执行树（Root -> Child -> Grandchild）在停止最深后代时，
+    // 被停止的 Grandchild 与仍处于 WAITING_CHILDREN 的 Child、Root 在同一个 Stop 事务内立即收敛为 IDLE，
+    // 祖先仅更新状态与通知版本，不追加 STOP 历史。
+    Baseline root = seedBaseline(store);
+    UUID childId = createChildThread(store, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID grandChildId = createChildThread(store, childId, root.sessionId(), root.rootEntryId());
+    seedActiveHierarchy(root.threadId(), childId);
+
+    ThreadState rootBefore = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    UUID rootHeadBefore = rootBefore.headEntryId();
+    long rootVersionBefore = rootBefore.version();
+
+    StopResult result = runtime.stop(new StopCommand(grandChildId, TestIds.id(31), 0));
+
+    assertFalse(result.replayed());
+    assertStoppedTurnEnd(grandChildId, TestIds.id(31));
+    for (UUID threadId : List.of(grandChildId, childId, root.threadId())) {
+      ThreadState state = store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+      assertEquals(ThreadLifecycleStatus.IDLE, state.status(), "thread " + threadId);
+    }
+    // 祖先 head 不变，状态改变必须推进通知版本。
+    ThreadState rootAfter = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    assertEquals(rootHeadBefore, rootAfter.headEntryId());
+    assertEquals(rootVersionBefore + 1, rootAfter.version());
+  }
+
+  @Test
+  void stoppedParentWithQueuedUserInputAcceptsDeliveryInsteadOfFreezing() {
+    // 测试意图：验证“暂停交付”只适用于 STOPPED head 且没有任何排队真实用户输入的父线程：
+    // 父线程在 Stop 之后重新排入真实用户输入，就不再是暂停态，子线程停止时结果应立即交付并写入父 Thread 命令队列。
+    Baseline root = seedBaseline(store);
+    runtime.stop(new StopCommand(root.threadId(), TestIds.id(32), 0));
+
+    // 父线程恢复：Stop 之后排入真实用户消息（尚未开始新的 turn）
+    ThreadState stopped = runtime.getThreadSnapshot(root.threadId()).thread();
+    var resume = userMessagePayload("resume-after-stop");
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                stopped.id(), stopped.headEntryId(), stopped.nextCommandSequence()),
+            List.of(
+                new NewThreadCommand(
+                    resume, TestIds.id(33), ThreadCommandPayloadJsonCodec.requestHash(resume)))),
+        AcceptancePreflight.IDENTITY);
+
+    UUID childId = createChildThread(store, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID joinId = UUID.randomUUID();
+    seedQueuedCommand(store, childId, 1L, userMessagePayload("child-task"), TestIds.id(34));
+    seedJoin(store, joinId, root.threadId(), childId);
+
+    runtime.stop(new StopCommand(childId, TestIds.id(35), 0));
+
+    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    assertTrue(join.matched());
+    assertNotNull(join.deliveryCommandSequence());
+
+    List<ThreadCommand> parentCommands =
+        store.transaction(
+            tx -> {
+              tx.lockThread(root.threadId());
+              return tx.loadQueuedCommands(root.threadId());
+            });
+    assertEquals(2, parentCommands.size());
+    assertEquals(ThreadCommandType.USER_MESSAGE, parentCommands.get(0).type());
+    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, parentCommands.get(1).type());
+    assertEquals(join.deliveryCommandSequence(), parentCommands.get(1).sequence());
+    assertTrue(hasWork(root.threadId(), WorkTargetType.THREAD));
+  }
+
+  /** 把 Root / Child 置为非空闲状态，模拟真实递归活跃层级。 */
+  private void seedActiveHierarchy(UUID rootThreadId, UUID childThreadId) {
+    store.transaction(
+        tx -> {
+          List<UUID> ordered =
+              List.of(rootThreadId, childThreadId).stream().sorted(UuidOrder.COMPARATOR).toList();
+          for (UUID threadId : ordered) {
+            tx.lockThread(threadId);
+          }
+          for (UUID threadId : ordered) {
+            ThreadState thread = tx.lockThread(threadId).orElseThrow();
+            tx.updateThread(
+                thread.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, T0));
+          }
+          return null;
+        });
+  }
+
+  /** 为已存在的子线程写入一条未匹配 join。 */
+  private void seedJoin(
+      InMemoryHarnessStore targetStore, UUID joinId, UUID parentId, UUID childId) {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(
+              new ThreadJoin(
+                  joinId,
+                  CREATION_REQUEST_HASH,
+                  parentId,
+                  childId,
+                  1L,
+                  0L,
+                  "agent",
+                  10,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  T0,
+                  T0));
+          return null;
+        });
   }
 
   private UUID seedChildRunningModel(
