@@ -147,8 +147,8 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends ProjectTestSupport {
         sessionId);
     jdbcTemplate.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " yolo_enabled, next_command_sequence, version, created_at, updated_at) values (?, ?,"
-            + " ?, ?, ?, true, 1, 0, current_timestamp, current_timestamp)",
+            + " yolo_enabled, next_command_sequence, version, status, created_at, updated_at) values (?, ?,"
+            + " ?, ?, ?, true, 1, 0, 'IDLE', current_timestamp, current_timestamp)",
         threadId,
         sessionId,
         rootEntryId,
