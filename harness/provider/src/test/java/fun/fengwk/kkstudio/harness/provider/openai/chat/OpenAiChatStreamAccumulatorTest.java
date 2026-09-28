@@ -402,6 +402,81 @@ class OpenAiChatStreamAccumulatorTest {
         "fn_1", completion.replayState().payload().path("tool_calls").get(0).path("id").asText());
   }
 
+  /** 测试意图：builder 建立后的 identity-only 片段只累积 id，不得因缺少 function 触发 NPE；明确 null 与标量 function 则是非法响应。 */
+  @Test
+  void identityOnlyFragmentAfterFunctionBuilderDoesNotFail() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"1"}]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"function":{"arguments":"{}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals("call_1", completion.response().toolCalls().get(0).id());
+    assertEquals("lookup", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+  }
+
+  @Test
+  void nullOrScalarFunctionFragmentIsInvalidResponse() {
+    OpenAiChatStreamAccumulator nullFunction =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    nullFunction.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    ProviderException nullError =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                nullFunction.handleData(
+                    """
+                    {"choices":[{"delta":{"tool_calls":[
+                    {"index":0,"function":null}
+                    ]}}]}
+                    """));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, nullError.kind());
+
+    OpenAiChatStreamAccumulator scalarFunction =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    scalarFunction.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    ProviderException scalarError =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                scalarFunction.handleData(
+                    """
+                    {"choices":[{"delta":{"tool_calls":[
+                    {"index":0,"function":"lookup"}
+                    ]}}]}
+                    """));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, scalarError.kind());
+  }
+
   /** 测试意图：custom 占据 wire index=0 时，LENGTH 诊断与已发布 function delta 均使用 runtime ordinal=0。 */
   @Test
   void usesNormalizedOrdinalForLengthDiagnosticAfterCustomCall() {

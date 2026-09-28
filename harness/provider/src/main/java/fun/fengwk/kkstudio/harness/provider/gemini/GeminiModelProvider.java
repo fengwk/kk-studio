@@ -108,12 +108,15 @@ final class GeminiModelProvider implements ModelProvider {
           @Override
           public void onEvent(ServerSentEvent event) {
             // 每条 transport SSE frame 先原样交付原生通道，再进入规范化累积器：两条通道独立且互补
-            bridge.emitProtocolEvent(
-                new ProviderProtocolEvent(resolveProtocolEventType(event), event.data()));
             try {
+              bridge.emitProtocolEvent(
+                  new ProviderProtocolEvent(resolveProtocolEventType(event), event.data()));
               accumulator.handleEvent(event.event(), event.data());
             } catch (ProviderException pe) {
               bridge.emitError(pe);
+            } catch (RuntimeException handlerFailure) {
+              bridge.sealTerminal();
+              throw handlerFailure;
             }
           }
 
@@ -124,6 +127,9 @@ final class GeminiModelProvider implements ModelProvider {
               bridge.emitComplete(completion);
             } catch (ProviderException pe) {
               bridge.emitError(pe);
+            } catch (RuntimeException handlerFailure) {
+              bridge.sealTerminal();
+              throw handlerFailure;
             }
           }
 
@@ -141,6 +147,12 @@ final class GeminiModelProvider implements ModelProvider {
           transport.stream(
               httpRequest, descriptor.modelCallTimeoutPolicy(), HttpSseLimits.DEFAULT, callback);
       bridge.bind(stream);
+    } catch (TransportException exception) {
+      ProviderException mapped = GeminiErrorMapper.mapTransportException(exception);
+      if (mapped != null) {
+        bridge.emitError(mapped);
+      }
+      return bridge;
     } catch (RuntimeException ex) {
       throw new RuntimeException("transport execution failed");
     }
