@@ -112,6 +112,10 @@ public final class CanvasCommandPlanner {
 
     private void createNode(CanvasCommand.CreateNode command) {
       UUID nodeId = command.nodeId();
+      if (removedNodes.contains(nodeId)) {
+        throw new CanvasValidationException(
+            "node id deleted in this batch must not be reused by create");
+      }
       if (nodes.containsKey(nodeId)) {
         conflicts.add(new CanvasConflict.TargetPresent(nodeId, Target.NODE));
         return;
@@ -251,6 +255,10 @@ public final class CanvasCommandPlanner {
 
     private void createGroup(CanvasCommand.CreateGroup command) {
       UUID groupId = command.groupId();
+      if (removedGroups.contains(groupId)) {
+        throw new CanvasValidationException(
+            "group id deleted in this batch must not be reused by create");
+      }
       if (groups.containsKey(groupId)) {
         conflicts.add(new CanvasConflict.TargetPresent(groupId, Target.GROUP));
         return;

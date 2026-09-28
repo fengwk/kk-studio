@@ -38,6 +38,30 @@ class InputNormalizerTest {
     assertEquals("{\"ratio\":\"abc\"}", InputNormalizer.normalize("{\"ratio\":\"abc\"}", schema));
   }
 
+  @Test
+  void convertsNumberTextWithoutDoublePrecisionLoss() throws Exception {
+    // 测试意图：NumberSchema 字符串必须按十进制原值转换，不能先变成 double 再丢精度或变成非有限数。
+    InputSchema schema =
+        new InputSchema(null, Map.of("ratio", new NumberSchema(null)), Set.of(), false);
+    String exactInteger = "9007199254740993";
+    String normalized = InputNormalizer.normalize("{\"ratio\":\"" + exactInteger + "\"}", schema);
+    JsonNode ratio = OBJECT_MAPPER.readTree(normalized).get("ratio");
+    assertEquals(exactInteger, ratio.decimalValue().toPlainString());
+    assertEquals("{\"ratio\":1.25}", InputNormalizer.normalize("{\"ratio\":\"1.25\"}", schema));
+
+    String subnormal = "{\"ratio\":\"1e-324\"}";
+    assertEquals(subnormal, InputNormalizer.normalize(subnormal, schema));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> InputValidator.validate(InputNormalizer.normalize(subnormal, schema), schema));
+
+    String hugeExponent = "{\"ratio\":\"1e1000000\"}";
+    assertEquals(hugeExponent, InputNormalizer.normalize(hugeExponent, schema));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> InputValidator.validate(InputNormalizer.normalize(hugeExponent, schema), schema));
+  }
+
   /** string/boolean/enum 字段的数字文本不转换；整数字段的真实 JSON number 不转换。 */
   @Test
   void leavesNonNumericSchemasAndRealNumbersUntouched() {
