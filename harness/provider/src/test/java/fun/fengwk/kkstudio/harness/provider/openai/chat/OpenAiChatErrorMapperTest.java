@@ -26,17 +26,36 @@ class OpenAiChatErrorMapperTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   @Test
-  @DisplayName("传输层可取消/被拒绝/回调失败时静默返回 null")
-  void silentOnCancelledOrRejected() {
+  @DisplayName("仅取消静默；执行器拒绝与回调失败进入脱敏终态")
+  void silentOnlyOnCancelled() {
     assertNull(
         OpenAiChatErrorMapper.mapTransportException(
             new TransportException(TransportErrorKind.CANCELLED, "cancelled")));
-    assertNull(
+
+    ProviderException rejected =
         OpenAiChatErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected")));
-    assertNull(
+            new TransportException(
+                TransportErrorKind.EXECUTOR_REJECTED,
+                "rejected",
+                new IllegalStateException("secret sk-chat")));
+    assertEquals(ProviderErrorKind.TRANSIENT, rejected.kind());
+    assertEquals("OpenAI executor rejected the request", rejected.getMessage());
+    assertFalse(rejected.getMessage().contains("sk-chat"));
+    assertNull(rejected.getCause());
+
+    ProviderException callbackFailed =
         OpenAiChatErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback failed")));
+            new TransportException(
+                TransportErrorKind.CALLBACK_FAILED,
+                "callback failed",
+                500,
+                "{\"error\":{\"code\":\"server_error\"}}".getBytes(StandardCharsets.UTF_8),
+                null,
+                new RuntimeException("handler body sk-chat")));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, callbackFailed.kind());
+    assertEquals(OpenAiChatErrorMapper.MSG_INVALID_RESPONSE, callbackFailed.getMessage());
+    assertFalse(callbackFailed.getMessage().contains("server_error"));
+    assertNull(callbackFailed.getCause());
   }
 
   @Test

@@ -208,11 +208,11 @@ final class IncrementalSseParser {
     }
 
     if (line.startsWith("event:")) {
-      currentEvent = line.substring("event:".length()).trim();
+      currentEvent = extractFieldValue(line, "event:");
     } else if (line.equals("event")) {
       currentEvent = "";
     } else if (line.startsWith("data:")) {
-      String value = extractDataValue(line);
+      String value = extractFieldValue(line, "data:");
       if (currentData == null) {
         currentData = new StringBuilder(value);
       } else {
@@ -242,8 +242,9 @@ final class IncrementalSseParser {
     }
   }
 
-  private static String extractDataValue(String line) {
-    String value = line.substring("data:".length());
+  /** 只去掉冒号后的一个 ASCII 空格，保留其余前导与尾随空白。 */
+  private static String extractFieldValue(String line, String prefix) {
+    String value = line.substring(prefix.length());
     return value.startsWith(" ") ? value.substring(1) : value;
   }
 }

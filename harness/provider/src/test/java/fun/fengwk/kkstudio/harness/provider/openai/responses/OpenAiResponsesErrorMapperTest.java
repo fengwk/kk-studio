@@ -152,18 +152,35 @@ class OpenAiResponsesErrorMapperTest {
     assertEquals(OBJECT_MAPPER.readTree(rateLimit).toString(), rateLimitEx.getMessage());
   }
 
-  /** 验证传输层非致命取消与回调异常返回 null 保持静默。 */
+  /** 验证仅用户取消静默；执行器拒绝与回调失败必须进入脱敏终态。 */
   @Test
-  void test_nonFatalTransportExceptions() {
+  void test_onlyCancellationIsSilent() {
     assertNull(
         OpenAiResponsesErrorMapper.mapTransportException(
             new TransportException(TransportErrorKind.CANCELLED, "cancelled")));
-    assertNull(
+    ProviderException rejected =
         OpenAiResponsesErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected")));
-    assertNull(
+            new TransportException(
+                TransportErrorKind.EXECUTOR_REJECTED,
+                "rejected",
+                new IllegalStateException("secret sk-responses")));
+    assertEquals(ProviderErrorKind.TRANSIENT, rejected.kind());
+    assertEquals("OpenAI Responses executor rejected the request", rejected.getMessage());
+    assertFalse(rejected.getMessage().contains("sk-responses"));
+    assertNull(rejected.getCause());
+    ProviderException callbackFailed =
         OpenAiResponsesErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback error")));
+            new TransportException(
+                TransportErrorKind.CALLBACK_FAILED,
+                "callback error",
+                500,
+                "{\"error\":{\"code\":\"server_error\"}}".getBytes(StandardCharsets.UTF_8),
+                null,
+                new RuntimeException("handler sk-responses")));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, callbackFailed.kind());
+    assertEquals(OpenAiResponsesErrorMapper.MSG_INVALID_RESPONSE, callbackFailed.getMessage());
+    assertFalse(callbackFailed.getMessage().contains("server_error"));
+    assertNull(callbackFailed.getCause());
   }
 
   /** 验证超时与网络 I/O 错误被归类为 TRANSIENT。 */

@@ -127,6 +127,16 @@ final class GeminiStreamBridge implements ProviderStream {
     }
   }
 
+  /** 用户 handler 自身抛错后封口，后续 CALLBACK_FAILED 不再进入 onError。 */
+  void sealTerminal() {
+    dispatchLock.lock();
+    try {
+      this.terminal = true;
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
   void emitError(ProviderException error) {
     Objects.requireNonNull(error, "error");
     ProviderStream streamToCancel = null;

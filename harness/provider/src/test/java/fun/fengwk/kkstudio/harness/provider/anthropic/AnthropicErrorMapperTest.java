@@ -24,18 +24,38 @@ class AnthropicErrorMapperTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   @Test
-  void mapsCancelledAndExecutorRejectedAndCallbackFailedToNull() {
+  void mapsOnlyCancelledToNullAndAdmissionFailuresToTransient() {
     TransportException cancelled =
         new TransportException(TransportErrorKind.CANCELLED, "cancelled by user");
     assertNull(AnthropicErrorMapper.mapTransportException(cancelled));
 
+    // 拒绝与回调失败必须保留分类并脱敏，不能把 cause 或响应正文带进对外消息。
     TransportException rejected =
-        new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
-    assertNull(AnthropicErrorMapper.mapTransportException(rejected));
+        new TransportException(
+            TransportErrorKind.EXECUTOR_REJECTED,
+            "rejected",
+            new IllegalStateException("secret-token sk-anthropic"));
+    ProviderException rejectedMapped = AnthropicErrorMapper.mapTransportException(rejected);
+    assertEquals(ProviderErrorKind.TRANSIENT, rejectedMapped.kind());
+    assertEquals("Anthropic executor rejected the request", rejectedMapped.getMessage());
+    assertFalse(rejectedMapped.getMessage().contains("sk-anthropic"));
+    assertNull(rejectedMapped.getCause());
 
+    byte[] body =
+        "{\"error\":{\"type\":\"authentication_error\"}}".getBytes(StandardCharsets.UTF_8);
     TransportException callbackFailed =
-        new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback failed");
-    assertNull(AnthropicErrorMapper.mapTransportException(callbackFailed));
+        new TransportException(
+            TransportErrorKind.CALLBACK_FAILED,
+            "callback failed",
+            401,
+            body,
+            null,
+            new RuntimeException("handler exploded with sk-anthropic"));
+    ProviderException callbackMapped = AnthropicErrorMapper.mapTransportException(callbackFailed);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, callbackMapped.kind());
+    assertEquals(AnthropicErrorMapper.MSG_INVALID_RESPONSE, callbackMapped.getMessage());
+    assertFalse(callbackMapped.getMessage().contains("authentication_error"));
+    assertNull(callbackMapped.getCause());
   }
 
   @Test

@@ -85,6 +85,7 @@ class OpenAiResponsesModelProviderTest {
 
     ProviderCompletion completion;
     ProviderException error;
+    int errorCount;
 
     @Override
     public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
@@ -106,6 +107,7 @@ class OpenAiResponsesModelProviderTest {
     @Override
     public void onError(ProviderException error, ProviderStream stream) {
       this.error = error;
+      errorCount++;
       callbackOrder.add("error");
     }
   }
@@ -611,6 +613,22 @@ class OpenAiResponsesModelProviderTest {
     assertNotNull(stream);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.TRANSIENT, handler.error.kind());
+    assertEquals("OpenAI Responses I/O error", handler.error.getMessage());
+
+    JdkHttpSseTransport rejectedTransport =
+        stubTransport(
+            (req, cb) -> {
+              throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
+            });
+    RecordingHandler rejectedHandler = new RecordingHandler();
+    ProviderStream rejectedStream =
+        new OpenAiResponsesProviderAdapter(rejectedTransport, "key")
+            .create(createDescriptor()).stream(createRequest(), rejectedHandler);
+    assertNotNull(rejectedStream);
+    assertEquals(1, rejectedHandler.errorCount);
+    assertEquals(ProviderErrorKind.TRANSIENT, rejectedHandler.error.kind());
+    assertEquals(
+        "OpenAI Responses executor rejected the request", rejectedHandler.error.getMessage());
 
     // 同时验证当 TransportErrorKind 为 CANCELLED 时，映射为 null 且不投递错误
     JdkHttpSseTransport cancelledTransport =
@@ -665,5 +683,44 @@ class OpenAiResponsesModelProviderTest {
     assertNotNull(callbackRef.get());
     callbackRef.get().onFailure(new TransportException(TransportErrorKind.CANCELLED, "cancelled"));
     assertNull(handler.error);
+  }
+
+  /** 测试意图：用户 handler 抛错后 bridge 已终态，CALLBACK_FAILED 不得再次回调 onError。 */
+  @Test
+  void test_handlerFailureDoesNotReenterOnError() {
+    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
+    JdkHttpSseTransport transport = stubTransport((req, cb) -> callbackRef.set(cb));
+    ModelProvider provider =
+        new OpenAiResponsesProviderAdapter(transport, "key").create(createDescriptor());
+    AtomicReference<Integer> errors = new AtomicReference<>(0);
+    provider.stream(
+        createRequest(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            throw new IllegalStateException("user handler failed");
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            errors.set(errors.get() + 1);
+          }
+        });
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            callbackRef
+                .get()
+                .onEvent(
+                    new ServerSentEvent(
+                        "response.output_text.delta",
+                        "{\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}")));
+    callbackRef
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, errors.get());
   }
 }
