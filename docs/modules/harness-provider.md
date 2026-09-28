@@ -11,7 +11,7 @@
 - **启动门**：worker 与 watchdog 两个任务都排期成功后才开闸，因此不会出现「watchdog 已跑、worker 还没开始」的中间态。
 - **拒绝 inline 执行**：worker 一旦发现运行在自己的调用线程上（direct / caller-runs 执行器），立即判定 `inlineExecutionDetected` 并同步抛 `EXECUTOR_REJECTED`，防止流在提交线程上自等而死锁。
 - **任意阶段拒绝**：worker 提交或 watchdog 调度被拒时立即 `abortAdmission()` 并同步抛 `EXECUTOR_REJECTED`，此时任务尚未触碰 `HttpClient`。
-- **Watchdog**：基于 `System.nanoTime()` 与饱和换算的单调时钟，巡检间隔取 `min(totalTimeout, idleTimeout)/2` 并夹在 `[1ms, 25ms]`；总调用超时或无活动闲置超时都派发 `TIMEOUT`。每次从流读到字节或错误正文都刷新活动时间。
+- **Deadline**：基于 `System.nanoTime()` 与饱和换算的单调时钟，只排期当前最近的总超时或闲置超时。读取字节只刷新活动时间，不逐字节重排 timer；到期复核后，未超时则按剩余期限重新排期，确已超时才派发 `TIMEOUT`。timer 不执行阻塞关闭或用户回调，真正到期或重排被拒时才启动短生命周期清理虚拟线程，不为每个流保留巡检线程。
 - **取消**：`cancel()` 幂等，CAS 推进到取消态后关闭底层 `InputStream` 并取消 watchdog 与 worker future，调用方立刻返回。
 - **回调仲裁**：状态机 `PENDING / RUNNING / CANCELLED / COMPLETED / FAILED` 配合回调锁保证 Terminal-Once——`onComplete` 与 `onFailure` 互斥且各至多一次，取消后不再有任何回调；回调内部重入取消安全；外部回调抛出未受检异常时被捕获并转为 `CALLBACK_FAILED` 终态。
 

@@ -46,20 +46,25 @@ Parent Model Turn ──(task call)──► TaskTool 持久接受（同事务�
 ```bash
 # join 接受、回执投影、完成消息渲染（纯函数 + 内存 Store）
 env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/runtime -am test \
+  -Dsurefire.failIfNoSpecifiedTests=false \
   -Dtest='HarnessRuntimeJoinAcceptanceTest,ThreadProcessorIdleJoinDeliveryTest,ThreadProcessorSoftBudgetTest,ThreadJoin*Test,HarnessRuntimeStopRecursivePropagationTest'
 
 # task 工具解析、即时回执与配置
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/builtin -am test -Dtest='TaskToolTest,SubagentTaskRequestTest,SubagentTaskMessagesTest,SubagentConfigTest'
+env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/builtin -am test -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dtest='TaskToolTest,SubagentTaskRequestTest,SubagentTaskMessagesTest,SubagentConfigTest'
 
 # Platform 侧接受编排、Agent 物化与设置映射
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl platform -am test -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest'
+env JAVA_HOME=$JAVA_HOME_21 mvn -pl platform -am test -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest'
 
 # 真实 PostgreSQL 事务、树锁、删除与恢复（Testcontainers）
 env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/infra -am test \
+  -Dsurefire.failIfNoSpecifiedTests=false \
   -Dtest='PostgresqlJoinAcceptanceRollbackTest,PostgresqlParentStopChildJoinConcurrencyTest,PostgresqlJoinTest'
 
 # 端到端执行树：真实 Runtime + 真实 dispatcher/Processor + 真实 PostgreSQL（模型用回显替身）
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl web -am test -Dtest='ThreadJoinDelegationPostgresIntegrationTest'
+env JAVA_HOME=$JAVA_HOME_21 mvn -pl web -am test -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dtest='ThreadJoinDelegationPostgresIntegrationTest'
 ```
 
 Testcontainers 用例需要可用的隔离数据库，不得指向部署数据库。
@@ -90,14 +95,14 @@ Testcontainers 用例需要可用的隔离数据库，不得指向部署数据�
 | `subagent-real-factory.test.ts`: "throws a clear error when no persisted session file matches the requested id" | `SubagentTaskRunnerTest#rejectsResumingAThreadOfAnotherParent`、`SubagentTaskRunnerTest#rejectsDetachedOrForeignInvocationWithoutTouchingAcceptance` | **等价**：目标 Thread 不存在或归属不符时明确拒绝。 |
 | `subagent-runner.test.ts`: "uses a hashed cwd-derived directory name to avoid lexical path collisions" | `SubagentTaskRunnerTest#stableDerivationAndRequestHashDistinguishDelegations` | **语义收窄**：子身份由 UUID namespace + `invocationId` 稳定派生；工作目录由 Environment 承接，不在委派层派生。 |
 | `subagent-foundation.test.ts`: "defaults to root depth when no depth entry exists"、"reads the latest depth entry and treats deeper sessions as non-root"、"ignores malformed depth values" | `HarnessStoreJoinContract#findAncestorChainReturnsSingleRootAndHierarchy`、`HarnessRuntimeJoinAcceptanceTest#joinAcceptanceBoundaryRejections` | **语义收窄**：不再解析历史里的 depth / root 条目；深度与根身份每次由 `findAncestorChain` 的递归祖先链派生，畸形条目不可能出现。 |
-| `subagent-runner.test.ts`: "preserves the caller's persisted root-session id in registry nodes" | `HarnessStoreJoinContract#findAncestorChainReturnsSingleRootAndHierarchy`、`HarnessRuntimeJoinAcceptanceTest#rootTicketAcceptsCommandAndReceiptInSameTransactionAndReplays` | **等价**：根身份由祖先链给出，并在接受事务内用于树级额度与树锁，不依赖内存注册表。 |
+| `subagent-runner.test.ts`: "preserves the caller's persisted root-session id in registry nodes" | `HarnessStoreJoinContract#findAncestorChainReturnsSingleRootAndHierarchy`、`HarnessRuntimeJoinAcceptanceTest#rootTicketAcceptsCommandAndReceiptInSameTransactionAndReplays` | **等价**：根身份由祖先链给出，并在接受事务内用于树锁，不依赖内存注册表。 |
 
 ### 3. 归属、深度与并发额度（Ownership, Depth & Quotas）
 
 | pi-base 用例名 | 本仓库对应的测试类#方法 | 映射关系 |
 | --- | --- | --- |
 | `subagent-task-tool.test.ts`: "enforces the per-session concurrency cap for new spawns"、"enforces maxConcurrency across parallel task calls in the same turn"、"applies maxConcurrency to resumed subagent sessions too" | `SubagentTaskRunnerTest#newDelegationAcceptsAtomicallyWithStableIdentityAndAdmissionLimits`、`HarnessRuntimeJoinAcceptanceTest#quotaAndInvocationReuseRejectWithoutOrphanSource`、`HarnessRuntimeJoinAcceptanceTest#quotaExistingBusyChildAndHierarchyQuotas`、`PostgresqlJoinAcceptanceRollbackTest#acceptCommandsAndJoinQuotaExceededRollsBackEntirely`、`ThreadJoinDelegationPostgresIntegrationTest#concurrentJoinAcceptanceSerializesParentQuotaAndRollsBackLosers` | **语义扩展**：pi-base 依赖内存注册表；本仓库在接纳事务内以持久直接孩子计数为准，并发超额整体回滚。 |
-| `subagent-task-tool.test.ts`: "enforces maxTotalConcurrency across the whole root delegation tree"、"enforces maxTotalConcurrency across parallel starts under the same root" | `HarnessStoreJoinContract#countActiveChildrenCountsDirectNonIdleChildrenOnly`、`HarnessStoreJoinContract#countActiveThreadsInTreeCountsAllActiveDescendantsExcludingRoot`、`HarnessStoreJoinContract#busyChildDuplicateJoinsQuotaCountsDistinctActivePermanentThreadsNotJoins`、`HarnessRuntimeJoinAcceptanceTest#quotaExistingBusyChildAndHierarchyQuotas` | **等价**：树级总量按永久活跃 Thread 计数（同一子上的多个 join 不重复占额），根级别加锁。 |
+| `subagent-task-tool.test.ts`: "enforces maxTotalConcurrency across the whole root delegation tree"、"enforces maxTotalConcurrency across parallel starts under the same root" | `HarnessStoreJoinContract#countActiveSubagentThreadsCountsActiveExecutionChildrenAcrossAllRoots`、`HarnessStoreJoinContract#busyChildDuplicateJoinsQuotaCountsDistinctActivePermanentThreadsNotJoins`、`HarnessRuntimeJoinAcceptanceTest#globalSubagentConcurrencyCapSpansRootTreesAndReleasesOnIdle`、`PostgresqlJoinAcceptanceRollbackTest#globalJoinAdmissionSerializesConcurrentNewSessionsAcrossRootTreesAndEnforcesCap` | **语义扩展**：平台设置为跨所有根的全局活跃子 Thread 上限；根不计入，同一忙碌子上的多个 join 不重复占额。全局准入锁保护额度判定与创建，超限整体回滚。 |
 | `subagent-task-tool.test.ts`: "passes childDepth = parent depth + 1"、"withholds `task` when depth has reached maxDepth" | `HarnessRuntimeJoinAcceptanceTest#joinAcceptanceBoundaryRejections`、`ThreadJoinDelegationPostgresIntegrationTest#joinDepthQuotaRejectionRollsBackGrandChild` | **等价**：深度由递归祖先链计算，超限拒绝且整事务回滚。 |
 | `subagent-task-injection.test.ts`: "filters unknown subagents at load time so task is never injected for them"、"withholds `task` when depth has reached maxDepth" | `SubagentTaskRunnerTest#rejectsUnauthorizedSubagentTypeWithAvailableNames`、`DatabaseTurnResolverTest#freezesAllowedSubagentsAndComposesTaskPrompt`、`DatabaseTurnResolverTest#taskDelegationComesFromLatestAllowlistOnly`、`DatabaseTurnResolverTest#rejectsMissingSubagentWithoutSilentFallback` | **等价**：冻结的 subagent allowlist 是唯一授权来源，缺失即拒绝，绝不静默回退。 |
 | `subagent-foundation.test.ts`: "defaults the root session id to the current session and restores persisted child roots"、"ignores malformed root-session entries" | `HarnessRuntimeJoinAcceptanceTest#ancestorIdleTransitionToWaitingChildrenOnChildSessionAndThreadCommands`、`HarnessStoreJoinContract#findAncestorChainReturnsSingleRootAndHierarchy` | **语义收窄**：根身份由祖先链推导而非解析历史条目，畸形 root 记录不可能出现。 |
