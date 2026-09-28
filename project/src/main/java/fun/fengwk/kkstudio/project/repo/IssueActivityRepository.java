@@ -17,6 +17,13 @@ public interface IssueActivityRepository {
   /** 按同 Issue 的请求键读取既有活动；用于请求键去重（fail closed，不静默重放）。 */
   IssueActivity findByIdempotencyKey(UUID issueId, String idempotencyKey);
 
+  /**
+   * 在已经持有 Issue 行锁的同一语句中读取 receipt。
+   *
+   * <p>单独的后续查询在 READ COMMITTED 下仍可能使用锁等待开始前的快照，从而漏看等待期间提交的活动。
+   */
+  IssueActivity findByIdempotencyKeyForUpdate(UUID issueId, String idempotencyKey);
+
   List<IssueActivity> listByIssueId(UUID issueId);
 
   /** 按序号升序读取有界窗口 {@code (afterSequence, ...]}：投递游标只推进真正检视过的窗口。 */

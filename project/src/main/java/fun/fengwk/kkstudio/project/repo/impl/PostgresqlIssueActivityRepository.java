@@ -36,6 +36,12 @@ public class PostgresqlIssueActivityRepository implements IssueActivityRepositor
   }
 
   @Override
+  public IssueActivity findByIdempotencyKeyForUpdate(UUID issueId, String idempotencyKey) {
+    IssueActivityDO row = mapper.findByIdempotencyKeyForUpdate(issueId, idempotencyKey);
+    return row == null ? null : toModel(row);
+  }
+
+  @Override
   public List<IssueActivity> listByIssueId(UUID issueId) {
     return mapper.listByIssueId(issueId).stream()
         .map(PostgresqlIssueActivityRepository::toModel)

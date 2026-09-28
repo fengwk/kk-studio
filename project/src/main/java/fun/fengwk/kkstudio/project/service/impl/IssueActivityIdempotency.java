@@ -51,11 +51,25 @@ final class IssueActivityIdempotency {
   /**
    * 返回该身份已提交的活动：{@code null} 表示首次执行；同键同指纹返回原活动供调用方精确重放；同键异指纹抛冲突。
    *
-   * <p>调用方必须在任何版本校验、状态/额度校验与外部派发之前调用本方法。
+   * <p>锁前调用只是快速路径。调用方在取得 owner 锁之后、版本/状态/额度校验与外部派发之前必须再调用一次。
    */
   static IssueActivity findApplied(
       IssueActivityRepository repository, UUID issueId, Identity identity) {
-    IssueActivity existing = repository.findByIdempotencyKey(issueId, identity.key());
+    return match(repository.findByIdempotencyKey(issueId, identity.key()), identity);
+  }
+
+  /**
+   * owner 锁内的 receipt 判定。
+   *
+   * <p>必须使用 {@link IssueActivityRepository#findByIdempotencyKeyForUpdate}：它把 Issue 行锁和活动读取放在同一条语句，
+   * 避免锁等待期间提交的 receipt 被当前事务的旧快照漏掉。
+   */
+  static IssueActivity findAppliedUnderLock(
+      IssueActivityRepository repository, UUID issueId, Identity identity) {
+    return match(repository.findByIdempotencyKeyForUpdate(issueId, identity.key()), identity);
+  }
+
+  private static IssueActivity match(IssueActivity existing, Identity identity) {
     if (existing == null) {
       return null;
     }
