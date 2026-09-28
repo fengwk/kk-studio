@@ -679,6 +679,11 @@ owner/encoding/locale/tablespace/connection limit 创建空库。创建或改名
 恢复事务先排他锁定三张表并复查为空，再按外键顺序 COPY，提交前逐表比对包内指纹；锁超时、并发
 写入、脏表或指纹不符都会整体回滚。失败日志只保留 SQLSTATE 与固定安全类别，不保留行值。
 
+维护流程自身的验收入口是 `python3 -m unittest discover -s scripts/ops/tests`：契约测试把当前 V1 的
+Flyway checksum 固定为断言（V1 变化即导致失败），集成测试在一次性本地 PostgreSQL 容器里跑通
+export、reset 空库、外部 V1 初始化后的 import、错误回滚、owner-only 产物与敏感值不外泄（本机没有
+可用 Docker 时跳过）。改动 V1 后必须重跑这两个入口，再把契约测试里的 checksum 重新固定为新值。
+
 #### 权限、产物与清理
 
 - **重置权限**：`reset-database.sh` 需要能改目标库、能建库、并能把新库交给原 owner 的角色，**不要求 superuser**。具体检查（全部只读，缺哪一项就只读失败）：
