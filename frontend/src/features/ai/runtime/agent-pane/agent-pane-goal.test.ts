@@ -21,6 +21,7 @@ const mockThread: HarnessThreadSnapshotDTO = {
   threadId: 't-123',
   sessionId: 's-123',
   headEntryId: 'e-1',
+  parentThreadId: null,
   nextCommandSequence: '1',
   branchSettings: {
     agentName: 'assistant',

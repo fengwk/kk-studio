@@ -113,6 +113,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     threadId: THREAD_ID,
     sessionId: 'session-1',
     headEntryId: 'head-1',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
@@ -1444,6 +1445,73 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onCommand(testCommand('stop')))
     await waitFor(() => expect(hook.result.current.error).toBe('stop failed'))
+  })
+
+  it('renders localized WAITING_CHILDREN status label when bound thread is waiting for child threads', async () => {
+    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子线程”。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'WAITING_CHILDREN', processing: false })),
+    )
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      expect(screen.getByText('等待子线程')).toBeInTheDocument()
+    })
+  })
+
+  it('renders localized QUEUED status label when bound thread is queued', async () => {
+    // 测试意图：当绑定的 Thread 处于 QUEUED 排队状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“排队中”。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'QUEUED', processing: false })),
+    )
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      expect(screen.getByText('排队中')).toBeInTheDocument()
+    })
+  })
+
+  it('isolates ISSUE_AGENT owner storage and routing from independent thread pane without crosstalk', async () => {
+    // 测试意图：验证当 owner 为 ISSUE_AGENT 时，其生命周期与无 owner 的子线程路由或 CHAT owner 完全隔离，
+    // 不会向 CHAT 存储命名空间写入 target，也不会调用 chat 专有服务，两套架构 owner 语义不混淆。
+    const issueOwner: AgentRuntimeOwnerDTO = {
+      type: 'ISSUE_AGENT',
+      issueId: 'issue-42',
+      agentName: 'architect',
+    }
+    const issueThreadId = '00000000-0000-0000-0000-000000000042'
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(issueThreadId, { name: 'Architect Thread' })),
+    )
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    render(
+      <QueryClientProvider client={client}>
+        <AgentPane
+          owner={issueOwner}
+          paneId="pane-issue"
+          agents={agents}
+          initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
+          focused
+        />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Architect Thread').length).toBeGreaterThan(0)
+    })
+
+    expect(chatService.listChatSessions).not.toHaveBeenCalled()
+    expect(localStorage.getItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-issue')).toBeNull()
   })
 })
 

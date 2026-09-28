@@ -62,6 +62,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     threadId: CHILD_THREAD_ID,
     sessionId: 'session-child',
     headEntryId: 'head-1',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     status: 'WAITING_TOOL',
@@ -264,5 +265,31 @@ describe('ThreadWorkspacePage', () => {
     expect(targetThreadId).toBe(CHILD_THREAD_ID)
     expect(invocationId).toBe('inv-bash-1')
     expect(payload.decision).toBe('DENY')
+  })
+
+  it('isolates child thread routing from IssueAgent and Chat owner state without crosstalk', async () => {
+    // 测试意图：验证子线程独立路由工作区在没有显式 owner 时，作为只读的 BOUND_THREAD 渲染，
+    // 绝不调用 chatService.listChatSessions，并且即使 localStorage 中存在其他 CHAT 或 ISSUE_AGENT 的 PaneTarget，
+    // 也严格锁定在 URL 参数指定的 childThreadId 上，子线程路由与 IssueAgent/Chat owner 语义互不混淆。
+    const foreignIssueTarget = JSON.stringify({
+      kind: 'BOUND_THREAD',
+      threadId: 'foreign-thread-999',
+    })
+    localStorage.setItem('kk-studio.agent-pane-target.ISSUE_AGENT:issue-1:architect:thread-00000000-0000-0000-0000-000000000999', foreignIssueTarget)
+    localStorage.setItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-1', foreignIssueTarget)
+
+    const childSnapshot = snapshotWithPendingTool(CHILD_THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(childSnapshot)
+
+    renderPage(`/threads/${CHILD_THREAD_ID}`)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Child Worker Thread').length).toBeGreaterThan(0)
+    })
+
+    // 确保请求的是子线程的快照，而不是其他 owner 残留的 foreign thread
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
+    expect(harnessService.getThreadSnapshot).not.toHaveBeenCalledWith('foreign-thread-999')
+    expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
 })

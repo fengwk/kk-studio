@@ -107,6 +107,84 @@ describe('ChatPanel', () => {
     expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
   })
 
+  it('renders localized WAITING_CHILDREN status label alongside interaction panel without interference', () => {
+    // 测试意图：验证当线程处于 WAITING_CHILDREN 状态且交互面板（如问答/审批 WAITING_INPUT）打开时，
+    // 状态条依然展示“等待子线程”，与 interactionPanel 和谐共存，Composer 保持收起，确保交叉语义正确。
+    const waitingLabel = '等待子线程'
+    const { container } = render(
+      <ChatPanel
+        labels={{}}
+        transcript={{
+          timeline: {
+            messages: [],
+            queuedMessages: [{ idempotencyKey: 'q-1', role: 'user', text: 'queued input', sequence: 1 }],
+            hasPendingInputs: true,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
+        }}
+        composer={{
+          parts: [],
+          pending: false,
+          disabled: false,
+          onPartsChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+          interactionPanel: <section aria-label="Questionnaire Interaction">ask_user questionnaire</section>,
+        }}
+        activity={{
+          working: true,
+          workingLabel: waitingLabel,
+          widgets: <div>sub-widget</div>,
+        }}
+      />,
+    )
+
+    expect(screen.getByText('等待子线程')).toBeInTheDocument()
+    expect(screen.getByLabelText('Questionnaire Interaction')).toBeInTheDocument()
+    expect(screen.queryByText('sub-widget')).not.toBeInTheDocument()
+    expect(screen.queryByText('queued input')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
+  })
+
+  it('renders localized QUEUED status label alongside interaction panel without interference', () => {
+    // 测试意图：验证当线程处于 QUEUED 排队状态且交互面板激活时，正确展示“排队中”且隐藏输入框与常规队列。
+    const queuedLabel = '排队中'
+    const { container } = render(
+      <ChatPanel
+        labels={{}}
+        transcript={{
+          timeline: {
+            messages: [],
+            queuedMessages: [],
+            hasPendingInputs: false,
+          },
+          bodyRef: createRef<HTMLDivElement>(),
+          loading: false,
+          error: null,
+        }}
+        composer={{
+          parts: [],
+          pending: false,
+          disabled: false,
+          onPartsChange: vi.fn(),
+          onSubmit: vi.fn(),
+          onCommand: vi.fn(),
+          interactionPanel: <section aria-label="Approval Interaction">tool approval</section>,
+        }}
+        activity={{
+          working: true,
+          workingLabel: queuedLabel,
+        }}
+      />,
+    )
+
+    expect(screen.getByText('排队中')).toBeInTheDocument()
+    expect(screen.getByLabelText('Approval Interaction')).toBeInTheDocument()
+    expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
+  })
+
   it('treats a missing authoritative original response as an unavailable resource', async () => {
     storageMocks.getBlobDownloadUrl.mockRejectedValue(new Error('missing'))
     storageMocks.getBlobPreviewUrl.mockResolvedValue({
