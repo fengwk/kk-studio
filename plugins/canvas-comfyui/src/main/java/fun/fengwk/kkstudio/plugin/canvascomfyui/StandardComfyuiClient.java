@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -17,7 +18,6 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,9 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 
 /** 只使用标准 ComfyUI HTTP API 的有界、流式客户端。 */
 public final class StandardComfyuiClient {
@@ -340,98 +338,72 @@ public final class StandardComfyuiClient {
             .getBytes(StandardCharsets.UTF_8);
     byte[] footer = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
     long totalLength = header.length + contentLength + footer.length;
-    return HttpRequest.BodyPublishers.fromPublisher(
-        new MultipartFlowPublisher(header, content, footer), totalLength);
+    AtomicBoolean contentOpened = new AtomicBoolean();
+    HttpRequest.BodyPublisher publisher =
+        HttpRequest.BodyPublishers.concat(
+            HttpRequest.BodyPublishers.ofByteArray(header),
+            HttpRequest.BodyPublishers.ofInputStream(
+                () -> {
+                  if (!contentOpened.compareAndSet(false, true)) {
+                    throw new IllegalStateException("upload content stream is already open");
+                  }
+                  return new FixedLengthInputStream(content, contentLength);
+                }),
+            HttpRequest.BodyPublishers.ofByteArray(footer));
+    // ofInputStream 的 contentLength 恒为 -1，concat 因此也是 -1；用声明总长度恢复固定长度。
+    return HttpRequest.BodyPublishers.fromPublisher(publisher, totalLength);
   }
 
-  private static final class MultipartFlowPublisher
-      implements HttpRequest.BodyPublisher, Flow.Publisher<ByteBuffer> {
+  /** 调用方传入的上传流只允许打开一次。成功读满后返回 EOF 且不再读底层流；JDK 在正常结束时关闭流。读失败、提前结束或取消时由本类关闭。 */
+  private static final class FixedLengthInputStream extends FilterInputStream {
 
-    private final byte[] header;
-    private final Supplier<InputStream> streamSupplier;
-    private final byte[] footer;
-    private final long totalLength;
+    private final long expected;
+    private long remaining;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
-    private MultipartFlowPublisher(byte[] header, InputStream stream, byte[] footer) {
-      this.header = header;
-      this.streamSupplier = () -> stream;
-      this.footer = footer;
-      this.totalLength = -1L;
-    }
-
-    @Override
-    public long contentLength() {
-      return totalLength;
-    }
-
-    @Override
-    public void subscribe(Flow.Subscriber<? super ByteBuffer> subscriber) {
-      subscriber.onSubscribe(
-          new MultipartSubscription(subscriber, header, streamSupplier.get(), footer));
-    }
-  }
-
-  private static final class MultipartSubscription implements Flow.Subscription {
-
-    private final Flow.Subscriber<? super ByteBuffer> subscriber;
-    private final byte[] header;
-    private final InputStream stream;
-    private final byte[] footer;
-    private final AtomicBoolean completed = new AtomicBoolean();
-    private boolean headerSent;
-    private boolean streamFinished;
-    private boolean footerSent;
-
-    private MultipartSubscription(
-        Flow.Subscriber<? super ByteBuffer> subscriber,
-        byte[] header,
-        InputStream stream,
-        byte[] footer) {
-      this.subscriber = Objects.requireNonNull(subscriber, "subscriber");
-      this.header = header;
-      this.stream = Objects.requireNonNull(stream, "stream");
-      this.footer = footer;
-    }
-
-    @Override
-    public void request(long n) {
-      if (n <= 0L) {
-        subscriber.onError(new IllegalArgumentException("non-positive request"));
-        return;
+    private FixedLengthInputStream(InputStream content, long expected) {
+      super(Objects.requireNonNull(content, "content"));
+      if (expected <= 0L) {
+        throw new IllegalArgumentException("contentLength must be positive");
       }
+      this.expected = expected;
+      remaining = expected;
+    }
+
+    @Override
+    public int read(byte[] buffer, int offset, int length) throws IOException {
+      if (closed.get()) {
+        throw new IOException("upload content stream is closed");
+      }
+      if (remaining == 0L || length == 0) {
+        return length == 0 && remaining > 0L ? 0 : -1;
+      }
+      int requested = (int) Math.min(length, remaining);
+      int read;
       try {
-        if (!headerSent) {
-          headerSent = true;
-          subscriber.onNext(ByteBuffer.wrap(header));
-          return;
-        }
-        if (!streamFinished) {
-          byte[] buffer = new byte[32 * 1024];
-          int read = stream.read(buffer);
-          if (read >= 0) {
-            subscriber.onNext(ByteBuffer.wrap(buffer, 0, read));
-            return;
-          }
-          streamFinished = true;
-        }
-        if (!footerSent) {
-          footerSent = true;
-          subscriber.onNext(ByteBuffer.wrap(footer));
-          if (completed.compareAndSet(false, true)) {
-            subscriber.onComplete();
-          }
-        }
+        read = in.read(buffer, offset, requested);
       } catch (IOException error) {
-        if (completed.compareAndSet(false, true)) {
-          subscriber.onError(error);
-        }
+        close();
+        throw error;
       }
+      if (read < 0) {
+        close();
+        throw new IOException(
+            "upload content ended after " + (expected - remaining) + " of " + expected + " bytes");
+      }
+      if (read > requested) {
+        close();
+        throw new IOException("upload content read exceeded the requested length");
+      }
+      remaining -= read;
+      return read;
     }
 
     @Override
-    public void cancel() {
-      completed.set(true);
-      closeQuietly(stream);
+    public void close() throws IOException {
+      if (closed.compareAndSet(false, true)) {
+        in.close();
+      }
     }
   }
 

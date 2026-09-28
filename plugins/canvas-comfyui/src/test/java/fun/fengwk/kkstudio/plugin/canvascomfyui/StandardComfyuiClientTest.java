@@ -15,11 +15,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
+import java.net.http.HttpRequest;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.Flow;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,6 +47,9 @@ class StandardComfyuiClientTest {
   private final AtomicReference<String> viewQuery = new AtomicReference<>();
   private final AtomicReference<String> queueDeleteBody = new AtomicReference<>();
   private final AtomicInteger queueDeleteStatus = new AtomicInteger(200);
+  private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
+  private final AtomicReference<String> uploadContentLength = new AtomicReference<>();
+  private final AtomicInteger uploadStatus = new AtomicInteger(200);
 
   @BeforeEach
   void setUp() throws IOException {
@@ -133,6 +145,208 @@ class StandardComfyuiClientTest {
                 3L,
                 new ByteArrayInputStream(new byte[] {1, 2, 3}),
                 CANVAS));
+  }
+
+  @Test
+  void uploadsExactMultipartBytesWhenContentIsDemandedInOneRequest() {
+    byte[] payload = new byte[] {9, 8, 7, 6};
+    AtomicBoolean closed = new AtomicBoolean();
+    uploadResponse.set(
+        "{\"name\":\"clip.mp4\",\"subfolder\":\"kk-studio/" + CANVAS + "\",\"type\":\"input\"}");
+    H3UploadedFile uploaded =
+        client.upload(
+            "clip.mp4",
+            "video/mp4",
+            payload.length,
+            tracking(new ByteArrayInputStream(payload), closed),
+            CANVAS);
+    assertEquals("clip.mp4", uploaded.name());
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("name=\"subfolder\""));
+    assertTrue(text.contains("kk-studio/" + CANVAS));
+    assertTrue(text.contains("name=\"overwrite\""));
+    assertTrue(text.contains("name=\"image\"; filename=\"clip.mp4\""));
+    assertTrue(text.contains("Content-Type: video/mp4"));
+    int payloadAt = indexOf(body, payload);
+    assertTrue(payloadAt > 0);
+    assertEquals(
+        "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
+    assertTrue(text.trim().endsWith("--"));
+    assertTrue(closed.get());
+  }
+
+  @Test
+  void uploadsWhenSubscriberRequestsOnlyTwoBuffersAtATime() {
+    byte[] payload = new byte[40 * 1024];
+    for (int i = 0; i < payload.length; i++) {
+      payload[i] = (byte) (i & 0xff);
+    }
+    AtomicBoolean closed = new AtomicBoolean();
+    client.upload(
+        "wide.bin",
+        "application/octet-stream",
+        payload.length,
+        tracking(new ChunkedInputStream(payload, 100), closed),
+        CANVAS);
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    assertTrue(indexOf(body, payload) >= 0);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("filename=\"wide.bin\""));
+    assertTrue(text.contains("Content-Type: application/octet-stream"));
+    assertTrue(closed.get());
+  }
+
+  @Test
+  void publisherHonorsSingleUnlimitedDemandAndRepeatedDemandOfTwo() throws Exception {
+    byte[] payload = new byte[] {1, 2, 3, 4, 5};
+    AtomicBoolean closed = new AtomicBoolean();
+    HttpRequest.BodyPublisher publisher =
+        multipart(
+            "once.mp4",
+            "video/mp4",
+            payload.length,
+            tracking(new ByteArrayInputStream(payload), closed));
+    byte[] unlimited = collect(publisher, Long.MAX_VALUE);
+    assertEquals(publisher.contentLength(), unlimited.length);
+    assertTrue(closed.get());
+    assertMultipart("once.mp4", "video/mp4", payload, unlimited);
+
+    byte[] repeatedPayload = new byte[] {3, 3, 3};
+    AtomicBoolean repeatedClosed = new AtomicBoolean();
+    HttpRequest.BodyPublisher repeated =
+        multipart(
+            "two.bin",
+            "application/octet-stream",
+            repeatedPayload.length,
+            tracking(new ByteArrayInputStream(repeatedPayload), repeatedClosed));
+    byte[] batched = collect(repeated, 2L);
+    assertEquals(repeated.contentLength(), batched.length);
+    assertTrue(repeatedClosed.get());
+    assertMultipart("two.bin", "application/octet-stream", repeatedPayload, batched);
+  }
+
+  @Test
+  void cancellingPublisherClosesUploadStreamWithoutReusingIt() throws Exception {
+    AtomicBoolean closed = new AtomicBoolean();
+    InputStream content =
+        tracking(
+            new InputStream() {
+              @Override
+              public int read() {
+                return 7;
+              }
+            },
+            closed);
+    HttpRequest.BodyPublisher publisher =
+        multipart("cancel.bin", "application/octet-stream", 1024L, content);
+    Flow.Subscription[] subscription = new Flow.Subscription[1];
+    AtomicReference<Throwable> error = new AtomicReference<>();
+    AtomicInteger parts = new AtomicInteger();
+    publisher.subscribe(
+        new Flow.Subscriber<>() {
+          @Override
+          public void onSubscribe(Flow.Subscription incoming) {
+            subscription[0] = incoming;
+            incoming.request(1);
+          }
+
+          @Override
+          public void onNext(ByteBuffer item) {
+            if (parts.incrementAndGet() == 1) {
+              subscription[0].request(1);
+              return;
+            }
+            subscription[0].cancel();
+          }
+
+          @Override
+          public void onError(Throwable throwable) {
+            error.set(throwable);
+          }
+
+          @Override
+          public void onComplete() {}
+        });
+    assertTrue(closed.get());
+    assertEquals(null, error.get());
+    AtomicReference<Throwable> resubscribe = new AtomicReference<>();
+    publisher.subscribe(
+        new Flow.Subscriber<>() {
+          @Override
+          public void onSubscribe(Flow.Subscription incoming) {
+            incoming.request(Long.MAX_VALUE);
+          }
+
+          @Override
+          public void onNext(ByteBuffer item) {}
+
+          @Override
+          public void onError(Throwable throwable) {
+            resubscribe.set(throwable);
+          }
+
+          @Override
+          public void onComplete() {}
+        });
+    assertTrue(resubscribe.get() instanceof IllegalStateException);
+  }
+
+  @Test
+  void fixedLengthStreamSurfacesCloseFailure() throws Exception {
+    AtomicBoolean closeFailed = new AtomicBoolean();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            collect(
+                multipart(
+                    "bad-close.bin",
+                    "application/octet-stream",
+                    1L,
+                    tracking(
+                        new InputStream() {
+                          @Override
+                          public int read() throws IOException {
+                            throw new IOException("read failed");
+                          }
+
+                          @Override
+                          public void close() throws IOException {
+                            throw new IOException("close failed");
+                          }
+                        },
+                        closeFailed)),
+                Long.MAX_VALUE));
+    assertTrue(closeFailed.get());
+  }
+
+  @Test
+  void closesUploadStreamWhenReadFailsOrContentIsShorterThanDeclared() {
+    AtomicBoolean failedClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "broken.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new FailingInputStream(), failedClosed),
+                CANVAS));
+    assertTrue(failedClosed.get());
+
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "short.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                CANVAS));
+    assertTrue(shortClosed.get());
   }
 
   @Test
@@ -248,12 +462,153 @@ class StandardComfyuiClientTest {
   }
 
   private void upload(HttpExchange exchange) throws IOException {
-    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-    if (body.contains("filename=\"../escape.mp4\"")) {
+    byte[] body = exchange.getRequestBody().readAllBytes();
+    uploadBody.set(body);
+    uploadContentLength.set(exchange.getRequestHeaders().getFirst("Content-Length"));
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    if (text.contains("filename=\"../escape.mp4\"")) {
       json(exchange, 400, "{\"error\":\"escape\"}");
       return;
     }
-    json(exchange, 200, uploadResponse.get());
+    json(exchange, uploadStatus.get(), uploadResponse.get());
+  }
+
+  private HttpRequest.BodyPublisher multipart(
+      String filename, String mediaType, long length, InputStream content) throws Exception {
+    Method method =
+        StandardComfyuiClient.class.getDeclaredMethod(
+            "multipart",
+            String.class,
+            String.class,
+            String.class,
+            long.class,
+            InputStream.class,
+            String.class);
+    method.setAccessible(true);
+    return (HttpRequest.BodyPublisher)
+        method.invoke(
+            client, "boundary", filename, mediaType, length, content, "kk-studio/" + CANVAS);
+  }
+
+  private static byte[] collect(HttpRequest.BodyPublisher publisher, long demand) throws Exception {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    AtomicReference<Throwable> error = new AtomicReference<>();
+    AtomicBoolean completed = new AtomicBoolean();
+    publisher.subscribe(
+        new Flow.Subscriber<>() {
+          private Flow.Subscription subscription;
+
+          @Override
+          public void onSubscribe(Flow.Subscription incoming) {
+            subscription = incoming;
+            incoming.request(demand);
+          }
+
+          @Override
+          public void onNext(ByteBuffer item) {
+            byte[] chunk = new byte[item.remaining()];
+            item.get(chunk);
+            try {
+              out.write(chunk);
+            } catch (IOException failure) {
+              error.set(failure);
+            }
+            if (demand != Long.MAX_VALUE) {
+              subscription.request(demand);
+            }
+          }
+
+          @Override
+          public void onError(Throwable throwable) {
+            error.set(throwable);
+          }
+
+          @Override
+          public void onComplete() {
+            completed.set(true);
+          }
+        });
+    if (error.get() != null) {
+      throw new IllegalStateException(error.get());
+    }
+    assertTrue(completed.get());
+    return out.toByteArray();
+  }
+
+  private static void assertMultipart(
+      String filename, String mediaType, byte[] payload, byte[] body) {
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("name=\"image\"; filename=\"" + filename + "\""));
+    assertTrue(text.contains("Content-Type: " + mediaType));
+    int payloadAt = indexOf(body, payload);
+    assertTrue(payloadAt > 0);
+    assertEquals(
+        "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
+  }
+
+  private static InputStream tracking(InputStream content, AtomicBoolean closed) {
+    return new FilterInputStream(content) {
+      @Override
+      public void close() throws IOException {
+        closed.set(true);
+        super.close();
+      }
+    };
+  }
+
+  private static int indexOf(byte[] body, byte[] needle) {
+    for (int i = 0; i <= body.length - needle.length; i++) {
+      boolean matched = true;
+      for (int j = 0; j < needle.length; j++) {
+        if (body[i + j] != needle[j]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 每次最多读固定字节，迫使 HttpClient 分多次 request。 */
+  private static final class ChunkedInputStream extends InputStream {
+
+    private final byte[] payload;
+    private final int chunk;
+    private int offset;
+
+    private ChunkedInputStream(byte[] payload, int chunk) {
+      this.payload = payload;
+      this.chunk = chunk;
+    }
+
+    @Override
+    public int read(byte[] buffer, int off, int len) {
+      if (offset >= payload.length) {
+        return -1;
+      }
+      int count = Math.min(chunk, Math.min(len, payload.length - offset));
+      System.arraycopy(payload, offset, buffer, off, count);
+      offset += count;
+      return count;
+    }
+
+    @Override
+    public int read() {
+      byte[] one = new byte[1];
+      int read = read(one, 0, 1);
+      return read < 0 ? -1 : one[0] & 0xff;
+    }
+  }
+
+  private static final class FailingInputStream extends InputStream {
+
+    @Override
+    public int read() throws IOException {
+      throw new IOException("read failed");
+    }
   }
 
   private void view(HttpExchange exchange) throws IOException {
