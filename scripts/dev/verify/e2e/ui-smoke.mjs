@@ -1081,7 +1081,7 @@ async function main(argv) {
           )
         }
         assert(created.agentName === tempAgentName, JSON.stringify(created))
-        await shot(caseArt, 'create-chat-agent-bound-environment')
+        await shot(caseArt, 'create-chat-agent-no-implicit-environment')
         expectNoFatal(pageErrors, consoleErrors)
       } finally {
         await apiDeleteByName(args.backendUrl, 'chats', title)
