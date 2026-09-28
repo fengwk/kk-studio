@@ -399,8 +399,8 @@ export const settingsCatalog = {
     'zh-CN': '最大轮数',
   },
   'settings.field.aiRuntime.subagentMaxTurns.hint': {
-    'en-US': 'Maximum interaction turns allowed for a single subagent task. Upon reaching the limit, the subagent returns a phase report.',
-    'zh-CN': '单个子代理任务允许执行的最大交互轮数。达到上限后子代理将强制返回阶段性结果。',
+    'en-US': 'Soft interaction-turn budget for a subagent task. At the limit, the subagent is reminded to finish the current phase and report.',
+    'zh-CN': '单个子代理任务的交互轮数软预算。达到上限后提醒子代理结束当前阶段并汇报。',
   },
   'settings.option.retryBackoff.fixed': {
     'en-US': 'Fixed',
