@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -187,6 +188,28 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         () -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+  }
+
+  /** 每 Issue 唯一活动 Run：已存在活动 Run 时新的接受被拒绝，且不新建 Harness 事实或第二条 Run 行。 */
+  @Test
+  void acceptRunRejectedWhileActiveRunExists() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("唯一活动 Run", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun active = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    ProjectValidationException rejected =
+        assertThrows(
+            ProjectValidationException.class,
+            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+
+    assertTrue(rejected.getMessage().contains("active run"), rejected.getMessage());
+    assertEquals(active.getId(), issueRunService.getActiveRun(issue.getId()).getId());
+    assertEquals(
+        1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+    assertEquals(1L, count("select count(*) from harness_session"));
+    assertEquals(1L, budgetUsed(issue.getId()));
   }
 
   /**
