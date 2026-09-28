@@ -44,6 +44,15 @@ public record ToolDescriptor(
     if (defaultTimeout.isNegative()) {
       throw new IllegalArgumentException("defaultTimeout must not be negative");
     }
+    // 毫秒是唯一 canonical 单位：拒绝纳秒余量，也拒绝 toMillis 无法表达的溢出值。
+    if (defaultTimeout.getNano() % 1_000_000 != 0) {
+      throw new IllegalArgumentException("defaultTimeout must be an exact millisecond duration");
+    }
+    try {
+      defaultTimeout.toMillis();
+    } catch (ArithmeticException overflow) {
+      throw new IllegalArgumentException("defaultTimeout exceeds millisecond range", overflow);
+    }
   }
 
   /**
