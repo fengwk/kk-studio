@@ -337,6 +337,16 @@ class HarnessOneShotServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> service.await(OneShotTicket.forThread(UUID.randomUUID()), Duration.ZERO, () -> true));
+    // 超出 nano 表示范围的 deadline 必须显式拒绝，而不是溢出成负数后立刻误判 timeout。
+    IllegalArgumentException overflow =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                service.await(
+                    OneShotTicket.forThread(UUID.randomUUID()),
+                    Duration.ofSeconds(Long.MAX_VALUE / 2),
+                    () -> true));
+    assertTrue(overflow.getMessage().contains("nanoseconds"), overflow.getMessage());
     assertThrows(NullPointerException.class, () -> service.stop(null));
     verify(runtime, never()).getThreadSnapshot(null);
 
