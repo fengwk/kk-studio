@@ -105,23 +105,18 @@ public class SessionDeletionOrchestrator {
     // store 事务（PROPAGATION_REQUIRED）加入本应用事务；blob release 经 SessionBlobRefManager（MANDATORY）。
     store.transaction(
         tx -> {
-          // 阶段 1（无锁）：先算出删除闭包，再据此取锁。闭包以「Session 的全部 Thread」为单位向下推进，因此
-          // 共享 Session 内由别的入口建立的无父 root fork 及其后代同样进入删除集合，不会被漏掉。
+          // 先算闭包后取锁：闭包以「Session 的全部 Thread」为单位向下推进，共享 Session 内别的入口建立的 root fork 同样在删除集合内。
           DeletionScope scope = discoverScope(tx, sessionIds);
-          // 阶段 2：树锁必须早于 Session/Thread 锁；并发加入子树时按规范顺序先锁全部执行树 root。
+          // 锁序与 accept 路径一致（执行树 root -> Session -> Thread）；并发加入子树由树锁排除，加锁后复核闭包只增不减。
           for (UUID root : scope.roots()) {
             tx.lockTree(root);
           }
-          // 阶段 3：以规范锁序锁定全部目标 Session（SESSION rank）。多 Session 深删若逐个取 SESSION 锁，
-          // 第二 Session 开始会因曾取过 THREAD 锁而违反 SESSION -> THREAD 单调锁序。
           List<UUID> presentSessions = new ArrayList<>(scope.sessions().size());
           for (UUID sessionId : scope.sessions()) {
             if (tx.lockSessionForUpdate(sessionId).isPresent()) {
               presentSessions.add(sessionId);
             }
           }
-          // 阶段 4：锁内复核。持有 Session FOR UPDATE 后同 Session 的 fork 创建已被排除；若闭包在此前变大
-          // （新 fork/新 Session 取了未锁的树、或产生未锁 root），则整体回滚交由调用方重试，绝不删除漏后代的集合。
           DeletionScope confirmed = discoverScope(tx, presentSessions);
           if (!scope.sessions().containsAll(confirmed.sessions())
               || !scope.roots().containsAll(confirmed.roots())) {
@@ -129,14 +124,11 @@ public class SessionDeletionOrchestrator {
                 "harness execution tree changed while acquiring its deletion locks");
           }
           scope = confirmed;
-          // 阶段 5：产品归属 relation 行（FK RESTRICT）必须先于 harness Thread/Session 行删除：
-          // session_owner 行以及 project_issue_agent_session 行都持有指向 Session/Thread 的外键。
+          // 产品归属 relation 行持有指向 Session/Thread 的 FK（RESTRICT），必须先于 harness 行删除。
           for (UUID sessionId : presentSessions) {
             deleteRelation(owner, sessionId);
           }
-          // 阶段 6：闭包内全部 Thread 一起删除，保证 THREAD rank 全局单调递增。
           deleteThreadsDeep(tx, scope.threads());
-          // 阶段 7：blob ref 释放与 Entry/Session 清理（均不取 harness 锁）。
           for (UUID sessionId : scope.sessions()) {
             releaseSessionBlobRefs(sessionId);
             tx.deleteEntries(sessionId);
@@ -175,11 +167,7 @@ public class SessionDeletionOrchestrator {
     };
   }
 
-  /**
-   * 删除闭包内全部 Thread：先按 UUID 升序锁定全部 Thread，再校验执行两端都在删除集合内，最后删 join 与执行事实。
-   *
-   * <p>仍拒绝单边删除：任一 Thread 的父（或子）不在删除集合内都说明闭包被截断，必须整体失败而不是留下悬挂的 join 引用。
-   */
+  /** 删除闭包内全部 Thread：按 UUID 升序锁定，拒绝单边删除（父或子存活即闭包被截断），再批量删 join 与执行事实。 */
   private void deleteThreadsDeep(HarnessStore.Transaction tx, Set<UUID> threadIds) {
     List<UUID> ordered = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID threadId : ordered) {
@@ -201,20 +189,13 @@ public class SessionDeletionOrchestrator {
             "cannot delete a parent thread while its execution children survive");
       }
     }
-    deleteJoins(tx, ordered);
-    if (!ordered.isEmpty() && tx.deleteThreads(ordered) != ordered.size()) {
-      throw new IllegalStateException("not all locked threads were deleted");
+    if (ordered.isEmpty()) {
+      return;
     }
-  }
-
-  /**
-   * 删除闭包内全部 join：join 固定回执引用源 Command 与结果 Entry，必须在删除命令/历史之前移除。
-   *
-   * <p>闭包已保证父子两端都在删除集合内，因此逐 child 删除即为完整删除。
-   */
-  private static void deleteJoins(HarnessStore.Transaction tx, List<UUID> threadIds) {
-    for (UUID threadId : threadIds) {
-      tx.deleteJoinsByChild(threadId);
+    // 两端都在删除集合内，因此未匹配/未交付的 pending join 也一并删除；join 引用源 Command 与结果 Entry，必须先于二者删除。
+    tx.deleteJoinsForThreads(ordered);
+    if (tx.deleteThreads(ordered) != ordered.size()) {
+      throw new IllegalStateException("not all locked threads were deleted");
     }
   }
 

@@ -217,10 +217,10 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
     execute(
         conn,
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-            + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " name, yolo_enabled, next_command_sequence, version, status, created_at, updated_at)"
             + " values (?, ?, ?, '"
             + "0".repeat(64)
-            + "', 'test-thread', false, 1, 0, clock_timestamp(), clock_timestamp())",
+            + "', 'test-thread', false, 1, 0, 'IDLE', clock_timestamp(), clock_timestamp())",
         threadId,
         sessionId,
         rootEntryId);

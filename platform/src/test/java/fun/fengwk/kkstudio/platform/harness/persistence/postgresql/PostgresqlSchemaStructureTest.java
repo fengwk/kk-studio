@@ -64,7 +64,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
-          "harness_subagent_task",
+          "harness_thread_join",
           "project",
           "project_issue",
           "project_issue_dependency",
@@ -90,7 +90,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work");
 
-  /** 所有允许使用 harness_ 前缀的基础设施表：执行协议七表 + 异步委派记录表。 */
+  /** 所有允许使用 harness_ 前缀的基础设施表：执行协议七表 + Join 契约记录表。 */
   private static final Set<String> HARNESS_PREFIXED_TABLES =
       Set.of(
           "harness_session",
@@ -100,7 +100,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
-          "harness_subagent_task");
+          "harness_thread_join");
 
   /** Canvas 与 Chat/Comfy 一样完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
   private static final Set<String> CANVAS_UUID_ID_TABLES =
@@ -394,10 +394,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "harness_thread",
         "id",
         "session_id",
+        "parent_thread_id",
         "head_entry_id",
         "creation_request_hash",
         "name",
         "yolo_enabled",
+        "status",
         "next_command_sequence",
         "version",
         "created_at",
@@ -544,6 +546,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   @Test
   void usesNativeBooleanForFlags() throws SQLException {
     assertColumnType("boolean", "harness_thread", "yolo_enabled");
+    assertColumnType("uuid", "harness_thread", "parent_thread_id");
+    assertColumnType("character varying", "harness_thread", "status");
     assertColumnType("boolean", "chat", "yolo_enabled");
     assertColumnType("boolean", "project", "yolo_enabled");
   }
@@ -1090,10 +1094,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " name, yolo_enabled, next_command_sequence, version, status, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', 'schema-structure-test-thread', false, 1, 0, current_timestamp, current_timestamp)")) {
+                    + "', 'schema-structure-test-thread', false, 1, 0, 'IDLE', current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       session.setObject(2, "schema-structure-test-session");
       assertEquals(1, session.executeUpdate());
@@ -1332,7 +1336,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_environment_name",
             "uk_environment_registration_token",
             "uk_harness_entry_session_id",
-            "uk_harness_subagent_task_child_open",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_idempotency",
             "uk_harness_model_invocation_turn",

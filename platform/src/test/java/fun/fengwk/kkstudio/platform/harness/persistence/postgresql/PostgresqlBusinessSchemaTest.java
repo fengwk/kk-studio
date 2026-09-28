@@ -453,10 +453,10 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " name, yolo_enabled, next_command_sequence, version, status, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', 'schema-business-test-thread', false, 1, 0, current_timestamp, current_timestamp)")) {
+                    + "', 'schema-business-test-thread', false, 1, 0, 'IDLE', current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       session.setObject(2, "schema-business-test-session");
       assertEquals(1, session.executeUpdate());
