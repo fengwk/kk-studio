@@ -12,10 +12,12 @@ import { useI18n } from '@/shared/i18n'
  */
 export function ThreadWidgetStack({
   working,
+  workingLabel,
   queuedMessages = [],
   children,
 }: {
   working: boolean
+  workingLabel?: string
   queuedMessages?: QueuedThreadMessage[]
   children?: ReactNode
 }) {
@@ -39,7 +41,7 @@ export function ThreadWidgetStack({
 
   return (
     <section className="thread-widget-stack" aria-label={t('ai.runtime.thread.widgetZone')}>
-      <ThreadWorkingStatus active={showWorking} />
+      <ThreadWorkingStatus active={showWorking} label={workingLabel} />
       {hasQueuedMessages ? (
         <ol
           ref={queueRef}

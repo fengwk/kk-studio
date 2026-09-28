@@ -1454,6 +1454,54 @@ export const aiCatalog = {
     'en-US': 'Working...',
     'zh-CN': 'Working...',
   },
+  'ai.runtime.thread.status.WAITING_CHILDREN': {
+    'en-US': 'Waiting for child threads',
+    'zh-CN': '等待子线程',
+  },
+  'ai.runtime.thread.status.QUEUED': {
+    'en-US': 'Queued',
+    'zh-CN': '排队中',
+  },
+  'ai.runtime.thread.status.IDLE': {
+    'en-US': 'Idle',
+    'zh-CN': '空闲',
+  },
+  'ai.runtime.thread.status.CONTINUATION_DUE': {
+    'en-US': 'Continuation due',
+    'zh-CN': '待推进',
+  },
+  'ai.runtime.thread.status.APPLYING': {
+    'en-US': 'Applying',
+    'zh-CN': '应用中',
+  },
+  'ai.runtime.thread.status.MODEL_READY': {
+    'en-US': 'Model ready',
+    'zh-CN': '模型就绪',
+  },
+  'ai.runtime.thread.status.MODEL_DISPATCHING': {
+    'en-US': 'Dispatching model',
+    'zh-CN': '分派模型中',
+  },
+  'ai.runtime.thread.status.MODEL_RUNNING': {
+    'en-US': 'Model running',
+    'zh-CN': '模型运行中',
+  },
+  'ai.runtime.thread.status.TOOL_WAITING_APPROVAL': {
+    'en-US': 'Waiting for approval',
+    'zh-CN': '等待审批',
+  },
+  'ai.runtime.thread.status.TOOL_READY': {
+    'en-US': 'Tool ready',
+    'zh-CN': '工具就绪',
+  },
+  'ai.runtime.thread.status.TOOL_DISPATCHING': {
+    'en-US': 'Dispatching tool',
+    'zh-CN': '分派工具中',
+  },
+  'ai.runtime.thread.status.TOOL_RUNNING': {
+    'en-US': 'Tool running',
+    'zh-CN': '工具运行中',
+  },
   'ai.runtime.message.stopped': {
     'en-US': 'Stopped',
     'zh-CN': '已停止',

@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
@@ -32,5 +34,19 @@ public record ThreadSnapshot(
     toolSiblings = List.copyOf(Objects.requireNonNull(toolSiblings, "toolSiblings"));
     modelAttemptFailures =
         List.copyOf(Objects.requireNonNull(modelAttemptFailures, "modelAttemptFailures"));
+  }
+
+  /** 递归生命周期确定是否空闲；本地适用上下文保留审批、终态待物化和续写等细分阶段。 */
+  public ThreadRuntimeStatus runtimeStatus() {
+    return switch (thread.status()) {
+      case WAITING_CHILDREN -> ThreadRuntimeStatus.WAITING_CHILDREN;
+      case IDLE -> ThreadRuntimeStatus.IDLE;
+      case ACTIVE -> {
+        ThreadRuntimeStatus local =
+            ThreadRuntimeStatus.from(
+                new ThreadContextClassifier().classify(thread, entryPath, model, toolSiblings));
+        yield local == ThreadRuntimeStatus.IDLE ? ThreadRuntimeStatus.QUEUED : local;
+      }
+    };
   }
 }

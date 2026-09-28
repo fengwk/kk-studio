@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
@@ -49,8 +48,7 @@ import java.util.function.Supplier;
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
  * result.status} 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO
- * {@literal ->} 400。属于 Issue+Agent 的 Thread（含其分支）不接受本控制面的 YOLO 覆盖，由 Project 设置与
- * Issue 工作流统一维护（409）。
+ * {@literal ->} 400。属于 Issue+Agent 的 Thread（含其分支）不接受本控制面的 YOLO 覆盖，由 Project 设置与 Issue 工作流统一维护（409）。
  */
 @RestController
 @RequestMapping("/api/harness/threads")
@@ -64,23 +62,19 @@ public class StudioHarnessThreadController {
   private final ModelRequestDebugService modelRequestDebugService;
   private final ProjectThreadOwnerResolver projectThreadOwnerResolver;
   private final InteractionService interactionService;
-  private final SubagentTaskActivity subagentTaskActivity;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
       ModelRequestDebugService modelRequestDebugService,
       ProjectThreadOwnerResolver projectThreadOwnerResolver,
-      InteractionService interactionService,
-      SubagentTaskActivity subagentTaskActivity) {
+      InteractionService interactionService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
     this.projectThreadOwnerResolver =
         Objects.requireNonNull(projectThreadOwnerResolver, "projectThreadOwnerResolver");
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
-    this.subagentTaskActivity =
-        Objects.requireNonNull(subagentTaskActivity, "subagentTaskActivity");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -92,8 +86,7 @@ public class StudioHarnessThreadController {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
               ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
               ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
-              return HarnessRuntimeResponseMapper.toSnapshotDto(
-                  snapshot, availability, pendingDelegatedWork(id));
+              return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
             }));
   }
 
@@ -123,7 +116,7 @@ public class StudioHarnessThreadController {
                   runtime.renameThread(
                       HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request));
               return HarnessRuntimeResponseMapper.toThreadDto(
-                  runtime.getThreadSnapshot(updated.id()), pendingDelegatedWork(updated.id()));
+                  runtime.getThreadSnapshot(updated.id()));
             }));
   }
 
@@ -138,9 +131,7 @@ public class StudioHarnessThreadController {
                   runtime.compactThread(
                       HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request));
               return HarnessRuntimeResponseMapper.toCompactResultDto(
-                  result,
-                  runtime.getThreadSnapshot(result.thread().id()),
-                  pendingDelegatedWork(result.thread().id()));
+                  result, runtime.getThreadSnapshot(result.thread().id()));
             }));
   }
 
@@ -167,7 +158,7 @@ public class StudioHarnessThreadController {
               }
               ThreadState updated = runtime.setThreadYolo(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
-                  runtime.getThreadSnapshot(updated.id()), pendingDelegatedWork(updated.id()));
+                  runtime.getThreadSnapshot(updated.id()));
             }));
   }
 
@@ -185,9 +176,7 @@ public class StudioHarnessThreadController {
               }
               StopResult result = runtime.stop(command);
               return HarnessRuntimeResponseMapper.toStopResultDto(
-                  result,
-                  runtime.getThreadSnapshot(result.thread().id()),
-                  pendingDelegatedWork(result.thread().id()));
+                  result, runtime.getThreadSnapshot(result.thread().id()));
             }));
   }
 
@@ -209,11 +198,6 @@ public class StudioHarnessThreadController {
                     interactionService.decideApproval(
                         HarnessRuntimeRequestMapper.toToolApprovalCommand(
                             threadId, toolInvocationId, request)))));
-  }
-
-  /** 该 Thread（含委派子树）是否仍有未交付委派：向外聚合时由同一个权威判定补齐 processing。 */
-  private boolean pendingDelegatedWork(UUID threadId) {
-    return subagentTaskActivity.hasPendingDelegatedWork(threadId);
   }
 
   /** 将 Harness Runtime 异常翻译为统一 HTTP 错误响应。 */

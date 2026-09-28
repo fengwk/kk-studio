@@ -37,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
@@ -70,7 +69,6 @@ class StudioHarnessThreadControllerTest {
   private ModelRequestDebugService modelRequestDebugService;
   private ProjectThreadOwnerResolver projectThreadOwnerResolver;
   private InteractionService interactionService;
-  private SubagentTaskActivity subagentTaskActivity;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -79,14 +77,9 @@ class StudioHarnessThreadControllerTest {
     modelRequestDebugService = mock(ModelRequestDebugService.class);
     projectThreadOwnerResolver = mock(ProjectThreadOwnerResolver.class);
     interactionService = mock(InteractionService.class);
-    subagentTaskActivity = mock(SubagentTaskActivity.class);
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime,
-            modelRequestDebugService,
-            projectThreadOwnerResolver,
-            interactionService,
-            subagentTaskActivity);
+            runtime, modelRequestDebugService, projectThreadOwnerResolver, interactionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -96,21 +89,22 @@ class StudioHarnessThreadControllerTest {
   }
 
   /**
-   * 意图：父 Thread 自身静止但子树仍有未交付委派时，快照必须保持 processing=true 而 status 仍为该 Thread
-   * 自身的状态——前端据此显示"仍在工作"，而不是诱使用户以为可以开始下一轮。
+   * 意图：父 Thread 本地已静止但仍等子执行时，快照的 status 必须由 Runtime 投影为 WAITING_CHILDREN 且 processing=true，前端
+   * 据此显示"仍在工作"；同时必须暴露执行父关系。该路由不依赖任何 task join 侧事实，因此服务端不额外注入任何委派状态。
    */
   @Test
-  void snapshotKeepsProcessingWhileDelegatedWorkIsPending() throws Exception {
-    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+  void snapshotProjectsWaitingChildrenStatusAndParentThreadId() throws Exception {
+    when(runtime.getThreadSnapshot(id(1)))
+        .thenReturn(HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2)));
     when(runtime.manualCompactionAvailability(id(1)))
         .thenReturn(ManualCompactionAvailability.enabled());
-    when(subagentTaskActivity.hasPendingDelegatedWork(id(1))).thenReturn(true);
 
     mockMvc
         .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
-        .andExpect(jsonPath("$.data.thread.processing").value(true));
+        .andExpect(jsonPath("$.data.thread.status").value("WAITING_CHILDREN"))
+        .andExpect(jsonPath("$.data.thread.processing").value(true))
+        .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
   }
 
   /** 意图：验证 GET /api/harness/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */
@@ -551,6 +545,39 @@ class StudioHarnessThreadControllerTest {
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
+    assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
+  }
+
+  /**
+   * 意图：审批路由必须直达被请求 Thread 自己的 invocation——即使该 Thread 带执行父关系（异步 task 的子执行），也不得因为 "task join
+   * 当前是否存在或是否已交付"而改变到达的 Thread/调用身份；换言之 approval 与孩子查询都不是 join 的附属状态。
+   */
+  @Test
+  void approvalRouteOnChildThreadTargetsThatThreadInvocation() throws Exception {
+    UUID childThreadId = id(7);
+    UUID toolInvocationId = id(100);
+    when(interactionService.decideApproval(any(ToolApprovalCommand.class)))
+        .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/"
+                    + idText(7)
+                    + "/tool-invocations/"
+                    + idText(100)
+                    + "/approval")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"decision\":\"ALLOW\",\"decisionId\":\""
+                        + idText(51)
+                        + "\",\"actor\":\"alice\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
+
+    ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
+    verify(interactionService).decideApproval(captor.capture());
+    assertEquals(childThreadId, captor.getValue().threadId());
+    assertEquals(toolInvocationId, captor.getValue().toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
   }
 }

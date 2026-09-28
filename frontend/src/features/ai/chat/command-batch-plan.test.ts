@@ -30,6 +30,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     name: 'thread-name',
     sessionId: 's1',
     headEntryId: 'root',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',

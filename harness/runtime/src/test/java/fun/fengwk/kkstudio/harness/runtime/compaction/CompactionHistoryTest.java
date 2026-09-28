@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.math.BigDecimal;
@@ -142,6 +143,17 @@ class CompactionHistoryTest {
 
   private static ThreadState thread(UUID headEntryId) {
     return new ThreadState(
-        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
+        THREAD_ID,
+        SESSION_ID,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "main",
+        false,
+        ThreadLifecycleStatus.ACTIVE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 }

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -18,14 +17,14 @@ import java.util.UUID;
 public sealed interface AcceptCommandsTarget {
 
   /**
-   * 新建 Session：调用方预分配 {@code sessionId} / {@code threadId}，携带 root settings、可选的 subagent 归属与
-   * initial yolo。
+   * 新建 Session：调用方预分配 {@code sessionId} / {@code threadId}，携带 root settings、可选的执行父 Thread 与 initial
+   * yolo。
    */
   record NewSession(
       UUID sessionId,
       UUID threadId,
       BranchSettings rootSettings,
-      SubagentContext subagentContext,
+      UUID parentThreadId,
       boolean yoloEnabled)
       implements AcceptCommandsTarget {
 

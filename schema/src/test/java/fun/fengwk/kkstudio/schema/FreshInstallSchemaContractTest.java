@@ -60,7 +60,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 135;
+  private static final int PROBE_ASSERTION_COUNT = 151;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -80,9 +80,9 @@ class FreshInstallSchemaContractTest {
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
-          "harness_subagent_task",
           "harness_thread",
           "harness_thread_command",
+          "harness_thread_join",
           "harness_tool_invocation",
           "harness_work",
           "mcp_server",
@@ -161,7 +161,17 @@ class FreshInstallSchemaContractTest {
       List.of(
           "chat.archived_at",
           "chat.idx_chat_archived",
+          "harness_thread.parent_thread_id",
+          "harness_thread.status",
+          "harness_thread.ck_harness_thread_parent_not_self",
+          "harness_thread.ck_harness_thread_status",
+          "harness_thread.fk_harness_thread_parent",
+          "harness_thread.idx_harness_thread_parent",
           "harness_thread.uk_harness_thread_session",
+          "harness_thread_join.ck_harness_thread_join_receipt_pair",
+          "harness_thread_join.fk_harness_thread_join_source_command",
+          "harness_thread_join.idx_harness_thread_join_child_pending",
+          "harness_thread_join.idx_harness_thread_join_parent_pending",
           "harness_tool_invocation.input_receipt",
           "harness_tool_invocation.ck_harness_tool_input_receipt",
           "harness_tool_invocation.ck_harness_tool_waiting_input",

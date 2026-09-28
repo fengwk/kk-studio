@@ -84,6 +84,7 @@ function threadFixture(
     name: 'thread-name',
     sessionId: 's1',
     headEntryId: 'e-assistant',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
