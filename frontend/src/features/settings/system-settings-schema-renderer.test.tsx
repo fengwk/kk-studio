@@ -121,7 +121,6 @@ describe('system settings schema renderer', () => {
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
-      'aiRuntime.subagentIdleTimeoutMillis',
       'aiRuntime.subagentMaxTurns',
     ])
     // 顺序与 server schema 一致。
@@ -198,7 +197,7 @@ describe('system settings schema renderer', () => {
     // 曾经出现过 t(field.hintKey) 之后 primitives 又 t(hint) 的双重翻译，导致
     // ⟦missing:已翻译文本⟧；现在 hint 必须是渲染后的文本且无 missing 标记。
     expect(screen.getByText('全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。')).toBeInTheDocument()
-    expect(screen.getByText('子代理无输出或处于等待状态的超时毫秒数。设为 0 表示不启用空闲超时检测。')).toBeInTheDocument()
+    expect(screen.getByText('单个子代理任务允许执行的最大交互轮数。达到上限后子代理将强制返回阶段性结果。')).toBeInTheDocument()
     expect(container.textContent).not.toContain('⟦missing:')
   })
 

@@ -38,8 +38,6 @@ export interface SystemSettingsAiRuntimeDraft {
   subagentMaxConcurrency: DraftNumericField
   /** '' 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: DraftNumericField
-  /** 0 表示关闭。 */
-  subagentIdleTimeoutMillis: DraftNumericField
   subagentMaxTurns: DraftNumericField
 }
 
@@ -230,7 +228,6 @@ function aiRuntimeToDraft(
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
     subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
-    subagentIdleTimeoutMillis: dto.subagentIdleTimeoutMillis,
     subagentMaxTurns: String(dto.subagentMaxTurns),
   }
 }
@@ -344,7 +341,6 @@ export function assembleSettingsUpdate(
       subagentMaxTotalConcurrency: requiredInt(
         draft.aiRuntime.subagentMaxTotalConcurrency,
       ),
-      subagentIdleTimeoutMillis: requiredLong(draft.aiRuntime.subagentIdleTimeoutMillis),
       subagentMaxTurns: requiredInt(draft.aiRuntime.subagentMaxTurns),
     },
     environment: {
