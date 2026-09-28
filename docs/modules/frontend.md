@@ -222,8 +222,9 @@ Base64 内联媒体；与上述不包含 Base64 的结构化诊断、活动请�
   Composer，`IDLE` 是 no-op。
 - Tool approval 使用 `{decision, decisionId, actor: "web", reason: null}`；同一
   Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY 切换生成新 id。
-- `task.status` 是完整 heartbeat 而不是 delta，状态为 `queued`、`running_model`、
-  `running_tool`、`waiting_approval`；同一子 Thread 的 heartbeat 替换旧帧。
+- Thread 与委派子 Thread 的进度都来自同一份快照派生字段：`processing` 等价于 `status != IDLE`，
+  `WAITING_CHILDREN` 表示该 Thread 本地已静止但仍有活跃直接孩子（因而仍在处理）。前端按 Thread
+  维度读取同一份快照渲染进度，没有独立的子任务状态通道。
 
 ## 变更提交与上传
 

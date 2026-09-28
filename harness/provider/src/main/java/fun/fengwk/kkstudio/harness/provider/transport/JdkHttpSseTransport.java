@@ -10,8 +10,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 基于 JDK 21 {@link HttpClient}、受管 {@link ExecutorService} 与受管 {@link ScheduledExecutorService}
@@ -21,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <ul>
  *   <li>构造时要求注入独立的 worker 执行器与定时调度执行器，并强制拒绝跟随重定向（{@code HttpClient.Redirect.NEVER}）。
- *   <li>{@link #stream} 方法先将 I/O 工作任务提交至受管 worker 执行器，再将单调时钟 Watchdog 提交至定时调度器；启动门（start
+ *   <li>{@link #stream} 方法先将 I/O 工作任务提交至受管 worker 执行器，再将单调时钟 deadline 提交至定时调度器；启动门（start
  *       gate）确保两者均排期成功后才允许工作任务发起网络请求。
  *   <li>任一阶段被执行器拒绝时，能够绝对证明工作任务尚未接触 {@link HttpClient}，并同步抛出 {@link
  *       TransportErrorKind#EXECUTOR_REJECTED} 异常。
@@ -86,20 +84,14 @@ public class JdkHttpSseTransport {
           "Direct or caller-runs executor execution is rejected to prevent stream deadlock");
     }
 
-    ScheduledFuture<?> watchdogFuture;
     try {
-      long checkDelayNanos = execution.watchdogIntervalNanos();
-      watchdogFuture =
-          scheduler.scheduleWithFixedDelay(
-              execution::checkWatchdog, checkDelayNanos, checkDelayNanos, TimeUnit.NANOSECONDS);
+      execution.scheduleDeadline(scheduler);
     } catch (RejectedExecutionException e) {
       // 调度器拒绝时，worker 仍在 start gate 阻塞，绝对未发起任何网络请求
       execution.abortAdmission();
       throw new TransportException(
-          TransportErrorKind.EXECUTOR_REJECTED, "Scheduler rejected watchdog task", e);
+          TransportErrorKind.EXECUTOR_REJECTED, "Scheduler rejected deadline task", e);
     }
-    execution.attachWatchdogFuture(watchdogFuture);
-
     execution.openStartGate();
     return execution;
   }

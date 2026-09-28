@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -191,7 +192,10 @@ final class ManualCompactionControl {
       ManualPlan plan,
       TurnResolver.Result result) {
     Instant now = clock.instant();
-    ThreadState thread = lockThreadWithSession(tx, command.threadId());
+    ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, command.threadId());
+    if (thread == null) {
+      throw new HarnessRuntimeNotFoundException("thread " + command.threadId() + " does not exist");
+    }
     if (thread.version() != command.expectedVersion()
         || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
       throw staleManualVersion(command, thread);
@@ -220,8 +224,11 @@ final class ManualCompactionControl {
               plan.sourceHeadEntryId(),
               resolvedPayload,
               mutationNow));
-      ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), mutationNow);
+      ThreadState advanced =
+          ThreadLifecycleCoordinator.advanceHeadWithStatus(
+              thread, plan.turnStartEntryId(), ThreadLifecycleStatus.ACTIVE, mutationNow);
       tx.updateThread(advanced);
+      ThreadLifecycleCoordinator.markAncestorsWaitingChildren(tx, thread.id(), mutationNow);
       UUID invocationId = tx.nextId();
       tx.insertModelInvocation(
           new ModelInvocation(
@@ -281,6 +288,7 @@ final class ManualCompactionControl {
 
   /** 按 Session KEY SHARE -&gt; Thread FOR UPDATE 获取一致 Thread，避免后续 Entry 外键锁与 Session 深删除形成逆序。 */
   private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
+    ThreadTreeLocks.lockForThread(tx, threadId);
     ThreadState immutable =
         tx.findThread(threadId)
             .orElseThrow(

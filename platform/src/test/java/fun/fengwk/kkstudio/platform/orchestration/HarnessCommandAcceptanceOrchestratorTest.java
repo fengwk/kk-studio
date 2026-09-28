@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -742,7 +743,18 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   private static ThreadState thread(UUID threadId, UUID sessionId) {
     return new ThreadState(
-        threadId, sessionId, ENTRY_ID, "0".repeat(64), "thread", false, 1, 0, NOW, NOW);
+        threadId,
+        sessionId,
+        null,
+        ENTRY_ID,
+        "0".repeat(64),
+        "thread",
+        false,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static UUID id(long value) {

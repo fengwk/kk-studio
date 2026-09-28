@@ -65,7 +65,6 @@ class HarnessCompactionConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns());
     new ApplicationContextRunner()
         .withUserConfiguration(HarnessCompactionConfiguration.class)
@@ -104,7 +103,6 @@ class HarnessCompactionConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns());
     return new SystemSettings(
         SystemSettings.Tool.DEFAULT,

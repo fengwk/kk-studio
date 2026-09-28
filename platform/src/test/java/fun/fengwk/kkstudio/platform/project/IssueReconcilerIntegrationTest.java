@@ -14,7 +14,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskMessages.Outcome;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -37,11 +36,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskDraft;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskStatus;
-import fun.fengwk.kkstudio.platform.harness.task.repo.SubagentTaskRepository;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
@@ -76,7 +73,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   @Autowired private IssueWorkStore issueWorkStore;
   @Autowired private IssueTransitionService issueTransitionService;
   @Autowired private HarnessRuntime harnessRuntime;
-  @Autowired private SubagentTaskRepository subagentTaskRepository;
 
   private final Map<UUID, EntryPayload> customPayloads = new ConcurrentHashMap<>();
 
@@ -91,8 +87,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   private ThreadSnapshot createSnapshot(UUID threadId) {
     Map<String, Object> row =
         jdbc.queryForMap(
-            "select session_id, head_entry_id, next_command_sequence from harness_thread where id"
-                + " = ?",
+            "select session_id, head_entry_id, next_command_sequence, status from harness_thread"
+                + " where id = ?",
             threadId);
     UUID headEntryId = (UUID) row.get("head_entry_id");
     ThreadState thread = mock(ThreadState.class);
@@ -101,6 +97,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     when(thread.headEntryId()).thenReturn(headEntryId);
     when(thread.nextCommandSequence())
         .thenReturn(((Number) row.get("next_command_sequence")).longValue());
+    // 递归生命周期只能来自真实 Thread 行：委派静止点判定读取的就是这一持久事实。
+    when(thread.status()).thenReturn(ThreadLifecycleStatus.valueOf((String) row.get("status")));
 
     List<UUID> ids = new ArrayList<>();
     UUID cursor = headEntryId;
@@ -760,30 +758,19 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
   }
 
-  /** 测试意图：父 Thread 已静止且已有产出，持久 OPEN/SETTLED 委派仍阻止 Run 收尾；交付后才允许收尾。 */
+  /**
+   * 测试意图：父 Thread 本地静止且已有产出，但永久执行子树仍有非 IDLE 的委派 Thread 时，Run 不得收尾；委派子树真正静止后才允许 COMPLETED。判定只读
+   * Thread 的持久递归生命周期，不依赖任何任务扫描表。
+   */
   @Test
-  void pendingDelegatedTaskDefersRunCompletionUntilDelivery() {
+  void pendingDelegatedChildThreadDefersRunCompletionUntilSettled() {
     String agent = createAgent();
-    UUID projectId = createProjectWithStages("委派未交付延后", agent, agent, 3);
+    UUID projectId = createProjectWithStages("委派未静止延后", agent, agent, 3);
     Issue issue = createIssue(projectId);
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID newHead = appendHistoryEntry(run.getThreadId());
-    UUID invocationId = UUID.randomUUID();
-    assertTrue(
-        subagentTaskRepository.insert(
-            new SubagentTaskDraft(
-                invocationId,
-                run.getThreadId(),
-                run.getThreadId(),
-                UUID.randomUUID(),
-                UUID.randomUUID(),
-                newHead,
-                agent,
-                "delegated work",
-                10,
-                SubagentTaskStatus.OPEN,
-                0L)));
+    UUID childThreadId = insertDelegatedChildThread(run.getThreadId());
 
     assertEquals(
         IssueReconcileOutcome.DEFERRED_PROCESSING, reconciler.reconcile(claimWork(issue.getId())));
@@ -794,11 +781,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
     assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
 
-    assertTrue(
-        subagentTaskRepository.settleResult(invocationId, Outcome.COMPLETED, "done", null, null));
-    assertEquals(
-        IssueReconcileOutcome.DEFERRED_PROCESSING, reconciler.reconcile(claimWork(issue.getId())));
-    assertTrue(subagentTaskRepository.markDelivered(invocationId));
+    // 委派子树收敛（子 Thread IDLE、父同步回 IDLE）后，Run 才允许收尾。
+    jdbc.update("update harness_thread set status = 'IDLE' where id = ?", childThreadId);
+    jdbc.update("update harness_thread set status = 'IDLE' where id = ?", run.getThreadId());
     assertEquals(
         IssueReconcileOutcome.RUN_COMPLETED, reconciler.reconcile(claimWork(issue.getId())));
     assertEquals(
@@ -808,6 +793,40 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " end_entry_id = ?",
             run.getId(),
             newHead));
+  }
+
+  /**
+   * 建一个归入父执行子树的委派子 Thread（独立 Session 与 ROOT Entry），并按递归生命周期不变量把父 Thread 标为
+   * WAITING_CHILDREN；委派静止点判定读取的正是这一对持久事实。
+   */
+  private UUID insertDelegatedChildThread(UUID parentThreadId) {
+    UUID sessionId = UUID.randomUUID();
+    UUID rootEntryId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "delegated-" + sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+            + " values (?, ?, 'ROOT', '{}'::jsonb, current_timestamp)",
+        rootEntryId,
+        sessionId);
+    UUID childThreadId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+            + " creation_request_hash, name, yolo_enabled, status, next_command_sequence, version,"
+            + " created_at, updated_at)"
+            + " values (?, ?, ?, ?, ?, ?, false, 'ACTIVE', 1, 0, current_timestamp,"
+            + " current_timestamp)",
+        childThreadId,
+        sessionId,
+        parentThreadId,
+        rootEntryId,
+        "0".repeat(64),
+        "delegated-" + childThreadId);
+    jdbc.update(
+        "update harness_thread set status = 'WAITING_CHILDREN' where id = ?", parentThreadId);
+    return childThreadId;
   }
 
   /** 测试意图：存在入队命令时，reconcile 判定为在途执行尚未静止，返回 DEFERRED_PROCESSING 延后重检。 */

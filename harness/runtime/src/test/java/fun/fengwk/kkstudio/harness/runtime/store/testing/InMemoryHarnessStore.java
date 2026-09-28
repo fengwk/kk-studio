@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -187,6 +189,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     final Map<CommandKey, ThreadCommand> commands = new HashMap<>();
     final Map<UUID, ModelInvocation> modelInvocations = new HashMap<>();
     final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
+    final Map<UUID, ThreadJoin> joins = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
     long nextId;
 
@@ -198,6 +201,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       copy.commands.putAll(source.commands);
       copy.modelInvocations.putAll(source.modelInvocations);
       copy.toolInvocations.putAll(source.toolInvocations);
+      copy.joins.putAll(source.joins);
       copy.works.putAll(source.works);
       copy.nextId = source.nextId;
       return copy;
@@ -214,29 +218,30 @@ public final class InMemoryHarnessStore implements HarnessStore {
     WORK
   }
 
-  private record LockKey(LockRank rank, String key) {
+  /** 行锁 key；{@code ownerThreadId} 记录 COMMAND 行所属 Thread，用于同树例外判定。 */
+  private record LockKey(LockRank rank, String key, UUID ownerThreadId) {
     static LockKey session(UUID id) {
-      return new LockKey(LockRank.SESSION, "session:" + id);
+      return new LockKey(LockRank.SESSION, "session:" + id, null);
     }
 
     static LockKey thread(UUID id) {
-      return new LockKey(LockRank.THREAD, "thread:" + id);
+      return new LockKey(LockRank.THREAD, "thread:" + id, null);
     }
 
     static LockKey command(UUID threadId, long sequence) {
-      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence);
+      return new LockKey(LockRank.COMMAND, "command:" + threadId + ":" + sequence, threadId);
     }
 
     static LockKey model(UUID id) {
-      return new LockKey(LockRank.MODEL, "model:" + id);
+      return new LockKey(LockRank.MODEL, "model:" + id, null);
     }
 
     static LockKey tool(UUID id) {
-      return new LockKey(LockRank.TOOL, "tool:" + id);
+      return new LockKey(LockRank.TOOL, "tool:" + id, null);
     }
 
     static LockKey work(WorkTarget target) {
-      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id());
+      return new LockKey(LockRank.WORK, "work:" + target.type() + ":" + target.id(), null);
     }
   }
 
@@ -252,8 +257,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     private final State state;
     private final Set<LockKey> locked = new HashSet<>();
+    private final Set<UUID> lockedTrees = new HashSet<>();
     private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
     private final Thread owner = Thread.currentThread();
+    private boolean joinAdmissionLocked;
     private LockRank highestLockRank;
     private UUID highestThreadId;
     private WorkTarget highestWorkTarget;
@@ -276,11 +283,26 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    private void requireCanLockRank(LockRank rank) {
+    /**
+     * 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。
+     *
+     * <p>唯一例外是同一执行树内、已持有<b>该行所属树</b>事务级锁的前提下回写 COMMAND（父 Thread 结果交付）：交付命令可能在 Model/Tool 收敛过程中（Work
+     * 之前）或 Work fencing 之后（Stop 收尾）写入。例外严格限定在「command 所属 Thread 落在已持有的树锁内」， 仅持有其它执行树的树锁不允许逆序加锁。
+     */
+    private void requireCanLockRank(LockRank rank, UUID commandThreadId) {
       if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
+        if (rank == LockRank.COMMAND
+            && commandThreadId != null
+            && isInLockedTree(commandThreadId)) {
+          return;
+        }
         throw new IllegalStateException(
             "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
       }
+    }
+
+    private void requireCanLockRank(LockRank rank) {
+      requireCanLockRank(rank, null);
     }
 
     private void requireCanLockThread(UUID threadId) {
@@ -309,7 +331,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     private void requireCanLock(LockKey key) {
       if (!locked.contains(key)) {
-        requireCanLockRank(key.rank());
+        requireCanLockRank(key.rank(), key.ownerThreadId());
       }
     }
 
@@ -354,12 +376,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       requireCanLock(key);
       if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
+        if (target.type() == WorkTargetType.THREAD
+            && !lockedTrees.isEmpty()
+            && locked.contains(LockKey.thread(target.id()))
+            && isInLockedTree(target.id())) {
+          return;
+        }
         throw new IllegalStateException(
             "work locks must be acquired by ascending (type, id): "
                 + highestWorkTarget
                 + " before "
                 + target);
       }
+    }
+
+    private boolean isInLockedTree(UUID threadId) {
+      if (lockedTrees.isEmpty()) {
+        return false;
+      }
+      List<UUID> chain = findAncestorChain(threadId);
+      UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
+      return lockedTrees.contains(root);
     }
 
     private void requireCanClaimWork() {
@@ -438,7 +475,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     @Override
     public Optional<Session> lockSessionForKeyShare(UUID id) {
       checkOpen();
-      requireCanLockRank(LockRank.SESSION);
+      // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
+      if (!locked.contains(LockKey.session(id))) {
+        requireCanLockRank(LockRank.SESSION);
+      }
       Session session = state.sessions.get(id);
       if (session != null) {
         lock(LockKey.session(id));
@@ -566,9 +606,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
       requireAbsent(state.threads, thread.id(), "thread");
       requireExistingEntry(thread.headEntryId());
       requireThreadHeadInSession(thread);
-      requireCanLockThread(thread.id());
+      if (thread.parentThreadId() != null && !state.threads.containsKey(thread.parentThreadId())) {
+        throw new IllegalArgumentException(
+            "parent thread " + thread.parentThreadId() + " does not exist");
+      }
+      boolean joinedChild =
+          thread.parentThreadId() != null
+              && !lockedTrees.isEmpty()
+              && locked.contains(LockKey.thread(thread.parentThreadId()));
+      if (!joinedChild) {
+        requireCanLockThread(thread.id());
+      }
       state.threads.put(thread.id(), thread);
-      recordThreadLock(thread.id());
+      if (joinedChild) {
+        locked.add(LockKey.thread(thread.id()));
+        if (highestThreadId == null
+            || UuidOrder.COMPARATOR.compare(thread.id(), highestThreadId) > 0) {
+          highestThreadId = thread.id();
+        }
+      } else {
+        recordThreadLock(thread.id());
+      }
     }
 
     /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（Session -&gt; head 同一 Session 约束）。 */
@@ -619,6 +677,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public List<ThreadState> listChildren(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return state.threads.values().stream()
+          .filter(thread -> parentThreadId.equals(thread.parentThreadId()))
+          .sorted(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
     public void updateThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
@@ -636,6 +704,227 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public List<UUID> findAncestorChain(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      if (!state.threads.containsKey(threadId)) {
+        return List.of();
+      }
+      List<UUID> chain = new ArrayList<>();
+      Set<UUID> visited = new HashSet<>();
+      UUID current = threadId;
+      while (current != null) {
+        if (!visited.add(current)) {
+          throw new IllegalStateException("thread parent cycle at " + current);
+        }
+        ThreadState thread = state.threads.get(current);
+        if (thread == null) {
+          throw new IllegalStateException("thread ancestor chain is incomplete");
+        }
+        chain.add(current);
+        current = thread.parentThreadId();
+      }
+      return List.copyOf(chain);
+    }
+
+    @Override
+    public void lockTree(UUID rootThreadId) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      if (lockedTrees.contains(rootThreadId)) {
+        return;
+      }
+      if (highestLockRank != null) {
+        throw new IllegalStateException("tree lock must precede business row locks");
+      }
+      if (!lockedTrees.isEmpty()
+          && UuidOrder.COMPARATOR.compare(
+                  rootThreadId, lockedTrees.stream().max(UuidOrder.COMPARATOR).orElseThrow())
+              <= 0) {
+        throw new IllegalStateException("tree locks must be acquired in ascending root order");
+      }
+      List<UUID> chain = findAncestorChain(rootThreadId);
+      if (!chain.isEmpty() && (chain.size() != 1 || !chain.get(0).equals(rootThreadId))) {
+        throw new IllegalStateException("tree root changed while acquiring lock");
+      }
+      lockedTrees.add(rootThreadId);
+    }
+
+    @Override
+    public void insertJoin(ThreadJoin join) {
+      checkOpen();
+      Objects.requireNonNull(join, "join");
+      requireMillisecondPrecision(join.createdAt());
+      requireMillisecondPrecision(join.updatedAt());
+      if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
+        throw new IllegalArgumentException("new join must be unmatched");
+      }
+      requireAbsent(state.joins, join.invocationId(), "join");
+      if (!state.threads.containsKey(join.childThreadId())) {
+        throw new IllegalArgumentException(
+            "child thread " + join.childThreadId() + " does not exist");
+      }
+      if (join.parentThreadId() != null && !state.threads.containsKey(join.parentThreadId())) {
+        throw new IllegalArgumentException(
+            "parent thread " + join.parentThreadId() + " does not exist");
+      }
+      CommandKey sourceKey = new CommandKey(join.childThreadId(), join.sourceCommandSequence());
+      if (!state.commands.containsKey(sourceKey)) {
+        throw new IllegalArgumentException(
+            "source command "
+                + join.childThreadId()
+                + "/"
+                + join.sourceCommandSequence()
+                + " does not exist");
+      }
+      requireLocked(LockKey.thread(join.childThreadId()));
+      state.joins.put(join.invocationId(), join);
+    }
+
+    @Override
+    public Optional<ThreadJoin> findJoin(UUID invocationId) {
+      checkOpen();
+      Objects.requireNonNull(invocationId, "invocationId");
+      return Optional.ofNullable(state.joins.get(invocationId));
+    }
+
+    @Override
+    public List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion) {
+      checkOpen();
+      Objects.requireNonNull(childThreadId, "childThreadId");
+      return state.joins.values().stream()
+          .filter(
+              join ->
+                  join.childThreadId().equals(childThreadId)
+                      && join.matchedIdleVersion() == null
+                      && join.afterVersion() < idleVersion)
+          .sorted(
+              Comparator.comparing(ThreadJoin::createdAt)
+                  .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return state.joins.values().stream()
+          .filter(
+              join ->
+                  parentThreadId.equals(join.parentThreadId())
+                      && join.matchedIdleVersion() != null
+                      && join.deliveryCommandSequence() == null)
+          .sorted(
+              Comparator.comparing(ThreadJoin::createdAt)
+                  .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public int countActiveChildren(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return (int)
+          state.threads.values().stream()
+              .filter(
+                  thread ->
+                      parentThreadId.equals(thread.parentThreadId())
+                          && thread.status() != ThreadLifecycleStatus.IDLE)
+              .count();
+    }
+
+    @Override
+    public void lockJoinAdmission() {
+      checkOpen();
+      if (joinAdmissionLocked) {
+        return;
+      }
+      if (highestLockRank != null || !lockedTrees.isEmpty()) {
+        throw new IllegalStateException(
+            "join admission lock must precede tree and business row locks");
+      }
+      // 参考实现由全局 monitor 串行化事务，准入锁只需保留与 PG 一致的“必须最先获取”防御。
+      joinAdmissionLocked = true;
+    }
+
+    @Override
+    public int countActiveSubagentThreads() {
+      checkOpen();
+      return (int)
+          state.threads.values().stream()
+              .filter(
+                  thread ->
+                      thread.parentThreadId() != null
+                          && thread.status() != ThreadLifecycleStatus.IDLE)
+              .count();
+    }
+
+    @Override
+    public void updateJoin(ThreadJoin join) {
+      checkOpen();
+      Objects.requireNonNull(join, "join");
+      requireMillisecondPrecision(join.createdAt());
+      requireMillisecondPrecision(join.updatedAt());
+      requireLocked(LockKey.thread(join.childThreadId()));
+      ThreadJoin old =
+          findJoin(join.invocationId())
+              .orElseThrow(
+                  () -> new IllegalArgumentException("join not found: " + join.invocationId()));
+      ThreadJoin.validateTransition(old, join);
+      if (join.resultHeadEntryId() != null) {
+        requireExistingEntry(join.resultHeadEntryId());
+      }
+      if (join.deliveryCommandSequence() != null) {
+        if (join.parentThreadId() == null) {
+          throw new IllegalArgumentException("delivery requires a parent thread");
+        }
+        CommandKey deliveryKey =
+            new CommandKey(join.parentThreadId(), join.deliveryCommandSequence());
+        if (!state.commands.containsKey(deliveryKey)) {
+          throw new IllegalArgumentException(
+              "delivery command "
+                  + join.parentThreadId()
+                  + "/"
+                  + join.deliveryCommandSequence()
+                  + " does not exist");
+        }
+      }
+      state.joins.put(join.invocationId(), join);
+    }
+
+    @Override
+    public int deleteJoinsByChild(UUID childThreadId) {
+      checkOpen();
+      Objects.requireNonNull(childThreadId, "childThreadId");
+      requireLocked(LockKey.thread(childThreadId));
+      if (!isInLockedTree(childThreadId)) {
+        throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
+      }
+      List<ThreadJoin> childJoins =
+          state.joins.values().stream()
+              .filter(j -> j.childThreadId().equals(childThreadId))
+              .toList();
+      for (ThreadJoin join : childJoins) {
+        if (!join.matched()) {
+          throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
+        }
+        if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+          throw new IllegalArgumentException(
+              "cannot delete join pending delivery " + join.invocationId());
+        }
+      }
+      int count = 0;
+      var it = state.joins.entrySet().iterator();
+      while (it.hasNext()) {
+        if (it.next().getValue().childThreadId().equals(childThreadId)) {
+          it.remove();
+          count++;
+        }
+      }
+      return count;
+    }
+
+    @Override
     public Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
       checkOpen();
       Objects.requireNonNull(idempotencyKey, "idempotencyKey");
@@ -649,11 +938,53 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      for (ThreadCommand command : state.commands.values()) {
+        if (command.threadId().equals(threadId) && command.sequence() == sequence) {
+          return Optional.of(command);
+        }
+      }
+      return Optional.empty();
+    }
+
+    @Override
+    public int deleteJoinsForThreads(List<UUID> threadIds) {
+      checkOpen();
+      List<UUID> copied = List.copyOf(threadIds);
+      Set<UUID> deleting = Set.copyOf(copied);
+      for (UUID threadId : copied) {
+        requireLocked(LockKey.thread(threadId));
+        if (!isInLockedTree(threadId)) {
+          throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+        }
+      }
+      int count = 0;
+      var it = state.joins.entrySet().iterator();
+      while (it.hasNext()) {
+        ThreadJoin join = it.next().getValue();
+        if (!deleting.contains(join.childThreadId())) {
+          continue;
+        }
+        boolean parentAlsoDeleted =
+            join.parentThreadId() == null || deleting.contains(join.parentThreadId());
+        if (!parentAlsoDeleted && (!join.matched() || join.deliveryCommandSequence() == null)) {
+          throw new IllegalArgumentException(
+              "cannot delete join pending delivery " + join.invocationId());
+        }
+        it.remove();
+        count++;
+      }
+      return count;
+    }
+
+    @Override
     public List<ThreadCommand> loadQueuedCommands(UUID threadId) {
       checkOpen();
       // 锁序 Thread -> commands：先锁 Thread 才能读它的 mailbox。
       requireLocked(LockKey.thread(threadId));
-      requireCanLockRank(LockRank.COMMAND);
+      requireCanLockRank(LockRank.COMMAND, threadId);
       List<ThreadCommand> queued =
           state.commands.values().stream()
               .filter(
@@ -723,12 +1054,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
         if (!state.threads.containsKey(command.threadId())) {
           throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
         }
-        // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread。
+        // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread，且 COMMAND 的树锁例外只对同一执行树生效。
         requireLocked(LockKey.thread(command.threadId()));
+        requireCanLockRank(LockRank.COMMAND, command.threadId());
         requireUniqueCommandKey(command);
-      }
-      if (!copied.isEmpty()) {
-        requireCanLockRank(LockRank.COMMAND);
       }
       for (ThreadCommand command : copied) {
         state.commands.put(new CommandKey(command.threadId(), command.sequence()), command);
@@ -1345,11 +1674,33 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       for (UUID threadId : copied) {
         requireLocked(LockKey.thread(threadId));
+        if (!isInLockedTree(threadId)) {
+          throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+        }
         if (!state.threads.containsKey(threadId)) {
           throw new IllegalArgumentException("thread " + threadId + " does not exist");
         }
       }
       Set<UUID> threadIdSet = Set.copyOf(copied);
+      for (ThreadJoin join : state.joins.values()) {
+        if (threadIdSet.contains(join.childThreadId())
+            || (join.parentThreadId() != null && threadIdSet.contains(join.parentThreadId()))) {
+          throw new IllegalArgumentException(
+              "cannot delete thread referenced by join " + join.invocationId());
+        }
+      }
+      for (UUID threadId : copied) {
+        for (ThreadState thread : state.threads.values()) {
+          if (threadId.equals(thread.parentThreadId()) && !threadIdSet.contains(thread.id())) {
+            throw new IllegalArgumentException(
+                "cannot delete parent thread "
+                    + threadId
+                    + " while child thread "
+                    + thread.id()
+                    + " still exists");
+          }
+        }
+      }
 
       List<ThreadCommand> commands =
           state.commands.values().stream()

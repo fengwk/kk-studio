@@ -142,8 +142,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       """
       {"settings": {"agentName": "lifecycle-test", "model": \
       {"providerName": "openai", "modelName": "gpt-test", "variant": "default"}, \
-      "environmentName": null, "goal": null}, \
-      "subagentContext": null}
+      "environmentName": null, "goal": null}}
       """;
 
   private void seedDueThreadWork() {
@@ -158,9 +157,10 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         SESSION_ID,
         ROOT_PAYLOAD_JSON);
     jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-            + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, false, 1, 0, now(), now())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+            + " creation_request_hash, name, yolo_enabled, status, next_command_sequence, version,"
+            + " created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, ?, false, 'IDLE', 1, 0, now(), now())",
         THREAD_ID,
         SESSION_ID,
         ROOT_ENTRY_ID,

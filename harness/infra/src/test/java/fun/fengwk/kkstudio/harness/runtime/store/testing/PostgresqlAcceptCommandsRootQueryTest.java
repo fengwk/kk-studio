@@ -94,10 +94,12 @@ class PostgresqlAcceptCommandsRootQueryTest {
               new ThreadState(
                   current.id(),
                   current.sessionId(),
+                  current.parentThreadId(),
                   turnEndId,
                   current.creationRequestHash(),
                   current.name(),
                   current.yoloEnabled(),
+                  current.status(),
                   current.nextCommandSequence(),
                   current.version() + 1,
                   current.createdAt(),

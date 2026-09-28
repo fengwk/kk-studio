@@ -40,8 +40,6 @@ export interface SystemSettingsAiRuntimeDTO {
   subagentMaxConcurrency: number
   /** 0 表示不额外限制（无 cap）。 */
   subagentMaxTotalConcurrency: number
-  /** 0 表示关闭。 */
-  subagentIdleTimeoutMillis: DecimalLong
   subagentMaxTurns: number
 }
 

@@ -394,21 +394,13 @@ export const settingsCatalog = {
     'en-US': 'Global limit on concurrent subagents across all conversation sessions. Set to 0 for no global cap.',
     'zh-CN': '全系统所有会话中同时运行的子代理任务总数上限。设为 0 表示不设全局上限。',
   },
-  'settings.field.aiRuntime.subagentIdleTimeoutMillis': {
-    'en-US': 'Idle timeout (ms)',
-    'zh-CN': '空闲超时（毫秒）',
-  },
-  'settings.field.aiRuntime.subagentIdleTimeoutMillis.hint': {
-    'en-US': 'Idle timeout in milliseconds for inactive subagents. Set to 0 to disable idle timeout detection.',
-    'zh-CN': '子代理无输出或处于等待状态的超时毫秒数。设为 0 表示不启用空闲超时检测。',
-  },
   'settings.field.aiRuntime.subagentMaxTurns': {
     'en-US': 'Max turns',
     'zh-CN': '最大轮数',
   },
   'settings.field.aiRuntime.subagentMaxTurns.hint': {
-    'en-US': 'Maximum interaction turns allowed for a single subagent task. Upon reaching the limit, the subagent returns a phase report.',
-    'zh-CN': '单个子代理任务允许执行的最大交互轮数。达到上限后子代理将强制返回阶段性结果。',
+    'en-US': 'Soft interaction-turn budget for a subagent task. At the limit, the subagent is reminded to finish the current phase and report.',
+    'zh-CN': '单个子代理任务的交互轮数软预算。达到上限后提醒子代理结束当前阶段并汇报。',
   },
   'settings.option.retryBackoff.fixed': {
     'en-US': 'Fixed',

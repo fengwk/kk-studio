@@ -53,11 +53,26 @@ function nonNegativeDecimal(value, field) {
   return raw
 }
 
-/** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段并返回 threadId。 */
+/**
+ * 校验 Thread 投影的不可变执行父关系并返回它：根 Thread 为 null，非根必须是 canonical UUID。
+ *
+ * <p>{@code parentThreadId} 只表达执行父子归属，不进入 Session 历史；委派产生的子 Thread 必须指回
+ * 发起它的父 Thread。断言父关系才能证明「结果来自同一执行树」，同 Session 的另一条线程不会混淆。
+ */
+export function threadParentIdOf(thread) {
+  const parentThreadId = thread?.parentThreadId
+  if (parentThreadId !== null) {
+    canonicalUuid(parentThreadId, 'parentThreadId')
+  }
+  return parentThreadId
+}
+
+/** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段与父关系并返回 threadId。 */
 export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
   canonicalUuid(thread.sessionId, 'sessionId')
   canonicalUuid(thread.headEntryId, 'headEntryId')
+  threadParentIdOf(thread)
   // name 是 Thread 的必需非空展示名称（服务端派生/控制面重命名，绝不回退为 id）。
   assert(
     typeof thread.name === 'string' && thread.name.trim().length > 0,

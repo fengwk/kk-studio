@@ -8,6 +8,8 @@ import {
   chatOwner,
   newSessionTarget,
   newThreadTarget,
+  threadParentIdOf,
+  threadIdOf,
   threadTarget,
   userMessageCommand,
 } from '../lib/harness.mjs'
@@ -91,6 +93,31 @@ test('newThreadTarget defaults yoloEnabled to false and validates canonical ids'
     () => newThreadTarget({ sessionId: 'not-uuid', startEntryId: cid(), threadId: cid() }),
     /canonical UUID/,
   )
+})
+
+test('threadParentIdOf/threadIdOf enforce the immutable execution parent relation', () => {
+  // 测试意图：Thread 的执行父关系是不可变事实（根为 null、其余为 canonical UUID），且不再物化进
+  // ROOT payload。委派链路断言必须靠这个字段，所以 helper 要拒绝缺失字段，根也必须显式返回 null。
+  const threadId = '00000000-0000-4000-8000-000000000000'
+  const base = {
+    threadId,
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    headEntryId: '22222222-2222-4222-8222-222222222222',
+    name: 'main',
+    nextCommandSequence: '1',
+    version: '0',
+  }
+
+  assert.equal(threadParentIdOf({ ...base, parentThreadId: null }), null)
+  assert.throws(() => threadParentIdOf(base), /canonical UUID/)
+  const parentThreadId = '33333333-3333-4333-8333-333333333333'
+  assert.equal(threadParentIdOf({ ...base, parentThreadId }), parentThreadId)
+  assert.equal(threadIdOf({ ...base, parentThreadId }), threadId)
+
+  for (const invalid of [undefined, 'not-uuid', '33333333333343338333333333333333', '']) {
+    assert.throws(() => threadParentIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
+    assert.throws(() => threadIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
+  }
 })
 
 test('legacy ENTRY target tokens and helpers are no longer part of the lib API', async () => {

@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
@@ -325,8 +326,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)",
+                + " name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
+                + " values (?, ?, ?, ?, ?, ?, 'IDLE', 1, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
@@ -352,7 +353,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     private static ThreadSnapshot snapshot(JdbcTemplate jdbc, UUID threadId) {
       Map<String, Object> row =
           jdbc.queryForMap(
-              "select session_id, head_entry_id, next_command_sequence from harness_thread"
+              "select session_id, head_entry_id, next_command_sequence, status from harness_thread"
                   + " where id = ?",
               threadId);
       UUID headEntryId = (UUID) row.get("head_entry_id");
@@ -361,6 +362,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       when(thread.headEntryId()).thenReturn(headEntryId);
       when(thread.nextCommandSequence())
           .thenReturn(((Number) row.get("next_command_sequence")).longValue());
+      // 递归生命周期来自真实行：委派静止点判定只读持久 status，测试不得伪造固定值。
+      when(thread.status()).thenReturn(ThreadLifecycleStatus.valueOf((String) row.get("status")));
       EntryPath path = entryPath(jdbc, headEntryId);
       ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
       when(snapshot.thread()).thenReturn(thread);
