@@ -37,14 +37,15 @@ QueryClientProvider
 Query 默认 `retry: false`、`refetchOnWindowFocus: false`；ExtensionHost 在 provider
 生命周期内只创建一次，ApplicationEventProvider 持有共享的 application-event manager。
 
-[AppRouter](../../frontend/src/app/router.tsx) 把 `/` replace 到 `/chats`，其余路径
-交给 [WorkbenchShell](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
+[AppRouter](../../frontend/src/app/router.tsx) 把 `/` replace 到 `/chats`，`/interactions`
+承载人机交互审批与问卷页面，其余路径交给
+[WorkbenchShell](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
 WorkbenchShell 组合 `AppShell` 与动态 `StudioRoutes`，每个 Page contribution 都包裹
 `OverlayHost`（无多余空槽）。
 
 [AppShell](../../frontend/src/platform/shell/AppShell.tsx) 从当前匹配的 `PageContribution`
 获取所属顶层导航组（`navGroup`）与工作区沉浸布局（`workspace` predicate），不再硬编码业务
-path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId` 与 canonical UUID 的
+path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId`、`/threads/:threadId` 与 canonical UUID 的
 `/canvas/:canvasId` 使用 immersive shell 并隐藏 topbar；主导航固定组在应用组合根
 （`PRIMARY_NAV_ITEMS`）声明一次；Escape 只在没有 blocking modal、焦点不在可编辑控件、
 内层 menu 未展开时才关闭导航抽屉。
@@ -54,7 +55,7 @@ path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId` 与
 
 | extension | 页面 | 其他 contribution |
 | --- | --- | --- |
-| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | 创建/编辑/删除 dialog、`task` tool renderer |
+| `builtin.ai` | `/chats`、`/chats/:chatId`、`/threads/:threadId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | 创建/编辑/删除 dialog、`task` tool renderer |
 | `builtin.projects` | `/projects`、`/projects/:projectId` | 全局 Project invalidation overlay |
 | `builtin.canvas` | `/canvas`、`/canvas/:canvasId` | lazy 加载 Canvas feature |
 | `builtin.settings` | `/settings` | lazy 加载 Settings feature |
@@ -379,17 +380,13 @@ MiniMax Mavis 卡片的 Connect 流程是：
 ### Projects
 
 [ProjectsPage](../../frontend/src/features/projects/ProjectsPage.tsx) 承载 Project 列表
-与 create/edit/archive/delete，表单可设 `yoloEnabled` 与审查打回阈值；[ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)
-只消费一个 `ProjectSnapshotDTO`（Project、未归档 Issues、依赖、blocked、当前审查窗口打回次数、当前/最近 Run）。
+与 create/edit/archive/delete，表单可配置 `yoloEnabled` 与项目描述；[ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)
+只消费权威 `ProjectSnapshotDTO`（包含 Project 详情与各 Issue 的当前/最近 Run 摘要）。
 [IssueBoard](../../frontend/src/features/projects/components/IssueBoard.tsx)
-固定七列需求池、待办、执行中、等待人类、审核中、已阻塞、已完成，已取消的 Issue 单独成道；
-BLOCKED 卡片用 Snapshot 中服务端计数与 Project 当前阈值显示「本轮打回次数 / 上限」，不从分页 Activity 推导。
-Issue 创建与规格编辑的执行者、审查者从分页 Agent Catalog 完整枚举后受控选择；下线的历史分配名称在编辑时保留为选项，不静默清空。
+依据项目工作流配置中的状态自然 token（`states`）动态分列展示未归档与归档 Issue，支持标题/编号检索与按状态流转。
 IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot，
-并在 BLOCKED 上提供人工恢复与解除阻塞的理由输入。执行与审核页只对最新 `FAILED`/`UNKNOWN` Run 提供
-显式重试：`UNKNOWN` 下必须先填写人工核对说明（说明 trim 后随请求提交，为空时按钮禁用并给出内联校验
-提示），`FAILED` 保持原有直接重试。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，不在
-Project 页另建会话入口，Project feature 不维护自己的运行时状态机。
+支持 Issue 状态转移、人工解除阻塞/恢复、重新打开、终止执行、追加活动（评论与指令），以及上传与预览证据；
+对处于 `UNKNOWN` 的 Issue 提供人工核查输入解除门禁。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，并在详情页右侧受控 AgentPane 中承载交互，Project feature 不维护自己的运行时状态机。
 
 [ProjectsInvalidationBridge](../../frontend/src/features/projects/extensions/projects-extension.tsx)
 作为 ExtensionHost overlay 订阅 `{kind: "projects"}`，并通过

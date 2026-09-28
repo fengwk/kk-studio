@@ -11,7 +11,6 @@
  */
 
 import type {
-  CanvasCommandDTO,
   CanvasConflictDTO,
   CanvasFunctionDTO,
   CanvasTransformDTO,
@@ -25,10 +24,6 @@ export interface CanvasNodeDraft {
   generation: number
   /** 最近更新时间戳 */
   updatedAt: number
-  /** 冻结在途请求的客户端幂等标识 */
-  requestId?: string
-  /** 冻结在途命令批次请求体 */
-  commands?: CanvasCommandDTO[]
   /** 本地未保存的位置草稿 */
   position?: { x: number; y: number }
   /** 本地未保存的文本与标题草稿 */
