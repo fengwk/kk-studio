@@ -200,8 +200,13 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
 这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
 
-异步 `task` 的工具结果只表示已接受，完成结果由后续独立的 `<subagent_result>` 消息交付。
-`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成消息，不能将受理当作完成。
+异步 `task` 的工具结果只表示已接受；完成结果由 Runtime 在子执行首次 Idle 匹配 join 后，作为父 Thread
+的一条 `CUSTOM_MESSAGE` 交付——wire 是 USER 角色、正文包在 `<system-reminder>` 中的
+系统提醒形态（`SystemReminder.message`），内层唯一形状为
+`<subagent_result thread_id agent state>`。
+`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成消息，不能将受理当作完成；
+它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
+payload 只含 settings、不物化任何委派运行树元数据。
 受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立 Thread 面板查看进度并处理工具审批，
 不依赖 Chat 归属，也不开放无 owner 的会话命令发送。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
