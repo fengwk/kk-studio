@@ -97,6 +97,7 @@ export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
   private sequence = 0
+  private listFailed = false
   private activeRecovery: Promise<CanvasCommandRecoveryResult> | null = null
   private blocked = false
   private blockedError: Error | null = null
@@ -174,7 +175,11 @@ export class CanvasCommandQueue {
     }
 
     const result = this.tail.then(() => {
-      // 执行落盘前分配序列号：若前序存在 recovery，此时其 store.list 与序号推进已必定完成
+      if (this.listFailed) {
+        // list 失败期间绝不分配低 seq 写 store，直接拒绝尚未 freeze 的新入队以保持草稿
+        throw new CanvasQueueBlockedError(undefined, this.blockedError)
+      }
+      // 执行落盘前分配序列号：若前序存在 recovery，此时已预先从 list 全部 pending 取 max 推进
       const operation = this.freezeOperation(payload)
       this.operations.set(operation.id, operation)
       return this.persistAndSend(operation, options?.signal)
@@ -283,14 +288,16 @@ export class CanvasCommandQueue {
     const result: CanvasCommandRecoveryResult = { replayed: 0, conflicted: 0, failed: 0, ackedDrafts: [] }
     let pending: CanvasPendingOperation[]
     try {
+      this.listFailed = false
       // storage.list 失败不能伪装空成功，必须标记阻塞并抛出错误。
       pending = await this.store.list()
     } catch (error) {
+      this.listFailed = true
       this.markBlocked(error)
       throw error
     }
 
-    // 确保持久化已有序列号完成同步，推进 sequence
+    // 从 list 全部 pending 先取 max sequence 推进，避免首个未知 break 导致后续操作序号倒挂
     for (const op of pending) {
       this.sequence = Math.max(this.sequence, op.sequence + 1)
     }
@@ -311,7 +318,6 @@ export class CanvasCommandQueue {
 
     let hadUnknownFailure = false
     for (const operation of sorted) {
-      this.sequence = Math.max(this.sequence, operation.sequence + 1)
       this.operations.set(operation.id, operation)
       try {
         await this.send(operation)
