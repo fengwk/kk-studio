@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 只使用标准 ComfyUI HTTP API 的有界、流式客户端。 */
 public final class StandardComfyuiClient {
@@ -44,25 +43,37 @@ public final class StandardComfyuiClient {
       Duration connectTimeout,
       Duration requestTimeout,
       ObjectMapper objectMapper) {
+    this(
+        baseUrl,
+        bearerToken,
+        requestTimeout,
+        objectMapper,
+        HttpClient.newBuilder()
+            .connectTimeout(requirePositive(connectTimeout, "connectTimeout"))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build());
+  }
+
+  /** 测试注入 HttpClient，不改变生产构造。 */
+  StandardComfyuiClient(
+      String baseUrl,
+      String bearerToken,
+      Duration requestTimeout,
+      ObjectMapper objectMapper,
+      HttpClient httpClient) {
     baseUri = normalizeBaseUrl(baseUrl);
     this.bearerToken = normalizeBearer(bearerToken);
     this.requestTimeout = requirePositive(requestTimeout, "requestTimeout");
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    client =
-        HttpClient.newBuilder()
-            .connectTimeout(requirePositive(connectTimeout, "connectTimeout"))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
+    client = Objects.requireNonNull(httpClient, "httpClient");
   }
 
   public H3UploadedFile upload(
       String filename, String mediaType, long contentLength, InputStream content, UUID canvasId) {
     requireFilename(filename);
-    if (mediaType == null || mediaType.isBlank()) {
-      throw new IllegalArgumentException("mediaType must not be blank");
-    }
+    requireHeaderToken(mediaType, "mediaType");
     if (contentLength <= 0L) {
       throw new IllegalArgumentException("contentLength must be positive");
     }
@@ -70,21 +81,25 @@ public final class StandardComfyuiClient {
     Objects.requireNonNull(canvasId, "canvasId");
     String boundary = "kkstudio-" + UUID.randomUUID();
     String subfolder = "kk-studio/" + canvasId;
-    HttpRequest.BodyPublisher body =
-        multipart(boundary, filename, mediaType, contentLength, content, subfolder);
-    HttpRequest request =
-        request("upload/image")
-            .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-            .POST(body)
-            .build();
-    ObjectNode response = object(sendJson(request), "upload response");
-    H3UploadedFile uploaded =
-        new H3UploadedFile(
-            text(response, "name"), text(response, "subfolder"), text(response, "type"));
-    if (!subfolder.equals(uploaded.subfolder())) {
-      throw new IllegalArgumentException("ComfyUI upload returned an unexpected subfolder");
+    try {
+      HttpRequest.BodyPublisher body =
+          multipart(boundary, filename, mediaType, contentLength, content, subfolder);
+      HttpRequest request =
+          request("upload/image")
+              .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+              .POST(body)
+              .build();
+      ObjectNode response = object(sendJson(request), "upload response");
+      H3UploadedFile uploaded =
+          new H3UploadedFile(
+              text(response, "name"), text(response, "subfolder"), text(response, "type"));
+      if (!subfolder.equals(uploaded.subfolder())) {
+        throw new IllegalArgumentException("ComfyUI upload returned an unexpected subfolder");
+      }
+      return uploaded;
+    } finally {
+      closeQuietly(content);
     }
-    return uploaded;
   }
 
   public String submit(ObjectNode workflow, String clientId) {
@@ -338,72 +353,48 @@ public final class StandardComfyuiClient {
             .getBytes(StandardCharsets.UTF_8);
     byte[] footer = ("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8);
     long totalLength = header.length + contentLength + footer.length;
-    AtomicBoolean contentOpened = new AtomicBoolean();
     HttpRequest.BodyPublisher publisher =
         HttpRequest.BodyPublishers.concat(
             HttpRequest.BodyPublishers.ofByteArray(header),
             HttpRequest.BodyPublishers.ofInputStream(
-                () -> {
-                  if (!contentOpened.compareAndSet(false, true)) {
-                    throw new IllegalStateException("upload content stream is already open");
-                  }
-                  return new FixedLengthInputStream(content, contentLength);
-                }),
+                () -> new ExactUploadContent(content, contentLength)),
             HttpRequest.BodyPublishers.ofByteArray(footer));
     // ofInputStream 的 contentLength 恒为 -1，concat 因此也是 -1；用声明总长度恢复固定长度。
     return HttpRequest.BodyPublishers.fromPublisher(publisher, totalLength);
   }
 
-  /** 调用方传入的上传流只允许打开一次。成功读满后返回 EOF 且不再读底层流；JDK 在正常结束时关闭流。读失败、提前结束或取消时由本类关闭。 */
-  private static final class FixedLengthInputStream extends FilterInputStream {
+  /** 只读声明长度。提前结束或声明长度之后仍有字节都失败，不截断多余内容。单字节 read 由 FilterInputStream 转到块读取。流由 upload 关闭。 */
+  private static final class ExactUploadContent extends FilterInputStream {
 
-    private final long expected;
+    private final long declared;
     private long remaining;
-    private final AtomicBoolean closed = new AtomicBoolean();
 
-    private FixedLengthInputStream(InputStream content, long expected) {
-      super(Objects.requireNonNull(content, "content"));
-      if (expected <= 0L) {
-        throw new IllegalArgumentException("contentLength must be positive");
-      }
-      this.expected = expected;
-      remaining = expected;
+    private ExactUploadContent(InputStream content, long declared) {
+      super(content);
+      this.declared = declared;
+      remaining = declared;
     }
 
     @Override
     public int read(byte[] buffer, int offset, int length) throws IOException {
-      if (closed.get()) {
-        throw new IOException("upload content stream is closed");
-      }
-      if (remaining == 0L || length == 0) {
-        return length == 0 && remaining > 0L ? 0 : -1;
+      if (remaining == 0L) {
+        int extra = in.read(buffer, offset, length);
+        if (extra > 0) {
+          throw new IOException("upload content is longer than declared contentLength");
+        }
+        return extra;
       }
       int requested = (int) Math.min(length, remaining);
-      int read;
-      try {
-        read = in.read(buffer, offset, requested);
-      } catch (IOException error) {
-        close();
-        throw error;
-      }
+      int read = in.read(buffer, offset, requested);
       if (read < 0) {
-        close();
-        throw new IOException(
-            "upload content ended after " + (expected - remaining) + " of " + expected + " bytes");
-      }
-      if (read > requested) {
-        close();
-        throw new IOException("upload content read exceeded the requested length");
+        throw new IOException(shortContent());
       }
       remaining -= read;
       return read;
     }
 
-    @Override
-    public void close() throws IOException {
-      if (closed.compareAndSet(false, true)) {
-        in.close();
-      }
+    private String shortContent() {
+      return "upload content ended after " + (declared - remaining) + " of " + declared + " bytes";
     }
   }
 
@@ -512,11 +503,19 @@ public final class StandardComfyuiClient {
   }
 
   private static void requireFilename(String filename) {
-    if (filename == null || filename.isBlank()) {
-      throw new IllegalArgumentException("filename must not be blank");
-    }
+    requireHeaderToken(filename, "filename");
     if (filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
       throw new IllegalArgumentException("filename must not contain directory traversal");
+    }
+  }
+
+  /** filename 与 mediaType 会进入 multipart 头，拒绝 CR/LF 与双引号，避免拆头。 */
+  private static void requireHeaderToken(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(field + " must not be blank");
+    }
+    if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0 || value.indexOf('"') >= 0) {
+      throw new IllegalArgumentException(field + " must not contain CR, LF, or quotes");
     }
   }
 
