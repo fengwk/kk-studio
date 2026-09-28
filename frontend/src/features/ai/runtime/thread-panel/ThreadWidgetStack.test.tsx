@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
+import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
 
 describe('ThreadWidgetStack', () => {
   it('shows the generic working strip when working without custom retry copy', () => {
@@ -95,5 +96,42 @@ describe('ThreadWidgetStack', () => {
     )
 
     expect(queue.scrollTop).toBe(12)
+  })
+
+  it('renders localized status text when working with workingLabel', () => {
+    // 测试意图：当线程处于等待子线程或排队中状态时，若 working=true，ThreadWidgetStack 必须优先展示格式化后的本地化文案。
+    const waitingLabel = formatThreadStatusLabel('WAITING_CHILDREN')
+    const { rerender } = render(
+      <ThreadWidgetStack
+        working
+        workingLabel={waitingLabel}
+        queuedMessages={[]}
+      />,
+    )
+    expect(screen.getByText('等待子线程')).toBeInTheDocument()
+
+    const queuedLabel = formatThreadStatusLabel('QUEUED')
+    rerender(
+      <ThreadWidgetStack
+        working
+        workingLabel={queuedLabel}
+        queuedMessages={[]}
+      />,
+    )
+    expect(screen.getByText('排队中')).toBeInTheDocument()
+  })
+
+  it('keeps stack empty when not working even if workingLabel is provided', () => {
+    // 测试意图：即使传入了 workingLabel，如果 working=false 且无队列消息，组件仍应处于空闲隐藏状态，不展示工作条。
+    const label = formatThreadStatusLabel('WAITING_CHILDREN')
+    const { container } = render(
+      <ThreadWidgetStack
+        working={false}
+        workingLabel={label}
+        queuedMessages={[]}
+      />,
+    )
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText('等待子线程')).not.toBeInTheDocument()
   })
 })

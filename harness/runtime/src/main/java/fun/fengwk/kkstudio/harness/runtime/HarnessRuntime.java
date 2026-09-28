@@ -16,6 +16,10 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
@@ -162,6 +166,33 @@ public final class HarnessRuntime {
     return acceptCommandsControl.acceptCommands(command, preflight);
   }
 
+  /** 原子接受源 prompt、执行父子归属、join 凭据和持久 Work。 */
+  public AcceptedCommands acceptCommandsAndJoin(
+      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
+    return acceptCommandsControl.acceptCommandsAndJoin(command, join, preflight);
+  }
+
+  /** 按 invocationId 读取固定 join receipt（未匹配时 receipt 字段为空）。 */
+  public Optional<ThreadJoin> findJoin(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return store.transaction(tx -> tx.findJoin(invocationId));
+  }
+
+  /** 从已匹配的固定结果 head 和原始源 command 投影回执，不读取子线程当前 head。 */
+  public Optional<ThreadJoinReceipt> projectJoinReceipt(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return store.transaction(
+        tx ->
+            tx.findJoin(invocationId)
+                .flatMap(join -> ThreadJoinProjector.INSTANCE.project(tx, join)));
+  }
+
+  /** 当前不可变执行关系的 head-to-root 祖先链。 */
+  public List<UUID> findAncestorChain(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(tx -> tx.findAncestorChain(threadId));
+  }
+
   /**
    * 读取 Session 当前投影；不存在抛 {@link HarnessRuntimeNotFoundException}。
    *
@@ -226,6 +257,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -252,6 +284,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -298,21 +331,17 @@ public final class HarnessRuntime {
    */
   public StopResult stop(StopCommand command) {
     StopControl.Commit commit = stopControl.stop(command);
-    if (commit.modelExecutionId() != null) {
-      cancelLocalExecution(modelExecutionCanceller, "Model", commit.modelExecutionId());
-    }
-    for (UUID toolExecutionId : commit.toolExecutionIds()) {
-      cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
-    }
+    cancelLocalExecutions(modelExecutionCanceller, "Model", commit.modelExecutionIds());
+    cancelLocalExecutions(toolExecutionCanceller, "Tool", commit.toolExecutionIds());
     return commit.result();
   }
 
   /**
    * 在单个短 transaction 内接受（或精确 replay）一次人工输入提交。
    *
-   * <p>锁序：Session -&gt; Thread -&gt; Model -&gt; Tool siblings -&gt; Work。回答按 Invocation ID
-   * 锁定当前真实调用，校验它仍在 当前 TOOL_ACTIVE 上下文且为 WAITING_INPUT，再按冻结问卷（Assistant ToolCall
-   * arguments）校验并规范化答案；结果与 submissionId / actor / acceptedAt 回执同事务落盘，并登记 THREAD Work 以物化
+   * <p>锁序：Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread -&gt; Model -&gt; Tool siblings
+   * -&gt; Work。回答按 Invocation ID 锁定当前真实调用，校验它仍在 当前 TOOL_ACTIVE 上下文且为 WAITING_INPUT，再按冻结问卷（Assistant
+   * ToolCall arguments）校验并规范化答案；结果与 submissionId / actor / acceptedAt 回执同事务落盘，并登记 THREAD Work 以物化
    * ToolResult。答案非法为 INPUT_SUBMISSION_INVALID，目标不适用为 INPUT_SUBMISSION_NOT_APPLICABLE，另一个提交身份或不同答案为
    * INPUT_SUBMISSION_MISMATCH；provenance 由触发 WAITING_INPUT 时的冻结 binding 决定，本入口绝不接受 approval。
    */
@@ -381,6 +410,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
           if (thread == null) {
             throw approvalNotApplicable("thread " + command.threadId() + " does not exist");
@@ -424,6 +454,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, threadId);
           ThreadState thread =
               tx.lockThread(threadId)
                   .orElseThrow(
@@ -630,6 +661,14 @@ public final class HarnessRuntime {
   private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
     Objects.requireNonNull(processor, "toolProcessor");
     return processor::cancel;
+  }
+
+  /** 逐个 best-effort 取消本地执行；单个取消失败只记录日志，绝不中断其余取消，也不改变已 commit 的 Stop 结果。 */
+  private static void cancelLocalExecutions(
+      Consumer<UUID> canceller, String executionType, List<UUID> invocationIds) {
+    for (UUID invocationId : invocationIds) {
+      cancelLocalExecution(canceller, executionType, invocationId);
+    }
   }
 
   private static void cancelLocalExecution(

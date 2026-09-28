@@ -62,6 +62,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     threadId: CHILD_THREAD_ID,
     sessionId: 'session-child',
     headEntryId: 'head-1',
+    parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
     status: 'WAITING_TOOL',

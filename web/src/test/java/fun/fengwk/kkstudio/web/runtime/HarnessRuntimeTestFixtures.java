@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -101,19 +102,51 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(
-        id(1), id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
+    return thread(id(1), headEntryId);
   }
 
   public static ThreadState thread(UUID id, UUID headEntryId) {
+    return thread(id, null, ThreadLifecycleStatus.IDLE, headEntryId);
+  }
+
+  /** ACTIVE 生命周期的 Thread：本地仍有执行，只有这种 Thread 才会投影出模型/工具/排队等非 IDLE 状态。 */
+  public static ThreadState activeThread(UUID id, UUID headEntryId) {
+    return thread(id, null, ThreadLifecycleStatus.ACTIVE, headEntryId);
+  }
+
+  /** 显式指定不可变执行父关系与递归生命周期状态的 Thread（根 Thread 传 null 父）。 */
+  public static ThreadState thread(
+      UUID id, UUID parentThreadId, ThreadLifecycleStatus status, UUID headEntryId) {
     return new ThreadState(
-        id, id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
+        id,
+        id(1),
+        parentThreadId,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "thread",
+        true,
+        status,
+        4,
+        3,
+        NOW,
+        NOW);
   }
 
   /** rename 后的 Thread state：name 替换为 "new thread name"、version 由 3 精确递增到 4。 */
   public static ThreadState renamedThread(UUID id) {
     return new ThreadState(
-        id, id(1), id(1), CREATION_REQUEST_HASH, "new thread name", true, 4, 4, NOW, NOW);
+        id,
+        id(1),
+        null,
+        id(1),
+        CREATION_REQUEST_HASH,
+        "new thread name",
+        true,
+        ThreadLifecycleStatus.IDLE,
+        4,
+        4,
+        NOW,
+        NOW);
   }
 
   public static Session session() {
@@ -138,13 +171,47 @@ public final class HarnessRuntimeTestFixtures {
     return new ThreadSnapshot(thread(threadId, id(1)), path, List.of(), null, List.of(), List.of());
   }
 
-  /** CONTINUATION_DUE 快照：ROOT -> TURN_START -> USER -> ASSISTANT -> continueModel TURN_END。 */
-  public static ThreadSnapshot continuationDueSnapshot() {
-    return continuationDueSnapshot(id(1));
+  /**
+   * 本地已静止但仍有活跃直接孩子的父 Thread 快照：durable 生命周期为 {@link ThreadLifecycleStatus#WAITING_CHILDREN}， 对外必须是
+   * WAITING_CHILDREN 且 processing，而不是伪装成 IDLE。
+   */
+  public static ThreadSnapshot waitingChildrenSnapshot(UUID parentThreadId) {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(
+        thread(id(1), parentThreadId, ThreadLifecycleStatus.WAITING_CHILDREN, id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of());
   }
 
-  /** CONTINUATION_DUE 快照（指定 thread id）。 */
-  public static ThreadSnapshot continuationDueSnapshot(UUID threadId) {
+  /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：durable 生命周期为 ACTIVE。 */
+  public static ThreadSnapshot queuedSnapshot() {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(
+        thread(id(1), null, ThreadLifecycleStatus.ACTIVE, id(1)),
+        path,
+        List.of(queuedUserMessageCommand()),
+        null,
+        List.of(),
+        List.of());
+  }
+
+  /**
+   * 尚有 continuation 义务的 Thread 快照：ROOT -&gt; TURN_START -&gt; USER -&gt; ASSISTANT -&gt;
+   * continueModel TURN_END，durable 生命周期为 ACTIVE。
+   *
+   * <p>续写义务属于当前 Thread，Runtime 将其投影为 CONTINUATION_DUE。
+   */
+  public static ThreadSnapshot continuationPendingSnapshot(UUID threadId) {
+    Entry turnStart =
+        new Entry(
+            id(2),
+            id(1),
+            id(1),
+            new TurnStartPayload(TurnStartReason.INPUT, settings(), threadId),
+            NOW);
     Entry turnEnd =
         new Entry(
             id(5),
@@ -154,9 +221,9 @@ public final class HarnessRuntimeTestFixtures {
             NOW);
     EntryPath path =
         new EntryPath(
-            List.of(
-                rootEntry(), turnStartEntry(), userMessageEntry(), plainAssistantEntry(), turnEnd));
-    return new ThreadSnapshot(thread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
+            List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
+    return new ThreadSnapshot(
+        activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
   }
 
   public static ModelUsage usage() {

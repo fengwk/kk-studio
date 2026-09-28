@@ -73,6 +73,26 @@ class HarnessRuntimeDtoContractTest {
     assertFalse(missing.hasEnvironmentNameField());
   }
 
+  /**
+   * Thread 投影的根 Thread 没有执行父关系：{@code parentThreadId} 是"必需 nullable"字段——HTTP JSON 必须显式输出
+   * null，前端据此判定执行树根；若依赖全局省略 null 的默认行为，"字段缺失"就会与"未知/旧版本"混淆。
+   */
+  @Test
+  void threadDtoAlwaysSerializesNullableParentThreadId() throws Exception {
+    HarnessThreadDTO root = new HarnessThreadDTO();
+    root.setThreadId("00000000-0000-0000-0000-000000000001");
+    root.setParentThreadId(null);
+
+    String json = MAPPER.writeValueAsString(root);
+
+    assertTrue(json.contains("\"parentThreadId\":null"), json);
+    // HTTP 层全局省略 null 值，因此该字段必须自带 ALWAYS 覆盖，才能在根 Thread 上显式输出 null。
+    Field parentThreadId = HarnessThreadDTO.class.getDeclaredField("parentThreadId");
+    JsonInclude include = parentThreadId.getAnnotation(JsonInclude.class);
+    assertNotNull(include);
+    assertEquals(JsonInclude.Include.ALWAYS, include.value());
+  }
+
   @Test
   void commandDtoDoesNotExposeCustomMessagePayloadFields() {
     HarnessCommandCreateDTO command = new HarnessCommandCreateDTO();

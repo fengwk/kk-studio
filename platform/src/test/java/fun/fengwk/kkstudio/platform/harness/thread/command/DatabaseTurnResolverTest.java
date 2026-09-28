@@ -60,7 +60,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptFailurePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -882,24 +881,17 @@ class DatabaseTurnResolverTest {
    * task 调用期 gate，由 DatabaseSubagentRunner 拒绝。
    */
   @Test
-  void keepsTaskDeclarationAndSubagentBindingsAtMaxDepth() {
+  void freezesTaskDeclarationAndSubagentBindingsInModelRequest() {
     Fixture fixture = taskFixture();
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
 
-    // maxDepth=2：depth=2 的 subagent session 已到达部署上限，但规划仍然声明 task 并冻结 binding。
-    EntryPath depthLimited =
+    // 深度额度由 Runtime 在接受 join 时裁决；模型规划仍然冻结可委派 binding。
+    EntryPath branch =
         new EntryPath(
-            List.of(
-                new Entry(
-                    id(1),
-                    SESSION_ID,
-                    null,
-                    new RootPayload(
-                        settings("default"), new SubagentContext(id(90), id(80), id(70), 2)),
-                    NOW)));
+            List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings("default")), NOW)));
 
-    ModelRequestSpec requestSpec = fixture.resolved(depthLimited);
+    ModelRequestSpec requestSpec = fixture.resolved(branch);
     assertEquals(
         List.of(new SubagentBinding("reviewer", "Review")), requestSpec.subagentBindings());
     assertEquals(
@@ -2964,7 +2956,7 @@ class DatabaseTurnResolverTest {
       when(projectIssueTurnResolver.resolve(any(), any(), any())).thenReturn(Optional.empty());
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
-      SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
+      SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, 50);
 
       HarnessCatalog catalog;
       if (providedCatalog != null) {

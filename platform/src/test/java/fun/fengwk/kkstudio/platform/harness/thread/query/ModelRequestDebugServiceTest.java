@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
@@ -382,7 +383,18 @@ class ModelRequestDebugServiceTest {
 
   private static ThreadState thread(UUID headEntryId) {
     return new ThreadState(
-        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, "thread", false, 1, 0, NOW, NOW);
+        THREAD_ID,
+        SESSION_ID,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "thread",
+        false,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static BranchSettings branchSettings() {

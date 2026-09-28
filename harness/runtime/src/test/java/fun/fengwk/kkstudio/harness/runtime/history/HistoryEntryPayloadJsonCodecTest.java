@@ -38,8 +38,6 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static final String UUID_2 = "00000000-0000-0000-0000-000000000002";
   private static final String UUID_7 = "00000000-0000-0000-0000-000000000007";
-  private static final String UUID_10 = "00000000-0000-0000-0000-00000000000a";
-  private static final String UUID_11 = "00000000-0000-0000-0000-00000000000b";
   private static final String UUID_0 = "00000000-0000-0000-0000-000000000000";
   private static final HistoryEntryPayloadJsonCodec CODEC = new HistoryEntryPayloadJsonCodec();
 
@@ -131,14 +129,11 @@ class HistoryEntryPayloadJsonCodecTest {
                 ToolResultReason.HISTORY_CUT,
                 null));
     EntryPayload root = new RootPayload(settings());
-    EntryPayload subagentRoot =
-        new RootPayload(settings(), new SubagentContext(id(11L), id(10L), id(12L), 2));
     EntryPayload completedEnd =
         new TurnEndPayload(id(7L), TurnEndOutcome.COMPLETED, false, null, null);
 
     assertEquals(tool, CODEC.decode(EntryType.MESSAGE, CODEC.encode(tool)));
     assertEquals(root, CODEC.decode(EntryType.ROOT, CODEC.encode(root)));
-    assertEquals(subagentRoot, CODEC.decode(EntryType.ROOT, CODEC.encode(subagentRoot)));
     assertEquals(completedEnd, CODEC.decode(EntryType.TURN_END, CODEC.encode(completedEnd)));
   }
 
@@ -304,7 +299,7 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
-            + ",\"environmentName\":null,\"goal\":null},\"subagentContext\":null}",
+            + ",\"environmentName\":null,\"goal\":null}}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
@@ -435,8 +430,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}},"
-                    + "\"subagentContext\":null}"));
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -444,7 +438,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
-                    + ",\"environmentName\":\" \"},\"subagentContext\":null}"));
+                    + ",\"environmentName\":\" \"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -452,7 +446,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
-                    + ",\"environmentName\":\"env/a\"},\"subagentContext\":null}"));
+                    + ",\"environmentName\":\"env/a\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -460,7 +454,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
-                    + ",\"environmentName\":5},\"subagentContext\":null}"));
+                    + ",\"environmentName\":5}}"));
     // 正例：canonical 环境名往返，且 null 与文本都会被精确保留。
     assertEquals(
         new RootPayload(settings()),
@@ -489,34 +483,23 @@ class HistoryEntryPayloadJsonCodecTest {
     // 缺失 goal 字段（旧 shape）拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + "},\"subagentContext\":null}"));
+        () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + "}}"));
     // 缺 text / 非对象 / 非 UUID id 拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.ROOT,
-                "{\"settings\":{"
-                    + base
-                    + ",\"goal\":{\"id\":\""
-                    + id(700L)
-                    + "\"}},\"subagentContext\":null}"));
+                "{\"settings\":{" + base + ",\"goal\":{\"id\":\"" + id(700L) + "\"}}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + ",\"goal\":\"x\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.ROOT,
-                "{\"settings\":{" + base + ",\"goal\":\"x\"},\"subagentContext\":null}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.ROOT,
-                "{\"settings\":{"
-                    + base
-                    + ",\"goal\":{\"id\":\"not-a-uuid\",\"text\":\"x\"}},"
-                    + "\"subagentContext\":null}"));
+                "{\"settings\":{" + base + ",\"goal\":{\"id\":\"not-a-uuid\",\"text\":\"x\"}}}"));
   }
 
   @Test
@@ -524,6 +507,14 @@ class HistoryEntryPayloadJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{},\"extra\":1}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"environmentName\":null,\"goal\":null},\"subagentContext\":null}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "[]"));
     assertThrows(

@@ -50,7 +50,6 @@ class SystemSettingsTest {
     assertEquals(2, defaults.aiRuntime().subagentMaxDepth());
     assertEquals(10, defaults.aiRuntime().subagentMaxConcurrency());
     assertEquals(0, defaults.aiRuntime().subagentMaxTotalConcurrency());
-    assertEquals(0L, defaults.aiRuntime().subagentIdleTimeoutMillis());
     assertEquals(50, defaults.aiRuntime().subagentMaxTurns());
 
     assertEquals(16L * 1024 * 1024, defaults.environment().maxResourceBytes());
@@ -171,7 +170,6 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentIdleTimeoutMillis(),
                 base.subagentMaxTurns()));
   }
 
@@ -191,7 +189,6 @@ class SystemSettingsTest {
                 0,
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                base.subagentIdleTimeoutMillis(),
                 base.subagentMaxTurns()));
     assertThrows(
         IllegalArgumentException.class,
@@ -206,7 +203,6 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 -1,
-                base.subagentIdleTimeoutMillis(),
                 base.subagentMaxTurns()));
     assertThrows(
         IllegalArgumentException.class,
@@ -221,8 +217,7 @@ class SystemSettingsTest {
                 base.subagentMaxDepth(),
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
-                -1L,
-                base.subagentMaxTurns()));
+                0));
   }
 
   @Test

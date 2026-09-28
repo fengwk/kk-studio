@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -8,14 +9,23 @@ import java.time.Instant;
  * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code version} 为 durable snapshot
  * cursor（非负十进制字符串）。
  *
- * <p>{@code status} 与 {@code processing} 由 Thread 快照确定性派生，不属于 durable 列：{@code status} 只描述该 Thread
- * 自身的执行，{@code processing} 则聚合"自身执行中"与"委派子树仍有未交付结果"，因此 {@code status} 为 {@code IDLE} 时 {@code
- * processing} 仍可能为 true；{@code branchSettings} 是 head Entry 分支的完整设置快照。
+ * <p>{@code status} 与 {@code processing} 都直接来自 Thread 快照的 runtime 状态投影，不属于 durable 列，也不由调用方拼装：
+ * {@code status} 覆盖自身执行阶段（{@code IDLE / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* /
+ * APPLYING}）以及递归生命周期 （{@code WAITING_CHILDREN} 表示本地已静止但仍有活跃直接孩子），{@code processing} 等价于 {@code
+ * status != IDLE}，因此 {@code WAITING_CHILDREN} 与 {@code QUEUED} 同样是处理中；{@code branchSettings} 是 head
+ * Entry 分支的完整设置快照。
+ *
+ * <p>{@code parentThreadId} 是该 Thread 不可变执行父关系的展示投影（根 Thread 为 null）；它只表达执行关系，Session 历史仍然按 Entry
+ * 路径读取，不因父关系而混入其他 Thread 的对话。
  */
 @Data
 public class HarnessThreadDTO {
   /** Thread 主键：canonical UUID string。 */
   private String threadId;
+
+  /** 执行父 Thread（根 Thread 为 null）：canonical UUID string。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String parentThreadId;
 
   /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
   private String name;
@@ -35,10 +45,13 @@ public class HarnessThreadDTO {
   /** PostgreSQL authoritative durable projection cursor (non-negative decimal bigint string)。 */
   private String version;
 
-  /** 展示状态（派生）：{@code IDLE / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING}。 */
+  /**
+   * 展示状态（派生）：{@code IDLE / QUEUED / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING /
+   * WAITING_CHILDREN}。
+   */
   private String status;
 
-  /** 该 Thread 及其委派子树当前是否仍在处理（派生）：自身执行中，或子树仍有未交付的异步 task 结果。 */
+  /** 该 Thread 当前是否仍在处理（派生）：{@code status != IDLE}。 */
   private Boolean processing;
 
   /** head Entry 分支的完整设置快照。 */

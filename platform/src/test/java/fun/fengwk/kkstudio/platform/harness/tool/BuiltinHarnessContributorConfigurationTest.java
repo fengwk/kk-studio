@@ -29,12 +29,12 @@ import java.util.Set;
 
 /**
  * 验证 {@link BuiltinHarnessContributorConfiguration#subagentConfigProvider} 把 {@code
- * SystemSettings.AiRuntime} 的五个 subagent 字段完整映射为 {@link SubagentConfig}，以及 Contributor 装配。
+ * SystemSettings.AiRuntime} 的 subagent 字段完整映射为 {@link SubagentConfig}，以及 Contributor 装配。
  */
 class BuiltinHarnessContributorConfigurationTest {
 
   @Test
-  void subagentConfigMapsAllFiveAiRuntimeFields() {
+  void subagentConfigMapsAllAiRuntimeFields() {
     // 使用互不相同的非默认值，确保 per-parent 与 total 上限不会在装配时丢失或互换。
     SystemSettings.AiRuntime aiRuntime =
         new SystemSettings.AiRuntime(
@@ -47,7 +47,6 @@ class BuiltinHarnessContributorConfigurationTest {
             4,
             7,
             13,
-            1234L,
             89);
 
     SubagentConfig config =
@@ -58,7 +57,6 @@ class BuiltinHarnessContributorConfigurationTest {
     assertEquals(4, config.maxDepth());
     assertEquals(7, config.maxConcurrency());
     assertEquals(13, config.maxTotalConcurrency());
-    assertEquals(Duration.ofMillis(1234L), config.idleTimeout());
     assertEquals(89, config.maxTurns());
   }
 

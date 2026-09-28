@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.lang.reflect.Modifier;
@@ -40,10 +41,12 @@ class StopRecordsTest {
       new ThreadState(
           id(1L),
           id(2L),
+          null,
           id(3L),
           CREATION_REQUEST_HASH,
           "main",
           false,
+          ThreadLifecycleStatus.ACTIVE,
           1,
           0,
           Instant.ofEpochMilli(1),
@@ -105,12 +108,13 @@ class StopRecordsTest {
   }
 
   @Test
-  void stopCommitRejectsInvalidLocalCancellationMetadata() {
+  void stopCommitCarriesEveryLocalCancellation() {
     StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
-    // Model 与 Tool 执行不能同时取消。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new StopControl.Commit(queuedOnlyReceipt, id(1L), List.of(id(2L))));
+    // Commit 同时承载任意数量的 Model / Tool 本地取消（父与多子混合执行），不做单类型截断。
+    StopControl.Commit commit =
+        new StopControl.Commit(queuedOnlyReceipt, List.of(id(1L)), List.of(id(2L)));
+    assertEquals(List.of(id(1L)), commit.modelExecutionIds());
+    assertEquals(List.of(id(2L)), commit.toolExecutionIds());
     assertThrows(NullPointerException.class, () -> new StopControl.Commit(null, null, List.of()));
     assertThrows(
         NullPointerException.class, () -> new StopControl.Commit(queuedOnlyReceipt, null, null));

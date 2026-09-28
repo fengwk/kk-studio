@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -135,7 +136,18 @@ final class ThreadProcessorTestSupport {
   /** 构造有合法 creationRequestHash 的 ThreadState：name 固定 root 名、version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
     return new ThreadState(
-        threadId, sessionId, headEntryId, CREATION_REQUEST_HASH, "main", false, 1L, 0L, now, now);
+        threadId,
+        sessionId,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "main",
+        false,
+        ThreadLifecycleStatus.ACTIVE,
+        1L,
+        0L,
+        now,
+        now);
   }
 
   // -----------------------------------------------------------------------------------------------

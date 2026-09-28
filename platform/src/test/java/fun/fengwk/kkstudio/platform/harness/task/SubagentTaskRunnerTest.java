@@ -2,29 +2,22 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
-import org.mockito.invocation.InvocationOnMock;
-import org.springframework.dao.DuplicateKeyException;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskMessages.Outcome;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -32,875 +25,608 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.platform.harness.task.repo.SubagentTaskRepository;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 验证 task 委派的持久接受语义：稳定派生与幂等、接受命令形状（新建/继续）、以及在写入事务内加锁判定额度的并发安全边界。
+ * 平台侧 task 委派接受的回归基线：权限校验、稳定身份、幂等回放、忙碌子线程追加与错误收敛。
  *
- * <p>测试意图：这是平台侧"接受"子阶段的回归基线。Runtime/store 用窄接口 mock 表达，其中 mock 的 {@code acceptCommands} 忠实回放真实语义
- * ——在同一事务内调用 preflight，使 preflight 的异常与回滚后果与生产一致。真实 advisory 锁、部分唯一索引与外键删除行为需要 PostgreSQL
- * 集成测试覆盖，本测试不声称覆盖这些。
+ * <p>测试意图：Runtime 用窄接口 mock 表达；join 身份、命令形状与错误类型是本类的真实职责，而额度/深度/匹配/交付属于 Runtime，不在本测试断言范围。
  */
 class SubagentTaskRunnerTest {
 
   private static final String AGENT = "alpha";
-  private static final String OTHER_AGENT = "beta";
+  private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
   private static final ModelSelection MODEL = new ModelSelection("provider", "model", "v1");
 
+  private final UUID parentThreadId = UUID.randomUUID();
+  private final UUID invocationId = UUID.randomUUID();
+  private final UUID parentHeadEntryId = UUID.randomUUID();
+  private final BranchSettings target = new BranchSettings(AGENT, MODEL, "env");
+
+  private final HarnessRuntime runtime = mock(HarnessRuntime.class);
+  private final AgentBranchSettingsMaterializer materializer =
+      mock(AgentBranchSettingsMaterializer.class);
+
+  private SubagentTaskRunner runner(SubagentConfig config) {
+    return new SubagentTaskRunner(() -> runtime, materializer, () -> config);
+  }
+
+  private static SubagentConfig config() {
+    return new SubagentConfig(3, 4, 0, 10);
+  }
+
+  /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
+  private void stubParent(List<String> allowedSubagents) {
+    ThreadSnapshot parent = mock(ThreadSnapshot.class);
+    ModelInvocation model = mock(ModelInvocation.class);
+    ModelRequestSpec spec = mock(ModelRequestSpec.class);
+    ToolInvocation tool = mock(ToolInvocation.class);
+    EntryPath path = mock(EntryPath.class);
+    when(parent.thread())
+        .thenReturn(
+            new ThreadState(
+                parentThreadId,
+                UUID.randomUUID(),
+                null,
+                parentHeadEntryId,
+                "0".repeat(64),
+                "main",
+                true,
+                ThreadLifecycleStatus.ACTIVE,
+                5L,
+                3L,
+                NOW,
+                NOW));
+    when(parent.model()).thenReturn(model);
+    when(parent.toolSiblings()).thenReturn(List.of(tool));
+    when(tool.id()).thenReturn(invocationId);
+    when(model.requestSpec()).thenReturn(spec);
+    when(spec.subagentBindings())
+        .thenReturn(
+            allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList());
+    when(parent.entryPath()).thenReturn(path);
+    when(path.baseSettings()).thenReturn(new BranchSettings("parent-agent", MODEL, "parent-env"));
+    when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(parent);
+    when(materializer.materializeSubagent(AGENT, "parent-env")).thenReturn(target);
+  }
+
+  private static AcceptedCommands accepted(UUID sessionId, UUID threadId, boolean replayed) {
+    AcceptedCommands accepted = mock(AcceptedCommands.class);
+    Session session = mock(Session.class);
+    when(session.id()).thenReturn(sessionId);
+    ThreadState thread = mock(ThreadState.class);
+    when(thread.id()).thenReturn(threadId);
+    when(accepted.session()).thenReturn(session);
+    when(accepted.thread()).thenReturn(thread);
+    when(accepted.replayed()).thenReturn(replayed);
+    return accepted;
+  }
+
+  private SubagentTaskRequest request(Integer maxTurns, UUID resumeThreadId) {
+    return new SubagentTaskRequest(
+        invocationId, parentThreadId, "do the work", AGENT, maxTurns, resumeThreadId);
+  }
+
   @Test
-  void newChildAcceptsDurableTaskAndRecordsOpenExecution() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "alpha agent")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
+  void newDelegationAcceptsAtomicallyWithStableIdentityAndAdmissionLimits() {
+    stubParent(List.of(AGENT));
+    UUID sessionId = UUID.randomUUID();
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
+    when(runtime.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = fixture.accept(null);
+    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
 
-    AcceptCommandsTarget.NewSession target =
-        assertInstanceOf(AcceptCommandsTarget.NewSession.class, fixture.target());
-    assertEquals(target.sessionId(), acceptance.childSessionId());
-    assertEquals(target.threadId(), acceptance.childThreadId());
+    assertEquals(sessionId, acceptance.childSessionId());
+    assertEquals(childThreadId, acceptance.childThreadId());
     assertFalse(acceptance.replayed());
-    // 子 Session 冻结归属：父 Thread、树根 Thread、本次 invocation 与深度都写进 ROOT。
-    assertEquals(fixture.parentThreadId, target.subagentContext().parentThreadId());
-    assertEquals(fixture.parentThreadId, target.subagentContext().rootThreadId());
-    assertEquals(fixture.invocationId, target.subagentContext().taskInvocationId());
-    // 普通根 Thread 的深度为 1，其子 Session 从 2 开始。
-    assertEquals(2, target.subagentContext().depth());
-    assertEquals(new BranchSettings(AGENT, MODEL, "env"), target.rootSettings());
-    assertEquals(1, fixture.commands().size());
-    assertInstanceOf(UserMessageCommandPayload.class, fixture.commands().get(0).payload());
+    ArgumentCaptor<AcceptCommandsCommand> command =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    ArgumentCaptor<ThreadJoinRequest> join = ArgumentCaptor.forClass(ThreadJoinRequest.class);
+    verify(runtime)
+        .acceptCommandsAndJoin(command.capture(), join.capture(), any(AcceptancePreflight.class));
 
-    // preflight 写入委派记录：执行边界取接受时子 Thread 的 head，状态 OPEN，prompt/maxTurns 原样持久。
-    ArgumentCaptor<SubagentTaskDraft> draft = ArgumentCaptor.forClass(SubagentTaskDraft.class);
-    verify(fixture.repository).insert(draft.capture());
-    assertEquals(fixture.invocationId, draft.getValue().invocationId());
-    assertEquals(fixture.parentThreadId, draft.getValue().parentThreadId());
-    assertEquals(fixture.parentThreadId, draft.getValue().rootThreadId());
-    assertEquals(target.sessionId(), draft.getValue().childSessionId());
-    assertEquals(target.threadId(), draft.getValue().childThreadId());
-    assertEquals(fixture.boundaryEntryId, draft.getValue().sourceHeadEntryId());
-    assertEquals(AGENT, draft.getValue().agent());
-    assertEquals("do the work", draft.getValue().prompt());
-    assertEquals(7, draft.getValue().maxTurns().intValue());
-    assertEquals(SubagentTaskStatus.OPEN, draft.getValue().status());
-    assertEquals(0L, draft.getValue().reminderTurn());
+    AcceptCommandsTarget.NewSession acceptedTarget =
+        (AcceptCommandsTarget.NewSession) command.getValue().target();
+    assertEquals(childThreadId, acceptedTarget.threadId());
+    assertEquals(
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/session/"),
+        acceptedTarget.sessionId());
+    // 执行父关系由 Runtime 建立：target 携带父 Thread，ROOT settings 只由本次物化结果决定。
+    assertEquals(parentThreadId, acceptedTarget.parentThreadId());
+    assertEquals(target, acceptedTarget.rootSettings());
+    assertEquals(true, acceptedTarget.yoloEnabled());
+    // 源 prompt 与 join 同一批命令：恰好一条 USER 消息。
+    assertEquals(1, command.getValue().commands().size());
+    assertTrue(command.getValue().commands().get(0).payload() instanceof UserMessageCommandPayload);
+
+    // 未显式给出 max_turns 时用 policy 默认；额度按 config 快照冻结，0 表示不设树级上限。
+    assertEquals(parentHeadEntryId, join.getValue().expectedParentHeadEntryId());
+    assertEquals(AGENT, join.getValue().agent());
+    assertEquals(10, join.getValue().maxTurns().intValue());
+    assertEquals(
+        SubagentTaskRunner.requestHash(request(null, null)), join.getValue().requestHash());
+    assertEquals(3, join.getValue().maxDepth());
+    assertEquals(4, join.getValue().maxConcurrentChildren());
+    assertEquals(Integer.MAX_VALUE, join.getValue().maxConcurrentThreads());
   }
 
   @Test
-  void replayedInvocationReturnsPersistedChildWithoutAcceptingAgain() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    UUID childSessionId = fixture.derivedChildSessionId();
-    UUID childThreadId = fixture.derivedChildThreadId();
-    when(fixture.repository.findByInvocationId(fixture.invocationId))
-        .thenReturn(fixture.task(childSessionId, childThreadId, SubagentTaskStatus.OPEN));
+  void explicitMaxTurnsIsFrozenAndCommandKeysAreDeterministic() {
+    stubParent(List.of(AGENT));
+    AcceptedCommands accepted = accepted(UUID.randomUUID(), UUID.randomUUID(), false);
+    when(runtime.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = fixture.accept(null);
+    runner(config()).accept(request(7, null));
 
-    // 同一次 Tool 调用重试：复用既有子 Thread，不再触达 Runtime、额度与记录写入。
+    ArgumentCaptor<AcceptCommandsCommand> command =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    ArgumentCaptor<ThreadJoinRequest> join = ArgumentCaptor.forClass(ThreadJoinRequest.class);
+    verify(runtime)
+        .acceptCommandsAndJoin(command.capture(), join.capture(), any(AcceptancePreflight.class));
+    assertEquals(7, join.getValue().maxTurns().intValue());
+    // 命令幂等键由 invocation + 槽位稳定派生，重放才能精确命中同一批命令。
+    UUID expectedKey =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/command/0/");
+    assertEquals(expectedKey, command.getValue().commands().get(0).idempotencyKey());
+  }
+
+  @Test
+  void acceptedInvocationReplaysWithoutTouchingRuntimeAcceptance() {
+    // 已接受的回放不依赖父调用是否仍在执行：父快照已不可用时也必须返回既有子身份。
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    UUID childSessionId = UUID.randomUUID();
+    ThreadSnapshot child = mock(ThreadSnapshot.class);
+    when(child.thread())
+        .thenReturn(
+            new ThreadState(
+                childThreadId,
+                childSessionId,
+                parentThreadId,
+                UUID.randomUUID(),
+                "0".repeat(64),
+                "child",
+                false,
+                ThreadLifecycleStatus.IDLE,
+                2L,
+                1L,
+                NOW,
+                NOW));
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+
+    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
+
+    assertTrue(acceptance.replayed());
+    assertEquals(childThreadId, acceptance.childThreadId());
     assertEquals(childSessionId, acceptance.childSessionId());
-    assertEquals(childThreadId, acceptance.childThreadId());
-    assertTrue(acceptance.replayed());
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-    verify(fixture.repository, never()).lockQuota(any(), any());
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  @Test
-  void replayedContinueInvocationReturnsPersistedTargetThread() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    UUID childThreadId = UUID.randomUUID();
-    when(fixture.repository.findByInvocationId(fixture.invocationId))
-        .thenReturn(fixture.task(UUID.randomUUID(), childThreadId, SubagentTaskStatus.SETTLED));
-
-    SubagentTaskAcceptance acceptance =
-        fixture.runner.accept(fixture.continueRequest(childThreadId));
-
-    // 继续既有子 Thread 的重放：目标必须就是那条既有子 Thread；已终结记录同样允许重放（身份与终态无关）。
-    assertEquals(childThreadId, acceptance.childThreadId());
-    assertTrue(acceptance.replayed());
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-    verify(fixture.repository, never()).insert(any());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+    verify(runtime, never()).getThreadSnapshot(parentThreadId);
   }
 
   @Test
   void replayedInvocationWithAnyDifferentFrozenFactIsRejected() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    UUID invocationId = fixture.invocationId;
-    UUID parentThreadId = fixture.parentThreadId;
-    when(fixture.repository.findByInvocationId(invocationId))
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.findJoin(invocationId))
         .thenReturn(
-            fixture.task(
-                fixture.derivedChildSessionId(),
-                fixture.derivedChildThreadId(),
-                SubagentTaskStatus.OPEN));
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(7, null)),
+                    AGENT,
+                    7)));
 
-    List<SubagentTaskRequest> differentDelegations =
+    List<SubagentTaskRequest> otherDelegations =
         List.of(
-            // 父 Thread 不同：另一次调用（可能来自别的父）想复用这条记录。
+            // 另一个父 Thread 想复用同一 invocation。
             new SubagentTaskRequest(invocationId, UUID.randomUUID(), "do the work", AGENT, 7, null),
-            // prompt 不同：绝不是同一次委派。
-            new SubagentTaskRequest(invocationId, parentThreadId, "different work", AGENT, 7, null),
-            // 目标 Agent 不同。
-            new SubagentTaskRequest(
-                invocationId, parentThreadId, "do the work", "another-agent", 7, null),
-            // max_turns 不同（含显式与缺省之别）。
+            // 不同 prompt / agent / max_turns 都不是同一次委派。
+            new SubagentTaskRequest(invocationId, parentThreadId, "different", AGENT, 7, null),
+            new SubagentTaskRequest(invocationId, parentThreadId, "do the work", "beta", 7, null),
             new SubagentTaskRequest(invocationId, parentThreadId, "do the work", AGENT, 9, null),
             new SubagentTaskRequest(invocationId, parentThreadId, "do the work", AGENT, null, null),
-            // 目标是继续另一条子 Thread，而既有记录是新建派生的子 Thread。
+            // 目标是继续另一条子 Thread。
             new SubagentTaskRequest(
                 invocationId, parentThreadId, "do the work", AGENT, 7, UUID.randomUUID()));
 
-    for (SubagentTaskRequest different : differentDelegations) {
+    for (SubagentTaskRequest other : otherDelegations) {
       SubagentTaskRejectedException rejected =
-          assertThrows(SubagentTaskRejectedException.class, () -> fixture.runner.accept(different));
+          assertThrows(SubagentTaskRejectedException.class, () -> runner(config()).accept(other));
       assertTrue(rejected.getMessage().contains("different delegation"), rejected.getMessage());
     }
-    // 越权重放不得泄露既有子身份，也不得触达 Runtime 或写入任何记录。
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-    verify(fixture.repository, never()).lockQuota(any(), any());
-    verify(fixture.repository, never()).insert(any());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
   }
 
   @Test
-  void replayedInvocationWithTamperedChildThreadIsRejected() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    // 新建委派的子 Thread 必须等于由 invocation 稳定派生的身份：不一致说明记录并非本次调用产生。
-    when(fixture.repository.findByInvocationId(fixture.invocationId))
-        .thenReturn(
-            fixture.task(
-                fixture.derivedChildSessionId(), UUID.randomUUID(), SubagentTaskStatus.OPEN));
-
-    assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-  }
-
-  @Test
-  void childIdentityIsStableAndDerivedFromInvocation() {
-    UUID invocationId = UUID.randomUUID();
-
-    // 子身份必须由 invocation 稳定派生：同一 invocation 在任何进程/重启后都得到同一 UUID，重放才不会双开子执行。
-    UUID childSessionId =
-        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/session/");
+  void defaultMaxTurnsChangeDoesNotRewriteAnAcceptedReceipt() {
+    // policy 默认 maxTurns 在两次调用之间变化时，同 invocation 仍必须回放既有接受结果而不是改写回执。
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
-    assertEquals(
-        childSessionId,
-        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/session/"));
-    assertEquals(
-        childThreadId,
-        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/"));
-    assertNotEquals(childSessionId, childThreadId);
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    ThreadSnapshot child = mock(ThreadSnapshot.class);
+    when(child.thread())
+        .thenReturn(
+            new ThreadState(
+                childThreadId,
+                UUID.randomUUID(),
+                parentThreadId,
+                UUID.randomUUID(),
+                "0".repeat(64),
+                "child",
+                false,
+                ThreadLifecycleStatus.IDLE,
+                2L,
+                1L,
+                NOW,
+                NOW));
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
 
-    // 不同 invocation 必须派生出不同子身份（否则并发委派会互相覆盖）。
-    UUID other =
-        SubagentTaskRunner.derive(UUID.randomUUID(), "kk-studio/harness/subagent/session/");
-    assertNotEquals(childSessionId, other);
-    assertEquals(
-        UUID.nameUUIDFromBytes(
-            ("kk-studio/harness/subagent/session/" + invocationId)
-                .getBytes(StandardCharsets.UTF_8)),
-        childSessionId);
+    // 默认值从 10 变成 99：请求 hash 不含运行期默认值，回放仍然成立。
+    assertTrue(runner(new SubagentConfig(3, 4, 0, 99)).accept(request(null, null)).replayed());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
   }
 
   @Test
-  void quotaLockAndCountingPrecedeTaskRecordInsert() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 4, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "alpha agent")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-
-    fixture.accept(null);
-
-    // 并发安全的关键：先取额度 advisory 锁，再计数，最后插入，三者同事务。
-    InOrder order = inOrder(fixture.repository);
-    order.verify(fixture.repository).lockQuota(fixture.parentThreadId, fixture.parentThreadId);
-    order.verify(fixture.repository).countOpenByParentThreadId(fixture.parentThreadId);
-    order.verify(fixture.repository).countOpenByRootThreadId(fixture.parentThreadId);
-    order.verify(fixture.repository).insert(any());
-  }
-
-  @Test
-  void parentConcurrencyQuotaRejectsBeforeAnyTaskRecord() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 2, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "alpha agent")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    when(fixture.repository.countOpenByParentThreadId(fixture.parentThreadId)).thenReturn(2);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    // 越限即在接受事务内失败：不写记录，子 Session/Thread 一并回滚。
-    assertTrue(rejected.getMessage().contains("concurrency limit"));
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  @Test
-  void totalConcurrencyQuotaRejectsBeforeAnyTaskRecord() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 5, 3, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "alpha agent")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    when(fixture.repository.countOpenByRootThreadId(fixture.parentThreadId)).thenReturn(3);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("total concurrency limit"));
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  @Test
-  void nestedQuotaUsesRootThreadOfDelegationTree() {
-    Fixture fixture = new Fixture(new SubagentConfig(3, 3, 2, Duration.ZERO, 10));
-    UUID rootThreadId = UUID.randomUUID();
-    fixture.stubParentSnapshot(
-        List.of(new SubagentBinding(AGENT, "alpha agent")),
-        new SubagentContext(fixture.outerThreadId, rootThreadId, UUID.randomUUID(), 2));
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-
-    fixture.accept(null);
-
-    // 嵌套委派：树级额度打树根 Thread，父级额度打当前父 Thread。
-    verify(fixture.repository).lockQuota(rootThreadId, fixture.parentThreadId);
-    verify(fixture.repository).countOpenByRootThreadId(rootThreadId);
-    ArgumentCaptor<SubagentTaskDraft> draft = ArgumentCaptor.forClass(SubagentTaskDraft.class);
-    verify(fixture.repository).insert(draft.capture());
-    assertEquals(rootThreadId, draft.getValue().rootThreadId());
-    assertEquals(fixture.parentThreadId, draft.getValue().parentThreadId());
-  }
-
-  @Test
-  void rejectsDetachedInvocation() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    ThreadSnapshot snapshot = fixture.parentSnapshot(List.of(new SubagentBinding(AGENT, "a")));
-    when(snapshot.model()).thenReturn(null);
-    when(fixture.runtime.getThreadSnapshot(fixture.parentThreadId)).thenReturn(snapshot);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    // 没有 Model invocation 就不是"正在执行的父调用"，任务调用已失效。
-    assertTrue(rejected.getMessage().contains("no longer attached"));
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-  }
-
-  @Test
-  void rejectsInvocationMissingFromToolSiblings() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshotWithoutSiblings(List.of(new SubagentBinding(AGENT, "a")), null);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("no longer attached"));
-  }
-
-  @Test
-  void rejectsSubagentTypeNotAllowed() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () ->
-                fixture.runner.accept(
-                    new SubagentTaskRequest(
-                        fixture.invocationId,
-                        fixture.parentThreadId,
-                        "do the work",
-                        OTHER_AGENT,
-                        null,
-                        null)));
-
-    // 允许名单来自父调用的冻结快照，拒绝信息要带上可用项。
-    assertTrue(rejected.getMessage().contains("is not allowed"));
-    assertTrue(rejected.getMessage().contains(AGENT));
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-  }
-
-  @Test
-  void rejectsDelegationBeyondMaxDepth() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(
-        List.of(new SubagentBinding(AGENT, "a")),
-        new SubagentContext(fixture.outerThreadId, UUID.randomUUID(), UUID.randomUUID(), 2));
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("max depth"));
-  }
-
-  @Test
-  void rejectsParentInvocationThatForbidsDelegation() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(), null);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("does not allow subagent delegation"));
-  }
-
-  @Test
-  void rejectsWhenChildThreadAlreadyHasOpenExecution() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    when(fixture.repository.insert(any()))
-        .thenThrow(new DuplicateKeyException("uk_harness_subagent_task_child_open"));
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    // 部分唯一索引冲突（同子 Thread 已有 OPEN 执行）必须冒泡成可读拒绝并让整个接受事务回滚。
-    assertTrue(rejected.getMessage().contains("already has an open execution"));
-  }
-
-  @Test
-  void rejectsWhenTaskRecordCannotBeCreated() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    when(fixture.repository.insert(any())).thenReturn(false);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("could not be created"));
-  }
-
-  @Test
-  void continueChildConvergesSettingsThenQueuesPrompt() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(
-        List.of(new SubagentBinding(AGENT, "alpha"), new SubagentBinding(OTHER_AGENT, "beta")),
-        null);
-    fixture.stubMaterialize(
-        new BranchSettings(
-            OTHER_AGENT, new ModelSelection("provider", "other-model", "v2"), "env2"));
+  void busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix() {
+    // resume 不要求前一次 join 已交付，也不要求子线程 idle：格式化前缀按目标 settings 固定发出。
+    stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
-    UUID childSessionId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
-        childThreadId,
-        childSessionId,
-        fixture.parentThreadId,
-        new BranchSettings(AGENT, MODEL, "env"));
+    ThreadSnapshot child = child(childThreadId, parentThreadId, 9L);
+    AcceptedCommands accepted = accepted(UUID.randomUUID(), childThreadId, false);
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
+    when(runtime.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance =
-        fixture.accept(fixture.continueRequest(childThreadId, OTHER_AGENT));
+    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
 
     assertEquals(childThreadId, acceptance.childThreadId());
-    AcceptCommandsTarget.Thread target =
-        assertInstanceOf(AcceptCommandsTarget.Thread.class, fixture.target());
+    ArgumentCaptor<AcceptCommandsCommand> command =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommandsAndJoin(command.capture(), any(), any());
+    AcceptCommandsTarget.Thread target = (AcceptCommandsTarget.Thread) command.getValue().target();
     assertEquals(childThreadId, target.threadId());
-    assertEquals(fixture.childHeadEntryId, target.expectedHeadEntryId());
-    assertEquals(fixture.childNextCommandSequence, target.expectedNextCommandSequence());
-
-    // 收敛顺序固定：SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> USER。
-    List<String> payloadTypes =
-        fixture.commands().stream().map(step -> step.payload().getClass().getSimpleName()).toList();
-    assertEquals(
-        List.of(
-            SetAgentCommandPayload.class.getSimpleName(),
-            SetModelCommandPayload.class.getSimpleName(),
-            SetEnvironmentCommandPayload.class.getSimpleName(),
-            UserMessageCommandPayload.class.getSimpleName()),
-        payloadTypes);
-
-    ArgumentCaptor<SubagentTaskDraft> draft = ArgumentCaptor.forClass(SubagentTaskDraft.class);
-    verify(fixture.repository).insert(draft.capture());
-    assertEquals(childThreadId, draft.getValue().childThreadId());
-    assertEquals(childSessionId, draft.getValue().childSessionId());
-    assertEquals(OTHER_AGENT, draft.getValue().agent());
-    assertEquals(7, draft.getValue().maxTurns().intValue());
-    assertEquals(fixture.boundaryEntryId, draft.getValue().sourceHeadEntryId());
+    assertEquals(9L, target.expectedNextCommandSequence());
+    List<NewThreadCommand> commands = command.getValue().commands();
+    assertEquals(4, commands.size());
+    // SET_* 前缀无条件完整发出：batch 指纹只由本次目标 settings 决定，与子线程当前 head settings 无关。
+    assertEquals(new SetAgentCommandPayload(AGENT), commands.get(0).payload());
+    assertEquals(new SetModelCommandPayload(MODEL), commands.get(1).payload());
+    assertEquals(new SetEnvironmentCommandPayload("env"), commands.get(2).payload());
+    assertTrue(commands.get(3).payload() instanceof UserMessageCommandPayload);
   }
 
   @Test
-  void continueChildRetriesAfterRuntimeConflict() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
+  void resumeCursorConflictRetriesWithFreshSnapshot() {
+    stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
-        childThreadId,
-        UUID.randomUUID(),
-        fixture.parentThreadId,
-        new BranchSettings(AGENT, MODEL, "env"));
-    fixture.stubConflictsThenAcceptance(1);
+    UUID firstHead = UUID.randomUUID();
+    UUID secondHead = UUID.randomUUID();
+    ThreadSnapshot staleChild = child(childThreadId, parentThreadId, firstHead, 9L);
+    ThreadSnapshot freshChild = child(childThreadId, parentThreadId, secondHead, 12L);
+    AcceptedCommands accepted = accepted(UUID.randomUUID(), childThreadId, false);
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(staleChild).thenReturn(freshChild);
+    when(runtime.acceptCommandsAndJoin(any(), any(), any()))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale"))
+        .thenReturn(accepted);
 
-    SubagentTaskAcceptance acceptance = fixture.accept(fixture.continueRequest(childThreadId));
+    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, childThreadId));
 
-    // 子 Thread 在读取与接受之间推进：重读最新 cursor 后重试成功，并且只写一行记录。
     assertEquals(childThreadId, acceptance.childThreadId());
-    verify(fixture.repository).insert(any());
+    ArgumentCaptor<AcceptCommandsCommand> command =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime, times(2)).acceptCommandsAndJoin(command.capture(), any(), any());
+    // 第二次必须使用重新读取的 cursor，而不是第一次的陈旧 cursor。
+    assertEquals(
+        secondHead,
+        ((AcceptCommandsTarget.Thread) command.getAllValues().get(1).target())
+            .expectedHeadEntryId());
   }
 
   @Test
-  void continueChildRejectsAfterRepeatedRuntimeConflicts() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
+  void concurrentDuplicateLosingTheRaceReplaysTheWinnersJoin() {
+    stubParent(List.of(AGENT));
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.acceptCommandsAndJoin(any(), any(), any()))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED, "winner"));
+    // 竞争者先提交成功：本进程第一次提交冲突，随后的重读才看到胜者的 join。
+    when(runtime.findJoin(invocationId))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.empty())
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    ThreadSnapshot child = mock(ThreadSnapshot.class);
+    when(child.thread())
+        .thenReturn(
+            new ThreadState(
+                childThreadId,
+                UUID.randomUUID(),
+                parentThreadId,
+                UUID.randomUUID(),
+                "0".repeat(64),
+                "child",
+                false,
+                ThreadLifecycleStatus.IDLE,
+                2L,
+                1L,
+                NOW,
+                NOW));
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(child);
+
+    SubagentTaskAcceptance acceptance = runner(config()).accept(request(null, null));
+
+    // 只提交一次；第二次循环按 join 回放，不产生部分重放也不会重复入队 prompt。
+    assertTrue(acceptance.replayed());
+    verify(runtime, times(1)).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void rejectsDetachedOrForeignInvocationWithoutTouchingAcceptance() {
+    // 父调用已结束（无 Model）或 invocation 不在冻结的 tool siblings 中：不得凭 invocationId 越权。
+    ThreadSnapshot detached = mock(ThreadSnapshot.class);
+    when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(detached);
+    SubagentTaskRejectedException detachedError =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(
+        detachedError.getMessage().contains("no longer attached"), detachedError.getMessage());
+
+    stubParent(List.of(AGENT));
+    ThreadSnapshot parent = runtime.getThreadSnapshot(parentThreadId);
+    when(parent.toolSiblings()).thenReturn(List.of());
+    SubagentTaskRejectedException missingSibling =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(
+        missingSibling.getMessage().contains("no longer attached"), missingSibling.getMessage());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void rejectsUnauthorizedSubagentTypeWithAvailableNames() {
+    // 多个可选 subagent 时错误必须列出全部名字，便于父 Agent 自我纠正。
+    stubParent(List.of("beta", "gamma"));
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+
+    assertTrue(rejected.getMessage().contains("is not allowed"), rejected.getMessage());
+    assertTrue(rejected.getMessage().contains("beta / gamma"), rejected.getMessage());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void missingSnapshotsBecomeTypedTaskFailures() {
+    // resume 目标已消失：追加命令前重读失败必须收敛为 typed 失败。
+    stubParent(List.of(AGENT));
+    UUID missingChild = UUID.randomUUID();
+    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+        .when(runtime)
+        .getThreadSnapshot(missingChild);
+    SubagentTaskRejectedException goneChild =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, missingChild)));
+    assertTrue(goneChild.getMessage().contains("was not found"), goneChild.getMessage());
+
+    // 父快照已消失（父线程被删）：同样不得凭 invocationId 继续。
+    stubParent(List.of(AGENT));
+    doThrow(new HarnessRuntimeNotFoundException("parent gone"))
+        .when(runtime)
+        .getThreadSnapshot(parentThreadId);
+    SubagentTaskRejectedException goneParent =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(goneParent.getMessage().contains("no longer attached"), goneParent.getMessage());
+
+    // 回放路径上子 Thread 已消失：无法解析子 Session，必须报出明确的 not found。
+    UUID childThreadId =
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
+    when(runtime.findJoin(invocationId))
+        .thenReturn(
+            Optional.of(
+                join(
+                    parentThreadId,
+                    childThreadId,
+                    SubagentTaskRunner.requestHash(request(null, null)),
+                    AGENT,
+                    10)));
+    doThrow(new HarnessRuntimeNotFoundException("child gone"))
+        .when(runtime)
+        .getThreadSnapshot(childThreadId);
+    SubagentTaskRejectedException replayedMissingChild =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(
+        replayedMissingChild.getMessage().contains("was not found"),
+        replayedMissingChild.getMessage());
+
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void exceptionWithoutMessageStillYieldsTypedFailureWithClassName() {
+    // 无 message 的 Runtime 拒绝也必须给出可读原因（退回异常类名），不能吞成空消息。
+    stubParent(List.of(AGENT));
+    doThrow(new IllegalArgumentException())
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+
+    assertTrue(rejected.getMessage().contains("IllegalArgumentException"), rejected.getMessage());
+  }
+
+  @Test
+  void rejectsResumingAThreadOfAnotherParent() {
+    stubParent(List.of(AGENT));
     UUID childThreadId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
+    ThreadSnapshot foreignChild = child(childThreadId, UUID.randomUUID(), 3L);
+    when(runtime.getThreadSnapshot(childThreadId)).thenReturn(foreignChild);
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, childThreadId)));
+
+    assertTrue(rejected.getMessage().contains("does not belong"), rejected.getMessage());
+    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+  }
+
+  @Test
+  void runtimeUnavailabilityAndRuntimeRejectionBecomeTypedTaskFailures() {
+    // 未装配 Runtime 时给出明确错误而不是 NullPointerException。
+    SubagentTaskRunner offline =
+        new SubagentTaskRunner(() -> null, materializer, SubagentTaskRunnerTest::config);
+    SubagentTaskRejectedException unavailable =
+        assertThrows(
+            SubagentTaskRejectedException.class, () -> offline.accept(request(null, null)));
+    assertTrue(unavailable.getMessage().contains("not available"), unavailable.getMessage());
+
+    // Runtime 的额度/深度等业务拒绝（IllegalArgumentException）必须收敛为 typed task 失败，让 tool 报错而不是抛 NPE。
+    stubParent(List.of(AGENT));
+    doThrow(new IllegalArgumentException("parent join quota exceeded"))
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
+    SubagentTaskRejectedException quota =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+    assertTrue(quota.getMessage().contains("quota exceeded"), quota.getMessage());
+
+    // 父线程在提交前消失同样收敛为 typed 失败。
+    doThrow(new HarnessRuntimeNotFoundException("parent gone"))
+        .when(runtime)
+        .acceptCommandsAndJoin(any(), any(), any());
+    assertThrows(
+        SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
+  }
+
+  @Test
+  void stableDerivationAndRequestHashDistinguishDelegations() {
+    UUID other = UUID.randomUUID();
+    assertEquals(
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/"),
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/"));
+    assertNotEquals(
+        SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/"),
+        SubagentTaskRunner.derive(other, "kk-studio/harness/subagent/thread/"));
+    assertEquals(64, SubagentTaskRunner.requestHash(request(null, null)).length());
+    // 省略 max_turns 与显式值必须是不同身份；同一请求必须稳定。
+    assertEquals(
+        SubagentTaskRunner.requestHash(request(null, null)),
+        SubagentTaskRunner.requestHash(request(null, null)));
+    assertNotEquals(
+        SubagentTaskRunner.requestHash(request(null, null)),
+        SubagentTaskRunner.requestHash(request(10, null)));
+  }
+
+  private static ThreadJoin join(
+      UUID parentThreadId, UUID childThreadId, String requestHash, String agent, Integer maxTurns) {
+    return new ThreadJoin(
+        UUID.randomUUID(),
+        requestHash,
+        parentThreadId,
         childThreadId,
-        UUID.randomUUID(),
-        fixture.parentThreadId,
-        new BranchSettings(AGENT, MODEL, "env"));
-    fixture.stubConflictsThenAcceptance(Integer.MAX_VALUE);
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () -> fixture.accept(fixture.continueRequest(childThreadId)));
-
-    // 重试用尽即拒绝，不留下任何记录（子执行从未被真正接受）。
-    assertTrue(rejected.getMessage().contains("changed before the task prompt could be queued"));
-    verify(fixture.repository, never()).insert(any());
+        1L,
+        1L,
+        agent,
+        maxTurns,
+        0L,
+        null,
+        null,
+        null,
+        NOW,
+        NOW);
   }
 
-  @Test
-  void rejectsWhenRuntimeIsUnavailable() {
-    SubagentTaskRunner runner =
-        new SubagentTaskRunner(
-            () -> null,
-            mock(AgentBranchSettingsMaterializer.class),
-            mock(SubagentConfigProvider.class),
-            mock(SubagentTaskRepository.class));
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () ->
-                runner.accept(
-                    new SubagentTaskRequest(
-                        UUID.randomUUID(), UUID.randomUUID(), "do", AGENT, null, null)));
-
-    assertTrue(rejected.getMessage().contains("HarnessRuntime is not available"));
+  private static ThreadSnapshot child(UUID childThreadId, UUID parentThreadId, long nextSequence) {
+    return child(childThreadId, parentThreadId, UUID.randomUUID(), nextSequence);
   }
 
-  @Test
-  void continueChildSendsOnlyPromptWhenSettingsAlreadyMatch() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    UUID childThreadId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
-        childThreadId,
-        UUID.randomUUID(),
-        fixture.parentThreadId,
-        new BranchSettings(AGENT, MODEL, "env"));
-
-    fixture.accept(fixture.continueRequest(childThreadId));
-
-    // 设置未变化时不发送冗余 SET_*，只有 USER prompt。
-    assertEquals(1, fixture.commands().size());
-    assertInstanceOf(UserMessageCommandPayload.class, fixture.commands().get(0).payload());
-  }
-
-  @Test
-  void continueChildRejectsThreadOwnedByAnotherParent() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    UUID childThreadId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
-        childThreadId,
-        UUID.randomUUID(),
-        UUID.randomUUID(),
-        new BranchSettings(AGENT, MODEL, "env"));
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () -> fixture.accept(fixture.continueRequest(childThreadId)));
-
-    // 归属以子 Session ROOT 的冻结 SubagentContext 为准，不能跨父继续。
-    assertTrue(rejected.getMessage().contains("does not belong to this parent"));
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-  }
-
-  @Test
-  void continueChildRejectsNonQuiescentThread() {
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    UUID childThreadId = UUID.randomUUID();
-    ThreadSnapshot child =
-        fixture.stubChildSnapshot(
-            childThreadId,
-            UUID.randomUUID(),
-            fixture.parentThreadId,
-            new BranchSettings(AGENT, MODEL, "env"));
-    when(child.model()).thenReturn(mock(ModelInvocation.class));
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () -> fixture.accept(fixture.continueRequest(childThreadId)));
-
-    assertTrue(rejected.getMessage().contains("is not quiescent"));
-    verify(fixture.runtime, never()).acceptCommands(any(), any());
-  }
-
-  @Test
-  void continueChildRejectsThreadWithUndeliveredExecution() {
-    // 测试意图：继续委派要求上一次执行已完整结清并交付。子 Thread 上还有未交付执行（OPEN 或 SETTLED）时，
-    // 旧结果与本次新 prompt 会在同一子 Thread 上串扰：父子都无法判断哪条结果属于哪次执行，必须在接受事务内拒绝。
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    UUID childThreadId = UUID.randomUUID();
-    fixture.stubChildSnapshot(
-        childThreadId,
-        UUID.randomUUID(),
-        fixture.parentThreadId,
-        new BranchSettings(AGENT, MODEL, "env"));
-    fixture.childHasUndeliveredExecution = true;
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(
-            SubagentTaskRejectedException.class,
-            () -> fixture.accept(fixture.continueRequest(childThreadId)));
-
-    assertTrue(rejected.getMessage().contains("undelivered execution"), rejected.getMessage());
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  @Test
-  void acceptsOnlyWhenParentHeadStillMatchesTheDelegationFacts() {
-    // 测试意图：接受事务内必须复核父 Thread 仍是这次委派的父：父已推进（例如已被停止并写下停止边界）时，
-    // 这次委派是在旧事实上迟到的，必须拒绝而不是留下一个父已不再等待的 OPEN 记录。
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    fixture.stubParentHeadAdvanced();
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("advanced"), rejected.getMessage());
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  @Test
-  void rejectsDelegationFromStoppedParent() {
-    // 测试意图：父 Thread 的 head 是显式停止边界时不接受新委派：停止门禁在接受侧同样成立，
-    // 否则停止的父会收到一个它明确拒绝的委派链条。
-    Fixture fixture = new Fixture(new SubagentConfig(2, 3, 0, Duration.ZERO, 10));
-    fixture.stubParentSnapshot(List.of(new SubagentBinding(AGENT, "a")), null);
-    fixture.stubMaterialize(new BranchSettings(AGENT, MODEL, "env"));
-    fixture.stubStoppedParentHead();
-
-    SubagentTaskRejectedException rejected =
-        assertThrows(SubagentTaskRejectedException.class, () -> fixture.accept(null));
-
-    assertTrue(rejected.getMessage().contains("explicitly stopped"), rejected.getMessage());
-    verify(fixture.repository, never()).insert(any());
-  }
-
-  /**
-   * 被测运行器的 mock 装配；mock 的 {@code acceptCommands} 忠实回放真实接受语义：在同一"事务"内调用 preflight，并以 target 中预分配的 id
-   * 回显接受结果。
-   */
-  private static final class Fixture {
-
-    final HarnessRuntime runtime = mock(HarnessRuntime.class);
-    final SubagentTaskRepository repository = mock(SubagentTaskRepository.class);
-    final AgentBranchSettingsMaterializer materializer =
-        mock(AgentBranchSettingsMaterializer.class);
-    final SubagentConfigProvider configProvider = mock(SubagentConfigProvider.class);
-    final HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
-    final SubagentTaskRunner runner;
-    final UUID parentThreadId = UUID.randomUUID();
-    final UUID outerThreadId = UUID.randomUUID();
-    final UUID invocationId = UUID.randomUUID();
-    final UUID boundaryEntryId = UUID.randomUUID();
-    final UUID parentHeadEntryId = UUID.randomUUID();
-    final long childNextCommandSequence = 4L;
-
-    UUID childHeadEntryId = UUID.randomUUID();
-
-    /** 接受事务内看到的父 Thread 事实（head 已推进/停止由测试通过辅助方法覆盖）。 */
-    ThreadState parentThreadFacts = parentThreadFacts();
-
-    Entry parentHeadEntry = activeParentHead();
-    boolean childHasUndeliveredExecution;
-    private AcceptCommandsCommand acceptedCommand;
-    private UUID childSessionId;
-
-    Fixture(SubagentConfig config) {
-      when(configProvider.subagentConfig()).thenReturn(config);
-      when(repository.insert(any())).thenReturn(true);
-      runner = new SubagentTaskRunner(() -> runtime, materializer, configProvider, repository);
-      when(runtime.acceptCommands(any(), any())).thenAnswer(this::acceptWithin);
-    }
-
-    /** 冲突重试场景：前 {@code conflicts} 次接受抛类型化冲突，之后按真实语义成功。 */
-    void stubConflictsThenAcceptance(int conflicts) {
-      AtomicInteger calls = new AtomicInteger();
-      // 重新 stubbing 已带 answer 的方法必须用 doAnswer，否则 when(...) 会先执行旧 answer。
-      doAnswer(
-              invocation -> {
-                if (calls.getAndIncrement() < conflicts) {
-                  throw new HarnessRuntimeConflictException(
-                      HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR, "stale cursor");
-                }
-                return acceptWithin(invocation);
-              })
-          .when(runtime)
-          .acceptCommands(any(), any());
-    }
-
-    /** 忠实回放真实 store 的接受语义：在"事务内"调用 preflight，并以 target 的预分配 id 回显结果。 */
-    private AcceptedCommands acceptWithin(InvocationOnMock invocation) {
-      acceptedCommand = invocation.getArgument(0);
-      AcceptancePreflight preflight = invocation.getArgument(1);
-      UUID childThreadId = threadIdOf(acceptedCommand.target());
-      UUID sessionId =
-          acceptedCommand.target() instanceof AcceptCommandsTarget.NewSession target
-              ? target.sessionId()
-              : childSessionId;
-      ThreadState childThread = mock(ThreadState.class);
-      when(childThread.headEntryId()).thenReturn(boundaryEntryId);
-      when(transaction.findThread(childThreadId)).thenReturn(Optional.of(childThread));
-      // 接受事务内的父复核：父 Thread 存在、head 未推进、head 不是停止边界、目标子 Thread 没有未交付旧执行。
-      when(transaction.findThread(parentThreadId)).thenReturn(Optional.of(parentThreadFacts));
-      when(transaction.findEntry(parentHeadEntryId)).thenReturn(Optional.of(parentHeadEntry));
-      when(repository.hasUndeliveredByChildThreadId(any()))
-          .thenReturn(childHasUndeliveredExecution);
-      // 真实 store 在写入 command 之前调用 preflight：异常直接使整个接受失败。
-      preflight.prepare(transaction, mock(Session.class), acceptedCommand.commands());
-      AcceptedCommands accepted = mock(AcceptedCommands.class);
-      Session session = mock(Session.class);
-      ThreadState thread = mock(ThreadState.class);
-      when(session.id()).thenReturn(sessionId);
-      when(thread.id()).thenReturn(childThreadId);
-      when(accepted.session()).thenReturn(session);
-      when(accepted.thread()).thenReturn(thread);
-      when(accepted.replayed()).thenReturn(false);
-      return accepted;
-    }
-
-    /** 接受事务内看到父 head 已推进（父在接受前被停止/推进）：委派迟到，必须拒绝。 */
-    void stubParentHeadAdvanced() {
-      ThreadState advanced = mock(ThreadState.class);
-      when(advanced.headEntryId()).thenReturn(UUID.randomUUID());
-      parentThreadFacts = advanced;
-    }
-
-    /** 接受事务内看到父 head 是显式停止边界。 */
-    void stubStoppedParentHead() {
-      Entry stopped = mock(Entry.class);
-      when(stopped.payload())
-          .thenReturn(
-              new TurnEndPayload(
-                  UUID.randomUUID(),
-                  TurnEndOutcome.STOPPED,
-                  false,
-                  TurnEndReason.USER_STOP,
-                  UUID.randomUUID()));
-      parentHeadEntry = stopped;
-    }
-
-    private ThreadState parentThreadFacts() {
-      ThreadState thread = mock(ThreadState.class);
-      when(thread.headEntryId()).thenReturn(parentHeadEntryId);
-      return thread;
-    }
-
-    private static Entry activeParentHead() {
-      Entry head = mock(Entry.class);
-      when(head.payload()).thenReturn(new RootPayload(new BranchSettings(AGENT, MODEL, "env")));
-      return head;
-    }
-
-    UUID derivedChildSessionId() {
-      return SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/session/");
-    }
-
-    UUID derivedChildThreadId() {
-      return SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
-    }
-
-    SubagentTaskAcceptance accept(SubagentTaskRequest request) {
-      SubagentTaskRequest effective =
-          request != null
-              ? request
-              : new SubagentTaskRequest(
-                  invocationId, parentThreadId, "do the work", AGENT, 7, null);
-      return runner.accept(effective);
-    }
-
-    SubagentTaskRequest continueRequest(UUID childThreadId) {
-      return continueRequest(childThreadId, AGENT);
-    }
-
-    SubagentTaskRequest continueRequest(UUID childThreadId, String agent) {
-      return new SubagentTaskRequest(
-          invocationId, parentThreadId, "do the work", agent, 7, childThreadId);
-    }
-
-    AcceptCommandsTarget target() {
-      return acceptedCommand.target();
-    }
-
-    List<NewThreadCommand> commands() {
-      return acceptedCommand.commands();
-    }
-
-    void stubMaterialize(BranchSettings settings) {
-      when(materializer.materializeSubagent(anyString(), any())).thenReturn(settings);
-    }
-
-    void stubParentSnapshot(List<SubagentBinding> bindings, SubagentContext context) {
-      stubParentSnapshot(bindings, context, true);
-    }
-
-    void stubParentSnapshotWithoutSiblings(
-        List<SubagentBinding> bindings, SubagentContext context) {
-      stubParentSnapshot(bindings, context, false);
-    }
-
-    private void stubParentSnapshot(
-        List<SubagentBinding> bindings, SubagentContext context, boolean attached) {
-      ThreadSnapshot snapshot = parentSnapshot(bindings);
-      // 先构造 sibling 再 when(...)：stubbing 表达式里不能再发起新的 stubbing。
-      List<ToolInvocation> tools =
-          List.of(toolSibling(attached ? invocationId : UUID.randomUUID()));
-      when(snapshot.toolSiblings()).thenReturn(tools);
-      // thenReturn 的实参不能包含 mock 调用，否则会被 Mockito 当作一次新的 stubbing。
-      BranchSettings base = new BranchSettings(AGENT, MODEL, "env");
-      RootPayload rootPayload = new RootPayload(base, context);
-      when(snapshot.entryPath().root().payload()).thenReturn(rootPayload);
-      when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(snapshot);
-    }
-
-    ThreadSnapshot parentSnapshot(List<SubagentBinding> bindings) {
-      ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-      ModelInvocation model = mock(ModelInvocation.class);
-      ModelRequestSpec spec = mock(ModelRequestSpec.class);
-      ThreadState thread = mock(ThreadState.class);
-      EntryPath path = mock(EntryPath.class);
-      Entry root = mock(Entry.class);
-      Entry head = mock(Entry.class);
-      when(snapshot.model()).thenReturn(model);
-      when(snapshot.entryPath()).thenReturn(path);
-      when(snapshot.thread()).thenReturn(thread);
-      when(snapshot.queuedCommands()).thenReturn(List.of());
-      when(model.requestSpec()).thenReturn(spec);
-      when(spec.subagentBindings()).thenReturn(bindings);
-      when(thread.id()).thenReturn(parentThreadId);
-      when(thread.headEntryId()).thenReturn(parentHeadEntryId);
-      when(thread.sessionId()).thenReturn(UUID.randomUUID());
-      when(thread.yoloEnabled()).thenReturn(false);
-      when(path.root()).thenReturn(root);
-      when(path.head()).thenReturn(head);
-      when(path.baseSettings()).thenReturn(new BranchSettings(AGENT, MODEL, "env"));
-      // 非 TURN_END payload 即"没有未结清 turn"，用真实 ROOT payload 表达，不 mock sealed 接口。
-      when(head.payload()).thenReturn(new RootPayload(new BranchSettings(AGENT, MODEL, "env")));
-      return snapshot;
-    }
-
-    /** 静止的子 Thread 快照：无 Model、无 Tool siblings、无排队命令，ROOT 携带冻结的 SubagentContext。 */
-    ThreadSnapshot stubChildSnapshot(
-        UUID childThreadId, UUID childSessionId, UUID ownerParentThreadId, BranchSettings base) {
-      this.childSessionId = childSessionId;
-      ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-      ThreadState thread = mock(ThreadState.class);
-      EntryPath path = mock(EntryPath.class);
-      Entry root = mock(Entry.class);
-      Entry head = mock(Entry.class);
-      when(snapshot.model()).thenReturn(null);
-      when(snapshot.entryPath()).thenReturn(path);
-      when(snapshot.thread()).thenReturn(thread);
-      when(snapshot.toolSiblings()).thenReturn(List.of());
-      when(snapshot.queuedCommands()).thenReturn(List.of());
-      when(thread.id()).thenReturn(childThreadId);
-      when(thread.sessionId()).thenReturn(childSessionId);
-      when(thread.headEntryId()).thenReturn(childHeadEntryId);
-      when(thread.nextCommandSequence()).thenReturn(childNextCommandSequence);
-      when(path.root()).thenReturn(root);
-      when(path.head()).thenReturn(head);
-      when(path.baseSettings()).thenReturn(base);
-      when(head.payload()).thenReturn(new RootPayload(base));
-      when(root.payload())
-          .thenReturn(
-              new RootPayload(
-                  base,
-                  new SubagentContext(
-                      ownerParentThreadId, ownerParentThreadId, UUID.randomUUID(), 2)));
-      when(runtime.getThreadSnapshot(childThreadId)).thenReturn(snapshot);
-      return snapshot;
-    }
-
-    SubagentTask task(UUID childSessionId, UUID childThreadId, SubagentTaskStatus status) {
-      // 已终结状态必须成对携带终态与终结时间（与数据库 ck_harness_subagent_task_state_shape 同构）。
-      boolean settled = status != SubagentTaskStatus.OPEN;
-      return new SubagentTask(
-          invocationId,
-          parentThreadId,
-          parentThreadId,
-          childSessionId,
-          childThreadId,
-          boundaryEntryId,
-          AGENT,
-          "do the work",
-          7,
-          status,
-          settled ? Outcome.COMPLETED : null,
-          settled ? "done" : null,
-          null,
-          null,
-          0L,
-          settled ? Instant.parse("2026-01-01T00:00:01Z") : null,
-          Instant.parse("2026-01-01T00:00:00Z"),
-          Instant.parse("2026-01-01T00:00:00Z"));
-    }
-
-    private static UUID threadIdOf(AcceptCommandsTarget target) {
-      return switch (target) {
-        case AcceptCommandsTarget.NewSession newSession -> newSession.threadId();
-        case AcceptCommandsTarget.NewThread newThread -> newThread.threadId();
-        case AcceptCommandsTarget.Thread thread -> thread.threadId();
-      };
-    }
-  }
-
-  private static ToolInvocation toolSibling(UUID invocationId) {
-    ToolInvocation tool = mock(ToolInvocation.class);
-    when(tool.id()).thenReturn(invocationId);
-    return tool;
+  private static ThreadSnapshot child(
+      UUID childThreadId, UUID parentThreadId, UUID headEntryId, long nextSequence) {
+    // 子线程可处于 ACTIVE（忙碌）：resume 只追加命令，不等待旧 join 交付。
+    ThreadSnapshot child = mock(ThreadSnapshot.class);
+    when(child.thread())
+        .thenReturn(
+            new ThreadState(
+                childThreadId,
+                UUID.randomUUID(),
+                parentThreadId,
+                headEntryId,
+                "0".repeat(64),
+                "child",
+                false,
+                ThreadLifecycleStatus.ACTIVE,
+                nextSequence,
+                7L,
+                NOW,
+                NOW));
+    EntryPath path = mock(EntryPath.class);
+    when(path.baseSettings()).thenReturn(new BranchSettings("child-agent", MODEL, "child-env"));
+    when(child.entryPath()).thenReturn(path);
+    return child;
   }
 }

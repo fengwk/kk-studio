@@ -57,6 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -586,9 +587,14 @@ final class HarnessRuntimeTestSupport {
 
   /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
   static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return setWaitingApproval(store, baseline.toolId());
+  }
+
+  /** 将指定 id 的 ToolInvocation 推进到 WAITING_APPROVAL（多 sibling 的 TOOL_ACTIVE 上下文）。 */
+  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
           ToolInvocation waiting = tool.requestApproval("tool approval requested", T3);
           tx.updateToolInvocations(List.of(waiting));
           return waiting;
@@ -973,7 +979,18 @@ final class HarnessRuntimeTestSupport {
   static ThreadState thread(
       UUID id, UUID sessionId, UUID headEntryId, String name, boolean yoloEnabled) {
     return new ThreadState(
-        id, sessionId, headEntryId, CREATION_REQUEST_HASH, name, yoloEnabled, 1, 0, T0, T0);
+        id,
+        sessionId,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        name,
+        yoloEnabled,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        T0,
+        T0);
   }
 
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {

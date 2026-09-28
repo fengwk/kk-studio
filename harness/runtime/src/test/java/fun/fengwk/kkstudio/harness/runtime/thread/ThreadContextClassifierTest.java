@@ -668,7 +668,18 @@ class ThreadContextClassifierTest {
 
   private static ThreadState thread(UUID headEntryId) {
     return new ThreadState(
-        THREAD_ID, SESSION_ID, headEntryId, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
+        THREAD_ID,
+        SESSION_ID,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "main",
+        false,
+        ThreadLifecycleStatus.ACTIVE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static Entry entry(UUID id, UUID parentId, EntryPayload payload) {

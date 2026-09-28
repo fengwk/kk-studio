@@ -126,14 +126,6 @@ public class SystemSettingsSchemaProvider {
                         0,
                         null),
                     field(
-                        "aiRuntime.subagentIdleTimeoutMillis",
-                        "settings.field.aiRuntime.subagentIdleTimeoutMillis",
-                        "settings.field.aiRuntime.subagentIdleTimeoutMillis.hint",
-                        FieldType.LONG,
-                        false,
-                        0,
-                        null),
-                    field(
                         "aiRuntime.subagentMaxTurns",
                         "settings.field.aiRuntime.subagentMaxTurns",
                         null,

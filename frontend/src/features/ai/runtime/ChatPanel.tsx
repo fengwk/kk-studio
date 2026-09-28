@@ -61,6 +61,7 @@ export type ChatPanelComposerInput = ThreadPanelComposerInput
 /** Composer 上方展示的工作状态、永久 TaskStatus 与可关闭反馈。 */
 export interface ChatPanelActivityInput {
   working: boolean
+  workingLabel?: string
   /** 追加到 ThreadWidgetStack.children 的自定义 widget。 */
   widgets?: ReactNode
   actionError?: string | null
@@ -125,6 +126,7 @@ export function ChatPanel({
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
+    workingLabel: activity.workingLabel,
     widgets: activity.widgets,
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,

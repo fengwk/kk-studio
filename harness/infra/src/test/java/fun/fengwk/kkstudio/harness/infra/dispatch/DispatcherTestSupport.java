@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -611,7 +612,18 @@ final class DispatcherTestSupport {
 
   private static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
     return new ThreadState(
-        id, sessionId, headEntryId, CREATION_REQUEST_HASH, "main", false, 1, 0, NOW, NOW);
+        id,
+        sessionId,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "main",
+        false,
+        ThreadLifecycleStatus.ACTIVE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static BranchSettings branchSettings() {

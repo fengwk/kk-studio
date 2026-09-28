@@ -17,6 +17,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -30,16 +31,23 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * owner 深删除编排的单元契约。
+ * owner 深删除编排的单元契约：锁序、闭包范围、relation 顺序与 fail-safe 回滚。
  *
- * <p>覆盖锁序（Owner -&gt; Session -&gt; Thread）、归属行先于 harness Thread/Session 删除、blob 引用释放，以及「存在 Run
- * 引用绑定/Thread 时删除被 RESTRICT 拒绝且不产生半删状态」的 fail closed 行为。
+ * <p>测试意图：真实 PG 上的外键/FK 行为由 {@code SessionDeletionOrchestratorPostgresTest} 覆盖；本测试用内存模型表达 Harness
+ * Store 的 Thread/Session 图，固定锁序（Owner -&gt; Tree -&gt; Session -&gt; Thread）、以 Session 为单位推进的删除闭包（含
+ * task 子 Session 与其中的无父 root fork）、归属行先于 harness Thread/Session 删除、blob 引用释放，以及「存在 Run 引用绑定/Thread
+ * 时删除被 RESTRICT 拒绝且不产生半删状态」的 fail closed 行为。
  */
 class SessionDeletionOrchestratorTest {
 
@@ -47,8 +55,11 @@ class SessionDeletionOrchestratorTest {
   private static final UUID CHAT_ID = id(1);
   private static final UUID SESSION_1 = id(10);
   private static final UUID SESSION_2 = id(20);
+  private static final UUID SESSION_3 = id(25);
   private static final UUID THREAD_1 = id(30);
   private static final UUID THREAD_2 = id(40);
+  private static final UUID THREAD_3 = id(45);
+  private static final UUID THREAD_FORK = id(55);
   private static final UUID BLOB_1 = id(50);
   private static final UUID BLOB_2 = id(60);
   private static final UUID PROJECT_ID = id(70);
@@ -71,6 +82,13 @@ class SessionDeletionOrchestratorTest {
   private Issue issue;
   private SessionDeletionOrchestrator service;
 
+  /** 内存模型：Session -> Thread、Thread -> 直接子 Thread，以及当前仍存在的 Session/Thread。 */
+  private final Map<UUID, List<ThreadState>> sessionThreads = new HashMap<>();
+
+  private final Map<UUID, List<ThreadState>> children = new HashMap<>();
+  private final Set<UUID> presentSessions = new HashSet<>();
+  private final Map<UUID, ThreadState> threads = new HashMap<>();
+
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
@@ -91,6 +109,26 @@ class SessionDeletionOrchestratorTest {
               Function<HarnessStore.Transaction, ?> callback = invocation.getArgument(0);
               return callback.apply(transaction);
             });
+    when(transaction.listThreadsBySession(any()))
+        .thenAnswer(
+            inv -> new ArrayList<>(sessionThreads.getOrDefault(inv.getArgument(0), List.of())));
+    when(transaction.listChildren(any()))
+        .thenAnswer(inv -> new ArrayList<>(children.getOrDefault(inv.getArgument(0), List.of())));
+    when(transaction.findAncestorChain(any())).thenAnswer(inv -> ancestorChain(inv.getArgument(0)));
+    when(transaction.lockSessionForUpdate(any()))
+        .thenAnswer(
+            inv ->
+                presentSessions.contains(inv.getArgument(0))
+                    ? Optional.of(new Session(inv.getArgument(0), "session", NOW))
+                    : Optional.empty());
+    when(transaction.lockThread(any()))
+        .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
+    when(transaction.findThread(any()))
+        .thenAnswer(inv -> Optional.ofNullable(threads.get(inv.getArgument(0))));
+    when(transaction.deleteThreads(any()))
+        .thenAnswer(inv -> ((List<UUID>) inv.getArgument(0)).size());
+    when(transaction.deleteSession(any())).thenReturn(true);
+
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
 
     binding = new IssueAgentThread(ISSUE_ID, AGENT_NAME, THREAD_1);
@@ -119,31 +157,22 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void deletesChatSessionsAndThreadsInCanonicalLockOrder() {
-    // Session 与 Thread 即使由仓库逆序返回，也必须按 UUID 全局排序后锁定并按子事实顺序深删。
+    // Session 与 Thread 即使由仓库逆序返回，也必须在树锁后按 UUID 全局排序锁定并删除。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_2, SESSION_1));
-    when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, "session-1", NOW)));
-    when(transaction.lockSessionForUpdate(SESSION_2))
-        .thenReturn(Optional.of(new Session(SESSION_2, "session-2", NOW)));
-    ThreadState thread1 = thread(THREAD_1, SESSION_2);
-    ThreadState thread2 = thread(THREAD_2, SESSION_1);
-    when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(thread2));
-    when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of(thread1));
-    when(transaction.lockThread(THREAD_1)).thenReturn(Optional.of(thread1));
-    when(transaction.lockThread(THREAD_2)).thenReturn(Optional.of(thread2));
-    when(transaction.deleteThreads(List.of(THREAD_1, THREAD_2))).thenReturn(2);
+    putSession(SESSION_1, thread(THREAD_2, SESSION_1));
+    putSession(SESSION_2, thread(THREAD_1, SESSION_2));
     when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_2, BLOB_1));
-    when(refManager.listBlobIds(SESSION_2)).thenReturn(List.of());
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
     InOrder storeOrder = inOrder(transaction);
+    storeOrder.verify(transaction).lockTree(THREAD_1);
+    storeOrder.verify(transaction).lockTree(THREAD_2);
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_1);
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_2);
-    storeOrder.verify(transaction).listThreadsBySession(SESSION_1);
-    storeOrder.verify(transaction).listThreadsBySession(SESSION_2);
     storeOrder.verify(transaction).lockThread(THREAD_1);
     storeOrder.verify(transaction).lockThread(THREAD_2);
+    storeOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteEntries(SESSION_1);
     storeOrder.verify(transaction).deleteSession(SESSION_1);
@@ -154,7 +183,6 @@ class SessionDeletionOrchestratorTest {
     blobOrder.verify(refManager).listBlobIds(SESSION_1);
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_2);
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
-    blobOrder.verify(refManager).listBlobIds(SESSION_2);
     verify(chatSessionRepository).deleteBySessionId(SESSION_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_2);
     verifyNoInteractions(issueAgentThreadRepository);
@@ -163,13 +191,7 @@ class SessionDeletionOrchestratorTest {
   @Test
   void deletesIssueAgentSessionByResolvingBindingThreadAndRemovesBindingFirst() {
     // Session 只能由稳定的绑定 Thread 解析；归属行必须先于 harness Thread/Session 删除。
-    when(transaction.findThread(THREAD_1)).thenReturn(Optional.of(thread(THREAD_1, SESSION_1)));
-    when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, "agent-session", NOW)));
-    ThreadState thread = thread(THREAD_1, SESSION_1);
-    when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(thread));
-    when(transaction.lockThread(THREAD_1)).thenReturn(Optional.of(thread));
-    when(transaction.deleteThreads(List.of(THREAD_1))).thenReturn(1);
+    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
     when(refManager.listBlobIds(SESSION_1)).thenReturn(List.of(BLOB_1));
 
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
@@ -185,6 +207,7 @@ class SessionDeletionOrchestratorTest {
         .verify(issueAgentThreadRepository)
         .deleteByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME);
     deleteOrder.verify(transaction).lockThread(THREAD_1);
+    deleteOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1));
     deleteOrder.verify(transaction).deleteThreads(List.of(THREAD_1));
     deleteOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
     deleteOrder.verify(transaction).deleteEntries(SESSION_1);
@@ -194,13 +217,9 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void skipsSessionsThatDisappearedBeforeLock() {
-    // 并发消失的 Session 被跳过，只深删仍存在的 Session。
+    // 并发消失的 Session 被跳过，只深删仍存在的 Session，且不为它删归属行或 History。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_2, SESSION_1));
-    when(transaction.lockSessionForUpdate(SESSION_1)).thenReturn(Optional.empty());
-    when(transaction.lockSessionForUpdate(SESSION_2))
-        .thenReturn(Optional.of(new Session(SESSION_2, "session-2", NOW)));
-    when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of());
-    when(refManager.listBlobIds(SESSION_2)).thenReturn(List.of());
+    putSession(SESSION_2, thread(THREAD_2, SESSION_2));
 
     service.deleteSessionsByOwner(CHAT_OWNER);
 
@@ -213,8 +232,52 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
+  void deletesTaskChildSessionsAndParentlessForksInTheSameTree() {
+    // 测试意图：task 子 Session 没有 owner relation，且其中可能有另一入口建立的无父 root fork；
+    // 闭包必须以 Session 为单位推进，才能把整棵树（含 fork）一起删除，而不是留下悬挂 join/History。
+    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    ThreadState child = thread(THREAD_2, SESSION_2, THREAD_1);
+    ThreadState fork = thread(THREAD_FORK, SESSION_2, null);
+    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
+    putSession(SESSION_2, child, fork);
+    putChildren(THREAD_1, child);
+
+    service.deleteSessionsByOwner(CHAT_OWNER);
+
+    // 子 Session 与其 fork 都被删除，且 fork 自己的执行树 root 也被锁定（否则并发可加入未锁的树）。
+    verify(transaction).lockTree(THREAD_1);
+    verify(transaction).lockTree(THREAD_FORK);
+    verify(transaction).lockSessionForUpdate(SESSION_1);
+    verify(transaction).lockSessionForUpdate(SESSION_2);
+    verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
+    verify(transaction).deleteJoinsForThreads(List.of(THREAD_1, THREAD_2, THREAD_FORK));
+    verify(transaction).deleteSession(SESSION_2);
+  }
+
+  @Test
+  void newForkAppearingBetweenDiscoveryAndSessionLockAbortsDeletion() {
+    // 测试意图：fork 创建由 Session 锁排除；若在发现与加锁之间出现新 Session，必须整体回滚而不是删掉漏后代的集合。
+    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
+    when(transaction.lockSessionForUpdate(SESSION_1))
+        .thenAnswer(
+            inv -> {
+              // 模拟并发 fork：加锁期间在另一个 Session 中出现 THREAD_1 的新子线程。
+              putChild(THREAD_1, thread(THREAD_3, SESSION_3, THREAD_1));
+              return Optional.of(new Session(SESSION_1, "session-1", NOW));
+            });
+
+    assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
+
+    verify(transaction, never()).deleteThreads(any());
+    verify(transaction, never()).deleteJoinsForThreads(any());
+    verify(transaction, never()).deleteEntries(any());
+    verify(transaction, never()).deleteSession(any());
+  }
+
+  @Test
   void missingOwnerIsAnIdempotentNoop() {
-    // Owner 已不存在等价于删除已完成，不能枚举 relation 或打开 Harness 事务。
+    // Owner 已不存在等价于删除已完成；不能枚举 relation，也不能打开 Harness 事务。
     when(chatRepository.lockById(CHAT_ID)).thenReturn(null);
     service.deleteSessionsByOwner(CHAT_OWNER);
 
@@ -239,7 +302,6 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void ownerWithoutSessionsReturnsBeforeStoreLookup() {
-    // relation 列表为空时不需要 HarnessStore，也不产生删除副作用。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of());
 
     service.deleteSessionsByOwner(CHAT_OWNER);
@@ -250,7 +312,6 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void missingStoreFailsBeforeOpeningDeletionTransaction() {
-    // 有归属 Session 却未装配 HarnessStore 时必须 fail closed。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
     when(stores.getIfAvailable()).thenReturn(null);
 
@@ -264,10 +325,7 @@ class SessionDeletionOrchestratorTest {
   void disappearingThreadAbortsDeepDeletionBeforeChildRowsAreRemoved() {
     // Session 锁后列出的 Thread 若在 Thread 锁阶段消失，必须抛错并依赖外事务整体回滚。
     when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
-    when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, "session-1", NOW)));
-    ThreadState thread = thread(THREAD_1, SESSION_1);
-    when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(thread));
+    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
     when(transaction.lockThread(THREAD_1)).thenReturn(Optional.empty());
 
     assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
@@ -281,9 +339,7 @@ class SessionDeletionOrchestratorTest {
   /** Run 仍引用绑定/Thread 时归属行删除被 FK RESTRICT 拒绝：深删除必须整体失败且不触碰 Thread/Entry/Session，绝无绕过业务清理的硬删。 */
   @Test
   void runReferencedBindingFailsClosedWithoutDeletingHarnessFacts() {
-    when(transaction.findThread(THREAD_1)).thenReturn(Optional.of(thread(THREAD_1, SESSION_1)));
-    when(transaction.lockSessionForUpdate(SESSION_1))
-        .thenReturn(Optional.of(new Session(SESSION_1, "agent-session", NOW)));
+    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
     when(issueAgentThreadRepository.deleteByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
         .thenThrow(new DataIntegrityViolationException("referenced by project_issue_run"));
 
@@ -292,6 +348,7 @@ class SessionDeletionOrchestratorTest {
         () -> service.deleteSessionsByOwner(ISSUE_AGENT_OWNER));
 
     verify(transaction, never()).deleteThreads(any());
+    verify(transaction, never()).deleteJoinsForThreads(any());
     verify(transaction, never()).deleteEntries(any());
     verify(transaction, never()).deleteSession(any());
     verifyNoInteractions(refManager);
@@ -300,7 +357,7 @@ class SessionDeletionOrchestratorTest {
 
   @Test
   void rejectsNullDependenciesAndNullOwner() {
-    // 验证 SessionBlobRefManager 等强依赖不可为 null。
+    // 验证 SessionBlobRefManager 等强依赖与 owner 均不可为 null。
     assertThrows(
         NullPointerException.class,
         () ->
@@ -326,9 +383,64 @@ class SessionDeletionOrchestratorTest {
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 
+  private void putSession(UUID sessionId, ThreadState... sessionThreads) {
+    presentSessions.add(sessionId);
+    List<ThreadState> threadsInSession = new ArrayList<>(List.of(sessionThreads));
+    this.sessionThreads.put(sessionId, threadsInSession);
+    for (ThreadState thread : sessionThreads) {
+      threads.put(thread.id(), thread);
+    }
+  }
+
+  private void putChildren(UUID parentThreadId, ThreadState... directChildren) {
+    children.put(parentThreadId, List.of(directChildren));
+    for (ThreadState child : directChildren) {
+      threads.put(child.id(), child);
+    }
+  }
+
+  /** 在 {@code parent} 下新增一个子线程；子线程自带其 Session。 */
+  private void putChild(UUID parentThreadId, ThreadState child) {
+    List<ThreadState> direct = new ArrayList<>(children.getOrDefault(parentThreadId, List.of()));
+    direct.add(child);
+    children.put(parentThreadId, List.copyOf(direct));
+    threads.put(child.id(), child);
+    presentSessions.add(child.sessionId());
+    sessionThreads.computeIfAbsent(child.sessionId(), key -> new ArrayList<>()).add(child);
+  }
+
+  /** head-to-root 祖先链：沿不可变 parentThreadId 走到根。 */
+  private List<UUID> ancestorChain(UUID threadId) {
+    List<UUID> chain = new ArrayList<>();
+    UUID current = threadId;
+    while (current != null && threads.containsKey(current) && !chain.contains(current)) {
+      chain.add(current);
+      current = threads.get(current).parentThreadId();
+    }
+    if (current != null && !threads.containsKey(current)) {
+      chain.add(current);
+    }
+    return chain;
+  }
+
   private static ThreadState thread(UUID threadId, UUID sessionId) {
+    return thread(threadId, sessionId, null);
+  }
+
+  private static ThreadState thread(UUID threadId, UUID sessionId, UUID parentThreadId) {
     return new ThreadState(
-        threadId, sessionId, id(100), "0".repeat(64), "thread", false, 1, 0, NOW, NOW);
+        threadId,
+        sessionId,
+        parentThreadId,
+        id(100),
+        "0".repeat(64),
+        "thread",
+        false,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static UUID id(long value) {
