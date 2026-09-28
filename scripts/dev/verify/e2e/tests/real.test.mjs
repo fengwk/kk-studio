@@ -12,6 +12,8 @@ import {
   assertProviderUsageAlgebra,
   DEFAULT_BUILTIN_MODEL_ID,
   collectTaskToolResults,
+  delegatedChildFacts,
+  isSystemReminderText,
   resolveBuiltinModelDef,
   sanitizeArtifact,
   safeDiagnosticJson,
@@ -787,9 +789,13 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
   )
 })
 
-test('task 完成消息只按真实 CUSTOM_MESSAGE/USER 读取，不接受旧 MESSAGE/id= 别名', () => {
-  // 测试意图：完成结果由 settlement 异步交付为 CUSTOM_MESSAGE + role=USER 的 text content；旧实现把同一
-  // 正文放在 MESSAGE 里并用 id="<threadId>" 匹配，都会让父 Thread 永远等不到结果，因此必须严格只认真实 wire。
+test('task 完成消息只认 USER 角色 SystemReminder 形态的 CUSTOM_MESSAGE，不接受裸用户消息或历史别名', () => {
+  // 测试意图：完成结果由 Runtime 在子执行首次 Idle 匹配 join 后作为运行时 steering 交付，wire 是
+  // CUSTOM_MESSAGE + USER 角色的 <system-reminder> 包裹文本（SystemReminder.message）。普通用户
+  // custom message、历史 ASSISTANT 消息或受理 JSON 里出现同样 XML 都必须被拒绝，否则父 Thread 会把
+  // 用户自己贴的报告、历史回显或受理回执误当成新的委派结果。
+  const envelope = '<subagent_result thread_id="t1" agent="c" state="completed"><task></task><result>M</result></subagent_result>'
+  const reminder = (text) => `<system-reminder>\n${text}\n</system-reminder>`
   const customMessage = (text) => ({
     entryId: 'e-custom',
     entryType: 'CUSTOM_MESSAGE',
@@ -801,13 +807,74 @@ test('task 完成消息只按真实 CUSTOM_MESSAGE/USER 读取，不接受旧 ME
     payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text }] } }),
   })
 
+  assert.equal(isSystemReminderText(reminder(envelope)), true)
+  assert.equal(isSystemReminderText('<system-reminder>inline</system-reminder>'), false)
+  assert.equal(isSystemReminderText(`${envelope}`), false)
+
   assert.deepEqual(
     subagentResultTexts([
-      customMessage('<subagent_result thread_id="t1" agent="c" state="completed"><task></task><result>M</result></subagent_result>'),
-      assistantMessage('<subagent_result thread_id="t2" agent="c" state="completed"></subagent_result>'),
-      customMessage('{"thread_id":"t3","status":"accepted"}'),
+      customMessage(reminder(envelope)),
+      // 普通用户消息：正文一样，但没有提醒包裹，必须排除。
+      customMessage(envelope),
+      // 提醒形态但不是完成结果（例如受理回执 JSON），必须排除。
+      customMessage(reminder('{"thread_id":"t3","status":"accepted"}')),
+      assistantMessage(reminder('<subagent_result thread_id="t2" agent="c" state="completed"></subagent_result>')),
     ]),
-    ['<subagent_result thread_id="t1" agent="c" state="completed"><task></task><result>M</result></subagent_result>'],
+    [reminder(envelope)],
+  )
+})
+
+test('委派子 Thread 必须指回发起父且 ROOT payload 只有 settings', () => {
+  // 测试意图：执行父子关系是不可变 Thread 事实（HarnessThreadDTO.parentThreadId），不再物化进 ROOT
+  // payload；只有同时钉住父关系与 ROOT 纯度，才能真正证明结果是同一执行树的产物，而不是同 Session
+  // 里另一条线程或旧 subagentContext 运行树留下的残留。
+  const parentThreadId = '11111111-1111-4111-8111-111111111111'
+  const childThreadId = '22222222-2222-4222-8222-222222222222'
+  const rootPayload = JSON.stringify({
+    settings: {
+      agentName: 'default-assistant',
+      model: { providerName: 'p', modelName: 'm', variant: 'v' },
+      environmentName: null,
+    },
+  })
+  const snapshot = (thread, payloadJson) => ({
+    thread,
+    entries: [{ entryId: 'e-root', entryType: 'ROOT', payloadJson }],
+  })
+  const childThread = (parentThreadId) => ({
+    threadId: childThreadId,
+    parentThreadId,
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    headEntryId: '44444444-4444-4444-8444-444444444444',
+    name: 'main',
+    nextCommandSequence: '1',
+    version: '0',
+  })
+
+  const facts = delegatedChildFacts(parentThreadId, snapshot(childThread(parentThreadId), rootPayload))
+  assert.equal(facts.parentThreadId, parentThreadId)
+  assert.equal(facts.rootSettings.agentName, 'default-assistant')
+
+  // 父关系不符 / 根 Thread（null）都不是委派子线程。
+  assert.throws(
+    () => delegatedChildFacts(parentThreadId, snapshot(childThread(null), rootPayload)),
+    /child thread parent/,
+  )
+  assert.throws(
+    () => delegatedChildFacts(parentThreadId, snapshot(childThread(childThreadId), rootPayload)),
+    /child thread parent/,
+  )
+  // 旧运行树残留的 subagentContext 必须让断言失败，而不是被静默接受。
+  assert.throws(
+    () =>
+      delegatedChildFacts(
+        parentThreadId,
+        snapshot(
+          childThread(parentThreadId),
+          JSON.stringify({ settings: JSON.parse(rootPayload).settings, subagentContext: {} }),
+        ),
+      ),
+    /child ROOT payload fields must be/,
   )
 })
 
