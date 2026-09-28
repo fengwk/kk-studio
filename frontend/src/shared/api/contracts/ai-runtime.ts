@@ -133,8 +133,9 @@ export interface HarnessSessionEntryDTO {
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
  * branch=branch-<uuid 前 8 位>；可经 PUT /harness/threads/{id}/name 修改）；
- * status/processing 是派生的展示字段：status 只描述该 Thread 自身的执行，processing 是
- * "自身执行中或委派子树仍有未交付结果"的聚合，因此 status 为 IDLE 时 processing 仍可能为 true；
+ * status/processing 是派生的展示字段：status 由后端综合该 Thread 自身执行与整棵委派子树的活性
+ * 派生（子树仍活跃时为 WAITING_CHILDREN，仅当整棵子树静止才是 IDLE），processing 恒等于
+ * `status !== 'IDLE'`；前端不再自行聚合 task 状态。
  * branchSettings 是 head Entry branch 的完整 settings 快照。
  */
 export interface HarnessThreadDTO {
@@ -145,15 +146,17 @@ export interface HarnessThreadDTO {
   sessionId: string
   /** 当前 head Entry。 */
   headEntryId: string
+  /** 父 Thread 主键（根 Thread 为 null）。 */
+  parentThreadId: string | null
   /** 当前冻结的 YOLO 运行时策略。 */
   yoloEnabled: boolean
   /** 已分配的 command sequence 高水位标记 + 1。 */
   nextCommandSequence: string
   /** PostgreSQL 权威持久投影游标（非负十进制 bigint 字符串）。 */
   version: string
-  /** 展示状态（派生）：IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING。 */
+  /** 展示状态（派生）：IDLE / CONTINUATION_DUE / QUEUED / WAITING_CHILDREN / MODEL_* / TOOL_* / APPLYING。 */
   status: string
-  /** 该 Thread 及其委派子树当前是否仍在处理（派生字段）；status 为 IDLE 时仍可能为 true。 */
+  /** 是否仍在处理（派生字段），恒等于 `status !== 'IDLE'`。 */
   processing: boolean
   /** head Entry branch 的完整 settings 快照。 */
   branchSettings: HarnessBranchSettingsDTO
@@ -394,9 +397,9 @@ export interface RuntimeThreadSummaryDTO {
   name: string
   createdAt: BackendDateTime
   updatedAt: BackendDateTime
-  /** 该 Thread 自身执行状态的派生展示值。 */
+  /** 该 Thread 执行状态的派生展示值（含委派子树活性：子树活跃时为 WAITING_CHILDREN）。 */
   status: string
-  /** 该 Thread 及其委派子树当前是否仍在处理（派生字段）；status 为 IDLE 时仍可能为 true。 */
+  /** 是否仍在处理（派生字段），恒等于 `status !== 'IDLE'`。 */
   processing: boolean
   model: HarnessModelSelectionDTO
   headMessagePreview: string | null

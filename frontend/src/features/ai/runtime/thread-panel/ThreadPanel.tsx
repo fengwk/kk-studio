@@ -76,6 +76,7 @@ export interface ThreadPanelComposerInput {
  */
 export interface ThreadPanelActivityInput {
   working: boolean
+  workingLabel?: string
   widgets?: ReactNode
   actionError?: string | null
   onDismissActionError?: () => void
@@ -140,6 +141,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
         )}
         <ThreadWidgetStack
           working={activity.working || composer.pending}
+          workingLabel={activity.workingLabel}
           queuedMessages={interactionOpen ? [] : transcript.queuedMessages}
         >
           {interactionOpen ? null : activity.widgets}
