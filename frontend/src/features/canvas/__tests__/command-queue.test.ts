@@ -914,6 +914,174 @@ describe('CanvasCommandQueue', () => {
     expect(storeMap.size).toBe(0)
     expect(reloadedQueue.isBlocked()).toBe(false)
   })
+
+  it('A5/C9 列表：A 网络失败中断恢复，新 B sequence 必须先从全部 pending 取 max 确保 B > 9 且 reload 顺序为 A -> C -> B', async () => {
+    // 意图：验证 sequence 初始化必须预先从 list 全部 pending 取 max，而不是在重放循环逐个 max；
+    // 当 A (seq 5) 发送失败中断恢复而 C (seq 9) 尚未被访问时，新入队的 B 必须获取大于 9 的序号（B.sequence = 10 > 9），
+    // 绝不能错误获得 6 排在 C 前面。
+    const storeMap = new Map<string, CanvasPendingOperation>()
+    const opA: CanvasPendingOperation = {
+      id: 'user:canvas:session:key-old-a',
+      userId: 'user',
+      canvasId: CANVAS_ID,
+      editingSessionId: 'session',
+      sessionKey: 'user:canvas:session',
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5' as UUIDString,
+      commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
+      baselineRevision: '1',
+      ack: [],
+      sequence: 5,
+      createdAt: 1000,
+    }
+    const opC: CanvasPendingOperation = {
+      id: 'user:canvas:session:key-old-c',
+      userId: 'user',
+      canvasId: CANVAS_ID,
+      editingSessionId: 'session',
+      sessionKey: 'user:canvas:session',
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c9' as UUIDString,
+      commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'C' }],
+      baselineRevision: '1',
+      ack: [],
+      sequence: 9,
+      createdAt: 2000,
+    }
+    storeMap.set(opA.id, opA)
+    storeMap.set(opC.id, opC)
+
+    let releaseListGate!: () => void
+    const listGate = new Promise<void>((resolve) => {
+      releaseListGate = resolve
+    })
+    let listCalls = 0
+
+    const store = {
+      save: vi.fn(async (op: CanvasPendingOperation) => {
+        storeMap.set(op.id, op)
+      }),
+      remove: vi.fn(async (id: string) => {
+        storeMap.delete(id)
+      }),
+      list: vi.fn(async () => {
+        listCalls++
+        if (listCalls === 1) {
+          await listGate
+        }
+        return [...storeMap.values()]
+      }),
+    }
+
+    const applyCalls: ApplyCanvasCommandsRequestDTO[] = []
+    const apply = vi.fn().mockImplementation(async (_canvasId, request: ApplyCanvasCommandsRequestDTO) => {
+      applyCalls.push(request)
+      if (request.idempotencyKey === 'aaaaaaaa-0000-4000-8000-0000000000a5') {
+        throw new ApiError('network down')
+      }
+      return advancePatch(applyCalls.length + 1)
+    })
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b0' as UUIDString,
+      operationStore: store,
+    })
+
+    const recPromise = queue.recover()
+    await Promise.resolve()
+
+    // 在 recover 等待 store.list 期间入队 B
+    const bPromise = queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'C', name: 'B' }])
+
+    // 释放 list 门禁：返回 [A (seq 5), C (seq 9)]
+    releaseListGate()
+
+    // A 失败，C 尚未访问，recover 结束
+    const recResult = await recPromise
+    expect(recResult.failed).toBe(1)
+    expect(queue.isBlocked()).toBe(true)
+
+    // B 落盘并拒绝发送
+    await expect(bPromise).rejects.toBeInstanceOf(CanvasQueueBlockedError)
+    expect(storeMap.size).toBe(3)
+
+    const savedB = [...storeMap.values()].find((op) => op.idempotencyKey === 'aaaaaaaa-0000-4000-8000-0000000000b0')!
+    expect(savedB).toBeDefined()
+    // 核心断言：B.sequence 必须严格大于 C 的 sequence 9（不能是 6）
+    expect(savedB.sequence).toBeGreaterThan(9)
+    expect(savedB.sequence).toBe(10)
+
+    // 模拟 reload 重放，验证三者严格保序 A (5) -> C (9) -> B (10)
+    const reloadCalls: ApplyCanvasCommandsRequestDTO[] = []
+    const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn().mockImplementation(async (_canvasId, req: ApplyCanvasCommandsRequestDTO) => {
+        reloadCalls.push(req)
+        return advancePatch(reloadCalls.length + 1)
+      }),
+      refetch: vi.fn(),
+      operationStore: store,
+    })
+
+    const reloadResult = await reloadedQueue.recover()
+    expect(reloadResult.replayed).toBe(3)
+    expect(reloadResult.failed).toBe(0)
+
+    expect(reloadCalls).toHaveLength(3)
+    expect(reloadCalls[0]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000a5')
+    expect(reloadCalls[1]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000c9')
+    expect(reloadCalls[2]?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000b0')
+    expect(storeMap.size).toBe(0)
+  })
+
+  it('list 失败期间绝不分配低 seq 写 store，直接拒绝尚未 freeze 的新入队保持草稿', async () => {
+    // 意图：当 initial recover 在 store.list 发生错误时，尚未完成 sequence 初始化；
+    // 此时排队的尚未 freeze 的新操作绝不能以错误的初值 seq 0 写入 store，必须直接 reject 并保持草稿。
+    const storeMap = new Map<string, CanvasPendingOperation>()
+    let releaseListGate!: () => void
+    const listGate = new Promise<void>((resolve) => {
+      releaseListGate = resolve
+    })
+
+    const store = {
+      save: vi.fn(async (op: CanvasPendingOperation) => {
+        storeMap.set(op.id, op)
+      }),
+      remove: vi.fn(async () => undefined),
+      list: vi.fn(async () => {
+        await listGate
+        throw new Error('IndexedDB list error')
+      }),
+    }
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn(),
+      refetch: vi.fn(),
+      operationStore: store,
+    })
+
+    const recPromise = queue.recover()
+    await Promise.resolve()
+
+    // 在 store.list 挂起期间入队 B
+    const bPromise = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+
+    // 释放门禁使 store.list 抛出错误
+    releaseListGate()
+
+    // recover 抛出错误并进入 blocked
+    await expect(recPromise).rejects.toThrow('IndexedDB list error')
+    expect(queue.isBlocked()).toBe(true)
+
+    // 排队的 B 被直接拒绝
+    await expect(bPromise).rejects.toBeInstanceOf(CanvasQueueBlockedError)
+
+    // 断言：B 绝未写入 store，storeMap 为空，save 未被调用
+    expect(store.save).not.toHaveBeenCalled()
+    expect(storeMap.size).toBe(0)
+  })
 })
 
 function noopStore() {
