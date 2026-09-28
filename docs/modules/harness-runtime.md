@@ -22,13 +22,14 @@ findJoin / projectJoinReceipt / findAncestorChain
 跨实体的多行事务必须按同一层级取锁，实现层负责在真正取锁前拒绝逆序：
 
 ```text
-tree（执行树的根 Thread，事务级 advisory lock）
+task 准入（全局事务级 advisory lock，仅 task 接受路径）
+  -> tree（执行树的根 Thread，事务级 advisory lock）
   -> Session -> Thread（UUID 升序）-> Commands（sequence 升序）
   -> ModelInvocation -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
   -> Work（type + UUID 升序）
 ```
 
-涉及执行树的事务先用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
+task 接受先取全局准入锁，跨所有执行树统计非空闲子 Thread，保证全局额度判定与创建原子；根 Thread 不计入子代理额度。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 

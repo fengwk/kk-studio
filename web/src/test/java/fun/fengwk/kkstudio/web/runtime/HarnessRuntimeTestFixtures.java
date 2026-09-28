@@ -202,10 +202,16 @@ public final class HarnessRuntimeTestFixtures {
    * 尚有 continuation 义务的 Thread 快照：ROOT -&gt; TURN_START -&gt; USER -&gt; ASSISTANT -&gt;
    * continueModel TURN_END，durable 生命周期为 ACTIVE。
    *
-   * <p>运行时状态投影只看 durable 生命周期与本地活跃调用，因此历史里的 continueModel 义务以 {@code QUEUED} 暴露（等待调度启动下一个 turn），
-   * 不再由 web 层根据历史自行推断出独立状态。
+   * <p>续写义务属于当前 Thread，Runtime 将其投影为 CONTINUATION_DUE。
    */
   public static ThreadSnapshot continuationPendingSnapshot(UUID threadId) {
+    Entry turnStart =
+        new Entry(
+            id(2),
+            id(1),
+            id(1),
+            new TurnStartPayload(TurnStartReason.INPUT, settings(), threadId),
+            NOW);
     Entry turnEnd =
         new Entry(
             id(5),
@@ -215,8 +221,7 @@ public final class HarnessRuntimeTestFixtures {
             NOW);
     EntryPath path =
         new EntryPath(
-            List.of(
-                rootEntry(), turnStartEntry(), userMessageEntry(), plainAssistantEntry(), turnEnd));
+            List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
     return new ThreadSnapshot(
         activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
   }

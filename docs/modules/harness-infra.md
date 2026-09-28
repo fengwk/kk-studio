@@ -13,7 +13,8 @@ Runtime 把「该由谁做什么」写成 `harness_work` 里的一行，把「�
 [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 实现 [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 的全部原语，并在句柄内记录当前达成的最高锁阶梯，实现层保证 Runtime 声明的锁序真的被遵守：
 
 ```text
-tree（执行树根 Thread 的事务级 advisory lock）
+task 准入（全局事务级 advisory lock，仅 task 接受路径）
+  -> tree（执行树根 Thread 的事务级 advisory lock）
   -> Session (KEY SHARE / FOR UPDATE) -> Thread（UUID 升序）
   -> Commands（sequence 升序）-> ModelInvocation
   -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
@@ -21,6 +22,8 @@ tree（执行树根 Thread 的事务级 advisory lock）
 ```
 
 执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。
+
+`lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countActiveSubagentThreads` 跨所有根统计 `parent_thread_id` 非空且非 `IDLE` 的 Thread，原子执行全局并发准入；已活跃子线程追加输入不重复占额度。普通执行推进和无父 one-shot 不取全局准入锁。
 
 命令写入、ThreadProcessor Entry 物化、手工压缩与会话创建只取 Session `FOR KEY SHARE`，让同 Session 的兄弟 Thread 并发推进；删除、独占变更与 `renameSession` 才升级为 `FOR UPDATE`。任何要在 Thread 行锁之后插入 `harness_entry` 的事务必须先持有父 Session 的 `KEY SHARE`，否则外键会在插入时隐式补取 Session 锁，与深删除形成 `Thread -> Session` 逆序。检测到逆序立即抛 `IllegalStateException`；句柄严格绑定创建它的线程。
 
