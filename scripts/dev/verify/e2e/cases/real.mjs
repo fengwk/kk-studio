@@ -25,6 +25,7 @@ import {
   setModelCommand,
   snapshotEntries,
   stopThread,
+  threadParentIdOf,
   threadTarget,
   userMessageCommand,
   waitForModelContentDeltaAfterEventSubscribed,
@@ -1279,7 +1280,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 settlement 异步交付为独立 CUSTOM_MESSAGE（role=USER，外层 <subagent_result thread_id="..." agent="..." state="...">，不做旧别名兼容），因此 case 轮询真实 snapshot 直到该消息 durable 且父重新 quiescent；thread_id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 Runtime 在子执行首次 Idle 匹配 join 后异步交付为独立 CUSTOM_MESSAGE（SystemReminder 形态：USER 角色的 <system-reminder> 包裹文本，内层唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该消息 durable 且父重新 quiescent；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
@@ -1396,13 +1397,22 @@ registerCase({
       assert(taskId, `accepted receipt thread_id missing: ${taskText}`)
       canonicalUuid(taskId, 'task receipt thread id')
 
-      // 完成消息由 settlement 异步交付（真实 wire：CUSTOM_MESSAGE + USER role + <subagent_result>），
-      // 因此必须轮询而非只取一次 quiescent 快照；provider/规划错误立即失败并带完整诊断。
+      // 完成消息由 Runtime 在子执行首次 Idle 匹配 join 后异步交付（真实 wire：CUSTOM_MESSAGE +
+      // SystemReminder 包裹文本 + <subagent_result>），因此必须轮询而非只取一次 quiescent 快照；
+      // provider/规划错误立即失败并带完整诊断。
       const completion = await waitForSubagentResult(ctx, parentThreadId, taskId, {
         timeoutMs: 240_000,
         intervalMs: 1_000,
       })
       parentSnapshot = completion.snapshot
+      assert(
+        parentSnapshot.thread.status === 'IDLE' && parentSnapshot.thread.processing === false,
+        safeDiagnosticJson(parentSnapshot.thread),
+      )
+      assert(
+        threadParentIdOf(parentSnapshot.thread) === null,
+        `root parent thread must be null: ${safeDiagnosticJson(parentSnapshot.thread)}`,
+      )
       const subagentResultText = completion.text
       assert(
         subagentResultText.includes(marker),
@@ -1416,6 +1426,12 @@ registerCase({
         childAnswer && messageText(childAnswer).trim() === marker,
         'child assistant did not return the delegated marker',
       )
+      // 子 Thread 的执行父关系与 ROOT payload 都必须符合委派契约（无 subagentContext 运行树）。
+      delegatedChildFacts(parentThreadId, childSnapshot)
+      assert(
+        childSnapshot.thread.processing === false,
+        `child thread must be settled: ${safeDiagnosticJson(childSnapshot.thread)}`,
+      )
       const completionEntry = (parentSnapshot.entries || []).findIndex(
         (entry) => entryType(entry) === 'CUSTOM_MESSAGE' && messageText(entry) === subagentResultText,
       )
@@ -1423,16 +1439,6 @@ registerCase({
       assert(
         completionEntry >= 0 && parentAnswer && messageText(parentAnswer).includes(marker),
         'parent assistant did not consume the delivered subagent result',
-      )
-      const childRoot = (childSnapshot.entries || [])[0]
-      assert(entryType(childRoot) === 'ROOT', safeDiagnosticJson(childSnapshot.entries))
-      const context = parseEntryPayload(childRoot).subagentContext
-      assert(
-        String(context?.parentThreadId) === parentThreadId
-          && String(context?.rootThreadId) === parentThreadId
-          && canonicalUuid(context?.taskInvocationId, 'subagentContext.taskInvocationId')
-          && context?.depth === 2,
-        `invalid child ROOT subagentContext: ${safeDiagnosticJson(context)}`,
       )
       ctx.writeArtifact(
         'task-delegation.json',
@@ -2272,11 +2278,27 @@ export function collectTaskToolResults(entries) {
 }
 
 /**
+ * 判断一段文本是否是运行时注入的 `<system-reminder>` 提醒正文（与
+ * `SystemReminder.wrap` 的精确定界符一致）。
+ *
+ * <p>完成交付是运行时 steering，不是真实用户输入；只有带该包裹形态的 CUSTOM_MESSAGE 才算完成消息，
+ * 普通用户 custom message 里出现同样的 XML 不得被认成委派结果。
+ */
+export function isSystemReminderText(text) {
+  return (
+    typeof text === 'string'
+    && text.startsWith('<system-reminder>\n')
+    && text.endsWith('\n</system-reminder>')
+  )
+}
+
+/**
  * 提取父 Thread 收到的 task 完成消息正文。
  *
- * <p>真实 wire 是 `CUSTOM_MESSAGE` + `role=USER` + `text` content（`SubagentTaskSettlementScanner.deliver` 用
- * `CustomMessageCommandPayload(AgentMessage.user(...))` 入队），外层唯一形状 `&lt;subagent_result thread_id="…"&gt;`；因此这里只看
- * CUSTOM_MESSAGE，不做任何旧别名兼容。
+ * <p>真实 wire 是 `CUSTOM_MESSAGE`（payload 为 `SystemReminder.message`，即 USER 角色的
+ * `<system-reminder>` 包裹文本，见 `ThreadJoinCompletion.buildDelivery`），正文外层唯一形状是
+ * `<subagent_result thread_id="…" agent="…" state="…">`；因此这里只认 CUSTOM_MESSAGE + 提醒包裹，
+ * 不做任何旧别名兼容，也不接受普通用户消息。
  */
 export function subagentResultTexts(entries) {
   const texts = []
@@ -2287,7 +2309,7 @@ export function subagentResultTexts(entries) {
     for (const content of message.contents || []) {
       if (
         content?.type === 'text'
-        && typeof content.text === 'string'
+        && isSystemReminderText(content.text)
         && content.text.includes('<subagent_result')
       ) {
         texts.push(content.text)
@@ -2295,6 +2317,28 @@ export function subagentResultTexts(entries) {
     }
   }
   return texts
+}
+
+/**
+ * 断言一个由 `task` 委派产生的子 Thread：执行父关系指回发起方，ROOT 只保存 settings。
+ *
+ * <p>执行父子关系是 Thread 行的不可变事实（`HarnessThreadDTO.parentThreadId`），不再物化进 ROOT
+ * payload；ROOT 只冻结初始 branch settings，历史是对话历史而不是运行树，因此这里拒绝任何额外的
+ * ROOT 字段（例如旧的 `subagentContext`）。
+ */
+export function delegatedChildFacts(parentThreadId, childSnapshot) {
+  const thread = childSnapshot?.thread
+  const parent = threadParentIdOf(thread)
+  assert(
+    parent === parentThreadId,
+    `child thread parent ${JSON.stringify(parent)} != delegating parent ${JSON.stringify(parentThreadId)}`,
+  )
+  const entries = childSnapshot?.entries || []
+  const root = entries[0]
+  assert(entryType(root) === 'ROOT', safeDiagnosticJson(entries))
+  const payload = parseEntryPayload(root)
+  assertExactFields(payload, ['settings'], 'child ROOT payload')
+  return { parentThreadId: parent, rootSettings: payload.settings }
 }
 
 /**

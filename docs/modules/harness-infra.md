@@ -13,27 +13,31 @@ Runtime 把「该由谁做什么」写成 `harness_work` 里的一行，把「�
 [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 实现 [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 的全部原语，并在句柄内记录当前达成的最高锁阶梯，实现层保证 Runtime 声明的锁序真的被遵守：
 
 ```text
-Session (KEY SHARE / FOR UPDATE) -> Thread（UUID 升序）
+tree（执行树根 Thread 的事务级 advisory lock）
+  -> Session (KEY SHARE / FOR UPDATE) -> Thread（UUID 升序）
   -> Commands（sequence 升序）-> ModelInvocation
   -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
   -> Work（target type + UUID 升序）
 ```
 
+执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。
+
 命令写入、ThreadProcessor Entry 物化、手工压缩与会话创建只取 Session `FOR KEY SHARE`，让同 Session 的兄弟 Thread 并发推进；删除、独占变更与 `renameSession` 才升级为 `FOR UPDATE`。任何要在 Thread 行锁之后插入 `harness_entry` 的事务必须先持有父 Session 的 `KEY SHARE`，否则外键会在插入时隐式补取 Session 锁，与深删除形成 `Thread -> Session` 逆序。检测到逆序立即抛 `IllegalStateException`；句柄严格绑定创建它的线程。
 
 事务期间任何底层数据库异常都被句柄记录为首个故障（poisoning），并在回调返回前由 `rethrowDatabaseFailure()` 强制重抛，防止把被污染的连接继续用于提交。
 
-## 七表与 EntryPath 读取
+## 八表与 EntryPath 读取
 
 | 表 | 承载内容 |
 | --- | --- |
 | `harness_session` | Session 聚合根标识、显示名称与创建时间 |
 | `harness_entry` | append-only Entry Tree 节点与 payload |
-| `harness_thread` | Session 归属、head 游标、creation request hash、显示名称、YOLO 开关、命令序号与 version |
+| `harness_thread` | Session 归属、不可变执行父关系、递归 `status`、head 游标、creation request hash、显示名称、YOLO 开关、命令序号与 version |
 | `harness_thread_command` | 有序命令邮箱、请求哈希、APPLIED 关联节点或 CANCELLED 取消标记 |
 | `harness_model_invocation` | Model 请求规格、状态、attempt、流式 checkpoint、结果与错误 |
 | `harness_tool_invocation` | Tool 调用参数、绑定、审批记录、状态、副作用批与错误 |
 | `harness_work` | THREAD / MODEL / TOOL 调度邮箱、`wake_version` 与租约 |
+| `harness_thread_join` | 一次委派的 join 凭据：源命令 `(thread_id, sequence)`、`after_version`、`matched_idle_version` / `result_head_entry_id` 固定回执与 `delivery_command_sequence` |
 
 数据库只做形状防御，语义由应用层负责：`(session_id, parent_entry_id)` 外键保证父子同 Session，部分唯一索引 `uk_harness_entry_single_root` 保证每个 Session 至多一个 ROOT；`harness_thread_command` 以 `(thread_id, sequence)` 为主键、`(thread_id, idempotency_key)` 唯一；`harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一；`harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，且非 `SUCCEEDED` 时 `effects` 必须为空批 `{"version": 1, "customEntries": []}`。所有时间列是 `timestamptz(3)` 毫秒精度，version 与业务 ID 完全由应用生成。
 
@@ -118,7 +122,7 @@ read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘�
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
 | `infra.dispatch` | `HarnessWorkDispatcher` 与 `HarnessWorkDispatcherConfig`：Work 调度循环、类型轮转、有界 handoff、wake 合并与 stop | claim-only 短事务；不读业务状态、不解释 Processor 结果 |
-| `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlWorkChannel`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 七表 durable 协议、锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
+| `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlWorkChannel`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 八表 durable 协议、树锁与锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
 | `infra.realtime` | `RealtimeEventSource` 实时事件订阅端口 | 只定义 live overlay 订阅与完成围栏；durable snapshot 是唯一恢复事实源 |
 | `infra.resource` | `LocalFileResourceStore` 本地内容寻址对象存储 | 固定根目录、SHA-256 扁平命名、create-only 原子发布与精确校验 |
 
@@ -128,7 +132,7 @@ read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘�
 
 测试分四组，入口都在 [`harness/infra/src/test`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/) 下；改 Store 或调度前先从这里定位对应断言：
 
-- 真实 PostgreSQL 契约（需要 Testcontainers 启动数据库）：[`runtime/store/testing` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/)；[`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java) 锁定七表形状，[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)、[`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java) 覆盖事务边界、锁序递增与句柄生命周期；[`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java) 用 CTE 计数器把冷读一次 CTE、连续 append 零 CTE 与会话驱逐变成可断言事实；[`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java) 覆盖 claim、lease、wake、NOTIFY 唤醒与周期轮询语义；深删除顺序、命令邮箱、Entry 树与 Invocation 状态一致性由同目录按域拆分的其余 PostgreSQL 契约测试覆盖。
+- 真实 PostgreSQL 契约（需要 Testcontainers 启动数据库）：[`runtime/store/testing` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/)；[`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java) 锁定八表形状（含 `harness_thread_join` 的固定回执与交付约束），[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)、[`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java) 覆盖事务边界、锁序递增与句柄生命周期；[`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java) 用 CTE 计数器把冷读一次 CTE、连续 append 零 CTE 与会话驱逐变成可断言事实；[`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java) 覆盖 claim、lease、wake、NOTIFY 唤醒与周期轮询语义；深删除顺序、命令邮箱、Entry 树与 Invocation 状态一致性由同目录按域拆分的其余 PostgreSQL 契约测试覆盖。
 - 调度循环：[`dispatch` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/)；[`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)、[`HarnessWorkDispatcherConfigTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfigTest.java) 覆盖单次 drain、周期调度、有界分发、执行器拒绝归还、平滑停止与配置边界。
 - Realtime 与本地资源：[`postgresql` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/) 的 [`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)、[`PostgresqlRealtimeEventSinkIntegrationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkIntegrationTest.java)、[`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java) 覆盖规范编解码、超限降级、分块上界与 `Array` 释放、批量保序与回滚不产生通知、Source 围栏控制；[`LocalFileResourceStoreTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStoreTest.java) 覆盖哈希寻址、并发 create-only 发布、NOFOLLOW 打开与精确校验。
 - 架构守卫：[`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java) 守卫生产依赖范围与包结构。

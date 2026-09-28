@@ -9,22 +9,26 @@ Harness 要回答的是：用户这一句话说完之后，系统究竟记住了
 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与运行时交互的唯一同步入口：
 
 ```text
-acceptCommands / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
+acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
 stop / decideToolApproval / setThreadYolo / renameThread / renameSession
 manualCompactionAvailability / compactThread / getThreadSnapshot
+findJoin / projectJoinReceipt / findAncestorChain
 ```
 
-除 `manualCompactionAvailability`、`findThreadCommand`、`getSession*`、`listThreadsBySession` 这类只读查询外，每个方法都在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。唯一跨越事务边界的是 Stop 的本地取消——只有持久化终态提交成功之后，才在同一 JVM 内对 Processor 做 best-effort 取消，取消失败不回滚已提交的事实。
+除 `manualCompactionAvailability`、`findThreadCommand`、`findJoin`、`projectJoinReceipt`、`findAncestorChain`、`getSession*`、`listThreadsBySession` 这类只读查询外，每个方法都在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。唯一跨越事务边界的是 Stop 的本地取消——只有持久化终态提交成功之后，才在同一 JVM 内对 Processor 做 best-effort 取消，取消失败不回滚已提交的事实。
 
 所有业务拒绝都是类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java)（`STALE_VERSION`、`STALE_COMMAND_CURSOR`、`IDEMPOTENCY_KEY_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_ID_REUSED`、`TERMINAL_APPLY_PENDING`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`、`MANUAL_COMPACTION_UNAVAILABLE`）或 `HarnessRuntimeNotFoundException`；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）一律以 `IllegalStateException` fail closed，绝不降级成业务错误。
 
 跨实体的多行事务必须按同一层级取锁，实现层负责在真正取锁前拒绝逆序：
 
 ```text
-Session -> Thread（UUID 升序）-> Commands（sequence 升序）
+tree（执行树的根 Thread，事务级 advisory lock）
+  -> Session -> Thread（UUID 升序）-> Commands（sequence 升序）
   -> ModelInvocation -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
   -> Work（type + UUID 升序）
 ```
+
+涉及执行树的事务先用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 
@@ -37,7 +41,7 @@ ROOT                  TURN_START   MESSAGE      CUSTOM                MODEL_ATTE
 CUSTOM_MESSAGE        ASSISTANT_ERROR           ASSISTANT_ABORTED     COMPACTION           TURN_END
 ```
 
-`ROOT` 是唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName`、`ModelSelection` 与可空 `environmentName`）并可在派生子智能体时携带 `SubagentContext`；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
+`ROOT` 是唯一根，只保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName`、`ModelSelection` 与可空 `environmentName`）；执行父子关系不物化进历史，而是 Thread 行上不可变的 `parent_thread_id`，因此历史始终是对话历史而不是运行树；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
 
 分支冻结用户可见的 agent、model 与可空 Environment name：Environment 以全局唯一且不可变的 name 进入历史，每回合再解析为内部路由身份，目录只由每次工具调用自己的 arguments 提供，因此 Entry 里没有目录状态。
 
@@ -46,11 +50,13 @@ CUSTOM_MESSAGE        ASSISTANT_ERROR           ASSISTANT_ABORTED     COMPACTION
 [`ThreadState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadState.java) 是 `harness_thread` 行的持久化当前状态，只保存 Thread 自己拥有的东西：
 
 ```text
-id / sessionId / headEntryId / creationRequestHash / name
-yoloEnabled / nextCommandSequence / version / createdAt / updatedAt
+id / sessionId / parentThreadId / headEntryId / creationRequestHash / name
+yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 ```
 
-`sessionId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进，`name` 是唯一可被控制面独立重命名的字段（`renameThread` 只替换名称并 +1，不产生 Command / Entry / Work）。
+`sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进，`name` 是唯一可被控制面独立重命名的字段（`renameThread` 只替换名称并 +1，不产生 Command / Entry / Work）。
+
+[`ThreadLifecycleStatus`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadLifecycleStatus.java) 是持久化的**递归**生命周期，只存 `IDLE` / `ACTIVE` / `WAITING_CHILDREN`：`IDLE` 表示本地无 queued command、无 applicable invocation、无 continuation obligation，并且全部永久直接孩子都 `IDLE`；`ACTIVE` 表示本地仍有工作；`WAITING_CHILDREN` 表示本地已完成但至少一个直接孩子非 `IDLE`。是否存在未交付的 join 不影响判定——等待子结果不是本地工作。显式停止不是第四种状态，而是 head 上的 `STOPPED` `TURN_END` 事实。对外的细粒度状态由 [`ThreadSnapshot.runtimeStatus()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 派生：`WAITING_CHILDREN` / `IDLE` 直接透出，`ACTIVE` 再按 tool siblings、model、queued 投影为 `TOOL_*` / `MODEL_*` / `QUEUED`，因此 `IDLE` 之外的每个值都表示 `processing`。
 
 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 是纯函数分类器，输入 ThreadState、root-to-head `EntryPath`、当前 open turn 的 ModelInvocation 与（仅当 Model 结果恰为当前 Assistant head 时加载的）Tool siblings，输出唯一的 [`ThreadContext`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContext.java)：`IdleOrHistorical`、`ContinuationDue`、`ModelActive`、`ModelTerminalPending`、`ToolActive`、`ToolTerminalPending`。检测到所有权归属异常、Model 身份与 Thread/open turn 不匹配、Model 未挂结果却有 Tool siblings、Model 响应 `toolCalls` 与 Assistant 消息 `ToolCall` 不一致、sibling 数量或 `callIndex` 不连续等破坏时直接抛 `IllegalStateException`。
 
@@ -181,7 +187,31 @@ Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会�
 这里只生成策略候选，真实文件边界、符号链接检查与进程隔离由 Environment Daemon 在
 执行入口落实。
 
-子智能体会话由内部 `task` 工具驱动，复用同一套运行时协议：创建时校验父级 ModelInvocation 冻结的绑定参数，以 `NEW_SESSION` + `SubagentContext(parentThreadId, rootThreadId, taskInvocationId, depth)` 建立标准持久化子线程；恢复已有会话要求同属当前父级与同一根线程且子线程已静止。父级通过 [`HarnessThreadChangeSource`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessThreadChangeSource.java) 订阅「可能发生变化」的唤醒信号，[`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java) 按 `version` / `descendants` / `cancel` 三类计数合并唤醒并避免先 signal 后 wait 丢失。并发槽位、`maxDepth`、`idleTimeout` 与 `maxTurns` 策略属于 [Harness Builtin](harness-builtin.md) 与 [Platform](platform.md)；`maxTurns` 到期只是软提醒，`idleTimeout` 到期取消当前子执行并保留 Session 以便恢复。
+### 子智能体委派与 Join
+
+内部 `task` 工具只做一次持久接受：Platform 的 `SubagentTaskRunner` 把本轮调用归一化为 `ThreadJoinRequest`，用 `acceptCommandsAndJoin` 在同一事务接受源 prompt、建立或沿用子 Thread、写入 join 凭据并请求 Work；`TaskTool` 立即用一次成功 tool_result 回执唯一 JSON `{"thread_id":"…","status":"accepted"}`，不阻塞、没有第二个 tool_result。子结果不经过工具返回，而是由运行时在子执行首次 Idle 时匹配 join，并作为父 Thread 的一条独立消息交付。
+
+join 的持久事实是 `harness_thread_join` 的一行，只记凭据、不复制任何对话内容：
+
+```text
+invocationId / requestHash / parentThreadId / childThreadId
+sourceCommandSequence / afterVersion / agent / maxTurns / reminderTurn
+matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / updatedAt
+```
+
+- `ThreadJoinRequest` 携带 `invocationId`、可空 `parentThreadId`、父非空时的 `expectedParentHeadEntryId`、`requestHash`、`agent`、`maxTurns`，以及本次接纳的限额（`maxDepth`、`maxConcurrentChildren`、`maxConcurrentThreads`）。
+- `parentThreadId` 非空表示 task：同一事务校验父仍可接受本次调用、`expectedParentHeadEntryId` 与父 head 匹配、子关系与深度/并发额度。只有新建子才设置父关系，resume 不能改父；父停在 `STOPPED` 边界时拒绝发起新委派。resume 不要求子已 Idle——向仍在执行的子追加源 prompt 后等待它真正的下一次 Idle，绝不同步等待。
+- `parentThreadId` 为空表示内部 root one-shot 的 completion ticket：同样与源 prompt 原子接受，但不投递父消息。
+- `sourceCommandSequence` 与 `afterVersion` 记录源命令身份与接受完成后的 Thread version（不是事务前版本），`afterVersion` 之后的首次 Idle 才允许匹配。
+- `matchedIdleVersion` 与 `resultHeadEntryId` 同空或同非空，只写一次且必须大于 `afterVersion`；`deliveryCommandSequence` 非空必须已匹配。
+
+结果固定在源命令 `applied_turn_start_entry_id` 到 `resultHeadEntryId` 的历史范围：子树后续继续推进也绝不改写旧回执；源命令在执行前就被取消时单独投影为取消，不会误拾取更早的回答；同一 turn 的多条输入可以共享同一个结果。只读入口是 `findJoin`（固定 join 事实）、`projectJoinReceipt`（按 `invocationId` 投影回执）与 `findAncestorChain`（head-to-root 祖先链）。
+
+首次「非空闲 -> Idle」的版本推进、join 匹配、父 `CUSTOM_MESSAGE` 入队与父重新标为非空闲在同一事务内完成，不存在假 Idle 窗口；多个 join 可以同时命中首个 Idle。完成消息是 `SystemReminder` 形态的 USER 消息（`<system-reminder>` 包裹 `<subagent_result thread_id agent state>`，内含本次任务原文 `<task>` 与 `<result>` / `<error>` / `<partial_result>`），渲染是 `runtime.join` 的纯函数，绝不读取子线程的当前 head。
+
+显式停止的父不会被自动唤醒：先保存已匹配的 receipt，父真实接受新输入时再在同一事务原子交付旧结果，重放不产生第二次交付。停止传播覆盖全部执行后代，迟到的模型/工具结果由既有 ownership fence 拒绝。`maxTurns` 是软预算，按源命令实际 turn 计数，在已确定继续运行的边界用 durable reminder 进度（`reminderTurn`）入队提醒，不为已经 Idle 的已完成子线程人为开启新 turn。
+
+推进完全由 durable Work 驱动：PG NOTIFY 只作唤醒提示，通知丢失或进程重启后由 dispatcher 的周期恢复重新 claim（见 [Harness Infra](harness-infra.md)）。并发额度、`maxDepth` 与 `maxTurns` 配置属于 [Harness Builtin](harness-builtin.md) 与 [Platform](platform.md)。
 
 ## 端口、数据与配置
 
@@ -215,24 +245,25 @@ Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会�
 | `runtime.cache` | `PromptCacheAffinityKeyFactory` 与 `PromptCacheRequestFinalizer` | 纯内存派生稳定亲和键，只在请求终结阶段生成缓存控制指令 |
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |
 | `runtime.entry` | `BranchSettings`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；环境与目录不进入分支历史 |
-| `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验、`SubagentContext` 与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
+| `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
 | `runtime.invocation.codec` | Model/Tool 持久化列的严格确定性 JSON 编解码 | 未知、缺失、重复或尾随字段直接拒绝 |
 | `runtime.invocation.model` | `ModelInvocation` 状态机、`ModelRequestSpec`、重试审计与 `ModelRequestMaterializer` | 调度租约归 `runtime.work`；请求使用供应商中立模型 |
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与 `ToolEffectBatch` | 不自行执行工具，物理执行委托 `ToolGateway` |
+| `runtime.join` | `ThreadJoinRequest`、`ThreadJoin`、`ThreadJoinReceipt`、`ThreadJoinOutcome`、`ThreadJoinProjector`、`ThreadJoinCompletion`、`ThreadJoinCompletionRenderer` | join 凭据与回执投影的纯函数；匹配、交付与递归 Idle 收敛由 `runtime` 与 `runtime.processor` 在事务内驱动 |
 | `runtime.model` | `ModelDescriptor`、`ModelVariant`、`ModelPricing`、`ModelUsage`、`ModelCost`、`ModelInvocationError` | 纯领域值对象；用量非负、成本总额等于分项之和 |
 | `runtime.model.cache` | `PromptCachePolicy`、`PromptCacheCapability`、`PromptCacheMode`、`PromptCacheRetention`、`ProviderCacheControl` | 静态策略与指令契约，不维护缓存存储或命中事实 |
 | `runtime.model.codec` | `ModelDescriptor` 与 `ModelVariant` 的权威 JSON 编解码 | 拒绝未知字段，不允许数据库 resource id 或密钥进入该边界 |
 | `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体 SDK 解耦；SDK 类型只在 Platform 适配层出现 |
 | `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码 | 只依赖 Jackson 与纯 model 类型 |
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
-| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`RealtimeEventSink`、`HarnessThreadChangeSource` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
+| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
 | `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码 | 有损 live overlay，不持久化、不承担恢复或审计 |
 | `runtime.resource` | `ResourceStore` 内容寻址资源存取端口 | 基础设施能力，不参与 Agent Loop 正确性判定 |
 | `runtime.retry` | `InvocationRetryPolicy`、`InvocationRetryPolicyProvider`、退避策略 | 只计算重试可行性与延迟，不读时钟、不写状态 |
 | `runtime.session` | `Session` 实体与不可变消息内容块（Text、Image、Audio、Video、Resource、Thinking、ToolCall 等） | 与 `harness_session` 对齐；Entry 节点与 payload 在 `runtime.history` |
 | `runtime.store` | `HarnessStore` 根与 `HarnessStore.Transaction` 原语、`HarnessStoreTime`、`UuidOrder` | 领域模型与物理持久化的唯一边界，守卫锁序与毫秒精度 |
-| `runtime.thread` | `ThreadState`、`ThreadContextClassifier`、`ThreadContext`、`ThreadContextProbe`、`ResolvedRequestValidator`、`ProviderMessageProjector` | 只保存 Thread 自身状态；环境、open turn 与 lease 由 Entry/Invocation/Work 投影 |
+| `runtime.thread` | `ThreadState`、`ThreadLifecycleStatus`、`ThreadRuntimeStatus`、`ThreadContextClassifier`、`ThreadContext`、`ThreadContextProbe`、`SystemReminder`、`ResolvedRequestValidator`、`ProviderMessageProjector` | 只保存 Thread 自身状态；环境、open turn 与 lease 由 Entry/Invocation/Work 投影 |
 | `runtime.thread.command` | 命令邮箱实体、`ThreadCommandState` 派生与 `CommandHarvestReducer` | 只做 typed 字段归约；持久化与 CAS 由调度路径负责 |
 | `runtime.tool` | `ToolInvocationError` 与严格 JSON 编解码 | 只含错误值类型，不定义执行状态机 |
 | `runtime.work` | `Work`、`ClaimedWork`、`WorkTarget`、`WorkTargetType` 与环境亲和性标记 | 独占 lease 与所有权围栏；不存放业务状态、attempt 或审批 |
@@ -242,7 +273,8 @@ Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会�
 按维护任务分组：每组先给包目录，再给少数代表文件。
 
 - 同步入口与事务边界：[`runtime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/) 与 [`runtime.store`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/) 包，代表文件 [`HarnessRuntime.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java)、[`HarnessStore.java`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java)。测试入口 [`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java)、[`HarnessRuntimeAcceptInitialTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java)、[`HarnessRuntimeStopReplayTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopReplayTest.java)、[`HarnessStoreContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStoreContractTest.java)：依赖方向、命令批次形状与创建重放、停止幂等，以及同一份 Store 契约在内存与 PostgreSQL 上的并行验证。
-- Entry Tree、Thread 与命令邮箱：[`runtime.history`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/)、[`runtime.thread`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/)、[`runtime.thread.command`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/command/) 包；测试 [`EntryPathTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPathTest.java)、[`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`CommandHarvestReducerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/command/CommandHarvestReducerTest.java) 覆盖路径不变量、turn 文法、上下文分类与 typed 字段归约。
+- Entry Tree、Thread 与命令邮箱：[`runtime.history`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/)、[`runtime.thread`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/)、[`runtime.thread.command`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/command/) 包；测试 [`EntryPathTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPathTest.java)、[`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`ThreadRuntimeStatusTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadRuntimeStatusTest.java)、[`CommandHarvestReducerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/command/CommandHarvestReducerTest.java) 覆盖路径不变量、turn 文法、上下文分类、递归生命周期投影与 typed 字段归约。
+- 子智能体委派与 Join：[`runtime.join`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/) 包；测试 [`HarnessRuntimeJoinAcceptanceTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeJoinAcceptanceTest.java) 覆盖原子接受与回滚、幂等重放、深度/并发额度与边界拒绝，[`ThreadProcessorIdleJoinDeliveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorIdleJoinDeliveryTest.java) 与 [`ThreadProcessorSoftBudgetTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorSoftBudgetTest.java) 覆盖首次 Idle 匹配、父停止挂起、递归 Idle 传播与软预算提醒，[`ThreadJoinProjectorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinProjectorTest.java)、[`ThreadJoinCompletionRendererTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinCompletionRendererTest.java)、[`ThreadJoinTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinTest.java) 锁定回执投影、完成消息转义与 join 不变量的纯函数语义；递归停止由 [`HarnessRuntimeStopRecursivePropagationTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopRecursivePropagationTest.java) 覆盖。
 - Invocation、Work 与端口：[`runtime.invocation.model`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/)、[`runtime.invocation.tool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/)、[`runtime.work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/)、[`runtime.port`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/)、[`runtime.admission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/) 包；测试 [`ModelInvocationTransitionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationTransitionTest.java)、[`ToolInvocationTransitionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationTransitionTest.java)、[`WorkTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTest.java)、[`ConcurrencyAdmissionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmissionTest.java) 覆盖状态机跃迁、调度纯函数、环境亲和性不可变性与槽位归还。
 - Processor 与执行：[`runtime.processor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/) 包；测试集中在 [`processor` 测试目录](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/)，其中 [`ModelProcessorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorTest.java)、[`ThreadProcessorPlanningTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorPlanningTest.java)、[`ToolProcessorRecoveryTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorRecoveryTest.java)、[`WorkHeartbeatTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeatTest.java) 覆盖两阶段激活、checkpoint 聚合与终态吸收、投机规划与批次物化、UNKNOWN 恢复与租约续期。
 - 压缩、权限、重试与缓存：[`runtime.compaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/)、[`runtime.permission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/)、[`runtime.retry`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/)、[`runtime.cache`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/) 包；测试 [`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)、[`CompactionResultEvaluatorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluatorTest.java)、[`PermissionEvaluatorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluatorTest.java)、[`InvocationRetryPolicyTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicyTest.java) 锁定阈值公式与切分、失败分类、规则求值与退避判定。
