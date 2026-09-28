@@ -484,6 +484,28 @@ export async function runComposerMatrix(ui) {
           const switchPanel = await openFixtureThreadPanel(page, fixture)
           const switchSearch = switchPanel.getByRole('searchbox')
           await switchSearch.fill(siblingThreadId)
+          // 面板可见后 option 列表仍可能处于加载中：此时 Enter 会被 activeId 为空的 selectActive
+          // 忽略而面板不关闭。先等待过滤收敛到唯一 sibling 且它成为 active，再断言 Enter 的真实语义。
+          await page.waitForFunction(
+            ({ panelLabel, expectedId }) => {
+              const region = [...document.querySelectorAll('[role="region"]')]
+                .find((element) => element.getAttribute('aria-label') === panelLabel)
+              const options = region?.querySelectorAll('[role="option"]') ?? []
+              return options.length === 1 && options[0]?.textContent?.includes(expectedId)
+            },
+            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
+            { timeout: 10_000 },
+          )
+          await page.waitForFunction(
+            ({ panelLabel, expectedId }) => {
+              const region = [...document.querySelectorAll('[role="region"]')]
+                .find((element) => element.getAttribute('aria-label') === panelLabel)
+              const active = region?.querySelector('[role="option"][aria-selected="true"]')
+              return active?.textContent?.includes(expectedId)
+            },
+            { panelLabel: '选择 Thread', expectedId: siblingThreadId },
+            { timeout: 10_000 },
+          )
           await switchSearch.press('Enter')
           await switchPanel.waitFor({ state: 'hidden', timeout: 10_000 })
           await page.getByText(`selection original descendant ${stamp}`, { exact: true })

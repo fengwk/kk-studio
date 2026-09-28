@@ -447,11 +447,23 @@ final class HarnessRuntimeTestSupport {
           + "{\"question\":\"which tracks?\",\"multiple\":true,\"options\":[{\"label\":\"a\"},{\"label\":\"b\"},{\"label\":\"c\"}]}"
           + "]}";
 
+  /** {@code ask_user} TOOL baseline：默认根 Thread、IDLE 状态与标准冻结问卷。 */
+  static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
+    return seedAskUserBaseline(store, null, ThreadLifecycleStatus.IDLE, ASK_USER_QUESTIONNAIRE);
+  }
+
   /**
    * {@code ask_user} TOOL baseline：ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT(ask_user
    * call)， 挂一个 SUCCEEDED Model 与 READY ToolInvocation；binding 来自内置 contributor（provenance 是身份判据）。
+   *
+   * <p>可指定父 Thread、初始生命周期状态与冻结问卷原文，用于两类边界：子树中的子 Thread 等待人工输入（祖先递归状态断言），以及 模型/持久化给出不合规 ask_user
+   * 参数导致冻结问卷损坏时的 fail-closed 断言。
    */
-  static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
+  static ToolBaseline seedAskUserBaseline(
+      InMemoryHarnessStore store,
+      UUID parentThreadId,
+      ThreadLifecycleStatus status,
+      String argumentsJson) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -461,13 +473,25 @@ final class HarnessRuntimeTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
+          ThreadState thread =
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  parentThreadId,
+                  turnStartEntryId,
+                  CREATION_REQUEST_HASH,
+                  "main",
+                  false,
+                  status,
+                  1,
+                  0,
+                  T0,
+                  T0);
           tx.insertThread(thread);
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           ModelRequestSpec requestSpec = askUserModelRequest();
-          ProviderResponse response =
-              responseWithToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE);
+          ProviderResponse response = responseWithToolCall("call-1", "ask_user", argumentsJson);
           UUID assistantEntryId = tx.nextId();
           tx.insertEntry(
               mappedAssistantEntry(
@@ -490,7 +514,7 @@ final class HarnessRuntimeTestSupport {
                       modelId,
                       assistantEntryId,
                       0,
-                      new ToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE),
+                      new ToolCall("call-1", "ask_user", argumentsJson),
                       askUserBinding(),
                       ToolInvocationStatus.READY,
                       0,
@@ -525,7 +549,8 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  private static ModelRequestSpec askUserModelRequest() {
+  /** {@code ask_user} 冻结的 Model 请求：toolBindings 只含内置 {@code ask_user}（问卷由 response 携带）。 */
+  static ModelRequestSpec askUserModelRequest() {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -746,6 +771,38 @@ final class HarnessRuntimeTestSupport {
           UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
           tx.insertThread(thread(id, sessionId, headEntryId, true));
           return id;
+        });
+  }
+
+  /**
+   * 只充当归属与递归状态坐标的父 Thread：自带 Session（与子线程的 Session 不同，覆盖祖先链多 Session 锁序）、head 停在 ROOT，
+   * 生命周期状态为等待子线程。
+   *
+   * <p>用于断言人工输入的接受只推进目标 Thread，祖先链的递归投影与 Work 不被改写。
+   */
+  static UUID seedWaitingChildrenParent(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertThread(
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  null,
+                  rootEntryId,
+                  CREATION_REQUEST_HASH,
+                  "parent",
+                  false,
+                  ThreadLifecycleStatus.WAITING_CHILDREN,
+                  1,
+                  0,
+                  T0,
+                  T0));
+          return threadId;
         });
   }
 

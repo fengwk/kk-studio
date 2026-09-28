@@ -531,6 +531,8 @@ const CORE_STATE_ENUMS = [
     enumName: 'ThreadRuntimeStatus',
     constants: [
       'IDLE',
+      'QUEUED',
+      'WAITING_CHILDREN',
       'CONTINUATION_DUE',
       'MODEL_READY',
       'MODEL_DISPATCHING',
@@ -593,7 +595,7 @@ const CORE_STATE_ENUMS = [
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/TurnStartReason.java',
     enumName: 'TurnStartReason',
-    constants: ['INPUT', 'CONTINUATION', 'COMPACTION'],
+    constants: ['INPUT', 'CONTINUATION', 'COMPACTION', 'STOP'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/ToolResultStatus.java',
@@ -729,11 +731,6 @@ const CORE_STATE_ENUMS = [
     path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliHubClient.java',
     enumName: 'ExecutionStatus',
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
-  },
-  {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/DatabaseSubagentRunner.java',
-    enumName: 'RunState',
-    constants: ['COMPLETED', 'ERROR', 'CANCELLED'],
   },
   {
     path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',

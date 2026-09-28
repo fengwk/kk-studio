@@ -197,10 +197,11 @@ function assertBoxesDoNotOverlap(left, right, label) {
   assert(!overlaps, `${label} bounding boxes overlap`)
 }
 
-async function assertLeadingCreateCard(page, action, label) {
+async function assertLeadingCreateCard(page, action, label, gridSelector = '.cards-grid') {
   // Resource creation belongs to the first card in the content grid, not the subbar.
-  const layout = await action.evaluate((element) => {
-    const grid = element.closest('.cards-grid')
+  // 内容网格的容器类按页面不同（资源页 .cards-grid、Canvas 库 .project-grid），因此由调用方给出真实容器。
+  const layout = await action.evaluate((element, selector) => {
+    const grid = element.closest(selector)
     const bounds = element.getBoundingClientRect()
     const container = grid?.getBoundingClientRect()
     return {
@@ -211,7 +212,7 @@ async function assertLeadingCreateCard(page, action, label) {
         && bounds.left >= container.left - 1
         && bounds.right <= container.right + 1,
     }
-  })
+  }, gridSelector)
   assert(layout.first && layout.card && layout.visible && layout.contained,
     `${label} must be the visible leading create card: ${JSON.stringify(layout)}`)
 }
@@ -579,13 +580,24 @@ async function main(argv) {
   await run('ui.canvas.page_loads', 'Canvas 库与编辑器可打开', async (caseArt) => {
     await goto('/canvas')
     await expectVisibleText(page, '你的画布')
-    // Library 路由保留全局顶栏。
+    // Library 路由保留全局顶栏与 library view 语义容器。
+    assert(
+      await page.locator('#libraryView').isVisible(),
+      'canvas library view must be visible',
+    )
+    assert(
+      await page.locator('.library-view').isVisible(),
+      'canvas library-view class must be visible',
+    )
     assert(
       await page.locator('.topbar').isVisible(),
       'canvas library must keep the global topbar',
     )
-    const createButton = page.getByRole('button', { name: '创建新画布' })
+    const createButton = page.getByRole('button', {
+      name: /^(Create a new canvas|Create new canvas|创建新画布)$/,
+    })
     await createButton.waitFor({ state: 'visible' })
+    await assertLeadingCreateCard(page, createButton, 'Create Canvas', '.project-grid')
     await shot(caseArt, 'canvas-library')
     const existingCanvas = page.locator('.project-card:not(.create-card)').first()
     if (await existingCanvas.count() > 0) {
@@ -599,7 +611,12 @@ async function main(argv) {
       /^\/canvas\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(new URL(page.url()).pathname),
       `canvas editor pathname invalid: ${new URL(page.url()).pathname}`,
     )
-    // 编辑器沉浸：无全局顶栏、挂 canvas-immersive class，Chat 面板默认收起。
+
+    // 编辑器沉浸：无全局顶栏、挂 canvas-immersive class、返回键、保存状态与版本号。
+    assert(
+      await page.locator('#editorView').isVisible(),
+      'canvas editor view must be visible',
+    )
     assert(
       await page.locator('.topbar').count() === 0,
       'canvas editor must not render the global topbar',
@@ -608,107 +625,84 @@ async function main(argv) {
       await page.locator('.app-frame.canvas-immersive').count() === 1,
       'canvas editor must carry the canvas-immersive root class',
     )
+    const backButton = page.locator('.canvas-back-button.sidebar-icon-btn')
     assert(
-      await page.locator('#agentPanel').count() === 0,
-      'Chat panel must be collapsed by default',
+      await backButton.count() === 1,
+      'canvas back control must be rendered exactly once',
     )
     assert(
-      await page.locator('.chat-shell.thread-panel').count() === 0,
-      'collapsed Canvas must not render a thread panel',
+      await backButton.getAttribute('href') === '/canvas',
+      'canvas back control href must point to /canvas',
     )
     assert(
-      await page.locator('.canvas-back-button.sidebar-icon-btn').count() === 1,
-      'canvas back control must reuse the Chat workspace icon-button grammar',
+      await page.locator('#saveState').isVisible(),
+      'canvas editor save state indicator must be visible',
     )
+    const versionText = (await page.locator('.version-pill').textContent())?.trim() ?? ''
+    assert(
+      /^v\d+$/.test(versionText),
+      `canvas editor version pill invalid: ${versionText}`,
+    )
+
+    // 缩放控制真实交互：初始 readout 处于 25..200 整数，Zoom in 严格递增，Zoom out 严格递减，Fit all 有效，Reset 恢复 100%。
     const resetZoom = page.getByRole('button', {
       name: /^(Reset zoom to 100%|重置缩放为 100%)$/,
     })
     await resetZoom.waitFor({ state: 'visible' })
+    const initialZoomText = (await resetZoom.textContent())?.trim() ?? ''
+    const initialZoom = Number.parseInt(initialZoomText, 10)
+    assert(
+      Number.isInteger(initialZoom) && initialZoom >= 25 && initialZoom <= 200,
+      `canvas initial zoom is invalid: ${initialZoomText}`,
+    )
+
+    const zoomIn = page.getByRole('button', {
+      name: /^(Zoom in|放大)$/,
+    })
+    await zoomIn.click()
+    await page.waitForFunction((prev) => {
+      const button = document.querySelector(
+        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
+      )
+      const current = Number.parseInt(button?.textContent?.trim() ?? '', 10)
+      return Number.isInteger(current) && current > prev
+    }, initialZoom)
+    const zoomedInText = (await resetZoom.textContent())?.trim() ?? ''
+    const zoomedInZoom = Number.parseInt(zoomedInText, 10)
+    assert(
+      zoomedInZoom > initialZoom,
+      `zoom in failed to strictly increase readout: initial=${initialZoom}, after=${zoomedInZoom}`,
+    )
+
+    const zoomOut = page.getByRole('button', {
+      name: /^(Zoom out|缩小)$/,
+    })
+    await zoomOut.click()
+    await page.waitForFunction((prev) => {
+      const button = document.querySelector(
+        '[aria-label="Reset zoom to 100%"], [aria-label="重置缩放为 100%"]',
+      )
+      const current = Number.parseInt(button?.textContent?.trim() ?? '', 10)
+      return Number.isInteger(current) && current < prev
+    }, zoomedInZoom)
+    const zoomedOutText = (await resetZoom.textContent())?.trim() ?? ''
+    const zoomedOutZoom = Number.parseInt(zoomedOutText, 10)
+    assert(
+      zoomedOutZoom < zoomedInZoom,
+      `zoom out failed to strictly decrease readout: before=${zoomedInZoom}, after=${zoomedOutZoom}`,
+    )
+
+    const fitAll = page.getByRole('button', {
+      name: /^(Fit all content|适应全部内容)$/,
+    })
+    await fitAll.click()
     const fittedZoomText = (await resetZoom.textContent())?.trim() ?? ''
     const fittedZoom = Number.parseInt(fittedZoomText, 10)
     assert(
       Number.isInteger(fittedZoom) && fittedZoom >= 25 && fittedZoom <= 200,
-      `canvas fitted zoom is invalid: ${await resetZoom.textContent()}`,
+      `canvas fitted zoom is invalid: ${fittedZoomText}`,
     )
-    // header「Chat / 对话」toggle 展开/收起右侧 aside。
-    const threadToggle = page.getByRole('button', {
-      name: /^(Toggle the Chat panel|切换对话面板)$/,
-    })
-    await threadToggle.click()
-    await page.locator('#agentPanel').waitFor({ state: 'visible', timeout: 10_000 })
-    const canvasComposer = page.locator('#agentPanel').getByLabel('给 AI 发送消息')
-    await canvasComposer.waitFor({ state: 'visible', timeout: 15_000 })
-    await page.locator('#agentPanel').getByRole('button', { name: '权限模式' })
-      .waitFor({ state: 'visible', timeout: 15_000 })
-    await page.locator('#agentPanel').getByRole('button', { name: 'Model 与 Variant' })
-      .waitFor({ state: 'visible', timeout: 15_000 })
-    const canvasEditorBox = await canvasComposer.boundingBox()
-    const canvasControlsBox = await page.locator('#agentPanel .thread-dock-controls').boundingBox()
-    assert(
-      canvasEditorBox
-      && canvasControlsBox
-      && canvasEditorBox.y + canvasEditorBox.height <= canvasControlsBox.y + 2,
-      `Canvas blank Composer is not rendered as input + control rows: ${JSON.stringify({
-        canvasEditorBox,
-        canvasControlsBox,
-      })}`,
-    )
-    await assertReadOnlyZeroFooter(
-      page.locator('#agentPanel'),
-      'Canvas blank Footer',
-    )
-    assert(
-      (await threadToggle.getAttribute('aria-expanded')) === 'true',
-      'thread toggle must report aria-expanded=true when the panel is open',
-    )
-    assert(
-      (await resetZoom.textContent())?.trim() === fittedZoomText,
-      'opening the Agent panel must not change canvas zoom',
-    )
-    const panel = page.locator('#agentPanel')
-    const initialPanelBox = await panel.boundingBox()
-    assert(
-      initialPanelBox?.width >= 440,
-      `Chat panel default width must be at least 440px: ${initialPanelBox?.width}`,
-    )
-    const resizeHandle = page.getByRole('separator', {
-      name: /^(Resize the Chat panel|调整对话面板宽度)$/,
-    })
-    const resizeBox = await resizeHandle.boundingBox()
-    assert(resizeBox, 'Chat panel resize handle is missing')
-    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2)
-    await page.mouse.down()
-    await page.mouse.move(resizeBox.x - 72, resizeBox.y + resizeBox.height / 2, { steps: 4 })
-    await page.mouse.up()
-    const resizedPanelBox = await panel.boundingBox()
-    assert(
-      resizedPanelBox?.width >= (initialPanelBox?.width ?? 0) + 60,
-      `Chat panel did not grow from its left edge: ${JSON.stringify({ initialPanelBox, resizedPanelBox })}`,
-    )
-    assert(
-      (await resetZoom.textContent())?.trim() === fittedZoomText,
-      'resizing the Chat panel must not change canvas zoom',
-    )
-    await shot(caseArt, 'canvas-agent-panel')
-    await threadToggle.click()
-    await page.locator('#agentPanel').waitFor({ state: 'detached', timeout: 10_000 })
-    assert(
-      (await resetZoom.textContent())?.trim() === fittedZoomText,
-      'closing the Chat panel must restore the same canvas zoom',
-    )
-    assert(
-      await page.locator('.chat-shell.thread-panel').count() === 0,
-      'closing Chat must not reveal a thread panel',
-    )
-    // 左侧居中 add launcher 仍可打开/关闭菜单。
-    const addLauncher = page.getByRole('button', {
-      name: /^(Add resource or Function|添加资源或 Function)$/,
-    })
-    await addLauncher.click()
-    await page.getByRole('menu').waitFor({ state: 'visible', timeout: 10_000 })
-    await shot(caseArt, 'canvas-add-menu')
-    await page.keyboard.press('Escape')
-    await page.getByRole('menu').waitFor({ state: 'hidden', timeout: 10_000 })
+
     await resetZoom.click()
     await page.waitForFunction(() => {
       const button = document.querySelector(
@@ -716,6 +710,105 @@ async function main(argv) {
       )
       return button?.textContent?.trim() === '100%'
     })
+    assert(
+      (await resetZoom.textContent())?.trim() === '100%',
+      'reset zoom button text must be 100%',
+    )
+    await shot(caseArt, 'canvas-controls')
+
+    // Add 菜单行为：点击展开并包含 6 个候选 action，按 Escape 关闭。
+    const addLauncher = page.getByRole('button', {
+      name: /^(Add resource or Function|添加资源或 Function)$/,
+    })
+    await addLauncher.click()
+    const addMenu = page.getByRole('menu')
+    await addMenu.waitFor({ state: 'visible', timeout: 10_000 })
+    const menuItems = addMenu.getByRole('menuitem')
+    const actionList = await menuItems.evaluateAll((items) =>
+      items.map((item) => item.getAttribute('data-add-action')),
+    )
+    const expectedActions = [
+      'image-resource',
+      'video-resource',
+      'audio-resource',
+      'text-resource',
+      'image-function',
+      'video-function',
+    ]
+    assert(
+      JSON.stringify(actionList) === JSON.stringify(expectedActions),
+      `Add menu actions mismatch: expected ${JSON.stringify(expectedActions)}, got ${JSON.stringify(actionList)}`,
+    )
+    await shot(caseArt, 'canvas-add-menu')
+    await page.keyboard.press('Escape')
+    await addMenu.waitFor({ state: 'hidden', timeout: 10_000 })
+
+    // 确定性节点交互流：打开 Add 菜单 -> 点击 text-resource -> 打开非模态文本编辑浮层 -> 关闭浮层。
+    await addLauncher.click()
+    await addMenu.waitFor({ state: 'visible', timeout: 10_000 })
+    const textResourceItem = addMenu.locator('[data-add-action="text-resource"]')
+    await textResourceItem.click()
+    const textEditor = page.locator('.canvas-text-editor.create')
+    await textEditor.waitFor({ state: 'visible', timeout: 10_000 })
+    const nameInput = textEditor.getByRole('textbox', {
+      name: /^(Name|名称)$/,
+    })
+    const prefilledName = await nameInput.inputValue()
+    assert(
+      typeof prefilledName === 'string' && prefilledName.trim().length > 0,
+      `text editor prefilled name is empty: "${prefilledName}"`,
+    )
+    const closeEditorButton = textEditor.getByRole('button', {
+      name: /^(Close text editor|关闭文本编辑)$/,
+    })
+    await closeEditorButton.click()
+    await textEditor.waitFor({ state: 'detached', timeout: 10_000 })
+    assert(
+      await page.locator('.canvas-text-editor').count() === 0,
+      'canvas text editor overlay must be detached after closing',
+    )
+    assert(
+      await page.locator('#canvasStage').isVisible(),
+      'canvas stage must remain visible after closing text editor',
+    )
+
+    // 显式断言已移除的 Canvas Agent / Chat 面板与组件彻底不存在。
+    assert(
+      await page.locator('#agentPanel').count() === 0,
+      'removed #agentPanel must not exist',
+    )
+    assert(
+      await page.locator('.canvas-agent-dock').count() === 0,
+      'removed .canvas-agent-dock must not exist',
+    )
+    assert(
+      await page.locator('[data-testid="agent-dock"]').count() === 0,
+      'removed agent-dock testid must not exist',
+    )
+    assert(
+      await page.locator('.thread-panel').count() === 0,
+      'removed .thread-panel must not exist in canvas',
+    )
+    assert(
+      await page.locator('.chat-shell.thread-panel').count() === 0,
+      'removed .chat-shell.thread-panel must not exist in canvas',
+    )
+    assert(
+      await page.getByRole('button', {
+        name: /^(Toggle the Chat panel|切换对话面板)$/,
+      }).count() === 0,
+      'removed Chat panel toggle button must not exist',
+    )
+    assert(
+      await page.locator('#editorView').getByLabel('给 AI 发送消息').count() === 0,
+      'canvas editor must not contain chat composer',
+    )
+    assert(
+      await page.locator('#editorView .thread-dock').count() === 0,
+      'canvas editor must not contain thread-dock',
+    )
+
+    // 页面重载与历史导航回退/前进验证。
     await page.reload({ waitUntil: 'networkidle' })
     await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
     await page.waitForFunction(() => {
