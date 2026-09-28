@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
@@ -444,14 +445,14 @@ class HarnessRuntimeJoinAcceptanceTest {
                 join1Third,
                 AcceptancePreflight.IDENTITY));
 
-    // 校验整树配额超限（maxConcurrentThreads = 1，而当前活跃线程已有 parent + child2 = 2）
-    ThreadJoinRequest lowTreeQuota =
+    // 校验全局并发额度超限（maxConcurrentThreads = 1，而当前全局活跃子线程已有 child2 = 1）
+    ThreadJoinRequest lowGlobalQuota =
         new ThreadJoinRequest(TestIds.id(82), parentId, parentHead, HASH, "assistant", 3, 5, 5, 1);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             runtime.acceptCommandsAndJoin(
-                session(83, 84, parentId), lowTreeQuota, AcceptancePreflight.IDENTITY));
+                session(83, 84, parentId), lowGlobalQuota, AcceptancePreflight.IDENTITY));
 
     // 校验深度配额超限（maxDepth = 1，而新子线程深度为 2）
     ThreadJoinRequest lowDepthQuota =
@@ -461,6 +462,88 @@ class HarnessRuntimeJoinAcceptanceTest {
         () ->
             runtime.acceptCommandsAndJoin(
                 session(86, 87, parentId), lowDepthQuota, AcceptancePreflight.IDENTITY));
+  }
+
+  @Test
+  void globalSubagentConcurrencyCapSpansRootTreesAndReleasesOnIdle() {
+    // 测试意图：task 的 maxConcurrentThreads 是全局上限——统计所有 root 下的活跃执行子 Thread（不含 root 自身）。
+    // 另一个 root 下的活跃子线程同样占用额度（旧的按树统计会错误放行）；达到上限后新子线程被拒绝且无残留，
+    // exact replay 不重复占额度，忙子 resume 不新增额度仍允许，子线程回到 IDLE 后额度即释放。
+    AcceptedCommands rootA =
+        runtime.acceptCommands(session(2200, 2201, null), AcceptancePreflight.IDENTITY);
+    AcceptedCommands rootB =
+        runtime.acceptCommands(session(2210, 2211, null), AcceptancePreflight.IDENTITY);
+    UUID parentA = rootA.thread().id();
+    UUID parentB = rootB.thread().id();
+    UUID headA = rootA.thread().headEntryId();
+    UUID headB = rootB.thread().headEntryId();
+
+    // cap = 2：A 下的 childA1 与 B 下的 childB1 各占 1 个额度
+    ThreadJoinRequest a1 =
+        new ThreadJoinRequest(TestIds.id(2202), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+    AcceptedCommands childA1 =
+        runtime.acceptCommandsAndJoin(
+            session(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
+    ThreadJoinRequest b1 =
+        new ThreadJoinRequest(TestIds.id(2212), parentB, headB, HASH, "assistant", 3, 3, 5, 2);
+    AcceptedCommands childB1 =
+        runtime.acceptCommandsAndJoin(
+            session(2213, 2214, parentB), b1, AcceptancePreflight.IDENTITY);
+    assertEquals(2, activeSubagentThreads());
+
+    // 全局额度已满：A 树自己只有 1 个活跃子线程，但 B 树的 childB1 占用全局额度 -> 拒绝（修复点）
+    ThreadJoinRequest a2 =
+        new ThreadJoinRequest(TestIds.id(2205), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(2206, 2207, parentA), a2, AcceptancePreflight.IDENTITY));
+    assertTrue(store.transaction(tx -> tx.findThread(TestIds.id(2207))).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findJoin(TestIds.id(2205))).isEmpty());
+
+    // exact replay 命中既有 join，不重复占额度
+    AcceptedCommands replayed =
+        runtime.acceptCommandsAndJoin(
+            session(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
+    assertTrue(replayed.replayed());
+    assertEquals(2, activeSubagentThreads());
+
+    // 忙子 resume 不新增额度，即使全局额度已满仍允许
+    ThreadState childB1State =
+        store.transaction(tx -> tx.findThread(childB1.thread().id()).orElseThrow());
+    ThreadJoinRequest b1Resume =
+        new ThreadJoinRequest(TestIds.id(2215), parentB, headB, HASH, "assistant", 3, 3, 5, 2);
+    AcceptedCommands resumed =
+        runtime.acceptCommandsAndJoin(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(
+                    childB1.thread().id(),
+                    childB1State.headEntryId(),
+                    childB1State.nextCommandSequence()),
+                List.of(userMessageCommand(TestIds.id(2216), "resume busy child"))),
+            b1Resume,
+            AcceptancePreflight.IDENTITY);
+    assertFalse(resumed.replayed());
+    assertEquals(2, activeSubagentThreads());
+
+    // childA1 回到 IDLE：额度释放，新子线程可再次占位
+    store.transaction(
+        tx -> {
+          ThreadState child = tx.lockThread(childA1.thread().id()).orElseThrow();
+          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T5));
+          return null;
+        });
+    assertEquals(1, activeSubagentThreads());
+    ThreadJoinRequest a3 =
+        new ThreadJoinRequest(TestIds.id(2208), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
+    runtime.acceptCommandsAndJoin(session(2209, 2220, parentA), a3, AcceptancePreflight.IDENTITY);
+    assertEquals(2, activeSubagentThreads());
+  }
+
+  /** 全局活跃执行子 Thread 数（跨 root、不含 root 自身）。 */
+  private int activeSubagentThreads() {
+    return store.transaction(tx -> tx.countActiveSubagentThreads());
   }
 
   @Test

@@ -104,6 +104,11 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
+          // 携带 frozen task 策略的子 Session 准入必须先取全局 Join 准入锁（即使本次额度 unlimited），
+          // 否则并发的有限额度请求会在“判定额度 + 创建”之间竞态。
+          if (target.parentThreadId() != null) {
+            tx.lockJoinAdmission();
+          }
           // 子身份必须在树锁内复读：并发重放可能在等待锁期间才看到第一次接受。
           LockedAncestors lockedAncestors =
               target.parentThreadId() != null
@@ -280,6 +285,10 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
+          // 携带 frozen task 策略的 resume 准入同样必须先取全局 Join 准入锁（即使额度 unlimited）。
+          if (join != null && join.parentThreadId() != null) {
+            tx.lockJoinAdmission();
+          }
           boolean genuineUserInput = isGenuineUserInput(commands);
           LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
           List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
@@ -506,13 +515,13 @@ final class AcceptCommandsControl {
     if (depth > join.maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    UUID root = chain.isEmpty() ? childId : chain.get(chain.size() - 1);
     boolean newActiveThread =
         creating || tx.findThread(childId).map(t -> t.status().isIdle()).orElse(true);
+    // 全局活跃子 Thread 上限（跨所有 root，不含 root 自身）：maxConcurrentThreads 来自冻结的 task 全局设置。
     if (parentId != null
         && newActiveThread
-        && tx.countActiveThreadsInTree(root) >= join.maxConcurrentThreads()) {
-      throw new IllegalArgumentException("tree join quota exceeded");
+        && tx.countActiveSubagentThreads() >= join.maxConcurrentThreads()) {
+      throw new IllegalArgumentException("subagent concurrency quota exceeded");
     }
   }
 

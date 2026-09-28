@@ -259,6 +259,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     private final Set<UUID> lockedTrees = new HashSet<>();
     private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
     private final Thread owner = Thread.currentThread();
+    private boolean joinAdmissionLocked;
     private LockRank highestLockRank;
     private UUID highestThreadId;
     private WorkTarget highestWorkTarget;
@@ -832,35 +833,29 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public int countActiveThreadsInTree(UUID rootThreadId) {
+    public void lockJoinAdmission() {
       checkOpen();
-      Objects.requireNonNull(rootThreadId, "rootThreadId");
-      if (!state.threads.containsKey(rootThreadId)) {
-        return 0;
+      if (joinAdmissionLocked) {
+        return;
       }
-      Set<UUID> treeThreadIds = new HashSet<>();
-      List<UUID> frontier = new ArrayList<>();
-      frontier.add(rootThreadId);
-      treeThreadIds.add(rootThreadId);
-      int activeCount = 0;
-      while (!frontier.isEmpty()) {
-        List<UUID> nextFrontier = new ArrayList<>();
-        for (UUID parentId : frontier) {
-          for (ThreadState thread : state.threads.values()) {
-            if (parentId.equals(thread.parentThreadId())) {
-              if (!treeThreadIds.add(thread.id())) {
-                throw new IllegalStateException("thread parent cycle at " + thread.id());
-              }
-              if (thread.status() != ThreadLifecycleStatus.IDLE) {
-                activeCount++;
-              }
-              nextFrontier.add(thread.id());
-            }
-          }
-        }
-        frontier = nextFrontier;
+      if (highestLockRank != null || !lockedTrees.isEmpty()) {
+        throw new IllegalStateException(
+            "join admission lock must precede tree and business row locks");
       }
-      return activeCount;
+      // 参考实现由全局 monitor 串行化事务，准入锁只需保留与 PG 一致的“必须最先获取”防御。
+      joinAdmissionLocked = true;
+    }
+
+    @Override
+    public int countActiveSubagentThreads() {
+      checkOpen();
+      return (int)
+          state.threads.values().stream()
+              .filter(
+                  thread ->
+                      thread.parentThreadId() != null
+                          && thread.status() != ThreadLifecycleStatus.IDLE)
+              .count();
     }
 
     @Override
