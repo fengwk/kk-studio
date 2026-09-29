@@ -19,6 +19,16 @@ REQUIRED_CASES = {
     },
 }
 
+# Windows 腿仍然要有「用真正的 Git Bash 跑通命令执行」的实证：BashCapabilityTest 自己显式定位 Git Bash（runner 上就是
+# workflow 的 `shell: bash` 用的那个），因此下面这两条在 Windows 上必须真跑且不得跳过——一条证明命令的 stdin 是确定性
+# EOF，一条证明超时预算不会因为算术溢出退化成立即超时。它们不依赖 POSIX 的额外语义，因此在 Windows 上也没有跳过的理由。
+WINDOWS_REQUIRED_CASES = {
+    "fun.fengwk.kkstudio.harness.daemon.coding.BashCapabilityTest": {
+        "closesStdinSoCommandsWaitingForEofFinishNaturally",
+        "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
+    },
+}
+
 # 其余被选中的用例各自带平台前置条件（POSIX shell、Windows Job 语义），因此只要求真的执行过且没有失败。
 SELECTED_CLASSES = (
     "ProcessScopeCrossPlatformTest",
@@ -35,9 +45,9 @@ SELECTED_CLASSES = (
 )
 
 
-# Windows runner 上「bash」只会命中 System32 的 WSL 转发程序（CreateProcess 的搜索顺序让系统目录永远先于 PATH），
-# 而 runner 上没有 Git Bash。下面两个类自己的夹具就走 `bash -lc`，在 Windows 上失败是平台能力缺口，不是执行范围的缺陷：
-# 它们仍然在 Linux 完整套件与 macOS 上执行，因此核心行为没有失去证据。
+# 这两个遗留编码能力夹具用裸名 `bash` 作为命令，Windows 上按 CreateProcess 的搜索顺序只会命中 System32 的 WSL 转发程序
+# （runner 自带 Git Bash，但裸名先命中系统目录），因此它们不属于 Windows 腿的执行范围：它们仍由 Linux 完整套件与 macOS
+# 覆盖。执行范围自己的原生用例与显式定位 Git Bash 的 BashCapabilityTest 照常在 Windows 上验收。
 WINDOWS_INAPPLICABLE_CLASSES = (
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
@@ -67,7 +77,10 @@ def parse_report(reports_dir: Path, class_name: str):
         "skipped": int(root.get("skipped", "0")),
     }
     cases = [case.get("name") for case in root.iter("testcase")]
-    return counts, cases
+    skipped = {
+        case.get("name") for case in root.iter("testcase") if case.find("skipped") is not None
+    }
+    return counts, cases, skipped
 
 
 def main() -> int:
@@ -93,19 +106,29 @@ def main() -> int:
         if parsed is None:
             failures.append(f"{simple_name}: missing surefire report on {os_label}")
             continue
-        counts, cases = parsed
+        counts, cases, skipped = parsed
         report(simple_name, counts, cases)
-        required = REQUIRED_CASES.get("fun.fengwk.kkstudio.harness.daemon.coding." + simple_name)
-        if required is None:
+        qualified = "fun.fengwk.kkstudio.harness.daemon.coding." + simple_name
+        strict = REQUIRED_CASES.get(qualified)
+        platform_cases = WINDOWS_REQUIRED_CASES.get(qualified) if os_label.startswith("windows") else None
+        if strict is None and not platform_cases:
             continue
-        if counts["skipped"]:
-            failures.append(f"{simple_name}: must not skip any case on {os_label}")
+        if strict is not None:
+            # 这一类是核心验收：它的每个用例在任何平台上都没有跳过的理由。
+            if counts["skipped"]:
+                failures.append(f"{simple_name}: must not skip any case on {os_label}")
+            required = strict
+        else:
+            # 这一类整体允许跳过平台不适用用例，但被点名的那几条必须真的跑过。
+            required = platform_cases
+            skipped_required = sorted(platform_cases & skipped)
+            if skipped_required:
+                failures.append(
+                    f"{simple_name}: required cases must not be skipped on {os_label}: {skipped_required}"
+                )
         missing = sorted(required - set(cases))
         if missing:
             failures.append(f"{simple_name}: required cases did not run on {os_label}: {missing}")
-        duplicated = sorted({name for name in cases if cases.count(name) > 1})
-        if duplicated:
-            failures.append(f"{simple_name}: required cases ran more than once on {os_label}: {duplicated}")
 
     if failures:
         for failure in failures:
