@@ -62,7 +62,6 @@ export function ApprovalCard({
       await harnessService.decideApproval(threadId, invocationId, {
         decision,
         decisionId,
-        actor: 'web',
         reason: null,
       })
       await Promise.all([

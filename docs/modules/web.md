@@ -113,7 +113,7 @@ result status 对齐。
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat 用户 command write path（202 accepted）；Issue 输入走工作流 |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/provider-request-preview`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、草稿协议请求预览、命名、运行控制与人工审批；Issue Agent Branch 的公开预览、YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
+| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/provider-request-preview`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、草稿协议请求预览、命名、运行控制与人工审批；属于 Issue Agent Branch 时改名、压缩、YOLO 与 stop 均在严格校验后 409，不经公开入口触达 Runtime（由 Issue/Project 工作流维护）；审批操作者只取自服务端认证主体 |
 | Interaction | `GET /api/interactions`、`POST /api/interactions/{interactionId}/input` | 问卷等待与审批等待合并的待处理列表（`(createTime, interactionId)` 稳定升序）与唯一人工提交入口；`interactionId` 就是待处理列表给出的 Tool invocation ID，actor 只来自服务端认证上下文 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`POST /{canvasId}/commands` | document snapshot/list/create/delete 与 typed command batch；Canvas 不持有 Session |

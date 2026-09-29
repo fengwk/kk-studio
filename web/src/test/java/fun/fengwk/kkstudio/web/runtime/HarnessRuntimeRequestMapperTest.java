@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -271,21 +272,23 @@ class HarnessRuntimeRequestMapperTest {
 
     HarnessToolApprovalDTO approval = new HarnessToolApprovalDTO();
     approval.setDecisionId(idText(30));
-    approval.setActor("user");
     approval.setDecision("ALLOW");
-    assertEquals(
-        ToolApprovalDecision.ALLOWED,
-        HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval)
-            .decision());
+    // 操作者不在 DTO 中：只能由调用方传入的服务端解析结果决定。
+    ToolApprovalCommand allowed =
+        HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval, "user");
+    assertEquals(ToolApprovalDecision.ALLOWED, allowed.decision());
+    assertEquals("user", allowed.actor());
     approval.setDecision("DENY");
-    assertEquals(
-        ToolApprovalDecision.DENIED,
-        HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval)
-            .decision());
+    ToolApprovalCommand denied =
+        HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval, "user");
+    assertEquals(ToolApprovalDecision.DENIED, denied.decision());
+    assertEquals("user", denied.actor());
     approval.setDecision("MAYBE");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), approval));
+        () ->
+            HarnessRuntimeRequestMapper.toToolApprovalCommand(
+                THREAD_ID, idText(31), approval, "user"));
   }
 
   @Test
@@ -649,7 +652,8 @@ class HarnessRuntimeRequestMapperTest {
         () -> HarnessRuntimeRequestMapper.toSetThreadYoloCommand(THREAD_ID, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null));
+        () ->
+            HarnessRuntimeRequestMapper.toToolApprovalCommand(THREAD_ID, idText(31), null, "user"));
 
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
     owner.setType("CHAT");

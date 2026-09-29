@@ -143,7 +143,6 @@ describe('harnessService', () => {
     const body = {
       decision: 'ALLOW' as const,
       decisionId: 'dec-1',
-      actor: 'user',
       reason: null,
     }
 

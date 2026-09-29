@@ -309,6 +309,69 @@ class PostgresqlNotificationLoopTest {
         "start after close must throw IllegalStateException");
   }
 
+  /**
+   * 测试意图：旧 listener 线程若未在 bounded join 内退出（handler 不响应 interrupt），stop 之后 start 必须 fail clearly，
+   * 绝不允许并存第二个 LISTEN loop；只有旧线程真正退出后 start 才可成功。旧 generation 的共享写也由线程身份 fence 兜底。
+   */
+  @Test
+  void restartIsRefusedWhilePreviousLoopThreadIsStillAlive() throws Exception {
+    FakeConnection connection = new FakeConnection();
+    SequencedDataSource dataSource = new SequencedDataSource(connection::connection);
+    CountDownLatch resyncEntered = new CountDownLatch(1);
+    CountDownLatch releaseResync = new CountDownLatch(1);
+    AtomicInteger resyncs = new AtomicInteger();
+    PostgresqlNotificationLoop loop =
+        new PostgresqlNotificationLoop(
+            dataSource,
+            List.of(
+                new PostgresqlNotificationHandler(
+                    WORK_CHANNEL,
+                    ignored -> {},
+                    () -> {
+                      resyncs.incrementAndGet();
+                      resyncEntered.countDown();
+                      // 故意不响应 interrupt（await 抛出的中断被吞掉后继续等待）：模拟阻塞超过 bounded join 的 handler。
+                      while (releaseResync.getCount() > 0) {
+                        try {
+                          releaseResync.await();
+                        } catch (InterruptedException ignoredInterrupt) {
+                          // 忽略中断，保持阻塞。
+                        }
+                      }
+                    })),
+            Duration.ofMillis(10),
+            Duration.ofMillis(1));
+
+    loop.start();
+    assertTrue(resyncEntered.await(5, TimeUnit.SECONDS));
+
+    // stop 无法在 bounded join 内确认旧线程退出：如实报告未运行，但旧线程仍存活。
+    loop.stop();
+    assertFalse(loop.isRunning());
+
+    // 旧线程仍 alive 时 restart 必须明确失败，绝不能并存第二个 listener。
+    assertThrows(IllegalStateException.class, loop::start);
+    assertEquals(1, dataSource.connectionAttempts.get());
+    assertEquals(1, resyncs.get());
+
+    // 释放旧 handler 后旧 generation 自行退出，此后 start 才被允许。
+    releaseResync.countDown();
+    await(
+        () -> {
+          try {
+            loop.start();
+            return true;
+          } catch (IllegalStateException stillAlive) {
+            return false;
+          }
+        });
+    assertTrue(loop.isRunning());
+    // 旧 generation 退出前不再向共享 handler 投递；第二次 resync 来自新 generation。
+    await(() -> resyncs.get() == 2);
+    loop.close();
+    assertFalse(loop.isRunning());
+  }
+
   @Test
   void unsupportedConnectionIsClosedAndStopInterruptsReconnectBackoff() throws Exception {
     FakeConnection unsupported = new FakeConnection();
