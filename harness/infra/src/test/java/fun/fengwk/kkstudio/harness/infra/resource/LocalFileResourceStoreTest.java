@@ -569,6 +569,66 @@ class LocalFileResourceStoreTest {
     assertEquals(0L, objectCount(root), "failed writeTempFile must not leave temp residue");
   }
 
+  /**
+   * 测试意图：写入器抛出非受检运行时异常（部分写入后失败，例如 JDK 层面的运行时 I/O 故障）同样必须由 writeTempFile 清理自己创建的临时文件、原样抛出失败，且绝不删除
+   * root 中既有条目。
+   */
+  @Test
+  void writeTempFileCleansUpAfterUncheckedPartialWriteFailure() throws IOException {
+    Path root = newRoot();
+    byte[] payload = bytes("payload");
+    Path existing = root.resolve(sha256Hex(payload));
+    Files.write(existing, bytes("already published"));
+    IllegalStateException partialWriteFailure =
+        new IllegalStateException("simulated unchecked partial write failure");
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                LocalFileResourceStore.writeTempFile(
+                    root,
+                    payload,
+                    (channel, buffer) -> {
+                      channel.write(ByteBuffer.wrap(new byte[] {1, 2, 3}));
+                      throw partialWriteFailure;
+                    }));
+
+    assertSame(partialWriteFailure, failure, "cleanup must not replace the original failure");
+    assertEquals(0, failure.getSuppressed().length, "cleanup itself succeeded");
+    assertEquals(
+        1L, objectCount(root), "failed writeTempFile must leave exactly the pre-existing entry");
+    assertArrayEquals(bytes("already published"), Files.readAllBytes(existing));
+  }
+
+  /** 测试意图：写入器抛出 Error（断言失败）时清理路径同样必须生效，不得在 root 遗留临时文件。 */
+  @Test
+  void writeTempFileCleansUpAfterErrorPartialWriteFailure() throws IOException {
+    Path root = newRoot();
+    byte[] payload = bytes("payload");
+    Path existing = root.resolve(sha256Hex(payload));
+    Files.write(existing, bytes("already published"));
+    AssertionError partialWriteFailure = new AssertionError("simulated writer assertion failure");
+
+    AssertionError failure =
+        assertThrows(
+            AssertionError.class,
+            () ->
+                LocalFileResourceStore.writeTempFile(
+                    root,
+                    payload,
+                    (channel, buffer) -> {
+                      channel.write(ByteBuffer.wrap(new byte[] {1, 2, 3}));
+                      throw partialWriteFailure;
+                    }));
+
+    assertSame(partialWriteFailure, failure, "cleanup must not replace the original failure");
+    assertEquals(0, failure.getSuppressed().length, "cleanup itself succeeded");
+    assertEquals(
+        1L, objectCount(root), "failed writeTempFile must leave exactly the pre-existing entry");
+    assertArrayEquals(bytes("already published"), Files.readAllBytes(existing));
+  }
+
   /** 测试意图：清理自身失败（条目已变成非空目录）只作为 suppressed 附加，绝不掩盖原始写入故障。 */
   @Test
   void deleteFailedTempAttachesCleanupFailureAsSuppressed() throws IOException {

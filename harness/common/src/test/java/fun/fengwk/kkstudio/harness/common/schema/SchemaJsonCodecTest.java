@@ -120,8 +120,26 @@ class SchemaJsonCodecTest {
    */
   @ParameterizedTest
   @NullAndEmptySource
-  @ValueSource(strings = {" ", "\n", "\t \r\n"})
+  @ValueSource(strings = {" ", "\n", "\t", "\n\t", "\t \r\n"})
   void rejectsBlankInputWithIllegalArgument(String json) {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(json));
+  }
+
+  /** JSON 字面量 {@code null} 与其它非对象根节点都无法构造出 InputSchema，必须抛 IllegalArgumentException 而非 NPE。 */
+  @Test
+  void rejectsJsonNullLiteralAndNonObjectRoot() {
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("1"));
+  }
+
+  /** 尾随 token 必须在解析阶段被拒绝：只解码首个对象而静默忽略剩余内容会破坏 canonical 契约。 */
+  @Test
+  void rejectsTrailingTokens() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false} {}"));
   }
 }
