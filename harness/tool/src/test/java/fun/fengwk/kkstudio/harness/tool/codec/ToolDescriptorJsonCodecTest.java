@@ -634,6 +634,7 @@ class ToolDescriptorJsonCodecTest {
   /** 顶层不是 object 必须拒绝。 */
   @Test
   void rejectsNonObjectRoot() {
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("\"x\""));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("42"));
@@ -657,7 +658,7 @@ class ToolDescriptorJsonCodecTest {
    */
   @ParameterizedTest
   @NullAndEmptySource
-  @ValueSource(strings = {" ", "\n", "\t \r\n"})
+  @ValueSource(strings = {" ", "\n", "\t", "\n\t", "\t \r\n"})
   void rejectsBlankInputWithIllegalArgument(String json) {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(json));
   }

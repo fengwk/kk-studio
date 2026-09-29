@@ -173,8 +173,9 @@ class StandardComfyuiClientTest {
     assertTrue(closed.get());
   }
 
+  /** 碎片化输入流（每次最多 100 字节）必须被完整组装成单个 multipart 请求体，不能截断或重复内容。 */
   @Test
-  void uploadsWhenSubscriberRequestsOnlyTwoBuffersAtATime() {
+  void uploadsCompleteMultipartFromFragmentedContentStream() {
     byte[] payload = new byte[40 * 1024];
     for (int i = 0; i < payload.length; i++) {
       payload[i] = (byte) (i & 0xff);
@@ -195,8 +196,9 @@ class StandardComfyuiClientTest {
     assertTrue(closed.get());
   }
 
+  /** HttpClient 的 executor 拒绝提交上传请求时调用方流仍必须被关闭，且不得继续读取内容。 */
   @Test
-  void uploadClosesCallerStreamWhenCancelledBeforeContentIsOpened() {
+  void closesCallerStreamWhenExecutorRejectsUploadRequest() {
     AtomicBoolean closed = new AtomicBoolean();
     InputStream content =
         tracking(
@@ -517,7 +519,7 @@ class StandardComfyuiClientTest {
     return -1;
   }
 
-  /** 每次最多读固定字节，迫使 HttpClient 分多次 request。 */
+  /** 每次最多读固定字节，让 BodyPublisher 分多次拉取内容（模拟碎片化输入流）。 */
   private static final class ChunkedInputStream extends InputStream {
 
     private final byte[] payload;

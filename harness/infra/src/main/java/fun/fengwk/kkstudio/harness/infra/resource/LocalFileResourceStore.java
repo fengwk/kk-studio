@@ -216,8 +216,8 @@ public final class LocalFileResourceStore implements ResourceStore {
   /**
    * 以 NOFOLLOW/CREATE_NEW 创建临时文件并交给 {@code writer} 写入：创建成功即由本方法负责清理。
    *
-   * <p>一旦文件创建成功，本方法在转移所有权（正常返回）之前对任何异常都 {@link Files#deleteIfExists}，清理自身的失败只作为 suppressed
-   * 附加而不掩盖原始故障；名称碰撞时文件不是本方法创建的，绝不删除。
+   * <p>一旦文件创建成功，本方法在转移所有权（正常返回）之前对任何故障（受检 IOException、非受检 RuntimeException/Error）都 {@link
+   * Files#deleteIfExists}，清理自身的失败只作为 suppressed 附加而不掩盖原始故障；名称碰撞时文件不是本方法创建的，绝不删除。
    */
   static Path writeTempFile(Path root, byte[] payload, TempWriter writer) throws IOException {
     for (int attempt = 0; attempt < 3; attempt++) {
@@ -232,7 +232,8 @@ public final class LocalFileResourceStore implements ResourceStore {
         return temp;
       } catch (FileAlreadyExistsException collision) {
         // 名称碰撞（极低概率）：换名重试。
-      } catch (IOException failure) {
+      } catch (IOException | RuntimeException | Error failure) {
+        // 非受检故障（写入器运行时错误/断言失败等）同样必须清理本次创建的临时文件，再原样抛出。
         if (created) {
           deleteFailedTemp(temp, failure);
         }
@@ -257,7 +258,7 @@ public final class LocalFileResourceStore implements ResourceStore {
    *
    * <p>清理失败（例如条目已被替换为非空目录）作为 suppressed 附加到原始故障上，绝不掩盖真正的写入失败。
    */
-  static void deleteFailedTemp(Path temp, IOException failure) {
+  static void deleteFailedTemp(Path temp, Throwable failure) {
     try {
       Files.deleteIfExists(temp);
     } catch (IOException cleanupFailure) {
