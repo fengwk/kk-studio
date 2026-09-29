@@ -30,6 +30,11 @@ let ownedSessionId: string | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let sessionStorageUnavailable = false
 let unloadReleaseRegistered = false
+let sessionReloading = false
+
+export function isSessionReloading(): boolean {
+  return sessionReloading
+}
 
 /**
  * 返回当前编辑会话标识：同一标签页内稳定，多标签页 / 复制标签页相互隔离。
@@ -50,6 +55,7 @@ export function resetEditingSessionForTests(): void {
   cachedSessionId = null
   ownedSessionId = null
   sessionStorageUnavailable = false
+  sessionReloading = false
   stopHeartbeat()
   if (typeof window === 'undefined') {
     return
@@ -207,12 +213,8 @@ function registerUnloadRelease(): void {
 }
 
 /**
- * bfcache retained 实例 pageshow 重新确认 claim 所有权：
- * - 页面进入 bfcache 时 pagehide 释放了 ownership；
- * - pageshow 恢复时重新检查：若该 session 在休眠期间已被同源其他活页面认领，
- *   必须避免旧实例与新活页面并发使用同一 scope；
- * - 采用 KISS 的安全 reload 方案重新分配会话与加载快照（IndexedDB 草稿持久完整保留，不强夺活 owner）；
- * - 若无其他活 owner，则本实例安全重新 claim 并恢复心跳。
+ * bfcache 页面恢复时重新校验会话所有权。
+ * 若会话已被其他活页面认领，标记重载并刷新页面，避免跨页面覆盖。
  */
 export function handlePageshow(_event?: Event | { persisted?: boolean }): void {
   const targetId = cachedSessionId ?? readSessionStorage()
@@ -222,10 +224,7 @@ export function handlePageshow(_event?: Event | { persisted?: boolean }): void {
   }
 
   if (isOwnedByAnotherLivePage(targetId)) {
-    console.warn(
-      `[canvas] bfcache 恢复时会话 ${targetId} 已被同源活所有者持有；`
-      + `执行安全 reload 重新隔离，防止旧实例污染旧 scope。`,
-    )
+    sessionReloading = true
     cachedSessionId = null
     ownedSessionId = null
     stopHeartbeat()

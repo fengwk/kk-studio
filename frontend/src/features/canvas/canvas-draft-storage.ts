@@ -20,7 +20,10 @@ import {
   toStorageError,
   type CanvasLocalStoreOptions,
 } from '@/features/canvas/canvas-local-store'
-import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
+import {
+  getEditingSessionId,
+  isSessionReloading,
+} from '@/features/canvas/canvas-editing-session'
 import { removeDraftField, type CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 
@@ -49,6 +52,9 @@ function buildRecordKey(userId: string, canvasId: string, editingSessionId: stri
 }
 
 function resolveScope(canvasId: string, options?: CanvasDraftStorageOptions) {
+  if (isSessionReloading()) {
+    throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+  }
   const userId = options?.userId ?? getCurrentUserId()
   const editingSessionId = options?.editingSessionId ?? getEditingSessionId()
   return {

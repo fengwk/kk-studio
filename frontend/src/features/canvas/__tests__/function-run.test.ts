@@ -7,6 +7,7 @@ import {
   clearPendingFunctionRun,
   loadPendingFunctionRun,
   patchSnapshotRun,
+  savePendingFunctionRun,
   useCanvasFunctionRun,
 } from '@/features/canvas/function-run'
 import type {
@@ -147,10 +148,10 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   const canvasId = CANVAS_ID as UUIDString
   const nodeId = NODE_FN as UUIDString
 
-  function setupHook() {
+  function setupHook(options?: { flushFunctionConfig?: (nodeId: UUIDString) => Promise<void> }) {
     const queryClient = new QueryClient()
     const setToast = vi.fn()
-    const flushFunctionConfig = vi.fn(async () => undefined)
+    const flushFunctionConfig = options?.flushFunctionConfig ?? vi.fn(async () => undefined)
     const { result } = renderHook(() => useCanvasFunctionRun({
       canvasId,
       queryClient,
@@ -263,5 +264,159 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(calls).toHaveLength(2)
     expect(calls[1]?.requestId).toBe(firstRequestId)
     expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(firstRequestId)
+  })
+
+  it('存储异常 fail-closed：localStorage.setItem 失败阻断请求，startCanvasFunctionRun 严格调用 0 次', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    startSpy.mockClear()
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new Error('QuotaExceededError: storage is full')
+    })
+
+    const { result, setToast } = setupHook()
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+
+    expect(startSpy).toHaveBeenCalledTimes(0)
+    expect(setToast).toHaveBeenCalledWith('本地运行状态持久化失败，无法发起生成')
+    setItemSpy.mockRestore()
+  })
+
+  it('未知重试语义：既有未决 attempt 存在时不冲刷新配置，避免破坏待确认请求', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    const flushFunctionConfig = vi.fn().mockResolvedValue(undefined)
+    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('timeout', 408),
+    )
+    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(new Error('unreachable'))
+
+    const { result } = setupHook({ flushFunctionConfig })
+
+    // 第一次调用：无 existing，必须调用 flushFunctionConfig
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(flushFunctionConfig).toHaveBeenCalledTimes(1)
+    expect(startSpy).toHaveBeenCalledTimes(1)
+
+    // 第二次调用（重试已存在的 attempt）：绝不可再调用 flushFunctionConfig！
+    startSpy.mockResolvedValueOnce(run('req-retry' as UUIDString, 'SUCCEEDED', 'COMPLETED'))
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(flushFunctionConfig).toHaveBeenCalledTimes(1) // 依然是 1 次，未重复调用
+  })
+
+  it('并发连点防御：同一节点并发 start 请求互斥锁生效', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    let resolveFirst: ((val: CanvasFunctionRunDTO) => void) | null = null
+    const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun')
+    startSpy.mockReset()
+    startSpy.mockImplementation(() => (
+      new Promise((res) => {
+        resolveFirst = res
+      })
+    ))
+
+    const { result } = setupHook()
+    const p1 = result.current.startFunctionRun(nodeId)
+    const p2 = result.current.startFunctionRun(nodeId)
+    await Promise.resolve()
+
+    expect(startSpy).toHaveBeenCalledTimes(1)
+    resolveFirst?.(run('req-1' as UUIDString, 'SUCCEEDED', 'COMPLETED'))
+    await act(async () => {
+      await Promise.all([p1, p2])
+    })
+  })
+
+  it('cancel/resolve 精确按 requestId 清除 pending 记录，不误删其他 attempt', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    const reqA = 'aaaaaaaa-1111-4000-8000-000000000001' as UUIDString
+    const reqB = 'bbbbbbbb-2222-4000-8000-000000000002' as UUIDString
+
+    savePendingFunctionRun({
+      canvasId,
+      nodeId,
+      request: { requestId: reqA },
+      basisRequestId: null,
+      createdAt: Date.now(),
+    })
+
+    vi.spyOn(studioService, 'cancelCanvasFunctionRun').mockResolvedValue(run(reqB, 'CANCELLED', 'DONE'))
+
+    const { result } = setupHook()
+    // 取消 request B，不应删除存储中的 request A
+    await act(async () => {
+      await result.current.cancelFunctionRun(nodeId, reqB)
+    })
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(reqA)
+
+    // 取消 request A，精确删除
+    vi.spyOn(studioService, 'cancelCanvasFunctionRun').mockResolvedValue(run(reqA, 'CANCELLED', 'DONE'))
+    await act(async () => {
+      await result.current.cancelFunctionRun(nodeId, reqA)
+    })
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+  })
+
+  it('严格 Schema 校验：仅接受 canonical UUID 与 exact request (only requestId)', () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
+
+    // 1. 非规范 UUID 的 requestId
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      canvasId,
+      nodeId,
+      request: { requestId: 'not-a-valid-uuid' },
+      basisRequestId: null,
+      createdAt: Date.now(),
+    }))
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+
+    // 2. request 包含额外注入属性
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      canvasId,
+      nodeId,
+      request: { requestId: crypto.randomUUID(), extra: 123 },
+      basisRequestId: null,
+      createdAt: Date.now(),
+    }))
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+
+    // 3. createdAt 为非法数值
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      canvasId,
+      nodeId,
+      request: { requestId: crypto.randomUUID() },
+      basisRequestId: null,
+      createdAt: -1,
+    }))
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+
+    // 4. canvasId / nodeId 不匹配
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      canvasId: crypto.randomUUID(),
+      nodeId,
+      request: { requestId: crypto.randomUUID() },
+      basisRequestId: null,
+      createdAt: Date.now(),
+    }))
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+
+    // 5. 合法规范结构
+    const validReqId = crypto.randomUUID() as UUIDString
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      canvasId,
+      nodeId,
+      request: { requestId: validReqId },
+      basisRequestId: null,
+      createdAt: Date.now(),
+    }))
+    const loaded = loadPendingFunctionRun(canvasId, nodeId)
+    expect(loaded?.request.requestId).toBe(validReqId)
   })
 })

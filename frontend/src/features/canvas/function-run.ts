@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import type {
@@ -16,6 +16,11 @@ import {
 import { queryKeys } from '@/shared/lib/query-keys'
 
 const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isCanonicalUUID(value: unknown): value is UUIDString {
+  return typeof value === 'string' && UUID_REGEX.test(value)
+}
 
 export interface PendingFunctionRunAttempt {
   canvasId: UUIDString
@@ -30,7 +35,7 @@ function getPendingRunStorageKey(canvasId: string, nodeId: string): string {
 }
 
 export function loadPendingFunctionRun(canvasId: string, nodeId: string): PendingFunctionRunAttempt | null {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || !window.localStorage) {
     return null
   }
   try {
@@ -38,33 +43,69 @@ export function loadPendingFunctionRun(canvasId: string, nodeId: string): Pendin
     if (!raw) {
       return null
     }
-    const parsed = JSON.parse(raw) as PendingFunctionRunAttempt
-    return parsed && parsed.request?.requestId ? parsed : null
+    const parsed = JSON.parse(raw) as Partial<PendingFunctionRunAttempt>
+    if (
+      parsed
+      && isCanonicalUUID(parsed.canvasId)
+      && parsed.canvasId === canvasId
+      && isCanonicalUUID(parsed.nodeId)
+      && parsed.nodeId === nodeId
+      && parsed.request
+      && typeof parsed.request === 'object'
+      && isCanonicalUUID(parsed.request.requestId)
+      && Object.keys(parsed.request).length === 1
+      && typeof parsed.createdAt === 'number'
+      && Number.isFinite(parsed.createdAt)
+      && parsed.createdAt > 0
+      && (parsed.basisRequestId === null || isCanonicalUUID(parsed.basisRequestId))
+    ) {
+      return parsed as PendingFunctionRunAttempt
+    }
+    return null
   } catch {
     return null
   }
 }
 
 export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void {
-  if (typeof window === 'undefined') {
-    return
+  if (typeof window === 'undefined' || !window.localStorage) {
+    throw new Error('Local storage is unavailable')
   }
-  try {
-    window.localStorage.setItem(
-      getPendingRunStorageKey(attempt.canvasId, attempt.nodeId),
-      JSON.stringify(attempt),
-    )
-  } catch {
-    // LocalStorage quota or blocked
+  if (
+    !isCanonicalUUID(attempt.canvasId)
+    || !isCanonicalUUID(attempt.nodeId)
+    || !isCanonicalUUID(attempt.request?.requestId)
+    || Object.keys(attempt.request).length !== 1
+    || (attempt.basisRequestId !== null && !isCanonicalUUID(attempt.basisRequestId))
+  ) {
+    throw new Error('Invalid function run attempt payload: must contain canonical UUIDs')
+  }
+  const key = getPendingRunStorageKey(attempt.canvasId, attempt.nodeId)
+  const serialized = JSON.stringify(attempt)
+  window.localStorage.setItem(key, serialized)
+  const readback = window.localStorage.getItem(key)
+  if (readback !== serialized) {
+    throw new Error('Failed to verify persisted function run attempt')
   }
 }
 
-export function clearPendingFunctionRun(canvasId: string, nodeId: string): void {
-  if (typeof window === 'undefined') {
+export function clearPendingFunctionRun(
+  canvasId: string,
+  nodeId: string,
+  expectedRequestId?: string,
+): void {
+  if (typeof window === 'undefined' || !window.localStorage) {
     return
   }
   try {
-    window.localStorage.removeItem(getPendingRunStorageKey(canvasId, nodeId))
+    const key = getPendingRunStorageKey(canvasId, nodeId)
+    if (expectedRequestId) {
+      const existing = loadPendingFunctionRun(canvasId, nodeId)
+      if (existing && existing.request.requestId !== expectedRequestId) {
+        return
+      }
+    }
+    window.localStorage.removeItem(key)
   } catch {
     // Ignore
   }
@@ -103,6 +144,7 @@ export function useCanvasFunctionRun(options: {
   flushFunctionConfig: (nodeId: UUIDString) => Promise<void>
 }): FunctionRunActions {
   const { canvasId, queryClient, setToast, flushFunctionConfig } = options
+  const inFlightNodesRef = useRef(new Set<string>())
 
   const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: UUIDString | null) => {
     if (!canvasId) {
@@ -127,58 +169,65 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, queryClient])
 
   const startFunctionRun = useCallback(async (nodeId: UUIDString) => {
-    if (!canvasId) {
+    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
-      await flushFunctionConfig(nodeId)
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : '启动生成失败')
-      return
-    }
+      // 先读取未决记录：若已存在未知状态请求，不可先冲刷最新配置，防止配置破坏原请求
+      const existing = loadPendingFunctionRun(canvasId, nodeId)
+      if (!existing) {
+        try {
+          await flushFunctionConfig(nodeId)
+        } catch (error) {
+          setToast(error instanceof Error ? error.message : '启动生成失败')
+          return
+        }
+      }
 
-    // 检查是否存在未决请求（例如提交后丢响应、断网或页面刷新残留）：
-    // 若存在，必须复用冻结的完整 attempt（原 requestId 与 requestDTO），绝不生成新 key 重新发起新任务！
-    const existing = loadPendingFunctionRun(canvasId, nodeId)
-    const attempt: PendingFunctionRunAttempt = existing ?? {
-      canvasId,
-      nodeId,
-      request: { requestId: crypto.randomUUID() as UUIDString },
-      basisRequestId: readBasisRequestId(nodeId),
-      createdAt: Date.now(),
-    }
+      const attempt: PendingFunctionRunAttempt = existing ?? {
+        canvasId,
+        nodeId,
+        request: { requestId: crypto.randomUUID() as UUIDString },
+        basisRequestId: readBasisRequestId(nodeId),
+        createdAt: Date.now(),
+      }
 
-    // 发请求前必须在 localStorage 持久化冻结请求
-    savePendingFunctionRun(attempt)
-
-    const basisRequestId = attempt.basisRequestId
-    const requestId = attempt.request.requestId
-    try {
-      const run = await startCanvasFunctionRun(canvasId, nodeId, attempt.request)
-      // 成功获得确定响应：清除 pending 记录
-      clearPendingFunctionRun(canvasId, nodeId)
-      publishRun(run, basisRequestId)
-    } catch (error) {
-      // 明确 409 或 4xx 客户端错误终态：清除 pending 记录，不再重试
-      if (isTerminalClientError(error)) {
-        clearPendingFunctionRun(canvasId, nodeId)
-        setToast(error instanceof Error ? error.message : '启动生成失败')
+      // 发请求前必须成功持久化；读回校验失败 fail-closed 阻断发请求
+      try {
+        savePendingFunctionRun(attempt)
+      } catch {
+        setToast('本地运行状态持久化失败，无法发起生成')
         return
       }
 
-      // 未知失败（网络断开、超时 408/429、5xx 等）：保留原 identity
+      const basisRequestId = attempt.basisRequestId
+      const requestId = attempt.request.requestId
       try {
-        const current = await getCanvasFunctionRun(canvasId, nodeId)
-        if (current.requestId === requestId) {
-          clearPendingFunctionRun(canvasId, nodeId)
-          publishRun(current, basisRequestId)
+        const run = await startCanvasFunctionRun(canvasId, nodeId, attempt.request)
+        clearPendingFunctionRun(canvasId, nodeId, requestId)
+        publishRun(run, basisRequestId)
+      } catch (error) {
+        if (isTerminalClientError(error)) {
+          clearPendingFunctionRun(canvasId, nodeId, requestId)
+          setToast(error instanceof Error ? error.message : '启动生成失败')
           return
         }
-      } catch {
-        // Preserve the original start error when reconciliation is unavailable.
+
+        try {
+          const current = await getCanvasFunctionRun(canvasId, nodeId)
+          if (current.requestId === requestId) {
+            clearPendingFunctionRun(canvasId, nodeId, requestId)
+            publishRun(current, basisRequestId)
+            return
+          }
+        } catch {
+          // 对账失败保留原 attempt 供重试
+        }
+        setToast(error instanceof Error ? error.message : '启动生成失败')
       }
-      // 不得在仅 GET 无结果时生成新 key，保留原 attempt 供重载 / 重试同 key 复用
-      setToast(error instanceof Error ? error.message : '启动生成失败')
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, flushFunctionConfig, publishRun, readBasisRequestId, setToast])
 
@@ -187,16 +236,18 @@ export function useCanvasFunctionRun(options: {
     requestId?: UUIDString,
   ) => {
     const targetRequestId = requestId ?? readBasisRequestId(nodeId)
-    if (!canvasId || !targetRequestId) {
+    if (!canvasId || !targetRequestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
       const run = await cancelCanvasFunctionRun(canvasId, nodeId, { requestId: targetRequestId })
-      clearPendingFunctionRun(canvasId, nodeId)
-      // cancel 以被取消的 requestId 为 basis：只允许更新该 request，不得覆盖更新的 request。
+      clearPendingFunctionRun(canvasId, nodeId, targetRequestId)
       publishRun(run, targetRequestId)
     } catch (error) {
       setToast(error instanceof Error ? error.message : '取消生成失败')
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, publishRun, readBasisRequestId, setToast])
 
@@ -206,19 +257,22 @@ export function useCanvasFunctionRun(options: {
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => {
-    if (!canvasId || !requestId) {
+    if (!canvasId || !requestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
       const run = await resolveCanvasFunctionRun(canvasId, nodeId, {
         requestId,
         resolution,
         verification,
       })
-      clearPendingFunctionRun(canvasId, nodeId)
+      clearPendingFunctionRun(canvasId, nodeId, requestId)
       publishRun(run, requestId)
     } catch (error) {
       setToast(error instanceof Error ? error.message : '核查确认失败')
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, publishRun, setToast])
 
