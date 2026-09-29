@@ -111,6 +111,10 @@
             <artifactId>apache-client</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.apache.httpcomponents.client5</groupId>
+            <artifactId>httpclient5</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
@@ -183,6 +187,9 @@
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/service/impl/McpServerServiceImpl</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog</include>
                                         <include>fun/fengwk/kkstudio/platform/catalog/mcp/runtime/RemoteMcpExecutableTool</include>
+                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressPolicy</include>
+                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressDnsResolver</include>
+                                        <include>fun/fengwk/kkstudio/platform/plugin/resource/HttpRemoteMediaTransport</include>
                                     </includes>
                                     <limits>
                                         <limit>
