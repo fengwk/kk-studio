@@ -14,6 +14,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,16 +27,26 @@ import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.http.AbortableInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.S3StorageServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
@@ -106,6 +117,88 @@ class StorageBlobContentServiceImplTest {
     inOrder.verify(blobManager).retain(blobId);
     inOrder.verify(s3StorageService).download(StorageObjectKeys.blobOriginal(blobId), 1024L);
     inOrder.verify(blobManager).release(blobId);
+  }
+
+  /**
+   * 测试意图：文档契约规定负数上限表示「不限大小」，实现必须走无上限对象读取。
+   *
+   * <p>这里使用真实 {@link S3StorageServiceImpl} + 受控 S3Client（而不是 mock 掉
+   * S3StorageService），让「有界下载拒绝负上限」这条真实门禁生效： 有界路径先 HEAD 再按上限断言，负上限不可能通过；无上限路径不做 HEAD。
+   */
+  @Test
+  void readBlobContentWithoutLimitUsesUnboundedDownload() {
+    UUID blobId = UUID.randomUUID();
+    byte[] payload = new byte[] {1, 2, 3, 4};
+    StorageBlob blob = activeBlob(blobId, payload.length, "image/png");
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    S3Client s3Client = mock(S3Client.class);
+    when(s3Client.getObject(any(GetObjectRequest.class)))
+        .thenReturn(getObjectStream(payload, "image/png"));
+
+    StorageBlobContent content =
+        contentServiceWithRealS3Client(s3Client).readBlobContent(blobId, -1L);
+
+    assertArrayEquals(payload, content.getBytes());
+    assertEquals("image/png", content.getMediaType());
+    assertEquals(payload.length, content.getSizeBytes());
+    verify(s3Client, never()).headObject(any(HeadObjectRequest.class));
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：非负上限保持有界下载语义 —— 先 HEAD 复核声明长度，对象超过上限时拒绝并仍释放引用。 */
+  @Test
+  void readBlobContentWithLimitUsesBoundedDownload() {
+    UUID blobId = UUID.randomUUID();
+    byte[] payload = new byte[] {1, 2, 3, 4};
+    StorageBlob blob = activeBlob(blobId, payload.length, "image/png");
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    S3Client s3Client = mock(S3Client.class);
+    when(s3Client.headObject(any(HeadObjectRequest.class)))
+        .thenReturn(HeadObjectResponse.builder().contentLength((long) payload.length).build());
+    when(s3Client.getObject(any(GetObjectRequest.class)))
+        .thenReturn(getObjectStream(payload, "image/png"));
+    StorageBlobContentService bounded = contentServiceWithRealS3Client(s3Client);
+
+    assertArrayEquals(payload, bounded.readBlobContent(blobId, payload.length).getBytes());
+    verify(s3Client).headObject(any(HeadObjectRequest.class));
+
+    // 声明元数据在上限内、真实对象更大：仍必须由有界下载按真实字节数拒绝。
+    when(s3Client.headObject(any(HeadObjectRequest.class)))
+        .thenReturn(HeadObjectResponse.builder().contentLength(payload.length + 1L).build());
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> bounded.readBlobContent(blobId, payload.length));
+    assertTrue(error.getMessage().contains("max input file size"), "actual: " + error.getMessage());
+    verify(blobManager, times(2)).release(blobId);
+  }
+
+  private static StorageBlob activeBlob(UUID blobId, long sizeBytes, String mediaType) {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    blob.setSizeBytes(sizeBytes);
+    blob.setMediaType(mediaType);
+    blob.setState(StorageBlobState.ACTIVE);
+    return blob;
+  }
+
+  /** 真实 S3 服务实现 + 受控 S3Client：保留大小门禁等真实行为，只替换网络边界。 */
+  private StorageBlobContentService contentServiceWithRealS3Client(S3Client s3Client) {
+    S3StorageProperties properties = new S3StorageProperties();
+    properties.setEndpoint("http://minio.example.local:9000");
+    properties.setRegion("us-east-1");
+    properties.setBucket("test-bucket");
+    return new StorageBlobContentServiceImpl(
+        blobManager, new S3StorageServiceImpl(properties, s3Client), transactionManager);
+  }
+
+  private static ResponseInputStream<GetObjectResponse> getObjectStream(
+      byte[] payload, String contentType) {
+    return new ResponseInputStream<>(
+        GetObjectResponse.builder()
+            .contentLength((long) payload.length)
+            .contentType(contentType)
+            .build(),
+        AbortableInputStream.create(new ByteArrayInputStream(payload.clone())));
   }
 
   /** 测试意图：流的获取、消费与关闭均在事务外；关闭后才 release，不缓存整对象。 */
@@ -410,7 +503,11 @@ class StorageBlobContentServiceImplTest {
     verify(s3StorageService, never()).download(any(), anyLong());
   }
 
-  /** 测试意图：当读取成功但 release 抛出异常时，必须抛出 release 异常以避免隐藏引用计数泄漏。 */
+  /**
+   * 测试意图：当读取成功但 release 抛出异常时，必须抛出 release 异常以避免隐藏引用计数泄漏。
+   *
+   * <p>负上限（不限大小）走无上限 {@code download(key)}，绝不把负值交给有界下载。
+   */
   @Test
   void shouldThrowReleaseErrorWhenReadSucceedsButReleaseThrows() {
     UUID blobId = UUID.randomUUID();
@@ -421,8 +518,7 @@ class StorageBlobContentServiceImplTest {
     blob.setMediaType("image/png");
 
     when(blobManager.retain(blobId)).thenReturn(blob);
-    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
-        .thenReturn(new S3ObjectContent(payload, "image/png"));
+    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId))).thenReturn(payload);
     doThrow(new RuntimeException("release db error")).when(blobManager).release(blobId);
 
     RuntimeException exception =
@@ -441,7 +537,7 @@ class StorageBlobContentServiceImplTest {
     blob.setMediaType("image/png");
 
     when(blobManager.retain(blobId)).thenReturn(blob);
-    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
+    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId)))
         .thenThrow(new IllegalStateException("S3 download error"));
     doThrow(new RuntimeException("release db error")).when(blobManager).release(blobId);
 
@@ -465,8 +561,7 @@ class StorageBlobContentServiceImplTest {
     blob.setMediaType("image/png");
 
     when(blobManager.retain(blobId)).thenReturn(blob);
-    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId), -1L))
-        .thenReturn(new S3ObjectContent(payload, "image/png"));
+    when(s3StorageService.download(StorageObjectKeys.blobOriginal(blobId))).thenReturn(payload);
     when(blobManager.release(blobId)).thenReturn(false);
 
     IllegalStateException exception =
