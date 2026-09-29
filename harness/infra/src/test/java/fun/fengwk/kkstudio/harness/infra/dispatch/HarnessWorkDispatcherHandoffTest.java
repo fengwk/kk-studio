@@ -186,7 +186,7 @@ class HarnessWorkDispatcherHandoffTest {
     ClaimedWork firstThreadClaim = claims.get(0);
     store.transaction(
         tx -> {
-          tx.rescheduleWork(firstThreadClaim, NOW, NOW);
+          tx.rescheduleWork(firstThreadClaim, NOW, Duration.ZERO);
           return null;
         });
     dispatcher.wake();

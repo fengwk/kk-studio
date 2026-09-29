@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -206,13 +207,25 @@ class HarnessWorkDispatcherLifecycleTest {
             claims::add,
             claims::add);
 
-    // 把 Work 重排到 150ms 后 due：start 的首次 wake 不会 claim。
+    // 用 claim + 相对 delay 的 reschedule 显式表达「150ms 后才 due」：start 的首次 wake 不会 claim。
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, seed.threadId());
     store.transaction(
         tx -> {
           tx.lockThread(seed.threadId());
           tx.deleteWork(target);
-          tx.requestWork(target, NOW.plusMillis(150));
+          tx.requestWork(target, NOW);
+          return null;
+        });
+    ClaimedWork claim =
+        store
+            .transaction(
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.THREAD, NOW, "seed-lease", Duration.ofMillis(10)))
+            .orElseThrow();
+    store.transaction(
+        tx -> {
+          tx.rescheduleWork(claim, NOW, Duration.ofMillis(150));
           return null;
         });
     dispatcher.start();

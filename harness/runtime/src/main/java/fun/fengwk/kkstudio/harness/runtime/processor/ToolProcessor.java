@@ -284,7 +284,7 @@ public final class ToolProcessor implements AutoCloseable {
                   if (tx.lockClaimedWork(claim, now).isEmpty()) {
                     return false;
                   }
-                  tx.rescheduleWork(claim, now, now.plus(config.admissionDeferral()));
+                  tx.rescheduleWork(claim, now, config.admissionDeferral());
                   return true;
                 }));
     return rescheduled ? ProcessResult.RESCHEDULED : ProcessResult.LOST_OWNERSHIP;
@@ -719,7 +719,7 @@ public final class ToolProcessor implements AutoCloseable {
                   || tool.approval() != null) {
                 return false;
               }
-              tx.rescheduleWork(claim, now, now.plus(delay));
+              tx.rescheduleWork(claim, now, delay);
               return true;
             }));
   }
@@ -886,7 +886,7 @@ public final class ToolProcessor implements AutoCloseable {
               }
               tx.updateToolInvocations(List.of(tool.dispatchBusy(now)));
               tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, now, now.plus(delay));
+              tx.rescheduleWork(claim, now, delay);
               return true;
             }));
   }

@@ -168,8 +168,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * <p>插入新工作或更新既有工作：
    *
    * <ul>
-   *   <li>若目标不存在则插入初始行（初始 wake_version = 1，lease 为空）；
-   *   <li>若已存在则更新 {@code available_at = least(current, requested)} 且递增 {@code wake_version}；
+   *   <li>若目标不存在则插入初始行（初始 wake_version = 1，lease 为空），available_at 取数据库权威时间「此刻」的毫秒截断；
+   *   <li>若已存在则把 {@code available_at} 提前为 min(现有, 数据库权威时间)，并递增 {@code wake_version}；因此一次唤醒始终表示「立即」，
+   *       不把调用方的 JVM 绝对时刻写成 due；
    *   <li>保留既有 {@code lease_token} 与 {@code lease_until} 不变；
    *   <li>冲突拒绝：WHERE 子句要求传入的 {@code required_environment_id} 必须与既有值一致或传入为 null； 若传入了与已冻结 affinity
    *       冲突的值，则更新 0 行并导致上层抛错拒绝。
@@ -179,7 +180,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       """
       insert into harness_work (
           target_type, target_id, available_at, wake_version, lease_token, lease_until, required_environment_id
-      ) values (?, ?, ?, 1, null, null, ?)
+      ) values (?, ?, date_trunc('milliseconds', statement_timestamp()), 1, null, null, ?)
       on conflict (target_type, target_id) do update
       set available_at = least(harness_work.available_at, excluded.available_at),
           wake_version = harness_work.wake_version + 1
@@ -1973,8 +1974,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public void requestWork(WorkTarget target, Instant requestedAt) {
-    requestWork(target, requestedAt, null);
+  public void requestWork(WorkTarget target, Instant now) {
+    requestWork(target, now, null);
   }
 
   /**
@@ -1983,8 +1984,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * <p>必须在已锁定属主 Thread 的事务内调用。执行 upsert 原语：
    *
    * <ul>
-   *   <li>若 Work 不存在则新建，初始 wake_version 为 1；
-   *   <li>若已存在则更新 {@code available_at = least(current, requested)} 且递增 {@code wake_version}；
+   *   <li>若 Work 不存在则新建，初始 wake_version 为 1，available_at 取数据库权威时间「此刻」；
+   *   <li>若已存在则更新 {@code available_at = least(current, statement_timestamp())} 且递增 {@code
+   *       wake_version}；本原语只表达一次 立即可处理的唤醒，{@code now} 只做毫秒精度校验，不参与 due 写入；
    *   <li>{@code requiredEnvironmentId} 仅允许用于 TOOL Work；
    *   <li><b>已冻结 Affinity 冲突拒绝：</b>upsert WHERE 子句要求传入的 {@code requiredEnvironmentId} 与既有值一致或传入为
    *       null； 若已存在的 Work 绑定的环境与新传入的值冲突，更新 0 行并抛出 {@link IllegalArgumentException} 明确拒绝，防止环境亲和性漂移；
@@ -1992,12 +1994,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * </ul>
    */
   @Override
-  public void requestWork(
-      WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
+  public void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
     checkOpen();
     Objects.requireNonNull(target, "target");
-    Objects.requireNonNull(requestedAt, "requestedAt");
-    PostgresqlHarnessRows.requireMillisecondPrecision(requestedAt);
+    Objects.requireNonNull(now, "now");
+    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
@@ -2010,7 +2011,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 PostgresqlHarnessRows.WORK,
                 target.type().name(),
                 target.id(),
-                PostgresqlHarnessRows.timestamp(requestedAt),
                 requiredEnvironmentId == null ? null : requiredEnvironmentId.value())
             .orElseThrow(
                 () ->
@@ -2132,19 +2132,24 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return next;
   }
 
-  /** 重排 Work 调度时间：清除租约并设置新的 requestedAt，保留当前 wakeVersion。 */
+  /**
+   * 重排 Work 调度时间：清除租约，并把 availableAt 设为数据库权威时间加上 {@code delay}，保留当前 wakeVersion。
+   *
+   * <p>{@code delay} 必须是非负整毫秒 Duration（零表示立即）；{@code now} 只做毫秒精度校验，due 完全由数据库时间域计算，避免 JVM 时钟偏差把
+   * 重试提前或推迟。
+   */
   @Override
-  public void rescheduleWork(ClaimedWork claim, Instant now, Instant requestedAt) {
+  public void rescheduleWork(ClaimedWork claim, Instant now, Duration delay) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
     Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(requestedAt, "requestedAt");
+    HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     PostgresqlHarnessRows.requireMillisecondPrecision(now);
-    PostgresqlHarnessRows.requireMillisecondPrecision(requestedAt);
     Instant databaseNow = databaseNow();
     Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
     Work next =
-        work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, requestedAt);
+        work.reschedule(
+            claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, databaseNow.plus(delay));
     updateWork(next);
     notifyWorkAvailable();
   }

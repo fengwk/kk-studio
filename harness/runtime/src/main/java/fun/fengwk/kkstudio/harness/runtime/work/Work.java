@@ -56,33 +56,32 @@ public record Work(
     this(target, availableAt, wakeVersion, leaseToken, leaseUntil, null);
   }
 
-  /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，无环境亲和性。 */
-  public static Work initial(WorkTarget target, Instant requestedAt) {
-    return initial(target, requestedAt, null);
+  /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，无环境亲和性；{@code now} 是该实现权威时间域中的立即可用时刻。 */
+  public static Work initial(WorkTarget target, Instant now) {
+    return initial(target, now, null);
   }
 
-  /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，冻结环境亲和性。 */
-  public static Work initial(
-      WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
+  /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，冻结环境亲和性；{@code now} 是该实现权威时间域中的立即可用时刻。 */
+  public static Work initial(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
     Objects.requireNonNull(target, "target");
-    Objects.requireNonNull(requestedAt, "requestedAt");
-    return new Work(target, requestedAt, 1L, null, null, requiredEnvironmentId);
+    Objects.requireNonNull(now, "now");
+    return new Work(target, now, 1L, null, null, requiredEnvironmentId);
   }
 
   /**
-   * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 requested time 的最小值，保留当前
-   * lease 与环境亲和性。
+   * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 wake 时刻的最小值，保留当前 lease
+   * 与环境亲和性。
    */
-  public Work request(Instant requestedAt) {
-    return request(requestedAt, null);
+  public Work request(Instant now) {
+    return request(now, null);
   }
 
   /**
-   * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 requested time 的最小值，保留当前
+   * 请求另一次 wake：{@code wakeVersion} 递增，并将 {@code availableAt} 提前到当前时间与 wake 时刻的最小值，保留当前
    * lease。若传入非空环境需求，必须与已冻结的亲和性一致，否则抛出 {@link IllegalArgumentException}。
    */
-  public Work request(Instant requestedAt, EnvironmentId newRequiredEnvironmentId) {
-    Objects.requireNonNull(requestedAt, "requestedAt");
+  public Work request(Instant now, EnvironmentId newRequiredEnvironmentId) {
+    Objects.requireNonNull(now, "now");
     if (newRequiredEnvironmentId != null
         && !Objects.equals(requiredEnvironmentId, newRequiredEnvironmentId)) {
       throw new IllegalArgumentException(
@@ -92,7 +91,7 @@ public record Work(
               + newRequiredEnvironmentId);
     }
     long nextWakeVersion = Math.addExact(wakeVersion, 1L);
-    Instant nextAvailableAt = availableAt.isAfter(requestedAt) ? requestedAt : availableAt;
+    Instant nextAvailableAt = availableAt.isAfter(now) ? now : availableAt;
     return new Work(
         target, nextAvailableAt, nextWakeVersion, leaseToken, leaseUntil, requiredEnvironmentId);
   }
@@ -157,13 +156,13 @@ public record Work(
 
   /**
    * 在当前 lease 于 {@code now} 仍有效时对 {@code claimedWakeVersion} 重新调度：相等的 claim 将 {@code availableAt}
-   * 设为 {@code requestedAt}；过期 claim 仅将 {@code availableAt} 提前 到最小值；未来的 claim 视为非法。lease
+   * 设为 {@code availableAt}；过期 claim 仅将 {@code availableAt} 提前到最小值；未来的 claim 视为非法。lease
    * 始终被清除，保留环境亲和性。
    */
-  public Work reschedule(String token, long claimedWakeVersion, Instant now, Instant requestedAt) {
+  public Work reschedule(String token, long claimedWakeVersion, Instant now, Instant availableAt) {
     Objects.requireNonNull(token, "token");
     Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(requestedAt, "requestedAt");
+    Objects.requireNonNull(availableAt, "availableAt");
     requireTokenMatch(token);
     if (claimedWakeVersion <= 0) {
       throw new IllegalArgumentException("claimedWakeVersion must be positive");
@@ -174,9 +173,9 @@ public record Work(
     }
     Instant nextAvailableAt;
     if (claimedWakeVersion == wakeVersion) {
-      nextAvailableAt = requestedAt;
+      nextAvailableAt = availableAt;
     } else {
-      nextAvailableAt = availableAt.isAfter(requestedAt) ? requestedAt : availableAt;
+      nextAvailableAt = this.availableAt.isAfter(availableAt) ? availableAt : this.availableAt;
     }
     return new Work(target, nextAvailableAt, wakeVersion, null, null, requiredEnvironmentId);
   }

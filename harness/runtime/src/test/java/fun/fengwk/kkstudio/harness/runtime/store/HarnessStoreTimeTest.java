@@ -52,6 +52,44 @@ class HarnessStoreTimeTest {
   }
 
   @Test
+  void rescheduleDurationsMustBeNonNegativeWholeMillisecondsWithinMillisecondRange() {
+    Duration canonical = Duration.ofMillis(1500);
+
+    // 零表示立即，合法。
+    assertEquals(
+        Duration.ZERO,
+        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(Duration.ZERO, "delay"));
+    assertEquals(
+        canonical, HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(canonical, "delay"));
+    assertThrows(
+        NullPointerException.class,
+        () -> HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(null, "delay"));
+    // 负值拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+                Duration.ofMillis(-1), "delay"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+                Duration.ofNanos(-1), "delay"));
+    // 亚毫秒精度拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+                Duration.ofNanos(1_500_000), "delay"));
+    // 毫秒范围溢出拒绝（toMillis 溢出应表现为调用方可见的校验错误，而不是延迟到后续算术）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+                Duration.ofSeconds(Long.MAX_VALUE), "delay"));
+  }
+
+  @Test
   void notBeforeClampsCandidateToMaximumFloorAndRejectsNulls() {
     Instant t1 = Instant.parse("2026-08-05T00:00:01.000Z");
     Instant t2 = Instant.parse("2026-08-05T00:00:02.000Z");

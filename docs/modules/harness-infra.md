@@ -52,14 +52,16 @@ task 准入（全局事务级 advisory lock，仅 task 接受路径）
 
 `harness_work` 以 `(target_type, target_id)` 为主键，列含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。
 
-`requestWork` 必须在持有所属 Thread 锁的事务内调用，upsert 语义是纯函数式推进：
+`requestWork` 必须在持有所属 Thread 锁的事务内调用，upsert 语义是纯函数式推进；一次 request 只表达「立即唤醒」，due 由数据库权威时间写入，调用方传入的 `now` 只做毫秒精度校验：
 
 ```text
-insert: available_at = requested, wake_version = 1, lease 保持 null
-conflict: available_at = least(current, requested)
+insert: available_at = date_trunc('milliseconds', statement_timestamp()), wake_version = 1, lease 保持 null
+conflict: available_at = least(current, statement_timestamp())
           wake_version = current + 1
           lease_token / lease_until 保持不变
 ```
+
+需要把一次唤醒（重试）排到未来时由 `rescheduleWork` 用相对 `Duration` 表达：`available_at = statement_timestamp() + delay`，并清空租约；`delay` 必须是非负整毫秒（零表示立即）。因此 JVM 时钟与数据库的偏差既不会把「立即 Work」延后，也不会让重试提前或推迟。
 
 环境亲和性一旦绑定即冻结：upsert 的更新条件为 `harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null`，因此既有行绑定了 `required_environment_id` 时，后续传入不一致的非空环境 ID 会让 UPDATE 命中 0 行，实现层随即抛 `IllegalArgumentException` 拒绝，执行环境不会漂移。
 

@@ -422,17 +422,19 @@ public interface HarnessStore {
     boolean deleteWork(WorkTarget target);
 
     /**
-     * 请求一次 wake（upsert 调度原语）：target 必须存在；新 target 写入 wakeVersion=1，已有行递增 wakeVersion 并把 availableAt
-     * 提前为 min(现有, requestedAt)，保留当前 lease。要求 owning Thread 已在本事务锁定；target 不存在抛 {@link
+     * 请求一次 wake（upsert 调度原语）：target 必须存在；新 target 写入 wakeVersion=1，已有行递增 wakeVersion，并把 availableAt
+     * 设为实现的权威时间「此刻」——本原语只表达一次立即可处理的唤醒，绝不把调用方的 JVM 绝对时刻写成持久化 due。生产实现的权威时间是数据库 时钟，{@code now}
+     * 不参与该写入；内存实现以 {@code now} 为同一时间域。已有行保留当前 lease。要求 owning Thread 已在本事务锁定； target 不存在抛 {@link
      * IllegalArgumentException}。
      */
-    void requestWork(WorkTarget target, Instant requestedAt);
+    void requestWork(WorkTarget target, Instant now);
 
     /**
-     * 请求一次带环境亲和性的 wake（TOOL 专用）：新 target 冻结 requiredEnvironmentId，已有行校验亲和性一致并保留当前 lease。 non-null
-     * 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛 {@link IllegalArgumentException}。
+     * 请求一次带环境亲和性的 wake（TOOL 专用）：调度语义与 {@link #requestWork(WorkTarget, Instant)} 完全相同，并在新 target 上
+     * 冻结 requiredEnvironmentId。non-null 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛
+     * {@link IllegalArgumentException}。
      */
-    void requestWork(WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId);
+    void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId);
 
     /**
      * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）。due / 旧 lease 是否过期、以及新 deadline，都由实现的权威时钟决定：
@@ -477,10 +479,11 @@ public interface HarnessStore {
 
     /**
      * 重排 claim 的 Work：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按权威时间校验 lease 仍然有效，然后按
-     * {@link Work#reschedule} 校验 token / claimedWakeVersion 并设置 availableAt、清除 lease。生产权威时间是数据库时钟；
-     * 内存实现以 {@code now} 为同一时间域。违反抛 {@link IllegalArgumentException}。
+     * {@link Work#reschedule} 校验 token / claimedWakeVersion，把 availableAt 设为实现的权威时间加上 {@code delay}
+     * 并清除 lease。 {@code delay} 必须是非负整毫秒 {@link Duration}（零表示立即可用）；生产实现的权威时间是数据库时钟，{@code now}
+     * 只做毫秒精度校验， 内存实现以 {@code now} 为同一时间域。违反抛 {@link IllegalArgumentException}。
      */
-    void rescheduleWork(ClaimedWork claim, Instant now, Instant requestedAt);
+    void rescheduleWork(ClaimedWork claim, Instant now, Duration delay);
 
     // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
 
