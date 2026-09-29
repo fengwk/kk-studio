@@ -489,6 +489,56 @@ class CanvasCommandPlannerTest {
     assertTrue(plan.mutations().isEmpty());
   }
 
+  @Test
+  void deleteThenCreateMustNotReuseIdentityInTheSameBatch() {
+    // 测试意图：同一批先删后建不能复用 node/group UUID；校验失败时不得留下可提交的部分 mutation。
+    CanvasResourceNode node = textNode(nodeId(1), "node", "body");
+    CanvasValidationException reusedNode =
+        assertThrows(
+            CanvasValidationException.class,
+            () ->
+                planner.plan(
+                    graph(List.of(node)),
+                    List.of(
+                        new CanvasCommand.DeleteNode(
+                            nodeId(1), List.of(node.resources().get(0).id()), null),
+                        new CanvasCommand.CreateNode(
+                            nodeId(1),
+                            "reborn",
+                            new CanvasTransform(1, 1, 10, 10),
+                            List.of(new CanvasResourceInput.Text("text", "next"))))));
+    assertTrue(reusedNode.getMessage().toLowerCase().contains("node"));
+
+    UUID groupId = UUID.fromString("00000000-0000-0000-0000-0000000000f1");
+    CanvasGroup group =
+        new CanvasGroup(groupId, CANVAS, "group", new CanvasTransform(0, 0, 10, 10));
+    CanvasValidationException reusedGroup =
+        assertThrows(
+            CanvasValidationException.class,
+            () ->
+                planner.plan(
+                    graph(List.of(node), List.of(group)),
+                    List.of(
+                        new CanvasCommand.DeleteGroup(groupId, List.of()),
+                        new CanvasCommand.CreateGroup(
+                            groupId, "reborn", new CanvasTransform(2, 2, 10, 10)))));
+    assertTrue(reusedGroup.getMessage().toLowerCase().contains("group"));
+
+    CanvasCommandPlan distinct =
+        planner.plan(
+            graph(List.of(node)),
+            List.of(
+                new CanvasCommand.DeleteNode(
+                    nodeId(1), List.of(node.resources().get(0).id()), null),
+                new CanvasCommand.CreateNode(
+                    nodeId(2),
+                    "created",
+                    new CanvasTransform(1, 1, 10, 10),
+                    List.of(new CanvasResourceInput.Text("text", "next")))));
+    assertFalse(distinct.isRejected());
+    assertTrue(distinct.hasChanges());
+  }
+
   /** 两槽位文本节点，第一个槽位使用固定 id，便于断言资源身份与槽位变化。 */
   private CanvasResourceNode twoSlotNode(UUID firstResourceId) {
     return new CanvasResourceNode(

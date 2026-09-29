@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -16,8 +17,8 @@ import java.util.regex.Pattern;
  * 输入参数 JSON 的静默归一化：在 schema 校验前将数字字符串容错改写为目标数值类型，并移除 schema 声明的可缺省属性上的显式 {@code null}。
  *
  * <p>{@link IntegerSchema} 字段接受匹配 {@code -?\d+} 的十进制数字字符串并改写为 JSON integer；{@link NumberSchema}
- * 字段接受十进制数字字符串（含小数与指数）并改写为 JSON number。非数字文本、超出 long / double
- * 可表示范围的值不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
+ * 字段接受十进制数字字符串（含小数与指数）并按 {@link BigDecimal} 原值改写为 JSON number。非数字文本与 {@link BigDecimal}
+ * 无法解析的文本不改写，仍由校验器严格拒绝。boolean/string/enum 字段不转换。
  *
  * <p>显式 {@code null} 只对 schema 声明的可缺省属性（未列入 {@code required}）静默删除，使其语义等同于缺省；{@code required} 属性的
  * {@code null} 与 schema 未声明字段的 {@code null} 保持原样，交由 {@link InputValidator} 严格拒绝。
@@ -67,7 +68,7 @@ public final class InputNormalizer {
         return NODES.numberNode(value);
       }
     } else if (schema instanceof NumberSchema) {
-      Double value = parseNumber(node);
+      BigDecimal value = parseNumber(node);
       if (value != null) {
         return NODES.numberNode(value);
       }
@@ -101,7 +102,7 @@ public final class InputNormalizer {
     }
   }
 
-  private static Double parseNumber(JsonNode node) {
+  private static BigDecimal parseNumber(JsonNode node) {
     if (!node.isTextual()) {
       return null;
     }
@@ -109,7 +110,10 @@ public final class InputNormalizer {
     if (!NUMBER_TEXT.matcher(text).matches()) {
       return null;
     }
-    double value = Double.parseDouble(text);
-    return Double.isFinite(value) ? value : null;
+    try {
+      return new BigDecimal(text);
+    } catch (NumberFormatException invalid) {
+      return null;
+    }
   }
 }

@@ -85,6 +85,36 @@ class ToolContractTest {
                 "search", "Search", " ", schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
   }
 
+  @Test
+  void defaultTimeoutMustBeAnExactNonNegativeMillisecondDuration() {
+    // 测试意图：毫秒是 defaultTimeout 的规范单位；非整毫秒或 toMillis 溢出必须拒绝，ZERO 仍表示无限。
+    ToolDescriptor unlimited =
+        new ToolDescriptor(
+            "search", "Search", "search", schema(), ToolSideEffect.READ_ONLY, Duration.ZERO);
+    assertEquals(Duration.ZERO, unlimited.defaultTimeout());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search",
+                "Search",
+                "search",
+                schema(),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofNanos(1_500_000)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search",
+                "Search",
+                "search",
+                schema(),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(Long.MAX_VALUE / 1000 + 1)));
+  }
+
   /** 反射契约锁定 descriptor 只暴露模型字段及其稳定顺序，不得重新引入路由字段。 */
   @Test
   void exposesOnlyModelContractComponentsInStableOrder() {

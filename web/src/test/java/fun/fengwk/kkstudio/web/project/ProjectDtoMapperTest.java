@@ -197,6 +197,66 @@ class ProjectDtoMapperTest {
   }
 
   @Test
+  void testMaxRunsRejectsValuesOutsideIntRange() {
+    // 测试意图：maxRuns 的领域类型是 Integer，超过 int 范围时禁止 long 截断，必须拒绝。
+    IllegalArgumentException overflow =
+        assertThrows(
+            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("2147483648")));
+    assertTrue(overflow.getMessage().contains("maxRuns"));
+    assertTrue(
+        overflow.getMessage().contains("int") || overflow.getMessage().contains("range"),
+        () -> "truncation must be rejected as a range error, but was: " + overflow.getMessage());
+
+    IllegalArgumentException beyondLong =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> mapper.toWorkflow(maxRunsWorkflow("9223372036854775808")));
+    assertTrue(beyondLong.getMessage().contains("maxRuns"));
+
+    IllegalArgumentException negative =
+        assertThrows(
+            IllegalArgumentException.class, () -> mapper.toWorkflow(maxRunsWorkflow("-1")));
+    assertTrue(negative.getMessage().contains("maxRuns"));
+
+    ProjectWorkflow accepted = mapper.toWorkflow(maxRunsWorkflow("2147483647"));
+    assertEquals(Integer.MAX_VALUE, accepted.states().get(1).maxRuns());
+  }
+
+  private static ProjectWorkflowDTO maxRunsWorkflow(String maxRuns) {
+    ProjectWorkflowStateDTO init =
+        ProjectWorkflowStateDTO.builder()
+            .state("INIT")
+            .name("Start")
+            .enabled(true)
+            .next(List.of("WORK"))
+            .build();
+    ProjectWorkflowStateDTO work =
+        ProjectWorkflowStateDTO.builder()
+            .state("WORK")
+            .name("Working")
+            .agent("coder")
+            .maxRuns(maxRuns)
+            .enabled(true)
+            .next(List.of("DONE"))
+            .build();
+    ProjectWorkflowStateDTO blocked =
+        ProjectWorkflowStateDTO.builder()
+            .state("BLOCKED")
+            .name("Blocked")
+            .enabled(true)
+            .next(List.of())
+            .build();
+    ProjectWorkflowStateDTO done =
+        ProjectWorkflowStateDTO.builder()
+            .state("DONE")
+            .name("Done")
+            .enabled(true)
+            .next(List.of())
+            .build();
+    return ProjectWorkflowDTO.builder().states(List.of(init, work, blocked, done)).build();
+  }
+
+  @Test
   void testIssueMapping() {
     // 测试意图：验证 Issue 实体到 IssueDTO 的正确映射
     UUID id = UUID.randomUUID();
