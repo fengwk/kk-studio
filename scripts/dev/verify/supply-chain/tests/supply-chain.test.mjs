@@ -50,6 +50,14 @@ const NVD_DATAFEED_ARGUMENT =
     '-DnvdDatafeedUrl=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz'
 const NPM_AUDIT_REGISTRY = 'https://registry.npmjs.org'
 
+// 防止测试入口因目录重组而静默执行零个用例；不能递归调用 test 子命令。
+test('test entrypoint points to the existing sibling test suite', () => {
+    const script = readFileSync(SCRIPT, 'utf8')
+    assert.match(script, /exec node --test "\$SCRIPT_DIR\/tests"\/\*\.test\.mjs/)
+    assert.ok(readdirSync(path.join(path.dirname(SCRIPT), 'tests'))
+        .some((name) => name.endsWith('.test.mjs')))
+})
+
 function createFakeToolchain() {
     const root = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-supply-chain-test-'))
     const bin = path.join(root, 'bin')

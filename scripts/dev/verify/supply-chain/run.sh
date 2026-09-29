@@ -1212,7 +1212,7 @@ main() {
             ;;
         test)
             require_cmd node
-            exec node --test "$SCRIPT_DIR/supply-chain/tests"/*.test.mjs
+            exec node --test "$SCRIPT_DIR/tests"/*.test.mjs
             ;;
         sbom|audit|image|all)
             MODE=$1
