@@ -145,8 +145,9 @@ final class LspClient {
     command.set(0, executable);
     Process process = spawn(server, root, command);
     ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
-    dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
     try {
+      // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止进程，不能把泄漏留给调用方。
+      dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
       if (waitForExit(process, PROCESS_PROBE_MILLIS)) {
         throw new IllegalStateException(
             "LSP server '"

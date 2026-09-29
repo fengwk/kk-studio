@@ -20,8 +20,13 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link LspClient} 的协议与失败路径：结果形态、错误应答、位置边界、启动失败、崩溃诊断、以及服务端请求的本地应答。
@@ -154,6 +159,62 @@ class LspClientProtocolTest {
             () -> empty.javaDecompile(root, "build/App.class", REQUEST_TIMEOUT));
     assertTrue(
         noSource.getMessage().contains("Could not load or decompile"), noSource.getMessage());
+  }
+
+  /** 意图：spawn 成功后 stderr 派发被拒时，已拉起的进程必须被终止，调用方拿到的是原始拒绝异常而不是进程泄漏。 */
+  @Test
+  void rejectedDispatchAfterSpawnTerminatesTheProcess() throws Exception {
+    Path pidFile = root.resolve("held.pid");
+    LspServerConfig config = holdingServer(pidFile);
+    RejectingExecutor rejecting = new RejectingExecutor();
+
+    Thread launch =
+        new Thread(
+            () -> {
+              try {
+                LspClient.launch(config, root, config.command().getFirst(), rejecting);
+              } catch (RuntimeException error) {
+                rejecting.failure = error;
+              }
+            },
+            "lsp-reject-launch");
+    launch.start();
+    long pid = awaitPidFile(pidFile);
+    launch.join(Duration.ofSeconds(20).toMillis());
+
+    assertFalse(launch.isAlive(), "拒绝后的 launch 必须返回");
+    assertTrue(
+        rejecting.failure instanceof RejectedExecutionException, String.valueOf(rejecting.failure));
+    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+  }
+
+  /** 意图：stderr 任务已进入所有权窗口但尚未返回时，启动探测失败必须终止同一进程，而不是把活进程交还给调用方。 */
+  @Test
+  void probeFailureWhileDispatchIsHeldTerminatesTheProcess() throws Exception {
+    Path transcript = transcript();
+    LspServerConfig config = FakeLspServers.deadServer("held-dead", 9);
+    HoldingExecutor holding = new HoldingExecutor();
+
+    Thread launch =
+        new Thread(
+            () -> {
+              try {
+                LspClient.launch(config, root, config.command().getFirst(), holding);
+              } catch (RuntimeException error) {
+                holding.failure = error;
+              }
+            },
+            "lsp-launch-hold");
+    launch.start();
+    assertTrue(holding.entered.await(20, TimeUnit.SECONDS), "stderr 任务必须进入所有权窗口");
+    holding.release.set(true);
+    launch.join(Duration.ofSeconds(20).toMillis());
+
+    assertFalse(launch.isAlive(), "所有权窗口结束后 launch 必须返回");
+    assertTrue(holding.failure != null, "提前退出的服务器必须让 launch 失败");
+    assertTrue(
+        holding.failure.getMessage().contains("exited before initialization"),
+        holding.failure.getMessage());
   }
 
   /** 意图：服务器在初始化前退出时启动失败并给出退出码与诊断；不会留下半初始化实例。 */
@@ -341,11 +402,127 @@ class LspClientProtocolTest {
     return client;
   }
 
+  private LspServerConfig holdingServer(Path pidFile) throws Exception {
+    Path wrapper = root.resolve("hold-launch.sh");
+    Files.writeString(
+        wrapper,
+        "#!/bin/sh\necho $$ > "
+            + shellQuote(pidFile.toString())
+            + "\nwhile true; do sleep 1; done\n");
+    if (!wrapper.toFile().setExecutable(true)) {
+      throw new IllegalStateException("cannot mark wrapper executable: " + wrapper);
+    }
+    return new LspServerConfig(
+        "held", List.of(wrapper.toString()), List.of(".java"), List.of(), List.of());
+  }
+
+  private static long awaitPidFile(Path pidFile) throws Exception {
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (System.nanoTime() < deadline) {
+      if (Files.exists(pidFile) && !Files.readString(pidFile).isBlank()) {
+        return Long.parseLong(Files.readString(pidFile).trim());
+      }
+      Thread.sleep(10);
+    }
+    throw new AssertionError("held launch did not record its pid: " + pidFile);
+  }
+
+  private static String shellQuote(String value) {
+    return "'" + value.replace("'", "'\\''") + "'";
+  }
+
   private Path transcript() {
     if (transcript == null) {
       transcript = FakeLspServers.transcript(root);
     }
     return transcript;
+  }
+
+  /** 提交即拒绝，用来钉住 spawn 成功之后、所有权 try 之内的失败窗口。 */
+  private static final class RejectingExecutor extends AbstractExecutorService {
+
+    private volatile RuntimeException failure;
+
+    @Override
+    public void shutdown() {}
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return false;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return true;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      throw new RejectedExecutionException("test dispatch rejects submissions");
+    }
+  }
+
+  /** 接受任务后停在任务入口，直到测试释放；用于观察所有权窗口内进程仍然可回收。 */
+  private static final class HoldingExecutor extends AbstractExecutorService {
+
+    private final CountDownLatch entered = new CountDownLatch(1);
+    private final AtomicBoolean release = new AtomicBoolean();
+    private volatile RuntimeException failure;
+
+    @Override
+    public void shutdown() {}
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      release.set(true);
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return false;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return true;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      Thread worker =
+          new Thread(
+              () -> {
+                entered.countDown();
+                while (!release.get()) {
+                  try {
+                    Thread.sleep(5);
+                  } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    return;
+                  }
+                }
+                command.run();
+              },
+              "lsp-stderr-hold");
+      worker.setDaemon(true);
+      worker.start();
+    }
   }
 
   private int startedProcesses() {
