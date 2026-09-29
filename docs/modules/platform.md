@@ -39,7 +39,7 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | `PlatformEvidenceBlobPort`、`PlatformHarnessCommandAcceptancePort`、`PlatformAgentBranchSettingsPort`、`PlatformIssueAgentSessionDeletionPort`、`ProjectHarnessContributor`、`IssueTransitionTool` | Project 端口实现与 Issue Agent 工具；领域、用例、持久化与 Reconciler 在 [project](project.md) 模块 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
-| [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
+| [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`StorageObjectCleanupService`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期、对象清理记录与对象存储 |
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration` | Environment Card、Daemon 会话装配与宿主元数据保留 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `CanvasBlobResourceMaterializer`、`CanvasMediaConfiguration`、`PlatformCanvasFunctionBlobAccess`、Canvas Function adapters | Function 输出物化、宿主 Blob 引用释放适配、媒体 probe 与参考 adapter；Canvas 命令、查询与 Resource 生命周期在 [canvas-infra](canvas-infra.md) |
 | [error](../../platform/src/main/java/fun/fengwk/kkstudio/platform/error)、[persistence](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence) | `DomainErrorCode`、`PostgresqlIntegrityViolationClassifier` | 领域错误分类与 FK/唯一约束到领域错误的映射 |
@@ -592,6 +592,7 @@ Storage 把内容身份、owner 引用和对象物理存储分开：
 - `session_blob_ref` 是 Harness Session 对 Blob 的显式 owner edge，`canvas_resource`
   和 Tool history ingest 通过各自的 owner/service 维护引用；
 - `storage_upload` 记录 PENDING/READY 上传、candidate blob、过期时间和 cleanup lease；
+- `storage_object_cleanup` 是对象 key 的耐久删除记录（`key` PK、`next_attempt_at`），登记与事实变更同事务、永不按 TTL 清除；
 - 对象 key 由 [StorageObjectKeys](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageObjectKeys.java)
   集中生成：`uploads/{id}/original`、`blobs/{id}/original`、`blobs/{id}/preview.webp`，
   调用方不能选择 bucket。
@@ -599,7 +600,12 @@ Storage 把内容身份、owner 引用和对象物理存储分开：
 `StorageBlobManager.retain/release` 与 `SessionBlobRefManager` 都要求
 `PROPAGATION_MANDATORY`，因此引用变更必须属于调用方已有事务。引用减到零时，数据库
 同一条条件 update 把 Blob 切为 `DELETING`；提交后只唤醒 maintenance，删除顺序是
-preview → original → 条件删除 Blob 行。
+preview → original → 条件删除 Blob 行。`DELETING` 是终态（retain 只在 ACTIVE 行生效），
+后台清扫先在最短短事务内复核状态/引用并把待删对象登记为清理记录，提交后才在事务外
+幂等删除对象；即使删除失败或对象随后又被迟到写入重建，记录也会让后台最终收敛。
+认领与重试只把「配置时长换算出的非负毫秒」交给数据库，由 `statement_timestamp()`
+算出下次尝试时间：任何节点的 JVM 时钟偏移都不会把记录留在过去，因此「批满则继续」
+的排空循环不会退化成永久忙循环。
 
 [StorageUploadServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/service/impl/StorageUploadServiceImpl.java)
 的上传协议是：
@@ -613,9 +619,11 @@ preview → original → 条件删除 Blob 行。
 3. `delete` 在短事务记录 cleanup request，READY upload 同时 release upload owner；它只写
    数据库事实、不做对象 I/O，因此不需要操作锁；
 4. `expireOnce` 先列出有界候选（cleanup request 或已过期且无有效 lease），逐行先尝试同一把
-   upload 操作锁、锁内重读当下事实再 claim，事务外幂等删除临时/candidate object，最后用
-   cleanup token 做 fenced finalize；锁忙（complete/stage 正在写对象）的行跳过本轮，删除或
-   finalize 失败时保留 lease，下一次 maintenance 重试。
+   upload 操作锁、锁内重读当下事实再 claim，claim 的同一条事务里把该 upload 的临时对象与
+   未绑定为自身 blob 的 candidate 原始/预览对象登记为清理记录（claim 之后不再可能绑定），
+   再在事务外幂等删除临时/candidate object，最后用 cleanup token 做 fenced finalize；锁忙
+   （complete/stage 正在写对象）的行跳过本轮，删除或 finalize 失败时保留 lease，下一次
+   maintenance 重试。
 
 `StorageUploadOperationLock` 是 PostgreSQL 会话级 advisory lock，使用固定 storage namespace 加由
 upload UUID 稳定折叠的 32bit key（跨进程/跨版本落在同一把锁上，碰撞只导致额外串行）。
@@ -633,8 +641,10 @@ cleanup request/lease 回收的 upload 证据。
 
 [StorageMaintenance](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageMaintenance.java)
 是 `SmartLifecycle`，拥有单一 daemon scheduled executor，启动立即 wake 并合并并发
-wake，同时以 fixed-delay poll 驱动 upload expire 与 DELETING blob sweep；所有 S3 I/O
-都在事务外，数据库清理事实是唯一可恢复依据。
+wake，同时以 fixed-delay poll 驱动 upload expire、DELETING blob sweep 与对象清理记录
+清扫；所有 S3 I/O 都在事务外，数据库清理事实是唯一可恢复依据。清理记录以数据库时间
+认领到期批次、在删除前先把 `next_attempt_at` 推出，失败改到短重试，因此批次排空有界且
+不会头部阻塞；只有元数据永久保留加额外低频 delete 这一种保证，不称真正 S3 fencing。
 
 Tool 终态结果由
 [ToolResultFinalizer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolResultFinalizer.java)

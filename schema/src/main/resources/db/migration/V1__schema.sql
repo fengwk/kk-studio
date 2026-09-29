@@ -1696,6 +1696,14 @@ create trigger trg_harness_thread_version_notify
 -- transition; it deliberately has no FK because the blob row is only created
 -- at complete time. The only FK (blob_id -> storage_blob) is ON DELETE
 -- RESTRICT: counted references must never be removed by a CASCADE.
+--
+-- storage_object_cleanup is the durable tombstone for object keys that must
+-- never be re-bound to a live row. A key is enqueued in the same transaction
+-- that removes (or claims for removal) its last database fact, so a late PUT
+-- or server-side COPY that lands after the fact is gone is still deleted by
+-- the background sweep. Records are never deleted by time: each sweep claims
+-- the next due batch, pushes next_attempt_at far into the future before doing
+-- any object I/O, and moves a failed key back to a short retry deadline.
 ------------------------------------------------------------------------------
 
 create table storage_blob (
@@ -1827,6 +1835,32 @@ comment on index uk_storage_upload_candidate is
 comment on index idx_storage_upload_cleanup_claim is
     'Storage Maintenance claim scan: requested or expired uploads with absent/expired'
     ' leases, ordered by request/deadline time.';
+
+create table storage_object_cleanup (
+    key              varchar(512)   not null,
+    next_attempt_at  timestamptz(3) not null,
+    constraint pk_storage_object_cleanup primary key (key),
+    constraint ck_storage_object_cleanup_key_nonblank check (btrim(key) <> '')
+);
+
+create index idx_storage_object_cleanup_due
+    on storage_object_cleanup (next_attempt_at, key);
+
+comment on table storage_object_cleanup is
+    'Durable object-key tombstone: a key whose last database fact was removed is'
+    ' deleted again whenever a late PUT/COPY recreates it. Records are permanent'
+    ' (never removed by TTL); each sweep claims the next due batch, advances'
+    ' next_attempt_at before doing object I/O and backs off failures.';
+
+comment on column storage_object_cleanup.key is
+    'Object storage key (uploads/{id}/original, blobs/{id}/original or'
+    ' blobs/{id}/preview.webp); primary key, so enqueueing is idempotent.';
+comment on column storage_object_cleanup.next_attempt_at is
+    'Next sweep deadline: driven by database time so every node claims with the'
+    ' same clock; advanced far on claim and set back on object deletion failure.';
+
+comment on index idx_storage_object_cleanup_due is
+    'Storage Maintenance tombstone scan: due keys in next_attempt_at order.';
 
 -- Session 级 Blob 引用：Session 的持久化 message（USER/RESOURCE 与 TOOL 结果）通过本表持有 storage_blob 的
 -- 活跃引用。ref_count 维护完全由应用层 SessionBlobRefManager 显式执行（insert+retain / delete+release 成对），

@@ -60,7 +60,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 151;
+  private static final int PROBE_ASSERTION_COUNT = 154;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -91,6 +91,7 @@ class FreshInstallSchemaContractTest {
           "session_blob_ref",
           "skill_package",
           "storage_blob",
+          "storage_object_cleanup",
           "storage_upload",
           "system_setting");
 

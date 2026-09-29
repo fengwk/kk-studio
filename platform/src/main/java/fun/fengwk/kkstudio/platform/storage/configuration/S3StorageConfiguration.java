@@ -27,17 +27,20 @@ import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
@@ -133,9 +136,26 @@ public class S3StorageConfiguration {
       StorageBlobRepository blobRepository,
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
-      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup) {
+      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
+      StorageObjectCleanupService storageObjectCleanupService,
+      PlatformTransactionManager transactionManager) {
     return new PostgresqlStorageBlobManager(
-        blobRepository, s3StorageService, s3PresignService, maintenanceWakeup);
+        blobRepository,
+        s3StorageService,
+        s3PresignService,
+        maintenanceWakeup,
+        storageObjectCleanupService,
+        transactionManager);
+  }
+
+  /** 对象清理记录服务：enqueue 与调用方事实变更同事务，sweepOnce 在事务外幂等删除对象；时间推进全部由数据库时钟换算。 */
+  @Bean
+  public StorageObjectCleanupService storageObjectCleanupService(
+      StorageObjectCleanupRepository cleanupRepository,
+      S3StorageService s3StorageService,
+      StorageMaintenanceProperties maintenanceProperties) {
+    return new PostgresqlStorageObjectCleanupService(
+        cleanupRepository, s3StorageService, maintenanceProperties);
   }
 
   /**
@@ -180,6 +200,7 @@ public class S3StorageConfiguration {
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
+      StorageObjectCleanupService storageObjectCleanupService,
       StorageUploadOperationLock storageUploadOperationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
       S3StorageProperties s3Properties,
@@ -195,6 +216,7 @@ public class S3StorageConfiguration {
         s3PresignService,
         mediaProbe,
         blobPreviewService,
+        storageObjectCleanupService,
         storageUploadOperationLock,
         maintenanceWakeup,
         s3Properties,
@@ -209,8 +231,10 @@ public class S3StorageConfiguration {
   public StorageMaintenance storageMaintenance(
       StorageUploadService storageUploadService,
       StorageBlobManager storageBlobManager,
+      StorageObjectCleanupService storageObjectCleanupService,
       StorageMaintenanceProperties properties) {
-    return new StorageMaintenance(storageUploadService, storageBlobManager, properties);
+    return new StorageMaintenance(
+        storageUploadService, storageBlobManager, storageObjectCleanupService, properties);
   }
 
   /** Session blob 引用边的显式 owner：insert/delete 与 blob retain/release 成对维护（MANDATORY 事务）。 */

@@ -5,6 +5,7 @@ import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.time.Duration;
@@ -20,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 全局 Blob 存储的耐久后台维护循环。
  *
  * <p>数据库行是唯一清理事实；本生命周期拥有单一 daemon scheduled executor，通过 startup wake、合并 wake 与 fixed-delay poll
- * 驱动上传 lease 清理和 DELETING blob 清扫。所有 S3 I/O 只在该后台线程或显式事务外请求路径执行。
+ * 驱动上传 lease 清理、DELETING blob 清扫与对象清理记录清扫。所有 S3 I/O 只在该后台线程或显式事务外请求路径执行。
  */
 @Slf4j
 public final class StorageMaintenance
@@ -30,6 +31,7 @@ public final class StorageMaintenance
 
   private final StorageUploadService uploadService;
   private final StorageBlobManager blobManager;
+  private final StorageObjectCleanupService objectCleanupService;
   private final long pollDelayMillis;
   private final Object lifecycleLock = new Object();
   private final AtomicBoolean wakeRequested = new AtomicBoolean();
@@ -43,9 +45,12 @@ public final class StorageMaintenance
   public StorageMaintenance(
       StorageUploadService uploadService,
       StorageBlobManager blobManager,
+      StorageObjectCleanupService objectCleanupService,
       StorageMaintenanceProperties properties) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.objectCleanupService =
+        Objects.requireNonNull(objectCleanupService, "objectCleanupService");
     Objects.requireNonNull(properties, "properties");
     this.pollDelayMillis = requirePositiveWholeMillis(properties.getPollDelay(), "pollDelay");
   }
@@ -184,12 +189,15 @@ public final class StorageMaintenance
   private void drainUntilIdle() {
     int expired;
     int swept;
+    int cleaned;
     do {
       expired = expire(uploadService);
       swept = sweep(blobManager);
+      cleaned = cleanupObjects(objectCleanupService);
     } while (running
         && (expired == StorageUploadService.MAX_EXPIRY_BATCH
-            || swept == StorageBlobManager.MAX_SWEEP_BATCH));
+            || swept == StorageBlobManager.MAX_SWEEP_BATCH
+            || cleaned == StorageObjectCleanupService.MAX_CLEANUP_BATCH));
   }
 
   private int expire(StorageUploadService uploadService) {
@@ -206,6 +214,15 @@ public final class StorageMaintenance
       return blobManager.sweepDeleting();
     } catch (RuntimeException ignored) {
       log.warn("storage blob maintenance failed; next wake or poll will retry");
+      return 0;
+    }
+  }
+
+  private int cleanupObjects(StorageObjectCleanupService objectCleanupService) {
+    try {
+      return objectCleanupService.sweepOnce();
+    } catch (RuntimeException ignored) {
+      log.warn("storage object cleanup maintenance failed; next wake or poll will retry");
       return 0;
     }
   }

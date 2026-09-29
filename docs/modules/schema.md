@@ -69,10 +69,10 @@ erDiagram
 | Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
 | Project / Issue | `project`、`project_issue`、`project_issue_agent_thread`、`project_issue_stage_budget`、`project_issue_run`、`project_issue_activity`、`project_issue_work`、`project_issue_evidence` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work`、`harness_subagent_task` |
-| Global Storage | `storage_blob`、`storage_upload`、`session_blob_ref` |
+| Global Storage | `storage_blob`、`storage_upload`、`storage_object_cleanup`、`session_blob_ref` |
 | Settings | 单行 `system_setting(id = 1)` |
 
-`harness_` 前缀覆盖 Harness 执行与异步委派的八张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 38 张业务及基础设施表集合与这份清单完全相等，多一张少一张都失败）。
+`harness_` 前缀覆盖 Harness 执行与异步委派的八张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 39 张业务及基础设施表集合与这份清单完全相等，多一张少一张都失败）。
 
 ## 关键表与约束
 
@@ -156,6 +156,8 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 
 `storage_blob` 是按 `(sha256, size_bytes)` 去重的不可变内容地址，字节在 S3，行只保存媒体事实与 `ref_count`/`state`。`uk_storage_blob_active_hash` 是部分唯一索引（`where state = 'ACTIVE'`），所以同一内容在 DELETING 期间可以重新上传；`ck_storage_blob_state_ref_count` 固定 ACTIVE 必须有正引用、DELETING 必须为零。`storage_upload.blob_id` 为空表示 PENDING（客户端 PUT 到 `uploads/{id}/original`）、非空表示 READY；`session_blob_ref` 让 Session 以显式边持有 blob。所有释放与 `ref_count` 变更都由应用事务完成，不依赖 cascade 或 trigger。
 
+`storage_object_cleanup` 是对象 key 的耐久删除记录（`key` PK、`next_attempt_at`）：凡是「该 key 的最后一个数据库事实即将消失」的路径，都与事实变更在同一事务内登记，记录永不按 TTL 清除，后台清扫用数据库时间认领到期批次、在事务外幂等删除、失败改到短重试。它保证迟到的浏览器直传 PUT、服务端 COPY 或预览写入最终被删除，但只提供「元数据永久保留 + 额外低频 delete」，当前**没有 finite TTL 清除**，也**不是真正的 S3 fencing**（不阻断写入，只在之后收敛）。
+
 ### Project、Issue 与 Stage Budget
 
 | 表 | 身份与关键约束 |
@@ -213,10 +215,10 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 
 测试入口：
 
-- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 38 张业务及基础设施表、快照一致性、旧对象清除与 SQL 探针。
+- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 39 张业务及基础设施表、快照一致性、旧对象清除与 SQL 探针。
 - [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 表集合精确相等、Harness 执行协议八表（含 `harness_thread_join`）限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
 - [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat、Environment 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
-- [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联。
+- [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联、对象清理记录的主键与非空约束。
 - [`PostgresqlSchemaSeedTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaSeedTest.java)：三份 seed 的幂等性、V1 默认 settings 解码、e2e seed 无凭据。
 - [`ProjectWorkflowServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectWorkflowServiceIntegrationTest.java)、[`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueRunAcceptanceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueRunAcceptanceIntegrationTest.java)、[`IssueStageBudgetIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueStageBudgetIntegrationTest.java)、[`IssueWorkStoreIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueWorkStoreIntegrationTest.java)：Project/Issue 工作流、生命周期、Run 接受、阶段预算与 Work 调度。
 - [`FlywayBootstrapArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java) 与 [`FlywayAutoConfigurationIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java)：唯一 V1、受控 seed 清单、各模块依赖 scope，以及在空库里真实执行迁移。

@@ -34,6 +34,7 @@ public class InMemoryS3StorageService implements S3StorageService {
   private final List<NetworkCall> networkCalls = new CopyOnWriteArrayList<>();
   private final Map<String, RuntimeException> deleteFailures = new ConcurrentHashMap<>();
   private volatile Consumer<NetworkCall> networkCallObserver = ignored -> {};
+  private volatile Runnable copyInFlightHook = () -> {};
 
   /** 清空全部对象（每个测试前调用）。 */
   public void clear() {
@@ -43,6 +44,7 @@ public class InMemoryS3StorageService implements S3StorageService {
     networkCalls.clear();
     deleteFailures.clear();
     networkCallObserver = ignored -> {};
+    copyInFlightHook = () -> {};
   }
 
   public void clearNetworkCalls() {
@@ -77,6 +79,15 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   public void setNetworkCallObserver(Consumer<NetworkCall> networkCallObserver) {
     this.networkCallObserver = networkCallObserver;
+  }
+
+  /**
+   * 在「服务端 COPY 已读取源对象、目标尚未写入」的飞行中窗口插入钩子（F01 会话终止复现专用）。
+   *
+   * <p>真实 S3 的 COPY 受理后源对象即使被删除也仍会完成写入；本钩子保留同样的飞行中语义， 使测试可以在写窗口内终止写者会话而不改变被复制的字节。
+   */
+  public void setCopyInFlightHook(Runnable hook) {
+    this.copyInFlightHook = hook == null ? () -> {} : hook;
   }
 
   /** 模拟浏览器直传：直接写入 uploads/{uploadId}/original 对象。 */
@@ -182,6 +193,7 @@ public class InMemoryS3StorageService implements S3StorageService {
     if (bytes == null) {
       throw NoSuchKeyException.builder().message("missing source: " + sourceKey).build();
     }
+    copyInFlightHook.run();
     objects.put(targetKey, bytes.clone());
     contentTypes.put(targetKey, contentTypes.get(sourceKey));
   }
