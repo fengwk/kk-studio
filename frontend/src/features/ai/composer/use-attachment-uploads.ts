@@ -11,8 +11,8 @@ import type { StorageMediaKind, StorageUploadDTO } from '@/shared/api/contracts/
 import { ApiError } from '@/shared/api/client'
 import {
   loadUnknownUploads,
-  storeUnknownUploads,
-  type StoredUnknownUpload,
+  persistPendingUnknownUpload,
+  removeStoredUnknownUpload,
 } from '@/features/ai/composer/composer-draft'
 import { translate } from '@/shared/i18n'
 
@@ -246,6 +246,10 @@ export function useAttachmentUploads(options?: {
   const service = options?.storageService ?? storageService
   const hashFile = options?.hashFile ?? defaultHashFile
   const scope = options?.scope
+  const scopeRef = useRef(scope)
+  useEffect(() => {
+    scopeRef.current = scope
+  }, [scope])
   const partsRef = useRef(options?.parts)
   useEffect(() => {
     partsRef.current = options?.parts
@@ -279,76 +283,49 @@ export function useAttachmentUploads(options?: {
   const activeRef = useRef(new Set<string>())
   const abortControllersRef = useRef(new Map<string, AbortController>())
 
-  const syncStoredUnknowns = useCallback(
-    (current: AttachmentUpload[]) => {
-      if (!scope) {
-        return
+  // 严格仅在 scope 改变时隔离清理旧在途并加载新 scope 的未知上传，绝不在 parts 改变时重复 restore
+  const prevScopeRef = useRef(scope)
+  useEffect(() => {
+    if (prevScopeRef.current !== scope) {
+      prevScopeRef.current = scope
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort()
       }
-      const unknowns: StoredUnknownUpload[] = current
-        .filter((u) => u.status === 'complete_unknown' && u.uploadId)
-        .map((u) => ({
-          localId: u.localId,
-          uploadId: u.uploadId!,
-          filename: u.filename,
-          mediaType: u.mediaType,
-          sizeBytes: u.sizeBytes,
-          sha256: u.sha256,
-          ...(u.imageTier ? { imageTier: u.imageTier } : {}),
-        }))
-      storeUnknownUploads(scope, unknowns)
-    },
-    [scope],
-  )
+      abortControllersRef.current.clear()
+      activeRef.current.clear()
+      filesRef.current.clear()
+      for (const localId of previewUrlsRef.current.keys()) {
+        revokePreviewUrl(localId, previewUrlsRef.current)
+      }
+      const unknowns = scope ? loadUnknownUploads(scope) : []
+      const fresh: AttachmentUpload[] = unknowns.map((item) => ({
+        localId: item.localId,
+        uploadId: item.uploadId,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        sizeBytes: item.sizeBytes,
+        sha256: item.sha256,
+        status: 'complete_unknown' as const,
+        progress: 0.8,
+        previewUrl: null,
+        detached: false,
+        ...(item.imageTier ? { imageTier: item.imageTier } : {}),
+      }))
+      setUploads(fresh)
+      uploadsRef.current = fresh
+    }
+  }, [scope])
 
   const updateUploads = useCallback(
     (updater: (current: AttachmentUpload[]) => AttachmentUpload[]) => {
       setUploads((current) => {
         const next = updater(current)
         uploadsRef.current = next
-        syncStoredUnknowns(next)
         return next
       })
     },
-    [syncStoredUnknowns],
+    [],
   )
-
-  // 当 scope 变化（例如面板切到不同 thread）时恢复该 scope 的未知上传条目
-  useEffect(() => {
-    if (!scope) {
-      return
-    }
-    const unknowns = loadUnknownUploads(scope)
-    if (unknowns.length === 0) {
-      return
-    }
-    setUploads((current) => {
-      const existingIds = new Set(current.map((u) => u.localId))
-      const freshRestored: AttachmentUpload[] = []
-      for (const item of unknowns) {
-        if (!existingIds.has(item.localId)) {
-          freshRestored.push({
-            localId: item.localId,
-            uploadId: item.uploadId,
-            filename: item.filename,
-            mediaType: item.mediaType,
-            sizeBytes: item.sizeBytes,
-            sha256: item.sha256,
-            status: 'complete_unknown',
-            progress: 0.8,
-            previewUrl: null,
-            detached: false,
-            ...(item.imageTier ? { imageTier: item.imageTier } : {}),
-          })
-        }
-      }
-      if (freshRestored.length === 0) {
-        return current
-      }
-      const next = [...current, ...freshRestored]
-      uploadsRef.current = next
-      return next
-    })
-  }, [scope])
 
   const patchUpload = useCallback(
     (localId: string, patch: Partial<AttachmentUpload>) => {
@@ -389,9 +366,12 @@ export function useAttachmentUploads(options?: {
       if (uploadId && !record.detached) {
         void service.deleteUpload(uploadId).catch(() => undefined)
       }
+      if (scope) {
+        removeStoredUnknownUpload(scope, localId)
+      }
       dropUpload(localId)
     },
-    [dropUpload, service],
+    [dropUpload, scope, service],
   )
 
   /**
@@ -426,7 +406,8 @@ export function useAttachmentUploads(options?: {
   const runPipeline = useCallback(
     async (record: AttachmentUpload, file: File) => {
       const localId = record.localId
-      const active = () => activeRef.current.has(localId)
+      const capturedScope = scopeRef.current
+      const active = () => activeRef.current.has(localId) && scopeRef.current === capturedScope
       const controller = abortControllersRef.current.get(localId)
       let reservedUploadId: string | null = null
       try {
@@ -458,21 +439,19 @@ export function useAttachmentUploads(options?: {
           patchUpload(localId, { progress: 0.8 })
         }
 
-        // 发送 complete 前预先在 scope 中保存 identity，防范在途网络未知或刷新窗口丢句柄
-        if (scope) {
-          const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-          storeUnknownUploads(scope, [
-            ...currentUnknowns,
-            {
-              localId,
-              uploadId: reservation.id,
-              filename: record.filename,
-              mediaType: record.mediaType,
-              sizeBytes: record.sizeBytes,
-              sha256: sha256 ?? record.sha256,
-              imageTier: record.imageTier,
-            },
-          ])
+        // 发送 complete 前预先在 capturedScope 中原子保存 identity，防范在途网络未知或刷新窗口丢句柄
+        // Fail-Closed 机制：若存储满额（QuotaExceededError）或写入失败，抛出错误，
+        // 绝不继续执行 completeUpload！
+        if (capturedScope) {
+          persistPendingUnknownUpload(capturedScope, {
+            localId,
+            uploadId: reservation.id,
+            filename: record.filename,
+            mediaType: record.mediaType,
+            sizeBytes: record.sizeBytes,
+            sha256: sha256 ?? record.sha256,
+            imageTier: record.imageTier,
+          })
         }
 
         let completed: StorageUploadDTO
@@ -496,26 +475,23 @@ export function useAttachmentUploads(options?: {
             })
             return
           }
-          // 确定未接受错误（非 5xx/408/429/网络异常）：清理预存的 unknown，进入外层 cleanup
-          if (scope) {
-            const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-            storeUnknownUploads(scope, currentUnknowns)
+          // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
           }
           throw completeError
         }
 
         if (!active()) {
           void service.deleteUpload(completed.id).catch(() => undefined)
-          if (scope) {
-            const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-            storeUnknownUploads(scope, currentUnknowns)
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
           }
           return
         }
-        // complete 成功：从 scope 的 unknown uploads 中移除
-        if (scope) {
-          const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-          storeUnknownUploads(scope, currentUnknowns)
+        // complete 成功：仅从 capturedScope 移除当前已确认的条目
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
         }
         // complete 返回同一 DTO：upload 句柄不变，绝不替换为 blobId。
         patchUpload(localId, {
@@ -526,6 +502,9 @@ export function useAttachmentUploads(options?: {
       } catch (error) {
         if (reservedUploadId && active()) {
           void service.deleteUpload(reservedUploadId).catch(() => undefined)
+        }
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
         }
         if (!active()) {
           return
@@ -542,13 +521,14 @@ export function useAttachmentUploads(options?: {
         })
       }
     },
-    [dropUpload, hashFile, patchUpload, scope, service],
+    [dropUpload, hashFile, patchUpload, service],
   )
 
   /** 重试未知结果条目的 completeUpload 操作。支持传入 localId 或 upload 对象。 */
   const retryComplete = useCallback(
     async (target: string | AttachmentUpload) => {
       const localId = typeof target === 'string' ? target : target.localId
+      const capturedScope = scopeRef.current
       const record = uploadsRef.current.find((u) => u.localId === localId)
       if (!record || !record.uploadId || record.status !== 'complete_unknown') {
         return
@@ -556,9 +536,8 @@ export function useAttachmentUploads(options?: {
       patchUpload(localId, { status: 'uploading', progress: 0.9 })
       try {
         const completed = await service.completeUpload(record.uploadId)
-        if (scope) {
-          const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-          storeUnknownUploads(scope, currentUnknowns)
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
         }
         patchUpload(localId, {
           uploadId: completed.id,
@@ -571,9 +550,8 @@ export function useAttachmentUploads(options?: {
         } else {
           // 确定未接受错误：释放并 drop
           void service.deleteUpload(record.uploadId).catch(() => undefined)
-          if (scope) {
-            const currentUnknowns = loadUnknownUploads(scope).filter((u) => u.localId !== localId)
-            storeUnknownUploads(scope, currentUnknowns)
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
           }
           dropUpload(localId)
         }
@@ -584,7 +562,7 @@ export function useAttachmentUploads(options?: {
         })
       }
     },
-    [dropUpload, patchUpload, scope, service],
+    [dropUpload, patchUpload, service],
   )
 
   /**
