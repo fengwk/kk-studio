@@ -97,8 +97,8 @@ describe('CreateProjectModal', () => {
 })
 
 describe('EditProjectModal', () => {
-  it('switches to workflow tab, formats json, and submits workflow updates', async () => {
-    // 测试意图：验证进入工作流 JSON 编辑器标签，可格式化 JSON 并严格调用 updateWorkflow 保存
+  it('switches to workflow tab, formats json, and submits workflow updates independently', async () => {
+    // 测试意图：验证进入工作流 JSON 编辑器标签，可格式化 JSON 并严格调用独立的 updateWorkflow 保存，成功触发 onSuccess
     const user = userEvent.setup()
     const mockApi = {
       updateProject: vi.fn().mockResolvedValue({ ...mockProject, version: '2' }),
@@ -125,9 +125,22 @@ describe('EditProjectModal', () => {
     // 格式化 JSON
     await user.click(screen.getByRole('button', { name: /格式化 JSON/i }))
 
-    // 点击保存
-    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    // 点击独立的工作流保存按钮
+    await user.click(screen.getByRole('button', { name: '保存工作流' }))
     await waitFor(() => {
+      expect(mockApi.updateWorkflow).toHaveBeenCalledWith(
+        mockProject.id,
+        expect.objectContaining({
+          expectedVersion: '1',
+          workflow: expect.objectContaining({
+            states: expect.arrayContaining([
+              expect.objectContaining({ state: 'INIT', name: '待开始' }),
+              expect.objectContaining({ state: 'BLOCKED', name: '业务阻塞' }),
+              expect.objectContaining({ state: 'DONE', name: '完成' }),
+            ]),
+          }),
+        }),
+      )
       expect(onSuccess).toHaveBeenCalled()
     })
   })
@@ -156,7 +169,7 @@ describe('EditProjectModal', () => {
     await user.clear(titleInput)
     await user.type(titleInput, 'Draft New Title')
 
-    await user.click(screen.getByRole('button', { name: '保存更改' }))
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
 
     // 提示 409 冲突并保留草稿
     expect(await screen.findByText(/409 冲突/i)).toBeInTheDocument()
@@ -167,6 +180,179 @@ describe('EditProjectModal', () => {
     await waitFor(() => {
       expect(screen.getByText('5')).toBeInTheDocument() // 期望版本更新为 5
       expect(titleInput.value).toBe('Draft New Title') // 草稿依然保留
+    })
+  })
+
+  it('independently saves YOLO mode and updates authoritative version for subsequent actions', async () => {
+    // 测试意图：验证 YOLO 模式拥有独立保存表单与按钮，CAS 成功后立即更新模态框权威版本，后续基础配置保存继承新版本
+    const user = userEvent.setup()
+    const projectAfterYolo = { ...mockProject, yoloEnabled: false, version: '2' }
+    const projectAfterBasic = { ...projectAfterYolo, title: 'Updated Title', version: '3' }
+    const mockApi = {
+      updateYolo: vi.fn().mockResolvedValue(projectAfterYolo),
+      updateProject: vi.fn().mockResolvedValue(projectAfterBasic),
+    } as unknown as ProjectsApi
+    const onSuccess = vi.fn()
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={onSuccess}
+        api={mockApi}
+      />,
+    )
+
+    // 更改 YOLO 模式并点击保存 YOLO 模式
+    const yoloCheckbox = screen.getByRole('checkbox')
+    await user.click(yoloCheckbox)
+    await user.click(screen.getByRole('button', { name: '保存 YOLO 模式' }))
+
+    await waitFor(() => {
+      expect(mockApi.updateYolo).toHaveBeenCalledWith(mockProject.id, {
+        expectedVersion: '1',
+        yoloEnabled: false,
+      })
+      expect(screen.getByText('2')).toBeInTheDocument() // 期望版本推进到 2
+      expect(screen.getByText('YOLO 模式保存成功')).toBeInTheDocument()
+    })
+
+    // 接着在同一弹窗中保存基础信息，验证其使用已更新的权威版本 2 进行 CAS
+    const titleInput = screen.getByLabelText(/项目名称/i)
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Updated Title')
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+
+    await waitFor(() => {
+      expect(mockApi.updateProject).toHaveBeenCalledWith(mockProject.id, {
+        expectedVersion: '2',
+        title: 'Updated Title',
+        description: mockProject.description,
+      })
+      expect(screen.getByText('3')).toBeInTheDocument() // 期望版本推进到 3
+      expect(screen.getByText('基础信息保存成功')).toBeInTheDocument()
+    })
+  })
+
+  it('does not claim composite atomic failure when one subform fails after another succeeds', async () => {
+    // 测试意图：验证当基础信息更新成功（版本变为 2）后，YOLO 模式保存抛出网络错误，只在 YOLO 区域提示错误，绝不声称基础配置保存也失败
+    const user = userEvent.setup()
+    const projectAfterBasic = { ...mockProject, title: 'Valid New Title', version: '2' }
+    const mockApi = {
+      updateProject: vi.fn().mockResolvedValue(projectAfterBasic),
+      updateYolo: vi.fn().mockRejectedValue(new Error('YOLO Network timeout')),
+    } as unknown as ProjectsApi
+    const onSuccess = vi.fn()
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={onSuccess}
+        api={mockApi}
+      />,
+    )
+
+    // 1. 保存基础信息成功
+    const titleInput = screen.getByLabelText(/项目名称/i)
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Valid New Title')
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('基础信息保存成功')).toBeInTheDocument()
+      expect(screen.getByText('2')).toBeInTheDocument() // 权威版本更新为 2
+    })
+
+    // 2. 保存 YOLO 模式失败
+    await user.click(screen.getByRole('button', { name: '保存 YOLO 模式' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('YOLO Network timeout')).toBeInTheDocument()
+      // 基础信息仍然显示成功，不被篡改为原子全部失败
+      expect(screen.getByText('基础信息保存成功')).toBeInTheDocument()
+      // 权威版本依然停留在成功后的 2
+      expect(screen.getByText('2')).toBeInTheDocument()
+    })
+  })
+
+  it('preserves dirty uncommitted drafts when parent updates project prop following a subform save (I08)', async () => {
+    // 测试意图：验证当父组件响应子表单保存并回传更新后的 project prop（版本推进）时，未提交的脏草稿字段不被重置覆盖，且后续保存自动继承新版本
+    const user = userEvent.setup()
+    const projectV2: ProjectDTO = {
+      ...mockProject,
+      yoloEnabled: false,
+      version: '2',
+    }
+    const projectV3: ProjectDTO = {
+      ...projectV2,
+      title: 'Draft Custom Title',
+      version: '3',
+    }
+    const mockApi = {
+      updateYolo: vi.fn().mockResolvedValue(projectV2),
+      updateProject: vi.fn().mockResolvedValue(projectV3),
+      getProject: vi.fn(),
+    } as unknown as ProjectsApi
+    const onSuccess = vi.fn()
+
+    const { rerender } = renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={onSuccess}
+        api={mockApi}
+      />,
+    )
+
+    // 1. 用户在 Basic 表单输入未提交的草稿
+    const titleInput = screen.getByLabelText(/项目名称/i) as HTMLInputElement
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Draft Custom Title')
+    expect(titleInput.value).toBe('Draft Custom Title')
+
+    // 2. 用户在 YOLO 区域独立保存 YOLO
+    const yoloCheckbox = screen.getByRole('checkbox')
+    await user.click(yoloCheckbox)
+    await user.click(screen.getByRole('button', { name: '保存 YOLO 模式' }))
+
+    await waitFor(() => {
+      expect(mockApi.updateYolo).toHaveBeenCalledWith(mockProject.id, {
+        expectedVersion: '1',
+        yoloEnabled: false,
+      })
+      expect(onSuccess).toHaveBeenCalledWith(projectV2)
+    })
+
+    // 3. 模拟父组件根据 onSuccess 回调更新 project prop 为 projectV2
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <EditProjectModal
+          isOpen={true}
+          project={projectV2}
+          onClose={vi.fn()}
+          onSuccess={onSuccess}
+          api={mockApi}
+        />
+      </QueryClientProvider>,
+    )
+
+    // 4. 验证：权威版本更新为 2，未提交的 Basic 草稿依然完好保留！
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(titleInput.value).toBe('Draft Custom Title')
+
+    // 5. 点击保存基础信息，验证其使用从父组件同步来的权威版本 2 进行 CAS
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => {
+      expect(mockApi.updateProject).toHaveBeenCalledWith(mockProject.id, {
+        expectedVersion: '2',
+        title: 'Draft Custom Title',
+        description: mockProject.description,
+      })
+      expect(screen.getByText('3')).toBeInTheDocument()
     })
   })
 })
