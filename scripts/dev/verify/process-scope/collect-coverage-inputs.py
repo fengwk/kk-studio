@@ -65,9 +65,16 @@ def main() -> int:
         return 1
     print("class digest %s identical on every platform" % list(digests.values())[0])
 
-    # 类别目录按平台各自上传，这里固定取第一份：三份已经证明逐字节一致。
+    # 类别目录按平台各自上传，这里固定取第一份：三份已经证明逐字节一致。链接必须用绝对路径——相对路径会相对**链接自身所在
+    # 目录**解析，调用方换个工作目录就变成断链，报告步骤会以「找不到 class 文件」失败。
+    classes_link = output / "classes"
+    if classes_link.is_symlink() or classes_link.exists():
+        classes_link.unlink()
+    classes_link.symlink_to(classes_source.resolve(), target_is_directory=True)
+    if not classes_link.is_dir():
+        print(f"FAIL {classes_link} does not resolve to a class directory")
+        return 1
     (output / "exec-files.txt").write_text("\n".join(str(path) for path in exec_files), encoding="utf-8")
-    (output / "classes").symlink_to(classes_source, target_is_directory=True)
     print("collected %d exec files" % len(exec_files))
     return 0
 
