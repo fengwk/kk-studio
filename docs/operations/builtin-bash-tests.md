@@ -292,10 +292,12 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   合并后即可在报告里看到 `ProcessScopeHelper`/`PosixProcessGroup` 的 helper 侧行覆盖。默认关闭是因为被插桩的 helper 冷启动更慢，
   会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
 - **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
-  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/`ProcessScopeState` 的本地
-  行覆盖低于仓库 90% 目标（约 68%/57%/61%，指令覆盖 87%），缺口主要是 Windows 专属分支与跨 JVM 的 helper 侧代码；helper 侧可用
-  `-Dkk-studio.process-scope.helper-coverage=true` 合并测量，真正补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的
-  补测。
+  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/
+  `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 79.6%/83.3%/68.0%，模块整体行 87.6%）；缺口是 Windows
+  专属分支（helper 的 `runWindows` 与 Windows 分派、`WindowsJobScope` 全类）、中断/信号被拒这类只在异常时序到达的失败关闭分支，以及
+  需要跨 JVM 采集的 helper 侧代码。helper 侧用
+  `-Dkk-studio.process-scope.helper-coverage=true` 收集，把 `target/jacoco.exec` 与 `target/jacoco-helper/*.exec` 串接成一个文件后交给
+  `jacoco:report` 即可合并测量；真正补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的补测。
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
   在下一次调用重建存储；输出内容与失败终态都不受影响。
 - **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」
