@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 核心测试的内存基座：可控 fake channel / lease store，以及握手与帧构造辅助。
@@ -339,6 +341,12 @@ final class EnvironmentDaemonServerTestSupport {
     /** 下一次递交抛出异常：模拟传输自身发送失败。 */
     boolean failNextOffer;
 
+    /** 下一次递交停在入口，直到 {@link #releaseOffer()}；用于制造代际替换窗口。 */
+    volatile boolean holdNextOffer;
+
+    private final CountDownLatch offerEntered = new CountDownLatch(1);
+    private final CountDownLatch offerReleased = new CountDownLatch(1);
+
     EnvironmentId boundEnvironmentId;
 
     FakeChannel(String connectionId) {
@@ -357,6 +365,18 @@ final class EnvironmentDaemonServerTestSupport {
 
     @Override
     public DaemonOfferResult offerText(String text) {
+      if (holdNextOffer) {
+        holdNextOffer = false;
+        offerEntered.countDown();
+        try {
+          if (!offerReleased.await(5, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("offer hold was not released");
+          }
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("offer hold interrupted", error);
+        }
+      }
       if (!open) {
         return DaemonOfferResult.CLOSED;
       }
@@ -415,6 +435,19 @@ final class EnvironmentDaemonServerTestSupport {
 
     int closeAfterFlushCount() {
       return closeAfterFlushCount;
+    }
+
+    boolean awaitOfferEntered() {
+      try {
+        return offerEntered.await(5, TimeUnit.SECONDS);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        return false;
+      }
+    }
+
+    void releaseOffer() {
+      offerReleased.countDown();
     }
   }
 

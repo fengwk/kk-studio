@@ -419,6 +419,37 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
   }
 
+  /** 意图：HELLO 未进入传输时不得停在 CONNECTING。关闭当前连接后，既有重连会再次发出 HELLO，而不是一直占着连接代际。 */
+  @Test
+  void helloOfferFailureClosesTheConnectionAndReconnects() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    transport.refuseNextOpen();
+    runtime = runtime(transport, new TestCapability(), Duration.ofMinutes(1));
+
+    runtime.start();
+    transport.awaitConnections(2);
+    completeHandshake();
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+    assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+  }
+
+  /** 意图：WELCOME 已到达但随后的 READY 未进入传输时，同样必须离开 CONNECTING 并重连，不能把半握手连接留在运行时里。 */
+  @Test
+  void welcomeWithoutReadyOfferClosesTheConnectionAndReconnects() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability(), Duration.ofMinutes(1));
+
+    runtime.start();
+    transport.awaitConnections(1);
+    transport.awaitNextMessageType(DaemonMessageType.HELLO);
+    transport.closeNextSend();
+    transport.receive(platformMessage(DaemonMessageType.WELCOME));
+
+    transport.awaitConnections(1);
+    completeHandshake();
+    assertEquals(DaemonRuntimeState.READY, runtime.state());
+  }
+
   /** 任一出站 send failure 都使连接失效；重连后 journal 仍阻止 invocation 重启。 */
   @Test
   void reconnectsAfterSendFailureWithoutRestartingInvocation() throws InterruptedException {
@@ -2448,6 +2479,7 @@ class DaemonRuntimeTest {
     private final LinkedBlockingQueue<String> sent = new LinkedBlockingQueue<>();
     private final AtomicBoolean failNextConnection = new AtomicBoolean();
     private final AtomicBoolean failNextSend = new AtomicBoolean();
+    private final AtomicBoolean refuseNextOpen = new AtomicBoolean();
     private final AtomicBoolean throwNextConnection = new AtomicBoolean();
     private final AtomicBoolean returnNullNextConnection = new AtomicBoolean();
     private final AtomicBoolean delayNextConnection = new AtomicBoolean();
@@ -2486,6 +2518,16 @@ class DaemonRuntimeTest {
 
     private void failNextSend() {
       failNextSend.set(true);
+    }
+
+    private void refuseNextOpen() {
+      refuseNextOpen.set(true);
+    }
+
+    private void closeNextSend() {
+      if (connection != null) {
+        connection.open = false;
+      }
     }
 
     private void throwNextConnection() {
@@ -2584,7 +2626,7 @@ class DaemonRuntimeTest {
 
     private final class FakeConnection implements DaemonConnection {
 
-      private volatile boolean open = true;
+      private volatile boolean open = !refuseNextOpen.getAndSet(false);
       private final CountDownLatch closed = new CountDownLatch(1);
 
       @Override
