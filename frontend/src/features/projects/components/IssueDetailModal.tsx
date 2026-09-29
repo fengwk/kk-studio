@@ -42,6 +42,7 @@ import {
   loadPendingAction,
   storePendingAction,
   type IssueActionKind,
+  type LoadPendingActionResult,
   type PendingIssueAction,
 } from '../pending-action-sidecar'
 import type { ProjectsApi } from '../projects-api'
@@ -159,6 +160,20 @@ function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
   )
 }
 
+function safeLoadPendingAction(issueId: string | null): LoadPendingActionResult {
+  if (!issueId) {
+    return { type: 'NONE' }
+  }
+  try {
+    return loadPendingAction(issueId)
+  } catch (err) {
+    return {
+      type: 'STORAGE_ERROR',
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
 export function IssueDetailModal({
   isOpen,
   issueId,
@@ -203,10 +218,17 @@ export function IssueDetailModal({
   const [conflictDetail, setConflictDetail] = useState<string | null>(null)
   const [isActionPending, setIsActionPending] = useState(false)
 
-  // 0. 未决操作持久化侧车与 unknown 状态 (I07)
-  const [pendingUnknownAction, setPendingUnknownAction] = useState<PendingIssueAction | null>(() => {
-    return issueId ? loadPendingAction(issueId) : null
+  // 0. 未决操作持久化侧车与 unknown / 异常状态 (I07)
+  const [pendingActionResult, setPendingActionResult] = useState<LoadPendingActionResult>(() => {
+    return safeLoadPendingAction(issueId)
   })
+
+  const pendingUnknownAction = pendingActionResult.type === 'VALID' ? pendingActionResult.action : null
+  const corruptActionInfo =
+    pendingActionResult.type === 'CORRUPT'
+      ? { raw: pendingActionResult.raw, error: pendingActionResult.error }
+      : null
+  const storageLoadError = pendingActionResult.type === 'STORAGE_ERROR' ? pendingActionResult.error : null
   const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false)
 
   // 1. Spec 编辑草稿状态与 409 保护
@@ -278,16 +300,13 @@ export function IssueDetailModal({
     }
   }, [detail, isEditingSpec])
 
-  // 挂载/打开时同步加载持久化侧车未决操作
+  // 挂载/打开/issueId 变化时同步加载持久化侧车未决操作或异常状态
   useEffect(() => {
-    if (issueId && isOpen) {
-      const persisted = loadPendingAction(issueId)
-      if (persisted && persisted.isUnknown) {
-        setPendingUnknownAction(persisted)
-      } else {
-        setPendingUnknownAction(null)
-      }
+    if (!issueId || !isOpen) {
+      setPendingActionResult({ type: 'NONE' })
+      return
     }
+    setPendingActionResult(safeLoadPendingAction(issueId))
   }, [issueId, isOpen])
 
   // 关闭时清理临时对话框、未提交草稿与本地证据 (I09)
@@ -433,6 +452,14 @@ export function IssueDetailModal({
   const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
   const isUnknown = issue?.state === 'UNKNOWN' || issue?.pauseReason === 'UNKNOWN'
   const isDone = issue?.state === 'DONE'
+  const isWriteBlocked = isActionPending || Boolean(pendingUnknownAction || corruptActionInfo || storageLoadError)
+
+  // 放弃损坏的挂起记录并解锁界面
+  const handleDiscardCorruptAction = () => {
+    if (!issueId) return
+    clearPendingAction(issueId, undefined, undefined, true)
+    setPendingActionResult({ type: 'NONE' })
+  }
 
   // 从传入的 workflow 找到可转移的 next 列表
   const currentWorkflowState = workflow?.states.find((s) => s.state === issue?.state)
@@ -458,12 +485,12 @@ export function IssueDetailModal({
     onExplicitSuccess: () => void,
   ) => {
     if (!issue) return
-    if (pendingUnknownAction) {
-      setActionError('当前存在未确认结果的写操作，禁止新请求；请先精确重试或明确放弃')
+    if (pendingUnknownAction || corruptActionInfo || storageLoadError) {
+      setActionError('当前存在未确认结果或损坏的写操作记录，禁止新请求；请先处理或放弃')
       return
     }
 
-    const pending: PendingIssueAction = {
+    const pending = {
       issueId: issue.id,
       kind,
       requestKey,
@@ -471,7 +498,7 @@ export function IssueDetailModal({
       payload,
       createdAt: new Date().toISOString(),
       isUnknown: true,
-    }
+    } as PendingIssueAction
 
     // 1. 发送前落盘侧车（fail closed）
     try {
@@ -489,7 +516,7 @@ export function IssueDetailModal({
       await runApi()
       // 2. 异步成功：只能清自己的 identity！
       clearPendingAction(issue.id, requestKey)
-      setPendingUnknownAction(null)
+      setPendingActionResult({ type: 'NONE' })
       onExplicitSuccess()
       await queryClient.invalidateQueries({ queryKey: issueQueryKey })
       notifyUpdated()
@@ -497,16 +524,16 @@ export function IssueDetailModal({
       if (isConflictError(err)) {
         // 409 确定被服务端拒绝，清理侧车并保留草稿
         clearPendingAction(issue.id, requestKey)
-        setPendingUnknownAction(null)
+        setPendingActionResult({ type: 'NONE' })
         setConflictDetail('操作遇到版本冲突 (409)。已为您保留编辑草稿，请刷新版本后重试。')
       } else if (!isNetworkUnknownError(err)) {
         // 其余明确 4xx 业务错误，服务端未接受
         clearPendingAction(issue.id, requestKey)
-        setPendingUnknownAction(null)
+        setPendingActionResult({ type: 'NONE' })
         setActionError(err instanceof Error ? err.message : '操作失败')
       } else {
         // 未知网络错误（408, 429, 5xx, 网络中断）：侧车保留并在 UI 标记 unknown！
-        setPendingUnknownAction(pending)
+        setPendingActionResult({ type: 'VALID', action: pending })
         setActionError(err instanceof Error ? err.message : '网络请求未收到确定响应，结果未知')
       }
     } finally {
@@ -635,17 +662,17 @@ export function IssueDetailModal({
           break
       }
       clearPendingAction(issue.id, requestKey)
-      setPendingUnknownAction(null)
+      setPendingActionResult({ type: 'NONE' })
       await queryClient.invalidateQueries({ queryKey: issueQueryKey })
       notifyUpdated()
     } catch (err) {
       if (isConflictError(err)) {
         clearPendingAction(issue.id, requestKey)
-        setPendingUnknownAction(null)
+        setPendingActionResult({ type: 'NONE' })
         setConflictDetail('重试操作遇到版本冲突 (409)，请刷新数据后重试。')
       } else if (!isNetworkUnknownError(err)) {
         clearPendingAction(issue.id, requestKey)
-        setPendingUnknownAction(null)
+        setPendingActionResult({ type: 'NONE' })
         setActionError(err instanceof Error ? err.message : '操作失败')
       } else {
         setActionError(err instanceof Error ? err.message : '重试依然未收到响应，结果未知')
@@ -659,7 +686,7 @@ export function IssueDetailModal({
   const handleDiscardPendingAction = () => {
     if (!issueId || !pendingUnknownAction) return
     clearPendingAction(issueId, pendingUnknownAction.requestKey)
-    setPendingUnknownAction(null)
+    setPendingActionResult({ type: 'NONE' })
     setIsDiscardConfirmOpen(false)
   }
 
@@ -969,7 +996,7 @@ export function IssueDetailModal({
                 key={toState}
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => handleTransition(toState)}
                 title={`流转状态至 ${toState}`}
               >
@@ -983,7 +1010,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action danger"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => setIsResolveUnknownOpen(true)}
                 title="核查外部副作用并解除 UNKNOWN"
               >
@@ -997,7 +1024,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => handleRecover()}
                 title="解除阻塞并恢复至原工作阶段"
               >
@@ -1008,7 +1035,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => setIsBlockModalOpen(true)}
                 title="记录原因并标记业务阻塞"
               >
@@ -1022,7 +1049,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => setIsStopModalOpen(true)}
                 title="终止当前活动 Run 并置为暂停"
               >
@@ -1036,7 +1063,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending || Boolean(pendingUnknownAction)}
+                disabled={isWriteBlocked}
                 onClick={() => handleReopen()}
                 title="重新打开已完成的 Issue 回到 INIT"
               >
@@ -1046,6 +1073,62 @@ export function IssueDetailModal({
             )}
           </div>
         </div>
+
+        {/* 存储读取异常警告条 */}
+        {storageLoadError && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              margin: '8px 20px 0 20px',
+              backgroundColor: 'var(--bg-danger-subtle, #330000)',
+              borderColor: 'var(--border-danger, #ef4444)',
+              color: 'var(--fg)',
+            }}
+          >
+            <AlertTriangle size={16} color="#ef4444" aria-hidden="true" />
+            <span>本地存储异常，为防止写操作状态失步已锁定当前 Issue: {storageLoadError}</span>
+          </div>
+        )}
+
+        {/* 损坏挂起记录警告条 */}
+        {corruptActionInfo && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              margin: '8px 20px 0 20px',
+              backgroundColor: 'var(--bg-warning-subtle, #2d2600)',
+              borderColor: 'var(--border-warning, #eab308)',
+              color: 'var(--fg)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
+              <strong style={{ color: '#eab308' }}>检测到损坏的本地未决操作记录（可能包含未确认副作用）</strong>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              解析错误: {corruptActionInfo.error}。为防止直接覆盖外部在途操作已安全锁定写操作。
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="btn-primary danger"
+                onClick={handleDiscardCorruptAction}
+                disabled={isActionPending}
+                style={{ fontSize: '12px', padding: '4px 12px' }}
+              >
+                放弃损坏记录并解锁
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 未决写操作未知状态警告条 (I07) */}
         {pendingUnknownAction && (
@@ -1358,7 +1441,7 @@ export function IssueDetailModal({
                       <button
                         type="submit"
                         className="btn-primary"
-                        disabled={isActionPending || !activityBody.trim() || Boolean(pendingUnknownAction)}
+                        disabled={isWriteBlocked || !activityBody.trim()}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
                         <Send size={12} aria-hidden="true" />
@@ -1633,7 +1716,7 @@ export function IssueDetailModal({
                   <button
                     type="submit"
                     className="btn-primary danger"
-                    disabled={isActionPending || Boolean(pendingUnknownAction)}
+                    disabled={isWriteBlocked}
                   >
                     {isActionPending ? '提交中...' : '确认阻塞'}
                   </button>
@@ -1680,7 +1763,7 @@ export function IssueDetailModal({
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isActionPending || Boolean(pendingUnknownAction)}
+                    disabled={isWriteBlocked}
                   >
                     {isActionPending ? '解除中...' : '确认解除门禁'}
                   </button>
@@ -1721,7 +1804,7 @@ export function IssueDetailModal({
                   <button
                     type="submit"
                     className="btn-primary danger"
-                    disabled={isActionPending || Boolean(pendingUnknownAction)}
+                    disabled={isWriteBlocked}
                   >
                     {isActionPending ? '终止中...' : '确认终止'}
                   </button>
@@ -1773,7 +1856,7 @@ export function IssueDetailModal({
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isActionPending || Boolean(pendingUnknownAction)}
+                    disabled={isWriteBlocked}
                   >
                     {isActionPending ? '重置中...' : '确认重置'}
                   </button>

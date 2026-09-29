@@ -7,7 +7,11 @@ import type { IssueDetailDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
 import type { StorageUploadDTO, StorageUploadResultDTO } from '@/shared/api/contracts/storage'
 import { ApiError } from '@/shared/api/client'
-import { loadPendingAction, storePendingAction } from '../pending-action-sidecar'
+import {
+  loadPendingAction,
+  pendingActionStorageKey,
+  storePendingAction,
+} from '../pending-action-sidecar'
 
 function renderModal(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
@@ -573,10 +577,12 @@ describe('IssueDetailModal', () => {
 
     // 验证 localStorage 中保存了未决操作
     const sidecar = loadPendingAction(issueId)
-    expect(sidecar).not.toBeNull()
-    expect(sidecar?.kind).toBe('TRANSITION')
-    expect(sidecar?.requestKey).toBe(recordedRequestKey)
-    expect(sidecar?.expectedVersion).toBe('3')
+    expect(sidecar.type).toBe('VALID')
+    if (sidecar.type === 'VALID') {
+      expect(sidecar.action.kind).toBe('TRANSITION')
+      expect(sidecar.action.requestKey).toBe(recordedRequestKey)
+      expect(sidecar.action.expectedVersion).toBe('3')
+    }
 
     // 此时流转按钮应该被禁用，禁止开启新身份请求
     expect(transitionBtn).toBeDisabled()
@@ -601,7 +607,7 @@ describe('IssueDetailModal', () => {
     // 成功后，未知状态横幅消失，sidecar 清除
     await waitFor(() => {
       expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
-      expect(loadPendingAction(issueId)).toBeNull()
+      expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
     })
   })
 
@@ -630,7 +636,7 @@ describe('IssueDetailModal', () => {
     // 出现冲突提示，但没有未知状态横幅
     expect(await screen.findByText(/版本冲突/i)).toBeInTheDocument()
     expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
-    expect(loadPendingAction(issueId)).toBeNull()
+    expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
   })
 
   it('allows explicit discard of unknown action with confirmation warning (I07)', async () => {
@@ -673,8 +679,104 @@ describe('IssueDetailModal', () => {
     // 警告消失，sidecar 清除
     await waitFor(() => {
       expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
-      expect(loadPendingAction(issueId)).toBeNull()
+      expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
     })
+  })
+
+  it('blocks API calls and displays error when storage throws QuotaExceededError on store', async () => {
+    // 测试意图：持久化侧车抛出异常时 fail-closed，阻止网络请求并呈现受控错误横幅，保证 0 API 发送
+    const api = createMockApi({
+      transitionIssue: vi.fn(),
+    })
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    fireEvent.click(transitionBtn)
+
+    // 提示错误且 API 零调用
+    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+    expect(api.transitionIssue).not.toHaveBeenCalled()
+
+    setItemSpy.mockRestore()
+  })
+
+  it('presents blocked UI for corrupt storage record and unlocks when discarded', async () => {
+    // 测试意图：检测到损坏的未决记录时渲染锁定警告，禁用写操作，支持人工放弃并解锁
+    window.localStorage.setItem(pendingActionStorageKey(issueId), 'corrupted non-json content')
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={createMockApi()}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent(/检测到损坏的本地未决操作记录/i)
+
+    // 所有写操作按钮被锁定
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    expect(transitionBtn).toBeDisabled()
+
+    // 点击放弃损坏记录并解锁
+    const discardCorruptBtn = screen.getByRole('button', { name: '放弃损坏记录并解锁' })
+    fireEvent.click(discardCorruptBtn)
+
+    // 锁定解除，按钮恢复可用
+    await waitFor(() => {
+      expect(screen.queryByText(/检测到损坏的本地未决操作记录/i)).toBeNull()
+      expect(transitionBtn).not.toBeDisabled()
+    })
+  })
+
+  it('safely catches storage read exceptions on load and blocks write UI without crashing', async () => {
+    // 测试意图：读取本地存储抛出异常时不发生 render crash，呈现受控 blocked UI，且按钮被禁用
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('Storage Access Denied (SecurityError)')
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={createMockApi()}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent(/本地存储异常，为防止写操作状态失步已锁定当前 Issue/i)
+
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    expect(transitionBtn).toBeDisabled()
+
+    getItemSpy.mockRestore()
   })
 
   it('rotates requestKey when payload changes in draft inputs, preventing payload switching under same key (I07)', async () => {
