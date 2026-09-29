@@ -621,14 +621,14 @@ final class ThreadProcessorTestSupport {
   }
 
   static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId, Instant now) {
-    return claimThreadWork(store, threadId, now, now.plusSeconds(60));
+    return claimThreadWork(store, threadId, now, Duration.ofSeconds(60));
   }
 
   static ClaimedWork claimThreadWork(
-      InMemoryHarnessStore store, UUID threadId, Instant now, Instant leaseUntil) {
+      InMemoryHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
-            tx -> tx.claimNextWork(WorkTargetType.THREAD, now, "token-" + threadId, leaseUntil))
+            tx -> tx.claimNextWork(WorkTargetType.THREAD, now, "token-" + threadId, leaseDuration))
         .orElseThrow();
   }
 

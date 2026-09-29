@@ -433,7 +433,7 @@ final class ToolProcessorTestSupport {
 
   static ClaimedWork claim(
       InMemoryHarnessStore store, UUID toolInvocationId, Instant now, String token) {
-    return claim(store, toolInvocationId, now, token, now.plusSeconds(60));
+    return claim(store, toolInvocationId, now, token, Duration.ofSeconds(60));
   }
 
   static ClaimedWork claim(
@@ -441,9 +441,9 @@ final class ToolProcessorTestSupport {
       UUID toolInvocationId,
       Instant now,
       String token,
-      Instant leaseUntil) {
+      Duration leaseDuration) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, now, token, leaseUntil))
+        .transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, now, token, leaseDuration))
         .orElseThrow();
   }
 

@@ -60,6 +60,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * 特性本地的同步 Stop transaction。
@@ -95,9 +96,16 @@ final class StopControl {
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
   }
 
-  Commit stop(StopCommand command) {
+  Commit stop(StopCommand command, Consumer<Commit> afterCommit) {
     Objects.requireNonNull(command, "command");
-    return store.transaction(tx -> stop(tx, command));
+    Objects.requireNonNull(afterCommit, "afterCommit");
+    return store.transaction(
+        tx -> {
+          Commit commit = stop(tx, command);
+          // 进程内取消绑定物理 commit：无外层事务时 Stop 事务提交后触发，加入外层事务时只在外层真正提交后触发，回滚不触发。
+          store.afterCommit(() -> afterCommit.accept(commit));
+          return commit;
+        });
   }
 
   static UUID deriveChildStopRequestId(UUID parentStopRequestId, UUID childThreadId) {

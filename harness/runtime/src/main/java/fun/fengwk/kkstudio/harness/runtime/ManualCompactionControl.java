@@ -42,6 +42,9 @@ import java.util.UUID;
  * <p>执行顺序严格保持：第一短事务 plan（Session KEY SHARE -&gt; Thread，校验 version/availability/boundary） -&gt; 事务外
  * resolve -&gt; 机械一致性校验 -&gt; 第二短事务 commit（同锁序，带 source head / Command 快照 CAS 原子提交 COMPACTION Turn
  * 与 MODEL Work）。失败与取消保持与自动压缩一致的单一事实源。
+ *
+ * <p>两段必须是独立物理短事务：入口（plan 之前）即调用 {@link HarnessStore#assertNoAmbientTransaction}，若调用方外层存在环境事务则
+ * 在写入任何内容之前拒绝，避免慢 resolve 期间持有 owner / Thread 锁，并让第二阶段 CAS 失去“两事务之间允许并发变化”的前提。
  */
 final class ManualCompactionControl {
 
@@ -76,6 +79,9 @@ final class ManualCompactionControl {
 
   CompactThreadResult compactThread(CompactThreadCommand command) {
     Objects.requireNonNull(command, "command");
+    // 两段必须是独立物理短事务：入口先断言不在任何环境事务中，被拒绝的手动压缩绝不先写入 plan（更不能让慢 resolve 与
+    // owner/Thread 锁同事务）。内存实现是 no-op，生产实现检测到真实环境事务时在此立即拒绝。
+    store.assertNoAmbientTransaction();
     ManualPlan manualPlan = store.transaction(tx -> planManual(tx, command));
     TurnResolver.Result result =
         resolver.resolve(

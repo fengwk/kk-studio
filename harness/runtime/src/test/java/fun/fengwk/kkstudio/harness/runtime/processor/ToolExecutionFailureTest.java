@@ -215,6 +215,16 @@ class ToolExecutionFailureTest {
     }
 
     @Override
+    public void afterCommit(Runnable action) {
+      delegate.afterCommit(action);
+    }
+
+    @Override
+    public void assertNoAmbientTransaction() {
+      delegate.assertNoAmbientTransaction();
+    }
+
+    @Override
     public <T> T transaction(Function<Transaction, T> callback) {
       if (failNext.compareAndSet(true, false)) {
         throw new IllegalStateException("injected Store failure");

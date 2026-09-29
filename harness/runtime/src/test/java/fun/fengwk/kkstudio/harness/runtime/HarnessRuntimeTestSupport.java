@@ -950,7 +950,7 @@ final class HarnessRuntimeTestSupport {
     seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
-          tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", T3);
+          tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.between(T0, T3));
           return null;
         });
   }

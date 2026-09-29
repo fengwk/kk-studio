@@ -634,7 +634,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "child-claim-1", now.plusSeconds(30)))
+                          WorkTargetType.THREAD, now, "child-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork1));
 
@@ -664,7 +664,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, T2, "child-claim-2", T2.plusSeconds(30)))
+                          WorkTargetType.THREAD, T2, "child-claim-2", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork2));
 
@@ -697,7 +697,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, T2, "parent-claim-1", T2.plusSeconds(30)))
+                          WorkTargetType.THREAD, T2, "parent-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(parentWork));
 

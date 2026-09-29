@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -59,9 +60,27 @@ public interface HarnessStore {
    *
    * <p>实现可以加入调用方已有的外层事务（例如 Spring {@code PROPAGATION_REQUIRED}）：此时回调正常返回只表示当前事务边界内
    * 的写入已准备好，实际提交/回滚由外层事务决定；未加入外层事务的调用则保持回调返回即提交的语义。回调抛异常在两种模式下都会使当前事务 边界失效（标记 rollback-only
-   * 或直接回滚），外层事务随后提交时会被拒绝。
+   * 或直接回滚），外层事务随后提交时会被拒绝。实现不得改用 {@code REQUIRES_NEW}：owner 锁与 harness durable 更新必须留在同一物理事务里。
    */
   <T> T transaction(Function<Transaction, T> callback);
+
+  /**
+   * 把进程内副作用登记到当前 {@link #transaction} 的物理提交之后。
+   *
+   * <p>只能由正在执行的 store callback 调用。无外层事务时，副作用在该 callback 成功提交后、{@link #transaction} 返回前执行；
+   * 实现加入了外层事务时，副作用只在该物理事务真正 {@code afterCommit} 时执行，rollback 不执行。callback 抛异常时不得执行已登记的动作。
+   *
+   * <p>动作执行时 store 事务边界已释放且提交已可见：动作可以开启新的 store 事务读取已提交状态；但动作不属于任何事务，其失败不得影响 已提交结果，也不得被 {@link
+   * #transaction} 重试或回滚。
+   */
+  void afterCommit(Runnable action);
+
+  /**
+   * 断言当前调用不处于任何环境事务中。
+   *
+   * <p>供必须在事务外执行的入口（手动压缩的 {@code resolve}）在开始工作前调用。内存实现是 no-op；生产实现检测到真实环境事务时必须在 该工作执行前拒绝。无事务时立即返回。
+   */
+  void assertNoAmbientTransaction();
 
   /** 一次事务内的 typed persistence 句柄。 */
   interface Transaction {
@@ -389,10 +408,10 @@ public interface HarnessStore {
     Optional<Work> lockWork(WorkTarget target);
 
     /**
-     * 锁定 Work 行并校验 claim ownership：仅当行存在、leaseToken 匹配且 leaseUntil {@code > now} 时返回当前
-     * Work；行缺失、token 不匹配或 lease 已过期均返回 {@link Optional#empty()}（lost / stale ownership
-     * 是正常竞态，不以异常表达）。持有 claim 期间 wakeVersion 增长（新 wake 到达）不导致 ownership 丢失，返回的 Work 可能带更新后的
-     * wakeVersion。未锁定行不产生锁。
+     * 锁定 Work 行并校验 claim ownership：仅当行存在、leaseToken 匹配且 {@code leaseUntil} 严格晚于实现的权威时间时返回当前
+     * Work。生产实现的权威时间是数据库时钟，{@code now} 不参与该比较；内存实现以 {@code now} 为同一时间域。行缺失、token 不匹配或 lease 已过期均返回
+     * {@link Optional#empty()}（lost / stale ownership 是正常竞态，不以异常表达）。持有 claim 期间 wakeVersion 增长（新
+     * wake 到达）不导致 ownership 丢失，返回的 Work 可能带更新后的 wakeVersion。未锁定行不产生锁。
      */
     Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now);
 
@@ -416,42 +435,50 @@ public interface HarnessStore {
     void requestWork(WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId);
 
     /**
-     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）：候选为 availableAt {@code <= now} 且 lease 为空或已过期
-     * （leaseUntil {@code <= now}）且无环境亲和性限制的行。
+     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）。due / 旧 lease 是否过期、以及新 deadline，都由实现的权威时钟决定：
+     * 生产实现使用数据库时钟，{@code now} 不参与比较；新 deadline 为权威时间加上 {@code leaseDuration}。返回的 {@link Work} 携带该权威
+     * deadline。
      */
     Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil);
+        WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration);
 
     /**
-     * 领取 targetType 中下一个 due 的 Work：候选为 availableAt {@code <= now} 且 lease 为空或已过期 （leaseUntil
-     * {@code <= now}）且满足环境亲和性（requiredEnvironmentId 为空或当前 nodeInstanceId 持有有效 READY 连接租约）的行， 按
-     * (availableAt, targetId) 升序确定性选取第一条并写入给定 leaseToken / leaseUntil。该 dispatcher primitive
+     * 领取 targetType 中下一个 due 的 Work。候选为权威时间下已 due（{@code availableAt} 不晚于权威时间）且 lease 为空或已过期，
+     * 并满足环境亲和性（requiredEnvironmentId 为空或当前 nodeInstanceId 持有有效 READY 连接租约）的行，按 (availableAt,
+     * targetId) 升序确定性选取第一条。新 {@code leaseUntil} 由权威时间加上正的整毫秒 {@code leaseDuration} 计算，而不是写入调用方 的绝对
+     * Instant；返回值使用该真实 deadline。生产权威时间是数据库时钟，内存实现以 {@code now} 为同一时间域。该 dispatcher primitive
      * 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
      */
     Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType,
         Instant now,
         String leaseToken,
-        Instant leaseUntil,
+        Duration leaseDuration,
         UUID nodeInstanceId);
 
     /**
-     * 延长 claim 的 lease：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按 {@link Work#renew} 校验
-     * token、lease 活跃与严格延展；违反抛 {@link IllegalArgumentException}。
+     * 延长 claim 的 lease，使其至少覆盖权威时间加上 {@code leaseDuration}。生产权威时间是数据库时钟，{@code now} 不参与有效性比较； 内存实现以
+     * {@code now} 为同一时间域。
+     *
+     * <p>内部先锁定 Work 行：行不存在抛 {@link IllegalStateException}（lost ownership），token 不匹配或该时间域下租约已过期抛
+     * {@link IllegalArgumentException}。若当前 lease 已不早于目标时点则保持不变并返回 {@code false}；否则延展到目标时点并返回 {@code
+     * true}。
      */
-    void renewWork(ClaimedWork claim, Instant now, Instant newLeaseUntil);
+    boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration);
 
     /**
      * 完成 claim：内部先锁定 Work 行；Work 行不存在时抛 {@link IllegalStateException}（lost ownership：没有可验证 的
-     * lease，不能幂等吞掉终态），否则按 {@link Work#complete} 校验 token / claimedWakeVersion：返回 {@link
-     * Optional#empty()} 表示删除匹配当前 wake 的行，返回保留的 {@link Work} 表示处理期间出现新 wake，仅清除 lease。token /
-     * version 违反抛 {@link IllegalArgumentException}。
+     * lease，不能幂等吞掉终态），否则按权威时间校验 lease 仍然有效，再按 {@link Work#complete} 校验 token /
+     * claimedWakeVersion：返回 {@link Optional#empty()} 表示删除匹配当前 wake 的行，返回保留的 {@link Work} 表示处理期间出现新
+     * wake，仅清除 lease。生产权威时间是数据库时钟；内存实现以 {@code now} 为同一时间域。token / version 违反抛 {@link
+     * IllegalArgumentException}。
      */
     Optional<Work> completeWork(ClaimedWork claim, Instant now);
 
     /**
-     * 重排 claim 的 Work：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按 {@link Work#reschedule}
-     * 校验 token / claimedWakeVersion 并设置 availableAt、清除 lease；违反抛 {@link IllegalArgumentException}。
+     * 重排 claim 的 Work：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按权威时间校验 lease 仍然有效，然后按
+     * {@link Work#reschedule} 校验 token / claimedWakeVersion 并设置 availableAt、清除 lease。生产权威时间是数据库时钟；
+     * 内存实现以 {@code now} 为同一时间域。违反抛 {@link IllegalArgumentException}。
      */
     void rescheduleWork(ClaimedWork claim, Instant now, Instant requestedAt);
 

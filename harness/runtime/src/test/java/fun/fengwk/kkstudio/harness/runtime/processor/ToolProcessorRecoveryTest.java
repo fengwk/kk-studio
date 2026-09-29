@@ -61,7 +61,7 @@ class ToolProcessorRecoveryTest {
                         WorkTargetType.THREAD,
                         ToolProcessorTestSupport.NOW,
                         "thread-token",
-                        ToolProcessorTestSupport.NOW.plusSeconds(60)))
+                        Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }

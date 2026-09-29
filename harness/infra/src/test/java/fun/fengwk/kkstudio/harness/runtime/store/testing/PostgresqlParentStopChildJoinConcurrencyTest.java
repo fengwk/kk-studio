@@ -328,7 +328,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", now.plusSeconds(30)))
+                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     CountDownLatch parentTreeLocked = new CountDownLatch(1);
@@ -443,7 +443,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", now.plusSeconds(30)))
+                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -537,7 +537,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", now.plusSeconds(30)))
+                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -660,7 +660,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", now.plusSeconds(30)))
+                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -17,11 +18,15 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
 class PostgresqlWorkTest extends HarnessStoreWorkContract {
+
+  /** TOOL claim 专用租约：短于 {@link #CLAIM_LEASE}，用于 route affinity 场景。 */
+  private static final Duration LEASE_30S = Duration.ofSeconds(30);
 
   @Override
   HarnessStore createStore() {
@@ -38,11 +43,20 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     return Instant.ofEpochMilli(System.currentTimeMillis());
   }
 
+  /** PostgreSQL 没有可注入时钟：过期必须直接改写持久化行的 lease deadline，由数据库时间域判定。 */
   @Override
-  protected ClaimedWork claimNext(WorkTargetType type, Instant now) {
-    return store
-        .transaction(tx -> tx.claimNextWork(type, now, "lease-token", now.plusSeconds(60)))
-        .orElseThrow();
+  protected void expireLease(WorkTarget target) {
+    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
+    assertEquals(
+        1,
+        jdbc.update(
+            """
+            update harness_work
+            set lease_until = statement_timestamp() - interval '1 second'
+            where target_type = ? and target_id = ?
+            """,
+            target.type().name(),
+            target.id()));
   }
 
   @Test
@@ -67,7 +81,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, current, "token-1", current.plusSeconds(4)))
+                        WorkTargetType.THREAD, current, "token-1", Duration.ofSeconds(4)))
             .isEmpty());
 
     // 直接推进持久化时间边界，避免 JVM clock、database clock 与短 sleep 之间的竞态。
@@ -86,9 +100,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     ClaimedWork claimed =
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, claimTime, "token-1", claimTime.plusSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, claimTime, "token-1", CLAIM_LEASE))
             .orElseThrow();
 
     // 活跃 lease 阻止其他 claim
@@ -96,29 +108,16 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertTrue(
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, blockedTime, "token-2", blockedTime.plusSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, blockedTime, "token-2", CLAIM_LEASE))
             .isEmpty());
 
-    assertEquals(
-        1,
-        jdbc.update(
-            """
-            update harness_work
-            set lease_until = statement_timestamp() - interval '1 second'
-            where target_type = ? and target_id = ?
-            """,
-            target.type().name(),
-            target.id()));
+    expireLease(target);
 
     Instant reclaimTime = now();
     ClaimedWork reclaimed =
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, reclaimTime, "token-3", reclaimTime.plusSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, reclaimTime, "token-3", CLAIM_LEASE))
             .orElseThrow();
     assertNotEquals(claimed.leaseToken(), reclaimed.leaseToken());
     assertEquals(1L, reclaimed.claimedWakeVersion());
@@ -171,9 +170,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     assertTrue(
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, current, "token-4", now().plusSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, current, "token-4", CLAIM_LEASE))
             .isEmpty());
   }
 
@@ -200,9 +197,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     ClaimedWork claimed =
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.TOOL, current, "token", current.plusSeconds(30), node))
+                tx -> tx.claimNextWork(WorkTargetType.TOOL, current, "token", LEASE_30S, node))
             .orElseThrow();
     assertEquals(toolTarget, claimed.target());
     assertEquals(env, claimed.requiredEnvironmentId());
@@ -315,9 +310,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     // 1. Node3 (无 route): 只能 claim 到 tool5 (null affinity)
     Optional<ClaimedWork> claimNode3 =
         store.transaction(
-            tx ->
-                tx.claimNextWork(
-                    WorkTargetType.TOOL, current, "token-node3", current.plusSeconds(30), node3));
+            tx -> tx.claimNextWork(WorkTargetType.TOOL, current, "token-node3", LEASE_30S, node3));
     assertTrue(claimNode3.isPresent());
     assertEquals(toolSeed5.toolId(), claimNode3.get().target().id());
 
@@ -325,25 +318,20 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     Optional<ClaimedWork> emptyForNode3 =
         store.transaction(
             tx ->
-                tx.claimNextWork(
-                    WorkTargetType.TOOL, current, "token-node3-2", current.plusSeconds(30), node3));
+                tx.claimNextWork(WorkTargetType.TOOL, current, "token-node3-2", LEASE_30S, node3));
     assertTrue(emptyForNode3.isEmpty());
 
     // 3. Node2 (持有 env-2 READY 路由): 只能 claim 到 tool2 (env-2)
     Optional<ClaimedWork> claimNode2 =
         store.transaction(
-            tx ->
-                tx.claimNextWork(
-                    WorkTargetType.TOOL, current, "token-node2", current.plusSeconds(30), node2));
+            tx -> tx.claimNextWork(WorkTargetType.TOOL, current, "token-node2", LEASE_30S, node2));
     assertTrue(claimNode2.isPresent());
     assertEquals(toolSeed2.toolId(), claimNode2.get().target().id());
 
     // 4. Node1 (持有 env-1 READY 路由): 只能 claim 到 tool1 (env-1)
     Optional<ClaimedWork> claimNode1 =
         store.transaction(
-            tx ->
-                tx.claimNextWork(
-                    WorkTargetType.TOOL, current, "token-node1", current.plusSeconds(30), node1));
+            tx -> tx.claimNextWork(WorkTargetType.TOOL, current, "token-node1", LEASE_30S, node1));
     assertTrue(claimNode1.isPresent());
     assertEquals(toolSeed1.toolId(), claimNode1.get().target().id());
 
@@ -353,23 +341,80 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.TOOL,
-                        current,
-                        "token-node1-2",
-                        current.plusSeconds(30),
-                        node1))
+                        WorkTargetType.TOOL, current, "token-node1-2", LEASE_30S, node1))
             .isEmpty());
     assertTrue(
         store
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.TOOL,
-                        current,
-                        "token-node2-2",
-                        current.plusSeconds(30),
-                        node2))
+                        WorkTargetType.TOOL, current, "token-node2-2", LEASE_30S, node2))
             .isEmpty());
+  }
+
+  /**
+   * 测试意图：生产权威时间是数据库时钟——claim 写出的 lease deadline 必须由数据库时间计算（≈ duration），而不是直接采用调用方 JVM 的绝对
+   * Instant；JVM 相对数据库偏移 ±2x lease duration 时不改变 claim 结果、lease fence 判定与 renew 语义。
+   */
+  @Test
+  void leaseAuthorityIsDatabaseTimeUnderJvmClockSkew() {
+    HarnessStore store = createStore();
+    JdbcTemplate jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
+    Baseline baseline = seedThreadBaseline(store);
+    WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          // available_at 只是调度时间：写一个远过去的时间，避免 JVM 与数据库时钟关系影响 due 判定
+          tx.requestWork(target, Instant.ofEpochMilli(1000));
+        });
+
+    Duration lease = Duration.ofMinutes(10);
+    Instant jvmNow = now();
+    Instant jvmAhead = jvmNow.plus(lease.multipliedBy(2));
+    Instant jvmBehind = jvmNow.minus(lease.multipliedBy(2));
+
+    // JVM 超前 2x：claim 仍成功，deadline 只由数据库时间决定（≈ lease，而不是 lease + 2x skew）
+    ClaimedWork claimed =
+        store
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, jvmAhead, "token", lease))
+            .orElseThrow();
+    assertEquals(lease.toMillis(), remainingLeaseMillis(jdbc, target.id()), 5_000L);
+
+    // 两个方向的 JVM 偏差都不参与 fence：数据库时间域内 lease 同时有效
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claimed, jvmAhead)).isPresent());
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claimed, jvmBehind)).isPresent());
+
+    // JVM 滞后 2x 时 renew 仍按数据库时间延长（而不是缩短或失效）
+    long before = remainingLeaseMillis(jdbc, target.id());
+    boolean extended =
+        store.transaction(tx -> tx.renewWork(claimed, jvmBehind, lease.multipliedBy(2)));
+    assertTrue(extended);
+    long after = remainingLeaseMillis(jdbc, target.id());
+    assertTrue(after > before, "renew must extend the database-time lease");
+    assertEquals(lease.multipliedBy(2).toMillis(), after, 5_000L);
+
+    // 数据库时间域内过期后，旧 claim 立即失去全部 ownership
+    expireLease(target);
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claimed, jvmAhead)).isEmpty());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> store.transaction(tx -> tx.completeWork(claimed, jvmAhead)));
+  }
+
+  /** 数据库时间域中 target 当前 lease 的剩余毫秒数：断言 deadline 由数据库时钟而非 JVM 时钟决定。 */
+  private static long remainingLeaseMillis(JdbcTemplate jdbc, UUID targetId) {
+    Double milliseconds =
+        jdbc.queryForObject(
+            """
+            select extract(epoch from (lease_until - statement_timestamp())) * 1000
+            from harness_work
+            where target_type = 'THREAD' and target_id = ?
+            """,
+            Double.class,
+            targetId);
+    return milliseconds == null ? 0L : Math.round(milliseconds);
   }
 
   private static void seedEnvironment(JdbcTemplate jdbc, EnvironmentId env) {

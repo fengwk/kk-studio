@@ -156,10 +156,11 @@ public final class HarnessRuntime {
    * cursor（否则 STALE_COMMAND_CURSOR），同事务调用 {@code preflight}（仅新 batch），预留连续 sequence 并请求 THREAD
    * Work。
    *
-   * <p>初始（NEW_SESSION/NEW_THREAD）batch 必须以恰一条 user-like message 结尾，允许固定顺序 SET_* 前缀，且只有初始 target
-   * 可在前缀携带 SYSTEM CUSTOM_MESSAGE；THREAD 允许产品用户 batch（禁止 SYSTEM CUSTOM_MESSAGE，<b>恰一条</b>末尾
-   * user-like）或恰一条 SYSTEM CUSTOM_MESSAGE steering。非法 batch 是请求校验错误，抛 {@link
-   * IllegalArgumentException}。
+   * <p>命令 batch 的 shape admission 对所有 target 一致：允许固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
+   * SET_ENVIRONMENT，每种至多一次） 的 SET_* 前缀且必须全部位于消息之前，整体必须以<b>恰一条</b> user-like 输入结尾（USER_MESSAGE、USER
+   * 角色的 CUSTOM_MESSAGE 或 typed GOAL；typed GOAL 不可与任何消息同批）。运行时注入的 reminder 也是 USER
+   * CUSTOM_MESSAGE，同样计入 user-like，因此 {@code [reminder, USER]} 是两条 user-like 而被拒。非法 batch 是请求校验错误，抛
+   * {@link IllegalArgumentException}。
    */
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {
@@ -326,13 +327,19 @@ public final class HarnessRuntime {
   /**
    * 原子停止当前 live Turn、取消已入队 Commands，或重放一次先前 thread-owned Stop。
    *
-   * <p>durable transaction 由 {@link StopControl} 持有。只有在其 commit 之后，本方法才会 best-effort 取消匹配的
-   * process-local Model/Tool execution；本地取消失败仅记录日志，无法改变已 commit 的结果。
+   * <p>durable transaction 由 {@link StopControl} 持有。本地 Model/Tool execution 的取消登记在该事务的物理 commit 之后
+   * （{@code store.afterCommit}）：无外层事务时即 Stop 事务提交后，加入调用方外层事务时只在外层真正提交后触发，外层回滚则不取消。
+   * 本地取消失败仅记录日志，无法改变已 commit 的结果。
    */
   public StopResult stop(StopCommand command) {
-    StopControl.Commit commit = stopControl.stop(command);
-    cancelLocalExecutions(modelExecutionCanceller, "Model", commit.modelExecutionIds());
-    cancelLocalExecutions(toolExecutionCanceller, "Tool", commit.toolExecutionIds());
+    Objects.requireNonNull(command, "command");
+    StopControl.Commit commit =
+        stopControl.stop(
+            command,
+            stopped -> {
+              cancelLocalExecutions(modelExecutionCanceller, "Model", stopped.modelExecutionIds());
+              cancelLocalExecutions(toolExecutionCanceller, "Tool", stopped.toolExecutionIds());
+            });
     return commit.result();
   }
 

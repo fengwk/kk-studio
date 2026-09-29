@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -123,7 +125,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    *   <li>Environment route 亲和性：当 {@code required_environment_id} 为空时无亲和性；非空时通过 EXISTS 关联 {@code
    *       environment_connection}，要求连接所有者为当前传入的 {@code nodeInstanceId}、状态为 {@code READY} 且租约有效；
    *   <li>使用 {@code FOR UPDATE SKIP LOCKED} 悲观跳过正被其他事务锁定或并发处理的行，选出单条候选；
-   *   <li>外层 UPDATE 原子写入新的 {@code lease_token} 与 {@code lease_until} 并返回完整 Work 行。
+   *   <li>外层 UPDATE 原子写入新的 {@code lease_token}，并以 {@code date_trunc('milliseconds',
+   *       statement_timestamp() + ?::interval)} 计算 {@code lease_until}，返回完整 Work 行。deadline 与 due /
+   *       expiry 使用同一数据库时间域。
    * </ul>
    */
   private static final String CLAIM_NEXT_WORK =
@@ -150,7 +154,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           limit 1
       )
       update harness_work work
-      set lease_token = ?, lease_until = ?
+      set lease_token = ?,
+          lease_until = date_trunc('milliseconds', statement_timestamp() + ?::interval)
       from candidate
       where work.target_type = candidate.target_type
         and work.target_id = candidate.target_id
@@ -1670,15 +1675,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   /**
-   * Work 所有权围栏校验：获取行级排他锁并校验 {@code lease_token} 匹配且 {@code lease_until > now}。
+   * Work 所有权围栏校验：获取行级排他锁并校验 {@code lease_token} 匹配且 {@code lease_until > statement_timestamp()}。
    *
-   * <p>若租约已过期或被其他 Dispatcher 接管，返回 empty，调用方绝不能推进该 Work 状态。
+   * <p>{@code now} 只校验毫秒精度，不参与有效性比较，避免 JVM 时钟偏差把数据库仍有效的租约判过期，或把数据库已过期的租约判有效。 若租约已过期或被其他 Dispatcher
+   * 接管，返回 empty，调用方绝不能推进该 Work 状态。
    */
   @Override
   public Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
     Objects.requireNonNull(now, "now");
+    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     requireCanLockWork(claim.target());
     Optional<Work> work =
         queryOne(
@@ -1688,14 +1695,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             where target_type = ?
               and target_id = ?
               and lease_token = ?
-              and lease_until > ?
+              and lease_until > statement_timestamp()
             for update
             """,
             PostgresqlHarnessRows.WORK,
             claim.target().type().name(),
             claim.target().id(),
-            claim.leaseToken(),
-            PostgresqlHarnessRows.timestamp(now));
+            claim.leaseToken());
     work.ifPresent(ignored -> recordWorkLock(claim.target()));
     return work;
   }
@@ -2016,8 +2022,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   @Override
   public Optional<ClaimedWork> claimNextWork(
-      WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil) {
-    return claimNextWork(targetType, now, leaseToken, leaseUntil, null);
+      WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration) {
+    return claimNextWork(targetType, now, leaseToken, leaseDuration, null);
   }
 
   /**
@@ -2039,17 +2045,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       WorkTargetType targetType,
       Instant now,
       String leaseToken,
-      Instant leaseUntil,
+      Duration leaseDuration,
       UUID nodeInstanceId) {
     checkOpen();
     Objects.requireNonNull(targetType, "targetType");
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(leaseToken, "leaseToken");
-    Objects.requireNonNull(leaseUntil, "leaseUntil");
+    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     PostgresqlHarnessRows.requireMillisecondPrecision(now);
-    PostgresqlHarnessRows.requireMillisecondPrecision(leaseUntil);
-    Work.initial(new WorkTarget(targetType, new UUID(0L, 0L)), now)
-        .claim(now, leaseToken, leaseUntil);
+    requireCanonicalLeaseToken(leaseToken);
     requireCanClaimWork();
     Optional<Work> claimed =
         writeOne(
@@ -2058,7 +2062,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             targetType.name(),
             nodeInstanceId,
             leaseToken,
-            PostgresqlHarnessRows.timestamp(leaseUntil));
+            leaseInterval(leaseDuration));
     if (claimed.isEmpty()) {
       return Optional.empty();
     }
@@ -2074,17 +2078,28 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             work.requiredEnvironmentId()));
   }
 
-  /** 在持有 Work 锁前提下为已 claim 的 Work 续期租约。 */
+  /**
+   * 延长 claim 的 lease，使其至少覆盖数据库时间加上 {@code leaseDuration}。
+   *
+   * <p>有效性与新 deadline 都在 {@code statement_timestamp()} 时间域内计算：{@code now} 不参与比较，避免 JVM 时钟把数据库仍有效的
+   * 租约拒绝、把已过期租约延展，或把一个更长的 lease 缩短。
+   */
   @Override
-  public void renewWork(ClaimedWork claim, Instant now, Instant newLeaseUntil) {
+  public boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
     Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
+    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     PostgresqlHarnessRows.requireMillisecondPrecision(now);
-    PostgresqlHarnessRows.requireMillisecondPrecision(newLeaseUntil);
-    Work renewed = lockedWork(claim.target()).renew(claim.leaseToken(), now, newLeaseUntil);
-    updateWork(renewed);
+    Instant databaseNow = databaseNow();
+    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
+    Instant target = databaseNow.plus(leaseDuration);
+    if (!target.isAfter(work.leaseUntil())) {
+      // 现有 lease 已覆盖目标 margin：保持不变，避免把更长的 lease 缩短。
+      return false;
+    }
+    updateWork(work.renew(claim.leaseToken(), databaseNow, target));
+    return true;
   }
 
   /**
@@ -2099,8 +2114,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     Objects.requireNonNull(claim, "claim");
     Objects.requireNonNull(now, "now");
     PostgresqlHarnessRows.requireMillisecondPrecision(now);
-    Work work = lockedWork(claim.target());
-    Optional<Work> next = work.complete(claim.leaseToken(), claim.claimedWakeVersion(), now);
+    Instant databaseNow = databaseNow();
+    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
+    Optional<Work> next =
+        work.complete(claim.leaseToken(), claim.claimedWakeVersion(), databaseNow);
     if (next.isEmpty()) {
       int deleted =
           update(
@@ -2124,9 +2141,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     Objects.requireNonNull(requestedAt, "requestedAt");
     PostgresqlHarnessRows.requireMillisecondPrecision(now);
     PostgresqlHarnessRows.requireMillisecondPrecision(requestedAt);
+    Instant databaseNow = databaseNow();
+    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
     Work next =
-        lockedWork(claim.target())
-            .reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, requestedAt);
+        work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, requestedAt);
     updateWork(next);
     notifyWorkAvailable();
   }
@@ -2500,6 +2518,44 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (!Boolean.TRUE.equals(exists)) {
       throw new IllegalArgumentException("work target does not exist: " + target);
     }
+  }
+
+  /** 读取数据库权威时间（毫秒精度），作为 Work lease 有效性与 deadline 的唯一时间域。 */
+  private Instant databaseNow() {
+    return queryOne(
+            "select date_trunc('milliseconds', statement_timestamp()) as now",
+            (resultSet, rowNumber) -> resultSet.getTimestamp("now").toInstant())
+        .orElseThrow(() -> new IllegalStateException("statement_timestamp returned no row"));
+  }
+
+  /**
+   * 锁定 Work 行并按数据库时间校验 claim ownership。
+   *
+   * <p>行不存在抛 {@link IllegalStateException}（lost ownership）；token 不匹配或数据库时间下租约已过期抛 {@link
+   * IllegalArgumentException}。有效性判定完全在数据库时间域，不依赖 JVM {@code now}。
+   */
+  private Work lockOwnedWorkAtDatabaseTime(ClaimedWork claim, Instant now) {
+    Optional<Work> locked = lockClaimedWork(claim, now);
+    if (locked.isPresent()) {
+      return locked.get();
+    }
+    if (findWork(claim.target()).isEmpty()) {
+      throw new IllegalStateException(
+          "work does not exist for target " + claim.target() + " (lost ownership)");
+    }
+    throw new IllegalArgumentException(
+        "lease is stale at database time for target " + claim.target());
+  }
+
+  /** 复用 {@link ClaimedWork} 的构造不变量校验 leaseToken 是 canonical 非空白 token（失败即请求校验错误）。 */
+  private static void requireCanonicalLeaseToken(String leaseToken) {
+    new ClaimedWork(
+        new WorkTarget(WorkTargetType.THREAD, new UUID(0L, 0L)), 1L, leaseToken, Instant.EPOCH);
+  }
+
+  /** PostgreSQL interval 字面量：duration 已限定为正的整毫秒。 */
+  private static String leaseInterval(Duration leaseDuration) {
+    return leaseDuration.toMillis() + " milliseconds";
   }
 
   private Work lockedWork(WorkTarget target) {
