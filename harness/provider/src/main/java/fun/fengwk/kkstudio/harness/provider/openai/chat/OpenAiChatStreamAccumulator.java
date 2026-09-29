@@ -117,6 +117,10 @@ final class OpenAiChatStreamAccumulator {
       seenDone = true;
       return;
     }
+    if (seenDone) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "semantic payload received after [DONE]");
+    }
 
     JsonNode root;
     try {

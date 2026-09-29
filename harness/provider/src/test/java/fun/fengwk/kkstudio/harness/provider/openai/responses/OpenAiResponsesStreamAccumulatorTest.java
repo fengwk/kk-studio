@@ -20,14 +20,18 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
@@ -218,6 +222,128 @@ class OpenAiResponsesStreamAccumulatorTest {
         accumulator.replayState().payload().path("output").get(0).path("content").get(0);
     assertEquals("refusal", replayContent.path("type").asText());
     assertEquals("I cannot help with that.", replayContent.path("refusal").asText());
+  }
+
+  /** 测试意图：终态后的已知语义事件拒绝，空帧和 [DONE] 仍可忽略，且原生事件已经记录。 */
+  @Test
+  void rejectsKnownSemanticEventAfterTerminal() throws Exception {
+    List<ProviderProtocolEvent> protocolEvents = new ArrayList<>();
+    OpenAiResponsesStreamBridge bridge =
+        new OpenAiResponsesStreamBridge(
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+              @Override
+              public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+                protocolEvents.add(event);
+              }
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {}
+            });
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(), createDescriptor(), "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "response.completed",
+        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}");
+    accumulator.handleEvent(null, "");
+    accumulator.handleEvent(null, "[DONE]");
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleEvent(
+                    "response.output_text.delta",
+                    "{\"type\":\"response.output_text.delta\",\"delta\":\"tail\"}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(
+        protocolEvents.stream().anyMatch(event -> "response.completed".equals(event.eventType())));
+    assertTrue(
+        protocolEvents.stream()
+            .anyMatch(event -> "response.output_text.delta".equals(event.eventType())));
+  }
+
+  /** 测试意图：同 identity 的重复 added 保留已累积参数；不同 identity 明确拒绝。 */
+  @Test
+  void duplicateAddedKeepsArgumentsAndRejectsDifferentIdentity() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+            {"type":"response.function_call_arguments.delta","item_id":"item_1","delta":"{\\"x\\":"}
+            """));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+            {"type":"response.function_call_arguments.delta","item_id":"item_1","delta":"1}"}
+            """));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}"));
+    assertEquals("{\"x\":1}", accumulator.response().toolCalls().get(0).argumentsJson());
+
+    OpenAiResponsesStreamAccumulator conflicting =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+    conflicting.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}"));
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                conflicting.processEvent(
+                    MAPPER.readTree(
+                        "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"lookup\"}}")));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
+  /** 测试意图：usage 子计数相加溢出或超过父总量时拒绝，不能用 clamp 掩盖。 */
+  @Test
+  void usageBreakdownOverflowAndExcessAreInvalid() throws Exception {
+    ProviderException overflow =
+        assertThrows(
+            ProviderException.class,
+            () -> completeWithUsage(Long.MAX_VALUE, Long.MAX_VALUE, 1L, 0L, 1L));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, overflow.kind());
+    ProviderException excess =
+        assertThrows(ProviderException.class, () -> completeWithUsage(1L, 0L, 0L, 3L, 0L));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, excess.kind());
+  }
+
+  private ProviderResponse completeWithUsage(
+      long input, long cached, long cacheWrite, long reasoning, long output) throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_usage\",\"status\":\"completed\",\"output\":[],\"usage\":{"
+                + "\"input_tokens\":"
+                + input
+                + ",\"output_tokens\":"
+                + output
+                + ",\"input_tokens_details\":{\"cached_tokens\":"
+                + cached
+                + ",\"cache_write_tokens\":"
+                + cacheWrite
+                + "},\"output_tokens_details\":{\"reasoning_tokens\":"
+                + reasoning
+                + "}}}}"));
+    return accumulator.response();
   }
 
   /** 意图：验证如果未收到终态事件而过早结束流，finish 明确抛出 INVALID_RESPONSE。 */
