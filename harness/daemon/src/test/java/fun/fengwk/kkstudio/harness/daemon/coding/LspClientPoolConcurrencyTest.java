@@ -82,7 +82,11 @@ class LspClientPoolConcurrencyTest {
     pool.release(secondEntry);
   }
 
-  /** 意图：spawn 成功后 stderr 派发被拒时，启动必须终止已拉起的进程并保留拒绝异常，池里不得留下未赋值的客户端。 */
+  /**
+   * 意图：stderr 派发被拒时，启动必须收敛整个执行范围并保留拒绝异常，池里不得留下未赋值的客户端。
+   *
+   * <p>命令与派发互斥：拒绝发生在命令真正运行之前时它根本没有机会产生副作用，发生在之后时它必须已经消失——两种合法结局都 要求范围收敛。
+   */
   @Test
   void rejectedBootstrapDispatchTerminatesTheSpawnedProcess() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
@@ -103,11 +107,10 @@ class LspClientPoolConcurrencyTest {
                 return error;
               }
             });
-    long pid = awaitPidFile(pidFile);
     Exception error = pending.get(WAIT.toSeconds(), TimeUnit.SECONDS);
 
     assertTrue(error instanceof RejectedExecutionException, String.valueOf(error));
-    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+    assertConvergedCommand(pidFile);
     assertEquals(0, pool.activeCount(), "派发被拒的实例不得进入可用集合");
   }
 
@@ -423,15 +426,28 @@ class LspClientPoolConcurrencyTest {
         template.firstMatchMarkers());
   }
 
-  private static long awaitPidFile(Path pidFile) throws Exception {
-    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-    while (System.nanoTime() < deadline) {
-      if (Files.exists(pidFile) && !Files.readString(pidFile).isBlank()) {
-        return Long.parseLong(Files.readString(pidFile).trim());
-      }
-      Thread.sleep(10);
+  /**
+   * 启动失败返回之后，命令要么从未跑起来（pid 文件没有被写下），要么已经消失。
+   *
+   * <p>判断发生在 launch 返回之后，而当时范围已经收敛，因此不可能再有「稍后才出现」的进程：文件不存在就说明命令没有机会执行。
+   */
+  private static void assertConvergedCommand(Path pidFile) {
+    long pid = readPidQuietly(pidFile);
+    if (pid > 0) {
+      FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
     }
-    throw new AssertionError("held bootstrap did not record its pid: " + pidFile);
+  }
+
+  private static long readPidQuietly(Path pidFile) {
+    try {
+      if (!Files.isRegularFile(pidFile)) {
+        return -1;
+      }
+      String content = Files.readString(pidFile).trim();
+      return content.isEmpty() ? -1 : Long.parseLong(content);
+    } catch (Exception error) {
+      return -1;
+    }
   }
 
   private static String shellQuote(String value) {

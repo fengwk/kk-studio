@@ -9,8 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -108,6 +111,71 @@ class ProcessScopeCrossPlatformTest {
       assertNotNull(exitCode, "helper 必须发布命令的自然退出码");
       assertEquals(42, exitCode.intValue(), "自然退出码必须来自命令自身");
       assertTrue(scope.terminate(), "收敛必须由内核或 Job 确认");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
+   * 双向标准流：命令的 stdin/stdout 是调用方直接持有的管道，而 stderr 仍然走自己的通道。
+   *
+   * <p>这条用例同时固定三件事：写进 stdin 的字节真的到达命令（而不是像捕获模式那样被一条立刻关闭的空管道顶替）；命令的输出可以按行读回；命令 的 stderr 没有被合并进
+   * stdout。捕获模式会把命令的 stderr 指向 stdout 的捕获句柄，因此这里的 stderr 断言正是两种模式的判别事实。
+   *
+   * <p>退出方式与捕获模式一致：调用方关闭自己那一侧的写端，命令读到 EOF 后自然退出，退出码由命令自己发布。
+   */
+  @Test
+  void duplexStdioCarriesInputAndKeepsStderrSeparate() throws Exception {
+    Path rootPid = workdir.resolve("root.pid");
+    ProcessScope scope = ProcessScope.startDuplex(workdir, fixture("duplex-echo", rootPid, "42"));
+    try {
+      awaitPid(rootPid, PID_BUDGET);
+      OutputStream stdin = scope.process().getOutputStream();
+      stdin.write("ping-42\n".getBytes(StandardCharsets.UTF_8));
+      stdin.flush();
+      BufferedReader stdout =
+          new BufferedReader(
+              new InputStreamReader(scope.process().getInputStream(), StandardCharsets.UTF_8));
+      assertEquals("ping-42", stdout.readLine(), "双向模式下命令必须收到调用方写进 stdin 的字节");
+
+      // 关闭调用方这一侧的写端：命令因此读到 EOF，并用自己的退出码自然退出。
+      stdin.close();
+      assertTrue(scope.awaitNaturalExit(PID_BUDGET.toMillis()), "命令必须在读到 EOF 后自然退出，而不是阻塞到超时");
+      Integer exitCode = scope.naturalExitCode();
+      assertNotNull(exitCode, "命令的退出码必须来自它自己的发布");
+      assertEquals(42, exitCode.intValue(), "自然退出码必须来自命令自身");
+      assertTrue(scope.process().waitFor(30, TimeUnit.SECONDS), "keeper 必须在命令退出后收敛并结束");
+
+      String restOfStdout = readAll(scope.process().getInputStream());
+      String stderr = readAll(scope.process().getErrorStream());
+      assertTrue(
+          stderr.contains(ProcessScopeFixtureMain.STDERR_MARKER), "命令的 stderr 必须走它自己的通道：" + stderr);
+      assertFalse(
+          restOfStdout.contains(ProcessScopeFixtureMain.STDERR_MARKER),
+          "双向模式绝不能把命令的 stderr 合并进 stdout：" + restOfStdout);
+      assertTrue(scope.terminate(), "收敛必须由内核或 Job 确认");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
+   * 双向标准流下根进程自然退出：它留下的活着的子进程同样必须被收敛。
+   *
+   * <p>双向模式没有「捕获管道读到 EOF」这个信号可用，因此范围完结只能靠命令自己的退出事实与整组收敛来判定；这条用例确认 收敛并不依赖捕获管道。
+   */
+  @Test
+  void duplexStdioConvergesLiveChildrenAfterNaturalExit() throws Exception {
+    Path rootPid = workdir.resolve("root.pid");
+    Path childPid = workdir.resolve("child.pid");
+    ProcessScope scope =
+        ProcessScope.startDuplex(workdir, fixture("duplex-fork-exit", rootPid, childPid));
+    try {
+      long child = awaitPid(childPid, PID_BUDGET);
+      assertTrue(isAlive(child), "子进程必须仍然存活：" + child);
+      assertTrue(scope.awaitNaturalExit(PID_BUDGET.toMillis()), "根进程必须在自己派生子进程之后自然退出");
+      assertTrue(scope.terminate(), "范围必须由内核或 Job 确认为已经收敛");
+      assertTrue(awaitGone(child, GONE_BUDGET), "自然退出后子进程 " + child + " 必须已经被收敛");
     } finally {
       scope.close();
     }

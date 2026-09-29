@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -53,17 +54,18 @@ public final class WindowsJobScope {
   private static final int STARTF_USESTDHANDLES = 0x0000_0100;
   private static final int EXTENDED_STARTUPINFO_PRESENT = 0x0008_0000;
 
-  /** 创建属性：只继承明确列举的句柄。 */
-  private static final long PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x0002_0002L;
+  /** 创建属性：只继承明确列举的句柄；包内可见，测试据此断言传进内核的句柄列表恰好是这些句柄（含去重后的顺序）。 */
+  static final long PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x0002_0002L;
 
-  /** 创建属性：进程创建时直接进入给定的 Job（Windows 10 及以上）。 */
-  private static final long PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002_000DL;
+  /** 创建属性：进程创建时直接进入给定的 Job（Windows 10 及以上）；包内可见，测试据此断言归属与创建是同一条内核指令。 */
+  static final long PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002_000DL;
 
   /** 属性个数：句柄列表 + Job 列表。 */
   private static final int CREATION_ATTRIBUTE_COUNT = 2;
 
   private static final int STD_INPUT_HANDLE = -10;
   private static final int STD_OUTPUT_HANDLE = -11;
+  private static final int STD_ERROR_HANDLE = -12;
   private static final int HANDLE_FLAG_INHERIT = 0x0000_0001;
   private static final int JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS = 1;
   private static final int JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS = 9;
@@ -116,16 +118,23 @@ public final class WindowsJobScope {
    * <p>{@code PROC_THREAD_ATTRIBUTE_JOB_LIST} 让进程由内核在创建时直接放进 Job，因此不存在「创建完成但尚未归属」的窗口： helper
    * 在这条指令之前被打死也不会留下无主进程。
    */
-  static WindowsJobScope createSuspended(String jobName, List<String> command, Path workdir) {
-    return createSuspended(WindowsKernel.INSTANCE, jobName, command, workdir);
+  static WindowsJobScope createSuspended(
+      String jobName, List<String> command, Path workdir, boolean duplex) {
+    return createSuspended(WindowsKernel.INSTANCE, jobName, command, workdir, duplex);
+  }
+
+  /** 与 5 参版本相同的实现，只是固定为捕获模式：包内测试用假实现驱动失败分支与句柄释放计数（真实失败只有在真实 Windows 上才能 构造），生产调用方永远走真实绑定。 */
+  static WindowsJobScope createSuspended(
+      WindowsKernel kernel, String jobName, List<String> command, Path workdir) {
+    return createSuspended(kernel, jobName, command, workdir, false);
   }
 
   /**
-   * 与 {@link #createSuspended(String, List, Path)} 相同的实现，只是显式给出 kernel 绑定：包内测试用假实现驱动失败分支与
-   * 句柄释放计数（真实失败只有在真实 Windows 上才能构造），生产调用方永远走真实绑定。
+   * @param duplex {@code true} 时命令直接继承 helper 自己的三条标准流（给常驻双向协议用）；{@code false} 是默认的捕获模式： 命令的 stdin
+   *     是一条只有 helper 持有写端的空管道，stderr 与 stdout 合并到同一个捕获句柄。
    */
   static WindowsJobScope createSuspended(
-      WindowsKernel kernel, String jobName, List<String> command, Path workdir) {
+      WindowsKernel kernel, String jobName, List<String> command, Path workdir, boolean duplex) {
     if (command.isEmpty()) {
       throw new IllegalArgumentException("command must not be empty");
     }
@@ -136,7 +145,8 @@ public final class WindowsJobScope {
     WindowsJobScope scope = new WindowsJobScope(job, true, kernel);
     try {
       scope.limitJobLifetimeToHandle();
-      WinBase.PROCESS_INFORMATION information = scope.createSuspendedProcess(command, workdir);
+      WinBase.PROCESS_INFORMATION information =
+          scope.createSuspendedProcess(command, workdir, duplex);
       scope.process = information.hProcess;
       scope.thread = information.hThread;
       scope.processId = information.dwProcessId.longValue();
@@ -271,12 +281,29 @@ public final class WindowsJobScope {
   }
 
   /**
-   * 以 suspended 状态创建进程，并把 helper 的标准句柄交给它。
+   * 按标准流模式以 suspended 状态创建命令进程。
    *
-   * <p>命令的 stderr 与 stdout 指向同一个捕获句柄，两路输出因此合并；helper 自己的 stderr（诊断）不传给命令。句柄必须是
-   * 可继承的，这里是显式校验/设置，而不是假定 Java 启动的进程一定给了可继承句柄。
+   * <p>捕获模式新建一条 stdin 管道（写端只留在 helper 手里，命令因此读到确定性 EOF），并把命令的 stderr 与 stdout 指向同一个
+   * 捕获句柄（两路输出因此合并）；双向模式不创建任何管道，命令直接继承 helper 自己的三条标准流。两种模式下 helper 自己的 stderr
+   * （诊断）都不传给命令，标准句柄都必须可继承——这里是显式校验/设置，而不是假定 Java 启动的进程一定给了可继承句柄。
    */
-  private WinBase.PROCESS_INFORMATION createSuspendedProcess(List<String> command, Path workdir) {
+  private WinBase.PROCESS_INFORMATION createSuspendedProcess(
+      List<String> command, Path workdir, boolean duplex) {
+    if (duplex) {
+      // 双向模式：命令直接继承 helper 自己的三条标准流（父进程提供的管道），stderr 与 stdout 保持独立。这里没有需要创建或
+      // 关闭的管道，创建即归属仍然由 JOB_LIST 完成。
+      HANDLE standardInput = inheritableStandardHandle(kernel, STD_INPUT_HANDLE, "stdin");
+      HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+      HANDLE standardError = inheritableStandardHandle(kernel, STD_ERROR_HANDLE, "stderr");
+      return createSuspendedProcess(
+          command,
+          workdir,
+          standardInput,
+          standardOutput,
+          standardError,
+          // 三条流可能是同一个句柄（父进程把它们接到同一个管道）：句柄列表里重复会让创建失败。
+          distinct(standardInput, standardOutput, standardError));
+    }
     HANDLEByReference stdinRead = new HANDLEByReference();
     HANDLEByReference stdinWrite = new HANDLEByReference();
     if (!kernel.CreatePipe(stdinRead, stdinWrite, inheritableAttributes(), 0)) {
@@ -284,7 +311,6 @@ public final class WindowsJobScope {
     }
     // 管道两端从这一刻起就属于这次调用：无论后面是校验标准句柄、创建属性列表还是创建进程失败，都必须交还给系统，
     // 因此它们统一由这个 finally 关闭（而不是只在 CreateProcessW 附近关）。
-    CreationAttributes attributes = null;
     try {
       // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
       if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
@@ -292,15 +318,36 @@ public final class WindowsJobScope {
             "cannot make the command stdin write end private: " + lastError());
       }
       HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+      // 捕获模式把两路输出指向同一个句柄，命令的 stderr 因此合并进捕获流。
+      return createSuspendedProcess(
+          command,
+          workdir,
+          stdinRead.getValue(),
+          standardOutput,
+          standardOutput,
+          new HANDLE[] {stdinRead.getValue(), standardOutput});
+    } finally {
+      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
+    }
+  }
+
+  /** 两个模式共用的创建步骤：标准句柄 + 句柄列表 + JOB_LIST，创建期间保持挂起。 */
+  private WinBase.PROCESS_INFORMATION createSuspendedProcess(
+      List<String> command,
+      Path workdir,
+      HANDLE standardInput,
+      HANDLE standardOutput,
+      HANDLE standardError,
+      HANDLE[] inherited) {
+    CreationAttributes attributes = null;
+    try {
       STARTUPINFOEX startupInfoEx = new STARTUPINFOEX();
       startupInfoEx.StartupInfo.cb = new DWORD(startupInfoEx.size());
       startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-      startupInfoEx.StartupInfo.hStdInput = stdinRead.getValue();
+      startupInfoEx.StartupInfo.hStdInput = standardInput;
       startupInfoEx.StartupInfo.hStdOutput = standardOutput;
-      startupInfoEx.StartupInfo.hStdError = standardOutput;
-      attributes =
-          CreationAttributes.create(
-              kernel, job, new HANDLE[] {stdinRead.getValue(), standardOutput});
+      startupInfoEx.StartupInfo.hStdError = standardError;
+      attributes = CreationAttributes.create(kernel, job, inherited);
       startupInfoEx.lpAttributeList = attributes;
       startupInfoEx.write();
       WinBase.PROCESS_INFORMATION information = new WinBase.PROCESS_INFORMATION();
@@ -323,8 +370,18 @@ public final class WindowsJobScope {
       if (attributes != null) {
         attributes.close(kernel);
       }
-      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
     }
+  }
+
+  /** 句柄列表去重：同一个句柄出现在继承列表里多次会让 {@code CreateProcess} 失败。 */
+  private static HANDLE[] distinct(HANDLE... handles) {
+    List<HANDLE> unique = new ArrayList<>();
+    for (HANDLE handle : handles) {
+      if (!unique.contains(handle)) {
+        unique.add(handle);
+      }
+    }
+    return unique.toArray(new HANDLE[0]);
   }
 
   /** 管道与 Job 句柄都不参与继承：它们只由 helper 与父进程各自持有。 */

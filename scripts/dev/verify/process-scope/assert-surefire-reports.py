@@ -16,6 +16,9 @@ REQUIRED_CASES = {
         "terminateConvergesNestedProcesses",
         "unpermittedStartNeverRunsTheFixture",
         "stdinEofLetsTheFixtureExitNaturally",
+        # 双向标准流：命令真的收到调用方写进 stdin 的字节，stderr 不被合并，且根进程自然退出后活着的子进程被收敛。
+        "duplexStdioCarriesInputAndKeepsStderrSeparate",
+        "duplexStdioConvergesLiveChildrenAfterNaturalExit",
     },
 }
 
@@ -39,7 +42,6 @@ SELECTED_CLASSES = (
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
-    "ProcessTreeTest",
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
 )

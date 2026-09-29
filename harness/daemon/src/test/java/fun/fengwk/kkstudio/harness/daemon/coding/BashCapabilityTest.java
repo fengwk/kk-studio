@@ -549,7 +549,7 @@ class BashCapabilityTest {
    *
    * <p>确定性构造：调度器先放行命令，等它就绪（主进程与后台子进程的 PID 都已落盘、就绪标记已写出）后才抛 {@code RejectedExecutionException}，
    * 因此触发收尾时进程树已经成形，不存在「fork 晚于快照」的竞态。整树存活情况只在 onComplete 这个事件点采集，不使用等待掩盖收尾顺序； 「先温和后强制」的优雅契约由 {@code
-   * ProcessTreeTest.terminatesGracefullyBeforeForcing} 单独守护，这里不要求每个进程都执行 TERM trap。
+   * ProcessScopeTest.terminateLetsTheCommandRunItsTerminationTrap} 单独守护，这里不要求每个进程都执行 TERM trap。
    */
   @Test
   void rejectedTimeoutSchedulingConvergesBeforeTerminalCallback() throws Exception {
@@ -1024,7 +1024,7 @@ class BashCapabilityTest {
   /**
    * 就绪时刻的整棵进程树：PID 文件记录的成员，加上当时可从这些成员枚举到的全部后代。
    *
-   * <p>存活判定沿用 {@link ProcessHandle#isAlive()}（与 {@code ProcessTree} 的收敛判定一致）；后代在收尾后可能被重新挂到 init
+   * <p>存活判定沿用 {@link ProcessHandle#isAlive()}（与 {@link ProcessScope} 的收敛判定一致）；后代在收尾后可能被重新挂到 init
    * 之下，但这里记录的是 PID，判定不依赖父子关系。
    */
   private static List<Long> trackedTree(Path pidFile) throws IOException {

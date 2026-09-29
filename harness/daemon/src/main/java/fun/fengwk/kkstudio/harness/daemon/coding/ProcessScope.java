@@ -40,6 +40,24 @@ final class ProcessScope implements AutoCloseable {
   /** 父进程私有状态目录前缀：定位残留时一眼可辨，且不落在数据目录内。 */
   static final String STATE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
 
+  /**
+   * 标准流模式：用户命令的 stdin/stdout/stderr 接到哪里。
+   *
+   * <p>{@link #CAPTURE} 是默认：命令的 stdin 是一条只有 keeper 持有写端的空管道（命令因此读到确定性 EOF），stderr 合并进
+   * stdout，父进程按捕获管道排空——「命令的输出就是调用结果」的模式。
+   *
+   * <p>{@link #DUPLEX} 供常驻双向协议（LSP）：命令的 stdin/stdout/stderr 直接继承 keeper 自己的三条流，stderr 保持独立，
+   * 父进程因此可以像直接 {@code ProcessBuilder.start()} 那样与命令对话。命令的 stdin 不创建、也不关闭，EOF 只在父进程关闭自己
+   * 那一端时到达；stderr 由父进程按自己的诊断需要排空。
+   */
+  enum Stdio {
+    CAPTURE,
+    DUPLEX
+  }
+
+  /** 把 stdio 模式转发给 helper 的属性名。 */
+  private static final String STDIO_PROPERTY = "kk-studio.process-scope.stdio";
+
   /** 启动许可：父进程在确认范围之后、放行用户命令之前询问调用方是否仍然允许启动。 */
   @FunctionalInterface
   interface StartGate {
@@ -113,13 +131,33 @@ final class ProcessScope implements AutoCloseable {
   }
 
   static ProcessScope start(Path workdir, List<String> command, StartGate gate) throws IOException {
+    return start(workdir, command, gate, Stdio.CAPTURE);
+  }
+
+  /**
+   * 以双向标准流启动 {@code command}：命令的 stdin/stdout/stderr 继承本次调用持有的管道，供常驻协议收发消息。
+   *
+   * <p>其余语义与 {@link #start(Path, List)} 完全一致——许可之前失败仍然等价于「命令没有运行过」，收敛仍然覆盖整组（含后代）。
+   */
+  static ProcessScope startDuplex(Path workdir, List<String> command) throws IOException {
+    return startDuplex(workdir, command, ALWAYS_ALLOW);
+  }
+
+  static ProcessScope startDuplex(Path workdir, List<String> command, StartGate gate)
+      throws IOException {
+    return start(workdir, command, gate, Stdio.DUPLEX);
+  }
+
+  private static ProcessScope start(Path workdir, List<String> command, StartGate gate, Stdio stdio)
+      throws IOException {
     Objects.requireNonNull(gate, "gate");
+    Objects.requireNonNull(stdio, "stdio");
     boolean windows =
         DaemonOperatingSystemDetector.detectCurrent() == DaemonOperatingSystem.WINDOWS;
     Path stateDir = Files.createTempDirectory(STATE_DIR_PREFIX);
     Process helper;
     try {
-      helper = spawnHelper(stateDir, workdir, command, windows);
+      helper = spawnHelper(stateDir, workdir, command, windows, stdio);
     } catch (IOException | RuntimeException error) {
       ProcessScopeState.deleteQuietly(stateDir);
       throw error;
@@ -137,7 +175,8 @@ final class ProcessScope implements AutoCloseable {
   }
 
   private static Process spawnHelper(
-      Path stateDir, Path workdir, List<String> command, boolean windows) throws IOException {
+      Path stateDir, Path workdir, List<String> command, boolean windows, Stdio stdio)
+      throws IOException {
     String classpath = System.getProperty("java.class.path");
     if (classpath == null || classpath.isBlank()) {
       throw new IOException(
@@ -151,16 +190,28 @@ final class ProcessScope implements AutoCloseable {
     argv.add("-Xlog:disable");
     argv.addAll(helperCoverageArguments(stateDir));
     argv.addAll(spawnLatchArguments());
+    argv.addAll(stdioArguments(stdio));
     argv.add("-cp");
     argv.add(classpath);
     argv.add(ProcessScopeHelper.class.getName());
     argv.add(stateDir.toString());
     argv.add(workdir.toString());
     argv.addAll(command);
-    return new ProcessBuilder(argv)
-        // helper 自己的 stderr（JVM 启动提示、诊断）只进调用私有的诊断文件，绝不混进用户命令的输出。
-        .redirectError(stateDir.resolve(ProcessScopeState.DIAGNOSTICS_FILE).toFile())
-        .start();
+    ProcessBuilder builder = new ProcessBuilder(argv);
+    if (stdio == Stdio.DUPLEX) {
+      // 双向模式下 helper 的 stderr 必须是管道：命令继承它，父进程按需排空（helper 自己的 Java 输出仍然写调用私有的诊断
+      // 文件，因此不会混进命令的 stderr）。
+      builder.redirectError(ProcessBuilder.Redirect.PIPE);
+    } else {
+      // 捕获模式下 helper 的 stderr（JVM 启动提示、诊断）只进调用私有的诊断文件，绝不混进用户命令的输出。
+      builder.redirectError(stateDir.resolve(ProcessScopeState.DIAGNOSTICS_FILE).toFile());
+    }
+    return builder.start();
+  }
+
+  /** {@link Stdio#DUPLEX} 时把模式转发给 helper；默认模式不传参数。 */
+  private static List<String> stdioArguments(Stdio stdio) {
+    return stdio == Stdio.DUPLEX ? List.of("-D" + STDIO_PROPERTY + "=duplex") : List.of();
   }
 
   private static String javaBinary(boolean windows) {
@@ -194,6 +245,25 @@ final class ProcessScope implements AutoCloseable {
     } catch (NumberFormatException error) {
       throw new IllegalStateException(
           "process scope helper published an unreadable exit code: " + value, error);
+    }
+  }
+
+  /**
+   * 有界等待用户命令自己发布退出码；返回它是否已经退出。
+   *
+   * <p>命令退出不等于 keeper 退出：keeper 还要收敛范围（含后代）才会结束，因此「命令是否已经退出」只能看命令自己发布的退出码， 不能拿 helper 的 {@code
+   * isAlive()} 当依据。keeper 已经结束时同样返回 {@code true}——那时命令不可能还在运行。
+   */
+  boolean awaitNaturalExit(long millis) {
+    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
+    while (true) {
+      if (naturalExitCode() != null || !helper.isAlive()) {
+        return true;
+      }
+      if (System.nanoTime() >= deadline) {
+        return false;
+      }
+      sleepQuietly(POLL_INTERVAL_MILLIS);
     }
   }
 
