@@ -325,7 +325,8 @@ final class ProcessScope implements AutoCloseable {
       awaitHelperExit(HELPER_CONVERGENCE_BUDGET_MILLIS);
     }
     if (!helper.isAlive()) {
-      return true;
+      // keeper 已经退出：只做只读确认，绝不向可能被复用的组 id 发信号。
+      return !PosixProcessGroup.hasLiveMember(scopeId, PosixProcessGroup.NO_PROCESS);
     }
     if (!PosixProcessGroup.signalGroup(scopeId, PosixProcessGroup.SIGTERM)) {
       return false;
