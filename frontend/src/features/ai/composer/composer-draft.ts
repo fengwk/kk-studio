@@ -179,93 +179,166 @@ export function unknownUploadsStorageKey(scope: string): string {
   return `${STORAGE_PREFIX}${scope}:unknown-uploads`
 }
 
+function safeResolveStorage(explicit?: Storage): Storage {
+  if (explicit) {
+    return explicit
+  }
+  if (typeof window !== 'undefined' && window.localStorage) {
+    return window.localStorage
+  }
+  throw new Error('localStorage is not available in current environment')
+}
+
+/**
+ * 确保存储写入并进行 readback 校验；若存储满额（QuotaExceededError）或写入失败，
+ * 严格 fail closed 抛出异常，绝不吞错，更绝不在 catch 中 removeItem 误删已有数据。
+ */
 export function storeUnknownUploads(
   scope: string,
   uploads: StoredUnknownUpload[],
-  storage: Storage = localStorage,
+  explicitStorage?: Storage,
 ): void {
   if (!scope) {
     return
   }
+  const storage = safeResolveStorage(explicitStorage)
   const key = unknownUploadsStorageKey(scope)
-  try {
-    if (uploads.length === 0) {
-      storage.removeItem(key)
-      return
-    }
-    storage.setItem(key, JSON.stringify({ version: 1, uploads }))
-  } catch {
-    try {
-      storage.removeItem(key)
-    } catch {
-      // localStorage 受限容错
-    }
+  if (uploads.length === 0) {
+    storage.removeItem(key)
+    return
+  }
+  const serialized = JSON.stringify({ version: 1, uploads })
+  storage.setItem(key, serialized)
+  // Readback 确保存储落盘一致性
+  const readback = storage.getItem(key)
+  if (readback !== serialized) {
+    throw new Error(`Failed to persist unknown uploads for scope "${scope}": readback verification failed`)
   }
 }
 
+/**
+ * 读取当前 scope 的未知上传。若读取抛错（例如 SecurityError），绝不吞成空数组
+ * 误删已有数据，确保调用方知晓持久化层不可读。
+ */
 export function loadUnknownUploads(
   scope: string,
-  storage: Storage = localStorage,
+  explicitStorage?: Storage,
 ): StoredUnknownUpload[] {
   if (!scope) {
     return []
   }
-  const key = unknownUploadsStorageKey(scope)
+  let storage: Storage
   try {
-    const raw = storage.getItem(key)
-    if (!raw) {
-      return []
-    }
-    const parsed = JSON.parse(raw)
-    if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.uploads)) {
-      storage.removeItem(key)
-      return []
-    }
-    const validated: StoredUnknownUpload[] = []
-    for (const item of parsed.uploads) {
-      if (
-        isRecord(item)
-        && typeof item.localId === 'string' && item.localId.trim()
-        && typeof item.uploadId === 'string' && item.uploadId.trim()
-        && typeof item.filename === 'string' && item.filename.trim()
-        && typeof item.mediaType === 'string'
-        && typeof item.sizeBytes === 'number' && Number.isSafeInteger(item.sizeBytes) && item.sizeBytes >= 0
-        && (item.sha256 === null || typeof item.sha256 === 'string')
-        && (item.imageTier === undefined
-          || item.imageTier === '720P'
-          || item.imageTier === '1080P'
-          || item.imageTier === 'ORIGINAL')
-      ) {
-        validated.push({
-          localId: item.localId,
-          uploadId: item.uploadId,
-          filename: item.filename,
-          mediaType: item.mediaType,
-          sizeBytes: item.sizeBytes,
-          sha256: item.sha256,
-          ...(item.imageTier ? { imageTier: item.imageTier } : {}),
-        })
-      }
-    }
-    return validated
+    storage = safeResolveStorage(explicitStorage)
   } catch {
+    return []
+  }
+  const key = unknownUploadsStorageKey(scope)
+  const raw = storage.getItem(key)
+  if (!raw) {
+    return []
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // 明确的损坏 JSON 数据：清理坏数据以避免后续无法解析
     try {
       storage.removeItem(key)
     } catch {
-      // 容错
+      // ignore
     }
     return []
+  }
+  if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.uploads)) {
+    try {
+      storage.removeItem(key)
+    } catch {
+      // ignore
+    }
+    return []
+  }
+  const validated: StoredUnknownUpload[] = []
+  for (const item of parsed.uploads) {
+    if (
+      isRecord(item)
+      && typeof item.localId === 'string' && item.localId.trim()
+      && typeof item.uploadId === 'string' && item.uploadId.trim()
+      && typeof item.filename === 'string' && item.filename.trim()
+      && typeof item.mediaType === 'string'
+      && typeof item.sizeBytes === 'number' && Number.isSafeInteger(item.sizeBytes) && item.sizeBytes >= 0
+      && (item.sha256 === null || typeof item.sha256 === 'string')
+      && (item.imageTier === undefined
+        || item.imageTier === '720P'
+        || item.imageTier === '1080P'
+        || item.imageTier === 'ORIGINAL')
+    ) {
+      validated.push({
+        localId: item.localId,
+        uploadId: item.uploadId,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        sizeBytes: item.sizeBytes,
+        sha256: item.sha256,
+        ...(item.imageTier ? { imageTier: item.imageTier } : {}),
+      })
+    }
+  }
+  return validated
+}
+
+/**
+ * 将处于完成前在途（in-flight）的未知上传按 identity 原子合并至当前 scope 列表。
+ * Fail-Closed：若存储失败或满额（QuotaExceededError），直接抛出异常，
+ * 阻止调用方发起 completeUpload！
+ */
+export function persistPendingUnknownUpload(
+  scope: string,
+  upload: StoredUnknownUpload,
+  explicitStorage?: Storage,
+): void {
+  if (!scope) {
+    return
+  }
+  const current = loadUnknownUploads(scope, explicitStorage)
+  const remaining = current.filter(
+    (item) => item.localId !== upload.localId && item.uploadId !== upload.uploadId,
+  )
+  remaining.push(upload)
+  storeUnknownUploads(scope, remaining, explicitStorage)
+}
+
+/**
+ * 仅移除已确认/取消的单个 identity (localId 或 uploadId)，保留同 scope 其它未知条目。
+ */
+export function removeStoredUnknownUpload(
+  scope: string,
+  identity: string,
+  explicitStorage?: Storage,
+): void {
+  if (!scope || !identity) {
+    return
+  }
+  try {
+    const current = loadUnknownUploads(scope, explicitStorage)
+    const remaining = current.filter(
+      (item) => item.localId !== identity && item.uploadId !== identity,
+    )
+    storeUnknownUploads(scope, remaining, explicitStorage)
+  } catch {
+    // 移除为 best-effort
   }
 }
 
 export function clearUnknownUploads(
   scope: string,
-  storage: Storage = localStorage,
+  explicitStorage?: Storage,
 ): void {
   if (!scope) {
     return
   }
   try {
+    const storage = safeResolveStorage(explicitStorage)
     storage.removeItem(unknownUploadsStorageKey(scope))
   } catch {
     // 容错

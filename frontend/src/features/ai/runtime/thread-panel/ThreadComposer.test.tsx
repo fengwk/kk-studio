@@ -612,5 +612,113 @@ describe('ThreadComposer and commands', () => {
       expect(fakeStorage.completeUpload).toHaveBeenCalledWith('upload-id-same-123')
       expect(await screen.findByText('2.0 KB')).toBeInTheDocument()
     })
+
+    it('fails closed in ThreadComposer when Storage quota is exceeded, calling completeUpload 0 times', async () => {
+      // 测试意图：ThreadComposer 中当本地 Storage 满额时，发送前持久化失败阻断 completeUpload 发起（调用 0 次）
+      const scope = 'quota-composer-scope'
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError')
+      })
+
+      const fakeStorage = {
+        reserveUpload: vi.fn().mockResolvedValue({
+          id: 'up-quota-1',
+          blobId: 'blob-quota',
+          mediaKind: 'image',
+          state: 'PENDING',
+          presignedPut: { url: 'put', method: 'PUT', headers: {} },
+          filename: 'quota.png',
+          mediaType: 'image/png',
+          sizeBytes: 1024,
+          sha256: 'sha-quota',
+          expiresAt: '2026',
+          createTime: '2026',
+        }),
+        completeUpload: vi.fn(),
+        deleteUpload: vi.fn().mockResolvedValue(undefined),
+        uploadFile: vi.fn().mockResolvedValue(undefined),
+        getBlobDownloadUrl: vi.fn(),
+        getBlobPreviewUrl: vi.fn(),
+      }
+
+      render(
+        <ThreadComposer
+          parts={[]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          scope={scope}
+          storageService={fakeStorage as unknown as StorageService}
+          hashFile={async () => 'sha-quota'}
+        />,
+      )
+
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      expect(fileInput).toBeInTheDocument()
+
+      const file = new File(['bytes'], 'quota.png', { type: 'image/png' })
+      await userEvent.upload(fileInput, file)
+
+      // 等待 reserveUpload 发生
+      await vi.waitFor(() => expect(fakeStorage.reserveUpload).toHaveBeenCalled())
+
+      // 核心验证：因 Storage 写入抛错，completeUpload 绝对没有被调用（0 次）
+      expect(fakeStorage.completeUpload).toHaveBeenCalledTimes(0)
+      // 预留的 handle 已被安全回滚释放
+      expect(fakeStorage.deleteUpload).toHaveBeenCalledWith('up-quota-1')
+
+      setItemSpy.mockRestore()
+    })
+
+    it('does not re-restore duplicate items when parts change', () => {
+      // 测试意图：验证当输入框 parts 频繁变化时，不会重复从 scope 恢复导致 Strip 出现重复附件
+      const scope = 'scope-dedup-check'
+      storeUnknownUploads(scope, [
+        {
+          localId: 'loc-single',
+          uploadId: 'up-single',
+          filename: 'single.png',
+          mediaType: 'image/png',
+          sizeBytes: 1024,
+          sha256: 'sha-s',
+        },
+      ])
+
+      const { rerender } = render(
+        <ThreadComposer
+          parts={[createAttachmentPart('loc-single', 'single.png')]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          scope={scope}
+        />,
+      )
+
+      expect(screen.getAllByText('[single.png]').length).toBeGreaterThanOrEqual(1)
+
+      // 改变 parts 输入内容（模拟输入文字）
+      rerender(
+        <ThreadComposer
+          parts={[
+            createAttachmentPart('loc-single', 'single.png'),
+            createTextPart('hello there'),
+          ]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          scope={scope}
+        />,
+      )
+
+      // strip 中该附件仍然只有一个 listitem，绝不重复生成
+      const retryButtons = screen.queryAllByRole('button', { name: /重试完成 single.png/ })
+      expect(retryButtons).toHaveLength(1)
+    })
   })
 })

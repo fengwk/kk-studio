@@ -386,5 +386,201 @@ describe('Attachment uploads lifecycle & safety', () => {
       expect(result.current.uploads).toHaveLength(0)
       expect(loadUnknownUploads(scope)).toHaveLength(0)
     })
+
+    it('fails closed when Storage quota is exceeded before completeUpload: aborts and calls completeUpload 0 times', async () => {
+      // 测试意图：验证 Storage 存储满额时（QuotaExceededError），严格阻止发送 completeUpload（0 次），清理 handle 并报错
+      const scope = 'agent-pane:quota-test'
+      const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('QuotaExceededError', 'QuotaExceededError')
+      })
+
+      const service = createFakeStorageService()
+      const errors: AttachmentUploadError[] = []
+      const { result } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-123',
+          scope,
+          onError: (e) => errors.push(e),
+        }),
+      )
+
+      act(() => {
+        result.current.addFiles([new File(['bytes'], 'photo.png', { type: 'image/png' })])
+      })
+
+      await vi.waitFor(() => {
+        expect(errors).toHaveLength(1)
+      })
+
+      // 核心断言：completeUpload 调用 0 次（Fail Closed）！
+      expect(service.completeUpload).toHaveBeenCalledTimes(0)
+      // 预留的 handle 已被安全 deleteUpload 清理
+      expect(service.deleteUpload).toHaveBeenCalledWith('res-1')
+      expect(result.current.uploads).toHaveLength(0)
+
+      setItemSpy.mockRestore()
+    })
+
+    it('interleaved two attachments: one success does not drop or overwrite the other unknown upload', async () => {
+      // 测试意图：两附件并发，A 成功返回 200，B 遇到 503 unknown；A 成功 resolve 绝不误删 B 的持久化 unknown 记录
+      const scope = 'agent-pane:interleaved'
+      const service = createFakeStorageService({
+        reserveUpload: vi.fn().mockImplementation(async (req) => ({
+          id: `res-${req.filename}`,
+          blobId: 'b',
+          mediaKind: 'image',
+          state: 'PENDING',
+          presignedPut: { url: 'put', method: 'PUT', headers: {} },
+          filename: req.filename,
+          mediaType: req.mediaType,
+          sizeBytes: req.sizeBytes,
+          sha256: req.sha256,
+          expiresAt: '2026',
+          createTime: '2026',
+        })),
+        completeUpload: vi.fn().mockImplementation(async (id: string) => {
+          if (id === 'res-fileB.png') {
+            throw new ApiError('Service Unavailable', 503)
+          }
+          return {
+            id,
+            blobId: 'b',
+            mediaKind: 'image',
+            state: 'READY',
+            presignedPut: { url: 'put', method: 'PUT', headers: {} },
+            filename: 'fileA.png',
+            mediaType: 'image/png',
+            sizeBytes: 100,
+            sha256: 'hA',
+            expiresAt: '2026',
+            createTime: '2026',
+          }
+        }),
+      })
+
+      const { result } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async (file) => `sha-${file.name}`,
+          scope,
+        }),
+      )
+
+      act(() => {
+        result.current.addFiles([
+          new File(['aaa'], 'fileA.png', { type: 'image/png' }),
+          new File(['bbb'], 'fileB.png', { type: 'image/png' }),
+        ])
+      })
+
+      await vi.waitFor(() => {
+        expect(service.completeUpload).toHaveBeenCalledTimes(2)
+      })
+
+      await vi.waitFor(() => {
+        const statuses = result.current.uploads.map((u) => u.status)
+        expect(statuses).toContain('ready')
+        expect(statuses).toContain('complete_unknown')
+      })
+
+      // 验证 Storage 中依然保留了 fileB.png 的未知元数据，fileA 的成功并未将其冲掉
+      const stored = loadUnknownUploads(scope)
+      expect(stored).toHaveLength(1)
+      expect(stored[0].uploadId).toBe('res-fileB.png')
+    })
+
+    it('old scope completion does not leak or contaminate new scope', async () => {
+      // 测试意图：旧 scope 发生上传中途组件切换至新 scope，旧 scope 的 resolve 绝不写入新 scope
+      let resolveOldComplete!: (v: StorageUploadDTO) => void
+      const service = createFakeStorageService({
+        completeUpload: vi.fn().mockImplementation(() => {
+          return new Promise((resolve) => {
+            resolveOldComplete = resolve
+          })
+        }),
+      })
+
+      let currentScope = 'scope-alpha'
+      const { result, rerender } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-1',
+          scope: currentScope,
+        }),
+      )
+
+      act(() => {
+        result.current.addFiles([new File(['test'], 'alpha.png', { type: 'image/png' })])
+      })
+
+      await vi.waitFor(() => expect(service.completeUpload).toHaveBeenCalledTimes(1))
+
+      // 此时切换至新 scope
+      currentScope = 'scope-beta'
+      rerender()
+
+      // 新 scope 初始应为空
+      expect(result.current.uploads).toHaveLength(0)
+
+      // 旧 scope complete 完成
+      await act(async () => {
+        resolveOldComplete({
+          id: 'res-alpha',
+          blobId: 'b',
+          mediaKind: 'image',
+          state: 'READY',
+          presignedPut: { url: 'put', method: 'PUT', headers: {} },
+          filename: 'alpha.png',
+          mediaType: 'image/png',
+          sizeBytes: 100,
+          sha256: 'sha-1',
+          expiresAt: '2026',
+          createTime: '2026',
+        })
+      })
+
+      // 新 scope 依然保持纯净，无任何 alpha 的数据泄露
+      expect(result.current.uploads).toHaveLength(0)
+      expect(loadUnknownUploads('scope-beta')).toHaveLength(0)
+    })
+
+    it('preserves identity in storage during in-flight complete and restores on reload', async () => {
+      // 测试意图：验证在 complete 发起中（网络在途、尚未 resolve 时），存储中已经存在该 uploadId；模拟窗口刷新重新挂载可恢复
+      const scope = 'scope-inflight'
+      let inFlightStorageSnapshot: ReturnType<typeof loadUnknownUploads> = []
+      const service = createFakeStorageService({
+        completeUpload: vi.fn().mockImplementation(async () => {
+          // 在 complete 请求飞行途中检查 Storage
+          inFlightStorageSnapshot = loadUnknownUploads(scope)
+          // 模拟在途时发生崩溃/刷新，挂起不返回
+          return new Promise(() => {})
+        }),
+      })
+
+      renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-inflight',
+          scope,
+        }),
+      ).result.current.addFiles([new File(['bytes'], 'inflight.png', { type: 'image/png' })])
+
+      await vi.waitFor(() => expect(inFlightStorageSnapshot.length).toBe(1))
+      expect(inFlightStorageSnapshot[0].uploadId).toBe('res-1')
+
+      // 模拟页面 reload 挂载：同 scope 重新挂载
+      const { result: reloaded } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-inflight',
+          scope,
+        }),
+      )
+
+      expect(reloaded.current.uploads).toHaveLength(1)
+      expect(reloaded.current.uploads[0].uploadId).toBe('res-1')
+      expect(reloaded.current.uploads[0].status).toBe('complete_unknown')
+    })
   })
 })
