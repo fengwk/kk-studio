@@ -48,7 +48,12 @@ class MiniMaxMavisCredentialRefresherTest {
         new MiniMaxMavisCredentialPayload(OLD_TOKEN, CLIENT_UUID, FIXED_NOW).toJson();
     this.snapshotCn =
         new PluginCredentialSnapshot(
-            MiniMaxMavisPlugin.PLUGIN_ID, "CN", FIXED_NOW.plusSeconds(3600), payloadJson);
+            MiniMaxMavisPlugin.PLUGIN_ID,
+            "CN",
+            FIXED_NOW.plusSeconds(3600),
+            0L,
+            new byte[0],
+            payloadJson);
   }
 
   /** 验证刷新成功时，新材料的 region 与快照严格一致，且携带新 token 与更新的刷新计划。 */
@@ -169,6 +174,8 @@ class MiniMaxMavisCredentialRefresherTest {
             MiniMaxMavisPlugin.PLUGIN_ID,
             "UNKNOWN_REGION",
             FIXED_NOW.plusSeconds(3600),
+            0L,
+            new byte[0],
             snapshotCn.payloadJson());
 
     MavisClient mockClient = mock(MavisClient.class);

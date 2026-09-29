@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * {@code plugin_credential} 上唯一的凭据读写实现。
@@ -27,20 +28,34 @@ import java.util.Optional;
  */
 public final class DatabasePluginCredentialStore implements PluginCredentialStore {
 
+  static final String AUTH_REJECTED_ERROR =
+      "plugin credential was rejected by the provider and must be re-authenticated";
+
   private final PluginCredentialRepository repository;
   private final PluginCredentialCodec codec;
   private final PluginCredentialKeyLoader keyLoader;
   private final Clock clock;
+  private final Consumer<String> saved;
 
   public DatabasePluginCredentialStore(
       PluginCredentialRepository repository,
       PluginCredentialCodec codec,
       PluginCredentialKeyLoader keyLoader,
       Clock clock) {
+    this(repository, codec, keyLoader, clock, pluginId -> {});
+  }
+
+  public DatabasePluginCredentialStore(
+      PluginCredentialRepository repository,
+      PluginCredentialCodec codec,
+      PluginCredentialKeyLoader keyLoader,
+      Clock clock,
+      Consumer<String> saved) {
     this.repository = Objects.requireNonNull(repository, "repository");
     this.codec = Objects.requireNonNull(codec, "codec");
     this.keyLoader = Objects.requireNonNull(keyLoader, "keyLoader");
     this.clock = Objects.requireNonNull(clock, "clock");
+    this.saved = Objects.requireNonNull(saved, "saved");
   }
 
   @Override
@@ -107,7 +122,12 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
           "plugin credential is expired; re-authenticate the plugin");
     }
     return new PluginCredentialSnapshot(
-        credential.pluginId(), credential.region(), credential.expiresAt(), payload);
+        credential.pluginId(),
+        credential.region(),
+        credential.expiresAt(),
+        credential.version(),
+        credential.encryptedPayload(),
+        payload);
   }
 
   @Override
@@ -141,12 +161,25 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
             now,
             now);
     repository.upsert(row);
+    saved.accept(pluginId);
     return projection(pluginId);
   }
 
   @Override
   public void delete(String pluginId) {
     repository.delete(pluginId);
+  }
+
+  @Override
+  public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+    Objects.requireNonNull(snapshot, "snapshot");
+    String bounded = PluginCredentialRefreshService.boundedError(error, AUTH_REJECTED_ERROR);
+    return repository.rejectUsedCredential(
+        snapshot.pluginId(),
+        snapshot.version(),
+        snapshot.encryptedPayload(),
+        bounded,
+        clock.instant());
   }
 
   private boolean decryptable(SecretKey key, PluginCredentialRow credential) {

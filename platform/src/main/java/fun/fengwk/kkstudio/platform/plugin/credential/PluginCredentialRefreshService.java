@@ -23,16 +23,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Plugin 凭据刷新编排：一次扫描把到期行 claim 出来、在事务外只刷新一次、再以 lease token 与 version 围栏终结。
+ * Plugin 凭据刷新编排：到期行一次只 claim 一行，发请求前再核验 lease 仍属于自己，然后在事务外只刷新一次并以围栏终结。
  *
  * <p>状态机与文档一致：
  *
  * <pre>
  * due row
- *   -> 单语句短事务：claim refresh lease（version + 1）
+ *   -> 单语句短事务：claim 恰好一行 refresh lease（version + 1）
+ *   -> 发请求前核验当前 lease token / version 仍属于自己且截止有效
  *   -> 事务外 external refresh exactly once
  *   -> 单语句短事务：
  *        success -> replace encrypted payload + expiry + nextRefreshAt
@@ -42,14 +44,15 @@ import java.util.UUID;
  * expired in-flight lease -> REFRESH_UNCERTAIN, never reclaim-and-send
  * </pre>
  *
- * <p>只领取当前 JVM 已安装 Plugin 的行，未安装 Plugin 的密文保持 dormant。lease 只解决多节点互斥，不承诺外部 exactly-once：节点在 HTTP
- * 前后崩溃 时没有节点能证明请求是否发出，因此过期 lease 一律收敛为 {@code REFRESH_UNCERTAIN}，绝不重新 claim。
+ * <p>只领取当前 JVM 已安装 Plugin 的行，未安装 Plugin 的密文保持 dormant。一次扫描最多循环 {@link #MAX_REFRESH_PASSES}
+ * 次，避免单次调度被无限到期行占住。lease 只解决多节点互斥，不承诺外部 exactly-once：节点在 HTTP 前后崩溃时没有节点能证明请求是否发出，因此过期 lease 一律收敛为
+ * {@code REFRESH_UNCERTAIN}，绝不重新 claim。核验失败时不得再调用 refresher。
  */
 @Slf4j
 public final class PluginCredentialRefreshService {
 
-  /** 一次扫描最多 claim 的行数；其余到期行由下一次扫描继续。 */
-  public static final int MAX_CLAIM_BATCH = 16;
+  /** 一次扫描最多 just-in-time claim 并刷新的行数；其余到期行由下一次扫描继续。 */
+  public static final int MAX_REFRESH_PASSES = 16;
 
   private static final String LEASE_EXPIRED_ERROR =
       "plugin credential refresh lease expired before a result was observed";
@@ -84,9 +87,13 @@ public final class PluginCredentialRefreshService {
   }
 
   /**
-   * 执行一次扫描并返回本次 claim 的行数。
+   * 执行一次扫描并返回本次真正终结的行数（{@code finalizeSuccess} / {@code finalizeFailure} 成功）。
    *
-   * <p>先原子收敛过期 in-flight lease（这些行永不重放），再 claim 到期行并逐行刷新；单行失败不影响其它行。
+   * <p>先原子收敛过期 in-flight lease（这些行永不重放），再循环最多 {@link #MAX_REFRESH_PASSES} 次：每次只 claim 一行、立即刷新并
+   * finalize，然后才领取下一行。
+   *
+   * <p>一旦某一行没有产生终态写入（释放 lease、丢失所有权或 CAS 竞争失败），本轮立即结束：该行仍然到期，继续循环只会重复领取同一行。
+   * 返回值因此也是调度器判断「本轮是否有进展」的依据。
    */
   public int refreshOnce() {
     List<String> installed = registry.pluginIds();
@@ -105,92 +112,129 @@ public final class PluginCredentialRefreshService {
       log.warn("Cannot converge expired plugin credential refresh leases", error);
       return 0;
     }
-    List<PluginCredentialRow> claimed;
+    int finalized = 0;
+    for (int pass = 0; pass < MAX_REFRESH_PASSES; pass++) {
+      PluginCredentialRow claimed = claimOne(installed);
+      if (claimed == null) {
+        return finalized;
+      }
+      boolean progressed;
+      try {
+        progressed = refreshClaimed(claimed);
+      } catch (RuntimeException error) {
+        log.warn(
+            "Unexpected failure while refreshing plugin credential {}", claimed.pluginId(), error);
+        progressed = false;
+      }
+      if (!progressed) {
+        return finalized;
+      }
+      finalized++;
+    }
+    return finalized;
+  }
+
+  /** 已安装 Plugin 中下一次可调度刷新时刻；没有可调度行时为空。 */
+  public Optional<Instant> earliestRefreshAt() {
+    List<String> installed = registry.pluginIds();
+    if (installed.isEmpty()) {
+      return Optional.empty();
+    }
+    return repository.earliestRefreshAt(installed, clock.instant());
+  }
+
+  private PluginCredentialRow claimOne(List<String> installed) {
+    Instant now = clock.instant();
     try {
-      claimed =
+      List<PluginCredentialRow> claimed =
           repository.claimDue(
               installed,
               now,
               now.plus(properties.getRefresh().getLeaseDuration()),
               UUID.randomUUID().toString(),
-              MAX_CLAIM_BATCH);
+              1);
+      return claimed.isEmpty() ? null : claimed.get(0);
     } catch (RuntimeException error) {
       log.warn("Cannot claim due plugin credentials for refresh", error);
-      return 0;
+      return null;
     }
-    for (PluginCredentialRow row : claimed) {
-      try {
-        refreshClaimed(row);
-      } catch (RuntimeException error) {
-        log.warn("Unexpected failure while refreshing plugin credential {}", row.pluginId(), error);
-      }
-    }
-    return claimed.size();
   }
 
-  private void refreshClaimed(PluginCredentialRow row) {
+  /**
+   * 刷新已 claim 的单行，返回本次是否产生了成功的终态写入。
+   *
+   * <p>{@code false} 表示该行仍然到期（释放 lease、丢失所有权或 CAS 竞争失败），调用方必须结束本轮扫描而不是立刻重新领取同一行。
+   */
+  private boolean refreshClaimed(PluginCredentialRow row) {
     SecretKey key = keyLoader.load().orElse(null);
     if (key == null) {
       // 主密钥不可用：本轮不写任何终态，释放 lease 让后续扫描重试。
       releaseLease(row);
-      return;
+      return false;
     }
     String payload;
     try {
       payload = codec.decrypt(key, row.pluginId(), row.region(), row.encryptedPayload());
     } catch (RuntimeException error) {
-      finalizeFailure(
+      return finalizeFailure(
           row, PluginCredentialStatus.REAUTH_REQUIRED, row.nextRefreshAt(), UNREADABLE_ERROR);
-      return;
     }
     StudioPlugin plugin = registry.find(row.pluginId()).orElse(null);
     PluginCredentialRefresher refresher = plugin == null ? null : plugin.refresher().orElse(null);
     if (refresher == null) {
       releaseLease(row);
-      return;
+      return false;
     }
     PluginCredentialSnapshot snapshot =
-        new PluginCredentialSnapshot(row.pluginId(), row.region(), row.expiresAt(), payload);
-    Instant now = clock.instant();
+        new PluginCredentialSnapshot(
+            row.pluginId(),
+            row.region(),
+            row.expiresAt(),
+            row.version(),
+            row.encryptedPayload(),
+            payload);
+    if (!stillOwnsLease(row)) {
+      log.debug(
+          "Lost plugin credential refresh lease before calling refresher for {}", row.pluginId());
+      return false;
+    }
+    Instant sentAt = clock.instant();
     PluginCredentialMaterial material;
     try {
       material = refresher.refresh(snapshot);
     } catch (PluginAuthRejectedException rejection) {
-      finalizeFailure(
+      return finalizeFailure(
           row,
           PluginCredentialStatus.REAUTH_REQUIRED,
           row.nextRefreshAt(),
           boundedError(rejection.getMessage(), "plugin credential was rejected"));
-      return;
     } catch (PluginRenewalNotSentException notSent) {
-      finalizeFailure(
+      return finalizeFailure(
           row,
           PluginCredentialStatus.REFRESH_FAILED,
-          now.plus(properties.getRefresh().getPollDelay()),
+          sentAt.plus(properties.getRefresh().getPollDelay()),
           boundedError(notSent.getMessage(), "plugin credential renewal was not sent"));
-      return;
     } catch (PluginKeyUnavailableException keyError) {
       releaseLease(row);
-      return;
+      return false;
     } catch (RuntimeException error) {
-      finalizeFailure(
+      return finalizeFailure(
           row,
           PluginCredentialStatus.REFRESH_UNCERTAIN,
           row.nextRefreshAt(),
           boundedError(error.getMessage(), UNEXPECTED_ERROR));
-      return;
     }
+    Instant completedAt = clock.instant();
     byte[] envelope;
     try {
-      requireUsable(plugin.descriptor(), row, material, now);
+      requireUsable(plugin.descriptor(), row, material, completedAt);
       envelope = codec.encrypt(key, row.pluginId(), material.region(), material.payloadJson());
     } catch (IllegalArgumentException error) {
-      finalizeFailure(
+      return finalizeFailure(
           row,
           PluginCredentialStatus.REFRESH_FAILED,
-          now.plus(properties.getRefresh().getPollDelay()),
+          completedAt.plus(properties.getRefresh().getPollDelay()),
           INVALID_RENEWAL_ERROR);
-      return;
     }
     boolean finalized =
         repository.finalizeSuccess(
@@ -201,11 +245,12 @@ public final class PluginCredentialRefreshService {
             material.region(),
             material.expiresAt(),
             material.nextRefreshAt(),
-            now,
-            now);
+            completedAt,
+            completedAt);
     if (!finalized) {
       log.debug("Lost plugin credential refresh race for {}", row.pluginId());
     }
+    return finalized;
   }
 
   /**
@@ -229,7 +274,8 @@ public final class PluginCredentialRefreshService {
     }
   }
 
-  private void finalizeFailure(
+  /** 终结为失败状态，返回是否真的写入了终态（CAS 竞争失败时为 {@code false}）。 */
+  private boolean finalizeFailure(
       PluginCredentialRow row, PluginCredentialStatus status, Instant nextRefreshAt, String error) {
     Instant now = clock.instant();
     boolean finalized =
@@ -244,6 +290,13 @@ public final class PluginCredentialRefreshService {
     if (!finalized) {
       log.debug("Lost plugin credential refresh race for {}", row.pluginId());
     }
+    return finalized;
+  }
+
+  /** 外部调用前的最后一道围栏：token、version 与截止时刻任一失效都不得外呼。 */
+  private boolean stillOwnsLease(PluginCredentialRow row) {
+    return repository.ownsUnexpiredLease(
+        row.pluginId(), row.refreshLeaseToken(), row.version(), clock.instant());
   }
 
   private void releaseLease(PluginCredentialRow row) {

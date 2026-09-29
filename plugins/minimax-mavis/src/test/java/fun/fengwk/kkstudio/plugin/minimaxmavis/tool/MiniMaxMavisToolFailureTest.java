@@ -504,6 +504,93 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
+   * 调用期 HTTP 401 是已证认证拒绝：结果仍是确定性 MAVIS_CALL_FAILED，但必须把**本次解析出的**凭据（同一快照实例，携带自己的 version 与原始密文）交给
+   * credentialStore 收敛，且错误文本不含 token。
+   */
+  @Test
+  void authenticatedRejectionInvalidatesExactlyTheResolvedCredential() {
+    transport.setInvokeResponse(new MavisHttpResponse(401, "{}"));
+    PluginCredentialSnapshot snapshot = snapshot();
+    RejectionTrackingCredentialStore credentialStore =
+        new RejectionTrackingCredentialStore(snapshot);
+
+    ToolResult result = executeWebSearch(credentialStore);
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
+    assertFalse(resultText(result).contains(IDENTIFIABLE_SECRET_TOKEN));
+    assertEquals(
+        List.of(snapshot),
+        credentialStore.rejected(),
+        "rejectUsed must receive exactly the credential resolved for this call");
+  }
+
+  /** 只有已证认证语义才允许作废凭据：403 + 已知认证业务码（1004）收敛为认证拒绝；403 + 非认证业务码（权限拒绝）不是凭据失效， 绝不能把权限问题升级为重新登录。 */
+  @Test
+  void businessAuthCodeInvalidatesButForbiddenWithoutAuthCodeDoesNot() {
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            403, "{\"base_resp\":{\"status_code\":1006,\"status_msg\":\"permission denied\"}}"));
+    RejectionTrackingCredentialStore forbiddenStore =
+        new RejectionTrackingCredentialStore(snapshot());
+    assertTrue(executeWebSearch(forbiddenStore).error());
+    assertTrue(
+        forbiddenStore.rejected().isEmpty(),
+        "an HTTP 403 without a known auth code must not invalidate the credential");
+
+    transport.setInvokeResponse(
+        new MavisHttpResponse(403, "{\"base_resp\":{\"status_code\":1004}}"));
+    RejectionTrackingCredentialStore rejectedStore =
+        new RejectionTrackingCredentialStore(snapshot());
+    assertTrue(executeWebSearch(rejectedStore).error());
+    assertEquals(1, rejectedStore.rejected().size());
+  }
+
+  /** 传输失败（断连/超时）结果不确定：绝不作废凭据，避免把一次性网络故障升级为重新登录。 */
+  @Test
+  void transportFailureNeverInvalidatesCredential() {
+    transport.setInvokeFailure(new MavisTransportException("connect timeout to upstream provider"));
+    RejectionTrackingCredentialStore credentialStore =
+        new RejectionTrackingCredentialStore(snapshot());
+
+    assertTrue(executeWebSearch(credentialStore).error());
+    assertTrue(credentialStore.rejected().isEmpty());
+  }
+
+  private ToolResult executeWebSearch(PluginCredentialStore credentialStore) {
+    MavisClient client = new MavisClient(transport);
+    MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
+    MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.WEB_SEARCH,
+            MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
+            credentialStore,
+            client,
+            cache,
+            access,
+            executor);
+
+    ToolCall call = new ToolCall("call-auth", tool.descriptor().name(), "{\"query\":\"test\"}");
+    MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
+        new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
+    tool.execute(
+        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    return listener.result();
+  }
+
+  private static PluginCredentialSnapshot snapshot() {
+    return new PluginCredentialSnapshot(
+        MiniMaxMavisPlugin.PLUGIN_ID,
+        MavisRegion.CN.id().toUpperCase(),
+        Instant.now().plusSeconds(3600),
+        7L,
+        new byte[] {1, 2, 3},
+        new MiniMaxMavisCredentialPayload(IDENTIFIABLE_SECRET_TOKEN, CLIENT_UUID, Instant.now())
+            .toJson());
+  }
+
+  /**
    * 调用并发上限已满（Executor 拒绝排入）：必须在**发送请求前**收敛为确定性的 MAVIS_CALL_FAILED，且不产生任何副作用。
    *
    * <p>这是「额度型调用宁可失败也不排队重放」的边界证据：拒绝发生在任何网络请求之前，因此它既不是不确定失败，也不需要用户重新登录。
@@ -560,6 +647,8 @@ class MiniMaxMavisToolFailureTest {
             MiniMaxMavisPlugin.PLUGIN_ID,
             MavisRegion.CN.id().toUpperCase(),
             Instant.now().plusSeconds(3600),
+            0L,
+            new byte[0],
             new MiniMaxMavisCredentialPayload(IDENTIFIABLE_SECRET_TOKEN, CLIENT_UUID, Instant.now())
                 .toJson());
     return new MiniMaxMavisToolExecutionTest.FakeCredentialStore(snapshot);
@@ -591,6 +680,50 @@ class MiniMaxMavisToolFailureTest {
 
     @Override
     public void delete(String pluginId) {}
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      return false;
+    }
+  }
+
+  /** 记录 rejectUsed 入参的假凭据 Store。 */
+  static final class RejectionTrackingCredentialStore implements PluginCredentialStore {
+    private final PluginCredentialSnapshot snapshot;
+    private final List<PluginCredentialSnapshot> rejected =
+        Collections.synchronizedList(new ArrayList<>());
+
+    RejectionTrackingCredentialStore(PluginCredentialSnapshot snapshot) {
+      this.snapshot = snapshot;
+    }
+
+    @Override
+    public PluginCredentialProjection projection(String pluginId) {
+      return null;
+    }
+
+    @Override
+    public PluginCredentialSnapshot resolve(String pluginId) {
+      return snapshot;
+    }
+
+    @Override
+    public PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material) {
+      return null;
+    }
+
+    @Override
+    public void delete(String pluginId) {}
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      rejected.add(snapshot);
+      return true;
+    }
+
+    List<PluginCredentialSnapshot> rejected() {
+      return List.copyOf(rejected);
+    }
   }
 
   /** 支持预设 catalog 响应和注入调用异常的假传输。 */
@@ -598,6 +731,7 @@ class MiniMaxMavisToolFailureTest {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
     private String catalogResponse = CATALOG_RESPONSE;
     private MavisTransportException invokeFailure;
+    private MavisHttpResponse invokeResponse;
 
     void setCatalogResponse(String catalogResponse) {
       this.catalogResponse = catalogResponse;
@@ -605,6 +739,10 @@ class MiniMaxMavisToolFailureTest {
 
     void setInvokeFailure(MavisTransportException invokeFailure) {
       this.invokeFailure = invokeFailure;
+    }
+
+    void setInvokeResponse(MavisHttpResponse invokeResponse) {
+      this.invokeResponse = invokeResponse;
     }
 
     @Override
@@ -615,6 +753,9 @@ class MiniMaxMavisToolFailureTest {
       }
       if (invokeFailure != null) {
         throw invokeFailure;
+      }
+      if (invokeResponse != null) {
+        return invokeResponse;
       }
       return new MavisHttpResponse(
           200,

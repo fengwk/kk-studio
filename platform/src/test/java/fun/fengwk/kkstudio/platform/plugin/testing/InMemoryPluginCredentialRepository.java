@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -286,6 +287,68 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
             row.createTime(),
             now);
     storage.put(pluginId, updated);
+    return true;
+  }
+
+  @Override
+  public synchronized boolean ownsUnexpiredLease(
+      String pluginId, String leaseToken, long version, Instant now) {
+    PluginCredentialRow row = storage.get(pluginId);
+    return row != null
+        && Objects.equals(row.refreshLeaseToken(), leaseToken)
+        && row.version() == version
+        && row.refreshLeaseUntil() != null
+        && row.refreshLeaseUntil().isAfter(now);
+  }
+
+  @Override
+  public synchronized Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now) {
+    if (pluginIds == null || pluginIds.isEmpty()) {
+      return Optional.empty();
+    }
+    return pluginIds.stream()
+        .map(storage::get)
+        .filter(Objects::nonNull)
+        .filter(
+            row ->
+                row.status() == PluginCredentialStatus.CONNECTED
+                    || row.status() == PluginCredentialStatus.REFRESH_FAILED)
+        .filter(
+            row ->
+                row.refreshLeaseToken() == null
+                    || (row.refreshLeaseUntil() != null && !row.refreshLeaseUntil().isAfter(now)))
+        .map(PluginCredentialRow::nextRefreshAt)
+        .min(Comparator.naturalOrder());
+  }
+
+  @Override
+  public synchronized boolean rejectUsedCredential(
+      String pluginId, long version, byte[] encryptedPayload, String error, Instant now) {
+    PluginCredentialRow row = storage.get(pluginId);
+    if (row == null) {
+      return false;
+    }
+    boolean matches =
+        row.version() == version || Arrays.equals(row.encryptedPayload(), encryptedPayload);
+    if (!matches) {
+      return false;
+    }
+    storage.put(
+        pluginId,
+        new PluginCredentialRow(
+            row.pluginId(),
+            row.encryptedPayload(),
+            row.region(),
+            row.expiresAt(),
+            row.nextRefreshAt(),
+            PluginCredentialStatus.REAUTH_REQUIRED,
+            row.lastRefreshedAt(),
+            error,
+            null,
+            null,
+            row.version() + 1L,
+            row.createTime(),
+            now));
     return true;
   }
 

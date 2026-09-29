@@ -367,6 +367,42 @@ class MavisClientTest {
     assertEquals(1, transport.requests.size());
   }
 
+  /**
+   * HTTP 403 不能一概当作凭据失效：它同样可能只是权限拒绝。只有响应体携带已知认证码（401 / 1004）才收敛为认证错误， 其余 403（非认证业务码、非 JSON
+   * body）保持普通传输失败，供调用方区分「换 token 也没用」与「需要重新登录」。
+   */
+  @Test
+  void invokeDistinguishesForbiddenFromAuthenticatedRejection() {
+    MavisCredential credential = credential();
+
+    RecordingTransport bodyAuthCode =
+        new RecordingTransport()
+            .responder(new MavisHttpResponse(403, "{\"base_resp\":{\"status_code\":1004}}"));
+    assertThrows(
+        MavisAuthException.class,
+        () -> client(bodyAuthCode).invoke(credential, MavisCapability.TTS, json("{}")));
+
+    RecordingTransport permissionDenied =
+        new RecordingTransport()
+            .responder(
+                new MavisHttpResponse(
+                    403,
+                    "{\"base_resp\":{\"status_code\":1006,\"status_msg\":\"permission denied\"}}"));
+    assertThrows(
+        MavisTransportException.class,
+        () -> client(permissionDenied).invoke(credential, MavisCapability.TTS, json("{}")));
+
+    RecordingTransport opaqueForbidden =
+        new RecordingTransport().responder(new MavisHttpResponse(403, "forbidden"));
+    assertThrows(
+        MavisTransportException.class,
+        () -> client(opaqueForbidden).invoke(credential, MavisCapability.TTS, json("{}")));
+
+    assertEquals(1, bodyAuthCode.requests.size());
+    assertEquals(1, permissionDenied.requests.size());
+    assertEquals(1, opaqueForbidden.requests.size());
+  }
+
   /** renewal 成功时只替换 token 与到期时间，client uuid 与 region 保持不变。 */
   @Test
   void renewReplacesTokenUnderReferenceRequestShape() {

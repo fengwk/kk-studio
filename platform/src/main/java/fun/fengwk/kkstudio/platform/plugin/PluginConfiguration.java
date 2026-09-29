@@ -5,6 +5,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
@@ -51,8 +53,34 @@ public class PluginConfiguration {
   public PluginCredentialStore pluginCredentialStore(
       PluginCredentialRepository repository,
       PluginCredentialCodec codec,
-      PluginCredentialKeyLoader keyLoader) {
-    return new DatabasePluginCredentialStore(repository, codec, keyLoader, Clock.systemUTC());
+      PluginCredentialKeyLoader keyLoader,
+      ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher) {
+    return new DatabasePluginCredentialStore(
+        repository,
+        codec,
+        keyLoader,
+        Clock.systemUTC(),
+        pluginId -> wakeAfterCommit(refreshDispatcher));
+  }
+
+  /** 凭据保存成功后唤醒刷新调度：有活跃事务时排到提交后，避免通知早于新凭据可见；无事务时立即唤醒。 */
+  private static void wakeAfterCommit(
+      ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher) {
+    PluginCredentialRefreshDispatcher dispatcher = refreshDispatcher.getIfAvailable();
+    if (dispatcher == null) {
+      return;
+    }
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              dispatcher.wake();
+            }
+          });
+    } else {
+      dispatcher.wake();
+    }
   }
 
   @Bean
@@ -78,6 +106,6 @@ public class PluginConfiguration {
   @ConditionalOnMissingBean
   public PluginCredentialRefreshDispatcher pluginCredentialRefreshDispatcher(
       PluginCredentialRefreshService refreshService, PluginProperties properties) {
-    return new PluginCredentialRefreshDispatcher(refreshService, properties);
+    return new PluginCredentialRefreshDispatcher(refreshService, properties, Clock.systemUTC());
   }
 }

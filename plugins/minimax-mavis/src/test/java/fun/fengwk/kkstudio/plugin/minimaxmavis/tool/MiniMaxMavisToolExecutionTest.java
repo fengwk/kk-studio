@@ -100,6 +100,8 @@ class MiniMaxMavisToolExecutionTest {
             MiniMaxMavisPlugin.PLUGIN_ID,
             MavisRegion.CN.id().toUpperCase(),
             Instant.now().plusSeconds(3600),
+            0L,
+            new byte[0],
             new MiniMaxMavisCredentialPayload(TEST_TOKEN, CLIENT_UUID, Instant.now()).toJson());
     this.credentialStore = new FakeCredentialStore(snapshot);
 
@@ -326,9 +328,11 @@ class MiniMaxMavisToolExecutionTest {
     }
   }
 
-  /** 假凭据持久化存储。 */
+  /** 假凭据持久化存储：记录被判定失效的本次已用凭据。 */
   static final class FakeCredentialStore implements PluginCredentialStore {
     private final PluginCredentialSnapshot snapshot;
+    private final List<PluginCredentialSnapshot> rejected =
+        Collections.synchronizedList(new ArrayList<>());
 
     FakeCredentialStore(PluginCredentialSnapshot snapshot) {
       this.snapshot = snapshot;
@@ -351,6 +355,16 @@ class MiniMaxMavisToolExecutionTest {
 
     @Override
     public void delete(String pluginId) {}
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      rejected.add(snapshot);
+      return true;
+    }
+
+    List<PluginCredentialSnapshot> rejected() {
+      return List.copyOf(rejected);
+    }
   }
 
   /** 假资源网关。 */

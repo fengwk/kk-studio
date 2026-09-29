@@ -68,4 +68,28 @@ public interface PluginCredentialRepository {
 
   /** 释放 lease 且不改状态：无法解析凭据或 Plugin 无刷新能力时使用，要求 lease token 与 version 都匹配。 */
   boolean releaseLease(String pluginId, String leaseToken, long version, Instant now);
+
+  /**
+   * 当前 lease 是否仍由该 token 与 version 持有且截止时刻晚于 {@code now}。
+   *
+   * <p>外部刷新只能在这个条件成立时发出：lease 过期、被另一节点收敛或被重新登录替换后都必须返回 false。
+   */
+  boolean ownsUnexpiredLease(String pluginId, String leaseToken, long version, Instant now);
+
+  /**
+   * 已安装 Plugin 中最早的可调度刷新时刻。
+   *
+   * <p>只看 {@code CONNECTED} / {@code REFRESH_FAILED} 且没有未过期 lease 的行；{@code now} 之前的时刻原样返回，表示已经到期。
+   */
+  Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now);
+
+  /**
+   * 调用期认证拒绝只作废本次已用凭据：version 或原始密文匹配才把该行置为 {@code REAUTH_REQUIRED}。
+   *
+   * <p>并发重新登录写入的新 version 与新密文都不会命中，因此不会误杀新 token。
+   *
+   * @return 是否实际作废了当前行
+   */
+  boolean rejectUsedCredential(
+      String pluginId, long version, byte[] encryptedPayload, String error, Instant now);
 }

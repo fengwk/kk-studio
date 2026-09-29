@@ -97,6 +97,25 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
     return mapper.releaseLease(pluginId, leaseToken, version, now) == 1;
   }
 
+  @Override
+  public boolean ownsUnexpiredLease(String pluginId, String leaseToken, long version, Instant now) {
+    return mapper.countOwnedUnexpiredLease(pluginId, leaseToken, version, now) == 1;
+  }
+
+  @Override
+  public Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now) {
+    if (pluginIds.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.ofNullable(mapper.earliestRefreshAt(pluginIds, now));
+  }
+
+  @Override
+  public boolean rejectUsedCredential(
+      String pluginId, long version, byte[] encryptedPayload, String error, Instant now) {
+    return mapper.rejectUsedCredential(pluginId, version, encryptedPayload, error, now) == 1;
+  }
+
   private PluginCredentialRow toRow(PluginCredentialDO row) {
     return new PluginCredentialRow(
         row.getPluginId(),

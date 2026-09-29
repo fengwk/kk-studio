@@ -503,9 +503,9 @@ class PluginCredentialRefreshServiceTest {
         new PluginCredentialRefreshService(
             registry, repository, codec, dynamicKeyLoader, properties, clock);
 
-    // 首次扫描：密钥文件尚不存在
-    int claimed = service.refreshOnce();
-    assertEquals(1, claimed);
+    // 首次扫描：密钥文件尚不存在；整轮扫描没有产生任何终态写入，因此返回 0。
+    int finalized = service.refreshOnce();
+    assertEquals(0, finalized, "a released lease is not a finalized row");
     assertEquals(0, callCount.get(), "refresher must not be called when key is unavailable");
 
     PluginCredentialRow rowAfterRelease = repository.getDirect(PLUGIN_ID);
@@ -520,8 +520,8 @@ class PluginCredentialRefreshServiceTest {
     Files.setPosixFilePermissions(dynamicKeyFile, PosixFilePermissions.fromString("rw-------"));
 
     // 再次扫描：密钥就绪，应能正常重新 claim 并成功刷新
-    int claimedSecond = service.refreshOnce();
-    assertEquals(1, claimedSecond);
+    int finalizedSecond = service.refreshOnce();
+    assertEquals(1, finalizedSecond);
     assertEquals(1, callCount.get(), "refresher must be called after key becomes available");
 
     PluginCredentialRow rowAfterSuccess = repository.getDirect(PLUGIN_ID);
@@ -704,8 +704,9 @@ class PluginCredentialRefreshServiceTest {
         new PluginCredentialRefreshService(
             registry, repository, codec, keyLoader, properties, clock);
 
-    int claimed = service.refreshOnce();
-    assertEquals(1, claimed);
+    int finalized = service.refreshOnce();
+    assertEquals(
+        0, finalized, "a CAS-losing finalizer writes no terminal state and reports no progress");
 
     // 校验 repository 维持并发重新登录的数据，未被迟到的 refresh 结果覆盖
     PluginCredentialRow finalRow = repository.getDirect(PLUGIN_ID);
@@ -716,6 +717,173 @@ class PluginCredentialRefreshServiceTest {
     SecretKey key = keyLoader.load().orElseThrow();
     String decrypted = codec.decrypt(key, PLUGIN_ID, REGION, finalRow.encryptedPayload());
     assertEquals(competitorPayload, decrypted, "payload must belong to the competitor re-login");
+  }
+
+  /**
+   * just-in-time 外呼前围栏（两节点 + 短 lease）：claim 之后、调用 refresher 之前 lease 已被其它节点换走时，绝不允许发出外呼， 也不写任何终态。
+   */
+  @Test
+  void lostLeaseBeforeExternalCallNeverCallsRefresher() {
+    AtomicInteger callCount = new AtomicInteger(0);
+    TestStudioPlugin plugin =
+        createPlugin(
+            PLUGIN_ID,
+            REGION,
+            snapshot -> {
+              callCount.incrementAndGet();
+              return new PluginCredentialMaterial(
+                  REGION,
+                  clock.instant().plusSeconds(3600),
+                  clock.instant().plusSeconds(1800),
+                  NEW_PAYLOAD);
+            });
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
+    PluginCredentialRow initialRow =
+        createRow(
+            PLUGIN_ID,
+            REGION,
+            OLD_PAYLOAD,
+            PluginCredentialStatus.CONNECTED,
+            clock.instant().plusSeconds(3600),
+            clock.instant().minusSeconds(10));
+
+    // 领取成功后立刻由另一节点换走 lease：本节点已失去所有权。
+    InMemoryPluginCredentialRepository convergingRepository =
+        new InMemoryPluginCredentialRepository() {
+          @Override
+          public synchronized List<PluginCredentialRow> claimDue(
+              List<String> pluginIds,
+              Instant now,
+              Instant leaseUntil,
+              String leaseToken,
+              int limit) {
+            List<PluginCredentialRow> claimed =
+                super.claimDue(pluginIds, now, leaseUntil, leaseToken, limit);
+            if (!claimed.isEmpty()) {
+              changeLeaseToken(claimed.get(0).pluginId(), "foreign-owner-token");
+            }
+            return claimed;
+          }
+        };
+    convergingRepository.setDirect(initialRow);
+
+    PluginCredentialRefreshService service =
+        new PluginCredentialRefreshService(
+            registry, convergingRepository, codec, keyLoader, properties, clock);
+
+    assertEquals(0, service.refreshOnce(), "a lost lease finalizes nothing");
+    assertEquals(0, callCount.get(), "a lost lease must never produce an external refresh call");
+    assertEquals(
+        "foreign-owner-token",
+        convergingRepository.getDirect(PLUGIN_ID).refreshLeaseToken(),
+        "this node must not finalize or release a lease it no longer owns");
+  }
+
+  /** just-in-time 外呼前围栏：claim 后 lease 在 checks 之前到期（慢 refresher / 短 lease）同样不得外呼。 */
+  @Test
+  void expiredLeaseBeforeExternalCallNeverCallsRefresher() {
+    AtomicInteger callCount = new AtomicInteger(0);
+    TestStudioPlugin plugin =
+        createPlugin(
+            PLUGIN_ID,
+            REGION,
+            snapshot -> {
+              callCount.incrementAndGet();
+              return new PluginCredentialMaterial(
+                  REGION,
+                  clock.instant().plusSeconds(3600),
+                  clock.instant().plusSeconds(1800),
+                  NEW_PAYLOAD);
+            });
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
+    repository.setDirect(
+        createRow(
+            PLUGIN_ID,
+            REGION,
+            OLD_PAYLOAD,
+            PluginCredentialStatus.CONNECTED,
+            clock.instant().plusSeconds(3600),
+            clock.instant().minusSeconds(10)));
+
+    InMemoryPluginCredentialRepository expiringRepository =
+        new InMemoryPluginCredentialRepository() {
+          @Override
+          public synchronized List<PluginCredentialRow> claimDue(
+              List<String> pluginIds,
+              Instant now,
+              Instant leaseUntil,
+              String leaseToken,
+              int limit) {
+            List<PluginCredentialRow> claimed =
+                super.claimDue(pluginIds, now, leaseUntil, leaseToken, limit);
+            // 模拟本条外部调用被拖到 lease（2 分钟）之后才真正开始。
+            clock.advance(Duration.ofMinutes(5));
+            return claimed;
+          }
+        };
+    expiringRepository.setDirect(repository.getDirect(PLUGIN_ID));
+
+    PluginCredentialRefreshService service =
+        new PluginCredentialRefreshService(
+            registry, expiringRepository, codec, keyLoader, properties, clock);
+
+    assertEquals(0, service.refreshOnce(), "an expired lease finalizes nothing");
+    assertEquals(
+        0, callCount.get(), "an expired lease must never produce an external refresh call");
+  }
+
+  /** earliestRefreshAt()：只报告可调度行的最早 next_refresh_at，被未过期 lease 占用的行不参与。 */
+  @Test
+  void earliestRefreshAtReportsNextSchedulableInstant() {
+    TestStudioPlugin plugin =
+        createPlugin(
+            PLUGIN_ID,
+            REGION,
+            snapshot ->
+                new PluginCredentialMaterial(
+                    REGION,
+                    clock.instant().plusSeconds(3600),
+                    clock.instant().plusSeconds(1800),
+                    NEW_PAYLOAD));
+    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
+    PluginCredentialRefreshService service =
+        new PluginCredentialRefreshService(
+            registry, repository, codec, keyLoader, properties, clock);
+
+    assertEquals(Optional.empty(), service.earliestRefreshAt(), "no row means no schedule");
+
+    Instant firstDue = clock.instant().plusSeconds(600);
+    repository.setDirect(
+        createRow(
+            PLUGIN_ID,
+            REGION,
+            OLD_PAYLOAD,
+            PluginCredentialStatus.CONNECTED,
+            clock.instant().plusSeconds(3600),
+            firstDue));
+    assertEquals(Optional.of(firstDue), service.earliestRefreshAt());
+
+    // 未过期 lease 占用的行不属于本节点可调度集合。
+    PluginCredentialRow leasedRow =
+        new PluginCredentialRow(
+            PLUGIN_ID,
+            repository.getDirect(PLUGIN_ID).encryptedPayload(),
+            REGION,
+            clock.instant().plusSeconds(3600),
+            clock.instant().minusSeconds(100),
+            PluginCredentialStatus.CONNECTED,
+            null,
+            null,
+            "other-node-token",
+            clock.instant().plusSeconds(120),
+            1L,
+            clock.instant(),
+            clock.instant());
+    repository.setDirect(leasedRow);
+    assertEquals(
+        Optional.empty(),
+        service.earliestRefreshAt(),
+        "in-flight lease held elsewhere must not be scheduled locally");
   }
 
   /** registry 为空时 refreshOnce() 返回 0，且绝不触碰 repository。 */
@@ -847,7 +1015,7 @@ class PluginCredentialRefreshServiceTest {
 
     // 第一次扫描：正好 claim 16 行
     int claimedBatch1 = service.refreshOnce();
-    assertEquals(PluginCredentialRefreshService.MAX_CLAIM_BATCH, claimedBatch1);
+    assertEquals(PluginCredentialRefreshService.MAX_REFRESH_PASSES, claimedBatch1);
     assertEquals(16, claimedBatch1);
 
     // 第二次扫描：claim 剩余的 4 行
