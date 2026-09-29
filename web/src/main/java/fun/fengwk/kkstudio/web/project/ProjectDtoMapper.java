@@ -112,7 +112,11 @@ public class ProjectDtoMapper {
       String instructions = stateDto.getInstructions();
       Integer maxRuns = null;
       if (stateDto.getMaxRuns() != null && !stateDto.getMaxRuns().isBlank()) {
-        maxRuns = (int) parseNonNegativeLong(stateDto.getMaxRuns(), "maxRuns");
+        long parsed = parseNonNegativeLong(stateDto.getMaxRuns(), "maxRuns");
+        if (parsed > Integer.MAX_VALUE) {
+          throw new IllegalArgumentException("maxRuns exceeds int range");
+        }
+        maxRuns = (int) parsed;
       }
       boolean enabled = stateDto.getEnabled() == null || stateDto.getEnabled();
       List<ProjectStateCode> next =

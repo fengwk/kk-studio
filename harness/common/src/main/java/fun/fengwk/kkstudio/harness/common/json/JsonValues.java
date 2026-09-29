@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 
 import java.util.Objects;
 
@@ -21,6 +22,8 @@ public final class JsonValues {
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // JSON number 按 BigDecimal 读回，避免 1e-324 / 1e309 在 double 中变成 0 或 Infinity。
+    OBJECT_MAPPER.configure(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
   }
 
   private JsonValues() {}

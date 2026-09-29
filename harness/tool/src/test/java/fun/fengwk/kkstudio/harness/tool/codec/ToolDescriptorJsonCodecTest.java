@@ -555,6 +555,35 @@ class ToolDescriptorJsonCodecTest {
             || error.getMessage().toLowerCase().contains("negative"));
   }
 
+  /** 毫秒 canonical 值必须完整往返，包括 Long.MAX_VALUE 与 ZERO。 */
+  @Test
+  void roundTripsCanonicalMillisecondTimeouts() {
+    long maxMillis = Long.MAX_VALUE;
+    ToolDescriptor original =
+        new ToolDescriptor(
+            "search",
+            "search helper",
+            "search",
+            new InputSchema(null, Map.of(), Set.of(), true),
+            ToolSideEffect.READ_ONLY,
+            Duration.ofMillis(maxMillis));
+
+    ToolDescriptor decoded = codec.decode(codec.encode(original));
+
+    assertEquals(Duration.ofMillis(maxMillis), decoded.defaultTimeout());
+    assertEquals(maxMillis, decoded.defaultTimeout().toMillis());
+
+    ToolDescriptor unlimited =
+        new ToolDescriptor(
+            "search",
+            "search helper",
+            "search",
+            new InputSchema(null, Map.of(), Set.of(), true),
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+    assertEquals(Duration.ZERO, codec.decode(codec.encode(unlimited)).defaultTimeout());
+  }
+
   /** defaultTimeoutMillis 非整数必须拒绝。 */
   @Test
   void rejectsNonIntegralTimeout() {
