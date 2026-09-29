@@ -61,17 +61,19 @@ import java.util.function.Supplier;
  * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 重放每个在途 INVOKE，Daemon journal 负责重放 STARTED
  * 或终态而不重复执行。只有身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用才被判定为结果不确定（exactly-once 通知）。
  *
- * <p><b>终态唯一：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation 的迟到
- * STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。
+ * <p><b>终态唯一与回调顺序：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation
+ * 的迟到 STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。并发 {@code receive} 下 listener 回调 仍严格按该连接
+ * {@code gate} 的处理顺序透传（{@code PARTIAL* -> exactly one terminal}），见下方锁边界。
  *
  * <p><b>资源上传控制面：</b>调用作用域的 {@code RESOURCE_UPLOAD_REQUEST}/{@code COMMIT} 只做协议校验与状态回执，真正的上传绑定与 对象存储
  * I/O 由窄端口 {@link DaemonResourceTicketService} 承担并在核心锁之外执行。同一 transfer 的重复申请/提交是幂等的；
  * FAILED/CANCELLED、实例接管与超时会幂等释放全部传输；COMPLETED 只释放未被结果引用的上传，被引用上传交给 history 物化事务转移 owner。
  *
- * <p><b>锁边界：</b>每个连接一代的 {@code gate} 只串行化入站协议处理；{@code state} 只保护该连接的协议字段；{@code inventory} 保护环境 与
- * invocation 目录。锁顺序固定为 {@code gate > state >
- * inventory}；租约存储访问、票据服务回调、会话监听器回调与连接关闭都在这些锁之外执行。同一连接上的并行 {@code receive} 仍由调用方保证不会并发进入 {@code
- * gate}；本轮不新增回调队列来吸收这个风险。
+ * <p><b>锁边界与回调顺序：</b>每个连接一代的 {@code gate} 串行化该连接的入站协议处理，并保护该连接「待执行回调批次」的排队；{@code state}
+ * 只保护该连接的协议字段；{@code inventory} 保护环境与 invocation 目录。锁顺序固定为 {@code gate > state > inventory}。 回调批次只在
+ * {@code gate} 内按处理顺序入队，执行始终由单一 drainer 在全部核心锁之外同步完成，因此并发 {@code receive} 不会打乱该连接上 listener
+ * 的观察顺序。租约存储访问、票据服务 I/O、上传释放、会话监听器回调与连接关闭都在这些锁之外执行。等待执行的回调批次以 {@link #MAX_PENDING_CALLBACK_BATCHES}
+ * 为每连接固定上界：达到上界即 fail-closed 关闭该连接，并把该 Environment 仍在途的调用一次性回收为结果不确定，绝不无界累积。
  *
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
  */
@@ -82,6 +84,14 @@ public final class EnvironmentDaemonServer
 
   /** 单次调用允许的并发资源传输数上限，防止恶意/失控 Daemon 无界创建上传行。 */
   private static final int MAX_TRANSFERS_PER_INVOCATION = 16;
+
+  /**
+   * 每连接「已按 {@code gate} 顺序入队、等待锁外 drain」的回调批次上界。
+   *
+   * <p>入站排队由传输适配器拥有，核心不感知其容量，因此这里只阻止等待执行的回调批次随调用方并发度无界增长；达到上界即 fail-closed
+   * 关闭连接并回收在途调用，而不是继续累积或改用异步执行破坏背压。
+   */
+  private static final int MAX_PENDING_CALLBACK_BATCHES = 64;
 
   /** 票据服务异常时的固定失败说明：绝不复述异常原文，避免把存储内部事实泄漏到控制面。 */
   private static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
@@ -137,7 +147,13 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 解码并处理一条入站文本帧；协议违规以 ERROR 帧回应后关闭该连接。 */
+  /**
+   * 解码并处理一条入站文本帧；协议违规以 ERROR 帧回应后关闭该连接。
+   *
+   * <p>允许调用方并发调用：状态变更在 {@code gate} 内按帧顺序完成，listener 回调批次同样在 {@code gate} 内入队，再由单一 drainer
+   * 在锁外同步执行，因此并发调用不会重排该连接上的回调。回调积压达到 {@link #MAX_PENDING_CALLBACK_BATCHES} 时按 fail-closed
+   * 收敛：丢弃该帧并关闭连接。
+   */
   @Override
   public void receive(String connectionId, String rawMessage) {
     Objects.requireNonNull(connectionId, "connectionId");
@@ -153,25 +169,37 @@ public final class EnvironmentDaemonServer
     List<Runnable> deferred = new ArrayList<>();
     RuntimeException protocolError = null;
     EnvironmentId receivedEnvironmentId = null;
+    boolean backlogFull = false;
     synchronized (state.gate) {
-      try {
-        DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
-        receivedEnvironmentId = envelope.environmentId();
-        // 资源上传控制面只在此处完成协议与绑定校验；对象存储/数据库 I/O 在 gate 之外执行。
-        switch (envelope.messageType()) {
-          case RESOURCE_UPLOAD_REQUEST -> prepared = prepareUploadReserve(state, envelope);
-          case RESOURCE_UPLOAD_COMMIT -> prepared = prepareUploadCommit(state, envelope);
-          default -> handleInbound(state, envelope, deferred);
+      if (state.callbackBacklogFull()) {
+        backlogFull = true;
+      } else {
+        try {
+          DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
+          receivedEnvironmentId = envelope.environmentId();
+          // 资源上传控制面只在此处完成协议与绑定校验；对象存储/数据库 I/O 在 gate 之外执行。
+          switch (envelope.messageType()) {
+            case RESOURCE_UPLOAD_REQUEST -> prepared = prepareUploadReserve(state, envelope);
+            case RESOURCE_UPLOAD_COMMIT -> prepared = prepareUploadCommit(state, envelope);
+            default -> handleInbound(state, envelope, deferred);
+          }
+        } catch (RuntimeException error) {
+          protocolError = error;
         }
-      } catch (RuntimeException error) {
-        protocolError = error;
+        if (protocolError == null) {
+          state.enqueueCallbacks(deferred);
+        }
       }
+    }
+    if (backlogFull) {
+      failCallbackBacklog(state);
+      return;
     }
     if (protocolError != null) {
       protocolFailure(state, protocolError, receivedEnvironmentId);
       return;
     }
-    runDeferred(deferred);
+    state.drainCallbacks();
     if (prepared != null) {
       executeTransfer(state, prepared);
     }
@@ -188,6 +216,37 @@ public final class EnvironmentDaemonServer
     if (state != null) {
       closeConnectionState(state);
     }
+  }
+
+  /**
+   * 回调积压达到每连接上界时的 fail-closed 收敛：关闭连接，并把该 Environment 仍在途的调用一次性回收为结果不确定。
+   *
+   * <p>已入队的批次仍由当前 drainer 按顺序执行，回收回调追加在同一队列尾部，因此不会出现迟到 partial 晚于 terminal；被回收的 invocation 同时登记
+   * tombstone，接管或重连重放的帧不再触发第二次终态。该路径与实例接管同语义：旧进程不可能再给出终态。
+   */
+  private void failCallbackBacklog(ConnectionState state) {
+    EnvironmentId environmentId = state.environmentId;
+    List<ActiveInvocation> abandoned =
+        environmentId == null ? List.of() : takeAbandonedInvocations(environmentId);
+    if (!abandoned.isEmpty()) {
+      List<Runnable> reclaim = new ArrayList<>();
+      for (ActiveInvocation active : abandoned) {
+        reclaim.add(
+            () ->
+                active.listener.onError(
+                    new EnvironmentCapabilitySendUncertainException(
+                        "daemon callback backlog for "
+                            + environmentId
+                            + " exceeded the per-connection bound; capability invocation outcome"
+                            + " is uncertain.")));
+        reclaim.add(() -> releaseAllTransfers(active));
+      }
+      synchronized (state.gate) {
+        state.enqueueCallbacks(reclaim);
+      }
+    }
+    close(state.connection.connectionId());
+    state.drainCallbacks();
   }
 
   /** 当前节点该 Environment 是否已有 READY 的活跃连接代际。 */
@@ -960,8 +1019,20 @@ public final class EnvironmentDaemonServer
     EnvironmentCapabilityResult result =
         resultCodec.decodeProgressForInvocation(
             envelope.payloadJson(), envelope.invocationId(), settings().maxResourceBytes());
-    if (active != null && isActive(active)) {
-      deferred.add(() -> active.listener.onPartial(result));
+    if (active != null) {
+      deferred.add(() -> deliverPartial(active, result));
+    }
+  }
+
+  /**
+   * 投递一个 partial 前复核 invocation 是否仍属于本连接的活动目录。
+   *
+   * <p>复核放在 drain 时刻而不是 gate 内，使接管或终态已经回收的 invocation 不可能被同一连接上更早入队、更晚执行的 partial 反超终态。 终态之后的
+   * partial 属于契约要求静默丢弃的迟到事件。
+   */
+  private void deliverPartial(ActiveInvocation active, EnvironmentCapabilityResult partial) {
+    if (isActive(active)) {
+      active.listener.onPartial(partial);
     }
   }
 
@@ -1284,15 +1355,6 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  private void runDeferred(List<Runnable> callbacks) {
-    for (Runnable callback : callbacks) {
-      try {
-        callback.run();
-      } catch (RuntimeException ignored) {
-      }
-    }
-  }
-
   private Duration timeout() {
     return settings().heartbeatTimeout();
   }
@@ -1511,7 +1573,7 @@ public final class EnvironmentDaemonServer
   /** 单个连接代际的协议状态；{@code generation} 用于识别需要重放 INVOKE 的新连接。 */
   private final class ConnectionState {
 
-    /** 只串行化该连接的入站协议处理；不与其它锁嵌套反向获取。 */
+    /** 串行化该连接的入站协议处理与回调批次排队；不与其它锁嵌套反向获取，回调执行一律在持锁之外。 */
     private final Object gate = new Object();
 
     private final DaemonChannel connection;
@@ -1524,9 +1586,68 @@ public final class EnvironmentDaemonServer
     private volatile boolean cleaned;
     private boolean closeAfterFlush;
 
+    /**
+     * 已按 {@code gate} 处理顺序入队、等待锁外 drain 的回调批次；由 {@code gate} 保护。
+     *
+     * <p>入站排队由传输适配器拥有，核心只知道「已经排好序但尚未执行」的批次，因此上界取固定值 {@link
+     * EnvironmentDaemonServer#MAX_PENDING_CALLBACK_BATCHES}，而不随调用方并发度增长；空批次不占位，纯控制帧不消耗上界。
+     */
+    private final ArrayDeque<List<Runnable>> pendingCallbacks = new ArrayDeque<>();
+
+    /** 当前持有 drain 所有权的线程标志；由 {@code gate} 保护，保证同一连接同一时刻至多一个 drainer。 */
+    private boolean drainingCallbacks;
+
     private ConnectionState(DaemonChannel connection, long generation) {
       this.connection = Objects.requireNonNull(connection, "connection");
       this.generation = generation;
+    }
+
+    /** 待执行回调批次是否已达每连接上界；达到后该连接按 fail-closed 收敛，不再接受新帧。 */
+    private boolean callbackBacklogFull() {
+      return pendingCallbacks.size() >= MAX_PENDING_CALLBACK_BATCHES;
+    }
+
+    /** 在 {@code gate} 内把一帧产生的回调按序追加到队尾。 */
+    private void enqueueCallbacks(List<Runnable> callbacks) {
+      if (!callbacks.isEmpty()) {
+        pendingCallbacks.addLast(callbacks);
+      }
+    }
+
+    /**
+     * 在锁外同步 drain 待执行回调：至多一个线程持有 drain 所有权，其余线程把批次留在队列里交给它，因此回调观察顺序恒等于 {@code gate} 处理顺序。
+     *
+     * <p>「取空批次」与「释放 drain 所有权」在同一次临界区内完成：并发追加的批次要么被本次 poll 取到，要么由追加线程自己成为 drainer，
+     * 不存在丢失唤醒。用户回调异常被逐个吸收，既不阻断该批次剩余回调，也不会把所有权留在退出的线程上。
+     */
+    private void drainCallbacks() {
+      synchronized (gate) {
+        if (drainingCallbacks) {
+          return;
+        }
+        drainingCallbacks = true;
+      }
+      while (true) {
+        List<Runnable> batch;
+        synchronized (gate) {
+          batch = pendingCallbacks.pollFirst();
+          if (batch == null) {
+            drainingCallbacks = false;
+            return;
+          }
+        }
+        runCallbacks(batch);
+      }
+    }
+
+    private void runCallbacks(List<Runnable> batch) {
+      for (Runnable callback : batch) {
+        try {
+          callback.run();
+        } catch (Throwable ignored) {
+          // 用户回调异常不改变会话状态，也不得让该连接其余回调与终态停止投递。
+        }
+      }
     }
 
     /** 完成 HELLO 绑定；重复绑定属于协议违规。 */
