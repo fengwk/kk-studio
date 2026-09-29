@@ -236,6 +236,7 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 | `ProcessScopeTest.closeIsIdempotent` | 重复 close 不抛出，也不改变已收敛的范围 |
 | `ProcessScopeTest.cancelledBeforeThePermitLeavesNoSideEffect` | 许可之前取消：命令从未启动，没有副作用，也不留状态目录 |
 | `ProcessScopeTest.publishedScopeIdIsTheHelperProcessGroup` | 发布的 scope id 必须等于 helper 自己的进程组，父进程只在此基础上发信号 |
+| `ProcessScopeTest.cancelDuringTheSpawnWindowStillConvergesRootAndDescendants` | 取消恰好落在「helper 即将启动命令」的窗口里时，命令与忽略温和信号的后代仍必须由内核确认收敛 |
 | `ProcessScopeTest.helperDiagnosticsStayOutOfTheCommandOutput` | helper 自己的诊断（含 JVM 启动提示）只进诊断文件，命令输出一个字节都不多 |
 | `WindowsCommandLineTest` | Windows 命令行 argv 拼装规则（空白、空参数、引号与尾部反斜杠转义） |
 | `WindowsJobScopeTest` | Job 相关结构的原生布局（64/144/48 字节）与 Job 名从状态目录派生（跨平台可执行，Windows 上是真实布局校验） |
@@ -277,8 +278,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   `ProcessTree` 仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows
   上的验证同样只能来自该矩阵。
 - **命令的 stdin 与信号处置是范围的一部分。** 命令的 stdin 是一条只由 keeper 持有写端的空管道（keeper 启动后立刻关闭写端），
-  因此「等待 EOF 的命令自然退出」不依赖调用方何时关闭写端，也不依赖 Windows 的句柄继承是否干净；POSIX 上 keeper 只在 fork 的瞬间把
-  `SIGTERM` 处置恢复为默认，命令因此可以注册自己的 `trap`，而 keeper 仍忽略 `SIGTERM` 活到强杀阶段。
+  因此「等待 EOF 的命令自然退出」不依赖调用方何时关闭写端，也不依赖 Windows 的句柄继承是否干净；POSIX 上 keeper 保留 JVM 默认的
+  `SIGTERM` 处置，`exec` 因此把它复位为默认，命令可以注册自己的 `trap`；keeper 在命令 fork 完成之后才忽略 `SIGTERM`（忽略状态
+  绝不进入命令），并由发布范围之前注册的收敛 hook 承担「温和信号 → 宽限 → 强杀 → 发布收敛结论」，与自然退出主路径 CAS 竞争。
 - **Windows 上必须显式指定 Git Bash。** 命令解析遵循 `CreateProcess` 的搜索顺序，系统目录永远先于 `PATH`，因此系统里存在
   WSL 时裸名 `bash` 会命中 `System32\bash.exe`（打印「no installed distributions」并以退出码 1 结束），命令一行都不会执行。
   Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；测试侧显式挑选 Git Bash，找不到时以「缺少环境前置条件」跳过，
@@ -299,9 +301,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
 - **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
   退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/
-  `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 79.6%/83.3%/68.0%，模块整体行 87.6%）；缺口是 Windows
-  专属分支（helper 的 `runWindows` 与 Windows 分派、`WindowsJobScope` 全类）、中断/信号被拒这类只在异常时序到达的失败关闭分支，以及
-  需要跨 JVM 采集的 helper 侧代码。helper 侧用
+  `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 78.1%/78.8%/73.6%，模块整体行 86.6%）；缺口是 Windows
+  专属分支（helper 的 `runWindows` 与 Windows 分派、`WindowsJobScope` 全类）、中断/信号被拒/闸门与许可超时这类只在异常时序到达的
+  失败关闭分支，以及需要跨 JVM 采集的 helper 侧代码。收敛 hook 本身由派发窗口取消用例覆盖。helper 侧用
   `-Dkk-studio.process-scope.helper-coverage=true` 收集，把 `target/jacoco.exec` 与 `target/jacoco-helper/*.exec` 串接成一个文件后交给
   `jacoco:report` 即可合并测量；真正补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的补测。
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，

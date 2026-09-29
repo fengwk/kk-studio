@@ -76,6 +76,13 @@ final class ProcessScope implements AutoCloseable {
   /** 显式要求给 helper 挂覆盖率代理的开关：默认关闭，避免改变正常调用与测试的启动开销。 */
   private static final String HELPER_COVERAGE_PROPERTY = "kk-studio.process-scope.helper-coverage";
 
+  /**
+   * 仅测试使用的派生闸门：显式设置时转发给 helper，让它在启动命令之前等待释放文件。
+   *
+   * <p>用来确定性地构造「父进程取消与 helper 派生命令同时发生」这一窗口，生产路径不设置该属性。
+   */
+  static final String SPAWN_LATCH_PROPERTY = "kk-studio.process-scope.spawn-latch";
+
   private static final String HELPER_COVERAGE_FILE = "jacoco-helper.exec";
 
   private final Process helper;
@@ -142,6 +149,7 @@ final class ProcessScope implements AutoCloseable {
     argv.add("-XX:TieredStopAtLevel=1");
     argv.add("-Xlog:disable");
     argv.addAll(helperCoverageArguments(stateDir));
+    argv.addAll(spawnLatchArguments());
     argv.add("-cp");
     argv.add(classpath);
     argv.add(ProcessScopeHelper.class.getName());
@@ -159,6 +167,14 @@ final class ProcessScope implements AutoCloseable {
         .resolve("bin")
         .resolve(windows ? "java.exe" : "java")
         .toString();
+  }
+
+  /** {@link #SPAWN_LATCH_PROPERTY} 设置时把闸门目录转发给 helper；未设置时参数里什么都不加。 */
+  private static List<String> spawnLatchArguments() {
+    String latch = System.getProperty(SPAWN_LATCH_PROPERTY);
+    return latch == null || latch.isBlank()
+        ? List.of()
+        : List.of("-D" + SPAWN_LATCH_PROPERTY + "=" + latch);
   }
 
   /** helper 的进程对象：父进程只从它读取用户命令的输出并等待收敛。 */
@@ -334,17 +350,46 @@ final class ProcessScope implements AutoCloseable {
   }
 
   /**
+   * keeper 已经退出之后的收敛：组 id 可能已经被复用，因此绝不广播，而是「先确认此刻属于本组、再逐个强杀」，直到没有活着的成员。
+   *
+   * <p>只做只读确认会把「keeper 先死、后代还在」当成失败并留下资源；这里把这类成员也收敛掉。没有枚举能力的平台（非 Linux）只能 退回过读确认：组不存在即收敛，否则如实报告未收敛。
+   */
+  private boolean convergedAfterHelperExit() {
+    if (!PosixProcessGroup.canEnumerateMembers()) {
+      return !PosixProcessGroup.hasLiveMember(scopeId, PosixProcessGroup.NO_PROCESS);
+    }
+    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(CONVERGENCE_BUDGET_MILLIS);
+    while (true) {
+      long[] members = PosixProcessGroup.liveMembers(scopeId, PosixProcessGroup.NO_PROCESS);
+      if (members.length == 0) {
+        return true;
+      }
+      if (members[0] < 0) {
+        // 枚举不可判定：不向任何 pid 发信号，也绝不当成收敛。
+        return false;
+      }
+      for (long member : members) {
+        PosixProcessGroup.signalProcess(member, PosixProcessGroup.SIGKILL);
+      }
+      if (System.nanoTime() >= deadline) {
+        return false;
+      }
+      sleepQuietly(POLL_INTERVAL_MILLIS);
+    }
+  }
+
+  /**
    * POSIX 整组收敛：命令已经自然退出时先让 helper 完成它自己的收尾，否则由父进程对整组发温和信号并在宽限后升级。
    *
-   * <p>helper 一旦退出就不再有「组 id 属于本次调用」的保证，因此信号只在它仍然存活时发出，之后只做只读确认。
+   * <p>helper 存活时父进程始终可以广播整组信号（keeper 自己会活到 shutdown hook 收尾完成）；helper 一旦退出就改走 {@link
+   * #convergedAfterHelperExit()}。
    */
   private boolean drainGroup() {
     if (ProcessScopeState.read(stateDir, ProcessScopeState.EXIT_FILE) != null) {
       awaitHelperExit(HELPER_CONVERGENCE_BUDGET_MILLIS);
     }
     if (!helper.isAlive()) {
-      // keeper 已经退出：只做只读确认，绝不向可能被复用的组 id 发信号。
-      return !PosixProcessGroup.hasLiveMember(scopeId, PosixProcessGroup.NO_PROCESS);
+      return convergedAfterHelperExit();
     }
     if (!PosixProcessGroup.signalGroup(scopeId, PosixProcessGroup.SIGTERM)) {
       return false;
