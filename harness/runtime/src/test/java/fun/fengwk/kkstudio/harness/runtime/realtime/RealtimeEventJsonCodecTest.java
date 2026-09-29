@@ -154,8 +154,7 @@ class RealtimeEventJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missing));
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decodeNode(toolPartialNodeWithEventId("")));
+        IllegalArgumentException.class, () -> codec.decodeNode(toolPartialNodeWithEventId("")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decodeNode(toolPartialNodeWithEventId("not-a-uuid")));
@@ -165,11 +164,9 @@ class RealtimeEventJsonCodecTest {
         () -> codec.decodeNode(toolPartialNodeWithEventId("1-2-3-4-5")));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decodeNode(
-            toolPartialNodeWithEventId("ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB")));
+        () -> codec.decodeNode(toolPartialNodeWithEventId("ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB")));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decodeNode(toolPartialNodeWithEventId(7)));
+        IllegalArgumentException.class, () -> codec.decodeNode(toolPartialNodeWithEventId(7)));
   }
 
   @Test

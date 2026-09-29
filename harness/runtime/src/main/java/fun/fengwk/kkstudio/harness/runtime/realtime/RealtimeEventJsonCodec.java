@@ -25,9 +25,8 @@ import java.util.UUID;
  *
  * <p>支持 Model delta 与 Tool partial；top-level exact field set：Model delta 为 {@code {threadId,
  * subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Tool partial 为 {@code
- * {threadId, subjectKind, subjectId, attempt, eventId, type, payload, createdAt}}。{@code
- * attempt} 与 {@code sequence} 只出现在 top-level；{@code eventId} 是 Tool partial 事件自身的
- * canonical UUID identity。
+ * {threadId, subjectKind, subjectId, attempt, eventId, type, payload, createdAt}}。{@code attempt} 与
+ * {@code sequence} 只出现在 top-level；{@code eventId} 是 Tool partial 事件自身的 canonical UUID identity。
  *
  * <p>{@code payload} discriminator 严格大小写：
  *
@@ -50,7 +49,14 @@ public final class RealtimeEventJsonCodec {
 
   private static final Set<String> TOOL_EVENT_FIELDS =
       orderedSet(
-          "threadId", "subjectKind", "subjectId", "attempt", "eventId", "type", "payload", "createdAt");
+          "threadId",
+          "subjectKind",
+          "subjectId",
+          "attempt",
+          "eventId",
+          "type",
+          "payload",
+          "createdAt");
   private static final Set<String> MODEL_EVENT_FIELDS =
       orderedSet(
           "threadId",
@@ -159,7 +165,8 @@ public final class RealtimeEventJsonCodec {
       }
       ToolResult partial = ToolResultJsonCodec.decode(write((ObjectNode) payloadNode));
       UUID eventId = requiredCanonicalUuid(node, "eventId", "realtimeEvent");
-      return new RealtimeEvent.ToolPartial(threadId, subjectId, attempt, eventId, partial, createdAt);
+      return new RealtimeEvent.ToolPartial(
+          threadId, subjectId, attempt, eventId, partial, createdAt);
     }
     throw new IllegalArgumentException("unsupported realtimeEvent.type: " + typeName);
   }
