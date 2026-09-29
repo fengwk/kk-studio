@@ -112,7 +112,11 @@ Commands:
              already stored in the service is reused; no daemon option is
              accepted and nothing has to be repeated.
   status     Print non-interactive service status and a short log tail.
-             Exit 0 when running, 1 when not installed, 3 when not running.
+             Linux: exit 0 when the unit is active, 1 when not installed,
+             3 when installed but not active.
+             macOS: exit 0 when the LaunchAgent is loaded, 1 when not
+             installed, 3 when installed but not loaded. Loaded is not a
+             running-process check.
   uninstall  Stop the service, remove only the managed service definition and
              the installed JAR. The registration token file, the data directory
              and macOS launchd logs are preserved.

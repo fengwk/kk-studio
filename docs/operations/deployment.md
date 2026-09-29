@@ -393,9 +393,10 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送
 `main` 时先执行全仓 Java/Frontend/脚本/文档/敏感数据门禁，再构建并发布
 `<namespace>/kk-studio:main`；推送 `dev` 时依赖提交前检查，跳过这组重复的全仓门禁，直接构建并
-发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。两者都附带 immutable commit SHA tag、
-`linux/amd64` 平台和 Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为 build arg
-或 image layer。
+发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。两者都附带 commit SHA tag、
+`linux/amd64` 平台和 Buildx GHA cache。这个 tag 标识构建所用的源码提交，不是可按提交重现的
+镜像摘要：基础镜像按 tag 解析，运行阶段执行 `apt-get upgrade`，因此同一次提交在不同日期构建
+可能得到不同镜像。Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
 registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
