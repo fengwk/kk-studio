@@ -475,14 +475,40 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
         self.gh_log = self.root / "gh.log"
         stub_dir = self.root / "bin"
         stub_dir.mkdir()
-        # 只替换 `gh`：脚本逻辑本身照常执行，上传调用被记录下来而不是真的发出。
+        # 只替换 `gh`：脚本逻辑本身照常执行。stub 记录每次调用，并按环境回答 release 元数据、
+        # 资产内容与第 N 次上传失败，用来验证 published 资产永不被改写。
         (stub_dir / "gh").write_text(
             "#!/usr/bin/env bash\n"
             'printf \'ARGV:%s\\n\' "$*" >>"$GH_STUB_LOG"\n'
-            'case "$1 $2" in\n'
-            '  "release view") [ "${GH_STUB_RELEASE_EXISTS:-false}" = true ] ;;\n'
-            "  *) exit 0 ;;\n"
-            "esac\n",
+            'case "$1" in\n'
+            "  api)\n"
+            '    name=${2##*/}\n'
+            '    file="${GH_STUB_RELEASE_DIR:-/nonexistent}/$name"\n'
+            '    if [ -f "$file" ]; then cat "$file"; exit 0; fi\n'
+            "    exit 1 ;;\n"
+            "  release)\n"
+            '    case "$2" in\n'
+            "      view)\n"
+            '        [ "${GH_STUB_RELEASE_EXISTS:-false}" = true ] || exit 1\n'
+            '        case "$*" in\n'
+            '          *"isDraft,assets"*) exit 0 ;;\n'
+            '          *".assets[].name"*) printf \'%s\\n\' ${GH_STUB_ASSET_NAMES:-}; exit 0 ;;\n'
+            '          *".isDraft"*) printf \'%s\\n\' "${GH_STUB_IS_DRAFT:-false}"; exit 0 ;;\n'
+            '          *"select(.name =="*)\n'
+            "            name=$(printf '%s' \"$*\" | sed -n 's/.*select(\\.name == \"\\([^\"]*\\)\").*/\\1/p')\n"
+            '            [ -n "$name" ] && printf \'https://stub/api/%s\\n\' "$name"\n'
+            "            exit 0 ;;\n"
+            "        esac\n"
+            "        exit 0 ;;\n"
+            "      upload)\n"
+            '        seen=$(grep -c "ARGV:release upload" "$GH_STUB_LOG")\n'
+            '        if [ -n "${GH_STUB_UPLOAD_FAIL_AT:-}" ] && [ "$seen" = "${GH_STUB_UPLOAD_FAIL_AT}" ]; then exit 1; fi\n'
+            "        exit 0 ;;\n"
+            "      edit|create) exit 0 ;;\n"
+            "    esac\n"
+            "    exit 0 ;;\n"
+            "esac\n"
+            "exit 0\n",
             encoding="utf-8",
         )
         (stub_dir / "gh").chmod(0o755)
@@ -591,7 +617,8 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
         self.assertIn("GH_TOKEN: ${{ github.token }}", self.workflow)
         self.assertRegex(self.workflow, r"(?m)^\s+gh release ")
 
-    def test_exactly_the_staged_assets_are_uploaded_and_reruns_clobber(self):
+    def test_staged_assets_are_published_without_clobbering(self):
+        """发布资产只来自 RELEASE_DIR，且不使用会先删后传的 --clobber。"""
         self.assertIn('RELEASE_DIR: harness/daemon/target/release', self.workflow)
         self.assertIn("staged assets do not match the release contract", self.workflow)
         for expected in (
@@ -603,56 +630,163 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
         ):
             self.assertIn(expected, self.workflow)
         self.assertIn('gh release create "${GITHUB_REF_NAME}"', self.workflow)
+        self.assertIn("--draft", self.workflow)
         self.assertIn("--verify-tag", self.workflow)
         self.assertIn("--generate-notes", self.workflow)
-        self.assertIn('gh release upload "${GITHUB_REF_NAME}" --clobber', self.workflow)
+        self.assertIn('gh release edit "${GITHUB_REF_NAME}" --draft=false', self.workflow)
+        # 已发布资产不可被替换：脚本里不允许出现 --clobber。
+        self.assertNotIn("--clobber", self.workflow)
         # 资产必须来自 RELEASE_DIR 的清单，而不是再次 glob 或写死路径。
         self.assertIn('assets+=("${RELEASE_DIR}/${name}")', self.workflow)
         self.assertNotIn("--latest", self.workflow)
 
-    def test_publish_step_creates_a_release_with_exactly_the_five_staged_assets(self):
-        """首次发布必须带上暂存的五个资产，并只在 tag 已存在时发布。"""
-        release_dir = self.prepare_staged_assets(self.expected_asset_names())
-        result = self.run_step(
-            "Publish GitHub Release",
-            {"GITHUB_REF_NAME": SAFE_TAG, "RELEASE_DIR": str(release_dir)},
-        )
-        self.assertEqual(0, result.returncode, result.stderr)
+    def publish_env(self, release_dir, *, exists=False, draft=False, assets=(),
+                    server_dir=None, fail_at=None):
+        """Environment for the publish step, backed by the recording gh stub."""
+        env = {
+            "GITHUB_REF_NAME": SAFE_TAG,
+            "RELEASE_DIR": str(release_dir),
+            "GH_STUB_RELEASE_EXISTS": "true" if exists else "false",
+            "GH_STUB_IS_DRAFT": "true" if draft else "false",
+            "GH_STUB_ASSET_NAMES": "\n".join(assets),
+            "GH_STUB_RELEASE_DIR": str(server_dir if server_dir is not None else release_dir),
+        }
+        if fail_at is not None:
+            env["GH_STUB_UPLOAD_FAIL_AT"] = str(fail_at)
+        return env
 
-        calls = self.gh_log.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(2, len(calls), calls)
-        self.assertEqual(f"ARGV:release view {SAFE_TAG}", calls[0])
-        create = calls[1]
-        self.assertTrue(create.startswith(f"ARGV:release create {SAFE_TAG} "), create)
-        self.assertIn("--verify-tag", create)
-        self.assertIn("--generate-notes", create)
-        for name in self.expected_asset_names():
-            self.assertIn(f"{release_dir}/{name}", create.split())
-
-    def test_publish_rerun_clobbers_the_same_assets_without_duplicating_the_release(self):
-        """重跑只覆盖同名资产并保持 release 已发布，不创建第二次 release。"""
+    def test_first_publish_creates_a_draft_then_publishes_it(self):
+        """首次发布先建草稿并上传全部五个资产，校验通过后再发布。"""
         release_dir = self.prepare_staged_assets(self.expected_asset_names())
-        result = self.run_step(
-            "Publish GitHub Release",
-            {
-                "GITHUB_REF_NAME": SAFE_TAG,
-                "RELEASE_DIR": str(release_dir),
-                "GH_STUB_RELEASE_EXISTS": "true",
-            },
-        )
+        result = self.run_step("Publish GitHub Release", self.publish_env(release_dir))
         self.assertEqual(0, result.returncode, result.stderr)
 
         calls = self.gh_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(3, len(calls), calls)
-        self.assertEqual(f"ARGV:release view {SAFE_TAG}", calls[0])
-        self.assertNotIn("release create", "\n".join(calls))
-        self.assertTrue(calls[1].startswith(f"ARGV:release upload {SAFE_TAG} --clobber "), calls[1])
-        self.assertEqual(f"ARGV:release edit {SAFE_TAG} --draft=false", calls[2])
+        self.assertTrue(calls[0].startswith(f"ARGV:release view {SAFE_TAG}"), calls[0])
+        create = calls[1]
+        self.assertTrue(create.startswith(f"ARGV:release create {SAFE_TAG} "), create)
+        self.assertIn("--draft", create)
+        self.assertIn("--verify-tag", create)
+        self.assertIn("--generate-notes", create)
         for name in self.expected_asset_names():
-            self.assertIn(f"{release_dir}/{name}", calls[1].split())
+            self.assertIn(f"{release_dir}/{name}", create.split())
+        self.assertEqual(f"ARGV:release edit {SAFE_TAG} --draft=false", calls[2])
 
-    def test_publish_step_fails_without_uploading_when_the_asset_set_differs(self):
-        """多一个或少一个资产都必须在上传之前失败，绝不发布半套资产。"""
+    def test_published_release_with_identical_assets_is_a_no_op(self):
+        """已发布且五个资产校验和一致时，重跑不写任何远端状态。"""
+        release_dir = self.prepare_staged_assets(self.expected_asset_names())
+        result = self.run_step(
+            "Publish GitHub Release",
+            self.publish_env(
+                release_dir, exists=True, draft=False, assets=self.expected_asset_names()
+            ),
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        recorded = "\n".join(self.gh_log.read_text(encoding="utf-8").splitlines())
+        self.assertNotIn("release upload", recorded)
+        self.assertNotIn("release edit", recorded)
+        self.assertNotIn("release create", recorded)
+        for name in self.expected_asset_names():
+            self.assertIn(f"ARGV:api https://stub/api/{name}", recorded)
+
+    def test_published_release_with_a_changed_asset_is_refused(self):
+        """已发布资产的字节与暂存不同必须失败，绝不覆盖公开资产。"""
+        release_dir = self.prepare_staged_assets(self.expected_asset_names())
+        server = self.root / "published"
+        server.mkdir()
+        for name in self.expected_asset_names():
+            (server / name).write_text("staged asset", encoding="utf-8")
+        (server / self.expected_asset_names()[0]).write_text("tampered", encoding="utf-8")
+
+        result = self.run_step(
+            "Publish GitHub Release",
+            self.publish_env(
+                release_dir, exists=True, draft=False,
+                assets=self.expected_asset_names(), server_dir=server,
+            ),
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("differs from the staged asset", result.stderr)
+        recorded = self.gh_log.read_text(encoding="utf-8")
+        self.assertNotIn("release upload", recorded)
+        self.assertNotIn("release edit", recorded)
+
+    def test_published_release_with_a_missing_asset_is_refused(self):
+        """缺少或多出资产的已发布 Release 必须失败，而不是补齐或删改。"""
+        contract = self.expected_asset_names()
+        for label, assets in (
+            ("missing", contract[:-1]),
+            ("extra", [*contract, "kk-studio-daemon-v0.0.1.jar"]),
+        ):
+            with self.subTest(case=label):
+                shutil.rmtree(self.root / "staged", ignore_errors=True)
+                release_dir = self.prepare_staged_assets(contract)
+                if self.gh_log.exists():
+                    self.gh_log.unlink()
+                result = self.run_step(
+                    "Publish GitHub Release",
+                    self.publish_env(release_dir, exists=True, draft=False, assets=assets),
+                )
+                self.assertNotEqual(0, result.returncode, f"{label} must fail")
+                self.assertIn("published release assets differ", result.stderr)
+                recorded = self.gh_log.read_text(encoding="utf-8") if self.gh_log.exists() else ""
+                self.assertNotIn("release upload", recorded)
+                self.assertNotIn("release edit", recorded)
+
+    def test_draft_release_uploads_only_missing_assets_and_publishes(self):
+        """草稿只补齐缺失资产，不覆盖已有资产。"""
+        contract = self.expected_asset_names()
+        release_dir = self.prepare_staged_assets(contract)
+        present = contract[:2]
+        result = self.run_step(
+            "Publish GitHub Release",
+            self.publish_env(release_dir, exists=True, draft=True, assets=present),
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
+        calls = self.gh_log.read_text(encoding="utf-8").splitlines()
+        uploads = [call for call in calls if "release upload" in call]
+        self.assertEqual(1, len(uploads))
+        self.assertNotIn("--clobber", uploads[0])
+        for name in contract[2:]:
+            self.assertIn(f"{release_dir}/{name}", uploads[0].split())
+        for name in present:
+            self.assertNotIn(f"{release_dir}/{name}", uploads[0].split())
+        self.assertIn(f"ARGV:release edit {SAFE_TAG} --draft=false", calls)
+
+    def test_draft_release_with_a_foreign_asset_is_refused(self):
+        """草稿里出现契约之外的资产时必须在任何上传之前失败。"""
+        contract = self.expected_asset_names()
+        release_dir = self.prepare_staged_assets(contract)
+        result = self.run_step(
+            "Publish GitHub Release",
+            self.publish_env(
+                release_dir, exists=True, draft=True, assets=[*contract[:2], "notes.txt"]
+            ),
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("outside the release contract", result.stderr)
+        recorded = self.gh_log.read_text(encoding="utf-8")
+        self.assertNotIn("release upload", recorded)
+        self.assertNotIn("release edit", recorded)
+
+    def test_failed_upload_never_publishes_a_partial_release(self):
+        """草稿补齐时第 N 个上传失败，必须保持草稿状态，绝不发布半套资产。"""
+        contract = self.expected_asset_names()
+        release_dir = self.prepare_staged_assets(contract)
+        result = self.run_step(
+            "Publish GitHub Release",
+            self.publish_env(release_dir, exists=True, draft=True, fail_at=1),
+        )
+        self.assertNotEqual(0, result.returncode)
+        recorded = self.gh_log.read_text(encoding="utf-8")
+        self.assertIn("release upload", recorded)
+        self.assertNotIn("release edit", recorded)
+
+    def test_publish_step_fails_without_uploading_when_the_staged_set_differs(self):
+        """暂存目录多一个或少一个资产都必须在上传之前失败，绝不发布半套资产。"""
         contract = self.expected_asset_names()
         cases = {
             "missing artifact": [name for name in contract if not name.endswith(".jar")],
