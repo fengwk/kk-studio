@@ -164,12 +164,17 @@ function renderPanel(
   const flushFunctionConfig = vi.fn(async () => undefined)
   const setToast = vi.fn()
   const setSelection = vi.fn()
+  const discardPendingRun = vi.fn(() => true)
+  const isNodeInFlight = vi.fn(() => false)
   const runtime = {
     models: availableModels,
     scheduleFunctionConfig,
     flushFunctionConfig,
     setToast,
     setSelection,
+    discardPendingRun,
+    isNodeInFlight,
+    localPendingErrors: {},
   } as unknown as CanvasController
   const { snapshot, target } = fixture(run)
   const anchor = rawAnchor && !('targetNodeId' in rawAnchor)
@@ -204,6 +209,8 @@ function renderPanel(
     flushFunctionConfig,
     setToast,
     setSelection,
+    discardPendingRun,
+    isNodeInFlight,
   }
 }
 
@@ -714,6 +721,42 @@ describe('Canvas generic generation panel', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('参数必须为 JSON 对象')
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
 
+    view.unmount()
+  })
+
+  it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
+    // 1. 设置坏记录到 localStorage，打开面板
+    const corruptRaw = 'corrupt-raw-json-data'
+    const targetId = '9'
+    const storageKey = `kkstudio.canvas.pending-run:1:${targetId}`
+    window.localStorage.setItem(storageKey, corruptRaw)
+
+    const view = renderPanel()
+
+    // 2. 验证出现 local-pending-error 提示条及“放弃本地未决记录”按钮
+    const errorBanner = await screen.findByTestId('local-pending-error')
+    expect(errorBanner).toHaveTextContent('未决运行记录异常')
+    const discardBtn = screen.getByTestId('discard-pending-btn')
+    expect(discardBtn).toBeInTheDocument()
+
+    // 3. 点击“放弃本地未决记录”，展示确认警告对话框
+    fireEvent.click(discardBtn)
+    expect(screen.getByRole('alertdialog', { name: '确认放弃未决记录' })).toBeInTheDocument()
+    expect(screen.getByText('这不会撤销服务端运行，核实后再继续')).toBeInTheDocument()
+
+    // 4. 点击取消：关闭确认框，恢复放弃按钮
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('discard-pending-btn')).toBeInTheDocument()
+
+    // 5. 再次点击放弃并确认，调用 discardPendingRun 并成功清理
+    fireEvent.click(screen.getByTestId('discard-pending-btn'))
+    const confirmBtn = screen.getByTestId('confirm-discard-btn')
+    fireEvent.click(confirmBtn)
+    expect(view.discardPendingRun).toHaveBeenCalledWith(targetId, corruptRaw)
+    expect(screen.queryByTestId('local-pending-error')).not.toBeInTheDocument()
+
+    window.localStorage.removeItem(storageKey)
     view.unmount()
   })
 })

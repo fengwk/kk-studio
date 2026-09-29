@@ -25,6 +25,7 @@ import {
 import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
 import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
+import { inspectLocalPendingRun } from '@/features/canvas/function-run'
 import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionConfigDTO,
@@ -70,6 +71,24 @@ export function CanvasGenerationPanel({
   const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.parameters, null, 2))
   const [jsonDirty, setJsonDirty] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  const [localPendingState, setLocalPendingState] = useState<{ message: string; raw: string | null } | null>(null)
+
+  useEffect(() => {
+    if (runtime.localPendingErrors?.[node.id]) {
+      setLocalPendingState(runtime.localPendingErrors[node.id])
+      return
+    }
+    const canvasId = snapshot.document.id
+    if (canvasId) {
+      const inspected = inspectLocalPendingRun(canvasId, node.id)
+      if (inspected.error && inspected.raw !== null) {
+        setLocalPendingState({ message: inspected.error, raw: inspected.raw })
+      } else {
+        setLocalPendingState(null)
+      }
+    }
+  }, [node.id, snapshot.document.id, runtime.localPendingErrors])
   const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
   const panelRef = useRef<HTMLElement | null>(null)
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
@@ -657,6 +676,59 @@ export function CanvasGenerationPanel({
                 提交核查
               </button>
             </div>
+          </div>
+        ) : null}
+        {localPendingState ? (
+          <div
+            className="generation-local-pending-error"
+            role="alert"
+            data-testid="local-pending-error"
+          >
+            <strong>未决运行记录异常</strong>
+            <p>{localPendingState.message}</p>
+            {confirmingDiscard ? (
+              <div
+                className="generation-discard-confirm"
+                role="alertdialog"
+                aria-label="确认放弃未决记录"
+              >
+                <p>这不会撤销服务端运行，核实后再继续</p>
+                <div className="generation-discard-confirm-actions">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDiscard(false)}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    data-testid="confirm-discard-btn"
+                    onClick={() => {
+                      if (localPendingState.raw !== null) {
+                        const success = runtime.discardPendingRun(node.id, localPendingState.raw)
+                        if (success) {
+                          setConfirmingDiscard(false)
+                          setLocalPendingState(null)
+                        }
+                      }
+                    }}
+                  >
+                    确认放弃
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="generation-discard-btn"
+                data-testid="discard-pending-btn"
+                disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
+                onClick={() => setConfirmingDiscard(true)}
+              >
+                放弃本地未决记录
+              </button>
+            )}
           </div>
         ) : null}
         {node.run?.status === 'FAILED' ? (

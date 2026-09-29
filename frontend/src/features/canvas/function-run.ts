@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import type {
@@ -113,14 +113,14 @@ export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void
   } catch (err) {
     throw new Error(`Failed to check existing function run attempt: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
   }
+  const serialized = JSON.stringify(attempt)
   if (rawExisting !== null) {
-    const existing = loadPendingFunctionRun(attempt.canvasId, attempt.nodeId)
-    if (existing && existing.request.requestId !== attempt.request.requestId) {
-      throw new Error('Cannot overwrite conflicting pending function run attempt from another process or pane')
+    // 完整序列比较：若已有记录且完整序列化内容不一致（包括不同 requestId，或同 requestId 但不同 basis / createdAt），一律拒绝覆盖
+    if (rawExisting !== serialized) {
+      throw new Error('Cannot overwrite conflicting or modified pending function run attempt')
     }
   }
 
-  const serialized = JSON.stringify(attempt)
   try {
     storage.setItem(key, serialized)
   } catch (err) {
@@ -165,15 +165,71 @@ export function clearPendingFunctionRun(
   }
 }
 
-export function discardPendingFunctionRun(canvasId: string, nodeId: string): void {
+export function discardPendingFunctionRun(
+  canvasId: string,
+  nodeId: string,
+  expectedRaw: string,
+): boolean {
   const storage = getLocalStorageSafe()
   if (!storage) {
-    return
+    throw new Error('无法读取浏览器存储，请检查存储权限')
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let currentRaw: string | null
+  try {
+    currentRaw = storage.getItem(key)
+  } catch (err) {
+    throw new Error(`无法读取浏览器存储: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  if (currentRaw === null) {
+    return true
+  }
+  // 仅删除经用户看到且确认的同 raw 记录；stale 确认不可删除新记录
+  if (currentRaw !== expectedRaw) {
+    return false
   }
   try {
-    storage.removeItem(getPendingRunStorageKey(canvasId, nodeId))
-  } catch {
-    // Ignore
+    storage.removeItem(key)
+    return true
+  } catch (err) {
+    throw new Error(`无法写入浏览器存储: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+}
+
+export interface LocalPendingRunState {
+  error: string | null
+  raw: string | null
+  attempt: PendingFunctionRunAttempt | null
+}
+
+export function inspectLocalPendingRun(canvasId: string, nodeId: string): LocalPendingRunState {
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    return { error: '无法读取浏览器存储，请检查存储权限', raw: null, attempt: null }
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let raw: string | null
+  try {
+    raw = storage.getItem(key)
+  } catch (err) {
+    return {
+      error: `无法读取浏览器存储: ${err instanceof Error ? err.message : String(err)}`,
+      raw: null,
+      attempt: null,
+    }
+  }
+  if (raw === null) {
+    return { error: null, raw: null, attempt: null }
+  }
+  try {
+    const attempt = loadPendingFunctionRun(canvasId, nodeId)
+    return { error: null, raw, attempt }
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : String(err),
+      raw,
+      attempt: null,
+    }
   }
 }
 
@@ -196,6 +252,9 @@ export interface FunctionRunActions {
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => Promise<void>
+  discardPendingRun: (nodeId: UUIDString, expectedRaw: string) => boolean
+  localPendingErrors: Record<string, { message: string; raw: string | null }>
+  isNodeInFlight: (nodeId: UUIDString) => boolean
 }
 
 /**
@@ -211,6 +270,38 @@ export function useCanvasFunctionRun(options: {
 }): FunctionRunActions {
   const { canvasId, queryClient, setToast, flushFunctionConfig } = options
   const inFlightNodesRef = useRef(new Set<string>())
+  const [localPendingErrors, setLocalPendingErrors] = useState<
+    Record<string, { message: string; raw: string | null }>
+  >({})
+
+  const isNodeInFlight = useCallback((nodeId: UUIDString): boolean => {
+    return inFlightNodesRef.current.has(nodeId)
+  }, [])
+
+  const discardPendingRun = useCallback((nodeId: UUIDString, expectedRaw: string): boolean => {
+    // 1. 禁止在 flight 时 discard
+    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
+      return false
+    }
+
+    try {
+      const deleted = discardPendingFunctionRun(canvasId, nodeId, expectedRaw)
+      if (deleted) {
+        setLocalPendingErrors((prev) => {
+          if (!prev[nodeId]) {
+            return prev
+          }
+          const next = { ...prev }
+          delete next[nodeId]
+          return next
+        })
+      }
+      return deleted
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : '无法读取浏览器存储，请检查存储权限')
+      return false
+    }
+  }, [canvasId, setToast])
 
   const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: UUIDString | null) => {
     if (!canvasId) {
@@ -244,9 +335,31 @@ export function useCanvasFunctionRun(options: {
       let existing: PendingFunctionRunAttempt | null = null
       try {
         existing = loadPendingFunctionRun(canvasId, nodeId)
+        setLocalPendingErrors((prev) => {
+          if (!prev[nodeId]) {
+            return prev
+          }
+          const next = { ...prev }
+          delete next[nodeId]
+          return next
+        })
       } catch (err) {
-        console.error('[canvas] Failed to load pending function run attempt:', err)
-        setToast('未决运行记录损坏或存储读取失败，已暂停生成以防数据覆盖。请排查存储或手动重置。')
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[canvas] Failed to load pending function run attempt:', message)
+        let raw: string | null = null
+        try {
+          const storage = getLocalStorageSafe()
+          if (storage) {
+            raw = storage.getItem(getPendingRunStorageKey(canvasId, nodeId))
+          }
+        } catch {
+          // Ignore
+        }
+        setLocalPendingErrors((prev) => ({
+          ...prev,
+          [nodeId]: { message, raw },
+        }))
+        setToast('未决运行记录损坏或存储读取失败，已暂停生成以防数据覆盖。请排查存储并在面板放弃。')
         return
       }
 
@@ -351,7 +464,14 @@ export function useCanvasFunctionRun(options: {
     }
   }, [canvasId, publishRun, setToast])
 
-  return { startFunctionRun, cancelFunctionRun, resolveFunctionRun }
+  return {
+    startFunctionRun,
+    cancelFunctionRun,
+    resolveFunctionRun,
+    discardPendingRun,
+    localPendingErrors,
+    isNodeInFlight,
+  }
 }
 
 /**
