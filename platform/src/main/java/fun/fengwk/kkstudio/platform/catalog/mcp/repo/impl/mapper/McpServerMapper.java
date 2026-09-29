@@ -53,6 +53,10 @@ public interface McpServerMapper extends BaseMapper {
   @ResultMap("mcpServerResultMap")
   McpServerDO getByName(@Param("name") String name);
 
+  @Select("select " + SERVER_COLUMNS + " from mcp_server where name = #{name} for share")
+  @ResultMap("mcpServerResultMap")
+  McpServerDO lockForShare(@Param("name") String name);
+
   @Select("select " + SERVER_COLUMNS + " from mcp_server where name = #{name} for update")
   @ResultMap("mcpServerResultMap")
   McpServerDO getForUpdate(@Param("name") String name);
@@ -105,6 +109,10 @@ public interface McpServerMapper extends BaseMapper {
   @ResultMap("mcpToolResultMap")
   McpToolDO getTool(@Param("name") String name);
 
+  @Select("select " + TOOL_COLUMNS + " from mcp_tool where name = #{name} for share")
+  @ResultMap("mcpToolResultMap")
+  McpToolDO lockToolForShare(@Param("name") String name);
+
   @Select(
       "select "
           + TOOL_COLUMNS
@@ -127,7 +135,14 @@ public interface McpServerMapper extends BaseMapper {
   @Select("select count(*) from mcp_tool where server_name = #{serverName}")
   int countTools(@Param("serverName") String serverName);
 
-  @Delete("delete from mcp_tool where server_name = #{serverName}")
+  @Delete(
+      """
+      with locked_server as (
+          select name from mcp_server where name = #{serverName} for update
+      )
+      delete from mcp_tool
+      where server_name in (select name from locked_server)
+      """)
   int deleteTools(@Param("serverName") String serverName);
 
   @Insert(

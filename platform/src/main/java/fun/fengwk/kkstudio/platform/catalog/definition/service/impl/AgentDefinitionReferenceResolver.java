@@ -3,8 +3,14 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
@@ -12,13 +18,21 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
-/** 解析全局 Agent definition、model 与 Skill 引用。 */
+/**
+ * 解析全局 Agent definition、model、Skill 与 MCP 工具引用。
+ *
+ * <p>写入事务的锁序固定为 Skill package {@code FOR SHARE}、MCP server {@code FOR SHARE}、Agent {@code FOR
+ * UPDATE}。 引用集合先完整收集再按 canonical name 升序加锁，锁后重读存在性，不边锁边遍历。
+ */
 @AllArgsConstructor
 @Component
 final class AgentDefinitionReferenceResolver {
@@ -26,10 +40,14 @@ final class AgentDefinitionReferenceResolver {
   private static final String DEFINITION_RESOURCE = "agent_definition";
   private static final String MODEL_RESOURCE = "agent_model";
   private static final String SKILL_RESOURCE = "skill";
+  private static final String TOOL_RESOURCE = "agent_tool";
+  private static final ContributorId MCP_CONTRIBUTOR = McpToolCatalog.CONTRIBUTOR_ID;
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
+  private final McpServerRepository mcpServerRepository;
+  private final RuntimeToolCatalog toolCatalog;
 
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
@@ -65,14 +83,45 @@ final class AgentDefinitionReferenceResolver {
   }
 
   /**
-   * 校验 Agent 选中的全局 Skill 引用必须存在。
+   * 在任何 Agent 行锁之前，按 canonical name 升序共享锁定被引用的 Skill package 与 MCP server，并重读存在性。
    *
-   * <p>对每个引用读取 Package 权威事实与其当前 manifest；任一 Package 或 Skill 缺失时确定性拒绝。 不再需要行锁，因为 Package 的 current
-   * commit 与 manifest 是单表行的原子事实。
+   * <p>MCP 归属只认 {@code platform.mcp} 贡献身份。锁前解析出的 tool→server 映射在共享锁之后必须仍然相同且工具行存在； builtin/plugin
+   * 工具没有 MCP 行，不取 server 锁。
    */
-  void requireCurrentSkills(List<SkillRefDTO> skills) {
+  void requireReferencedLifecycles(List<SkillRefDTO> skills, List<String> toolNames) {
+    Map<String, String> skillNames = skillNames(skills);
+    Map<String, String> mcpServers = mcpServers(toolNames);
+    for (String packageName : new TreeSet<>(skillNames.keySet())) {
+      SkillPackage locked = skillCatalogQueryService.lockPackageForShare(packageName);
+      String skillName = skillNames.get(packageName);
+      if (locked == null || locked.findSkill(skillName) == null) {
+        throw new AiValidationException(
+            SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
+      }
+    }
+    for (String serverName : new TreeSet<>(mcpServers.keySet())) {
+      String toolName = mcpServers.get(serverName);
+      McpServer locked =
+          mcpServerRepository
+              .lockForShare(serverName)
+              .orElseThrow(
+                  () ->
+                      new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName));
+      McpTool tool =
+          mcpServerRepository
+              .lockToolForShare(toolName)
+              .filter(candidate -> serverName.equals(candidate.getServerName()))
+              .orElse(null);
+      if (tool == null || !serverName.equals(locked.getName())) {
+        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+      }
+    }
+  }
+
+  private Map<String, String> skillNames(List<SkillRefDTO> skills) {
+    Map<String, String> names = new LinkedHashMap<>();
     if (skills == null || skills.isEmpty()) {
-      return;
+      return names;
     }
     List<String> missing = new ArrayList<>();
     for (SkillRefDTO ref : skills) {
@@ -83,13 +132,38 @@ final class AgentDefinitionReferenceResolver {
         if (!missing.contains(identity)) {
           missing.add(identity);
         }
+        continue;
       }
+      names.putIfAbsent(ref.getPackageName(), ref.getName());
     }
     if (!missing.isEmpty()) {
       missing.sort(String::compareTo);
       throw new AiValidationException(
           SKILL_RESOURCE, "unknown agent skills: " + String.join(", ", missing));
     }
+    return names;
+  }
+
+  private Map<String, String> mcpServers(List<String> toolNames) {
+    Map<String, String> servers = new LinkedHashMap<>();
+    if (toolNames == null || toolNames.isEmpty()) {
+      return servers;
+    }
+    for (String toolName : toolNames) {
+      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
+      if (contribution == null || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())) {
+        continue;
+      }
+      McpTool tool = mcpServerRepository.getTool(toolName).orElse(null);
+      if (tool == null || tool.getServerName() == null) {
+        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+      }
+      String previous = servers.putIfAbsent(tool.getServerName(), toolName);
+      if (previous != null && !previous.equals(toolName)) {
+        servers.put(tool.getServerName(), previous.compareTo(toolName) <= 0 ? previous : toolName);
+      }
+    }
+    return servers;
   }
 
   /**

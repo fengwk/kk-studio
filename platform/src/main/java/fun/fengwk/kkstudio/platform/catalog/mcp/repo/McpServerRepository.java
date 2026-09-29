@@ -20,6 +20,13 @@ public interface McpServerRepository {
 
   Optional<McpServer> getByName(String name);
 
+  /**
+   * 以 {@code FOR SHARE} 持有 Server 行，直到外层事务结束。
+   *
+   * <p>共享锁与 discover/delete 的 {@code FOR UPDATE} 互斥，拦住工具行替换等非键修改，同时允许并发的 Agent 引用事务共存。
+   */
+  Optional<McpServer> lockForShare(String name);
+
   /** 返回有效的 Server 并持有其行锁，直到外层事务结束。 */
   Optional<McpServer> getForUpdate(String name);
 
@@ -37,6 +44,9 @@ public interface McpServerRepository {
   /** 按模型可见 name 返回工具行。 */
   Optional<McpTool> getTool(String name);
 
+  /** 以 {@code FOR SHARE} 读取工具行；不存在返回 empty。调用方需已持有其 server 的共享锁。 */
+  Optional<McpTool> lockToolForShare(String name);
+
   /** 列出该 server 下全部工具行（按 name 排序）。 */
   List<McpTool> listTools(String serverName);
 
@@ -46,7 +56,11 @@ public interface McpServerRepository {
   /** 统计 server 下工具数。 */
   int countTools(String serverName);
 
-  /** 物理删除该 server 的全部工具行。 */
+  /**
+   * 物理删除该 server 的全部工具行。
+   *
+   * <p>删除前先 {@code FOR UPDATE} 父 server，使工具替换与 Agent 引用的 {@code FOR SHARE} 互斥。
+   */
   void deleteTools(String serverName);
 
   void insertTool(McpTool tool);

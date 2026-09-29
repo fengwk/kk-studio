@@ -43,6 +43,11 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
+  public Optional<McpServer> lockForShare(String name) {
+    return Optional.ofNullable(convertServer(mapper.lockForShare(name)));
+  }
+
+  @Override
   public Optional<McpServer> getForUpdate(String name) {
     return Optional.ofNullable(convertServer(mapper.getForUpdate(name)));
   }
@@ -71,6 +76,11 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   @Override
   public Optional<McpTool> getTool(String name) {
     return Optional.ofNullable(convertTool(mapper.getTool(name)));
+  }
+
+  @Override
+  public Optional<McpTool> lockToolForShare(String name) {
+    return Optional.ofNullable(convertTool(mapper.lockToolForShare(name)));
   }
 
   @Override
