@@ -21,7 +21,10 @@ import {
   toStorageError,
   type CanvasLocalStoreOptions,
 } from '@/features/canvas/canvas-local-store'
-import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
+import {
+  getEditingSessionId,
+  isSessionReloading,
+} from '@/features/canvas/canvas-editing-session'
 
 const DB_NAME = 'kkstudio.canvas.operations'
 const DB_VERSION = 1
@@ -72,6 +75,9 @@ interface ResolvedScope {
 }
 
 function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions): ResolvedScope {
+  if (isSessionReloading()) {
+    throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+  }
   const userId = options?.userId ?? getCurrentUserId()
   const editingSessionId = options?.editingSessionId ?? getEditingSessionId()
   return {
@@ -121,6 +127,9 @@ export async function saveCanvasOperation(
   operation: CanvasPendingOperation,
   options?: CanvasLocalStoreOptions,
 ): Promise<void> {
+  if (isSessionReloading()) {
+    throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+  }
   const factory = resolveIdbFactory(options)
   if (!factory) {
     throw declareUnavailable()
@@ -163,6 +172,9 @@ export async function deleteCanvasOperation(
   operationId: string,
   options?: CanvasLocalStoreOptions,
 ): Promise<void> {
+  if (isSessionReloading()) {
+    throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+  }
   const factory = resolveIdbFactory(options)
   if (!factory) {
     // 无可落盘内容，删除是幂等空操作；不重复告警。
@@ -265,9 +277,24 @@ export function createCanvasOperationStore(
   }
 
   return {
-    save: (operation) => saveCanvasOperation(operation, scopedOptions),
-    remove: (operationId) => deleteCanvasOperation(operationId, scopedOptions),
-    list: () => loadCanvasOperations(canvasId, scopedOptions),
+    save: async (operation) => {
+      if (isSessionReloading()) {
+        throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+      }
+      return saveCanvasOperation(operation, scopedOptions)
+    },
+    remove: async (operationId) => {
+      if (isSessionReloading()) {
+        throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+      }
+      return deleteCanvasOperation(operationId, scopedOptions)
+    },
+    list: async () => {
+      if (isSessionReloading()) {
+        throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+      }
+      return loadCanvasOperations(canvasId, scopedOptions)
+    },
   }
 }
 
