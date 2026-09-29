@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.tool.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -81,6 +83,91 @@ class ToolResultJsonCodecTest {
     ResourceResultContent decodedResource = (ResourceResultContent) decoded.contents().getFirst();
     assertEquals(resource, decodedResource.resource());
     assertEquals("hello preview", decodedResource.preview());
+    assertNull(decodedResource.textMetadata());
+  }
+
+  /** Resource 的 textMetadata 必须完整 round-trip：tree/stream 编码与解码都不能静默丢失它。 */
+  @Test
+  void roundTripsResourceContentWithTextMetadata() {
+    TextArtifactMetadata metadata = new TextArtifactMetadata(12L, 3L);
+    ResourceRef resource =
+        new ResourceRef(
+            "data:text/plain,hello",
+            "text/plain",
+            "hello.txt",
+            5L,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+    ToolResult source =
+        new ToolResult(
+            "call", List.of(new ResourceResultContent(resource, "preview", metadata)), false, "{}");
+
+    ToolResult decoded = ToolResultJsonCodec.decode(ToolResultJsonCodec.encode(source));
+
+    assertEquals("call", decoded.toolCallId());
+    assertEquals("{}", decoded.detailsJson());
+    assertEquals(
+        new ResourceResultContent(resource, "preview", metadata), decoded.contents().getFirst());
+  }
+
+  /** 流式字节计数必须把 textMetadata 计入，与 encode 的树编码在临界点精确一致。 */
+  @Test
+  void exceedsEncodedUtf8BytesMatchesEncodeExactlyForResourceTextMetadata() {
+    ToolResult result =
+        new ToolResult(
+            "call",
+            List.of(
+                new ResourceResultContent(
+                    new ResourceRef(
+                        "https://example.com/a",
+                        "text/plain",
+                        "a.txt",
+                        5L,
+                        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+                    "preview",
+                    new TextArtifactMetadata(5L, 1L))),
+            false,
+            "{}");
+    int exact = ToolResultJsonCodec.encode(result).getBytes(StandardCharsets.UTF_8).length;
+    assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact));
+    assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact - 1));
+  }
+
+  /** textMetadata 结构非法时必须严格拒绝：缺字段、多字段、类型错误、负数都不能被静默吞掉。 */
+  @Test
+  void rejectsMalformedTextMetadata() {
+    String base =
+        "{\"toolCallId\":\"call\",\"contents\":[{\"type\":\"resource\","
+            + "\"uri\":\"https://example.com/a\",\"mediaType\":\"text/plain\","
+            + "\"name\":null,\"size\":null,\"sha256\":null";
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                base + ",\"textMetadata\":{\"totalBytes\":1}}],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                base
+                    + ",\"textMetadata\":{\"totalBytes\":1,\"totalLines\":1,\"extra\":2}}],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                base
+                    + ",\"textMetadata\":{\"totalBytes\":\"x\",\"totalLines\":1}}],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                base
+                    + ",\"textMetadata\":{\"totalBytes\":-1,\"totalLines\":1}}],\"error\":false,\"details\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ToolResultJsonCodec.decode(
+                base
+                    + ",\"textMetadata\":{\"totalBytes\":1,\"totalLines\":-1}}],\"error\":false,\"details\":{}}"));
   }
 
   /** Resource 内容编码为扁平的精确字段，缺失的可选字段使用 JSON null。 */

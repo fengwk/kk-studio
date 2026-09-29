@@ -30,11 +30,13 @@ MCP 工具要接进 Harness，关键风险只有一条：一次远端调用把 B
 
 取消通路由 transport 自身提供：Streamable HTTP 通过关闭 per-request SSE 流结束本次请求的等待，因此不注册额外的协议取消 aborter，也绝不关闭共享 client，同一 client 上的其它并发调用不受影响。
 
+[`LangChainMcpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/LangChainMcpClient.java) 把阻塞 SDK 调用限制在 64 个真实 worker 上，交接队列为不保存等待任务的 `SynchronousQueue`，与外层工具 admission 的默认并发相同，不另设配置。池满或 client 已关闭时提交映射为可重试的 `McpException`，不会挂起调用方；`future.cancel` 只结束本地等待，不响应 interrupt 的 worker 继续占用名额，因此后续调用不会靠取消提前腾出容量。
+
 [`LangChainMcpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/LangChainMcpClient.java) 还区分了两类失败：工具自身以错误结束（SDK 抛 `ToolExecutionException`）映射为 `McpToolCallResult.errorText`，因为它仍是可读的工具输出；只有连接或协议失败才抛 [`McpException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpException.java)、[`McpTimeoutException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpTimeoutException.java) 或 [`McpCancelledException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpCancelledException.java)。上层据此决定是保留 client 还是重建，把工具报错误判成链路故障会连带销毁仍健康的连接。
 
 ## 结果映射
 
-[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元，且不因畸形内容二次失败：文本直通；`image` 的 base64 解码失败时退化为保留结构的 JSON 内容，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型序列化为 `JsonResultContent`，超过其 1 MiB 上限时退化为文本；空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
+[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元。文本计入单次响应的累计预算；`image` 在解码前按 encoded 长度检查 decoded 上界，非法 Base64 退化为保留结构的有界 JSON，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型先用有界 JSON writer 写出，超过 `JsonResultContent` 的 1 MiB 上限时直接失败，不退化为同尺寸无界文本。单次响应全部 text 与 binary 字节合计不超过 64 MiB，该上限对齐既有 terminal/daemon 的 64 MiB 边界，不是新的调用配置。空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
 
 ## 源码与测试
 

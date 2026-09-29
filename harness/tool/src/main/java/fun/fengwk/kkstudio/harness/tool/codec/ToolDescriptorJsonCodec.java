@@ -62,6 +62,9 @@ public final class ToolDescriptorJsonCodec {
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("malformed tool descriptor JSON", error);
     }
+    if (root == null) {
+      throw new IllegalArgumentException("tool descriptor JSON must not be empty");
+    }
     return decodeNode(root);
   }
 

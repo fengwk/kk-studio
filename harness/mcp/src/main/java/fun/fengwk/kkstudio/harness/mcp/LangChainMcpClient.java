@@ -21,9 +21,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -35,20 +36,49 @@ import java.util.concurrent.TimeoutException;
  *
  * <p>取消与超时都按「调用级」处理：立即结束本地等待，且不关闭共享 client，因此同一 client 上的其它并发调用不受影响。 Streamable HTTP 传输通过关闭
  * per-request SSE 流取消，无需额外的协议取消通道。
+ *
+ * <p>阻塞 SDK 调用跑在至多 {@value #MAX_CONCURRENT_OPERATIONS} 个 worker 的 {@link ThreadPoolExecutor}
+ * 上，交接队列为 {@link SynchronousQueue}，不保存等待任务：并发上限与外层工具 admission 的默认并发 64 对齐，不另设配置。池满或 client 已关闭时
+ * 提交立即拒绝，并映射为可重试的 {@link McpException}，绝不挂起调用方。{@code future.cancel} 只结束本地等待、不释放容量：不响应 interrupt 的
+ * worker 仍在执行任务，不会被 idle worker 接收新任务，因此容量上界始终是 executor 的真实 worker 上界。
  */
 final class LangChainMcpClient implements McpClient {
+
+  /**
+   * 单个 client 上同时执行的 SDK 阻塞调用上限。
+   *
+   * <p>沿用外层 Harness 工具 admission 的默认并发 {@code 64}，不新增 MCP 配置项。
+   */
+  static final int MAX_CONCURRENT_OPERATIONS = 64;
+
+  /** 空闲 worker 的回收时间：worker 数量在负载回落后收敛，池不会长期占着线程。 */
+  private static final long WORKER_KEEP_ALIVE_SECONDS = 60L;
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   private final DefaultMcpClient client;
   private final McpTransport transport;
-  private final ExecutorService workers =
-      Executors.newCachedThreadPool(
-          runnable -> {
-            Thread thread = new Thread(runnable, "mcp-client-worker");
-            thread.setDaemon(true);
-            return thread;
-          });
+  private final ThreadPoolExecutor workers = newWorkerPool();
+
+  /**
+   * 有界、无排队的阻塞调用池：只在有 idle worker 时直接交接，否则新建 worker，达到 {@link #MAX_CONCURRENT_OPERATIONS} 后拒绝。
+   *
+   * <p>worker 惰性创建且不预热——容量上界只由真实创建的 worker 决定，而不是预建一批可能永远空闲的线程。
+   */
+  private static ThreadPoolExecutor newWorkerPool() {
+    return new ThreadPoolExecutor(
+        0,
+        MAX_CONCURRENT_OPERATIONS,
+        WORKER_KEEP_ALIVE_SECONDS,
+        TimeUnit.SECONDS,
+        new SynchronousQueue<>(),
+        runnable -> {
+          Thread thread = new Thread(runnable, "mcp-client-worker");
+          thread.setDaemon(true);
+          return thread;
+        },
+        new ThreadPoolExecutor.AbortPolicy());
+  }
 
   LangChainMcpClient(DefaultMcpClient client, McpTransport transport) {
     this.client = Objects.requireNonNull(client, "client");
@@ -102,18 +132,27 @@ final class LangChainMcpClient implements McpClient {
     if (token.isCancelled()) {
       throw new McpCancelledException("MCP operation cancelled by caller");
     }
-    Future<T> future =
-        workers.submit(
-            () -> {
-              try {
-                return sdkCall.call();
-              } catch (CancellationException error) {
-                throw new McpCancelledException("MCP operation cancelled by caller");
-              } finally {
-                // worker 线程会被池复用：异常路径留下的 interrupt 状态会污染后续任务的取消判定。
-                Thread.interrupted();
-              }
-            });
+    Future<T> future;
+    try {
+      future =
+          workers.submit(
+              () -> {
+                try {
+                  return sdkCall.call();
+                } catch (CancellationException error) {
+                  throw new McpCancelledException("MCP operation cancelled by caller");
+                } finally {
+                  // worker 线程会被池复用：异常路径留下的 interrupt 状态会污染后续任务的取消判定。
+                  Thread.interrupted();
+                }
+              });
+    } catch (RejectedExecutionException rejected) {
+      // 池满或已关闭都不是永久性协议失败：调用方可以在容量恢复或 client 重建后重试。
+      if (workers.isShutdown()) {
+        throw new McpException(what + " rejected because the MCP client is closed");
+      }
+      throw new McpException(what + " rejected because the MCP client is at capacity");
+    }
     token.onCancel(() -> future.cancel(true));
     try {
       Duration waitBudget = deadline.requireRemaining();

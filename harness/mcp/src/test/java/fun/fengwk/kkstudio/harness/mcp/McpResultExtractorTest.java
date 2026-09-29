@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.harness.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.langchain4j.service.tool.ToolExecutionResult;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +15,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** MCP 结果提取器测试：验证多模态内容无损提取与非文本结构保留。 */
@@ -117,17 +121,77 @@ class McpResultExtractorTest {
     assertThat(((TextResultContent) textContents.getFirst()).text()).isEqualTo("plain string");
   }
 
-  /** 验证超限大结构 JSON 安全退化为纯文本而绝不抛出二次异常。 */
+  /** 结构化 JSON 超过单条 1 MiB 时必须 fail closed：不能物化成同尺寸无界文本，也不能吞掉超限继续返回内容。 */
   @Test
-  void fallsBackToTextWhenJsonExceedsLimit() throws Exception {
-    String largeValue = "x".repeat(1024 * 1024 + 100);
+  void rejectsStructuredJsonAboveSingleItemLimit() {
+    String largeValue = "x".repeat(JsonResultContent.MAX_JSON_UTF8_BYTES + 100);
     JsonNode node = MAPPER.createObjectNode().put("type", "huge").put("data", largeValue);
+
+    assertThatThrownBy(() -> extractor.extract(node, false))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining(String.valueOf(JsonResultContent.MAX_JSON_UTF8_BYTES));
+  }
+
+  /** 恰好不超过单条 JSON 上限的结构仍保留为 JsonResultContent，并计入累计预算。 */
+  @Test
+  void retainsStructuredJsonAtSingleItemLimit() {
+    int overhead = "{\"type\":\"huge\",\"data\":\"\"}".getBytes(StandardCharsets.UTF_8).length;
+    String largeValue = "x".repeat(JsonResultContent.MAX_JSON_UTF8_BYTES - overhead);
+    JsonNode node = MAPPER.createObjectNode().put("type", "huge").put("data", largeValue);
+
     ToolExecutionResult result = extractor.extract(node, false);
 
     @SuppressWarnings("unchecked")
     List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    assertThat(contents.getFirst()).isInstanceOf(TextResultContent.class);
+    assertThat(contents).singleElement().isInstanceOf(JsonResultContent.class);
+    assertThat(((JsonResultContent) contents.getFirst()).json().getBytes(StandardCharsets.UTF_8))
+        .hasSize(JsonResultContent.MAX_JSON_UTF8_BYTES);
+  }
+
+  /** 多条各自合法的文本合计超过 64 MiB 时拒绝，不能靠拆条绕过累计预算。 */
+  @Test
+  void rejectsAggregateTextAboveContentBudget() {
+    int chunk = 1024 * 1024;
+    ArrayNode array = MAPPER.createArrayNode();
+    int count = McpResultExtractor.MAX_CONTENT_BUDGET_BYTES / chunk + 1;
+    for (int index = 0; index < count; index++) {
+      array.addObject().put("type", "text").put("text", "x".repeat(chunk));
+    }
+
+    assertThatThrownBy(() -> extractor.extract(array, false))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining(String.valueOf(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES));
+  }
+
+  /** 解码前按 encoded 长度拒绝超预算图片，不能先分配完整 decoded 数组再失败。 */
+  @Test
+  void rejectsBase64ImageBeforeDecodingWhenEncodedLengthExceedsBudget() {
+    int encodedChars =
+        Math.toIntExact(((long) McpResultExtractor.MAX_CONTENT_BUDGET_BYTES / 3 + 1) * 4);
+    ObjectNode image = MAPPER.createObjectNode();
+    image.put("type", "image");
+    image.put("data", "A".repeat(encodedChars));
+    image.put("mimeType", "image/png");
+
+    assertThatThrownBy(() -> extractor.extract(image, false))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining(String.valueOf(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES));
+  }
+
+  /** 非法 Base64 预先扣除的 decoded 上界必须退回，后续合法内容不被误判超预算。 */
+  @Test
+  void refundsBudgetAfterInvalidBase64Image() throws Exception {
+    JsonNode node =
+        MAPPER.readTree(
+            "[{\"type\":\"image\",\"data\":\"not_base_64!!!\",\"mimeType\":\"image/png\"},"
+                + "{\"type\":\"text\",\"text\":\"after\"}]");
+
+    @SuppressWarnings("unchecked")
+    List<ResultContent> contents = (List<ResultContent>) extractor.extract(node, false).result();
+
+    assertThat(contents).hasSize(2);
+    assertThat(contents.get(0)).isInstanceOf(JsonResultContent.class);
+    assertThat(((TextResultContent) contents.get(1)).text()).isEqualTo("after");
   }
 
   /** 文本单元之间的换行合并必须只在存在多个文本时插入分隔符。 */
