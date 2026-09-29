@@ -31,6 +31,10 @@ SELECTED_CLASSES = (
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
 )
+WINDOWS_INAPPLICABLE = (
+    "CodingCapabilitiesTest",
+    "CodingCapabilitiesEdgeTest",
+)
 CORE_CLASSES = (
     "ProcessScope",
     "ProcessScopeHelper",
@@ -102,6 +106,25 @@ class AssertSurefireReportsTest(unittest.TestCase):
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertIn("PASS all selected cases really ran on test-os", result.stdout)
+
+    def test_windows_runner_does_not_require_the_posix_shell_only_classes(self):
+        """Windows 上没有 Git Bash：只依赖 POSIX shell 的编码能力夹具不属于该平台的执行范围。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(reports)
+            for class_name in WINDOWS_INAPPLICABLE:
+                (reports / f"TEST-{PACKAGE}.{class_name}.xml").unlink()
+            result = run_script(
+                "assert-surefire-reports.py", reports, "windows-latest"
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+            strict = run_script("assert-surefire-reports.py", reports, "macos-latest")
+            self.assertEqual(1, strict.returncode, strict.stdout + strict.stderr)
+            self.assertIn(
+                f"{WINDOWS_INAPPLICABLE[0]}: missing surefire report on macos-latest",
+                strict.stdout,
+            )
 
     def test_fails_when_a_required_case_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -101,6 +102,38 @@ class PosixProcessGroupTest {
         PosixProcessGroup.processGroupOf(ProcessHandle.current().pid()));
   }
 
+  /**
+   * 没有 {@code /proc} 的 POSIX 平台（macOS）必须如实回答「不可判定」，而不是伪装成「没有成员」。
+   *
+   * <p>「没有成员」会让收敛跳过强杀阶段并宣布已经收敛，所以能力缺口只能表现为不可判定：「组还在不在」仍然由内核回答，而 「组里还有谁」必须承认答不上来。
+   */
+  @Test
+  void memberEnumerationIsUndecidableWithoutProc() {
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    assumeFalse(isLinux(), "这条断言描述的是没有 /proc 的平台");
+    assertNull(
+        PosixProcessGroup.membersSnapshot(
+            PosixProcessGroup.currentGroup(), PosixProcessGroup.NO_PROCESS),
+        "没有 /proc 就没有成员枚举能力：必须返回不可判定");
+    assertEquals(
+        -1L,
+        PosixProcessGroup.processGroupOf(ProcessHandle.current().pid()),
+        "没有 /proc 就读不到进程组，必须如实返回查不到");
+  }
+
+  /** 组的存在性只依赖内核的信号语义，因此在没有 {@code /proc} 的平台上依然成立。 */
+  @Test
+  void groupExistenceStillWorksWithoutProc() {
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    assumeFalse(isLinux(), "这条断言描述的是没有 /proc 的平台");
+    assertTrue(PosixProcessGroup.groupExists(PosixProcessGroup.currentGroup()), "自己所在的组必须存在");
+    assertFalse(PosixProcessGroup.groupExists(goneGroup()), "从未存在过的组必须按「已经消失」处理");
+    assertTrue(
+        PosixProcessGroup.hasLiveMember(
+            PosixProcessGroup.currentGroup(), PosixProcessGroup.NO_PROCESS),
+        "组仍然存在就必须报告「还有成员」，不能因为枚举不可判定就宣布收敛");
+  }
+
   /** 已经被内核拒绝的组必须按「仍然存在」处理：否则会跳过强杀阶段，把还在跑的后代当成已经收敛。 */
   @Test
   void groupExistsTreatsRefusalAsStillExisting() {
@@ -160,12 +193,25 @@ class PosixProcessGroupTest {
     return Arrays.stream(values).boxed().collect(Collectors.toList());
   }
 
+  /**
+   * 成员枚举与「进程组」查询都建立在 {@code /proc} 上：只有 Linux/WSL 具备这个能力。
+   *
+   * <p>这条前置条件必须真的判定 Linux，而不是只排除 Windows：macOS 是 POSIX 但没有 {@code /proc}，把两个能力混为一谈会让 用例在 macOS
+   * 上以「成员为空」的形式失败，把一个平台能力缺口伪装成实现缺陷。
+   */
   private static void assumeTrueLinux() {
-    assumeFalse(isWindows(), "需要 /proc 才能枚举进程组成员");
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    assumeTrue(
+        System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux"),
+        "需要 /proc 才能枚举进程组成员");
   }
 
   private static boolean isWindows() {
     return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+  }
+
+  private static boolean isLinux() {
+    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux");
   }
 
   private static boolean isRoot() {
