@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /** 基于 PostgreSQL 的 {@code storage_upload} 仓库。 */
 @AllArgsConstructor
@@ -46,11 +45,8 @@ public class PostgresqlStorageUploadRepository implements StorageUploadRepositor
   }
 
   @Override
-  public List<StorageUpload> claimExpired(
-      int limit, Instant now, Instant leaseUntil, String cleanupToken) {
-    return uploadMapper.claimExpired(limit, now, leaseUntil, cleanupToken).stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+  public List<UUID> listCleanupCandidateIds(int limit, Instant now) {
+    return uploadMapper.listCleanupCandidateIds(limit, now);
   }
 
   @Override

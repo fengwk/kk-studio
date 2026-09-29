@@ -14,10 +14,14 @@ import java.util.UUID;
  * 校验对象大小/校验和，再探针权威媒体事实，然后先物化候选 blob 的最终对象（S3 复制），最后在事务内完成去重插入或并发消解并绑定上传 —— DB 绝不引用缺失的最终对象；
  * 去重落败时幂等清理未使用的候选对象。delete 与消费先以短事务持久化 cleanup request，READY 同事务恰好 release 上传引用，提交后仅唤醒后台；过期批次再以
  * cleanup lease 保护，事务外删除对象，最后以 token-fenced 短事务删除行。所有响应不暴露 bucket 与对象物理 key。
+ *
+ * <p>complete/stage 的「写对象 + 绑定」窗口与后台清理在同一个 upload 上互斥（{@link
+ * StorageUploadOperationLock}）：清理只在拿到该锁后才 claim 并删除对象与行，锁忙时跳过本轮，因此清理绝不删除尚在写窗口内的对象，也绝不删除已被 DB
+ * 引用的最终对象。
  */
 public interface StorageUploadService {
 
-  /** 过期批次上限：SKIP LOCKED 每批最多 claim 的行数；后台维护据此判断是否已排空。 */
+  /** 过期批次上限：每次后台回收最多检查的候选 upload 行数；后台维护据此判断是否已排空。 */
   int MAX_EXPIRY_BATCH = 16;
 
   /** 预约上传：内容命中返回 READY，否则返回 PENDING（含预签名 PUT）。 */
@@ -79,9 +83,9 @@ public interface StorageUploadService {
   record ReadyUpload(UUID blobId, String filename) {}
 
   /**
-   * 后台回收（SKIP LOCKED claim 批次，上限 16）：短事务 claim 显式 cleanup request 或过期行，事务外删除对象，再逐行 token-fenced
-   * finalize；显式 request 的 READY 行不重复 release，普通过期 READY 行在 finalize 中 release。返回成功 finalize
-   * 的行数，单行失败保留 lease 且不中断批次。
+   * 后台回收：先列出可清理的候选行（显式 cleanup request 或已过期，且无有效 lease），再逐行先取该 upload 的操作锁、锁内重读当下事实并 claim，事务外删除对象，
+   * 最后以 token-fenced 短事务删除行；锁忙（complete/stage 正在写对象或另一节点在处理）的行跳过本轮，绝不在无锁状态下删除证据。显式 request 的 READY
+   * 行不重复 release，普通过期 READY 行在 finalize 中 release。返回成功 finalize 的行数，单行失败保留 lease 且不中断批次。
    */
   int expireOnce();
 }

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -30,7 +31,9 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundExcepti
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
@@ -53,6 +56,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -80,6 +84,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private StorageBlobManager storageBlobManager;
+  @Autowired private StorageUploadOperationLock storageUploadOperationLock;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private RecordingS3PresignService s3Presigner;
   @Autowired private JdbcTemplate jdbc;
@@ -600,9 +605,19 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     }
 
     assertEquals(
+        21 - (processedA + processedB),
+        jdbc.queryForObject("select count(*) from storage_upload", Integer.class),
+        "each processed row must be finalized exactly once; a lock-busy row must stay for the next round");
+    // 后台维护的语义：反复回收直到排空（本轮锁忙跳过的行会在后续轮次被继续处理）。
+    int drained = 0;
+    int round;
+    while ((round = storageUploadService.expireOnce()) > 0) {
+      drained += round;
+    }
+    assertEquals(
         21,
-        processedA + processedB,
-        "SKIP LOCKED batch-in-one-tx must give each expired row to exactly one sweeper");
+        processedA + processedB + drained,
+        "every expired row must be cleaned exactly once across rounds");
     assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
     storageBlobManager.sweepDeleting();
     assertEquals(
@@ -610,6 +625,162 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         jdbc.queryForObject("select count(*) from storage_blob", Integer.class),
         "all 11 references must be released exactly once and the blob cleaned once");
     assertFalse(s3Storage.hasObject(StorageObjectKeys.blobOriginal(UUID.fromString(blobId))));
+  }
+
+  /**
+   * 测试意图：后台清理绝不能删除正在 complete 写窗口内的证据。
+   *
+   * <p>complete 已通过校验并持锁执行对象复制时，把上传行改成过期状态（后台清理此时「想」清理它），随后触发的回收必须整轮跳过该行：不 claim、不删临时对象、
+   * 不删行。complete 完成后（因行已过期而在 bind 处 fail-closed）上传行仍是耐久锚点，后台才能在锁内把临时对象、候选对象与行一起清掉 —— 不存在「行已被删、 copy
+   * 落盘成孤儿」的交错。
+   */
+  @Test
+  void maintenanceSkipsUploadWhoseCompleteHoldsTheOperationLock() throws Exception {
+    byte[] content = "lock-interleaved".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        reserve("locked.bin", "application/octet-stream", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "application/octet-stream");
+    UUID uploadId = UUID.fromString(pending.getId());
+    UUID candidateId = candidateBlobIdOf(pending.getId());
+    String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
+
+    CountDownLatch copyEntered = new CountDownLatch(1);
+    CountDownLatch copyRelease = new CountDownLatch(1);
+    s3Storage.setNetworkCallObserver(
+        call -> {
+          if ("copyObject".equals(call.operation())) {
+            copyEntered.countDown();
+            awaitQuietly(copyRelease);
+          }
+        });
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<StorageUploadDTO> completing =
+          executor.submit(() -> storageUploadService.complete(uploadId));
+      assertTrue(
+          copyEntered.await(30, TimeUnit.SECONDS),
+          "complete must reach the S3 copy while holding the upload operation lock");
+      // complete 仍持锁：把行改成过期事实，后台清理拿到候选也必须跳过。
+      backdateUpload(pending.getId());
+
+      assertEquals(0, storageUploadService.expireOnce(), "a lock-busy upload must be skipped");
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "select count(*) from storage_upload where id = ?", Integer.class, uploadId),
+          "the upload row must survive as the durable anchor");
+      assertNull(
+          jdbc.queryForObject(
+              "select cleanup_token from storage_upload where id = ?", String.class, uploadId),
+          "a skipped upload must not be claimed");
+      assertTrue(s3Storage.hasObject(tempKey), "temp object must survive the write window");
+
+      copyRelease.countDown();
+      ExecutionException failure =
+          assertThrows(
+              ExecutionException.class,
+              () -> completing.get(30, TimeUnit.SECONDS),
+              "an upload that expired mid-write must fail closed instead of binding");
+      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+    } finally {
+      executor.shutdownNow();
+    }
+
+    // 写窗口结束后：失败只留下耐久锚点（行 + 已落盘候选对象），清理永远由后台在锁内完成。
+    assertEquals(1, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    assertTrue(s3Storage.hasObject(StorageObjectKeys.blobOriginal(candidateId)));
+    assertEquals(1, storageUploadService.expireOnce());
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
+    assertEquals(0, s3Storage.objectCount(), "no candidate or temp object may be orphaned");
+    assertNoActiveBlobReferencesMissingObject();
+  }
+
+  /** 测试意图：显式 delete（只标记 cleanup request 的短事务路径）与 complete 写窗口交错时，清理同样只能在写窗口结束后删证据。 */
+  @Test
+  void cleanupRequestedDuringCompleteWriteWindowKeepsDurableAnchorUntilMaintenanceRuns()
+      throws Exception {
+    byte[] content = "cleanup-interleaved".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        reserve(
+            "cleanup-locked.bin", "application/octet-stream", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "application/octet-stream");
+    UUID uploadId = UUID.fromString(pending.getId());
+    UUID candidateId = candidateBlobIdOf(pending.getId());
+    String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
+
+    CountDownLatch copyEntered = new CountDownLatch(1);
+    CountDownLatch copyRelease = new CountDownLatch(1);
+    s3Storage.setNetworkCallObserver(
+        call -> {
+          if ("copyObject".equals(call.operation())) {
+            copyEntered.countDown();
+            awaitQuietly(copyRelease);
+          }
+        });
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<StorageUploadDTO> completing =
+          executor.submit(() -> storageUploadService.complete(uploadId));
+      assertTrue(copyEntered.await(30, TimeUnit.SECONDS));
+      // 消费方在写窗口内标记 cleanup request（不碰对象 I/O）：行立刻成为清理候选。
+      storageUploadService.delete(uploadId);
+
+      assertEquals(0, storageUploadService.expireOnce(), "a lock-busy upload must be skipped");
+      assertNull(
+          jdbc.queryForObject(
+              "select cleanup_token from storage_upload where id = ?", String.class, uploadId),
+          "the skipped upload keeps only the durable cleanup request");
+      assertTrue(s3Storage.hasObject(tempKey));
+
+      copyRelease.countDown();
+      ExecutionException failure =
+          assertThrows(
+              ExecutionException.class,
+              () -> completing.get(30, TimeUnit.SECONDS),
+              "cleanup was requested during the write window; complete must fail closed");
+      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+    } finally {
+      executor.shutdownNow();
+    }
+
+    assertTrue(s3Storage.hasObject(StorageObjectKeys.blobOriginal(candidateId)));
+    assertEquals(1, storageUploadService.expireOnce());
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    assertEquals(0, s3Storage.objectCount(), "the never-bound candidate object must be cleaned");
+    assertNoActiveBlobReferencesMissingObject();
+  }
+
+  /**
+   * 测试意图：真实 Spring 上下文必须装配由 {@code JdbcConnectionDetails} 派生的 PostgreSQL 操作锁（不是测试替身），并且该 bean 的
+   * 会话锁语义在容器内真实生效。
+   */
+  @Test
+  void uploadOperationLockIsWiredToRealPostgresSessions() {
+    assertInstanceOf(PostgresqlStorageUploadOperationLock.class, storageUploadOperationLock);
+    UUID uploadId = UUID.randomUUID();
+    try (StorageUploadOperationLock.Handle held = storageUploadOperationLock.tryAcquire(uploadId)) {
+      assertNotNull(held, "a free upload key must be acquired through the wired bean");
+      assertNull(storageUploadOperationLock.tryAcquire(uploadId));
+    }
+    try (StorageUploadOperationLock.Handle again =
+        storageUploadOperationLock.tryAcquire(uploadId)) {
+      assertNotNull(again, "closing the handle must release the session lock");
+    }
+  }
+
+  /** 让 S3 调用线程在测试控制的交错点上等待；超时即失败，避免无限挂起。 */
+  private static void awaitQuietly(CountDownLatch latch) {
+    try {
+      if (!latch.await(30, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("timed out waiting for the storage interleaving latch");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(error);
+    }
   }
 
   @Test
