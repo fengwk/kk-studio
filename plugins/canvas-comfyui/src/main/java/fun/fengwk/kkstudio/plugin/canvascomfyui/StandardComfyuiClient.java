@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 /** 只使用标准 ComfyUI HTTP API 的有界、流式客户端。 */
 public final class StandardComfyuiClient {
@@ -356,14 +358,23 @@ public final class StandardComfyuiClient {
     HttpRequest.BodyPublisher publisher =
         HttpRequest.BodyPublishers.concat(
             HttpRequest.BodyPublishers.ofByteArray(header),
-            HttpRequest.BodyPublishers.ofInputStream(
-                () -> new ExactUploadContent(content, contentLength)),
+            HttpRequest.BodyPublishers.ofInputStream(contentSupplier(content, contentLength)),
             HttpRequest.BodyPublishers.ofByteArray(footer));
     // ofInputStream 的 contentLength 恒为 -1，concat 因此也是 -1；用声明总长度恢复固定长度。
     return HttpRequest.BodyPublishers.fromPublisher(publisher, totalLength);
   }
 
-  /** 只读声明长度。提前结束或声明长度之后仍有字节都失败，不截断多余内容。单字节 read 由 FilterInputStream 转到块读取。流由 upload 关闭。 */
+  static Supplier<InputStream> contentSupplier(InputStream content, long contentLength) {
+    AtomicBoolean opened = new AtomicBoolean();
+    return () -> {
+      if (!opened.compareAndSet(false, true)) {
+        throw new IllegalStateException("upload content stream is already open");
+      }
+      return new ExactUploadContent(content, contentLength);
+    };
+  }
+
+  /** 只读声明长度。提前结束或声明长度之后仍有字节都失败，不截断。流由 upload 关闭。 */
   private static final class ExactUploadContent extends FilterInputStream {
 
     private final long declared;
@@ -376,7 +387,18 @@ public final class StandardComfyuiClient {
     }
 
     @Override
+    public int read() throws IOException {
+      byte[] one = new byte[1];
+      int read = read(one, 0, 1);
+      return read < 0 ? -1 : one[0] & 0xff;
+    }
+
+    @Override
     public int read(byte[] buffer, int offset, int length) throws IOException {
+      Objects.checkFromIndexSize(offset, length, buffer.length);
+      if (length == 0) {
+        return 0;
+      }
       if (remaining == 0L) {
         int extra = in.read(buffer, offset, length);
         if (extra > 0) {
