@@ -685,7 +685,14 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       },
       getDraftGeneration: (nodeId) => draftsRef.current[nodeId]?.generation,
     })
-  const { startFunctionRun, cancelFunctionRun, resolveFunctionRun } = useCanvasFunctionRun({
+  const {
+    startFunctionRun,
+    cancelFunctionRun,
+    resolveFunctionRun,
+    discardPendingRun,
+    localPendingErrors,
+    isNodeInFlight,
+  } = useCanvasFunctionRun({
     canvasId: state.canvasId,
     queryClient,
     setToast,
@@ -1501,6 +1508,9 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     startFunctionRun,
     cancelFunctionRun,
     resolveFunctionRun,
+    discardPendingRun,
+    localPendingErrors,
+    isNodeInFlight,
     createGroup,
     ungroupGroup,
     renameGroup,
