@@ -35,6 +35,26 @@ SELECTED_CLASSES = (
 )
 
 
+# Windows runner 上「bash」只会命中 System32 的 WSL 转发程序（CreateProcess 的搜索顺序让系统目录永远先于 PATH），
+# 而 runner 上没有 Git Bash。下面两个类自己的夹具就走 `bash -lc`，在 Windows 上失败是平台能力缺口，不是执行范围的缺陷：
+# 它们仍然在 Linux 完整套件与 macOS 上执行，因此核心行为没有失去证据。
+WINDOWS_INAPPLICABLE_CLASSES = (
+    "CodingCapabilitiesTest",
+    "CodingCapabilitiesEdgeTest",
+)
+
+
+def required_classes(os_label: str):
+    """该平台必须真的执行过的类：Windows 上排除只依赖 POSIX shell 的编码能力夹具。"""
+    if os_label.startswith("windows"):
+        return tuple(
+            class_name
+            for class_name in SELECTED_CLASSES
+            if class_name not in WINDOWS_INAPPLICABLE_CLASSES
+        )
+    return SELECTED_CLASSES
+
+
 def parse_report(reports_dir: Path, class_name: str):
     report = reports_dir / ("TEST-fun.fengwk.kkstudio.harness.daemon.coding." + class_name + ".xml")
     if not report.is_file():
@@ -68,7 +88,7 @@ def main() -> int:
         if counts["failures"] or counts["errors"]:
             failures.append(f"{class_name}: failing cases on {os_label}")
 
-    for simple_name in SELECTED_CLASSES:
+    for simple_name in required_classes(os_label):
         parsed = parse_report(reports_dir, simple_name)
         if parsed is None:
             failures.append(f"{simple_name}: missing surefire report on {os_label}")

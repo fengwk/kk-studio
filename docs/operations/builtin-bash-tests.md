@@ -283,10 +283,15 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   因此「等待 EOF 的命令自然退出」不依赖调用方何时关闭写端，也不依赖 Windows 的句柄继承是否干净；POSIX 上 keeper 保留 JVM 默认的
   `SIGTERM` 处置，`exec` 因此把它复位为默认，命令可以注册自己的 `trap`；keeper 在命令 fork 完成之后才忽略 `SIGTERM`（忽略状态
   绝不进入命令），并由发布范围之前注册的收敛 hook 承担「温和信号 → 宽限 → 强杀 → 发布收敛结论」，与自然退出主路径 CAS 竞争。
+  「命令有没有被派生过」与「不再派生」在同一把锁内成立，因此「从未派生」是一条确定性的「本次调用没有任何成员」证明：许可超时、
+  工作目录不存在这类启动失败直接发布 `cleanup=true`，既不扫描也不向整组广播强杀（广播会打到 keeper 自己，让父进程把真实失败原因
+  看成「被信号杀掉」）。
 - **Windows 上必须显式指定 Git Bash。** 命令解析遵循 `CreateProcess` 的搜索顺序，系统目录永远先于 `PATH`，因此系统里存在
   WSL 时裸名 `bash` 会命中 `System32\bash.exe`（打印「no installed distributions」并以退出码 1 结束），命令一行都不会执行。
-  Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；测试侧显式挑选 Git Bash，找不到时以「缺少环境前置条件」跳过，
-  而不是把 WSL 的失败伪装成能力行为。
+  Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；`BashCapabilityTest` 显式挑选 Git Bash，找不到时以「缺少环境前置
+  条件」跳过，而不是把 WSL 的失败伪装成能力行为。CI 的 Windows runner 没有 Git Bash，因此依赖 `bash -lc` 的编码能力夹具
+  （`CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest`）只在该平台的矩阵之外执行——它们由 Linux 完整套件与 macOS 覆盖，
+  Windows 上只跑不依赖 POSIX shell 的类。
 - **命令不存在时的失败形态与平台有关。** POSIX 上命令进程在范围建立之后才 `exec`，失败发生在已建立的范围内；Windows 上首个
   进程必须先创建并归属 Job，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭、都带上命令名，
   调用方（`BashCapability`）对两者的终态都按失败处理。
@@ -309,20 +314,19 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   与 `target/classes`；合并作业先核对三份 class 文件逐字节一致（不一致会让 JaCoCo 按 class id 静默丢 session），再合并出
   报告并核对「七类必须全部出现在报告里」。
   跨平台数据不能与单平台数据混着报数：类文件一变，同一份 `jacoco.exec` 就不再对应同一个 class id，因此门禁数字只能来自同一
-  次矩阵的三份产物。最近一次真实三平台合并（run 36596508961）的合计是 **83.3%**；它之后又补了 `WindowsJobScope` 的包内可注入
-  kernel 绑定与失败分支/句柄释放计数用例、`PosixProcessGroupTest` 的会话夹具、`ProcessScope` 的 pid 复用核验与「keeper 先死、
-  后代还在」用例、helper 入口与许可预算用例，这些改动都改变了 class id。改动后的本地单平台（Linux，七类合计）实测为
-  **86.2%**：`ProcessScope` 81.3%、`ProcessScopeHelper` 73.0%、`PosixProcessGroup` 88.9%、`ProcessScopeState` 96.4%、
-  `WindowsJobScope` 91.2%、`WindowsCommandLine` 100%、`BashCapability` 91.8%。新的三平台合计必须由改动后的矩阵重新跑出来，
-  不能用旧数据或单平台数据声明达标。
-  仍缺的行只能由对应平台或异常时序提供：`ProcessScopeHelper` 的 `runWindows` 与 Windows 分派、`ProcessScope` 的 Windows Job
-  分支与 `WindowsJobScope` 余下的句柄路径（Windows runner），以及「信号被内核拒绝、调用线程被中断、helper 拒绝退出」这类
-  失败关闭分支与 `helperCoverageArguments`/`helperCoverageDirectory` 中「父进程没有代理」的守卫分支（只有不带代理运行时才成立）。
-  补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的补测，也不通过放宽阈值把它们变成绿色。
+  次矩阵的三份产物。矩阵会按平台裁剪要跑的类——依赖 POSIX shell 的编码能力夹具只在 Linux/macOS 上跑，Windows runner 上没有
+  Git Bash（见上面的平台说明）——门禁的类集合与这条裁剪一致。
+  当前已核实的数字来自单平台（Linux 完整套件，含 helper 数据）：七类合计 **86.5% (837/968)**，逐类为 `ProcessScope` 81.3%、
+  `ProcessScopeHelper` 74.7%、`PosixProcessGroup` 88.9%、`ProcessScopeState` 96.4%、`WindowsJobScope` 91.2%、
+  `WindowsCommandLine` 100%、`BashCapability` 91.8%。其余缺口是 Windows 专属分支（helper 的 `runWindows` 与 Windows 分派、
+  `ProcessScope` 的 Job 分支、`WindowsJobScope` 余下的句柄路径）与只在异常时序到达的失败关闭分支；它们是否被覆盖由三平台合并
+  给出，本文件不预写那个数字，也不通过放宽阈值把它们变成绿色。
 - **保活与身份核验是两件事。** 「keeper 先死、后代还在」时不能照着快照直接发信号：快照与强杀之间存在时间差，pid 可能已被复用。
   `ProcessScope` 因此对每个成员重新核验「仍然存活、启动时刻与快照一致、此刻仍属于本次进程组」之后才强杀，任一不成立就只报告未收敛。
   这条性质由 `ProcessScope` 的「keeper 被杀之后仍收敛」与「绝不向未核验进程发信号」两条用例守卫。
-
+  识别「组里还有谁」依赖 `/proc`，因此这条兜底只在 Linux/WSL 上成立：没有成员枚举能力时父进程只能如实报告未收敛，不可能在
+  没有身份信息的前提下逐个核验并强杀。这不是本能力承诺的场景——命令自然退出（含超时与取消）时收敛由 keeper 自己完成，只有
+  keeper 被外部强杀才轮到这条兜底；不可判定也绝不等于收敛（那会让收尾跳过强杀阶段）。
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
   在下一次调用重建存储；输出内容与失败终态都不受影响。
 - **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」

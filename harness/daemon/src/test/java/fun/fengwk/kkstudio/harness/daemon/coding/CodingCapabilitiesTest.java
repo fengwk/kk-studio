@@ -38,6 +38,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -628,16 +629,25 @@ class CodingCapabilitiesTest {
   /**
    * 验证输出体积永远不是终止进程或让调用失败的理由：远超 16 MiB 的输出仍然正常完成，退出码是权威事实。
    *
-   * <p>这是对旧 {@code OUTPUT_TOO_LARGE} 语义的显式反向断言。
+   * <p>这是对旧 {@code OUTPUT_TOO_LARGE} 语义的显式反向断言。payload 由纯 Java 夹具生成形状已知的输出，因此这里逐字节
+   * 精确：落盘全文必须从开始标记起逐字节等于声明的形状（内容、大小、行数都精确，没有「大致相等」的放宽）。用平台工具 （{@code seq}、{@code head -c}、{@code
+   * awk}）生成时输出形状取决于工具实现与登录 shell 的启动噪声，只能退化为宽容断言。 登录 shell 可能在 payload
+   * 之前打印自己的启动噪声，因此比对从开始标记起算——在被比对的那一段里没有宽容。
    */
   @Test
   void bashNeverFailsOrKillsProcessOnLargeOutputVolume() throws Exception {
+    int lines = 24_000;
+    int lineBytes = 1_000;
     BashCapability bash = bash(config());
     RecordingListener listener =
         invokeAsync(
             bash,
-            "{\"command\":\"seq 1 4000000\",\"workdir\":" + json(workspaceRoot.toString()) + "}",
-            Duration.ofSeconds(60));
+            "{\"command\":"
+                + json(payloadCommand(lines, lineBytes))
+                + ",\"workdir\":"
+                + json(workspaceRoot.toString())
+                + "}",
+            Duration.ofSeconds(120));
     assertTrue(listener.await());
     assertFalse(listener.result.error(), "输出体积不得导致调用失败：" + text(listener.result));
 
@@ -645,17 +655,73 @@ class CodingCapabilitiesTest {
         AbstractCodingCapability.OBJECT_MAPPER
             .readTree(listener.result.detailsJson())
             .path("textOutput");
-    // 远大于旧的 16 MiB 硬上限，且进程正常退出、计数完整。
     assertTrue(textOutput.path("totalBytes").asLong() > 16L * 1024 * 1024, textOutput.toString());
-    assertEquals(4000000, textOutput.path("totalLines").asLong());
-    assertTrue(
-        textOutput.path("captureTruncated").asBoolean()
-            || textOutput.path("path").asText().endsWith(".log"),
-        "大输出必须落本地 durable 全文：" + textOutput);
+    assertFalse(textOutput.path("captureTruncated").asBoolean(), "全文必须完整落盘：" + textOutput);
 
     Path published = Path.of(textOutput.path("path").asText());
     assertTrue(Files.isRegularFile(published));
-    assertEquals(4000000, Files.readAllLines(published).size(), "durable 全文必须保留全部行（未被体积截断）");
+    byte[] served = Files.readAllBytes(published);
+    int begin = indexOfPayloadStart(served);
+    assertTrue(begin >= 0, "落盘全文必须包含 payload 的开始标记：" + textOutput);
+    byte[] expected = LargeOutputFixtureMain.expectedPayload(lines, lineBytes);
+    assertEquals(expected.length, served.length - begin, "payload 之后的字节数必须精确等于声明的形状");
+    assertArrayEquals(
+        expected, Arrays.copyOfRange(served, begin, served.length), "落盘全文必须逐字节保留 payload");
+    assertEquals(served.length, textOutput.path("totalBytes").asLong(), "总字节必须与落盘内容一致");
+    assertEquals(
+        lineBreaks(served) + (served.length > 0 && !endsWithLineBreak(served) ? 1 : 0),
+        textOutput.path("totalLines").asLong(),
+        "总行数必须与落盘内容一致");
+  }
+
+  /** 用纯 Java 夹具生成形状已知的大输出：路径按 shell 语义加引号，payload 形状由夹具声明。 */
+  private static String payloadCommand(int lines, int lineBytes) {
+    return "'"
+        + Path.of(System.getProperty("java.home"), "bin", "java")
+        + "' -cp '"
+        + System.getProperty("java.class.path")
+        + "' "
+        + LargeOutputFixtureMain.class.getName()
+        + " "
+        + lines
+        + " "
+        + lineBytes;
+  }
+
+  private static int indexOfPayloadStart(byte[] served) {
+    byte[] marker = LargeOutputFixtureMain.BEGIN_MARKER.getBytes(StandardCharsets.UTF_8);
+    for (int start = 0; start + marker.length <= served.length; start++) {
+      boolean matched = true;
+      for (int index = 0; index < marker.length; index++) {
+        if (served[start + index] != marker[index]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        return start;
+      }
+    }
+    return -1;
+  }
+
+  /** 与 {@code OutputSpool} 相同的换行约定：CR、LF 与 CRLF 都只记一次换行。 */
+  private static long lineBreaks(byte[] served) {
+    long breaks = 0;
+    for (int index = 0; index < served.length; index++) {
+      byte value = served[index];
+      if (value == (byte) 0x0D) {
+        breaks++;
+      } else if (value == (byte) 0x0A && (index == 0 || served[index - 1] != (byte) 0x0D)) {
+        breaks++;
+      }
+    }
+    return breaks;
+  }
+
+  private static boolean endsWithLineBreak(byte[] served) {
+    byte last = served[served.length - 1];
+    return last == (byte) 0x0A || last == (byte) 0x0D;
   }
 
   /** 达到捕获预算只停止文件捕获并明确报告截断，命令本身仍必须跑完，退出码仍然有效。 */
