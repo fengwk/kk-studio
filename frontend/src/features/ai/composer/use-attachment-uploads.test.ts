@@ -683,9 +683,10 @@ describe('Attachment uploads lifecycle & safety', () => {
       expect(result.current.uploads).toHaveLength(0)
     })
 
-    it('retryComplete respects scope generation gate: cleans persisted entry for captured scope but does not pollute new scope UI', async () => {
+    it('retryComplete preserves unknown identity on scope switch so reload can recover attachment, and does not pollute new scope UI', async () => {
       // 测试意图：验证针对 scope-A 的 unknown upload 进行 retryComplete 时，若在途期间切换到 scope-B，
-      // complete 成功后必须清理原 scope-A 中的持久条目，但绝不能调用 patchUpload 污染 scope-B 的 UI 列表。
+      // 由于 READY 状态未能移交给当前 UI 与 composer draft，旧 scope-A 必须保留原 unknown identity 供下次恢复，
+      // 绝不误删 pending 记录，也绝不调用 deleteUpload 误删远端资源，且不污染 scope-B 的 UI。
       const scopeA = 'scope-retry-A'
       const scopeB = 'scope-retry-B'
 
@@ -709,7 +710,7 @@ describe('Attachment uploads lifecycle & safety', () => {
       })
 
       let currentScope = scopeA
-      const { result, rerender } = renderHook(() =>
+      const { result, rerender, unmount } = renderHook(() =>
         useAttachmentUploads({
           storageService: service,
           hashFile: async () => 'sha-1',
@@ -752,10 +753,92 @@ describe('Attachment uploads lifecycle & safety', () => {
         })
       })
 
-      // 验证：原 scopeA 的持久化 unknown 记录被正确清除
-      expect(loadUnknownUploads(scopeA)).toHaveLength(0)
+      // 核心验证 1：原 scopeA 的持久化 unknown 记录被完整保留供下次恢复，绝不提前误删！
+      const preserved = loadUnknownUploads(scopeA)
+      expect(preserved).toHaveLength(1)
+      expect(preserved[0].uploadId).toBe('upload-a-1')
 
-      // 关键验证：当前 scopeB 的 UI 列表绝未被旧响应污染
+      // 核心验证 2：远端资源绝未被 deleteUpload 释放
+      expect(service.deleteUpload).not.toHaveBeenCalled()
+
+      // 核心验证 3：当前 scopeB 的 UI 列表绝未被旧响应污染
+      expect(result.current.uploads).toHaveLength(0)
+
+      unmount()
+
+      // 核心验证 4：重新切回 scopeA 重新挂载，能正常从 pending 存储中恢复该条目
+      const { result: reloaded } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-1',
+          scope: scopeA,
+        }),
+      )
+      expect(reloaded.current.uploads).toHaveLength(1)
+      expect(reloaded.current.uploads[0].uploadId).toBe('upload-a-1')
+      expect(reloaded.current.uploads[0].status).toBe('complete_unknown')
+    })
+
+    it('retryComplete does not resurrect item if user removed it during in-flight complete', async () => {
+      // 测试意图：验证在 retryComplete 请求在途期间，若用户主动调用 removeUpload 移除了该附件，
+      // 请求成功后由于 uploads 中已无该条目，isStillActive 拦截生效，绝不能复活该条目
+      const scope = 'scope-user-cancel'
+      persistPendingUnknownUpload(scope, {
+        localId: 'local-cancel-1',
+        uploadId: 'upload-cancel-1',
+        filename: 'cancel.png',
+        mediaType: 'image/png',
+        sizeBytes: 5678,
+        sha256: 'sha-cancel',
+      })
+
+      let resolveSlowComplete!: (v: StorageUploadDTO) => void
+      const slowCompletePromise = new Promise<StorageUploadDTO>((resolve) => {
+        resolveSlowComplete = resolve
+      })
+
+      const service = createFakeStorageService({
+        completeUpload: vi.fn().mockImplementation(() => slowCompletePromise),
+      })
+
+      const { result } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-1',
+          scope,
+        }),
+      )
+
+      expect(result.current.uploads).toHaveLength(1)
+      act(() => {
+        void result.current.retryComplete('local-cancel-1')
+      })
+      expect(result.current.uploads[0].status).toBe('uploading')
+
+      // 用户在在途期间主动移除该上传项
+      act(() => {
+        result.current.releaseUpload('local-cancel-1')
+      })
+      expect(result.current.uploads).toHaveLength(0)
+
+      // 慢请求成功返回
+      await act(async () => {
+        resolveSlowComplete({
+          id: 'upload-cancel-1',
+          blobId: 'blob-cancel-1',
+          mediaKind: 'image',
+          state: 'READY',
+          presignedPut: null,
+          filename: 'cancel.png',
+          mediaType: 'image/png',
+          sizeBytes: 5678,
+          sha256: 'sha-cancel',
+          expiresAt: '2026-01-01T00:00:00Z',
+          createTime: '2026-01-01T00:00:00Z',
+        })
+      })
+
+      // 关键断言：已移除项绝不复活到 UI 中
       expect(result.current.uploads).toHaveLength(0)
     })
   })

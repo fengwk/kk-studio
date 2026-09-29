@@ -327,4 +327,99 @@ describe('useInteractionsController', () => {
     expect(result.current.isFetchingMore).toBe(false)
     expect(result.current.items).toHaveLength(1)
   })
+
+  it('same object + 两个延迟 nextPage 乱序真实回归：cursor/flag 严格由新代拥有，旧响应不污染', async () => {
+    // 测试意图：验证结构共享下外部 invalidate 返回 same object（引用相同），触发 generation 递增，
+    // 此时两个延迟的 loadMore 请求发生乱序返回（旧代在途迟于新代到达），
+    // 旧代响应绝不能覆盖新代的 cursor，旧代的 finally 绝不能干扰新代 flag，cursor/flag 严格由新代拥有。
+    let resolveSlowLoadMore1!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const slowLoadMore1Promise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+      resolveSlowLoadMore1 = resolve
+    })
+
+    let resolveSlowLoadMore2!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const slowLoadMore2Promise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+      resolveSlowLoadMore2 = resolve
+    })
+
+    const sameFirstPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(sameFirstPage) // 挂载首屏
+      .mockImplementationOnce(() => slowLoadMore1Promise) // loadMore 1 (旧代)
+      .mockResolvedValueOnce(sameFirstPage) // 外部 invalidate 触发 refetch (结构共享 same object)
+      .mockImplementationOnce(() => slowLoadMore2Promise) // loadMore 2 (新代)
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.nextCursor).toBe('cursor-page-2')
+
+    // 1. 发起旧代 loadMore 1 (在途挂起)
+    act(() => {
+      void result.current.loadMore()
+    })
+    expect(result.current.isFetchingMore).toBe(true)
+
+    // 2. 外部触发 invalidate，返回结构共享 same object，推动 dataUpdatedAt 推进 generation
+    await act(async () => {
+      await queryClient.invalidateQueries()
+    })
+    // 验证 flag 及时重置，旧代 generation 已被废弃
+    await waitFor(() => expect(result.current.isFetchingMore).toBe(false))
+
+    // 3. 在新世代下发起 loadMore 2 (在途挂起)
+    act(() => {
+      void result.current.loadMore()
+    })
+    expect(result.current.isFetchingMore).toBe(true)
+
+    // 4. 新代 loadMore 2 先完成返回
+    await act(async () => {
+      resolveSlowLoadMore2({ items: [mockItem2], nextCursor: 'cursor-page-3-new-generation' })
+      await slowLoadMore2Promise
+    })
+
+    // 验证新代已成功入库
+    expect(result.current.items).toHaveLength(2)
+    expect(result.current.items[1].interactionId).toBe('int-2')
+    expect(result.current.nextCursor).toBe('cursor-page-3-new-generation')
+    expect(result.current.isFetchingMore).toBe(false)
+
+    // 5. 旧代 loadMore 1 迟到返回
+    await act(async () => {
+      resolveSlowLoadMore1({
+        items: [{ ...mockItem1, interactionId: 'stale-int-from-gen1' }],
+        nextCursor: 'cursor-stale-gen1',
+      })
+      await slowLoadMore1Promise
+    })
+
+    // 关键断言：游标严格为新代游标，列表不包含旧代 item，isFetchingMore 不受旧代 finally 影响
+    expect(result.current.nextCursor).toBe('cursor-page-3-new-generation')
+    expect(result.current.items).toHaveLength(2)
+    expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-1', 'int-2'])
+    expect(result.current.isFetchingMore).toBe(false)
+  })
+
+  it('loadMore catch sets controlled error on active generation without unhandled rejection', async () => {
+    // 测试意图：验证 loadMore 发生异常时，调用返回的 Promise 正常 resolve 而非 unhandled rejection，
+    // 当前活跃世代正确写入受控 error，便于 UI 呈现错误横幅
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage)
+      .mockRejectedValueOnce(new Error('Network error on loadMore'))
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    // 调用方直接 void 调用，验证不会产生未捕获的 rejection
+    await act(async () => {
+      await expect(result.current.loadMore()).resolves.toBeUndefined()
+    })
+
+    expect(result.current.isError).toBe(true)
+    expect(result.current.error?.message).toBe('Network error on loadMore')
+    expect(result.current.isFetchingMore).toBe(false)
+  })
 })

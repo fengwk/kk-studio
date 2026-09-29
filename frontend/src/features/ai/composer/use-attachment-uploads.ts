@@ -557,16 +557,15 @@ export function useAttachmentUploads(options?: {
         isMountedRef.current
         && generationRef.current === capturedGeneration
         && scopeRef.current === capturedScope
+        && uploadsRef.current.some((u) => u.localId === localId && u.uploadId === capturedUploadId)
       )
 
       patchUpload(localId, { status: 'uploading', progress: 0.9 })
       try {
         const completed = await service.completeUpload(capturedUploadId)
-        // 原 scope 持久清理按原 identity 执行，防范旧条目残留
-        if (capturedScope) {
-          removeStoredUnknownUpload(capturedScope, localId)
-        }
-        // 作用域切换或组件卸载后，旧响应绝不污染新 UI
+        // 只有该 upload 仍由当前界面持有并成功移交 ready state 时清 pending；
+        // 如果用户切 scope、unmount 或已移除，旧 scope 成功保留原 unknown identity 供下次同 uploadId 幂等 read/complete 恢复！
+        // 绝不删除该 resource，勿把完成但未呈现看作可抛弃
         if (!isStillActive()) {
           return
         }
@@ -575,6 +574,9 @@ export function useAttachmentUploads(options?: {
           status: 'ready',
           progress: 1,
         })
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
+        }
       } catch (error) {
         if (isAmbiguousUploadOutcome(error)) {
           if (!isStillActive()) {
