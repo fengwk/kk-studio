@@ -121,7 +121,8 @@ class ToolProcessorCallbackTest {
 
   /** partial toolCallId 不匹配 request：协议破坏，确定性 FAILED(INVALID_PARTIAL)。 */
   @Test
-  void partialWithMismatchedToolCallIdFails() {    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+  void partialWithMismatchedToolCallIdFails() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("other-call"));

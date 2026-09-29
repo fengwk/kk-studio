@@ -248,7 +248,9 @@ class EventFrameCodecTest {
         IllegalArgumentException.class, () -> CODEC.event(THREAD_KEY, new Signal.Resync()));
   }
 
-  /** realtime 帧对 ToolPartial 只做原样透传：data 就是 runtime codec 的 canonical Tool partial JSON，eventId 不丢失。 */
+  /**
+   * realtime 帧对 ToolPartial 只做原样透传：data 就是 runtime codec 的 canonical Tool partial JSON，eventId 不丢失。
+   */
   @Test
   void passesThroughCanonicalToolPartialData() {
     RealtimeEvent.ToolPartial partial =
