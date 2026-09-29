@@ -219,8 +219,7 @@ function registerUnloadRelease(): void {
  * 若会话已被其他活页面认领，标记重载并刷新页面，避免跨页面覆盖。
  */
 export function handlePageshow(event?: Event | { persisted?: boolean }): void {
-  const isBfCache = Boolean(event && 'persisted' in event && event.persisted)
-  if (!isBfCache) {
+  if (!event || !('persisted' in event) || event.persisted !== true) {
     return
   }
 

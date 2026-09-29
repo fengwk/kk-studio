@@ -282,9 +282,6 @@ export function ProjectDetailPage({
   const handleStopIssue = async () => {
     if (!issueDetail) return
     const targetIssueId = issueDetail.issue.id
-    if (inflightIssuesRef.current.has(targetIssueId)) {
-      return
-    }
     const targetVersion = issueDetail.issue.version
     const requestKey = createUuid()
     const action: PendingIssueAction = {
