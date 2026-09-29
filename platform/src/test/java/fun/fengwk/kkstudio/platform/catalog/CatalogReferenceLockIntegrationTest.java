@@ -144,6 +144,41 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
+  void createAgentCannotLeaveSecondSkillDanglingAfterPartialManifestRemoval() throws Exception {
+    String suffix = suffix();
+    Model model = model("skill-second-" + suffix);
+    String packageName = "pkg" + suffix;
+    insertPackage(packageName, "alpha", "zeta");
+    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    create.getConfig().setSkills(List.of(skill(packageName, "alpha"), skill(packageName, "zeta")));
+
+    Outcome<AgentDefinitionDTO> created =
+        race(
+            () -> definitionService.createAgent(create),
+            () -> {
+              skillPackages.lockPackage(packageName);
+              return null;
+            },
+            () -> {
+              replaceManifest(packageName, "alpha");
+              return null;
+            });
+
+    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    if (persisted != null && persisted.getConfigJson().contains("\"name\": \"zeta\"")) {
+      assertNotNull(skillPackages.getPackage(packageName).findSkill("zeta"));
+    }
+    assertTrue(created.value() != null || created.error() instanceof AiValidationException);
+    if (persisted != null) {
+      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+    }
+    if (skillPackages.getPackage(packageName) != null) {
+      skillPackages.deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
+    }
+    model.delete();
+  }
+
+  @Test
   void createAgentCannotLeaveDanglingMcpToolAfterDiscoverDeletesIt() throws Exception {
     String suffix = suffix();
     Model model = model("mcp-create-" + suffix);
@@ -178,6 +213,75 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
         created.value() != null
             || created.error() instanceof AiValidationException
             || persisted == null);
+    mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
+    model.delete();
+  }
+
+  @Test
+  void createAgentCannotLeaveNonMinimalToolDangling() throws Exception {
+    String suffix = suffix();
+    Model model = model("mcp-second-" + suffix);
+    McpServerDTO server = mcp("two" + suffix.substring(Math.max(0, suffix.length() - 8)));
+    insertTool(server.getName(), "alpha");
+    insertTool(server.getName(), "zeta");
+    String alpha = "mcp_" + server.getName() + "_alpha";
+    String zeta = "mcp_" + server.getName() + "_zeta";
+    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    create.getConfig().setTools(List.of(alpha, zeta));
+
+    Outcome<AgentDefinitionDTO> created =
+        race(
+            () -> definitionService.createAgent(create),
+            () -> {
+              mcpServers.getForUpdate(server.getName());
+              return null;
+            },
+            () -> {
+              jdbc.update("delete from mcp_tool where name = ?", zeta);
+              return null;
+            });
+
+    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    if (persisted != null && persisted.getConfigJson().contains(zeta)) {
+      assertTrue(mcpServers.getTool(zeta).isPresent(), () -> persisted.getConfigJson());
+    }
+    assertTrue(
+        created.value() != null
+            || created.error() instanceof AiValidationException
+            || persisted == null);
+    if (persisted != null) {
+      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+    }
+    mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
+    model.delete();
+  }
+
+  @Test
+  void createAgentCannotCommitWhenFindToolDisappearsBeforeReread() throws Exception {
+    String suffix = suffix();
+    Model model = model("mcp-gone-" + suffix);
+    McpServerDTO server = mcp("gone" + suffix.substring(Math.max(0, suffix.length() - 8)));
+    insertTool(server.getName(), "critical");
+    String toolName = "mcp_" + server.getName() + "_critical";
+    AgentDefinitionCreateDTO create = agent(model.ref(), "agent-" + suffix);
+    create.getConfig().setTools(List.of(toolName));
+
+    race(
+        () -> definitionService.createAgent(create),
+        () -> {
+          mcpServers.getForUpdate(server.getName());
+          return null;
+        },
+        () -> {
+          jdbc.update("delete from mcp_tool where name = ?", toolName);
+          return null;
+        });
+
+    AgentDefinition persisted = definitionRepository.getByName(create.getName());
+    if (persisted != null && persisted.getConfigJson().contains(toolName)) {
+      assertTrue(mcpServers.getTool(toolName).isPresent());
+      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+    }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
   }

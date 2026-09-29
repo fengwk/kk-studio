@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -198,6 +199,81 @@ class AgentDefinitionReferenceResolverTest {
         () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha_fetch")));
   }
 
+  /** 测试意图：同一 Package 的第二个 Skill 在共享锁后被移除时，不能只因第一个仍存在就接受引用。 */
+  @Test
+  void rejectsSecondSkillRemovedAfterShareLock() {
+    SkillCatalogQueryService skills = mock(SkillCatalogQueryService.class);
+    SkillPackage before = packageWith("tools", "alpha", "zeta");
+    SkillPackage after = packageWith("tools", "alpha");
+    when(skills.getPackage("tools")).thenReturn(before);
+    when(skills.lockPackageForShare("tools")).thenReturn(after);
+    AgentDefinitionReferenceResolver resolver =
+        new AgentDefinitionReferenceResolver(
+            mock(AgentDefinitionRepository.class),
+            mock(AgentModelRepository.class),
+            skills,
+            mock(McpServerRepository.class),
+            mock(RuntimeToolCatalog.class));
+
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            resolver.requireReferencedLifecycles(
+                List.of(skillRef("tools", "alpha"), skillRef("tools", "zeta")), List.of()));
+  }
+
+  /** 测试意图：同一 Server 上字典序较大的工具在共享锁后消失时，不能只复核较小的工具名。 */
+  @Test
+  void rejectsNonMinimalToolRemovedAfterShareLock() {
+    McpServerRepository servers = mock(McpServerRepository.class);
+    RuntimeToolCatalog tools = mock(RuntimeToolCatalog.class);
+    ToolContribution alpha = tool("platform.mcp", "alpha");
+    ToolContribution zeta = tool("platform.mcp", "zeta");
+    when(tools.findTool("mcp_alpha")).thenReturn(Optional.of(alpha));
+    when(tools.findTool("mcp_zeta")).thenReturn(Optional.of(zeta));
+    when(servers.getTool("mcp_alpha")).thenReturn(Optional.of(mcpTool("mcp_alpha", "srv")));
+    when(servers.getTool("mcp_zeta")).thenReturn(Optional.of(mcpTool("mcp_zeta", "srv")));
+    when(servers.lockForShare("srv")).thenReturn(Optional.of(mcpServer("srv")));
+    when(servers.lockToolForShare("mcp_alpha"))
+        .thenReturn(Optional.of(mcpTool("mcp_alpha", "srv")));
+    when(servers.lockToolForShare("mcp_zeta")).thenReturn(Optional.empty());
+    AgentDefinitionReferenceResolver resolver =
+        new AgentDefinitionReferenceResolver(
+            mock(AgentDefinitionRepository.class),
+            mock(AgentModelRepository.class),
+            mock(SkillCatalogQueryService.class),
+            servers,
+            tools);
+
+    assertThrows(
+        AiValidationException.class,
+        () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha", "mcp_zeta")));
+  }
+
+  /** 测试意图：锁前目录能解析、锁后 findTool 消失时必须 fail closed，不能把缺失贡献当成 builtin/plugin 跳过。 */
+  @Test
+  void rejectsFindToolThatDisappearsAfterShareLock() {
+    McpServerRepository servers = mock(McpServerRepository.class);
+    RuntimeToolCatalog tools = mock(RuntimeToolCatalog.class);
+    ToolContribution contribution = tool("platform.mcp", "fetch");
+    when(tools.findTool("mcp_alpha_fetch")).thenReturn(Optional.of(contribution), Optional.empty());
+    when(servers.getTool("mcp_alpha_fetch"))
+        .thenReturn(Optional.of(mcpTool("mcp_alpha_fetch", "alpha")));
+    when(servers.lockForShare("alpha")).thenReturn(Optional.of(mcpServer("alpha")));
+    AgentDefinitionReferenceResolver resolver =
+        new AgentDefinitionReferenceResolver(
+            mock(AgentDefinitionRepository.class),
+            mock(AgentModelRepository.class),
+            mock(SkillCatalogQueryService.class),
+            servers,
+            tools);
+
+    assertThrows(
+        AiValidationException.class,
+        () -> resolver.requireReferencedLifecycles(List.of(), List.of("mcp_alpha_fetch")));
+    verify(servers).lockForShare("alpha");
+  }
+
   private static AgentDefinitionReferenceResolver resolver() {
     return new AgentDefinitionReferenceResolver(
         mock(AgentDefinitionRepository.class),
@@ -207,10 +283,11 @@ class AgentDefinitionReferenceResolverTest {
         mock(RuntimeToolCatalog.class));
   }
 
-  private static SkillPackage packageWith(String packageName, String skillName) {
+  private static SkillPackage packageWith(String packageName, String... skillNames) {
     SkillPackage skillPackage = new SkillPackage();
     skillPackage.setPackageName(packageName);
-    skillPackage.setSkills(List.of(new SkillManifestEntry(skillName, skillName)));
+    skillPackage.setSkills(
+        Arrays.stream(skillNames).map(name -> new SkillManifestEntry(name, name)).toList());
     return skillPackage;
   }
 

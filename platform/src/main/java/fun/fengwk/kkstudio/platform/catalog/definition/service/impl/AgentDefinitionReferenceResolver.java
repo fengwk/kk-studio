@@ -83,43 +83,52 @@ final class AgentDefinitionReferenceResolver {
   }
 
   /**
-   * 在任何 Agent 行锁之前，按 canonical name 升序共享锁定被引用的 Skill package 与 MCP server，并重读存在性。
+   * 在任何 Agent 行锁之前，按 canonical name 升序共享锁定被引用的 Skill package 与 MCP server，并重读全部引用。
    *
-   * <p>MCP 归属只认 {@code platform.mcp} 贡献身份。锁前解析出的 tool→server 映射在共享锁之后必须仍然相同且工具行存在； builtin/plugin
-   * 工具没有 MCP 行，不取 server 锁。
+   * <p>锁前收集每个 package 的全部 Skill、每个 MCP server 的全部工具。父行锁按稳定顺序各取一次。锁后逐项重查：Skill 必须仍在
+   * manifest；每个工具必须再次由目录解析为 {@code platform.mcp}，且工具行仍属于锁前的 server。目录解析消失时 fail closed。
+   * builtin/plugin 只有在锁前已经解析到明确的非 MCP 贡献时才跳过，不按名字猜测。
    */
   void requireReferencedLifecycles(List<SkillRefDTO> skills, List<String> toolNames) {
-    Map<String, String> skillNames = skillNames(skills);
-    Map<String, String> mcpServers = mcpServers(toolNames);
+    Map<String, TreeSet<String>> skillNames = skillNames(skills);
+    Map<String, TreeSet<String>> mcpServers = mcpServers(toolNames);
     for (String packageName : new TreeSet<>(skillNames.keySet())) {
       SkillPackage locked = skillCatalogQueryService.lockPackageForShare(packageName);
-      String skillName = skillNames.get(packageName);
-      if (locked == null || locked.findSkill(skillName) == null) {
-        throw new AiValidationException(
-            SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
+      for (String skillName : skillNames.get(packageName)) {
+        if (locked == null || locked.findSkill(skillName) == null) {
+          throw new AiValidationException(
+              SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
+        }
       }
     }
     for (String serverName : new TreeSet<>(mcpServers.keySet())) {
-      String toolName = mcpServers.get(serverName);
       McpServer locked =
           mcpServerRepository
               .lockForShare(serverName)
               .orElseThrow(
                   () ->
-                      new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName));
-      McpTool tool =
-          mcpServerRepository
-              .lockToolForShare(toolName)
-              .filter(candidate -> serverName.equals(candidate.getServerName()))
-              .orElse(null);
-      if (tool == null || !serverName.equals(locked.getName())) {
-        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+                      new AiValidationException(
+                          TOOL_RESOURCE,
+                          "unknown agent tool: " + mcpServers.get(serverName).first()));
+      for (String toolName : mcpServers.get(serverName)) {
+        ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
+        McpTool tool =
+            mcpServerRepository
+                .lockToolForShare(toolName)
+                .filter(candidate -> serverName.equals(candidate.getServerName()))
+                .orElse(null);
+        if (contribution == null
+            || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())
+            || tool == null
+            || !serverName.equals(locked.getName())) {
+          throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+        }
       }
     }
   }
 
-  private Map<String, String> skillNames(List<SkillRefDTO> skills) {
-    Map<String, String> names = new LinkedHashMap<>();
+  private Map<String, TreeSet<String>> skillNames(List<SkillRefDTO> skills) {
+    Map<String, TreeSet<String>> names = new LinkedHashMap<>();
     if (skills == null || skills.isEmpty()) {
       return names;
     }
@@ -128,13 +137,13 @@ final class AgentDefinitionReferenceResolver {
       String identity = ref == null ? "null" : ref.getPackageName() + "/" + ref.getName();
       SkillPackage pkg =
           ref == null ? null : skillCatalogQueryService.getPackage(ref.getPackageName());
-      if (pkg == null || pkg.findSkill(ref.getName()) == null) {
+      if (ref == null || pkg == null || pkg.findSkill(ref.getName()) == null) {
         if (!missing.contains(identity)) {
           missing.add(identity);
         }
         continue;
       }
-      names.putIfAbsent(ref.getPackageName(), ref.getName());
+      names.computeIfAbsent(ref.getPackageName(), ignored -> new TreeSet<>()).add(ref.getName());
     }
     if (!missing.isEmpty()) {
       missing.sort(String::compareTo);
@@ -144,24 +153,24 @@ final class AgentDefinitionReferenceResolver {
     return names;
   }
 
-  private Map<String, String> mcpServers(List<String> toolNames) {
-    Map<String, String> servers = new LinkedHashMap<>();
+  private Map<String, TreeSet<String>> mcpServers(List<String> toolNames) {
+    Map<String, TreeSet<String>> servers = new LinkedHashMap<>();
     if (toolNames == null || toolNames.isEmpty()) {
       return servers;
     }
     for (String toolName : toolNames) {
       ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
-      if (contribution == null || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())) {
+      if (contribution == null) {
+        throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+      }
+      if (!MCP_CONTRIBUTOR.equals(contribution.id().contributorId())) {
         continue;
       }
       McpTool tool = mcpServerRepository.getTool(toolName).orElse(null);
       if (tool == null || tool.getServerName() == null) {
         throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
       }
-      String previous = servers.putIfAbsent(tool.getServerName(), toolName);
-      if (previous != null && !previous.equals(toolName)) {
-        servers.put(tool.getServerName(), previous.compareTo(toolName) <= 0 ? previous : toolName);
-      }
+      servers.computeIfAbsent(tool.getServerName(), ignored -> new TreeSet<>()).add(toolName);
     }
     return servers;
   }
