@@ -626,7 +626,7 @@ complete/stage 在「写对象 + 绑定」的整个窗口独占持锁，后台�
 新建会话、close 释放锁并关闭会话；锁必须在任何业务事务之前取得，S3 I/O 依然不进入数据库事务。
 
 服务端内容统一调用 `stage(InputStream, maxBytes)`：入口显式拒绝活动事务，先在本地做有界
-spool 并单遍计算 size/SHA-256，再以短事务登记 PENDING upload 和 candidate；随后在操作锁内、
+spool 并单遍计算 size/SHA-256，随后在 upload 操作锁内以短事务登记 PENDING upload 和 candidate，再在
 事务外执行 PUT、checksum HEAD、probe 与 copy，最后复用 complete 的去重绑定。
 因此对象写入后的 crash、媒体校验失败、去重落败和业务消费回滚都保留可由既有
 cleanup request/lease 回收的 upload 证据。
