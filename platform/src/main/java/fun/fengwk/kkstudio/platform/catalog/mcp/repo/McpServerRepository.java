@@ -59,7 +59,7 @@ public interface McpServerRepository {
   /**
    * 物理删除该 server 的全部工具行。
    *
-   * <p>删除前先 {@code FOR UPDATE} 父 server，使工具替换与 Agent 引用的 {@code FOR SHARE} 互斥。
+   * <p>调用方事务必须已经以 {@code FOR UPDATE} 持有父 server。本方法不再加锁。
    */
   void deleteTools(String serverName);
 

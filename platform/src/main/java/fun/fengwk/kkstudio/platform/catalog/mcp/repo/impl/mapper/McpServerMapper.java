@@ -135,14 +135,7 @@ public interface McpServerMapper extends BaseMapper {
   @Select("select count(*) from mcp_tool where server_name = #{serverName}")
   int countTools(@Param("serverName") String serverName);
 
-  @Delete(
-      """
-      with locked_server as (
-          select name from mcp_server where name = #{serverName} for update
-      )
-      delete from mcp_tool
-      where server_name in (select name from locked_server)
-      """)
+  @Delete("delete from mcp_tool where server_name = #{serverName}")
   int deleteTools(@Param("serverName") String serverName);
 
   @Insert(

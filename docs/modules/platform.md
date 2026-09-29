@@ -454,7 +454,7 @@ timeoutMillis、discoveryStatus、toolCount、version、时间），URL 与 head
 
 显式发现在请求线程同步完成：事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
 `tools/list` 与 schema/name 校验，再在短事务中 `SELECT ... FOR UPDATE` 锁 server、校验
-CAS version 并整体物理替换目录——清空工具行的语句再次 `FOR UPDATE` 父 server，再写入本次发现结果，没有
+CAS version 并整体物理替换目录——先清空该 server 的全部工具行，再写入本次发现结果，没有
 tombstone、修订号或 `available` 标记。任一步失败都完整保留旧工具行：
 
 - 版本 CAS 不一致抛出 version conflict；
