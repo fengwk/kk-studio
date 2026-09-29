@@ -348,9 +348,11 @@ Platform 在 `fun.fengwk.kkstudio.platform.plugin.resource` 包中提供了开�
      以及 IPv6 ULA（fc00::/7）、文档段（2001:db8::/32）、Teredo（2001::/32）、6to4（2002::/16）、
      NAT64（0064:ff9b::/32）和内嵌内网 IPv4 的 IPv4-mapped/compatible 地址全部拒绝；解析出的地址中
      任一条不属于公网即整体失败，杜绝部分公网放行。
-   - **传输与预算控制**：底层基于 JDK `HttpClient` 的 `JdkRemoteMediaTransport` 固定
-     `Redirect.NEVER`（3xx 直接判定失败，杜绝跳转绕过地址准入）；单次连接超时受 `connect-timeout`
-     约束，整体响应与读取期限受 `request-timeout` 约束。`Content-Length` 与实际读取字节数双向校验，
+   - **地址钉扎（DNS pinning）**：`PublicAddressDnsResolver` 在建立连接时校验全部解析地址，并将同一批
+     公网 IP 交给连接层，不进行第二次系统 DNS 解析。HTTP Host、TLS SNI 和证书主机名校验仍使用原主机名。
+   - **传输与预算控制**：GET 使用 Apache HttpClient5 `HttpRemoteMediaTransport`，禁用自动重定向和重试；
+     预签名 PUT 使用 JDK `HttpClient` 直传可信存储端点，不施加公网地址限制。连接受 `connect-timeout`
+     约束，响应等待与流式读取受超时及读取看门狗约束。`Content-Length` 与实际读取字节数双向校验，
      声明超出 `max-bytes`（默认 256 MiB，硬上限 1 GiB）或实际读取超限均立即失败。
    - **流式落盘与权威嗅探**：内容边流式写临时文件（默认位于 `java.io.tmpdir`，可通过 `temp-directory`
      配置绝对路径）边计算 SHA-256 摘要，不把大媒体读入堆内存。媒体类型由 `MediaTypeSniffer` 优先
@@ -635,8 +637,8 @@ Platform Plugin 不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
 MIME sniff、size budget 与 SHA-256，落库走 `StorageUploadService.reserve` → 预签名 PUT 直传 → `complete`，Tool terminal 返回 `blob-upload:<uploadId>`。之后仍由
 同一个 `ToolResultFinalizer` 和
 `GlobalStorageToolResultHistoryMaterializer` 完成全量校验与 owner 原子转移，不建立
-Plugin 旁路。第三方下载固定禁用自动 redirect；每一跳都必须是 HTTPS、通过 DNS/IP
-private-network 拒绝并受 response/time/size budget 约束。这样 2K 视频和长音频不进入 JVM
+Plugin 旁路。第三方下载只接受 HTTPS，禁用自动重定向和重试；校验后的公网 IP 直接用于连接，
+不再二次解析，并受 response/time/size budget 约束。这样 2K 视频和长音频不进入 JVM
 大数组，也不会把短期第三方 URL 写进历史。
 
 ## Environment
