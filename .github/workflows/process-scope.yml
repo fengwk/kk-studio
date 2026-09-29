@@ -62,10 +62,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-            -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
-            -Dkk-studio.process-scope.helper-coverage=true \
-            -Dsurefire.failIfNoSpecifiedTests=false
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Linux 跑完整 daemon 套件：执行范围的行为散布在 bash 能力与编码能力的边界用例里，只挑几个类会让覆盖率与真实
+            # 覆盖面脱节（本机完整套件里 BashCapability 比 CI 的局部运行高约 5 个百分点）。
+            env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
+              -Dkk-studio.process-scope.helper-coverage=true
+          else
+            # Windows/macOS 跑全部与执行范围相关的类（含新增的 State/Posix/helper 失败去向用例），helper 覆盖率同样打开。
+            env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dkk-studio.process-scope.helper-coverage=true \
+              -Dsurefire.failIfNoSpecifiedTests=false
+          fi
       # 验收不允许被跳过、也不允许被漏跑：按用例名核对，数量断言会被新增用例弄陈旧。
       - name: Assert every selected case really ran
         shell: bash

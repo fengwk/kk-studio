@@ -8,6 +8,7 @@ import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -350,32 +351,52 @@ final class ProcessScope implements AutoCloseable {
   }
 
   /**
-   * keeper 已经退出之后的收敛：组 id 可能已经被复用，因此绝不广播，而是「先确认此刻属于本组、再逐个强杀」，直到没有活着的成员。
+   * keeper 已经退出之后的收敛：组 id 与 pid 都可能已经被系统复用，因此绝不广播，而是「重新核验身份之后逐个强杀」，直到没有 活着的成员。
    *
-   * <p>只做只读确认会把「keeper 先死、后代还在」当成失败并留下资源；这里把这类成员也收敛掉。没有枚举能力的平台（非 Linux）只能 退回过读确认：组不存在即收敛，否则如实报告未收敛。
+   * <p>只做只读确认会把「keeper 先死、后代还在」当成失败并留下资源；但照着快照直接发信号又可能杀到一个复用了同一个 pid 的无关
+   * 进程。这里两者都不做：每个成员在发信号之前都要重新确认「它还活着、它仍然属于本次范围、它的启动时刻与快照一致」，任何一条 不成立就不发信号。不能枚举的平台（非
+   * Linux）与不可判定的扫描都退回过读确认：组不存在即收敛，否则如实报告未收敛。
    */
   private boolean convergedAfterHelperExit() {
-    if (!PosixProcessGroup.canEnumerateMembers()) {
-      return !PosixProcessGroup.hasLiveMember(scopeId, PosixProcessGroup.NO_PROCESS);
-    }
     long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(CONVERGENCE_BUDGET_MILLIS);
     while (true) {
-      long[] members = PosixProcessGroup.liveMembers(scopeId, PosixProcessGroup.NO_PROCESS);
-      if (members.length == 0) {
+      List<PosixProcessGroup.GroupMember> members =
+          PosixProcessGroup.membersSnapshot(scopeId, PosixProcessGroup.NO_PROCESS);
+      if (members == null) {
+        return !PosixProcessGroup.hasLiveMember(scopeId, PosixProcessGroup.NO_PROCESS);
+      }
+      if (members.isEmpty()) {
         return true;
       }
-      if (members[0] < 0) {
-        // 枚举不可判定：不向任何 pid 发信号，也绝不当成收敛。
-        return false;
-      }
-      for (long member : members) {
-        PosixProcessGroup.signalProcess(member, PosixProcessGroup.SIGKILL);
+      for (PosixProcessGroup.GroupMember member : members) {
+        killVerifiedMember(member);
       }
       if (System.nanoTime() >= deadline) {
         return false;
       }
       sleepQuietly(POLL_INTERVAL_MILLIS);
     }
+  }
+
+  /**
+   * 强制结束一个成员，但只在它的身份被重新核验通过时动手。
+   *
+   * <p>快照与强杀之间存在时间差，pid 可能已经被回收并分配给别的进程；因此这里同时核验「所属进程组仍然是本次范围」与 「启动时刻与快照一致」——前者排除同 pid 换了组的情况，后者排除同
+   * pid 换了进程的情况。核验不通过就不发信号：宁可报告未收敛， 也绝不杀错进程。
+   */
+  void killVerifiedMember(PosixProcessGroup.GroupMember member) {
+    ProcessHandle handle = ProcessHandle.of(member.pid()).orElse(null);
+    if (handle == null) {
+      return;
+    }
+    Instant start = handle.info().startInstant().orElse(null);
+    if (start == null || !start.equals(member.start())) {
+      return;
+    }
+    if (PosixProcessGroup.processGroupOf(member.pid()) != scopeId) {
+      return;
+    }
+    handle.destroyForcibly();
   }
 
   /**

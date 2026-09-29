@@ -62,6 +62,20 @@ class BashCapabilityTest {
     executor.shutdownNow();
   }
 
+  /** 大到无法表示的超时预算等价于「没有 deadline」，绝不能因为算术溢出退化成立即超时。 */
+  @Test
+  void unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout() throws Exception {
+    CodingToolsConfig config = config();
+    String arguments =
+        "{\"command\":\"printf 'survives-overflow\\n'\",\"workdir\":" + json(workspaceRoot) + "}";
+    for (Duration enormous :
+        List.of(Duration.ofSeconds(Long.MAX_VALUE / 2), Duration.ofNanos(Long.MAX_VALUE / 2))) {
+      EnvironmentCapabilityResult result = invoke(bash(config), arguments, enormous);
+      assertFalse(result.error(), "超时预算溢出不得退化成立即超时：" + text(result));
+      assertTrue(text(result).contains("survives-overflow"), text(result));
+    }
+  }
+
   /** 超时必须保留已捕获输出并明确区分超时与退出码：小输出仍内联返回，且收尾不产生任何 durable 或残留中转文件。 */
   @Test
   void timeoutKeepsCapturedOutputWithoutLeavingStagingResidue() throws Exception {

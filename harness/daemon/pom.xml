@@ -103,6 +103,9 @@
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
                                         <exclude>META-INF/INDEX.LIST</exclude>
+                                        <!-- 交付声明只由下面的 IncludeResourceTransformer 追加一份；留在这里会让「重复 verify」时的输入
+                                             （上一轮已经打包好声明的 jar）与本轮的声明撞成 duplicate entry。 -->
+                                        <exclude>META-INF/THIRD_PARTY_NOTICES</exclude>
                                         <!-- 多份 module-info 合并会互相覆盖；Daemon 运行在 unnamed module 中。 -->
                                         <exclude>module-info.class</exclude>
                                         <exclude>META-INF/versions/**/module-info.class</exclude>
