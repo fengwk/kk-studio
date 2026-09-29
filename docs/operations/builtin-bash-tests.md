@@ -289,9 +289,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 - **Windows 上必须显式指定 Git Bash。** 命令解析遵循 `CreateProcess` 的搜索顺序，系统目录永远先于 `PATH`，因此系统里存在
   WSL 时裸名 `bash` 会命中 `System32\bash.exe`（打印「no installed distributions」并以退出码 1 结束），命令一行都不会执行。
   Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；`BashCapabilityTest` 显式挑选 Git Bash，找不到时以「缺少环境前置
-  条件」跳过，而不是把 WSL 的失败伪装成能力行为。CI 的 Windows runner 没有 Git Bash，因此依赖 `bash -lc` 的编码能力夹具
-  （`CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest`）只在该平台的矩阵之外执行——它们由 Linux 完整套件与 macOS 覆盖，
-  Windows 上只跑不依赖 POSIX shell 的类。
+  条件」跳过，而不是把 WSL 的失败伪装成能力行为。CI 的 Windows runner 自带 Git Bash（矩阵自己的 `shell: bash` 用的就是它），
+  因此该平台照常验收命令执行；只有那两个用**裸名** `bash` 的遗留编码能力夹具（`CodingCapabilitiesTest`、
+  `CodingCapabilitiesEdgeTest`）不参与 Windows 腿——它们不是执行范围的用例，仍由 Linux 完整套件与 macOS 覆盖。
 - **命令不存在时的失败形态与平台有关。** POSIX 上命令进程在范围建立之后才 `exec`，失败发生在已建立的范围内；Windows 上首个
   进程必须先创建并归属 Job，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭、都带上命令名，
   调用方（`BashCapability`）对两者的终态都按失败处理。
@@ -314,13 +314,15 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   与 `target/classes`；合并作业先核对三份 class 文件逐字节一致（不一致会让 JaCoCo 按 class id 静默丢 session），再合并出
   报告并核对「七类必须全部出现在报告里」。
   跨平台数据不能与单平台数据混着报数：类文件一变，同一份 `jacoco.exec` 就不再对应同一个 class id，因此门禁数字只能来自同一
-  次矩阵的三份产物。矩阵会按平台裁剪要跑的类——依赖 POSIX shell 的编码能力夹具只在 Linux/macOS 上跑，Windows runner 上没有
-  Git Bash（见上面的平台说明）——门禁的类集合与这条裁剪一致。
-  当前已核实的数字来自单平台（Linux 完整套件，含 helper 数据）：七类合计 **86.5% (837/968)**，逐类为 `ProcessScope` 81.3%、
-  `ProcessScopeHelper` 74.7%、`PosixProcessGroup` 88.9%、`ProcessScopeState` 96.4%、`WindowsJobScope` 91.2%、
-  `WindowsCommandLine` 100%、`BashCapability` 91.8%。其余缺口是 Windows 专属分支（helper 的 `runWindows` 与 Windows 分派、
-  `ProcessScope` 的 Job 分支、`WindowsJobScope` 余下的句柄路径）与只在异常时序到达的失败关闭分支；它们是否被覆盖由三平台合并
-  给出，本文件不预写那个数字，也不通过放宽阈值把它们变成绿色。
+  次矩阵的三份产物。矩阵按平台裁剪要跑的类（用裸名 `bash` 的遗留编码能力夹具只在 Linux/macOS 上跑），断言脚本的平台要求与
+  这条裁剪一致；Windows 腿另外点名要求 `BashCapabilityTest` 的「命令的 stdin 是确定性 EOF」与「超时预算溢出不退化成立即超时」
+  两条必须真跑且不得跳过，这样「Windows 的命令执行由真正的 Git Bash 承担」是被锁住的实证而不是默认假设。
+  三平台合并的实测结果是七类合计 **90.2% (873/968)**，逐类为 `ProcessScope` 86.5%、`ProcessScopeHelper` 83.7%、
+  `PosixProcessGroup` 94.4%、`ProcessScopeState` 96.4%、`WindowsJobScope` 93.4%、`WindowsCommandLine` 100%、
+  `BashCapability` 92.2%。同一份代码单平台（Linux 完整套件）是 86.5%，差额正是只有对应平台才会执行的分支——Windows 的 Job
+  路径（helper 的 `runWindows` 与 Windows 分派、`ProcessScope` 的 Job 分支、`WindowsJobScope` 的句柄路径）与 macOS 上的
+  非 Linux 判定。剩下的未覆盖行是「信号被内核拒绝、调用线程被中断、helper 拒绝退出」这类只在异常时序到达的失败关闭分支，
+  门禁不去掩盖它们，也不通过放宽阈值换绿色。
 - **保活与身份核验是两件事。** 「keeper 先死、后代还在」时不能照着快照直接发信号：快照与强杀之间存在时间差，pid 可能已被复用。
   `ProcessScope` 因此对每个成员重新核验「仍然存活、启动时刻与快照一致、此刻仍属于本次进程组」之后才强杀，任一不成立就只报告未收敛。
   这条性质由 `ProcessScope` 的「keeper 被杀之后仍收敛」与「绝不向未核验进程发信号」两条用例守卫。
