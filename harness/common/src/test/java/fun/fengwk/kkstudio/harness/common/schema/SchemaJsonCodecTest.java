@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -109,5 +112,16 @@ class SchemaJsonCodecTest {
         () ->
             codec.decode(
                 "{\"type\":\"object\",\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"A\",\"A\"]}},\"required\":[],\"additionalProperties\":false}"));
+  }
+
+  /**
+   * 空白输入必须抛公开契约声明的 {@link IllegalArgumentException}，而不是让 Jackson 的 null 结果穿透成
+   * NullPointerException；null 入参保持原有的 IllegalArgumentException 契约。
+   */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {" ", "\n", "\t \r\n"})
+  void rejectsBlankInputWithIllegalArgument(String json) {
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(json));
   }
 }

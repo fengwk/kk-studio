@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * {@link LangChainMcpClient} 的调用级语义测试。
@@ -425,9 +425,112 @@ class LangChainMcpClientTest {
     verify(sdk, times(2)).close();
     verify(transport, times(2)).close();
 
-    // worker 池已被终止：关闭之后不再接受新调用，因此不会留下后台线程继续持有连接
+    // worker 池已被终止：关闭之后不再接受新调用，因此不会留下后台线程继续持有连接。
+    // 池满与已关闭都映射为可重试 McpException：调用方拿到确定性失败，而不是被挂起。
     assertThatThrownBy(() -> client.callTool("tool", "{}", McpDeadline.of(BUDGET), none()))
-        .isInstanceOf(RejectedExecutionException.class);
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining("closed");
+  }
+
+  /**
+   * 并发上限是有界且无排队的：不响应 interrupt 的调用占满 64 个真实 worker 后，后续提交立即以可重试 {@link McpException} 拒绝而不是挂起；{@code
+   * future.cancel} 不会提前释放容量；释放后 worker 线程回落到基线。
+   */
+  @Test
+  @Timeout(60)
+  void boundsConcurrentNonInterruptibleCallsToWorkerUpperBound() throws Exception {
+    int baselineWorkers = workerThreadCount();
+    CountDownLatch entered = new CountDownLatch(LangChainMcpClient.MAX_CONCURRENT_OPERATIONS);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicInteger active = new AtomicInteger();
+    AtomicInteger peak = new AtomicInteger();
+    DefaultMcpClient sdk = mock(DefaultMcpClient.class);
+    when(sdk.executeTool(any(ToolExecutionRequest.class)))
+        .thenAnswer(
+            invocation -> {
+              peak.accumulateAndGet(active.incrementAndGet(), Math::max);
+              entered.countDown();
+              // 模拟不响应 interrupt 的阻塞 SDK 调用：只由 release 放行。
+              awaitIgnoringInterrupt(release);
+              active.decrementAndGet();
+              return ToolExecutionResult.builder().resultText("late").build();
+            });
+    LangChainMcpClient client = newClient(sdk, null);
+
+    List<Thread> callers = new ArrayList<>();
+    for (int index = 0; index < LangChainMcpClient.MAX_CONCURRENT_OPERATIONS; index++) {
+      Thread caller =
+          new Thread(
+              () -> {
+                try {
+                  client.callTool("tool", "{}", McpDeadline.of(SHORT_BUDGET), none());
+                } catch (RuntimeException ignored) {
+                  // 本次验证只关心容量：超时/取消/池满都按预期结束。
+                }
+              },
+              "mcp-capacity-caller");
+      callers.add(caller);
+      caller.start();
+    }
+
+    assertThat(entered.await(20, TimeUnit.SECONDS)).as("64 个真实 worker 都必须进入 SDK 调用").isTrue();
+    assertThat(peak.get())
+        .as("真实并发不得超过 worker 上界")
+        .isEqualTo(LangChainMcpClient.MAX_CONCURRENT_OPERATIONS);
+
+    long startNanos = System.nanoTime();
+    assertThatThrownBy(() -> client.callTool("tool", "{}", McpDeadline.of(BUDGET), none()))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining("capacity");
+    assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos))
+        .as("池满必须立即拒绝而不是挂起")
+        .isLessThan(2_000L);
+
+    for (Thread caller : callers) {
+      caller.join(TimeUnit.SECONDS.toMillis(10));
+    }
+    // 调用方都已超时返回，但 worker 仍被不响应 interrupt 的调用占用：容量没有因为 cancel 提前回落。
+    assertThatThrownBy(() -> client.callTool("tool", "{}", McpDeadline.of(BUDGET), none()))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining("capacity");
+
+    release.countDown();
+    client.close();
+    awaitWorkerThreadsAtMost(baselineWorkers);
+  }
+
+  /** 阻塞直到释放，期间忽略 interrupt：模拟不响应中断、无法被 cancel 提前回收的 SDK 调用。 */
+  private static void awaitIgnoringInterrupt(CountDownLatch release) {
+    boolean released = false;
+    while (!released) {
+      try {
+        released = release.await(50, TimeUnit.MILLISECONDS);
+      } catch (InterruptedException ignored) {
+        // 不响应中断：继续占用 worker，直到显式释放。
+      }
+    }
+  }
+
+  private static int workerThreadCount() {
+    return (int)
+        Thread.getAllStackTraces().keySet().stream()
+            .filter(Thread::isAlive)
+            .filter(thread -> "mcp-client-worker".equals(thread.getName()))
+            .count();
+  }
+
+  /** worker 线程终止是异步的：轮询到稳定状态，断言本 client 的 64 个 worker 已回落到基线。 */
+  private static void awaitWorkerThreadsAtMost(int baselineWorkers) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (workerThreadCount() > baselineWorkers && System.nanoTime() < deadline) {
+      try {
+        Thread.sleep(20);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("interrupted while waiting for worker cleanup", error);
+      }
+    }
+    assertThat(workerThreadCount()).as("关闭后 worker 线程必须回落").isLessThanOrEqualTo(baselineWorkers);
   }
 
   /** 无传输的 client（无外部传输所有权）也必须能安全关闭，不因缺少传输而失败。 */
