@@ -41,6 +41,7 @@ export interface CanvasLocalState {
   addMenuIndex: number
   uploadProgress: Record<string, number>
   commandPending: boolean
+  draftPersistPending: boolean
   conflictMessage: string | null
   textEditor: CanvasTextEditorState | null
 }

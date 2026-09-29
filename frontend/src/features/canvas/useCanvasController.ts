@@ -18,10 +18,15 @@ import {
   type CanvasNodeDraft,
 } from '@/features/canvas/canvas-drafts'
 import {
+  ackCanvasDrafts,
   deleteCanvasDraft,
   loadCanvasDrafts,
   saveCanvasDraft,
 } from '@/features/canvas/canvas-draft-storage'
+import {
+  getEditingSessionId,
+  handlePageshow,
+} from '@/features/canvas/canvas-editing-session'
 import {
   CanvasStorageUnavailableError,
   onCanvasStorageError,
@@ -85,6 +90,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     addMenuIndex: 0,
     uploadProgress: {},
     commandPending: false,
+    draftPersistPending: false,
     conflictMessage: null,
     textEditor: null,
   }))
@@ -104,11 +110,22 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const pendingCommandCountRef = useRef(0)
   const reservedNodeAliasesRef = useRef(new Set<string>())
   const applyDraftAcksRef = useRef<(acks: CanvasDraftAck[]) => void>(() => undefined)
+  const isMountedRef = useRef(true)
+  const draftPersistChainRef = useRef<Promise<void>>(Promise.resolve())
+  const targetDraftsRef = useRef(state.drafts)
+  targetDraftsRef.current = state.drafts
   /** 该画布“已落盘草稿”的持久基线；canvasId 不匹配表示尚未加载完成，禁止按差集删除。 */
   const draftBaselineRef = useRef<{ canvasId: string | null; drafts: Record<string, CanvasNodeDraft> }>({
     canvasId: null,
     drafts: {},
   })
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
@@ -182,10 +199,10 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     })
   }, [])
 
-  // 本地草稿持久化：草稿状态每次变化都同步到 IndexedDB（新增/更新保存，移除即删除），
-  // 保证“每次操作真正进 store”，而不是散落在各分支里的旁路调用。
-  // 关键约束：只有“持久基线已就绪”时才允许按差集删除，避免初始加载竞态先清掉旧草稿。
-  useEffect(() => {
+  // 本地草稿持久化：序列化 await commit 推进基线，同一序列化边界共享于 draft 保存与 ACK 清除。
+  // 关键约束：只有在 saveCanvasDraft / deleteCanvasDraft 的 IDB 事务 complete 成功后才推进 baseline；
+  // 失败保持旧 baseline 并保留 dirty 状态供用户明确重试或下次变更重试，UI 绝不显示已保存。
+  const runDraftPersistence = useCallback(() => {
     const canvasId = state.canvasId
     if (!canvasId || state.view !== 'editor') {
       draftBaselineRef.current = { canvasId, drafts: {} }
@@ -196,18 +213,118 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       // 该画布的已落盘草稿尚未加载完成：跳过，绝不用当前（可能为空）状态删除旧草稿。
       return
     }
-    for (const [nodeId, draft] of Object.entries(state.drafts)) {
-      if (baseline.drafts[nodeId] !== draft) {
-        void saveCanvasDraft(canvasId, nodeId, draft).catch(() => undefined)
+
+    draftPersistChainRef.current = draftPersistChainRef.current.then(async () => {
+      if (!isMountedRef.current) {
+        return
       }
-    }
-    for (const nodeId of Object.keys(baseline.drafts)) {
-      if (!(nodeId in state.drafts)) {
-        void deleteCanvasDraft(canvasId, nodeId).catch(() => undefined)
+      const currentCanvasId = state.canvasId
+      if (!currentCanvasId || state.view !== 'editor' || currentCanvasId !== canvasId) {
+        return
       }
+      const currentBaseline = draftBaselineRef.current
+      if (currentBaseline.canvasId !== currentCanvasId) {
+        return
+      }
+      const target = targetDraftsRef.current
+
+      const toSave: Array<[string, CanvasNodeDraft]> = []
+      for (const [nodeId, draft] of Object.entries(target)) {
+        if (currentBaseline.drafts[nodeId] !== draft) {
+          toSave.push([nodeId, draft])
+        }
+      }
+      const toDelete: string[] = []
+      for (const nodeId of Object.keys(currentBaseline.drafts)) {
+        if (!(nodeId in target)) {
+          toDelete.push(nodeId)
+        }
+      }
+
+      if (toSave.length === 0 && toDelete.length === 0) {
+        if (isMountedRef.current) {
+          setState((cur) => cur.draftPersistPending ? { ...cur, draftPersistPending: false } : cur)
+        }
+        return
+      }
+
+      if (isMountedRef.current) {
+        setState((cur) => cur.draftPersistPending ? cur : { ...cur, draftPersistPending: true })
+      }
+
+      let hadError = false
+      for (const [nodeId, draft] of toSave) {
+        if (!isMountedRef.current) {
+          return
+        }
+        try {
+          await saveCanvasDraft(currentCanvasId, nodeId, draft)
+          currentBaseline.drafts[nodeId] = draft
+        } catch (err) {
+          hadError = true
+          const message = err instanceof Error ? err.message : String(err)
+          if (isMountedRef.current) {
+            setState((cur) => ({
+              ...cur,
+              storageError: message,
+              toast: '本地草稿保存失败，数据未持久化落盘',
+            }))
+          }
+          break
+        }
+      }
+
+      if (!hadError) {
+        for (const nodeId of toDelete) {
+          if (!isMountedRef.current) {
+            return
+          }
+          try {
+            await deleteCanvasDraft(currentCanvasId, nodeId)
+            delete currentBaseline.drafts[nodeId]
+          } catch (err) {
+            hadError = true
+            const message = err instanceof Error ? err.message : String(err)
+            if (isMountedRef.current) {
+              setState((cur) => ({
+                ...cur,
+                storageError: message,
+                toast: '本地草稿保存失败，数据未持久化落盘',
+              }))
+            }
+            break
+          }
+        }
+      }
+
+      if (isMountedRef.current) {
+        setState((cur) => ({
+          ...cur,
+          draftPersistPending: false,
+          storageError: hadError ? cur.storageError : null,
+        }))
+      }
+    }).catch(() => {
+      if (isMountedRef.current) {
+        setState((cur) => ({ ...cur, draftPersistPending: false }))
+      }
+    })
+  }, [state.canvasId, state.view])
+
+  useEffect(() => {
+    runDraftPersistence()
+  }, [state.canvasId, state.view, state.drafts, draftLoadEpoch, runDraftPersistence])
+
+  // bfcache 恢复时重新确认 claim 所有权，防止旧实例持有旧会话造成 scope 冲突
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      handlePageshow(event)
     }
-    draftBaselineRef.current = { canvasId, drafts: state.drafts }
-  }, [state.canvasId, state.view, state.drafts, draftLoadEpoch])
+    window.addEventListener('pageshow', onPageShow)
+    return () => {
+      window.removeEventListener('pageshow', onPageShow)
+    }
+  }, [])
 
   // 远端删除探测：快照中不存在但本地有未提交草稿的节点，标记为 remote_deleted 保留草稿供救援
   useEffect(() => {
@@ -243,6 +360,40 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     })
   }, [snapshotQuery.data, state.canvasId])
 
+  const ackDurableDrafts = useCallback((acks: CanvasDraftAck[]): Promise<void> => {
+    if (acks.length === 0) {
+      return Promise.resolve()
+    }
+    const canvasId = state.canvasId
+    if (!canvasId) {
+      return Promise.resolve()
+    }
+    const ackTask = draftPersistChainRef.current.then(async () => {
+      // 1. 同一序列化边界内执行：等待前序未决 saveCanvasDraft 全部完成，杜绝在途旧 persist 将草稿复活
+      await ackCanvasDrafts(canvasId, acks, { editingSessionId: getEditingSessionId() })
+      // 2. 同步推进基线，防止后续 persist 任务误判为本地新改动再次写回
+      const baseline = draftBaselineRef.current
+      if (baseline.canvasId === canvasId) {
+        for (const ack of acks) {
+          const baseDraft = baseline.drafts[ack.nodeId]
+          if (baseDraft) {
+            const field = ack.field === 'group' ? 'groupId' : ack.field
+            const next = removeDraftField(baseDraft, field, ack.generation)
+            if (next) {
+              baseline.drafts[ack.nodeId] = next
+            } else {
+              delete baseline.drafts[ack.nodeId]
+            }
+          }
+        }
+      }
+      // 3. 更新内存草稿与位置草稿
+      applyDraftAcksRef.current(acks)
+    })
+    draftPersistChainRef.current = ackTask.catch(() => undefined)
+    return ackTask
+  }, [state.canvasId])
+
   useEffect(() => {
     if (!snapshotQuery.data || !state.canvasId) {
       return
@@ -254,6 +405,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         onSnapshot: (snapshot) => {
           queryClient.setQueryData(queryKeys.studio.canvas(canvasId as string), snapshot)
         },
+        onDraftAcks: ackDurableDrafts,
       })
       queueRef.current = queue
       // 刷新 / 路由切换后，按冻结顺序精确重放原 idempotencyKey 与原始命令体。
@@ -261,9 +413,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         .then((result) => {
           if (queueRef.current !== queue) {
             return
-          }
-          if (result.ackedDrafts.length > 0) {
-            applyDraftAcksRef.current(result.ackedDrafts)
           }
           if (result.conflicted > 0) {
             setState((current) => ({
@@ -292,7 +441,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         queryClient.setQueryData(queryKeys.studio.canvas(state.canvasId), authoritative)
       }
     }
-  }, [queryClient, snapshotQuery.data, state.canvasId])
+  }, [ackDurableDrafts, queryClient, snapshotQuery.data, state.canvasId])
 
   // 应用事件 WebSocket 订阅：更高 revision 直接刷新权威 Snapshot
   const refreshCanvasSnapshot = useCallback(() => {
@@ -334,22 +483,31 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
     setState((current) => {
       const nextDrafts = { ...current.drafts }
+      const nextPositions = { ...current.positionDrafts }
       let changed = false
       for (const ack of acks) {
         const draft = nextDrafts[ack.nodeId]
         if (!draft) {
           continue
         }
+        if (ack.field === 'position') {
+          if (ack.generation === undefined || draft.generation <= ack.generation) {
+            delete nextPositions[ack.nodeId]
+            changed = true
+          }
+        }
         const field = ack.field === 'group' ? 'groupId' : ack.field
         const next = removeDraftField(draft, field, ack.generation)
-        if (next) {
-          nextDrafts[ack.nodeId] = next
-        } else {
-          delete nextDrafts[ack.nodeId]
+        if (next !== draft) {
+          if (next) {
+            nextDrafts[ack.nodeId] = next
+          } else {
+            delete nextDrafts[ack.nodeId]
+          }
+          changed = true
         }
-        changed = true
       }
-      return changed ? { ...current, drafts: nextDrafts } : current
+      return changed ? { ...current, drafts: nextDrafts, positionDrafts: nextPositions } : current
     })
   }, [])
 
@@ -366,7 +524,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     setState((current) => ({ ...current, commandPending: true, conflictMessage: null }))
     try {
       const snapshot = await queue.enqueue(commands, ack && ack.length > 0 ? { ack } : undefined)
-      applyDraftAcks(ack ?? [])
       return snapshot
     } catch (error) {
       if (error instanceof CanvasCommandConflictError) {
@@ -434,10 +591,40 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         setState((current) => ({ ...current, commandPending: false }))
       }
     }
-  }, [applyDraftAcks])
+  }, [])
 
   const { scheduleFunctionConfig, flushFunctionConfig, resetPending: resetFunctionConfigDrafts } =
-    useFunctionConfigSync(executeCommands, () => queueRef.current?.currentSnapshot() ?? snapshotQuery.data)
+    useFunctionConfigSync({
+      executeCommands,
+      getSnapshot: () => queueRef.current?.currentSnapshot() ?? snapshotQuery.data,
+      onImmediateDraft: (nodeId, modelKey, config) => {
+        let nextGen = 1
+        setState((current) => {
+          const existing = current.drafts[nodeId] ?? { generation: 0, updatedAt: Date.now() }
+          nextGen = (existing.generation ?? 0) + 1
+          return {
+            ...current,
+            drafts: {
+              ...current.drafts,
+              [nodeId]: {
+                ...existing,
+                generation: nextGen,
+                updatedAt: Date.now(),
+                function: {
+                  name: modelKey,
+                  args: {
+                    prompt: config.prompt,
+                    parameters: config.parameters,
+                  },
+                },
+              },
+            },
+          }
+        })
+        return nextGen
+      },
+      getDraftGeneration: (nodeId) => state.drafts[nodeId]?.generation,
+    })
   const { startFunctionRun, cancelFunctionRun, resolveFunctionRun } = useCanvasFunctionRun({
     canvasId: state.canvasId,
     queryClient,
@@ -467,6 +654,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         const base = existing ?? { generation: 0, updatedAt: Date.now() }
         nextDrafts[id] = {
           ...base,
+          generation: (base.generation ?? 0) + 1,
           position: pos,
           updatedAt: Date.now(),
         }
@@ -503,6 +691,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     snapshot: snapshotQuery.data,
     executeCommands,
     setPositionDrafts,
+    getDraftGeneration: (nodeId) => state.drafts[nodeId]?.generation,
   })
   const { moveNodes, commitTransforms, reset: resetTransformBatch } = transformBatch
 
@@ -1250,6 +1439,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     setAddMenuIndex,
     dismissDraft,
     retryDraft,
+    retryDraftPersist: runDraftPersistence,
     retryRecovery,
     dismissConflictMessage,
     saveDraftAsNewNode,

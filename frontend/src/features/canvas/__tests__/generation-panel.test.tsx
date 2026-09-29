@@ -680,4 +680,40 @@ describe('Canvas generic generation panel', () => {
       .parameters.duration).toBe(8)
     view.unmount()
   })
+
+  it('I11 参数 JSON 双向同步与非法输入防御：打开时同步最新值，表单修改联动，非法 JSON 绝不覆盖表单', async () => {
+    const view = renderPanel(null, models)
+
+    // 1. 展开参数 JSON：初始化展示当前参数
+    const toggleBtn = screen.getByRole('button', { name: '编辑参数 JSON' })
+    fireEvent.click(toggleBtn)
+
+    const textarea = screen.getByRole('textbox', { name: '参数 JSON' })
+    expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '1:1' })
+
+    // 2. 表单联动：当未脏态修改 JSON 时，表单控件（比例选择器）修改会联动同步更新 JSON 文本
+    const ratioSelect = screen.getByLabelText('比例')
+    fireEvent.change(ratioSelect, { target: { value: '16:9' } })
+    expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '16:9' })
+
+    // 3. 用户在 JSON 编辑器中输入合法 JSON：更新表单与调度
+    const scheduledCount = view.scheduleFunctionConfig.mock.calls.length
+    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"\n}' } })
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCount + 1)
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+      .parameters.ratio).toBe('1:1')
+
+    // 4. 用户输入非法 JSON（语法错误）：提示错误，绝不调用 scheduleFunctionConfig 破坏已有有效值
+    const beforeInvalidCalls = view.scheduleFunctionConfig.mock.calls.length
+    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"' } }) // 缺少右大括号
+    expect(screen.getByRole('alert')).toHaveTextContent('JSON 语法错误')
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
+
+    // 5. 用户输入非对象 JSON（如数组）：提示错误，不覆盖有效值
+    fireEvent.change(textarea, { target: { value: '[1, 2, 3]' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('参数必须为 JSON 对象')
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
+
+    view.unmount()
+  })
 })

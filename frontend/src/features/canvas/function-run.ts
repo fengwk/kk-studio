@@ -1,7 +1,9 @@
 import { useCallback } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/shared/api/client'
 import type {
   CanvasFunctionRunDTO,
+  CanvasFunctionRunRequestDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -12,6 +14,71 @@ import {
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+
+const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
+
+export interface PendingFunctionRunAttempt {
+  canvasId: UUIDString
+  nodeId: UUIDString
+  request: CanvasFunctionRunRequestDTO
+  basisRequestId: UUIDString | null
+  createdAt: number
+}
+
+function getPendingRunStorageKey(canvasId: string, nodeId: string): string {
+  return `${PENDING_RUN_STORAGE_PREFIX}${canvasId}:${nodeId}`
+}
+
+export function loadPendingFunctionRun(canvasId: string, nodeId: string): PendingFunctionRunAttempt | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const raw = window.localStorage.getItem(getPendingRunStorageKey(canvasId, nodeId))
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw) as PendingFunctionRunAttempt
+    return parsed && parsed.request?.requestId ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.setItem(
+      getPendingRunStorageKey(attempt.canvasId, attempt.nodeId),
+      JSON.stringify(attempt),
+    )
+  } catch {
+    // LocalStorage quota or blocked
+  }
+}
+
+export function clearPendingFunctionRun(canvasId: string, nodeId: string): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.removeItem(getPendingRunStorageKey(canvasId, nodeId))
+  } catch {
+    // Ignore
+  }
+}
+
+function isTerminalClientError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    const status = error.status
+    // 408 (Request Timeout) 与 429 (Too Many Requests) 是非终态可重试状态
+    // 403 (Forbidden), 409 (Conflict) 及其他 4xx (400, 404, 422 等) 属于不可重试的终态客户端错误
+    return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+  }
+  return false
+}
 
 export interface FunctionRunActions {
   startFunctionRun: (nodeId: UUIDString) => Promise<void>
@@ -69,24 +136,48 @@ export function useCanvasFunctionRun(options: {
       setToast(error instanceof Error ? error.message : '启动生成失败')
       return
     }
-    const requestId = crypto.randomUUID()
-    // 发请求前捕获 basis；fallback 与 start 沿用同一 basis，避免旧快照被错误替换。
-    const basisRequestId = readBasisRequestId(nodeId)
+
+    // 检查是否存在未决请求（例如提交后丢响应、断网或页面刷新残留）：
+    // 若存在，必须复用冻结的完整 attempt（原 requestId 与 requestDTO），绝不生成新 key 重新发起新任务！
+    const existing = loadPendingFunctionRun(canvasId, nodeId)
+    const attempt: PendingFunctionRunAttempt = existing ?? {
+      canvasId,
+      nodeId,
+      request: { requestId: crypto.randomUUID() as UUIDString },
+      basisRequestId: readBasisRequestId(nodeId),
+      createdAt: Date.now(),
+    }
+
+    // 发请求前必须在 localStorage 持久化冻结请求
+    savePendingFunctionRun(attempt)
+
+    const basisRequestId = attempt.basisRequestId
+    const requestId = attempt.request.requestId
     try {
-      const run = await startCanvasFunctionRun(canvasId, nodeId, {
-        requestId,
-      })
+      const run = await startCanvasFunctionRun(canvasId, nodeId, attempt.request)
+      // 成功获得确定响应：清除 pending 记录
+      clearPendingFunctionRun(canvasId, nodeId)
       publishRun(run, basisRequestId)
     } catch (error) {
+      // 明确 409 或 4xx 客户端错误终态：清除 pending 记录，不再重试
+      if (isTerminalClientError(error)) {
+        clearPendingFunctionRun(canvasId, nodeId)
+        setToast(error instanceof Error ? error.message : '启动生成失败')
+        return
+      }
+
+      // 未知失败（网络断开、超时 408/429、5xx 等）：保留原 identity
       try {
         const current = await getCanvasFunctionRun(canvasId, nodeId)
         if (current.requestId === requestId) {
+          clearPendingFunctionRun(canvasId, nodeId)
           publishRun(current, basisRequestId)
           return
         }
       } catch {
         // Preserve the original start error when reconciliation is unavailable.
       }
+      // 不得在仅 GET 无结果时生成新 key，保留原 attempt 供重载 / 重试同 key 复用
       setToast(error instanceof Error ? error.message : '启动生成失败')
     }
   }, [canvasId, flushFunctionConfig, publishRun, readBasisRequestId, setToast])
@@ -101,6 +192,7 @@ export function useCanvasFunctionRun(options: {
     }
     try {
       const run = await cancelCanvasFunctionRun(canvasId, nodeId, { requestId: targetRequestId })
+      clearPendingFunctionRun(canvasId, nodeId)
       // cancel 以被取消的 requestId 为 basis：只允许更新该 request，不得覆盖更新的 request。
       publishRun(run, targetRequestId)
     } catch (error) {
@@ -123,6 +215,7 @@ export function useCanvasFunctionRun(options: {
         resolution,
         verification,
       })
+      clearPendingFunctionRun(canvasId, nodeId)
       publishRun(run, requestId)
     } catch (error) {
       setToast(error instanceof Error ? error.message : '核查确认失败')

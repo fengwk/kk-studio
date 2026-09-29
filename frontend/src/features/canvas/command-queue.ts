@@ -63,6 +63,11 @@ export interface CanvasCommandQueueOptions {
   operationStore?: CanvasPendingOperationStore
   userId?: string
   editingSessionId?: string
+  /**
+   * ACK 回调 Promise 契约：必须先 await 持久 draft generation ACK 清理成功，再 remove operation。
+   * 必须实际等 IDB tx complete，顺序不能反。
+   */
+  onDraftAcks?: (acks: CanvasDraftAck[]) => Promise<void>
 }
 
 /** 重载后按冻结顺序重放待确认操作的结果统计。 */
@@ -109,6 +114,7 @@ export class CanvasCommandQueue {
   private readonly store: CanvasPendingOperationStore
   private readonly userId: string
   private readonly editingSessionId: string
+  private readonly onDraftAcks?: (acks: CanvasDraftAck[]) => Promise<void>
 
   constructor(
     private readonly canvasId: UUIDString,
@@ -121,6 +127,7 @@ export class CanvasCommandQueue {
     this.onSnapshot = options.onSnapshot
     this.userId = options.userId ?? getCurrentUserId()
     this.editingSessionId = options.editingSessionId ?? getEditingSessionId()
+    this.onDraftAcks = options.onDraftAcks
     this.store = options.operationStore ?? createCanvasOperationStore(canvasId, {
       userId: this.userId,
       editingSessionId: this.editingSessionId,
@@ -264,18 +271,18 @@ export class CanvasCommandQueue {
         { signal },
       )
       const snapshot = await this.ingestPatch(patch, signal)
-      await this.settle(operation)
+      await this.settle(operation, { clearAcks: true })
       return snapshot
     } catch (error) {
       if (isCanvasConflict(error)) {
         // 语义冲突是终态：清除该操作，绝不盲重放；草稿与远端内容都保留，交由 UI 明确解决。
-        await this.settle(operation)
+        await this.settle(operation, { clearAcks: false })
         const latest = await this.refetch(this.canvasId, { signal })
         const authoritative = this.replaceSnapshot(latest)
         throw new CanvasCommandConflictError(authoritative, error)
       }
       if (isTerminalClientError(error)) {
-        await this.settle(operation)
+        await this.settle(operation, { clearAcks: false })
         throw error
       }
       // 网络 / 服务端瞬时失败：保留冻结操作，标记队列阻塞，等待恢复或重载按原 key/body 幂等重放。
@@ -355,7 +362,15 @@ export class CanvasCommandQueue {
     this.blockedError = error instanceof Error ? error : new Error(String(error))
   }
 
-  private async settle(operation: CanvasPendingOperation): Promise<void> {
+  private async settle(
+    operation: CanvasPendingOperation,
+    options?: { clearAcks?: boolean },
+  ): Promise<void> {
+    if (options?.clearAcks !== false && operation.ack && operation.ack.length > 0 && this.onDraftAcks) {
+      // 必须先 await 持久 draft generation ACK 清理成功：
+      // 若草稿清理 abort / 失败，不得提前删除 operation，保留操作以便后续幂等重放消除崩溃窗口。
+      await this.onDraftAcks(operation.ack)
+    }
     this.operations.delete(operation.id)
     try {
       await this.store.remove(operation.id)

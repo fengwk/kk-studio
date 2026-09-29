@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest'
-import { patchSnapshotRun } from '@/features/canvas/function-run'
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/shared/api/client'
+import * as studioService from '@/shared/api/studio-service'
+import {
+  clearPendingFunctionRun,
+  loadPendingFunctionRun,
+  patchSnapshotRun,
+  useCanvasFunctionRun,
+} from '@/features/canvas/function-run'
 import type {
   CanvasFunctionRunDTO,
   CanvasSnapshotDTO,
@@ -131,5 +140,128 @@ describe('patchSnapshotRun basis-CAS', () => {
 
     expect(missingNode).toBe(current)
     expect(patchSnapshotRun(undefined, run(REQUEST_A, 'RUNNING', 'QUEUED'), null)).toBeUndefined()
+  })
+})
+
+describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () => {
+  const canvasId = CANVAS_ID as UUIDString
+  const nodeId = NODE_FN as UUIDString
+
+  function setupHook() {
+    const queryClient = new QueryClient()
+    const setToast = vi.fn()
+    const flushFunctionConfig = vi.fn(async () => undefined)
+    const { result } = renderHook(() => useCanvasFunctionRun({
+      canvasId,
+      queryClient,
+      setToast,
+      flushFunctionConfig,
+    }))
+    return { result, setToast, flushFunctionConfig, queryClient }
+  }
+
+  it('发请求前完整冻结 requestDTO (含 requestId) 到 localStorage，成功后清除', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    let persistedBeforeSend: ReturnType<typeof loadPendingFunctionRun> = null
+
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+      persistedBeforeSend = loadPendingFunctionRun(canvasId, nodeId)
+      expect(persistedBeforeSend?.request.requestId).toBe(req.requestId)
+      return run(req.requestId, 'RUNNING', 'QUEUED')
+    })
+
+    const { result } = setupHook()
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+
+    expect(persistedBeforeSend).not.toBeNull()
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+  })
+
+  it('错误分类：403 Forbidden 与 409 Conflict 属于不可重试终态，清除 pending 记录', async () => {
+    // 403 Forbidden
+    clearPendingFunctionRun(canvasId, nodeId)
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('forbidden', 403, 'FORBIDDEN'),
+    )
+    const { result, setToast } = setupHook()
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(setToast).toHaveBeenCalledWith('forbidden')
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+
+    // 409 Conflict
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('conflict', 409, 'CANVAS_CONFLICT'),
+    )
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(setToast).toHaveBeenCalledWith('conflict')
+    expect(loadPendingFunctionRun(canvasId, nodeId)).toBeNull()
+  })
+
+  it('错误分类：408 请求超时 与 429 限流属于非终态可重试，保留原 attempt 供复用', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('timeout', 408, 'REQUEST_TIMEOUT'),
+    )
+    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('not found', 404),
+    )
+
+    const { result } = setupHook()
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+
+    const attemptAfter408 = loadPendingFunctionRun(canvasId, nodeId)
+    expect(attemptAfter408).not.toBeNull()
+
+    // 429 Too Many Requests
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('rate limited', 429, 'TOO_MANY_REQUESTS'),
+    )
+    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValueOnce(
+      new ApiError('not found', 404),
+    )
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId)
+      .toBe(attemptAfter408?.request.requestId)
+  })
+
+  it('未知错误/网络中断重试：重试必须采用原冻结 requestId 与 requestDTO，绝不生成新 key', async () => {
+    clearPendingFunctionRun(canvasId, nodeId)
+    const calls: studioService.CanvasFunctionRunRequestDTO[] = []
+
+    vi.spyOn(studioService, 'startCanvasFunctionRun').mockImplementation(async (_cid, _nid, req) => {
+      calls.push(req)
+      throw new Error('Network error / connection dropped')
+    })
+    vi.spyOn(studioService, 'getCanvasFunctionRun').mockRejectedValue(
+      new Error('Reconciliation unreachable'),
+    )
+
+    const { result } = setupHook()
+
+    // 第一次尝试：失败
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(calls).toHaveLength(1)
+    const firstRequestId = calls[0]?.requestId
+    expect(firstRequestId).toBeTruthy()
+
+    // 第二次重试（模拟用户点击重试或页面重入重试）：必须原样复用 firstRequestId
+    await act(async () => {
+      await result.current.startFunctionRun(nodeId)
+    })
+    expect(calls).toHaveLength(2)
+    expect(calls[1]?.requestId).toBe(firstRequestId)
+    expect(loadPendingFunctionRun(canvasId, nodeId)?.request.requestId).toBe(firstRequestId)
   })
 })

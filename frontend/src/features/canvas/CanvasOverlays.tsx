@@ -5,6 +5,7 @@ export function CanvasOverlays() {
     state,
     dismissDraft,
     retryDraft,
+    retryDraftPersist,
     retryRecovery,
     dismissConflictMessage,
     saveDraftAsNewNode,
@@ -33,6 +34,14 @@ export function CanvasOverlays() {
       {state.storageError ? (
         <div className="canvas-storage-error-banner" role="alert">
           <span>本地草稿持久化落盘失败：{state.storageError}</span>
+          <button
+            type="button"
+            className="canvas-conflict-action-retry"
+            style={{ marginLeft: 8 }}
+            onClick={() => void retryDraftPersist()}
+          >
+            重试
+          </button>
         </div>
       ) : null}
       {conflictedEntries.map(([nodeId, draft]) => {
