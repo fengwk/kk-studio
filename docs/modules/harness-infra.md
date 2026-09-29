@@ -67,7 +67,7 @@ conflict: available_at = least(current, requested)
 
 环境路由围栏就嵌在这条 claim 之上：当 `required_environment_id` 为空时任何活跃 Dispatcher 节点都可认领；非空时用 `exists` 检查 `environment_connection` 中存在 `environment_id` 匹配、`owner_node_id` 等于当前 Dispatcher 的 `nodeInstanceId`、状态为 `READY` 且 `lease_until > statement_timestamp()` 的连接记录。断开、未就绪、归属他人或租约过期的环境一律不返回候选（fail closed），底层数据库故障则让整个 claim 事务回滚。这条路由围栏与 `FOR UPDATE SKIP LOCKED` 的行级并发控制、应用层 `lease_token` / `lease_until` 的所有权围栏分属三个层次，互不替代——路由回答「哪台机器该做」，行锁回答「谁先抢到」，租约回答「谁还在拥有」。
 
-围栏原语沿同一层次展开：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > now`；`renewWork` 在持锁前提下手动顺延 `lease_until`；[`PostgresqlWorkChannel`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlWorkChannel.java) 在 `requestWork` 之后于同一事务内 `pg_notify`，通知只在提交后才投递。
+围栏原语沿同一层次展开，且全部以数据库时钟为唯一权威时间域（JVM 传入的 `now` 只校验毫秒精度，不参与有效性比较）：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > statement_timestamp()`；`renewWork` 在持锁前提下把 `lease_until` 延展到「`statement_timestamp()` + 传入 `Duration`」，现有租约已覆盖目标时点则保持不变并返回 `false`，绝不缩短；[`PostgresqlWorkChannel`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlWorkChannel.java) 在 `requestWork` 之后于同一事务内 `pg_notify`，通知只在提交后才投递。
 
 ## Dispatcher 生命周期
 
