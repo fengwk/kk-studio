@@ -767,6 +767,50 @@ class GeminiRequestEncoderTest {
     }
   }
 
+  /**
+   * 测试意图：普通用户内容（image/audio/video/document）与工具结果统一只接受严格 Base64 data URI——无 base64 标记的 percent/普通
+   * data、非法 Base64、空载荷与缺失 media type 都在编码期以 INVALID_REQUEST 拒绝，绝不把无效载荷发往上游。 合法 inline 的逐字节保留由
+   * {@code encodesUserDataUriToInlineData}、 {@code
+   * encodesUserPdfDataUriToInlineDataPreservingPayload} 与 {@code encodesDataUriMediaWithMimeTypes}
+   * 覆盖。
+   */
+  @Test
+  void rejectsNonStrictBase64DataUriForAllUserMediaModalities() {
+    List<String> invalidSources =
+        List.of(
+            "data:image/png,abc",
+            "data:image/png,%89PNG%0D",
+            "data:image/png;base64,%%%",
+            "data:image/png;base64,",
+            "data:;base64,QQ==");
+
+    for (String source : invalidSources) {
+      List<ProviderContentBlock> blocks =
+          List.of(
+              new ProviderImageBlock("image/png", source),
+              new ProviderAudioBlock("audio/wav", source),
+              new ProviderVideoBlock("video/mp4", source),
+              new ProviderDocumentBlock("application/pdf", source));
+      for (ProviderContentBlock block : blocks) {
+        ProviderRequest request =
+            new ProviderRequest(
+                model(false),
+                DEFAULT_VARIANT,
+                1024,
+                "Test system instruction.",
+                List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(block))),
+                List.of(),
+                ProviderCacheControl.none());
+        ProviderException ex =
+            assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+        assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+        assertEquals(
+            "media source must be a base64 data URI with a non-empty decodable payload",
+            ex.getMessage());
+      }
+    }
+  }
+
   /** 验证 URL 形式的媒体资源（图片、音频、视频、PDF）直接编码为 fileData，绝不执行下载。 */
   @Test
   void encodesUserUrlToFileData_imageAudioVideoPdf() throws Exception {
@@ -2622,7 +2666,9 @@ class GeminiRequestEncoderTest {
             ProviderCacheControl.none());
     ProviderException ex1 =
         assertThrows(ProviderException.class, () -> encoder.encode(reqBadData, descriptor()));
-    assertEquals("invalid data URI in media source", ex1.getMessage());
+    assertEquals(
+        "media source must be a base64 data URI with a non-empty decodable payload",
+        ex1.getMessage());
 
     // 2. 不被允许的 scheme (非 http/https/gs，如 file://)
     ProviderRequest reqBadScheme =
