@@ -2,7 +2,8 @@
 #
 # 导出 durable Agent catalog（Provider / Model / Agent 定义）为可导入的版本化包。
 #
-# 只读操作：不修改数据库，也不管理任何服务的生命周期。产物写到仓库外的 owner-only 目录：
+# 只读操作：不修改数据库，也不管理任何服务的生命周期。三张表在同一个 REPEATABLE READ
+# READ ONLY 的 psql 事务里读取。产物写到仓库外的 owner-only 目录：
 #
 #   catalog.sql      mode 0600，含 Provider credential 的 SQL COPY bundle
 #   manifest.json    mode 0600，非敏感：源结构、V1 checksum、逐表行数与内容摘要
