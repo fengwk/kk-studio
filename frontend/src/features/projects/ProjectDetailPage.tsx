@@ -26,6 +26,13 @@ import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import { createUuid } from '@/shared/lib/uuid'
 import { queryKeys } from '@/shared/lib/query-keys'
+import {
+  clearPendingAction,
+  isNetworkUnknownError,
+  loadPendingAction,
+  storePendingAction,
+  type PendingIssueAction,
+} from './pending-action-sidecar'
 import './projects.css'
 
 export interface ProjectDetailPageProps {
@@ -196,18 +203,62 @@ export function ProjectDetailPage({
     })
   }
 
-  // 看板上的动作：每个写操作冻结 requestKey 支持相同重试
+  // 看板上的动作：每个写操作冻结 requestKey 支持相同重试并写入侧车
   const handleTransitionIssue = async (
     issueId: string,
     expectedVersion: string,
     toState: string,
   ) => {
+    const existing = loadPendingAction(issueId)
+    if (existing && existing.isUnknown) {
+      const pendingToState = (existing.payload as { toState?: string })?.toState
+      if (existing.kind === 'TRANSITION' && pendingToState === toState) {
+        // 精确重试原请求
+        try {
+          setActionError(null)
+          await api.transitionIssue(issueId, {
+            expectedVersion: existing.expectedVersion,
+            requestKey: existing.requestKey,
+            toState,
+          })
+          clearPendingAction(issueId, existing.requestKey)
+          await invalidateSnapshot()
+          return
+        } catch (err) {
+          if (!isNetworkUnknownError(err)) {
+            clearPendingAction(issueId, existing.requestKey)
+          }
+          setActionError(err instanceof Error ? err.message : '流转 Issue 状态重试失败')
+          return
+        }
+      } else {
+        setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
+        handleSelectIssue(issueId)
+        return
+      }
+    }
+
     const requestKey = createUuid()
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'TRANSITION',
+      requestKey,
+      expectedVersion,
+      payload: { toState },
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    }
+    storePendingAction(issueId, action)
+
     try {
       setActionError(null)
       await api.transitionIssue(issueId, { expectedVersion, requestKey, toState })
+      clearPendingAction(issueId, requestKey)
       await invalidateSnapshot()
     } catch (err) {
+      if (!isNetworkUnknownError(err)) {
+        clearPendingAction(issueId, requestKey)
+      }
       setActionError(err instanceof Error ? err.message : '流转 Issue 状态失败')
     }
   }
@@ -217,23 +268,105 @@ export function ProjectDetailPage({
   }
 
   const handleRecoverIssue = async (issueId: string, expectedVersion: string) => {
+    const existing = loadPendingAction(issueId)
+    if (existing && existing.isUnknown) {
+      if (existing.kind === 'RECOVER') {
+        try {
+          setActionError(null)
+          await api.recoverIssue(issueId, {
+            expectedVersion: existing.expectedVersion,
+            requestKey: existing.requestKey,
+          })
+          clearPendingAction(issueId, existing.requestKey)
+          await invalidateSnapshot()
+          return
+        } catch (err) {
+          if (!isNetworkUnknownError(err)) {
+            clearPendingAction(issueId, existing.requestKey)
+          }
+          setActionError(err instanceof Error ? err.message : '恢复 Issue 重试失败')
+          return
+        }
+      } else {
+        setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
+        handleSelectIssue(issueId)
+        return
+      }
+    }
+
     const requestKey = createUuid()
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'RECOVER',
+      requestKey,
+      expectedVersion,
+      payload: {},
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    }
+    storePendingAction(issueId, action)
+
     try {
       setActionError(null)
       await api.recoverIssue(issueId, { expectedVersion, requestKey })
+      clearPendingAction(issueId, requestKey)
       await invalidateSnapshot()
     } catch (err) {
+      if (!isNetworkUnknownError(err)) {
+        clearPendingAction(issueId, requestKey)
+      }
       setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
     }
   }
 
   const handleReopenIssue = async (issueId: string, expectedVersion: string) => {
+    const existing = loadPendingAction(issueId)
+    if (existing && existing.isUnknown) {
+      if (existing.kind === 'REOPEN') {
+        try {
+          setActionError(null)
+          await api.reopenIssue(issueId, {
+            expectedVersion: existing.expectedVersion,
+            requestKey: existing.requestKey,
+          })
+          clearPendingAction(issueId, existing.requestKey)
+          await invalidateSnapshot()
+          return
+        } catch (err) {
+          if (!isNetworkUnknownError(err)) {
+            clearPendingAction(issueId, existing.requestKey)
+          }
+          setActionError(err instanceof Error ? err.message : '重新打开 Issue 重试失败')
+          return
+        }
+      } else {
+        setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
+        handleSelectIssue(issueId)
+        return
+      }
+    }
+
     const requestKey = createUuid()
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'REOPEN',
+      requestKey,
+      expectedVersion,
+      payload: {},
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    }
+    storePendingAction(issueId, action)
+
     try {
       setActionError(null)
       await api.reopenIssue(issueId, { expectedVersion, requestKey })
+      clearPendingAction(issueId, requestKey)
       await invalidateSnapshot()
     } catch (err) {
+      if (!isNetworkUnknownError(err)) {
+        clearPendingAction(issueId, requestKey)
+      }
       setActionError(err instanceof Error ? err.message : '重新打开 Issue 失败')
     }
   }
@@ -537,6 +670,7 @@ export function ProjectDetailPage({
       />
 
       <IssueDetailModal
+        key={effectiveIssueId ?? 'none'}
         isOpen={isIssueDetailModalOpen}
         projectId={projectId}
         issueId={effectiveIssueId}

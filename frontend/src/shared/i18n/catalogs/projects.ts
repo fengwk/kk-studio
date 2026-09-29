@@ -147,4 +147,48 @@ export const projectsCatalog = {
     'zh-CN': '重试操作 (保持幂等键)',
     'en-US': 'Retry (Preserving Request Key)',
   },
+  'projects.saveBasic': {
+    'zh-CN': '保存基础信息',
+    'en-US': 'Save Basic Info',
+  },
+  'projects.saveYolo': {
+    'zh-CN': '保存 YOLO 模式',
+    'en-US': 'Save YOLO Mode',
+  },
+  'projects.basicSaved': {
+    'zh-CN': '基础信息保存成功',
+    'en-US': 'Basic info saved successfully',
+  },
+  'projects.yoloSaved': {
+    'zh-CN': 'YOLO 模式保存成功',
+    'en-US': 'YOLO mode saved successfully',
+  },
+  'projects.workflowSaved': {
+    'zh-CN': '工作流配置保存成功',
+    'en-US': 'Workflow config saved successfully',
+  },
+  'projects.close': {
+    'zh-CN': '关闭',
+    'en-US': 'Close',
+  },
+  'projects.issue.unknownPending': {
+    'zh-CN': '检测到未确认结果的写操作（可能已在服务端生效）',
+    'en-US': 'Unconfirmed write request detected (may have taken effect on server)',
+  },
+  'projects.issue.retryPending': {
+    'zh-CN': '精确重试未决操作',
+    'en-US': 'Retry Pending Action',
+  },
+  'projects.issue.discardPending': {
+    'zh-CN': '放弃未决操作',
+    'en-US': 'Discard Pending Action',
+  },
+  'projects.issue.discardConfirm': {
+    'zh-CN': '【警告】此操作可能已在服务端执行。放弃后将不再跟踪原请求，可能导致状态不一致。确定要放弃吗？',
+    'en-US': 'Warning: This action may have taken effect on server. Discarding it will lose tracking. Are you sure you want to discard it?',
+  },
+  'projects.issue.cannotModifyDraftWithUnknown': {
+    'zh-CN': '存在未决的未知请求，不能直接修改输入。请先精确重试或明确放弃。',
+    'en-US': 'A pending unknown request exists. Please retry or explicitly discard before modifying input.',
+  },
 } as const
