@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 进程 scope helper：以独立 JVM 建立操作系统级执行范围，然后在范围内启动用户命令。
@@ -37,6 +38,12 @@ public final class ProcessScopeHelper {
   private static final Duration JOB_DRAIN_BUDGET = Duration.ofSeconds(2);
 
   private static final long POLL_INTERVAL_MILLIS = 5;
+
+  /** 测试闸门的等待预算：没有释放就必须显式失败，绝不静默继续。 */
+  private static final Duration SPAWN_LATCH_BUDGET = Duration.ofSeconds(20);
+
+  private static final String SPAWN_LATCH_READY_FILE = "spawn-ready";
+  private static final String SPAWN_LATCH_RELEASE_FILE = "spawn-go";
 
   private ProcessScopeHelper() {}
 
@@ -92,6 +99,11 @@ public final class ProcessScopeHelper {
     private final Path workdir;
     private final List<String> command;
 
+    /** 收敛只执行一次：main 的自然退出路径与 shutdown hook 用它同步。 */
+    private final AtomicBoolean convergenceStarted = new AtomicBoolean();
+
+    private volatile Boolean convergenceResult;
+
     private Helper(Path stateDir, Path workdir, List<String> command) {
       this.stateDir = stateDir;
       this.workdir = workdir;
@@ -113,30 +125,29 @@ public final class ProcessScopeHelper {
         throw new IllegalStateException(
             "the scope helper is not the leader of its process group: " + processGroup);
       }
-      // 从这一刻起忽略温和信号：父进程对整组广播温和信号时，helper 必须活到强杀阶段。
-      PosixProcessGroup.ignoreTerminationSignal();
+      // 收敛的唯一执行者是 convergePosixGroup：它在两处被调用——命令自然退出后的这里，以及 JVM 默认 SIGTERM 处置触发的 shutdown
+      // hook。JVM 的信号处置是「捕获」而不是「忽略」，而 exec 会把被捕获的信号复位成默认处置，因此命令可以注册自己的 trap，
+      // helper 也不必在启动命令的瞬间改动任何信号处置（忽略状态会被 fork 继承，非交互 shell 无法覆盖）。
+      // hook 必须在范围发布之前注册：发布之后父进程随时可能对整组广播温和信号。
+      installConvergenceHook(processGroup);
       PosixProcessGroup.becomeChildSubreaper();
       ProcessScopeState.publish(
           stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(processGroup));
       awaitPermit();
+      awaitSpawnRelease();
       // 命令的 stderr 与 stdout 合并进捕获管道；helper 的诊断已经指向诊断文件，不会被继承。
       PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
-      Process child;
-      // 信号处置随 fork 继承：helper 忽略 SIGTERM 是为了不被父进程的整组温和信号打死，但命令不能带着这个忽略状态开始——
-      // POSIX 规定非交互 shell 无法注册「进入时已被忽略」的信号，脚本里的 trap 会静默失效、只剩强杀。因此只在 fork 的瞬间
-      // 恢复默认处置，命令一启动就重新忽略；这个窗口里若真的收到整组温和信号，父进程自己的内核检查仍是唯一结论来源。
-      PosixProcessGroup.restoreDefaultTerminationSignal();
-      try {
-        child =
-            new ProcessBuilder(command)
-                .directory(workdir.toFile())
-                .redirectInput(ProcessBuilder.Redirect.PIPE)
-                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-                .redirectError(ProcessBuilder.Redirect.INHERIT)
-                .start();
-      } finally {
-        PosixProcessGroup.ignoreTerminationSignal();
-      }
+      Process child =
+          new ProcessBuilder(command)
+              .directory(workdir.toFile())
+              .redirectInput(ProcessBuilder.Redirect.PIPE)
+              .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+              .redirectError(ProcessBuilder.Redirect.INHERIT)
+              .start();
+      // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布完成，
+      // 否则「helper 先死、后代还在」会把收敛结论交回父进程。放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell
+      // 无法为「进入时已被忽略」的信号注册 trap，用户的优雅收尾会因此静默失效。
+      PosixProcessGroup.ignoreTerminationSignal();
       // 命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于这里，
       // 而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。
       closeQuietly(child.getOutputStream());
@@ -144,10 +155,66 @@ public final class ProcessScopeHelper {
       ProcessScopeState.publish(stateDir, ProcessScopeState.EXIT_FILE, Integer.toString(exitCode));
       // 命令的退出码已经回收，此后 waitpid(-1) 只会回收被收养的孤儿，不会偷走命令的状态。
       startOrphanReaper();
-      boolean drained = convergeGroup(processGroup);
+      return convergePosixGroup(processGroup) ? 0 : 1;
+    }
+
+    /** 注册收敛 hook：必须在范围发布之前，否则父进程可能先看到范围再对整组发信号，而那时还没有人能接住温和信号。 */
+    private void installConvergenceHook(long processGroup) {
+      Runtime.getRuntime()
+          .addShutdownHook(
+              new Thread(
+                  () -> {
+                    // 收尾期间屏蔽重复的温和信号：hook 一旦开始，任何重复信号都不得打断强杀与收敛发布。
+                    PosixProcessGroup.ignoreTerminationSignal();
+                    convergePosixGroup(processGroup);
+                  },
+                  "process-scope-convergence"));
+    }
+
+    /**
+     * 收敛整组并把结果发布到 {@code cleanup}；同一次调用的收敛只执行一次——命令自然退出的 main 路径与 shutdown hook 会竞争，
+     * 先到者执行，后到者直接复用它的结论。
+     */
+    private boolean convergePosixGroup(long processGroup) {
+      if (!convergenceStarted.compareAndSet(false, true)) {
+        Boolean finished = convergenceResult;
+        return finished != null && finished;
+      }
+      boolean drained;
+      try {
+        drained = convergeGroup(processGroup);
+      } catch (RuntimeException | Error failure) {
+        publishFailure(failure);
+        drained = false;
+      }
       ProcessScopeState.publish(
           stateDir, ProcessScopeState.CLEANUP_FILE, Boolean.toString(drained));
-      return drained ? 0 : 1;
+      convergenceResult = drained;
+      return drained;
+    }
+
+    /**
+     * 仅测试使用的派生闸门：显式设置 {@link ProcessScope#SPAWN_LATCH_PROPERTY} 时，启动命令之前先写下就绪标记并等待释放
+     * 标记，用来确定性地构造「取消与派生同时发生」。生产路径不设置该属性，因此这里直接返回。
+     */
+    private void awaitSpawnRelease() throws IOException {
+      String latch = System.getProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+      if (latch == null || latch.isBlank()) {
+        return;
+      }
+      Path directory = Path.of(latch);
+      Files.writeString(
+          directory.resolve(SPAWN_LATCH_READY_FILE),
+          Long.toString(ProcessHandle.current().pid()),
+          StandardCharsets.UTF_8);
+      long deadline = System.nanoTime() + SPAWN_LATCH_BUDGET.toNanos();
+      while (!Files.exists(directory.resolve(SPAWN_LATCH_RELEASE_FILE))) {
+        if (System.nanoTime() >= deadline) {
+          throw new IllegalStateException(
+              "the spawn latch was not released within " + SPAWN_LATCH_BUDGET.toMillis() + " ms");
+        }
+        sleepQuietly();
+      }
     }
 
     /**

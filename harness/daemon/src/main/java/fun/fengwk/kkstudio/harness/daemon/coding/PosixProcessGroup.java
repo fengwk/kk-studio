@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * POSIX 进程组原语：父进程与 scope helper 都只通过这里触达 libc。
@@ -49,9 +51,6 @@ final class PosixProcessGroup {
   /** {@code SIG_IGN} 的原生取值，即 {@code (void *) 1}。 */
   private static final Pointer SIG_IGN = new Pointer(1);
 
-  /** {@code SIG_DFL} 的原生取值，即 {@code (void *) 0}。 */
-  private static final Pointer SIG_DFL = new Pointer(0);
-
   private static final Path PROC = Path.of("/proc");
 
   private PosixProcessGroup() {}
@@ -74,20 +73,58 @@ final class PosixProcessGroup {
     return Integer.toUnsignedLong(LibC.INSTANCE.getpgrp());
   }
 
-  /** 让本进程忽略 {@code SIGTERM}：父进程对整组广播温和信号时 helper 必须活到强杀阶段，否则整组会在宽限窗口内失去执行者。 */
+  /**
+   * 让本进程忽略 {@code SIGTERM}。
+   *
+   * <p>只在 helper 已经进入收尾时使用：那时重复的温和信号不得打断强杀与收敛发布。启动阶段绝不调用它——{@code SIG_IGN} 会被 {@code fork} 继承且非交互
+   * shell 无法覆盖，命令因此带着「进入时已被忽略」的信号开始，用户脚本的 trap 会静默失效。
+   */
   static void ignoreTerminationSignal() {
     LibC.INSTANCE.signal(SIGTERM, SIG_IGN);
   }
 
+  /** 本平台是否能枚举组内成员：只有 Linux/WSL 能通过 {@code /proc} 做到，其它 POSIX 平台只能问「组还在不在」。 */
+  static boolean canEnumerateMembers() {
+    return isLinux();
+  }
+
   /**
-   * 让本进程恢复 {@code SIGTERM} 的默认处置，仅供启动命令的极短窗口使用。
+   * 组里当前活着（非僵尸）的成员，排除 {@code excludedProcess}；无法枚举的平台返回空数组。
    *
-   * <p>信号处置会随 {@code fork} 继承：helper 若在启动命令时仍忽略 {@code SIGTERM}，命令就带着「进入时已被忽略」的状态开始，而 POSIX 规定非交互
-   * shell 无法为这类信号注册 trap——用户的优雅收尾会静默失效，只剩强杀。因此启动命令之前先恢复默认处置，命令 fork 出来之后再重新忽略（{@link
-   * #ignoreTerminationSignal()}）。
+   * <p>这是一个**快照**：调用方只能在紧接着的强杀里使用它，然后必须重新判定收敛。逐个 pid 发信号的价值在于「keeper 已经退出、组 id
+   * 可能被复用」时不再广播：信号只发给刚刚确认过属于本组的 pid。
+   *
+   * <p>扫描不可判定时返回单个 {@code -1}：调用方必须把它当成「还没有收敛」，不可判定绝不等于收敛。
    */
-  static void restoreDefaultTerminationSignal() {
-    LibC.INSTANCE.signal(SIGTERM, SIG_DFL);
+  static long[] liveMembers(long processGroup, long excludedProcess) {
+    if (!isLinux()) {
+      return new long[0];
+    }
+    List<Long> members = new ArrayList<>();
+    try (DirectoryStream<Path> entries = Files.newDirectoryStream(PROC)) {
+      for (Path entry : entries) {
+        long pid = parseProcessId(entry.getFileName().toString());
+        if (pid <= 0 || pid == excludedProcess) {
+          continue;
+        }
+        ProcessStat stat = readProcessStat(entry.resolve("stat"));
+        if (stat != null && stat.group == processGroup && isLiveState(stat.state)) {
+          members.add(pid);
+        }
+      }
+    } catch (IOException error) {
+      // 扫描失败按「不可判定」处理：调用方会把它当成「还没有收敛」，绝不据此宣布收敛。
+      return new long[] {-1};
+    }
+    return members.stream().mapToLong(Long::longValue).toArray();
+  }
+
+  /** 向单个进程发信号；返回 {@code true} 表示信号已经交付或进程已经不在了。 */
+  static boolean signalProcess(long process, int signal) {
+    if (LibC.INSTANCE.kill((int) process, signal) == 0) {
+      return true;
+    }
+    return Native.getLastError() == ESRCH;
   }
 
   /**
@@ -170,29 +207,7 @@ final class PosixProcessGroup {
     if (!groupExists(processGroup)) {
       return false;
     }
-    if (!isLinux()) {
-      return true;
-    }
-    return linuxHasLiveMember(processGroup, excludedProcess);
-  }
-
-  /** Linux 侧的真判定：遍历 {@code /proc} 找出该组里状态不是僵尸的成员；扫描失败按「仍有成员」处理。 */
-  private static boolean linuxHasLiveMember(long processGroup, long excludedProcess) {
-    try (DirectoryStream<Path> entries = Files.newDirectoryStream(PROC)) {
-      for (Path entry : entries) {
-        long pid = parseProcessId(entry.getFileName().toString());
-        if (pid <= 0 || pid == excludedProcess) {
-          continue;
-        }
-        ProcessStat stat = readProcessStat(entry.resolve("stat"));
-        if (stat != null && stat.group == processGroup && isLiveState(stat.state)) {
-          return true;
-        }
-      }
-      return false;
-    } catch (IOException error) {
-      return true;
-    }
+    return liveMembers(processGroup, excludedProcess).length > 0;
   }
 
   /** {@code /proc/<pid>/stat} 的状态字段：{@code Z}/{@code X}/{@code x} 是不会再执行任何代码的成员。 */

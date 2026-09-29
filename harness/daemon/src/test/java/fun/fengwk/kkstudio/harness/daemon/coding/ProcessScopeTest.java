@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -292,6 +293,94 @@ class ProcessScopeTest {
     } finally {
       scope.close();
     }
+  }
+
+  /**
+   * 取消恰好落在「helper 即将启动命令」的窗口里时，命令与它的后代仍然必须收敛。
+   *
+   * <p>这是对「在启动命令的瞬间改动信号处置」这类实现的显式反向断言：父进程此刻对整组广播温和信号，而 helper 紧接着启动命令。 若 helper
+   * 在这个窗口里把温和信号交回默认处置，它会当场消失，留下的后代（这里显式忽略 TERM）就再没有人强杀——收敛结论
+   * 只能靠父进程对内核的复核收口；若它在窗口里改成忽略温和信号，命令又会继承这个忽略状态，用户脚本的 trap 静默失效。
+   *
+   * <p>两种合法结局都要求收敛：命令在强杀之前完成 fork（pid 文件有内容，必须全部消失），或者强杀先到（命令根本没 fork）。
+   */
+  @Test
+  void cancelDuringTheSpawnWindowStillConvergesRootAndDescendants() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 进程组与信号语义");
+    Path latch = workdir.resolve("spawn-latch");
+    Files.createDirectories(latch);
+    Path pidFile = workdir.resolve("spawn-window.pids");
+    System.setProperty(ProcessScope.SPAWN_LATCH_PROPERTY, latch.toString());
+    ProcessScope scope;
+    try {
+      scope =
+          ProcessScope.start(
+              workdir,
+              List.of(
+                  "sh",
+                  "-c",
+                  "echo $$ >> '"
+                      + pidFile
+                      + "'; (trap '' TERM; sleep 60) & echo $! >> '"
+                      + pidFile
+                      + "'; wait"));
+    } finally {
+      System.clearProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+    }
+    try {
+      // helper 已经就位、只差启动命令：从这一刻起父进程的温和信号与 helper 的派发互为竞态。
+      awaitFile(latch.resolve("spawn-ready"));
+      CountDownLatch cancelled = new CountDownLatch(1);
+      boolean[] converged = new boolean[1];
+      Thread cancel =
+          new Thread(
+              () -> {
+                converged[0] = scope.terminate();
+                cancelled.countDown();
+              },
+              "spawn-window-cancel");
+      cancel.start();
+      Files.writeString(latch.resolve("spawn-go"), "go", StandardCharsets.UTF_8);
+      assertTrue(cancelled.await(30, TimeUnit.SECONDS), "取消必须在预算内结束");
+      cancel.join(Duration.ofSeconds(5).toMillis());
+      assertTrue(converged[0], "取消之后整组必须由内核确认收敛");
+      assertTrue(scope.converged(), "收敛结论必须来自内核，而不是调用方的乐观判断");
+      for (long pid : recordedPids(pidFile)) {
+        assertFalse(alive(pid), "取消窗口里启动的 " + pid + " 必须已经消失");
+      }
+    } finally {
+      scope.close();
+    }
+  }
+
+  /** 等到文件出现：测试闸门的就绪标记由 helper 在另一个进程里写下。 */
+  private static void awaitFile(Path file) throws Exception {
+    long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+    while (!Files.exists(file)) {
+      if (System.nanoTime() >= deadline) {
+        throw new AssertionError("等待超时：" + file);
+      }
+      Thread.sleep(20);
+    }
+  }
+
+  /** 命令记录下来的 pid；命令根本没启动时为空。 */
+  private static List<Long> recordedPids(Path file) throws IOException {
+    if (!Files.exists(file)) {
+      return List.of();
+    }
+    List<Long> pids = new ArrayList<>();
+    for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+      String trimmed = line.trim();
+      if (!trimmed.isEmpty()) {
+        pids.add(Long.parseLong(trimmed));
+      }
+    }
+    return pids;
+  }
+
+  private static boolean alive(long pid) {
+    return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
   }
 
   /** 统计临时目录里的进程范围状态目录数量，用于断言失败路径不留残留。 */
