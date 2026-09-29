@@ -82,6 +82,35 @@ class LspClientPoolConcurrencyTest {
     pool.release(secondEntry);
   }
 
+  /** 意图：spawn 成功后 stderr 派发被拒时，启动必须终止已拉起的进程并保留拒绝异常，池里不得留下未赋值的客户端。 */
+  @Test
+  void rejectedBootstrapDispatchTerminatesTheSpawnedProcess() throws Exception {
+    Path transcript = FakeLspServers.transcript(root);
+    Path pidFile = root.resolve("held.pid");
+    GateDispatch dispatch = gate();
+    dispatch.reject(true);
+    LspServerConfig server = holdingServer(transcript, pidFile);
+    LspClientPool pool = pool(transcript, Duration.ofMinutes(5), dispatch, server);
+    Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+
+    Future<Exception> pending =
+        callers.submit(
+            () -> {
+              try {
+                pool.lease(file);
+                return null;
+              } catch (Exception error) {
+                return error;
+              }
+            });
+    long pid = awaitPidFile(pidFile);
+    Exception error = pending.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+
+    assertTrue(error instanceof RejectedExecutionException, String.valueOf(error));
+    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+    assertEquals(0, pool.activeCount(), "派发被拒的实例不得进入可用集合");
+  }
+
   /** 意图：启动尚未完成时关闭：实例不得被发布，进程被终止，后续 lease 明确报已关闭。 */
   @Test
   void closeDuringBootCancelsPublicationAndStopsTheProcess() throws Exception {
@@ -372,6 +401,41 @@ class LspClientPoolConcurrencyTest {
     ExecutorService dispatch = Executors.newCachedThreadPool();
     dispatchers.add(dispatch);
     return dispatch;
+  }
+
+  private LspServerConfig holdingServer(Path transcript, Path pidFile) throws Exception {
+    LspServerConfig template = FakeLspServers.javaServer("held", "normal", root, transcript);
+    Path wrapper = root.resolve("hold-bootstrap.sh");
+    Files.writeString(
+        wrapper,
+        "#!/bin/sh\necho $$ > "
+            + shellQuote(pidFile.toString())
+            + "\nwhile true; do sleep 1; done\n");
+    if (!wrapper.toFile().setExecutable(true)) {
+      throw new IllegalStateException("cannot mark wrapper executable: " + wrapper);
+    }
+    Files.writeString(root.resolve("pom.xml"), "<project/>\n");
+    return new LspServerConfig(
+        template.id(),
+        List.of(wrapper.toString()),
+        template.extensions(),
+        template.rootMarkers(),
+        template.firstMatchMarkers());
+  }
+
+  private static long awaitPidFile(Path pidFile) throws Exception {
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (System.nanoTime() < deadline) {
+      if (Files.exists(pidFile) && !Files.readString(pidFile).isBlank()) {
+        return Long.parseLong(Files.readString(pidFile).trim());
+      }
+      Thread.sleep(10);
+    }
+    throw new AssertionError("held bootstrap did not record its pid: " + pidFile);
+  }
+
+  private static String shellQuote(String value) {
+    return "'" + value.replace("'", "'\\''") + "'";
   }
 
   private static int startedProcesses(Path transcript) {
