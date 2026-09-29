@@ -117,6 +117,9 @@ final class OpenAiChatModelProvider implements ModelProvider {
             try {
               accumulator.handleData(event.data());
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
             }
           }
@@ -127,6 +130,9 @@ final class OpenAiChatModelProvider implements ModelProvider {
               ProviderCompletion completion = accumulator.finish();
               bridge.emitComplete(completion);
             } catch (ProviderException pe) {
+              if (bridge.handlerFailed()) {
+                throw pe;
+              }
               bridge.emitError(pe);
             }
           }
@@ -145,6 +151,12 @@ final class OpenAiChatModelProvider implements ModelProvider {
           transport.stream(
               httpRequest, descriptor.modelCallTimeoutPolicy(), HttpSseLimits.DEFAULT, callback);
       bridge.bind(stream);
+    } catch (TransportException exception) {
+      ProviderException mapped = OpenAiChatErrorMapper.mapTransportException(exception);
+      if (mapped != null) {
+        bridge.emitError(mapped);
+      }
+      return bridge;
     } catch (RuntimeException ex) {
       throw new RuntimeException("transport execution failed");
     }

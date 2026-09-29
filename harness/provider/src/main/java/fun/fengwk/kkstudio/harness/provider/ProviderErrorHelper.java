@@ -22,11 +22,13 @@ public final class ProviderErrorHelper {
 
   private ProviderErrorHelper() {}
 
-  /** 判断是否属于无需向上抛出异常的静默传输错误类型。 */
+  /**
+   * 判断是否属于无需向上抛出异常的静默传输错误类型。
+   *
+   * <p>只有调用方主动取消保持静默。执行器拒绝与回调失败都是必须交付的终态，不能在这里全局吞掉。
+   */
   public static boolean isSilentTransportKind(TransportErrorKind kind) {
-    return kind == TransportErrorKind.CANCELLED
-        || kind == TransportErrorKind.EXECUTOR_REJECTED
-        || kind == TransportErrorKind.CALLBACK_FAILED;
+    return kind == TransportErrorKind.CANCELLED;
   }
 
   /**

@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -121,7 +122,7 @@ class AnthropicModelProviderUnitTest {
   }
 
   @Test
-  void throwsUnclassifiedRuntimeExceptionOnSynchronousTransportExceptionWithoutCallingHandler() {
+  void mapsSynchronousTransportExceptionToExactlyOneTerminalError() {
     // 1. 同步抛出 TransportException (IO)
     JdkHttpSseTransport ioTransport =
         new JdkHttpSseTransport(client, exec, sched) {
@@ -140,29 +141,27 @@ class AnthropicModelProviderUnitTest {
             ioTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
 
     AtomicReference<ProviderException> caughtIo = new AtomicReference<>();
-    RuntimeException exIo =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                ioProvider.stream(
-                    request,
-                    new ProviderStreamHandler() {
-                      @Override
-                      public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    AtomicReference<Integer> ioErrors = new AtomicReference<>(0);
+    ProviderStream ioStream =
+        ioProvider.stream(
+            request,
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
 
-                      @Override
-                      public void onComplete(
-                          ProviderCompletion completion, ProviderStream stream) {}
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
 
-                      @Override
-                      public void onError(ProviderException error, ProviderStream stream) {
-                        caughtIo.set(error);
-                      }
-                    }));
-    assertEquals("transport execution failed", exIo.getMessage());
-    assertNull(exIo.getCause());
-    assertNull(
-        caughtIo.get(), "handler.onError must not be called on synchronous transport exception");
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {
+                ioErrors.set(ioErrors.get() + 1);
+                caughtIo.set(error);
+              }
+            });
+    assertNotNull(ioStream);
+    assertEquals(1, ioErrors.get());
+    assertEquals(ProviderErrorKind.TRANSIENT, caughtIo.get().kind());
+    assertEquals("Anthropic I/O error", caughtIo.get().getMessage());
 
     // 2. 同步抛出 TransportException (EXECUTOR_REJECTED)
     JdkHttpSseTransport rejectedTransport =
@@ -185,29 +184,154 @@ class AnthropicModelProviderUnitTest {
             URI.create("https://api.anthropic.com/v1/messages"));
 
     AtomicReference<ProviderException> caughtRej = new AtomicReference<>();
-    RuntimeException exRej =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                rejProvider.stream(
-                    request,
-                    new ProviderStreamHandler() {
-                      @Override
-                      public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    AtomicReference<Integer> rejectedErrors = new AtomicReference<>(0);
+    ProviderStream rejectedStream =
+        rejProvider.stream(
+            request,
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
 
-                      @Override
-                      public void onComplete(
-                          ProviderCompletion completion, ProviderStream stream) {}
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
 
-                      @Override
-                      public void onError(ProviderException error, ProviderStream stream) {
-                        caughtRej.set(error);
-                      }
-                    }));
-    assertEquals("transport execution failed", exRej.getMessage());
-    assertNull(exRej.getCause());
-    assertNull(
-        caughtRej.get(), "handler.onError must not be called on synchronous executor rejection");
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {
+                rejectedErrors.set(rejectedErrors.get() + 1);
+                caughtRej.set(error);
+              }
+            });
+    assertNotNull(rejectedStream);
+    assertEquals(1, rejectedErrors.get());
+    assertEquals(ProviderErrorKind.TRANSIENT, caughtRej.get().kind());
+    assertEquals("Anthropic executor rejected the request", caughtRej.get().getMessage());
+  }
+
+  /** 测试意图：用户 handler 抛错后 bridge 已终态，transport 再交付 CALLBACK_FAILED 时不得再次回调。 */
+  @Test
+  void handlerFailureIsTerminalAndDoesNotReenterOnError() {
+    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
+    JdkHttpSseTransport failingCallbackTransport =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest request,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            callbackRef.set(callback);
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+    AnthropicModelProvider provider =
+        new AnthropicModelProvider(
+            failingCallbackTransport,
+            descriptor,
+            "key",
+            URI.create("https://api.anthropic.com/v1/messages"));
+    AtomicReference<Integer> errors = new AtomicReference<>(0);
+    ProviderStream stream =
+        provider.stream(
+            request,
+            new ProviderStreamHandler() {
+              @Override
+              public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+                throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+              }
+
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {
+                errors.set(errors.get() + 1);
+              }
+            });
+    assertThrows(
+        ProviderException.class,
+        () -> callbackRef.get().onEvent(new ServerSentEvent("message", "{\"type\":\"ping\"}")));
+    callbackRef
+        .get()
+        .onFailure(
+            new TransportException(TransportErrorKind.CALLBACK_FAILED, "onEvent callback threw"));
+    assertEquals(0, errors.get());
+    assertNotNull(stream);
+
+    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
+    AnthropicModelProvider providerExceptionProvider =
+        new AnthropicModelProvider(
+            new JdkHttpSseTransport(client, exec, sched) {
+              @Override
+              public ProviderStream stream(
+                  HttpRequest request,
+                  ModelCallTimeoutPolicy timeoutPolicy,
+                  HttpSseLimits limits,
+                  HttpSseCallback callback) {
+                providerExceptionCallback.set(callback);
+                return new ProviderStream() {
+                  @Override
+                  public void cancel() {}
+
+                  @Override
+                  public boolean isCancelled() {
+                    return false;
+                  }
+                };
+              }
+            },
+            descriptor,
+            "key",
+            URI.create("https://api.anthropic.com/v1/messages"));
+    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
+    providerExceptionProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+          }
+        });
+    providerExceptionCallback
+        .get()
+        .onEvent(
+            new ServerSentEvent(
+                "message_start",
+                "{\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}"));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            providerExceptionCallback
+                .get()
+                .onEvent(
+                    new ServerSentEvent(
+                        "content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"x\"}}")));
+    providerExceptionCallback
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, providerExceptionErrors.get());
   }
 
   @Test

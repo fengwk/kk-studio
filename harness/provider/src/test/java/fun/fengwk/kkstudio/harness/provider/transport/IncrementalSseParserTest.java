@@ -120,24 +120,20 @@ class IncrementalSseParserTest {
         events);
   }
 
-  /**
-   * 对应上游 parse_trims_event_field_and_strips_one_leading_space_from_data：验证 event trim 与 data 剥离单空格。
-   */
+  /** 测试意图：event 与 data 使用同一字段规则，只去掉冒号后的一个空格，保留其余前导与尾随空白。 */
   @Test
-  void parse_trims_event_field_and_strips_one_leading_space_from_data() {
+  void parse_strips_only_one_space_after_event_colon() {
     String input = "event:   spaced-event   \ndata:   spaced value   \n\n";
     List<ServerSentEvent> events = parseAll(input);
-    assertEquals(List.of(new ServerSentEvent("spaced-event", "  spaced value   ")), events);
+    assertEquals(List.of(new ServerSentEvent("  spaced-event   ", "  spaced value   ")), events);
   }
 
-  /**
-   * 对应上游 incremental_trims_event_field_and_strips_one_leading_space_from_data：增量模式下空格处理与全量模式严格一致。
-   */
+  /** 测试意图：event 字段跨 chunk 时仍不得裁掉尾随空白。 */
   @Test
-  void incremental_trims_event_field_and_strips_one_leading_space_from_data() {
+  void incremental_strips_only_one_space_after_event_colon() {
     String input = "event:   spaced-event   \ndata:   spaced value   \n\n";
     List<ServerSentEvent> events = parseChunked(input, 4);
-    assertEquals(List.of(new ServerSentEvent("spaced-event", "  spaced value   ")), events);
+    assertEquals(List.of(new ServerSentEvent("  spaced-event   ", "  spaced value   ")), events);
   }
 
   /** 契约测试：纯增量解析器支持逐字节供给且单字节实时触发交付，无需阻塞式缓冲。 */

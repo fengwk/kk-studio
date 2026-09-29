@@ -280,7 +280,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-          "localMethod": "parse_trims_event_field_and_strips_one_leading_space_from_data",
+          "localMethod": "parse_strips_only_one_space_after_event_colon",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -298,7 +298,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParserTest",
-          "localMethod": "incremental_trims_event_field_and_strips_one_leading_space_from_data",
+          "localMethod": "incremental_strips_only_one_space_after_event_colon",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null

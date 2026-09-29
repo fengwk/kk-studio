@@ -34,8 +34,8 @@ final class AnthropicErrorMapper {
    * 将传输层异常转换为 {@link ProviderException}。
    *
    * @param exception 传输层异常
-   * @return 映射后的 ProviderException；若为 CANCELLED、EXECUTOR_REJECTED 或 CALLBACK_FAILED 则返回 null
-   *     表示静默并保留 RUNNING 状态
+   * @return 映射后的 ProviderException；仅 CANCELLED 返回 null。EXECUTOR_REJECTED 映射为
+   *     TRANSIENT，CALLBACK_FAILED 映射为不含 cause 与响应正文的 INVALID_RESPONSE
    */
   static ProviderException mapTransportException(TransportException exception) {
     if (exception == null) {
@@ -43,6 +43,13 @@ final class AnthropicErrorMapper {
     }
     if (ProviderErrorHelper.isSilentTransportKind(exception.kind())) {
       return null;
+    }
+    if (exception.kind() == TransportErrorKind.EXECUTOR_REJECTED) {
+      return new ProviderException(
+          ProviderErrorKind.TRANSIENT, "Anthropic executor rejected the request");
+    }
+    if (exception.kind() == TransportErrorKind.CALLBACK_FAILED) {
+      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
     }
     if (exception.kind() == TransportErrorKind.TIMEOUT) {
       return new ProviderException(ProviderErrorKind.TRANSIENT, "Anthropic request timed out");

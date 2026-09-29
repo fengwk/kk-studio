@@ -231,6 +231,10 @@ final class OpenAiResponsesStreamAccumulator {
     if (!KNOWN_SSE_EVENTS.contains(type)) {
       return;
     }
+    if (terminalReceived) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "semantic event received after terminal response");
+    }
 
     switch (type) {
       case "response.created" -> handleCreated(node);
@@ -291,7 +295,14 @@ final class OpenAiResponsesStreamAccumulator {
       String name = item.path("name").asText(null);
       // 首次观察到的 function_call 分配下一个连续 ordinal；重复 added 复用既有 ordinal 以避免序号空洞
       WireToolCall previous = toolsById.get(id);
-      int ordinal = previous != null ? previous.ordinal : nextToolOrdinal++;
+      if (previous != null) {
+        if (!sameToolIdentity(previous, callId, name)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "duplicate output item has a different identity");
+        }
+        return;
+      }
+      int ordinal = nextToolOrdinal++;
       toolsById.put(id, new WireToolCall(ordinal, id, callId, name));
       if (callId != null || name != null) {
         bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(ordinal, callId, name, null));
@@ -331,6 +342,27 @@ final class OpenAiResponsesStreamAccumulator {
       }
       tool.argumentsDone = true;
     }
+  }
+
+  private static boolean sameToolIdentity(WireToolCall tool, String callId, String name) {
+    return Objects.equals(tool.callId, callId) && Objects.equals(tool.name, name);
+  }
+
+  private static long usageRemainder(long total, long... parts) {
+    long excluded = 0L;
+    try {
+      for (long part : parts) {
+        excluded = Math.addExact(excluded, part);
+      }
+    } catch (ArithmeticException overflow) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values overflow");
+    }
+    if (excluded > total) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage breakdown exceeds total");
+    }
+    return total - excluded;
   }
 
   private WireToolCall findToolCall(String itemId, String callId) {
@@ -772,8 +804,8 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     // Token 用量归一化：total_tokens 缺失时为 0L，不凭空合成
-    long ordinaryInput = Math.max(0L, rawInputTokens - cachedTokens - cacheWriteTokens);
-    long ordinaryOutput = Math.max(0L, rawOutputTokens - reasoningTokens);
+    long ordinaryInput = usageRemainder(rawInputTokens, cachedTokens, cacheWriteTokens);
+    long ordinaryOutput = usageRemainder(rawOutputTokens, reasoningTokens);
     long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : 0L;
 
     ModelUsage usage =

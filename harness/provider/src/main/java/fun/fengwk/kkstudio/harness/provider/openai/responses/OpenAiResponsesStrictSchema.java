@@ -33,17 +33,64 @@ final class OpenAiResponsesStrictSchema {
     return copy;
   }
 
+  private static final List<String> SCHEMA_FIELDS =
+      List.of(
+          "items",
+          "additionalProperties",
+          "additionalItems",
+          "contains",
+          "propertyNames",
+          "unevaluatedItems",
+          "unevaluatedProperties",
+          "not",
+          "if",
+          "then",
+          "else");
+
+  private static final List<String> SCHEMA_ARRAY_FIELDS =
+      List.of("anyOf", "oneOf", "allOf", "prefixItems");
+
+  private static final List<String> SCHEMA_MAP_FIELDS =
+      List.of("properties", "$defs", "definitions", "patternProperties", "dependentSchemas");
+
   private static void normalizeNode(JsonNode node) {
-    if (!node.isObject()) {
+    if (node == null || node.isNull() || !node.isObject()) {
       return;
     }
     ObjectNode object = (ObjectNode) node;
     if (isObjectSchema(object)) {
       normalizeObjectSchema(object);
+      return;
     }
-    JsonNode items = object.get("items");
-    if (items != null && !items.isNull()) {
-      normalizeNode(items);
+    walkSchemaLocations(object);
+  }
+
+  /** 只进入嵌套 schema 位置；default、enum、const 等字面量不递归。 */
+  private static void walkSchemaLocations(ObjectNode object) {
+    walkSchemaLocations(object, false);
+  }
+
+  private static void walkSchemaLocations(ObjectNode object, boolean skipProperties) {
+    for (String field : SCHEMA_FIELDS) {
+      JsonNode child = object.get(field);
+      if (child != null && !child.isBoolean()) {
+        normalizeNode(child);
+      }
+    }
+    for (String field : SCHEMA_ARRAY_FIELDS) {
+      JsonNode child = object.get(field);
+      if (child != null && child.isArray()) {
+        child.forEach(OpenAiResponsesStrictSchema::normalizeNode);
+      }
+    }
+    for (String field : SCHEMA_MAP_FIELDS) {
+      if (skipProperties && "properties".equals(field)) {
+        continue;
+      }
+      JsonNode child = object.get(field);
+      if (child != null && child.isObject()) {
+        child.forEach(OpenAiResponsesStrictSchema::normalizeNode);
+      }
     }
   }
 
@@ -74,6 +121,7 @@ final class OpenAiResponsesStrictSchema {
     ArrayNode required = object.putArray("required");
     propertyNames.forEach(required::add);
     object.put("additionalProperties", false);
+    walkSchemaLocations(object, true);
   }
 
   /** 读取源 schema 显式声明的 required；非字符串元素忽略，缺省即视为没有任何必填属性。 */
@@ -90,23 +138,45 @@ final class OpenAiResponsesStrictSchema {
     return required;
   }
 
-  /** 属性是否已经允许 null：{@code type: "null"} 或类型数组包含 {@code "null"}。 */
+  /**
+   * 属性是否已经明确允许 null。只承认 {@code type:"null"}、类型数组中的 null，以及 anyOf 中的 null；oneOf 与 allOf 不按 any
+   * 语义推断，避免把不能缺省的组合误判成已可空。
+   */
   private static boolean allowsNull(JsonNode property) {
     if (property == null || !property.isObject()) {
       return false;
     }
     JsonNode type = property.get("type");
+    if (type != null && !explicitTypeAllowsNull(type)) {
+      return false;
+    }
+    if (explicitTypeAllowsNull(type)) {
+      return true;
+    }
+    JsonNode anyOf = property.get("anyOf");
+    if (anyOf != null && anyOf.isArray()) {
+      for (JsonNode variant : anyOf) {
+        if (allowsNull(variant)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static boolean explicitTypeAllowsNull(JsonNode type) {
     if (type == null) {
       return false;
     }
     if (type.isTextual()) {
       return "null".equals(type.textValue());
     }
-    if (type.isArray()) {
-      for (JsonNode variant : type) {
-        if (variant.isTextual() && "null".equals(variant.textValue())) {
-          return true;
-        }
+    if (!type.isArray()) {
+      return false;
+    }
+    for (JsonNode variant : type) {
+      if (variant.isTextual() && "null".equals(variant.textValue())) {
+        return true;
       }
     }
     return false;

@@ -19,8 +19,9 @@ class ProviderErrorHelperTest {
   @DisplayName("isSilentTransportKind 正确识别静默传输类型")
   void testIsSilentTransportKind() {
     assertTrue(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.CANCELLED));
-    assertTrue(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.EXECUTOR_REJECTED));
-    assertTrue(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.CALLBACK_FAILED));
+    // 同步拒绝与回调崩溃必须进入终态，不能再被全局静默。
+    assertFalse(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.EXECUTOR_REJECTED));
+    assertFalse(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.CALLBACK_FAILED));
 
     assertFalse(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.TIMEOUT));
     assertFalse(ProviderErrorHelper.isSilentTransportKind(TransportErrorKind.IO));

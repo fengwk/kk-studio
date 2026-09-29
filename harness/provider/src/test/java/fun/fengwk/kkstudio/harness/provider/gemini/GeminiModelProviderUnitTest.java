@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -366,21 +367,179 @@ class GeminiModelProviderUnitTest {
     GeminiModelProvider provider =
         new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
 
+    RuntimeException failure =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                provider.stream(
+                    request,
+                    new ProviderStreamHandler() {
+                      @Override
+                      public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+                      @Override
+                      public void onError(ProviderException error, ProviderStream stream) {}
+
+                      @Override
+                      public void onComplete(
+                          ProviderCompletion completion, ProviderStream stream) {}
+                    }));
+    assertEquals("transport execution failed", failure.getMessage());
+    assertNull(failure.getCause());
+  }
+
+  /** 测试意图：同步执行器拒绝必须 exactly-once 进入终态，不能返回永不结束的 bridge。 */
+  @Test
+  void mapsSynchronousExecutorRejectionToTerminalError() {
+    JdkHttpSseTransport rejected =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest req,
+              ModelCallTimeoutPolicy timeout,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
+          }
+        };
+    GeminiModelProvider provider =
+        new GeminiModelProvider(rejected, descriptor, "k", URI.create("https://example.com"));
+    AtomicReference<Integer> errors = new AtomicReference<>(0);
+    AtomicReference<ProviderException> caught = new AtomicReference<>();
+    ProviderStream stream =
+        provider.stream(
+            request,
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+              @Override
+              public void onError(ProviderException error, ProviderStream stream) {
+                errors.set(errors.get() + 1);
+                caught.set(error);
+              }
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+            });
+    assertNotNull(stream);
+    assertEquals(1, errors.get());
+    assertEquals(ProviderErrorKind.TRANSIENT, caught.get().kind());
+    assertEquals("Gemini executor rejected the request", caught.get().getMessage());
+  }
+
+  /** 测试意图：用户 handler 抛错后已终态，后续 CALLBACK_FAILED 不得再次进入 onError。 */
+  @Test
+  void handlerFailureDoesNotReenterOnError() {
+    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
+    JdkHttpSseTransport transport =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest req,
+              ModelCallTimeoutPolicy timeout,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            callbackRef.set(callback);
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+    GeminiModelProvider provider =
+        new GeminiModelProvider(transport, descriptor, "k", URI.create("https://example.com"));
+    AtomicReference<Integer> errors = new AtomicReference<>(0);
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+          }
+
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            errors.set(errors.get() + 1);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+        });
     assertThrows(
-        RuntimeException.class,
+        ProviderException.class,
+        () -> callbackRef.get().onEvent(new ServerSentEvent(null, "{\"candidates\":[]}")));
+    callbackRef
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, errors.get());
+
+    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
+    GeminiModelProvider providerExceptionProvider =
+        new GeminiModelProvider(
+            new JdkHttpSseTransport(client, exec, sched) {
+              @Override
+              public ProviderStream stream(
+                  HttpRequest req,
+                  ModelCallTimeoutPolicy timeout,
+                  HttpSseLimits limits,
+                  HttpSseCallback callback) {
+                providerExceptionCallback.set(callback);
+                return new ProviderStream() {
+                  @Override
+                  public void cancel() {}
+
+                  @Override
+                  public boolean isCancelled() {
+                    return false;
+                  }
+                };
+              }
+            },
+            descriptor,
+            "k",
+            URI.create("https://example.com"));
+    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
+    providerExceptionProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+        });
+    assertThrows(
+        ProviderException.class,
         () ->
-            provider.stream(
-                request,
-                new ProviderStreamHandler() {
-                  @Override
-                  public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-                  @Override
-                  public void onError(ProviderException error, ProviderStream stream) {}
-
-                  @Override
-                  public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-                }));
+            providerExceptionCallback
+                .get()
+                .onEvent(
+                    new ServerSentEvent(
+                        null,
+                        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"x\"}]}}]}")));
+    providerExceptionCallback
+        .get()
+        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+    assertEquals(0, providerExceptionErrors.get());
   }
 
   /** 验证 onEvent 与 onComplete 中捕获 ProviderException 时通过 bridge.emitError 分发。 */
