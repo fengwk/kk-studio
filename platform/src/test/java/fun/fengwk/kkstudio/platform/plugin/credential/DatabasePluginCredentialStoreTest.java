@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,8 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 数据库凭据 Store 契约与状态矩阵测试。
@@ -389,6 +393,75 @@ class DatabasePluginCredentialStoreTest {
         assertThrows(PluginCredentialUnavailableException.class, () -> store.resolve(PLUGIN_ID));
     assertEquals(PluginCredentialUnavailableReason.NOT_CONNECTED, ex.reason());
     assertEquals(PluginCredentialStatus.NOT_CONNECTED, store.projection(PLUGIN_ID).status());
+  }
+
+  /** 调用期认证拒绝只作废本次已用凭据：version 与原始密文都指向当前行时，置为 {@code REAUTH_REQUIRED} 并清空在途 lease， 错误摘要受有界去敏约束。 */
+  @Test
+  void rejectUsedMarksOnlyTheMatchingCredential() {
+    store.save(PLUGIN_ID, validMaterial());
+    PluginCredentialSnapshot snapshot = store.resolve(PLUGIN_ID);
+    assertEquals(0L, snapshot.version());
+
+    assertTrue(store.rejectUsed(snapshot, "provider rejected the access token"));
+
+    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
+    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, row.status());
+    assertNull(row.refreshLeaseToken());
+    assertNull(row.refreshLeaseUntil());
+    assertEquals(1L, row.version());
+    assertEquals("provider rejected the access token", row.lastRefreshError());
+    assertFalse(row.lastRefreshError().contains(SECRET_TOKEN));
+  }
+
+  /** 并发重新登录写入的新 version 与新密文都不会被调用期认证拒绝误杀；但 version 前进而密文未变（例如在途刷新领取）时仍必须命中， 因为被拒绝的确实是同一条凭据。 */
+  @Test
+  void rejectUsedNeverKillsAConcurrentReloginButMatchesUnchangedCiphertext() {
+    store.save(PLUGIN_ID, validMaterial());
+    PluginCredentialSnapshot usedCredential = store.resolve(PLUGIN_ID);
+
+    // 并发重新登录：整体替换载荷并推进 version。
+    PluginCredentialMaterial relogin =
+        new PluginCredentialMaterial(
+            REGION, now.plusSeconds(7200), now.plusSeconds(3600), "{\"token\":\"fresh-login\"}");
+    store.save(PLUGIN_ID, relogin);
+    PluginCredentialRow afterRelogin = repository.getDirect(PLUGIN_ID);
+    assertEquals(1L, afterRelogin.version());
+
+    assertFalse(
+        store.rejectUsed(usedCredential, "stale token rejected"),
+        "a concurrent re-login must not be invalidated by the old credential's rejection");
+    assertEquals(PluginCredentialStatus.CONNECTED, repository.getDirect(PLUGIN_ID).status());
+
+    // version 前进但密文不变（其它节点推进版本）：仍应命中并作废这条确实被拒绝的凭据。
+    PluginCredentialSnapshot currentSnapshot = store.resolve(PLUGIN_ID);
+    assertEquals(1L, currentSnapshot.version());
+    repository.stealVersion(PLUGIN_ID);
+    PluginCredentialRow advanced = repository.getDirect(PLUGIN_ID);
+    assertEquals(2L, advanced.version());
+    assertArrayEquals(
+        currentSnapshot.encryptedPayload(),
+        advanced.encryptedPayload(),
+        "stealing a version must not change the ciphertext");
+
+    assertTrue(
+        store.rejectUsed(currentSnapshot, "provider rejected the access token"),
+        "an unchanged ciphertext must still match even when the version has advanced");
+    PluginCredentialRow rejected = repository.getDirect(PLUGIN_ID);
+    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
+    assertNull(rejected.refreshLeaseToken());
+  }
+
+  /** save() 成功后回调通知（dispatcher 唤醒接线）：每次成功写入都必须通知一次。 */
+  @Test
+  void saveNotifiesSavedCallbackAfterEachSuccessfulWrite() {
+    List<String> savedIds = new ArrayList<>();
+    DatabasePluginCredentialStore notifyingStore =
+        new DatabasePluginCredentialStore(repository, codec, keyLoader, clock, savedIds::add);
+
+    notifyingStore.save(PLUGIN_ID, validMaterial());
+    notifyingStore.save(PLUGIN_ID, validMaterial());
+
+    assertEquals(List.of(PLUGIN_ID, PLUGIN_ID), savedIds);
   }
 
   private static int indexOf(byte[] source, byte[] target) {

@@ -297,14 +297,20 @@ lease 属于 Platform，Plugin 只能拿到本次调用需要的解密快照，�
 主密钥。key file 缺失、长度错误或认证解密失败时状态投影为 `KEY_UNAVAILABLE`，读取和写入
 fail closed；没有 credential 行时仍允许应用启动。
 
-刷新 dispatcher 启动后立即扫描，随后默认每小时 fixed-delay 扫描
-`next_refresh_at`，且只领取当前 JVM 已安装 Plugin 的行；未安装 Plugin 的密文保持 dormant。
-每行通过短事务 claim `refresh_lease_token / refresh_lease_until`，外部 renewal 在事务外
-只发送一次，终态再以 lease token 与 version 围栏写回：
+刷新 dispatcher 启动后立即扫描一次；之后按数据库最早的 `next_refresh_at` 安排下一次单次
+调度，`pollDelay`（默认每小时）只是没有更早到期行时的最慢兜底，也是跨节点没有本地唤醒时的
+恢复上界。凭据保存提交后立即唤醒一次扫描，因此刚登录的短寿命 token 不必等到兜底轮询；扫描
+在途时到达的唤醒合并为结束后的一次补跑，既不丢失也不堆积，`stop()` 之后调度不会复活。
+
+一次扫描最多 just-in-time 领取 16 行，每轮只 claim 一行、刷新并终结后才领取下一行；只领取
+当前 JVM 已安装 Plugin 的行，未安装 Plugin 的密文保持 dormant。每行通过短事务 claim
+`refresh_lease_token / refresh_lease_until`，外部 renewal 在事务外只发送一次，终态再以
+lease token 与 version 围栏写回：
 
 ```text
 due row
   -> short transaction: claim refresh lease
+  -> re-check lease token / version / deadline; lost lease -> no outbound request
   -> external refresh exactly once
   -> short transaction:
        success -> replace encrypted payload + expiry + nextRefreshAt
@@ -314,11 +320,17 @@ due row
 expired in-flight lease -> REFRESH_UNCERTAIN, never reclaim-and-send
 ```
 
+发请求前的核验是外部调用的最后一道围栏：token、version 或截止时刻任一失效都不得外呼。成功
+校验用完成时刻的 `now`，避免长时间请求后用过期时间写入终态。
+
 lease 只解决多节点互斥，不承诺外部 exactly-once：节点在 HTTP 前后崩溃时，其他节点无法
 证明请求是否已经发送，因此过期的 in-flight lease 必须收敛为 `REFRESH_UNCERTAIN`，不能
 重新 claim。claim 后新的 Tool credential resolution 暂停或返回可重试的
 `AUTH_REFRESHING`，不与可能使旧 token 失效的 renewal 并发；已经取得快照的调用允许自然
 结束。确定性认证拒绝、token 过期、`REFRESH_UNCERTAIN` 都 fail closed 并要求重新登录。
+调用期的认证拒绝走 `PluginCredentialStore.rejectUsed`：它只按当次快照的 `version` 或原始密文
+CAS 作废那一行，并发重新登录产生的新 version 与新密文不会被误伤；判定必须来自明确的认证
+事实（HTTP `401`，或响应体里明确的业务认证码），普通 HTTP `403` 权限错误不当作认证拒绝。
 请求发送后的网络断开或超时不能证明服务端未签发新 token，因此当前 claim 和以后定时扫描
 都不重放该 credential 的 renewal。
 
@@ -404,10 +416,11 @@ Canvas Function 也以构建期 Plugin 发布，唯一扩展点是实现 `Canvas
 
 MiniMax 没有 OAuth `refresh_token`。刷新使用当前 access token 调一次 renewal，严格校验
 HTTP、业务状态与新 JWT 后才替换原密文。默认
-`nextRefreshAt = min(lastSuccess + 7d, token lifetime midpoint)`，dispatcher 默认每小时检查
-一次；`401` / `1004` 进入 `REAUTH_REQUIRED`。callback 与 renewal URL 可能直接携带秘密，
-HTTP diagnostics 必须先按敏感 query/header 名去敏，禁止打印原始 request URI、request
-body 或响应 token。
+`nextRefreshAt = min(lastSuccess + 7d, token lifetime midpoint)`：dispatcher 按该到期时刻
+安排下一次扫描，登录后立即唤醒，默认每小时只是最慢兜底；只有明确认证拒绝（HTTP `401` 或业务
+码 `1004`）才进入 `REAUTH_REQUIRED`，普通 `403` 按权限/传输错误处理且不作废凭据。callback
+与 renewal URL 可能直接携带秘密，HTTP diagnostics 必须先按敏感 query/header 名去敏，禁止
+打印原始 request URI、request body 或响应 token。
 
 模型只看到 15 个静态、可选择的 Tool：
 

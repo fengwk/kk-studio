@@ -154,6 +154,10 @@ public final class MavisClient {
     if (response.statusCode() == 401) {
       throw new MavisAuthException(MavisAuthException.REJECTED_MESSAGE);
     }
+    Optional<JsonNode> rejected = authRejection(response);
+    if (rejected.isPresent()) {
+      throw MavisStatus.raise(rejected.get(), context, detail(responseBody(response), accessToken));
+    }
     if (response.statusCode() < 200 || response.statusCode() >= 300) {
       throw new MavisTransportException(
           context
@@ -176,6 +180,37 @@ public final class MavisClient {
 
   private void raise(JsonNode code, String context, JsonNode payload, String accessToken) {
     throw MavisStatus.raise(code, context, detail(payload, accessToken));
+  }
+
+  /**
+   * 非 2xx 响应里已经证明的认证拒绝。
+   *
+   * <p>HTTP 403 本身可能只是权限拒绝，不能一概当成凭据失效；只有 body 里出现已知认证码（{@code 401} / {@code 1004}）才算。无法解析的 body
+   * 保持为普通传输错误。
+   */
+  private static Optional<JsonNode> authRejection(MavisHttpResponse response) {
+    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+      return Optional.empty();
+    }
+    JsonNode payload;
+    try {
+      payload = MAPPER.readTree(response.body());
+    } catch (JsonProcessingException error) {
+      return Optional.empty();
+    }
+    if (payload == null || !payload.isObject()) {
+      return Optional.empty();
+    }
+    return MavisStatus.privateStatus(payload).filter(MavisStatus::isAuthCode);
+  }
+
+  private static JsonNode responseBody(MavisHttpResponse response) {
+    try {
+      JsonNode payload = MAPPER.readTree(response.body());
+      return payload != null && payload.isObject() ? payload : MAPPER.createObjectNode();
+    } catch (JsonProcessingException error) {
+      return MAPPER.createObjectNode();
+    }
   }
 
   private MavisHttpRequest request(

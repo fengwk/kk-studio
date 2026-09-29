@@ -31,4 +31,13 @@ public interface PluginCredentialStore {
 
   /** 断连：删除该 Plugin 的凭据行；迟到 finalize 由 lease token 与 version 围栏拒绝。 */
   void delete(String pluginId);
+
+  /**
+   * 调用期确定性认证拒绝：只把本次已用凭据置为 {@code REAUTH_REQUIRED}。
+   *
+   * <p>匹配条件是快照里的 version，或快照携带的原始密文。并发重新登录产生的新 version 与新密文都不会命中。错误文本不得包含秘密。
+   *
+   * @return 是否实际作废了当前行
+   */
+  boolean rejectUsed(PluginCredentialSnapshot snapshot, String error);
 }

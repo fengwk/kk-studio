@@ -65,7 +65,7 @@ default Optional<ToolHistoryRenderer> historyRenderer();  // 默认 absent：Run
 ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
 ```
 
-`execute` 必须启动式、快速返回：实现可以在调用线程触发同步回调，但调用状态持久化为 `RUNNING` 之前回调会被门控缓冲，因此执行状态转换始终有序；返回的 [`ToolExecutionHandle`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java) 提供幂等 `cancel()` 与 `isCancelled()`。
+`execute` 必须启动式、快速返回：实现可以在调用线程触发同步回调，但调用状态持久化为 `RUNNING` 之前回调会被门控缓冲，因此执行状态转换始终有序；返回的 [`ToolExecutionHandle`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java) 提供幂等 `cancel()` 与 `isCancelled()`。取消与终态回调共享同一个终态 CAS：已经完成的调用不会被 `cancel()` 伪装成取消，取消成功的调用也不会再收到终态回调。
 
 `resolveTimeout` 是执行前唯一的超时解析点：入参是已归一化并通过 schema 校验的 `ToolCall`，默认实现返回 definition 的 `defaultTimeout()`，只有真正拥有 arguments 级超时契约的工具才覆盖它。返回值必须是原样的最终结果：`Duration.ZERO` 表示没有 execution deadline，下游不得再回落实现默认值或施加上限；非法 arguments 级超时必须抛出 `IllegalArgumentException` 而不是退回默认值，Gateway 会把它收敛为确定性的 `INVALID_REQUEST` 拒绝。
 
