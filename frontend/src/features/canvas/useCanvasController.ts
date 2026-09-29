@@ -1,7 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCanvasUploadPipeline } from '@/features/canvas/canvas-upload'
-import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
+import {
+  CanvasCommandConflictError,
+  CanvasCommandQueue,
+  CanvasQueueBlockedError,
+} from '@/features/canvas/command-queue'
 import { useCanvasVersionEvents } from '@/features/canvas/canvas-version-events'
 import {
   projectCanvasSnapshot,
@@ -266,9 +270,22 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
               ...current,
               conflictMessage: '部分未确认操作因服务端内容已变化而未能自动重放，请检查最新内容。',
             }))
+          } else if (result.failed > 0) {
+            setState((current) => ({
+              ...current,
+              conflictMessage: '部分未确认操作未能自动重放，请检查网络后重试。',
+            }))
           }
         })
-        .catch(() => undefined)
+        .catch(() => {
+          if (queueRef.current !== queue) {
+            return
+          }
+          setState((current) => ({
+            ...current,
+            conflictMessage: '待确认操作恢复失败，请检查网络后重试。',
+          }))
+        })
     } else {
       const authoritative = queueRef.current.replaceSnapshot(snapshotQuery.data)
       if (authoritative !== snapshotQuery.data) {
@@ -398,6 +415,12 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
             toast: '画布已在其他位置更新，请检查最新内容后重试。',
           }
         })
+      } else if (error instanceof CanvasQueueBlockedError) {
+        setState((current) => ({
+          ...current,
+          conflictMessage: '存在未确认操作阻塞队列，请检查网络后点击重试。',
+          toast: '队列受阻：存在未完成同步的修改，请重试。',
+        }))
       } else {
         setState((current) => ({
           ...current,
@@ -706,6 +729,53 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       // 冲突处理分支会自动刷新草稿状态
     }
   }, [dismissDraft, executeCommands, setToast, snapshotQuery.data, state.drafts])
+
+  const dismissConflictMessage = useCallback(() => {
+    setState((current) => ({ ...current, conflictMessage: null }))
+  }, [])
+
+  const retryRecovery = useCallback(async () => {
+    const queue = queueRef.current
+    if (!queue) {
+      return undefined
+    }
+    try {
+      const result = await queue.recover()
+      if (queueRef.current !== queue) {
+        return result
+      }
+      if (result.ackedDrafts.length > 0) {
+        applyDraftAcksRef.current(result.ackedDrafts)
+      }
+      if (result.conflicted > 0) {
+        setState((current) => ({
+          ...current,
+          conflictMessage: '部分未确认操作因服务端内容已变化而未能自动重放，请检查最新内容。',
+        }))
+      } else if (result.failed > 0) {
+        setState((current) => ({
+          ...current,
+          conflictMessage: '部分未确认操作未能自动重放，请检查网络后重试。',
+        }))
+      } else {
+        setState((current) => ({
+          ...current,
+          conflictMessage: null,
+        }))
+      }
+      return result
+    } catch (error) {
+      if (queueRef.current !== queue) {
+        throw error
+      }
+      setState((current) => ({
+        ...current,
+        conflictMessage: '待确认操作恢复失败，请检查网络后重试。',
+        toast: error instanceof Error ? error.message : '恢复失败',
+      }))
+      throw error
+    }
+  }, [])
 
   const renameNode = useCallback((nodeId: UUIDString, name: string) => {
     const normalized = name.trim()
@@ -1180,6 +1250,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     setAddMenuIndex,
     dismissDraft,
     retryDraft,
+    retryRecovery,
+    dismissConflictMessage,
     saveDraftAsNewNode,
     restoreDeletedDraftAsNewNode: saveDraftAsNewNode,
   }

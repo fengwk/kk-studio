@@ -39,6 +39,20 @@ export class CanvasCommandConflictError extends Error {
   }
 }
 
+export class CanvasQueueBlockedError extends Error {
+  readonly retryable = true
+  readonly cause?: unknown
+
+  constructor(
+    message = 'Canvas command queue is blocked by an earlier unconfirmed operation; recover and retry.',
+    cause?: unknown,
+  ) {
+    super(message)
+    this.name = 'CanvasQueueBlockedError'
+    this.cause = cause
+  }
+}
+
 export interface CanvasCommandQueueOptions {
   initialSnapshot: CanvasSnapshotDTO
   apply?: typeof postCanvasCommands
@@ -71,11 +85,22 @@ export interface CanvasCommandRecoveryResult {
  * - ACK 只清除与本次 operation 完全匹配的持久记录，旧响应不会清掉后来的输入；
  * - 响应 revision 与本地快照存在缺口时，绝不假装增量 patch 完整，必须重取权威快照。
  */
+interface CanvasPendingPayload {
+  idempotencyKey: UUIDString
+  commands: CanvasCommandDTO[]
+  baselineRevision: string
+  ack: CanvasDraftAck[]
+  createdAt: number
+}
+
 export class CanvasCommandQueue {
   private snapshot: CanvasSnapshotDTO
   private tail: Promise<void> = Promise.resolve()
   private sequence = 0
-  private recovery: Promise<CanvasCommandRecoveryResult> | null = null
+  private listFailed = false
+  private activeRecovery: Promise<CanvasCommandRecoveryResult> | null = null
+  private blocked = false
+  private blockedError: Error | null = null
   private readonly operations = new Map<string, CanvasPendingOperation>()
   private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
@@ -102,6 +127,14 @@ export class CanvasCommandQueue {
     })
   }
 
+  isBlocked(): boolean {
+    return this.blocked
+  }
+
+  getBlockedError(): Error | null {
+    return this.blockedError
+  }
+
   currentSnapshot(): CanvasSnapshotDTO {
     return this.snapshot
   }
@@ -118,19 +151,40 @@ export class CanvasCommandQueue {
   }
 
   /**
-   * 入队一个命令批：立即冻结 id / body / 基线，发送前先落盘，再按序提交。
-   * `ack` 描述本操作成功后需要按 generation 精准清除的草稿范围。
+   * 入队一个命令批：入队瞬间深拷贝并递归冻结 id / body / 基线 / ack；
+   * 发送前落盘并在 tail 流转时按已加载的持久序号分配 sequence，再按序提交。
    */
   enqueue(
     commands: ApplyCanvasCommandsRequestDTO['commands'],
     options?: { signal?: AbortSignal; ack?: CanvasDraftAck[] },
   ): Promise<CanvasSnapshotDTO> {
+    if (this.blocked) {
+      return Promise.reject(new CanvasQueueBlockedError(undefined, this.blockedError))
+    }
     if (commands.length === 0) {
       return Promise.resolve(this.snapshot)
     }
-    const operation = this.freeze(commands, options?.ack ?? [])
-    this.operations.set(operation.id, operation)
-    const result = this.tail.then(() => this.persistAndSend(operation, options?.signal))
+
+    // 入队瞬间深拷贝并冻结命令体与身份标识，锁定基线与草稿范围，保证不可变性
+    const payload: CanvasPendingPayload = {
+      idempotencyKey: this.createCommandId(),
+      commands: freezeCommands(commands),
+      baselineRevision: this.snapshot.document.revision,
+      ack: Object.freeze([...(options?.ack ?? [])]) as CanvasDraftAck[],
+      createdAt: Date.now(),
+    }
+
+    const result = this.tail.then(() => {
+      if (this.listFailed) {
+        // list 失败期间绝不分配低 seq 写 store，直接拒绝尚未 freeze 的新入队以保持草稿
+        throw new CanvasQueueBlockedError(undefined, this.blockedError)
+      }
+      // 执行落盘前分配序列号：若前序存在 recovery，此时已预先从 list 全部 pending 取 max 推进
+      const operation = this.freezeOperation(payload)
+      this.operations.set(operation.id, operation)
+      return this.persistAndSend(operation, options?.signal)
+    })
+
     this.tail = result.then(
       () => undefined,
       () => undefined,
@@ -140,31 +194,38 @@ export class CanvasCommandQueue {
 
   /**
    * 重载 / 重连后按冻结顺序重放本会话残留的待确认操作。
-   * 同一实例只执行一次；重放失败（网络）不丢弃记录，冲突（409）作为终态移除。
+   * recover 每次可再次调用（仅并发时 singleflight，不永久缓存首次失败），按冻结排序原 key 原 body 发送。
+   * 首个未知结果即停，明确 409 / 确定 4xx 可 settle 并继续。
    */
   recover(): Promise<CanvasCommandRecoveryResult> {
-    if (!this.recovery) {
-      const run = this.tail.then(() => this.runRecovery())
-      this.tail = run.then(
-        () => undefined,
-        () => undefined,
-      )
-      this.recovery = run
+    if (this.activeRecovery) {
+      return this.activeRecovery
     }
-    return this.recovery
+    const run = this.tail.then(() => this.runRecovery())
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    const active = run.finally(() => {
+      if (this.activeRecovery === active) {
+        this.activeRecovery = null
+      }
+    })
+    this.activeRecovery = active
+    return this.activeRecovery
   }
 
-  private freeze(commands: CanvasCommandDTO[], ack: CanvasDraftAck[]): CanvasPendingOperation {
+  private freezeOperation(payload: CanvasPendingPayload): CanvasPendingOperation {
     return buildPendingOperation({
       canvasId: this.canvasId,
       userId: this.userId,
       editingSessionId: this.editingSessionId,
-      idempotencyKey: this.createCommandId(),
-      commands: freezeCommands(commands),
-      baselineRevision: this.snapshot.document.revision,
-      ack,
+      idempotencyKey: payload.idempotencyKey,
+      commands: payload.commands,
+      baselineRevision: payload.baselineRevision,
+      ack: [...payload.ack],
       sequence: this.sequence++,
-      createdAt: Date.now(),
+      createdAt: payload.createdAt,
     })
   }
 
@@ -179,6 +240,13 @@ export class CanvasCommandQueue {
       this.operations.delete(operation.id)
       throw error
     }
+
+    if (this.blocked) {
+      // 前序操作已出现未知结果导致队列阻塞：
+      // 本操作已先完成持久化，但绝不得发送越过前序操作；返回清晰可重试错误，不无限挂起 Promise。
+      throw new CanvasQueueBlockedError(undefined, this.blockedError)
+    }
+
     return this.send(operation, signal)
   }
 
@@ -210,7 +278,8 @@ export class CanvasCommandQueue {
         await this.settle(operation)
         throw error
       }
-      // 网络 / 服务端瞬时失败：保留冻结操作，重载后按原 key/body 幂等重放。
+      // 网络 / 服务端瞬时失败：保留冻结操作，标记队列阻塞，等待恢复或重载按原 key/body 幂等重放。
+      this.markBlocked(error)
       throw error
     }
   }
@@ -219,12 +288,36 @@ export class CanvasCommandQueue {
     const result: CanvasCommandRecoveryResult = { replayed: 0, conflicted: 0, failed: 0, ackedDrafts: [] }
     let pending: CanvasPendingOperation[]
     try {
+      this.listFailed = false
+      // storage.list 失败不能伪装空成功，必须标记阻塞并抛出错误。
       pending = await this.store.list()
-    } catch {
+    } catch (error) {
+      this.listFailed = true
+      this.markBlocked(error)
+      throw error
+    }
+
+    // 从 list 全部 pending 先取 max sequence 推进，避免首个未知 break 导致后续操作序号倒挂
+    for (const op of pending) {
+      this.sequence = Math.max(this.sequence, op.sequence + 1)
+    }
+
+    if (pending.length === 0) {
+      this.blocked = false
+      this.blockedError = null
       return result
     }
-    for (const operation of pending) {
-      this.sequence = Math.max(this.sequence, operation.sequence + 1)
+
+    // 按冻结排序：sequence 升序（相同按 createdAt 升序）
+    const sorted = [...pending].sort((a, b) => {
+      if (a.sequence !== b.sequence) {
+        return a.sequence - b.sequence
+      }
+      return a.createdAt - b.createdAt
+    })
+
+    let hadUnknownFailure = false
+    for (const operation of sorted) {
       this.operations.set(operation.id, operation)
       try {
         await this.send(operation)
@@ -232,13 +325,34 @@ export class CanvasCommandQueue {
         result.ackedDrafts.push(...operation.ack)
       } catch (error) {
         if (error instanceof CanvasCommandConflictError) {
+          // 409 语义冲突终态：send 内部已 settle(operation)
           result.conflicted += 1
-        } else {
-          result.failed += 1
+          continue
         }
+        if (isTerminalClientError(error)) {
+          // 确定 4xx 终态：send 内部已 settle(operation)
+          result.failed += 1
+          continue
+        }
+        // 未知结果（网络失败 / 5xx 等）：首个未知结果即停，禁止处理后项！
+        result.failed += 1
+        this.markBlocked(error)
+        hadUnknownFailure = true
+        break
       }
     }
+
+    if (!hadUnknownFailure) {
+      this.blocked = false
+      this.blockedError = null
+    }
+
     return result
+  }
+
+  private markBlocked(error: unknown): void {
+    this.blocked = true
+    this.blockedError = error instanceof Error ? error : new Error(String(error))
   }
 
   private async settle(operation: CanvasPendingOperation): Promise<void> {

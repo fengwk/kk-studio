@@ -1106,7 +1106,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('retains a failed config draft so start retries the save before posting the run', async () => {
-    vi.mocked(postCanvasCommands).mockRejectedValueOnce(new Error('save failed'))
+    vi.mocked(postCanvasCommands).mockRejectedValueOnce(new ApiError('save failed', 400))
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
@@ -1436,5 +1436,36 @@ describe('useCanvasController real snapshot runtime', () => {
 
     await waitFor(() => expect(result.current.state.storageError).toBeTruthy())
     expect(result.current.state.toast).toBeTruthy()
+  })
+
+  it('队列未知错误阻塞后提示恢复入口，点击 retryRecovery 成功重放并清除 conflictMessage', async () => {
+    // 意图：验证当 controller 遇到未知错误使队列 blocked 时，conflictMessage 正确提示重试，
+    // 调用 retryRecovery 能完成重放并清除提示。
+    vi.mocked(postCanvasCommands)
+      .mockRejectedValueOnce(new ApiError('network down', 503))
+      .mockImplementationOnce(async () => diffPatch(snapshot(2)))
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never))
+    act(() => result.current.setTextEditorDraft({ name: 'Blocked Note', markdown: 'draft' }))
+
+    await act(async () => {
+      result.current.saveTextEditor()
+    })
+
+    // 再次尝试保存，此时队列已经被阻塞，抛出 CanvasQueueBlockedError 并设置 conflictMessage
+    await act(async () => {
+      result.current.saveTextEditor()
+    })
+    await waitFor(() => expect(result.current.state.conflictMessage).toContain('存在未确认操作阻塞队列'))
+
+    // 触发 retryRecovery 恢复
+    await act(async () => {
+      await result.current.retryRecovery()
+    })
+
+    await waitFor(() => expect(result.current.state.conflictMessage).toBeNull())
   })
 })

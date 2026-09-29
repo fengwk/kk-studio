@@ -8,7 +8,6 @@ describe('InteractionService', () => {
       get: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
       post: vi.fn(),
       put: vi.fn(),
-      patch: vi.fn(),
       delete: vi.fn(),
     }
     const service = new InteractionService(mockClient)
@@ -33,7 +32,6 @@ describe('InteractionService', () => {
         materialized: false,
       }),
       put: vi.fn(),
-      patch: vi.fn(),
       delete: vi.fn(),
     }
     const service = new InteractionService(mockClient)
