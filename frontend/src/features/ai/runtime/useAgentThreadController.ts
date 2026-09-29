@@ -18,6 +18,13 @@ import {
   type PendingStopOperation,
 } from '@/features/ai/runtime/pending-stop-sidecar'
 import {
+  clearBoundPendingMessage,
+  loadBoundPendingMessage,
+  saveBoundPendingMessage,
+  type BoundPendingMessage,
+} from '@/features/ai/runtime/agent-pane/pane-target'
+import { isDefiniteAcceptanceFailure } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
+import {
   createDecisionId,
   createStopRequestId,
   type CommandBatchPlan,
@@ -26,6 +33,7 @@ import {
   branchDraftFromThread,
   branchDraftsEqual,
   projectPendingTarget,
+  type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
 import {
   hasMessageContent,
@@ -42,7 +50,11 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  AgentCommandBatchRequestDTO,
+  HarnessCommandCreateDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
 import {
@@ -76,14 +88,18 @@ const MAX_STALE_MESSAGE_CURSOR_RETRIES = 2
  * 旧 head 仍位于最新 root-to-head 路径时，变化只是同一分支向前推进。
  */
 export function canRetryStaleMessageBatch(
-  plan: CommandBatchPlan,
+  planOrRequest:
+    | CommandBatchPlan
+    | AgentCommandBatchRequestDTO
+    | { request: AgentCommandBatchRequestDTO; targetDraft?: BranchDraft },
   snapshot: HarnessThreadSnapshotDTO,
 ): boolean {
-  const target = plan.request.target
+  const request: AgentCommandBatchRequestDTO = 'request' in planOrRequest ? planOrRequest.request : planOrRequest
+  const target = request.target
   if (
     target.type !== 'THREAD'
-    || plan.request.commands.length === 0
-    || plan.request.commands.some((command) => command.type !== 'USER_MESSAGE')
+    || request.commands.length === 0
+    || request.commands.some((command: HarnessCommandCreateDTO) => command.type !== 'USER_MESSAGE')
   ) {
     return false
   }
@@ -93,12 +109,14 @@ export function canRetryStaleMessageBatch(
   ) {
     return false
   }
-  const latestTarget = projectPendingTarget(
-    branchDraftFromThread(snapshot.thread),
-    snapshot.queuedCommands,
-  )
-  if (!branchDraftsEqual(latestTarget, plan.targetDraft)) {
-    return false
+  if ('targetDraft' in planOrRequest && planOrRequest.targetDraft != null) {
+    const latestTarget = projectPendingTarget(
+      branchDraftFromThread(snapshot.thread),
+      snapshot.queuedCommands,
+    )
+    if (!branchDraftsEqual(latestTarget, planOrRequest.targetDraft)) {
+      return false
+    }
   }
   return snapshot.thread.headEntryId === target.expectedHeadEntryId
     || snapshot.entries.some((entry) => entry.entryId === target.expectedHeadEntryId)
@@ -130,7 +148,6 @@ export function retireStaleStopPending(
 export function useAgentThreadController(
   threadId: string,
   initialParts: ComposerPart[] = [],
-  initialReplay?: CommandBatchReplay,
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
 ) {
   const { t } = useI18n()
@@ -145,10 +162,19 @@ export function useAgentThreadController(
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
-  // 未决的精确 batch（处于 in-flight 或在不确定的网络错误后被保留）会阻塞面板
-  // 切换：切换 Thread 时绝不能丢失逐字节复用的回放机会。
-  const [replayPending, setReplayPending] = useState(Boolean(initialReplay))
-  const replayRef = useRef<CommandBatchReplay | null>(null)
+  const isInFlightRef = useRef(false)
+
+  // Bound thread 持久化 pending 消息：发送前先写入 storage，网络未知结果后保留，
+  // reload/remount 后恢复，支持逐字节 retry 与明确放弃。
+  const [pendingMessage, setPendingMessage] = useState<BoundPendingMessage | null>(
+    () => (threadId ? loadBoundPendingMessage(threadId) : null),
+  )
+  const pendingMessageRef = useRef<BoundPendingMessage | null>(pendingMessage)
+  useEffect(() => {
+    pendingMessageRef.current = pendingMessage
+  }, [pendingMessage])
+  const replayPending = pendingMessage != null
+
   const initializedReplayThreadRef = useRef<string | null>(null)
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
   const appliedStopRequestIdsRef = useRef(new Set<string>())
@@ -215,8 +241,11 @@ export function useAgentThreadController(
     setDraftState(restoredDraft)
     draftRef.current = restoredDraft
     storeComposerDraft(draftStorageScope, restoredDraft)
-    replayRef.current = initialReplay ?? null
-    setReplayPending(initialReplay != null)
+
+    const restoredPending = threadId ? loadBoundPendingMessage(threadId) : null
+    pendingMessageRef.current = restoredPending
+    setPendingMessage(restoredPending)
+
     initializedReplayThreadRef.current = threadId
     // Pending Stop 按 Thread 持久化；重新绑定时只加载当前 Thread 的精确 identity。
     const restoredStop = loadPendingStop(threadId)
@@ -224,7 +253,7 @@ export function useAgentThreadController(
     setStopReplayPending(restoredStop != null)
     appliedStopRequestIdsRef.current.clear()
     decisionIdByInvocation.current.clear()
-  }, [draftStorageScope, initialParts, initialReplay, threadId])
+  }, [draftStorageScope, initialParts, threadId])
 
   const approvalMutation = useMutation({
     mutationFn: ({
@@ -334,15 +363,6 @@ export function useAgentThreadController(
     next: ComposerPart[],
     source: ComposerDraftChangeSource = 'edit',
   ) {
-    // 把恢复的 draft 编辑为不同内容会重置请求回放身份。
-    if (
-      source === 'edit'
-      && replayRef.current != null
-      && partsKey(next) !== partsKey(replayRef.current.parts)
-    ) {
-      replayRef.current = null
-      setReplayPending(false)
-    }
     if (source === 'edit') {
       storeComposerDraft(draftStorageScope, next)
     }
@@ -350,124 +370,217 @@ export function useAgentThreadController(
     setDraftState(next)
   }
 
-  /**
-   * 提交消息。payload 用于构建 command batch；localDraft（客户端 localId 快照）
-   * 用于 replay 与失败恢复——两者分开，绝不把服务端 uploadId 回填进草稿。
-   */
+  async function executePendingMessage(initialPending: BoundPendingMessage): Promise<void> {
+    let currentPending = initialPending
+    let currentRequest = initialPending.request
+    isInFlightRef.current = true
+    setInFlightSubmissions((count) => count + 1)
+
+    try {
+      for (let retryCount = 0; ; retryCount += 1) {
+        try {
+          await harnessService.acceptCommandBatch(currentRequest)
+          setConflict(null)
+          clearBoundPendingMessage(threadId, currentRequest)
+          pendingMessageRef.current = null
+          setPendingMessage(null)
+          // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.threads.snapshot(threadId),
+            }),
+            queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
+          ])
+          return
+        } catch (error) {
+          if (
+            retryCount < MAX_STALE_MESSAGE_CURSOR_RETRIES
+            && isConflictReason(error, 'STALE_COMMAND_CURSOR')
+          ) {
+            let latest: HarnessThreadSnapshotDTO
+            try {
+              latest = await harnessService.getThreadSnapshot(threadId)
+            } catch {
+              throw error
+            }
+            if (
+              latest.thread.threadId === threadId
+              && canRetryStaleMessageBatch(
+                { request: currentRequest, targetDraft: currentPending.targetDraft },
+                latest,
+              )
+            ) {
+              queryClient.setQueryData(queryKeys.threads.snapshot(threadId), latest)
+              currentRequest = {
+                ...currentRequest,
+                target: {
+                  type: 'THREAD',
+                  threadId,
+                  expectedHeadEntryId: latest.thread.headEntryId,
+                  expectedNextCommandSequence: latest.thread.nextCommandSequence,
+                },
+              }
+              const updatedPending: BoundPendingMessage = {
+                ...currentPending,
+                request: currentRequest,
+              }
+              // stale 恢复 save 失败不能 best-effort 继续 POST，必须 fail-closed 抛错
+              saveBoundPendingMessage(threadId, updatedPending)
+              currentPending = updatedPending
+              pendingMessageRef.current = updatedPending
+              setPendingMessage(updatedPending)
+              continue
+            }
+          }
+          throw error
+        }
+      }
+    } catch (error: unknown) {
+      // 确切已发 request / currentPending 贯穿错误处理，绝不使用旧闭包覆盖
+      reportMutationError(error, 'ai.runtime.action.sendFailed')
+      if (isDefiniteAcceptanceFailure(error)) {
+        clearBoundPendingMessage(threadId, currentRequest)
+        pendingMessageRef.current = null
+        setPendingMessage(null)
+        if (!hasMessageContent(draftRef.current)) {
+          storeComposerDraft(draftStorageScope, currentPending.localDraft)
+          draftRef.current = currentPending.localDraft
+          setDraftState(currentPending.localDraft)
+        }
+      } else {
+        const unknownPending: BoundPendingMessage = {
+          ...currentPending,
+          unknownOutcome: true,
+        }
+        try {
+          saveBoundPendingMessage(threadId, unknownPending)
+        } catch {
+          // best-effort writeback for unknown mark
+        }
+        pendingMessageRef.current = unknownPending
+        setPendingMessage(unknownPending)
+        if (!hasMessageContent(draftRef.current)) {
+          storeComposerDraft(draftStorageScope, currentPending.localDraft)
+          draftRef.current = currentPending.localDraft
+          setDraftState(currentPending.localDraft)
+        }
+      }
+    } finally {
+      isInFlightRef.current = false
+      setInFlightSubmissions((count) => Math.max(0, count - 1))
+    }
+  }
+
   function submitMessage(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]): Promise<void> {
-    const trimmed = trimMessageParts(payloadParts ?? draft)
-    const localDraft = trimMessageParts(localDraftParts ?? draft)
+    if (isInFlightRef.current) {
+      return Promise.resolve()
+    }
+    const trimmed = trimMessageParts(payloadParts ?? draftRef.current)
+    const localDraft = trimMessageParts(localDraftParts ?? draftRef.current)
     if (!hasMessageContent(trimmed) || slashQueryOf(trimmed) != null || !thread) {
       return Promise.resolve()
     }
-    if (!bound) {
+    if (!bound || buildBatch == null) {
       setActionError(t('ai.runtime.action.threadNotLoaded'))
       return Promise.resolve()
     }
-    if (buildBatch == null) {
-      setActionError(t('ai.runtime.action.threadNotLoaded'))
-      return Promise.resolve()
-    }
-    setActionError(null)
-    setConflict(null)
     const plan = buildBatch(trimmed)
     if (plan == null) {
       return Promise.resolve()
     }
-    // 重试逐字节复用精确的先前 batch（相同的 command ID/payload/顺序和原始
-    // expected cursor：服务器对 command 集合的有序回放会绕过已移动的 cursor）。
-    const previous = replayRef.current
-    const reused = previous != null && previous.plan.identity === plan.identity
-      ? previous.plan
-      : plan
-    let submittedPlan = reused
-    replayRef.current = { plan: submittedPlan, parts: localDraft }
-    setReplayPending(true)
-    // 先捕获 parts + id，随后立即清空 draft，以便输入下一条消息。
+    if (pendingMessageRef.current?.unknownOutcome) {
+      if (partsKey(trimmed) === partsKey(pendingMessageRef.current.localDraft)) {
+        return retryPendingMessage()
+      }
+      setActionError(t('ai.runtime.action.operationPending'))
+      return Promise.resolve()
+    }
+    setActionError(null)
+    setConflict(null)
+
+    const boundPending: BoundPendingMessage = {
+      threadId,
+      request: plan.request,
+      targetDraft: plan.targetDraft,
+      localDraft,
+      unknownOutcome: false,
+    }
+    try {
+      saveBoundPendingMessage(threadId, boundPending)
+    } catch (storageError) {
+      setActionError(
+        t('ai.runtime.action.storageFailed', {
+          defaultValue: '无法安全记录请求状态，发送已中止，请重试。',
+          error: errorMessage(storageError),
+        }),
+      )
+      return Promise.resolve()
+    }
+    pendingMessageRef.current = boundPending
+    setPendingMessage(boundPending)
     clearStoredComposerDraft(draftStorageScope)
     draftRef.current = []
     setDraftState([])
-    setInFlightSubmissions((count) => count + 1)
-    return acceptMessagePlanWithCursorRecovery(submittedPlan)
-      .then(() => {
-        // 仅当身份仍属于这个正在完成的请求时才清除它。
-        if (replayRef.current?.plan === submittedPlan) {
-          replayRef.current = null
-          setReplayPending(false)
-        }
-      })
-      .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.sendFailed')
-        // 仅在 composer 为空时恢复，以免破坏正在输入中的下一条 draft。
-        // （Ref 变更必须在 state updater 之外进行：React 会延迟执行 updater 函数。）
-        if (!hasMessageContent(draftRef.current)) {
-          if (isConflictError(error)) {
-            // 409 = batch 未被接受：精确回放已过期。下一次发送会基于刷新的
-            // head/nextSequence 用全新的 command id 重新构建。
-            replayRef.current = null
-            setReplayPending(false)
-          } else {
-            // 网络/不确定的失败会保留精确 batch，用于逐字节回放。
-            replayRef.current = { plan: submittedPlan, parts: localDraft }
-            setReplayPending(true)
-          }
-          // 恢复本地草稿（客户端 localId），与提交 payload 分开。
-          storeComposerDraft(draftStorageScope, localDraft)
-          draftRef.current = localDraft
-          setDraftState(localDraft)
-        }
-      })
-      .finally(() => {
-        setInFlightSubmissions((count) => Math.max(0, count - 1))
-      })
 
-    async function acceptMessagePlanWithCursorRecovery(
-      initialPlan: CommandBatchPlan,
-    ): Promise<void> {
-      submittedPlan = initialPlan
-      for (let retryCount = 0; ; retryCount += 1) {
-        try {
-          await harnessService.acceptCommandBatch(submittedPlan.request)
-          setConflict(null)
-          return
-        } catch (error) {
-          if (
-            retryCount >= MAX_STALE_MESSAGE_CURSOR_RETRIES
-            || !isConflictReason(error, 'STALE_COMMAND_CURSOR')
-          ) {
-            throw error
-          }
-          let latest: HarnessThreadSnapshotDTO
-          try {
-            // 直接读取权威 snapshot，不能复用可能早于失败请求启动的 query refetch。
-            latest = await harnessService.getThreadSnapshot(threadId)
-          } catch {
-            throw error
-          }
-          if (
-            latest.thread.threadId !== threadId
-            || !canRetryStaleMessageBatch(submittedPlan, latest)
-          ) {
-            throw error
-          }
-          queryClient.setQueryData(queryKeys.threads.snapshot(threadId), latest)
-          submittedPlan = {
-            ...submittedPlan,
-            request: {
-              ...submittedPlan.request,
-              target: {
-                type: 'THREAD',
-                threadId,
-                expectedHeadEntryId: latest.thread.headEntryId,
-                expectedNextCommandSequence: latest.thread.nextCommandSequence,
-              },
-            },
-          }
-          // stale batch 明确未被接受：保留 command IDs/payload，只替换权威 cursor。
-          replayRef.current = { plan: submittedPlan, parts: localDraft }
-        }
-      }
+    return executePendingMessage(boundPending)
+  }
+
+  function retryPendingMessage(): Promise<void> {
+    if (isInFlightRef.current) {
+      return Promise.resolve()
     }
+    const pending = pendingMessageRef.current ?? (threadId ? loadBoundPendingMessage(threadId) : null)
+    if (pending == null) {
+      return Promise.resolve()
+    }
+    setActionError(null)
+    setConflict(null)
+    const retryingPending: BoundPendingMessage = {
+      ...pending,
+      unknownOutcome: false,
+    }
+    try {
+      saveBoundPendingMessage(threadId, retryingPending)
+    } catch (storageError) {
+      setActionError(
+        t('ai.runtime.action.storageFailed', {
+          defaultValue: '无法安全记录请求状态，发送已中止，请重试。',
+          error: errorMessage(storageError),
+        }),
+      )
+      return Promise.resolve()
+    }
+    pendingMessageRef.current = retryingPending
+    setPendingMessage(retryingPending)
+
+    return executePendingMessage(retryingPending)
+  }
+
+  function abandonPendingMessage(): void {
+    if (isInFlightRef.current) {
+      return
+    }
+    const current = pendingMessageRef.current
+    if (current == null) {
+      return
+    }
+    const success = clearBoundPendingMessage(threadId, current.request)
+    if (!success) {
+      setActionError(
+        t('ai.runtime.action.storageClearFailed', {
+          defaultValue: '清除本地未决状态失败，请重试。',
+        }),
+      )
+      return
+    }
+    pendingMessageRef.current = null
+    setPendingMessage(null)
+    setActionError(
+      t('ai.runtime.action.abandonedPendingNotice', {
+        defaultValue: '已放弃未决消息。请注意：此操作仅清除本地未决状态，不会取消服务端可能已接受的命令，也不会自动重发。',
+      }),
+    )
+    setConflict(null)
   }
 
   function runCommand(command: ThreadCommand) {
@@ -556,8 +669,11 @@ export function useAgentThreadController(
         pendingStopRef.current = null
         setStopReplayPending(false)
         clearPendingStop(operationThreadId)
-        replayRef.current = null
-        setReplayPending(false)
+        if (pendingMessageRef.current != null) {
+          clearBoundPendingMessage(operationThreadId, pendingMessageRef.current.request)
+          pendingMessageRef.current = null
+          setPendingMessage(null)
+        }
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: queryKeys.threads.snapshot(operationThreadId),
@@ -659,6 +775,9 @@ export function useAgentThreadController(
     // 等待精确重试的含混 Stop 操作会阻塞面板切换。
     stopReplayPending,
     replayPending,
+    pendingMessage,
+    retryPendingMessage,
+    abandonPendingMessage,
   }
 }
 

@@ -2426,6 +2426,18 @@ export const aiCatalog = {
     'en-US': 'A previous acceptance is still awaiting a definite result',
     'zh-CN': '上一条接受请求仍在等待确定结果',
   },
+  'ai.runtime.action.abandonedPendingNotice': {
+    'en-US': 'Pending message was discarded locally. Note: this does not cancel any command that may have already been accepted by the server, and will not auto-resend.',
+    'zh-CN': '已放弃未决消息。请注意：此操作仅清除本地未决状态，不会取消服务端可能已接受的命令，也不会自动重发。',
+  },
+  'ai.runtime.action.storageFailed': {
+    'en-US': 'Failed to safely persist request state; send aborted to prevent state loss. Please retry.',
+    'zh-CN': '无法安全记录请求状态，发送已中止以防状态丢失，请重试。',
+  },
+  'ai.runtime.action.storageClearFailed': {
+    'en-US': 'Failed to clear local pending state. Please retry.',
+    'zh-CN': '清除本地未决状态失败，请重试。',
+  },
   'ai.runtime.action.operationPending': {
     'en-US': 'The current Thread still has an operation awaiting completion or exact replay',
     'zh-CN': '当前 Thread 仍有操作等待完成或精确重试',

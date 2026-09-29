@@ -16,7 +16,6 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import {
   useAgentThreadController,
-  type CommandBatchReplay,
 } from '@/features/ai/runtime/useAgentThreadController'
 import { harnessService } from '@/shared/api/harness-service'
 import { translate } from '@/shared/i18n'
@@ -91,12 +90,10 @@ export function useBoundBranchPanel({
   owner,
   threadId,
   initialParts = [],
-  initialReplay,
 }: {
   owner?: AgentRuntimeOwnerDTO
   threadId: string
   initialParts?: ComposerPart[]
-  initialReplay?: CommandBatchReplay
 }) {
   // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
   // 并在提交事件到达前由下方 effect 更新。
@@ -104,7 +101,6 @@ export function useBoundBranchPanel({
   const controller = useAgentThreadController(
     threadId,
     initialParts,
-    initialReplay,
     (parts) => buildBatchRef.current?.(parts) ?? null,
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
