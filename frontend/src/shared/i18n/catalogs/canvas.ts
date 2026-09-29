@@ -77,6 +77,10 @@ export const canvasCatalog = {
     'en-US': 'Saved',
     'zh-CN': '已保存',
   },
+  'canvas.editor.save.failed': {
+    'en-US': 'Save failed',
+    'zh-CN': '保存失败',
+  },
   'canvas.editor.notFound': {
     'en-US': 'Canvas not found',
     'zh-CN': '画布不存在',

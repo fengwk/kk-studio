@@ -46,7 +46,11 @@ export function CanvasEditor() {
         <div className="document-title">
           <strong>{snapshot.document.title}</strong>
           <span className="save-state" id="saveState" aria-live="polite">
-            {state.commandPending ? t('canvas.editor.save.saving') : t('canvas.editor.save.saved')}
+            {state.commandPending || state.draftPersistPending
+              ? t('canvas.editor.save.saving')
+              : state.storageError
+                ? t('canvas.editor.save.failed')
+                : t('canvas.editor.save.saved')}
           </span>
           <span className="version-pill" title={t('canvas.editor.version')}>
             v{snapshot.document.revision}

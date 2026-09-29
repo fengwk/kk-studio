@@ -1,7 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
+import { ApiError } from '@/shared/api/client'
 import type {
   CanvasFunctionRunDTO,
+  CanvasFunctionRunRequestDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -13,6 +15,234 @@ import {
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+export function isCanonicalUUID(value: unknown): value is UUIDString {
+  return typeof value === 'string' && UUID_REGEX.test(value)
+}
+
+function getLocalStorageSafe(): Storage | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    return window.localStorage ?? null
+  } catch {
+    return null
+  }
+}
+
+export interface PendingFunctionRunAttempt {
+  canvasId: UUIDString
+  nodeId: UUIDString
+  request: CanvasFunctionRunRequestDTO
+  basisRequestId: UUIDString | null
+  createdAt: number
+}
+
+function getPendingRunStorageKey(canvasId: string, nodeId: string): string {
+  return `${PENDING_RUN_STORAGE_PREFIX}${canvasId}:${nodeId}`
+}
+
+export function loadPendingFunctionRun(canvasId: string, nodeId: string): PendingFunctionRunAttempt | null {
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    throw new Error('Local storage is unavailable')
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let raw: string | null
+  try {
+    raw = storage.getItem(key)
+  } catch (err) {
+    throw new Error(`Failed to read pending function run attempt: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  if (raw === null) {
+    return null
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`Corrupted pending function run attempt (invalid JSON): ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  if (
+    !parsed
+    || typeof parsed !== 'object'
+    || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).canvasId)
+    || (parsed as Partial<PendingFunctionRunAttempt>).canvasId !== canvasId
+    || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).nodeId)
+    || (parsed as Partial<PendingFunctionRunAttempt>).nodeId !== nodeId
+    || !(parsed as Partial<PendingFunctionRunAttempt>).request
+    || typeof (parsed as Partial<PendingFunctionRunAttempt>).request !== 'object'
+    || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).request?.requestId)
+    || Object.keys((parsed as Partial<PendingFunctionRunAttempt>).request as object).length !== 1
+    || typeof (parsed as Partial<PendingFunctionRunAttempt>).createdAt !== 'number'
+    || !Number.isFinite((parsed as Partial<PendingFunctionRunAttempt>).createdAt)
+    || ((parsed as Partial<PendingFunctionRunAttempt>).createdAt ?? 0) <= 0
+    || ((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId !== null
+      && !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId))
+  ) {
+    throw new Error('Corrupted pending function run attempt (schema validation failed)')
+  }
+  return parsed as PendingFunctionRunAttempt
+}
+
+export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void {
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    throw new Error('Local storage is unavailable')
+  }
+  if (
+    !isCanonicalUUID(attempt.canvasId)
+    || !isCanonicalUUID(attempt.nodeId)
+    || !isCanonicalUUID(attempt.request?.requestId)
+    || Object.keys(attempt.request).length !== 1
+    || (attempt.basisRequestId !== null && !isCanonicalUUID(attempt.basisRequestId))
+    || typeof attempt.createdAt !== 'number'
+    || !Number.isFinite(attempt.createdAt)
+    || attempt.createdAt <= 0
+  ) {
+    throw new Error('Invalid function run attempt payload: must contain canonical lowercase UUIDs')
+  }
+  const key = getPendingRunStorageKey(attempt.canvasId, attempt.nodeId)
+
+  let rawExisting: string | null
+  try {
+    rawExisting = storage.getItem(key)
+  } catch (err) {
+    throw new Error(`Failed to check existing function run attempt: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  const serialized = JSON.stringify(attempt)
+  if (rawExisting !== null) {
+    // 完整序列比较：若已有记录且完整序列化内容不一致（包括不同 requestId，或同 requestId 但不同 basis / createdAt），一律拒绝覆盖
+    if (rawExisting !== serialized) {
+      throw new Error('Cannot overwrite conflicting or modified pending function run attempt')
+    }
+  }
+
+  try {
+    storage.setItem(key, serialized)
+  } catch (err) {
+    throw new Error(`Failed to persist function run attempt: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  const readback = storage.getItem(key)
+  if (readback !== serialized) {
+    throw new Error('Failed to verify persisted function run attempt (readback mismatch)')
+  }
+}
+
+export function clearPendingFunctionRun(
+  canvasId: string,
+  nodeId: string,
+  expectedRequestId: string,
+): void {
+  if (!isCanonicalUUID(expectedRequestId)) {
+    return
+  }
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    return
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let raw: string | null
+  try {
+    raw = storage.getItem(key)
+  } catch {
+    return
+  }
+  if (raw === null) {
+    return
+  }
+  try {
+    const existing = loadPendingFunctionRun(canvasId, nodeId)
+    if (existing && existing.request.requestId === expectedRequestId) {
+      storage.removeItem(key)
+    }
+  } catch {
+    // 读失败或损坏时保留原始记录，绝不盲目删除未知项
+    return
+  }
+}
+
+export function discardPendingFunctionRun(
+  canvasId: string,
+  nodeId: string,
+  expectedRaw: string,
+): boolean {
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    throw new Error('无法读取浏览器存储，请检查存储权限')
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let currentRaw: string | null
+  try {
+    currentRaw = storage.getItem(key)
+  } catch (err) {
+    throw new Error(`无法读取浏览器存储: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+  if (currentRaw === null) {
+    return true
+  }
+  // 仅删除经用户看到且确认的同 raw 记录；stale 确认不可删除新记录
+  if (currentRaw !== expectedRaw) {
+    return false
+  }
+  try {
+    storage.removeItem(key)
+    return true
+  } catch (err) {
+    throw new Error(`无法写入浏览器存储: ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+  }
+}
+
+export interface LocalPendingRunState {
+  error: string | null
+  raw: string | null
+  attempt: PendingFunctionRunAttempt | null
+}
+
+export function inspectLocalPendingRun(canvasId: string, nodeId: string): LocalPendingRunState {
+  const storage = getLocalStorageSafe()
+  if (!storage) {
+    return { error: '无法读取浏览器存储，请检查存储权限', raw: null, attempt: null }
+  }
+  const key = getPendingRunStorageKey(canvasId, nodeId)
+  let raw: string | null
+  try {
+    raw = storage.getItem(key)
+  } catch (err) {
+    return {
+      error: `无法读取浏览器存储: ${err instanceof Error ? err.message : String(err)}`,
+      raw: null,
+      attempt: null,
+    }
+  }
+  if (raw === null) {
+    return { error: null, raw: null, attempt: null }
+  }
+  try {
+    const attempt = loadPendingFunctionRun(canvasId, nodeId)
+    return { error: null, raw, attempt }
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : String(err),
+      raw,
+      attempt: null,
+    }
+  }
+}
+
+function isTerminalClientError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    const status = error.status
+    // 408 (Request Timeout) 与 429 (Too Many Requests) 是非终态可重试状态
+    // 403 (Forbidden), 409 (Conflict) 及其他 4xx (400, 404, 422 等) 属于不可重试的终态客户端错误
+    return typeof status === 'number' && status >= 400 && status < 500 && status !== 408 && status !== 429
+  }
+  return false
+}
+
 export interface FunctionRunActions {
   startFunctionRun: (nodeId: UUIDString) => Promise<void>
   cancelFunctionRun: (nodeId: UUIDString, requestId: UUIDString) => Promise<void>
@@ -22,6 +252,9 @@ export interface FunctionRunActions {
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => Promise<void>
+  discardPendingRun: (nodeId: UUIDString, expectedRaw: string) => boolean
+  localPendingErrors: Record<string, { message: string; raw: string | null }>
+  isNodeInFlight: (nodeId: UUIDString) => boolean
 }
 
 /**
@@ -36,6 +269,39 @@ export function useCanvasFunctionRun(options: {
   flushFunctionConfig: (nodeId: UUIDString) => Promise<void>
 }): FunctionRunActions {
   const { canvasId, queryClient, setToast, flushFunctionConfig } = options
+  const inFlightNodesRef = useRef(new Set<string>())
+  const [localPendingErrors, setLocalPendingErrors] = useState<
+    Record<string, { message: string; raw: string | null }>
+  >({})
+
+  const isNodeInFlight = useCallback((nodeId: UUIDString): boolean => {
+    return inFlightNodesRef.current.has(nodeId)
+  }, [])
+
+  const discardPendingRun = useCallback((nodeId: UUIDString, expectedRaw: string): boolean => {
+    // 1. 禁止在 flight 时 discard
+    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
+      return false
+    }
+
+    try {
+      const deleted = discardPendingFunctionRun(canvasId, nodeId, expectedRaw)
+      if (deleted) {
+        setLocalPendingErrors((prev) => {
+          if (!prev[nodeId]) {
+            return prev
+          }
+          const next = { ...prev }
+          delete next[nodeId]
+          return next
+        })
+      }
+      return deleted
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : '无法读取浏览器存储，请检查存储权限')
+      return false
+    }
+  }, [canvasId, setToast])
 
   const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: UUIDString | null) => {
     if (!canvasId) {
@@ -60,34 +326,96 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, queryClient])
 
   const startFunctionRun = useCallback(async (nodeId: UUIDString) => {
-    if (!canvasId) {
+    if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
-      await flushFunctionConfig(nodeId)
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : '启动生成失败')
-      return
-    }
-    const requestId = crypto.randomUUID()
-    // 发请求前捕获 basis；fallback 与 start 沿用同一 basis，避免旧快照被错误替换。
-    const basisRequestId = readBasisRequestId(nodeId)
-    try {
-      const run = await startCanvasFunctionRun(canvasId, nodeId, {
-        requestId,
-      })
-      publishRun(run, basisRequestId)
-    } catch (error) {
+      // 1. 读取未决记录：若抛错（数据损坏或存储异常），fail-closed 阻断，保证 0 flush / 0 POST
+      let existing: PendingFunctionRunAttempt | null = null
       try {
-        const current = await getCanvasFunctionRun(canvasId, nodeId)
-        if (current.requestId === requestId) {
-          publishRun(current, basisRequestId)
+        existing = loadPendingFunctionRun(canvasId, nodeId)
+        setLocalPendingErrors((prev) => {
+          if (!prev[nodeId]) {
+            return prev
+          }
+          const next = { ...prev }
+          delete next[nodeId]
+          return next
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.error('[canvas] Failed to load pending function run attempt:', message)
+        let raw: string | null = null
+        try {
+          const storage = getLocalStorageSafe()
+          if (storage) {
+            raw = storage.getItem(getPendingRunStorageKey(canvasId, nodeId))
+          }
+        } catch {
+          // Ignore
+        }
+        setLocalPendingErrors((prev) => ({
+          ...prev,
+          [nodeId]: { message, raw },
+        }))
+        setToast('未决运行记录损坏或存储读取失败，已暂停生成以防数据覆盖。请排查存储并在面板放弃。')
+        return
+      }
+
+      if (!existing) {
+        try {
+          await flushFunctionConfig(nodeId)
+        } catch (error) {
+          setToast(error instanceof Error ? error.message : '启动生成失败')
           return
         }
-      } catch {
-        // Preserve the original start error when reconciliation is unavailable.
       }
-      setToast(error instanceof Error ? error.message : '启动生成失败')
+
+      const attempt: PendingFunctionRunAttempt = existing ?? {
+        canvasId,
+        nodeId,
+        request: { requestId: crypto.randomUUID() as UUIDString },
+        basisRequestId: readBasisRequestId(nodeId),
+        createdAt: Date.now(),
+      }
+
+      // 2. 发请求前必须成功持久化，读回校验或并发冲突失败 fail-closed 阻断
+      try {
+        savePendingFunctionRun(attempt)
+      } catch (err) {
+        console.error('[canvas] Failed to save pending function run attempt:', err)
+        setToast('本地运行状态持久化失败，无法发起生成')
+        return
+      }
+
+      const basisRequestId = attempt.basisRequestId
+      const requestId = attempt.request.requestId
+      try {
+        const run = await startCanvasFunctionRun(canvasId, nodeId, attempt.request)
+        clearPendingFunctionRun(canvasId, nodeId, requestId)
+        publishRun(run, basisRequestId)
+      } catch (error) {
+        if (isTerminalClientError(error)) {
+          clearPendingFunctionRun(canvasId, nodeId, requestId)
+          setToast(error instanceof Error ? error.message : '启动生成失败')
+          return
+        }
+
+        try {
+          const current = await getCanvasFunctionRun(canvasId, nodeId)
+          if (current.requestId === requestId) {
+            clearPendingFunctionRun(canvasId, nodeId, requestId)
+            publishRun(current, basisRequestId)
+            return
+          }
+        } catch {
+          // 对账失败保留原 attempt 供重试
+        }
+        setToast(error instanceof Error ? error.message : '启动生成失败')
+      }
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, flushFunctionConfig, publishRun, readBasisRequestId, setToast])
 
@@ -96,15 +424,18 @@ export function useCanvasFunctionRun(options: {
     requestId?: UUIDString,
   ) => {
     const targetRequestId = requestId ?? readBasisRequestId(nodeId)
-    if (!canvasId || !targetRequestId) {
+    if (!canvasId || !targetRequestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
       const run = await cancelCanvasFunctionRun(canvasId, nodeId, { requestId: targetRequestId })
-      // cancel 以被取消的 requestId 为 basis：只允许更新该 request，不得覆盖更新的 request。
+      clearPendingFunctionRun(canvasId, nodeId, targetRequestId)
       publishRun(run, targetRequestId)
     } catch (error) {
       setToast(error instanceof Error ? error.message : '取消生成失败')
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, publishRun, readBasisRequestId, setToast])
 
@@ -114,22 +445,33 @@ export function useCanvasFunctionRun(options: {
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => {
-    if (!canvasId || !requestId) {
+    if (!canvasId || !requestId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
+    inFlightNodesRef.current.add(nodeId)
     try {
       const run = await resolveCanvasFunctionRun(canvasId, nodeId, {
         requestId,
         resolution,
         verification,
       })
+      clearPendingFunctionRun(canvasId, nodeId, requestId)
       publishRun(run, requestId)
     } catch (error) {
       setToast(error instanceof Error ? error.message : '核查确认失败')
+    } finally {
+      inFlightNodesRef.current.delete(nodeId)
     }
   }, [canvasId, publishRun, setToast])
 
-  return { startFunctionRun, cancelFunctionRun, resolveFunctionRun }
+  return {
+    startFunctionRun,
+    cancelFunctionRun,
+    resolveFunctionRun,
+    discardPendingRun,
+    localPendingErrors,
+    isNodeInFlight,
+  }
 }
 
 /**

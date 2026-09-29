@@ -1082,6 +1082,79 @@ describe('CanvasCommandQueue', () => {
     expect(store.save).not.toHaveBeenCalled()
     expect(storeMap.size).toBe(0)
   })
+
+  it('I02 崩溃时序保证：settle 必须先 await onDraftAcks 物理落盘成功，才允许从底层 store 移除 operation', async () => {
+    const { saved, store } = createFakeOperationStore()
+    const callOrder: string[] = []
+
+    const onDraftAcks = vi.fn(async () => {
+      callOrder.push('onDraftAcks')
+    })
+    const originalRemove = store.remove
+    store.remove = vi.fn(async (opId: string) => {
+      callOrder.push('store.remove')
+      await originalRemove(opId)
+    })
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn(async () => advancePatch(2)),
+      refetch: vi.fn(),
+      operationStore: store,
+      onDraftAcks,
+    })
+
+    const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
+    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { ack })
+
+    expect(onDraftAcks).toHaveBeenCalledWith(ack)
+    expect(callOrder).toEqual(['onDraftAcks', 'store.remove'])
+    expect(saved.size).toBe(0)
+  })
+
+  it('I02 崩溃时序保证：若 onDraftAcks 发生 IDB abort/error，绝不删除 operation，保留供幂等重放', async () => {
+    const { saved, store } = createFakeOperationStore()
+
+    const onDraftAcks = vi.fn(async () => {
+      throw new Error('IndexedDB draft ACK transaction aborted')
+    })
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn(async () => advancePatch(2)),
+      refetch: vi.fn(),
+      operationStore: store,
+      onDraftAcks,
+    })
+
+    const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
+    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }], { ack }))
+      .rejects.toThrow('IndexedDB draft ACK transaction aborted')
+
+    // 关键断言：草稿 ACK 失败时，底层 operation 绝未被删除，仍留在持久化 store 中
+    expect(store.remove).not.toHaveBeenCalled()
+    expect(saved.size).toBe(1)
+  })
+
+  it('I02 终端冲突保护：409 发生时 clearAcks 为 false，绝不调用 onDraftAcks 清理本地冲突草稿', async () => {
+    const { store } = createFakeOperationStore()
+    const onDraftAcks = vi.fn(async () => undefined)
+
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn().mockRejectedValue(new ApiError('conflict', 409, 'CANVAS_CONFLICT')),
+      refetch: vi.fn().mockResolvedValue(snapshot(2)),
+      operationStore: store,
+      onDraftAcks,
+    })
+
+    const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
+    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, name: 'New' }], { ack }))
+      .rejects.toBeInstanceOf(CanvasCommandConflictError)
+
+    // 关键断言：409 终端失败时不清除草稿 ACK，保留草稿供用户救援
+    expect(onDraftAcks).not.toHaveBeenCalled()
+  })
 })
 
 function noopStore() {

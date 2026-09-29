@@ -1133,6 +1133,70 @@
   color: var(--danger, #ff8b8b);
 }
 
+.canvas-feature .generation-local-pending-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger, #ff8b8b);
+  border-radius: 6px;
+  background: var(--danger-subtle, rgba(239, 68, 68, 0.12));
+  color: var(--danger, #ff8b8b);
+  font-size: 11px;
+}
+
+.canvas-feature .generation-local-pending-error strong {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+.canvas-feature .generation-local-pending-error p {
+  margin: 0 0 6px 0;
+  word-break: break-all;
+  color: var(--fg);
+}
+
+.canvas-feature .generation-discard-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--danger, #ff8b8b);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--danger, #ff8b8b);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.canvas-feature .generation-discard-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.canvas-feature .generation-discard-confirm {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong, #444);
+  border-radius: 4px;
+  background: var(--bg-surface, #242424);
+}
+
+.canvas-feature .generation-discard-confirm p {
+  margin: 0 0 6px 0;
+  color: var(--warning, #faad14);
+  font-size: 11px;
+}
+
+.canvas-feature .generation-discard-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.canvas-feature .generation-discard-confirm-actions button {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .canvas-feature .canvas-text-editor {
   position: absolute;
   z-index: 40;

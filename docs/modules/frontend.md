@@ -280,9 +280,17 @@ Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-qu
   全量 Snapshot；
 - HTTP `409` 先读取最新 Snapshot，再抛出 `CanvasCommandConflictError`，queue 不自动
   重放；`replaceSnapshot` 拒绝同一 Canvas 的 version 回退，Canvas version 全程使用
-  canonical decimal string；
+  canonical decimal string；409 终端失败时不清除草稿（`clearAcks: false`），保留草稿供救援；
+- 命令队列与持久草稿严格执行“物理 ACK 先于 Operation 删除”时序：`settle` 阶段必须先等待 `onDraftAcks`
+  完成 IndexedDB 事务物理落盘，才允许从持久化 store 移除 operation；若草稿 ACK 事务异常，operation 完整保留在 store 中供后续幂等重放；
+- 草稿持久化与 ACK 清理共用同一个 Promise 序列化链（`draftPersistChainRef`），杜绝在途保存落盘晚于 ACK 清除导致草稿复活；同时设立组件卸载安全边界（`isMountedRef`），卸载后排队任务绝不越界覆写或删除底层存储；
+- 保存状态栏严格遵循 fail-closed 语义：仅在 `commandPending === false && draftPersistPending === false && !storageError` 时才渲染“已保存”；写入中显示“保存中...”，失败保留 dirty 状态并暴露重试入口；
 - 节点 transform 由 [transform-batch.ts](../../frontend/src/features/canvas/transform-batch.ts)
-  以 `180ms` debounce 聚合，并以 epoch 归属在途请求；
+  以 `180ms` debounce 聚合，每次移动递增草稿世代（generation），批次命令冻结并携带世代 ACK，落盘 ACK 仅按世代精准清除，杜绝在途请求返回冲掉追加的用户移动；
+- Function Config 编辑立即写入本地草稿并分配世代，320ms 防抖仅控制网络调度，输入在防抖窗口期内即使崩溃也安全落盘；
+- Function Run 提交前在 localStorage 持久化冻结当前 `requestDTO`（包含 `{ requestId }`）；403 / 409 及其他 4xx 终态客户端错误立即清理持久化记录；408（超时）、429（限流）、5xx 与网络中断属于非终态可重试，保留原 attempt，重试时严格传给 start 接口原样 requestDTO 并复用原 `requestId`，绝不重新生成 key 或采用新 revision 替换；
+- bfcache 恢复保护：监听 `pageshow`，若休眠期间 session 已被同源其他活页面持有，执行安全 reload 重新分配隔离会话，绝不强夺活所有权造成多标签 scope 污染；未冲突时安全重新 claim 租约并恢复心跳；
+- 参数 JSON 编辑器展开时从当前 `parameters` 衍生文本；非脏态下表单控件修改实时同步更新 JSON 文本；用户编辑非法 JSON（语法错误或非对象）时展示错误 alert，绝不反向调用更新覆盖有效表单；
 - [canvas-version-events.ts](../../frontend/src/features/canvas/canvas-version-events.ts)
   订阅 `{kind: "canvas", id}`，首次 `subscribed`、重连、`resync` 和 `error` 都读取
   权威 Snapshot，`version` 只有严格大于本地版本时才触发读取。
