@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/shared/lib/query-keys'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
@@ -95,6 +97,7 @@ export function useBoundBranchPanel({
   threadId: string
   initialParts?: ComposerPart[]
 }) {
+  const queryClient = useQueryClient()
   // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
   // 并在提交事件到达前由下方 effect 更新。
   const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
@@ -324,7 +327,39 @@ export function useBoundBranchPanel({
       }
       const presented = presentConflict(error)
       if (presented != null) {
+        // 409 CAS 冲突：清空排队意图，回滚乐观 yoloEnabled（保留其他 draft 字段），发起权威 refetch 后展示 conflict
+        yoloPendingRef.current = null
+        setBranchState((current) =>
+          current == null || current.threadId !== threadId
+            ? current
+            : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
+        )
+        try {
+          const freshSnapshot = await harnessService.getThreadSnapshot(authoritative.threadId)
+          if (
+            generation === yoloGenerationRef.current
+            && freshSnapshot?.thread
+            && freshSnapshot.thread.threadId === boundThreadIdRef.current
+          ) {
+            adoptAuthoritative(freshSnapshot.thread)
+            setBranchState((current) => {
+              if (current == null || current.threadId !== threadId) {
+                return current
+              }
+              const freshBase = branchDraftFromThread(freshSnapshot.thread)
+              return {
+                ...current,
+                base: freshBase,
+                draft: { ...current.draft, yoloEnabled: freshSnapshot.thread.yoloEnabled },
+              }
+            })
+          }
+        } catch {
+          // 快照拉取异常不影响 conflict 展示
+        }
+        void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(authoritative.threadId) })
         setConflict(presented)
+        setYoloError(null)
         return
       }
       if (yoloPendingRef.current != null) {

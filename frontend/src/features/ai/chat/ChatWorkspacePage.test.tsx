@@ -1,7 +1,8 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspacePage } from '@/features/ai/chat/ChatWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
@@ -267,6 +268,77 @@ describe('ChatWorkspacePage', () => {
     expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
     )).toContain('NEW_SESSION_DRAFT')
+  })
+
+  it('consumes deep-link thread query only once on initial target pane and does not rebind on focus change', async () => {
+    // 测试意图：验证 ?thread= deep-link 仅由初始目标 pane 消费一次，多 pane 切换焦点不会重复绑定该 thread
+    const user = userEvent.setup()
+    localStorage.setItem(
+      `kk-studio.chat-pane.${CHAT_ID}`,
+      JSON.stringify({ layout: 'split-2', focusedPaneId: 'pane-1', panes: [{ id: 'pane-1' }, { id: 'pane-2' }] }),
+    )
+    const OTHER_THREAD = '22222222-3333-4444-5555-666666666666'
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: OTHER_THREAD }),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}?thread=${THREAD_ID}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<ChatWorkspacePage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Workspace' })
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    expect(composers).toHaveLength(2)
+
+    // 聚焦 pane-2
+    await user.click(composers[1]!)
+
+    // pane-2 保持其原有的 target，不会被 deep-link 的 THREAD_ID 覆盖
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`)).toContain(OTHER_THREAD)
+  })
+
+  it('supports in-component navigation to new thread via searchParams and consumes it via callback', async () => {
+    // 测试意图：验证同组件在 URL 导航至新 thread 时，当前 focused pane 正常消费并通过 callback 确认清理 query
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const NEW_THREAD = '33333333-4444-5555-6666-777777777777'
+    let testNavigate!: (to: string) => void
+    function NavTestBridge() {
+      const nav = useNavigate()
+      useEffect(() => {
+        testNavigate = nav
+      }, [nav])
+      return <ChatWorkspacePage />
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<NavTestBridge />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Workspace' })
+    act(() => {
+      testNavigate(`/chats/${CHAT_ID}?thread=${NEW_THREAD}`)
+    })
+
+    await waitFor(() => {
+      expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain(NEW_THREAD)
+    })
   })
 })
 

@@ -69,7 +69,11 @@ export function createStorageService(client: HttpClient = apiClient) {
       return decodeBlobUrl(raw)
     },
     /** 直传对象字节到签名 URL；仅发送签名响应提供的浏览器安全请求头。 */
-    uploadFile: async (presignedPut: StoragePresignedPutDTO, file: Blob): Promise<void> => {
+    uploadFile: async (
+      presignedPut: StoragePresignedPutDTO,
+      file: Blob,
+      signal?: AbortSignal,
+    ): Promise<void> => {
       const headers: Record<string, string> = {}
       for (const [name, value] of Object.entries(presignedPut.headers)) {
         if (!FORBIDDEN_UPLOAD_HEADERS.has(name.toLowerCase())) {
@@ -82,6 +86,7 @@ export function createStorageService(client: HttpClient = apiClient) {
           method: presignedPut.method,
           headers,
           body: file,
+          signal,
         })
       } catch (error) {
         // jsdom 的 DOMException 不继承 Error，跨 realm 时用 name 判定中止。
