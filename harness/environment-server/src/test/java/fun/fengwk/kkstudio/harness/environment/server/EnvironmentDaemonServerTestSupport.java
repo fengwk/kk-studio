@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -321,6 +322,35 @@ final class EnvironmentDaemonServerTestSupport {
 
     String partialText(int index) {
       return ((TextResultContent) partials.get(index).contents().get(0)).text();
+    }
+  }
+
+  /**
+   * 记录回调到达顺序的线程安全监听器：partial / complete / error 追加到同一序列，供并发 receive 的顺序断言使用。
+   *
+   * <p>非 final，便于测试叠加阻塞或异常行为而保留顺序记录能力。
+   */
+  static class SerialListener implements EnvironmentCapabilityExecutionListener {
+
+    private final List<String> events = new CopyOnWriteArrayList<>();
+
+    @Override
+    public void onPartial(EnvironmentCapabilityResult partial) {
+      events.add("partial:" + ((TextResultContent) partial.contents().get(0)).text());
+    }
+
+    @Override
+    public void onComplete(EnvironmentCapabilityResult result) {
+      events.add("complete:" + ((TextResultContent) result.contents().get(0)).text());
+    }
+
+    @Override
+    public void onError(Throwable error) {
+      events.add("error:" + error.getClass().getSimpleName());
+    }
+
+    List<String> events() {
+      return List.copyOf(events);
     }
   }
 

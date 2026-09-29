@@ -10,7 +10,11 @@ public interface DaemonEndpoint {
   /** 在首帧 HELLO 到达前注册一条新打开的连接。 */
   void open(DaemonChannel channel);
 
-  /** 投递一帧入站文本；协议违规由实现负责生成 ERROR 帧并关闭连接。 */
+  /**
+   * 投递一帧入站文本；协议违规由实现负责生成 ERROR 帧并关闭连接。
+   *
+   * <p>可能在任意线程被并发调用，调用方无需串行化同一连接的多帧：实现必须自行保证该连接上的协议处理顺序与回调观察顺序。
+   */
   void receive(String connectionId, String rawMessage);
 
   /** 丢弃物理连接代际；在途调用保留等待同实例 daemon 重连重放。必须幂等。 */
