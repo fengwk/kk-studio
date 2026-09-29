@@ -106,6 +106,20 @@ class OpenAiChatStreamAccumulatorTest {
     bridge = new OpenAiChatStreamBridge(handler);
   }
 
+  /** 测试意图：[DONE] 后重复终止帧无操作，非空语义帧必须拒绝且不能改写已累积文本。 */
+  @Test
+  void rejectsSemanticPayloadAfterDone() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}");
+    accumulator.handleData("[DONE]");
+    accumulator.handleData("  [DONE]  ");
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () -> accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\" again\"}}]}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
   @Test
   @DisplayName("文本 content delta 派发与尾部 usage 读取")
   void testContentDeltaAndTrailingUsage() {

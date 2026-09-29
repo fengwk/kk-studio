@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigInteger;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -507,14 +508,26 @@ final class GeminiRequestEncoder {
       String base64Data = matcher.group(2);
       if (dataUriMediaType != null
           && dataUriMediaType.equalsIgnoreCase(mediaType)
-          && base64Data != null
-          && !base64Data.isEmpty()) {
+          && decodedBase64Payload(base64Data)) {
         return base64Data;
       }
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST,
         "tool result media source must be a base64 data URI matching mediaType");
+  }
+
+  /** 只校验 payload 可解码且非空，不保留解码后的字节。 */
+  private static boolean decodedBase64Payload(String payload) {
+    if (payload == null || payload.isEmpty()) {
+      return false;
+    }
+    try {
+      byte[] decoded = Base64.getDecoder().decode(payload);
+      return decoded.length > 0;
+    } catch (IllegalArgumentException invalid) {
+      return false;
+    }
   }
 
   private static JsonNode encodeToolResultResponse(

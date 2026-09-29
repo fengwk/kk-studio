@@ -168,6 +168,55 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
   }
 
+  /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
+  @Test
+  void multiPartFramesKeepIndependentSlots() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"A"},{"text":"B"}]}}]}
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}]}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("ACBD", completion.response().text());
+    JsonNode parts = completion.replayState().payload().path("parts");
+    assertEquals("AC", parts.get(0).path("text").asText());
+    assertEquals("BD", parts.get(1).path("text").asText());
+  }
+
+  /** 测试意图：终态后禁止新 content 和第二个 finishReason，usage-only 空 candidates 仍可更新用量。 */
+  @Test
+  void terminalAllowsUsageOnlyAndRejectsLaterContent() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}]}
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1,"totalTokenCount":4},"candidates":[]}
+        """);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleEvent(
+                    "message",
+                    """
+                    {"candidates":[{"content":{"parts":[{"text":"tail"}]}}]}
+                    """));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
   /** 验证全量快照重复流中，文本增量被正确提取去重，绝不重复拼接。 */
   @Test
   void handlesSnapshotRepetitiveTextStream_deduplicatesAccumulatedPrefix() throws Exception {
