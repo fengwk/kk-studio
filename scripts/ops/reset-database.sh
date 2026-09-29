@@ -162,7 +162,7 @@ preflight() {
     "select count(*) from pg_stat_activity
       where datname = '$TARGET_DB' and pid <> pg_backend_pid()")
   [ "$sessions" = 0 ] \
-    || fail "refusing to reset: $sessions other session(s) are still connected to the target; wait for them to finish and retry"
+    || fail "refusing to reset: $sessions other session(s) are still connected to the target; stop application writes for the whole reset and retry. This check does not stop them"
 
   local custom_acl
   custom_acl=$(database_scalar "$MAINTENANCE_DB" \
@@ -292,7 +292,8 @@ show_plan() {
   echo "  snapshot:       $SNAPSHOT_DB (frozen with allow_connections=false)"
   echo
   echo "Plan:"
-  echo "  1. Write and validate a full custom-format backup."
+  echo "  1. Write and validate a custom-format pg_dump. It is a consistent point in time,"
+  echo "     not a fence against writes that commit before the database is frozen."
   echo "  2. Rename the target to $SNAPSHOT_DB and disable connections to it."
   echo "  3. Create the empty database as $PARTIAL_DB, apply the metadata, then rename it"
   echo "     to $TARGET_DB; a failure here drops it and restores $TARGET_DB."

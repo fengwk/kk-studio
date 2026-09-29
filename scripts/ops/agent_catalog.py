@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import subprocess
 import sys
 from typing import Dict, List, Optional, Sequence
@@ -244,6 +245,10 @@ class PgDatabase:
         self._database: Optional[str] = None
 
     def _psql(self, command: str) -> str:
+        """Run one autocommit statement. Schema checks use this; catalog export does not."""
+        return self._run_psql(["-c", command])
+
+    def _run_psql(self, arguments: Sequence[str], stdin: Optional[str] = None) -> str:
         args = [
             "psql",
             "-X",
@@ -253,12 +258,15 @@ class PgDatabase:
             "-v",
             "ON_ERROR_STOP=1",
             "--no-password",
-            "-c",
-            command,
+            *arguments,
         ]
         try:
             result = subprocess.run(
-                args, capture_output=True, check=False, env=self._environment
+                args,
+                input=None if stdin is None else stdin.encode("utf-8"),
+                capture_output=True,
+                check=False,
+                env=self._environment,
             )
         except OSError as error:
             raise CatalogError("cannot run psql: " + (error.strerror or "unknown error"))
@@ -279,6 +287,15 @@ class PgDatabase:
     def csv_text(self, query: str) -> str:
         """Return the exact CSV stream PostgreSQL produces for `query`."""
         return self._psql("copy (" + query + ") to stdout with (format csv)")
+
+    def read_snapshot(self, script: str) -> str:
+        """Run every catalog read in one repeatable-read transaction and return its output.
+
+        One psql process owns the transaction, so fingerprints, counts and COPY streams share
+        one snapshot. A later writer cannot mix rows into a package that this read already
+        started. The script is stdin, never an argument that could be reflected in an error.
+        """
+        return self._run_psql(["-f", "-"], stdin=script)
 
     def database_name(self) -> str:
         """The database this session is really connected to; never a guess from the environment."""
@@ -429,7 +446,91 @@ def restore_verify_sql(expected: Dict[str, str]) -> str:
     )
 
 
-def write_bundle(db: PgDatabase, stream: io.TextIOBase, expected: Dict[str, str]) -> None:
+def snapshot_script(marker: str) -> str:
+    """One repeatable-read script: fingerprints, then each table's count and COPY stream.
+
+    `marker` is a per-run random token echoed on its own line before every section. Row values
+    cannot collide with it, and an empty COPY stays an empty section, so a section can be
+    framed without depending on content.
+    """
+    lines = [
+        "begin isolation level repeatable read read only;",
+        "set time zone 'UTC';",
+        "set datestyle to ISO;",
+    ]
+    for table in CATALOG_TABLES:
+        lines.append(f"\\echo {marker}")
+        lines.append(fingerprint_query(source_projection(table), TARGET_COLUMNS[table]) + ";")
+    for table in CATALOG_TABLES:
+        projection = source_projection(table)
+        lines.append(f"\\echo {marker}")
+        lines.append(f"select count(*) from ({projection}) projected;")
+        lines.append(f"\\echo {marker}")
+        lines.append(f"copy ({projection}) to stdout with (format csv);")
+    lines.append("commit;")
+    return "\n".join(lines) + "\n"
+
+
+def _split_sections(output: str, marker: str) -> List[str]:
+    """Split psql output into the sections introduced by `marker`, keeping row bytes intact."""
+    lines = output.split("\n")
+    if lines and lines[-1] == "":
+        # The only trailing empty line is psql's final newline, never a copied row.
+        lines.pop()
+    sections: List[str] = []
+    current: Optional[List[str]] = None
+    for line in lines:
+        if line == marker:
+            if current is not None:
+                sections.append("\n".join(current) + ("\n" if current else ""))
+            current = []
+        elif current is not None:
+            current.append(line)
+    if current is not None:
+        sections.append("\n".join(current) + ("\n" if current else ""))
+    return sections
+
+
+def _section(sections: Sequence[str], index: int, label: str) -> str:
+    if index >= len(sections):
+        raise CatalogError(f"catalog snapshot is incomplete: missing {label}")
+    return sections[index]
+
+
+def read_catalog_snapshot(db: PgDatabase) -> tuple:
+    """Return fingerprints and COPY streams from one repeatable-read snapshot."""
+    marker = "kk-catalog-section-" + secrets.token_hex(16)
+    sections = _split_sections(db.read_snapshot(snapshot_script(marker)), marker)
+    expected_sections = len(CATALOG_TABLES) * 3
+    if len(sections) != expected_sections:
+        raise CatalogError(
+            "catalog snapshot is incomplete: "
+            f"read {len(sections)} of {expected_sections} sections"
+        )
+    fingerprints: Dict[str, str] = {}
+    copies: Dict[str, str] = {}
+    for index, table in enumerate(CATALOG_TABLES):
+        fingerprints[table] = _section(sections, index, f"{table} fingerprint").strip()
+        count = _section(sections, len(CATALOG_TABLES) + index * 2, f"{table} count").strip()
+        data = _section(sections, len(CATALOG_TABLES) + index * 2 + 1, f"{table} rows")
+        if not re.fullmatch(r"\d+:[0-9a-f]*", fingerprints[table]):
+            raise CatalogError(f"catalog snapshot has no fingerprint for {table}")
+        if not re.fullmatch(r"\d+", count):
+            raise CatalogError(f"catalog snapshot has no row count for {table}")
+        records = sum(1 for record in csv.reader(io.StringIO(data)) if record)
+        expected_rows = int(fingerprints[table].split(":", 1)[0])
+        if records != expected_rows or int(count) != expected_rows:
+            raise CatalogError(
+                f"catalog bundle is incomplete for {table}: "
+                f"read {records} of {expected_rows} rows"
+            )
+        copies[table] = data
+    return fingerprints, copies
+
+
+def write_bundle(
+    stream: io.TextIOBase, expected: Dict[str, str], copies: Dict[str, str]
+) -> None:
     """Write the psql COPY bundle: transaction guard, explicit columns, footer verification."""
     stream.write("-- kk-studio Agent catalog bundle for the current V1 baseline.\n")
     stream.write(
@@ -448,14 +549,8 @@ def write_bundle(db: PgDatabase, stream: io.TextIOBase, expected: Dict[str, str]
     rows_total = 0
     for table in CATALOG_TABLES:
         columns = ", ".join(TARGET_COLUMNS[table])
-        projection = source_projection(table)
-        expected_rows = int(db.scalar(f"select count(*) from ({projection}) projected"))
-        data = db.csv_text(projection)
-        records = sum(1 for record in csv.reader(io.StringIO(data)) if record)
-        if records != expected_rows:
-            raise CatalogError(
-                f"catalog bundle is incomplete for {table}: read {records} of {expected_rows} rows"
-            )
+        data = copies[table]
+        records = int(expected[table].split(":", 1)[0])
         rows_total += records
         stream.write(f"-- {table} rows={records}\n")
         stream.write(
@@ -509,22 +604,14 @@ def _discard_package(directory: Path) -> None:
 
 
 def write_package(db: PgDatabase, package_dir: str, v1_checksum: str) -> Dict[str, str]:
-    """Write the versioned package and return its facts; a mutating source aborts the export."""
+    """Write the versioned package from one repeatable-read snapshot."""
     directory = Path(package_dir)
     if directory.exists():
         raise CatalogError(f"refusing to overwrite an existing package directory: {directory}")
-    expected = catalog_fingerprints(db)
+    after, copies = read_catalog_snapshot(db)
     stream = io.StringIO()
-    write_bundle(db, stream, expected)
+    write_bundle(stream, after, copies)
     payload = stream.getvalue().encode("utf-8")
-    # Bundle generation is the longest read: a source that changed around it must not be exported
-    # as if the package matched the rows the manifest will claim.
-    after = catalog_fingerprints(db)
-    if expected != after:
-        changed = ", ".join(sorted(table for table in expected if expected[table] != after[table]))
-        raise CatalogError(
-            "the source catalog changed while the bundle was generated: " + changed
-        )
 
     directory.mkdir(mode=0o700)
     try:

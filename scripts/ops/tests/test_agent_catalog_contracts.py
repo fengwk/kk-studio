@@ -64,6 +64,7 @@ from scripts.ops.agent_catalog import (  # noqa: E402  (import after sys.path se
     PgDatabase,
     fingerprint_query,
     package_facts,
+    read_catalog_snapshot,
     read_package,
     require_local_v1_checksum,
     restore_guard_sql,
@@ -71,6 +72,7 @@ from scripts.ops.agent_catalog import (  # noqa: E402  (import after sys.path se
     sanitize_error,
     sanitize_log,
     source_projection,
+    snapshot_script,
     write_bundle,
     write_package,
 )
@@ -170,56 +172,50 @@ def run_library_snippet(snippet, environment=None):
 
 
 class FakeDatabase:
-    """In-memory stand-in for the read-only psql access used by the bundle and package writers."""
+    """In-memory stand-in for the one repeatable-read snapshot used by package export."""
 
     def __init__(self, fingerprints, rows=None, counts=None, database="probe_catalog"):
-        #: md5 fingerprint queries are answered in call order: the writer reads them before and
-        #: after generating the bundle.
-        self._fingerprints = list(fingerprints)
+        self._fingerprints = {
+            table: fingerprints[index] for index, table in enumerate(CATALOG_TABLES)
+        }
         self._rows = dict(rows or {})
         self._counts = dict(counts or {})
         self._database = database
+        self.snapshot_calls = 0
 
     def database_name(self):
         return self._database
 
-    @staticmethod
-    def _table_of(query):
-        # Queries may contain joins in future; the migrated catalog table is what counts.
-        matches = re.findall(r"public\.(\w+)", query)
-        for candidate in matches:
-            if candidate in CATALOG_TABLES:
-                return candidate
-        if not matches:
-            raise AssertionError(f"query names no catalog table: {query}")
-        return matches[0]
-
-    def scalar(self, query):
-        if "md5(" in query:
-            return self._fingerprints.pop(0)
-        return str(self._counts.get(self._table_of(query), 0))
-
-    def csv_text(self, query):
-        return self._rows.get(self._table_of(query), "")
+    def read_snapshot(self, script):
+        """Render the psql output one real repeatable-read transaction would print."""
+        self.snapshot_calls += 1
+        self.last_script = script
+        marker = re.search(r"^\\echo (.+)$", script, re.M).group(1)
+        payloads = [f"{self._fingerprints[table]}\n" for table in CATALOG_TABLES]
+        for table in CATALOG_TABLES:
+            payloads.append(f"{self._counts.get(table, 0)}\n")
+            payloads.append(self._rows.get(table, ""))
+        return "".join(f"{marker}\n{payload}" for payload in payloads)
 
 
 def fake_database(fingerprints=None, rows=None, counts=None):
-    """A catalog source with one row per migrated table, unchanged before and after the bundle."""
+    """A catalog source with one row per migrated table from one snapshot."""
     if counts is None:
         counts = {table: 1 for table in CATALOG_TABLES}
     if rows is None:
         rows = {table: f"{SECRET_ROW_VALUE}-{table}\n" for table in CATALOG_TABLES}
     if fingerprints is None:
         fingerprints = [f"1:{index}{'a' * 31}" for index, _ in enumerate(CATALOG_TABLES)]
-    return FakeDatabase(list(fingerprints) * 2, rows=rows, counts=counts)
+    return FakeDatabase(list(fingerprints), rows=rows, counts=counts)
 
 
 def bundle_text(database, expected=None):
     """Render the bundle for one source into memory; the expected fingerprints are an input."""
+    fingerprints, copies = read_catalog_snapshot(database)
     if expected is None:
-        expected = {table: "0:" for table in CATALOG_TABLES}
+        expected = fingerprints
     stream = io.StringIO()
-    write_bundle(database, stream, expected)
+    write_bundle(stream, expected, copies)
     return stream.getvalue()
 
 
@@ -365,21 +361,21 @@ class TestCatalogBundleContracts(unittest.TestCase):
         self.assertIn("--single-transaction", restore)
         self.assertIn("--file", restore)
 
-    def test_bundle_rejects_a_truncated_table(self):
-        """A short COPY stream must fail the export instead of restoring partial configuration."""
-        database = fake_database(
-            rows={CATALOG_TABLES[0]: "only-one-row\n"}, counts={CATALOG_TABLES[0]: 2}
-        )
-        with self.assertRaises(CatalogError) as captured:
-            bundle_text(database)
-        self.assertIn(f"catalog bundle is incomplete for {CATALOG_TABLES[0]}", str(captured.exception))
+    def test_snapshot_script_is_one_repeatable_read_transaction(self):
+        """Fingerprints, counts and COPY streams must share one read-only transaction."""
+        script = snapshot_script("-- kk-catalog-marker")
+        self.assertIn("begin isolation level repeatable read read only;", script)
+        self.assertIn("commit;", script)
+        self.assertEqual(len(CATALOG_TABLES) * 3, script.count("\\echo -- kk-catalog-marker"))
+        self.assertLess(script.index("begin isolation"), script.index("copy ("))
+        self.assertLess(script.index("copy ("), script.rindex("commit;"))
 
     def test_bundle_copies_postgres_csv_verbatim(self):
         """Rows are copied byte-for-byte: no re-quoting, no escaping of edge characters."""
         edge_row = 'trailing\\\\,tab\thello,"carriage\\rreturn","new\\nline",\\\\.'
-        database = fake_database(
-            rows={CATALOG_TABLES[0]: edge_row + "\n"}, counts={CATALOG_TABLES[0]: 1}
-        )
+        rows = {table: f"{SECRET_ROW_VALUE}-{table}\n" for table in CATALOG_TABLES}
+        rows[CATALOG_TABLES[0]] = edge_row + "\n"
+        database = fake_database(rows=rows)
         bundle = bundle_text(database)
         self.assertIn(edge_row + "\n", bundle)
         self.assertIn(f"-- {CATALOG_TABLES[0]} rows=1\n", bundle)
@@ -455,16 +451,28 @@ class TestPackageArtifactContracts(unittest.TestCase):
             (directory / CHECKSUMS_NAME).read_text().strip(),
         )
 
-    def test_write_package_detects_a_source_that_changed_around_the_bundle(self):
-        """A source that changes while the bundle is generated must not be exported unnoticed."""
-        mutated = fake_database()
-        # Six md5 reads: three before the bundle and three after, with the first one changed.
-        mutated._fingerprints = ["1:before"] + [f"1:{index}" for index in range(5)]
-        directory = self.package_dir("mutated")
+    def test_write_package_rejects_a_truncated_snapshot(self):
+        """A COPY shorter than its snapshot count must not become a package."""
+        database = fake_database(
+            fingerprints=[f"2:{index}{'a' * 31}" for index, _ in enumerate(CATALOG_TABLES)],
+            rows={CATALOG_TABLES[0]: "only-one-row\n"},
+            counts={table: 2 for table in CATALOG_TABLES},
+        )
+        directory = self.package_dir("truncated")
         with self.assertRaises(CatalogError) as captured:
-            write_package(mutated, str(directory), DOCUMENTED_V1_CHECKSUM)
-        self.assertIn("changed while the bundle was generated", str(captured.exception))
-        self.assertFalse(directory.exists(), "a mutated export must not leave a package behind")
+            write_package(database, str(directory), DOCUMENTED_V1_CHECKSUM)
+        self.assertIn(
+            f"catalog bundle is incomplete for {CATALOG_TABLES[0]}", str(captured.exception)
+        )
+        self.assertFalse(directory.exists())
+
+    def test_write_package_reads_the_catalog_in_one_snapshot(self):
+        """A package comes from one snapshot read, so later writes cannot splice its tables."""
+        database = fake_database()
+        directory = self.package_dir("snapshot")
+        write_package(database, str(directory), DOCUMENTED_V1_CHECKSUM)
+        self.assertEqual(1, database.snapshot_calls)
+        self.assertIn("repeatable read read only", database.last_script)
 
     def test_write_package_refuses_an_existing_package_directory(self):
         """An export never overwrites an earlier package: artifacts are immutable evidence."""
@@ -1013,6 +1021,12 @@ configure_connection '' '' '' ''
         self.assertNotIn("dropdb", source)
         # The freeze must be reversible when the empty database cannot be created.
         self.assertIn("unfreeze_database", function_body(RESET_SCRIPT, "on_exit"))
+
+    def test_reset_documents_the_caller_write_stop_and_point_in_time_dump(self):
+        """The dump is a consistent point in time, not a write fence; the caller stops writes."""
+        source = RESET_SCRIPT.read_text()
+        self.assertIn("stop application writes for the whole reset", source)
+        self.assertIn("not a fence against writes", source)
 
     def test_reset_records_creation_state_and_rolls_back_in_the_safe_order(self):
         """A created database is never misread as absent, and the target name is cleared first."""

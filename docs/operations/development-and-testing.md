@@ -649,7 +649,9 @@ export VPS_POSTGRES_DATABASE=
 ```
 
 导出只承认当前 V1 的三张 catalog 表及其精确列集合。任何旧结构、额外列或缺失列都会在写产物前
-fail closed；常驻维护入口不包含旧结构判别、字段投影或工具标识迁移。输出目录为 `0700`，
+fail closed；常驻维护入口不包含旧结构判别、字段投影或工具标识迁移。三张表的指纹、行数和
+COPY 数据来自同一个 `psql` 进程里的 `REPEATABLE READ READ ONLY` 事务，因此成功的包对应
+这一个快照，而不是多次独立查询拼起来的结果。输出目录为 `0700`，
 `catalog.sql`、`manifest.json` 与 `sha256sums.txt` 均为 `0600`。
 
 2. 备份并重建空库：
@@ -659,9 +661,13 @@ fail closed；常驻维护入口不包含旧结构判别、字段投影或工具
 ./scripts/ops/reset-database.sh
 ```
 
-reset 在任何改库操作前检查权限、目标库状态和其他会话；发现其他会话时直接拒绝，不主动终止。
-随后写入并验证完整 custom-format 备份，把旧库冻结为 `<db>_pre_<UTCstamp>`，以原
-owner/encoding/locale/tablespace/connection limit 创建空库。创建或改名失败时自动删除不完整空库并
+reset 在任何改库操作前检查权限、目标库状态和其他会话；发现其他会话时直接拒绝，不主动终止，
+也不代替调用者停止应用写入。调用者必须在整个 reset 期间保持目标库停写。preflight 会再次确认
+当时没有其他会话，但一次会话计数不是后续写入的屏障。
+
+随后写入并验证 custom-format `pg_dump`。这份备份是 dump 开始时的一致时间点，不保证包含
+dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` 才是 reset 完成前的最新旧库。
+空库保持原 owner/encoding/locale/tablespace/connection limit。创建或改名失败时自动删除不完整空库并
 恢复原库名。默认备份目录为
 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`。
 
