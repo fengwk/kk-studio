@@ -55,7 +55,8 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
       # ProcessScopeCrossPlatformTest 是三个平台上都必须真跑的核心验收：它用只依赖 JDK 的夹具造出真实进程层级，
-      # 因此没有 assumeFalse 可以把它在这台 runner 上跳过。其余用例走平台的 shell 语义（Windows 上由 Git Bash 承担）。
+      # 因此没有 assumeFalse 可以把它在这台 runner 上跳过。其余用例走平台的 shell 语义，所以每台 runner 跑的类不同：
+      # 依赖 POSIX shell 的编码能力夹具只在 Linux/macOS 上跑（Windows runner 没有 Git Bash，见下面分支里的说明）。
       # helper 覆盖率开关在这台 runner 上打开：执行范围的核心逻辑一半在 helper 的独立 JVM 里，而它的平台分支只有在
       # 对应平台上才会被执行，三平台数据必须一起收集才能合并出有意义的数字。
       - name: Run process scope tests
@@ -67,10 +68,19 @@ jobs:
             # 覆盖面脱节（本机完整套件里 BashCapability 比 CI 的局部运行高约 5 个百分点）。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
               -Dkk-studio.process-scope.helper-coverage=true
-          else
-            # Windows/macOS 跑全部与执行范围相关的类（含新增的 State/Posix/helper 失败去向用例），helper 覆盖率同样打开。
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            # macOS 跑执行范围相关的全部类：POSIX shell 语义由系统 bash 承担，编码能力的边界用例因此同样有证据。
             env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
               -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dkk-studio.process-scope.helper-coverage=true \
+              -Dsurefire.failIfNoSpecifiedTests=false
+          else
+            # Windows runner 上没有 Git Bash：CreateProcess 的搜索顺序让裸名 bash 只会命中 System32 的 WSL 转发程序，
+            # 而依赖 POSIX shell 的编码能力夹具本身就走 `bash -lc`。因此这里只跑不依赖 POSIX shell 的类；BashCapabilityTest
+            # 与 ProcessScope* 自己按平台前置条件跳过不适用的用例，编码能力两个夹具类仍由 Linux 完整套件与 macOS 覆盖。
+            # helper 覆盖率同样打开：helper 的平台分支只有在对应平台上才会被执行。
+            env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
               -Dkk-studio.process-scope.helper-coverage=true \
               -Dsurefire.failIfNoSpecifiedTests=false
           fi
