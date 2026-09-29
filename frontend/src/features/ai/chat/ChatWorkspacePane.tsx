@@ -13,6 +13,7 @@ export function ChatWorkspacePane({
   focused,
   onFocus,
   initialTarget,
+  onTargetConsumed,
 }: {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
@@ -21,6 +22,7 @@ export function ChatWorkspacePane({
   focused: boolean
   onFocus: () => void
   initialTarget?: PaneTarget
+  onTargetConsumed?: (target: PaneTarget) => void
 }) {
   return (
     <AgentPane
@@ -35,6 +37,7 @@ export function ChatWorkspacePane({
       focused={focused}
       onFocus={onFocus}
       initialTarget={initialTarget}
+      onTargetConsumed={onTargetConsumed}
     />
   )
 }

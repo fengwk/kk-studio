@@ -69,6 +69,7 @@ export interface ThreadPanelComposerInput {
   onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   previewLoading?: boolean
   previewDisabled?: boolean
+  scope?: string
 }
 
 /**
@@ -167,6 +168,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
           onPreview={composer.onPreview}
           previewLoading={composer.previewLoading}
           previewDisabled={composer.previewDisabled}
+          scope={composer.scope}
         />
         {composer.interactionPanel}
         {slots?.footer}

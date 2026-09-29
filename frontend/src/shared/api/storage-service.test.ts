@@ -208,4 +208,31 @@ describe('storage-service', () => {
       message: 'Direct upload failed',
     })
   })
+
+  it('forwards AbortSignal to fetch and rejects with AbortError when aborted', async () => {
+    // 测试意图：验证 uploadFile 将 AbortSignal 传递给底层 fetch，并支持请求中断
+    const { client } = fakeClient()
+    const service = createStorageService(client)
+    const controller = new AbortController()
+
+    vi.mocked(fetch).mockImplementationOnce((_url, init) => {
+      const signal = init?.signal
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    })
+
+    const uploadPromise = service.uploadFile(
+      pendingUpload('up-1').presignedPut,
+      new File(['data'], 'a.txt'),
+      controller.signal,
+    )
+    controller.abort()
+
+    await expect(uploadPromise).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+  })
 })

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -22,6 +22,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
   const [accumulatedItems, setAccumulatedItems] = useState<InteractionDTO[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
+  const generationRef = useRef(0)
 
   // 初始第一页查询
   const {
@@ -43,24 +44,30 @@ export function useInteractionsController(limit = 20): UseInteractionsController
     }
   }, [initialPage])
 
-  // 恢复刷新：清空下游游标并重新拉取第一页
+  // 恢复刷新：清空下游游标并重新拉取第一页，开启新世代
   const refresh = useCallback(async () => {
+    const generation = ++generationRef.current
     await queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all })
     const res = await refetch()
-    if (res.data) {
+    if (generation === generationRef.current && res.data) {
       setAccumulatedItems(res.data.items || [])
       setNextCursor(res.data.nextCursor || null)
     }
   }, [queryClient, refetch])
 
-  // 加载更多（游标翻页）
+  // 加载更多（游标翻页）：绑定 generation 与当前游标，旧代迟到响应与 finally 均做栅栏拦截
   const loadMore = useCallback(async () => {
-    if (!nextCursor || isFetchingMore) {
+    const generation = generationRef.current
+    const cursor = nextCursor
+    if (!cursor || isFetchingMore) {
       return
     }
     setIsFetchingMore(true)
     try {
-      const nextPage = await interactionService.listInteractions(nextCursor, limit)
+      const nextPage = await interactionService.listInteractions(cursor, limit)
+      if (generation !== generationRef.current) {
+        return
+      }
       setAccumulatedItems((prev) => {
         const existingIds = new Set(prev.map((it) => it.interactionId))
         const newItems = (nextPage.items || []).filter(
@@ -70,7 +77,10 @@ export function useInteractionsController(limit = 20): UseInteractionsController
       })
       setNextCursor(nextPage.nextCursor || null)
     } finally {
-      setIsFetchingMore(false)
+      // 旧代 finally 不得重置新状态
+      if (generation === generationRef.current) {
+        setIsFetchingMore(false)
+      }
     }
   }, [nextCursor, isFetchingMore, limit])
 

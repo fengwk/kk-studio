@@ -90,7 +90,7 @@ export function InteractionsPage() {
         <button
           type="button"
           className="ghost-btn interactions-refresh-btn"
-          disabled={isLoading}
+          disabled={isLoading || isFetchingMore}
           onClick={() => void refresh()}
         >
           <RotateCw size={14} className={isLoading ? 'animate-spin' : ''} />

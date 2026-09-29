@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
+import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import {
   applyChatLayout,
   focusPane,
@@ -59,11 +60,21 @@ export function ChatLayoutSelector({
 
 export function ChatWorkspacePage() {
   const { chatId = '' } = useParams()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const targetThreadId = searchParams.get('thread')
   const navigate = useNavigate()
   const { t } = useI18n()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
+
+  // 通过 callback 确认消费：目标 pane 成功消费（挂载初始化或无 pending 切换成功）后，通过 URL replace 消费掉参数
+  const handleTargetConsumed = useCallback((consumed: PaneTarget) => {
+    const currentThread = searchParams.get('thread')
+    if (currentThread && consumed.kind === 'BOUND_THREAD' && consumed.threadId === currentThread) {
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete('thread')
+      setSearchParams(nextParams, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
 
   useEffect(() => {
     setPaneState(loadChatPaneState(chatId))
@@ -131,6 +142,10 @@ export function ChatWorkspacePage() {
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
         {visiblePanes.map((pane, index) => {
           const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
+          const deepLinkTarget: PaneTarget | undefined =
+            targetThreadId && isFocused
+              ? { kind: 'BOUND_THREAD', threadId: targetThreadId }
+              : undefined
           return (
             <ChatWorkspacePane
               key={`${chat.id}:${pane.id}`}
@@ -140,7 +155,8 @@ export function ChatWorkspacePage() {
               pane={pane}
               focused={isFocused}
               onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
-              initialTarget={targetThreadId && isFocused ? { kind: 'BOUND_THREAD', threadId: targetThreadId } : undefined}
+              initialTarget={deepLinkTarget}
+              onTargetConsumed={isFocused ? handleTargetConsumed : undefined}
             />
           )
         })}

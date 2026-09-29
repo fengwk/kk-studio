@@ -7,10 +7,35 @@ import {
   type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
-import type { StorageMediaKind } from '@/shared/api/contracts/storage'
+import type { StorageMediaKind, StorageUploadDTO } from '@/shared/api/contracts/storage'
+import { ApiError } from '@/shared/api/client'
+import {
+  loadUnknownUploads,
+  persistPendingUnknownUpload,
+  removeStoredUnknownUpload,
+} from '@/features/ai/composer/composer-draft'
 import { translate } from '@/shared/i18n'
 
-export type AttachmentUploadStatus = 'uploading' | 'ready'
+export type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown'
+
+export function isAmbiguousUploadOutcome(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    if (error.status === undefined || error.status === 0) {
+      return true
+    }
+    if (error.status === 408 || error.status === 429) {
+      return true
+    }
+    if (error.status >= 500 && error.status <= 599) {
+      return true
+    }
+    return false
+  }
+  if (error instanceof TypeError) {
+    return true
+  }
+  return false
+}
 
 export interface AttachmentUploadError {
   filename: string
@@ -90,32 +115,122 @@ export function validateUploadFile(file: File): string | null {
   return null
 }
 
-export type HashFile = (file: File) => Promise<string>
+export type HashFile = (file: File, signal?: AbortSignal) => Promise<string>
 
-/** 默认哈希实现：专用 Web Worker + Web Crypto SHA-256。 */
+interface PendingHash {
+  resolve: (sha256: string) => void
+  reject: (error: Error) => void
+  onAbort?: () => void
+  signal?: AbortSignal
+}
+
+/** 默认哈希实现：专用 Web Worker + Web Crypto SHA-256，支持异常 settle 与 AbortSignal。 */
 export function createWorkerHasher(): HashFile {
   let worker: Worker | null = null
-  return (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const requestId = createPartId()
-      worker ??= new Worker(new URL('./upload-hash.worker.ts', import.meta.url), {
+  const pendingRequests = new Map<string, PendingHash>()
+
+  const cleanupWorker = (error: Error) => {
+    if (worker) {
+      worker.removeEventListener('message', onMessage)
+      worker.removeEventListener('error', onError)
+      worker.removeEventListener('messageerror', onMessageError)
+      try {
+        worker.terminate()
+      } catch {
+        // terminate 容错
+      }
+      worker = null
+    }
+    const current = Array.from(pendingRequests.values())
+    pendingRequests.clear()
+    for (const pending of current) {
+      if (pending.signal && pending.onAbort) {
+        pending.signal.removeEventListener('abort', pending.onAbort)
+      }
+      pending.reject(error)
+    }
+  }
+
+  const onMessage = (
+    event: MessageEvent<{ requestId: string; sha256?: string; error?: string }>,
+  ) => {
+    const requestId = event.data?.requestId
+    if (!requestId) {
+      return
+    }
+    const pending = pendingRequests.get(requestId)
+    if (!pending) {
+      return
+    }
+    pendingRequests.delete(requestId)
+    if (pending.signal && pending.onAbort) {
+      pending.signal.removeEventListener('abort', pending.onAbort)
+    }
+    if (event.data.sha256) {
+      pending.resolve(event.data.sha256)
+    } else {
+      pending.reject(new Error(event.data.error ?? 'SHA-256 failed'))
+    }
+  }
+
+  const onError = (event: ErrorEvent) => {
+    cleanupWorker(new Error(event.message || 'Hash worker runtime error'))
+  }
+
+  const onMessageError = () => {
+    cleanupWorker(new Error('Hash worker message deserialization error'))
+  }
+
+  const ensureWorker = () => {
+    if (!worker) {
+      worker = new Worker(new URL('./upload-hash.worker.ts', import.meta.url), {
         type: 'module',
       })
-      const onMessage = (
-        event: MessageEvent<{ requestId: string; sha256?: string; error?: string }>,
-      ) => {
-        if (event.data?.requestId !== requestId) {
-          return
-        }
-        worker?.removeEventListener('message', onMessage)
-        if (event.data.sha256) {
-          resolve(event.data.sha256)
-        } else {
-          reject(new Error(event.data.error ?? 'SHA-256 failed'))
-        }
-      }
       worker.addEventListener('message', onMessage)
-      worker.postMessage({ requestId, file })
+      worker.addEventListener('error', onError)
+      worker.addEventListener('messageerror', onMessageError)
+    }
+    return worker
+  }
+
+  return (file: File, signal?: AbortSignal) =>
+    new Promise<string>((resolve, reject) => {
+      if (signal?.aborted) {
+        const error = new DOMException('The operation was aborted', 'AbortError')
+        reject(error)
+        return
+      }
+
+      const requestId = createPartId()
+      let onAbort: (() => void) | undefined
+
+      if (signal) {
+        onAbort = () => {
+          pendingRequests.delete(requestId)
+          signal.removeEventListener('abort', onAbort!)
+          const error = new DOMException('The operation was aborted', 'AbortError')
+          reject(error)
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+      }
+
+      pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        onAbort,
+        signal,
+      })
+
+      try {
+        const w = ensureWorker()
+        w.postMessage({ requestId, file })
+      } catch (error) {
+        pendingRequests.delete(requestId)
+        if (signal && onAbort) {
+          signal.removeEventListener('abort', onAbort)
+        }
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
     })
 }
 
@@ -125,19 +240,81 @@ export function useAttachmentUploads(options?: {
   storageService?: StorageService
   hashFile?: HashFile
   onError?: (error: AttachmentUploadError) => void
+  scope?: string
+  parts?: ComposerPart[]
 }) {
   const service = options?.storageService ?? storageService
   const hashFile = options?.hashFile ?? defaultHashFile
+  const scope = options?.scope
+  const scopeRef = useRef(scope)
+  useEffect(() => {
+    scopeRef.current = scope
+  }, [scope])
+  const partsRef = useRef(options?.parts)
+  useEffect(() => {
+    partsRef.current = options?.parts
+  }, [options?.parts])
   const onErrorRef = useRef(options?.onError)
   useEffect(() => {
     onErrorRef.current = options?.onError
   }, [options?.onError])
 
-  const [uploads, setUploads] = useState<AttachmentUpload[]>([])
-  const uploadsRef = useRef<AttachmentUpload[]>([])
+  const [uploads, setUploads] = useState<AttachmentUpload[]>(() => {
+    if (!scope) {
+      return []
+    }
+    return loadUnknownUploads(scope).map((item) => ({
+      localId: item.localId,
+      uploadId: item.uploadId,
+      filename: item.filename,
+      mediaType: item.mediaType,
+      sizeBytes: item.sizeBytes,
+      sha256: item.sha256,
+      status: 'complete_unknown' as const,
+      progress: 0.8,
+      previewUrl: null,
+      detached: false,
+      ...(item.imageTier ? { imageTier: item.imageTier } : {}),
+    }))
+  })
+  const uploadsRef = useRef<AttachmentUpload[]>(uploads)
   const filesRef = useRef(new Map<string, File>())
   const previewUrlsRef = useRef(new Map<string, string>())
   const activeRef = useRef(new Set<string>())
+  const abortControllersRef = useRef(new Map<string, AbortController>())
+
+  // 严格仅在 scope 改变时隔离清理旧在途并加载新 scope 的未知上传，绝不在 parts 改变时重复 restore
+  const prevScopeRef = useRef(scope)
+  useEffect(() => {
+    if (prevScopeRef.current !== scope) {
+      prevScopeRef.current = scope
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort()
+      }
+      abortControllersRef.current.clear()
+      activeRef.current.clear()
+      filesRef.current.clear()
+      for (const localId of previewUrlsRef.current.keys()) {
+        revokePreviewUrl(localId, previewUrlsRef.current)
+      }
+      const unknowns = scope ? loadUnknownUploads(scope) : []
+      const fresh: AttachmentUpload[] = unknowns.map((item) => ({
+        localId: item.localId,
+        uploadId: item.uploadId,
+        filename: item.filename,
+        mediaType: item.mediaType,
+        sizeBytes: item.sizeBytes,
+        sha256: item.sha256,
+        status: 'complete_unknown' as const,
+        progress: 0.8,
+        previewUrl: null,
+        detached: false,
+        ...(item.imageTier ? { imageTier: item.imageTier } : {}),
+      }))
+      setUploads(fresh)
+      uploadsRef.current = fresh
+    }
+  }, [scope])
 
   const updateUploads = useCallback(
     (updater: (current: AttachmentUpload[]) => AttachmentUpload[]) => {
@@ -167,46 +344,75 @@ export function useAttachmentUploads(options?: {
   )
 
   /**
-   * 释放上传句柄：标记 pipeline 失效，并对已预留的 upload 发起
-   * best-effort DELETE（调用方已确认 draft 中不再引用）。
+   * 释放上传句柄：终止在途请求，标记 pipeline 失效。
+   * 确认发送后（detached === true）的 attachment 绝不删除服务端已被消息引用的句柄。
    */
   const releaseUpload = useCallback(
     (localId: string) => {
       activeRef.current.delete(localId)
+      const controller = abortControllersRef.current.get(localId)
+      if (controller) {
+        controller.abort()
+        abortControllersRef.current.delete(localId)
+      }
       const record = uploadsRef.current.find((upload) => upload.localId === localId)
       filesRef.current.delete(localId)
       revokePreviewUrl(localId, previewUrlsRef.current)
       if (!record) {
         return
       }
+      // 已随消息进入提交/发送管道的句柄已被引用，绝不调用 deleteUpload
       const uploadId = record.uploadId
-      if (uploadId) {
+      if (uploadId && !record.detached) {
         void service.deleteUpload(uploadId).catch(() => undefined)
+      }
+      if (scope) {
+        removeStoredUnknownUpload(scope, localId)
       }
       dropUpload(localId)
     },
-    [dropUpload, service],
+    [dropUpload, scope, service],
   )
 
+  /**
+   * 组件卸载：停止所有在途 hash/PUT 请求；
+   * 对已确定 READY 且未消费（未发送、!detached）的 upload 句柄主动释放；
+   * 绝对不能因 unknown 立即 destroy 恢复句柄，且已发送（detached）的不误删。
+   */
   useEffect(
     () => () => {
+      for (const controller of abortControllersRef.current.values()) {
+        controller.abort()
+      }
+      abortControllersRef.current.clear()
       activeRef.current.clear()
       filesRef.current.clear()
       for (const localId of previewUrlsRef.current.keys()) {
         revokePreviewUrl(localId, previewUrlsRef.current)
       }
+      for (const upload of uploadsRef.current) {
+        if (upload.uploadId && upload.status === 'ready' && !upload.detached) {
+          // 若草稿仍持有该 uploadId，保留至服务端 TTL 作为补偿，不破坏草稿恢复契约
+          const isReferencedInDraft = partsRef.current && uploadOccurrence(upload, partsRef.current) > 0
+          if (!isReferencedInDraft) {
+            void service.deleteUpload(upload.uploadId).catch(() => undefined)
+          }
+        }
+      }
     },
-    [],
+    [service],
   )
 
   const runPipeline = useCallback(
     async (record: AttachmentUpload, file: File) => {
       const localId = record.localId
-      const active = () => activeRef.current.has(localId)
+      const capturedScope = scopeRef.current
+      const active = () => activeRef.current.has(localId) && scopeRef.current === capturedScope
+      const controller = abortControllersRef.current.get(localId)
       let reservedUploadId: string | null = null
       try {
         patchUpload(localId, { status: 'uploading', progress: 0.1 })
-        const sha256 = record.sha256 ?? (await hashFile(file))
+        const sha256 = record.sha256 ?? (await hashFile(file, controller?.signal))
         if (!active()) {
           return
         }
@@ -219,24 +425,73 @@ export function useAttachmentUploads(options?: {
         })
         reservedUploadId = reservation.id
         if (!active()) {
-          // 上传途中被移除：尽力清理已预留但未完成的对象。
           void service.deleteUpload(reservation.id).catch(() => undefined)
           return
         }
         patchUpload(localId, { uploadId: reservation.id, progress: 0.4 })
         if (reservation.state === 'PENDING') {
           // PENDING = 对象尚未落库：必须直传；READY = sha256 命中，跳过直传。
-          await service.uploadFile(reservation.presignedPut, file)
+          await service.uploadFile(reservation.presignedPut, file, controller?.signal)
           if (!active()) {
             void service.deleteUpload(reservation.id).catch(() => undefined)
             return
           }
           patchUpload(localId, { progress: 0.8 })
         }
-        const completed = await service.completeUpload(reservation.id)
+
+        // 发送 complete 前预先在 capturedScope 中原子保存 identity，防范在途网络未知或刷新窗口丢句柄
+        // Fail-Closed 机制：若存储满额（QuotaExceededError）或写入失败，抛出错误，
+        // 绝不继续执行 completeUpload！
+        if (capturedScope) {
+          persistPendingUnknownUpload(capturedScope, {
+            localId,
+            uploadId: reservation.id,
+            filename: record.filename,
+            mediaType: record.mediaType,
+            sizeBytes: record.sizeBytes,
+            sha256: sha256 ?? record.sha256,
+            imageTier: record.imageTier,
+          })
+        }
+
+        let completed: StorageUploadDTO
+        try {
+          completed = await service.completeUpload(reservation.id)
+        } catch (completeError) {
+          if (!active()) {
+            return
+          }
+          if (isAmbiguousUploadOutcome(completeError)) {
+            // 未知结果：保留同 uploadId 精确重试，绝对不能 DELETE 已可能 READY 的句柄
+            patchUpload(localId, {
+              uploadId: reservation.id,
+              status: 'complete_unknown',
+              progress: 0.8,
+            })
+            onErrorRef.current?.({
+              filename: record.filename,
+              reason: completeError instanceof Error ? completeError.message : String(completeError),
+              localId,
+            })
+            return
+          }
+          // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
+          }
+          throw completeError
+        }
+
         if (!active()) {
           void service.deleteUpload(completed.id).catch(() => undefined)
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
+          }
           return
+        }
+        // complete 成功：仅从 capturedScope 移除当前已确认的条目
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
         }
         // complete 返回同一 DTO：upload 句柄不变，绝不替换为 blobId。
         patchUpload(localId, {
@@ -245,8 +500,11 @@ export function useAttachmentUploads(options?: {
           progress: 1,
         })
       } catch (error) {
-        if (reservedUploadId) {
+        if (reservedUploadId && active()) {
           void service.deleteUpload(reservedUploadId).catch(() => undefined)
+        }
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
         }
         if (!active()) {
           return
@@ -266,12 +524,50 @@ export function useAttachmentUploads(options?: {
     [dropUpload, hashFile, patchUpload, service],
   )
 
+  /** 重试未知结果条目的 completeUpload 操作。支持传入 localId 或 upload 对象。 */
+  const retryComplete = useCallback(
+    async (target: string | AttachmentUpload) => {
+      const localId = typeof target === 'string' ? target : target.localId
+      const capturedScope = scopeRef.current
+      const record = uploadsRef.current.find((u) => u.localId === localId)
+      if (!record || !record.uploadId || record.status !== 'complete_unknown') {
+        return
+      }
+      patchUpload(localId, { status: 'uploading', progress: 0.9 })
+      try {
+        const completed = await service.completeUpload(record.uploadId)
+        if (capturedScope) {
+          removeStoredUnknownUpload(capturedScope, localId)
+        }
+        patchUpload(localId, {
+          uploadId: completed.id,
+          status: 'ready',
+          progress: 1,
+        })
+      } catch (error) {
+        if (isAmbiguousUploadOutcome(error)) {
+          patchUpload(localId, { status: 'complete_unknown', progress: 0.8 })
+        } else {
+          // 确定未接受错误：释放并 drop
+          void service.deleteUpload(record.uploadId).catch(() => undefined)
+          if (capturedScope) {
+            removeStoredUnknownUpload(capturedScope, localId)
+          }
+          dropUpload(localId)
+        }
+        onErrorRef.current?.({
+          filename: record.filename,
+          reason: error instanceof Error ? error.message : String(error),
+          localId,
+        })
+      }
+    },
+    [dropUpload, patchUpload, service],
+  )
+
   /**
    * 添加文件；返回创建的有效注册表条目（校验失败文件直接触发 onError，不产生条目）。
-   *
-   * 不做客户端去重：元数据相同的不同文件也必须获得各自独立的 upload 句柄
-   * （服务端按 sha256 去重，返回 READY 免直传）。每个有效文件 = 一个新条目 + 新
-   * attachment part 引用；重复粘贴同一文件会产生两个独立句柄。
+   * 每个文件创建专用的 AbortController 贯穿散列与直传。
    */
   const addFiles = useCallback(
     (files: File[]): AttachmentUpload[] => {
@@ -311,6 +607,7 @@ export function useAttachmentUploads(options?: {
         fresh.push(record)
         filesRef.current.set(localId, file)
         activeRef.current.add(localId)
+        abortControllersRef.current.set(localId, new AbortController())
       }
       if (fresh.length > 0) {
         updateUploads((current) => [...current, ...fresh])
@@ -351,6 +648,7 @@ export function useAttachmentUploads(options?: {
     uploads,
     addFiles,
     releaseUpload,
+    retryComplete,
     markDetached,
     updateImageTier,
   }
