@@ -58,6 +58,18 @@ public interface SkillPackageMapper extends BaseMapper {
              create_time, update_time
       from skill_package
       where package_name = #{packageName}
+      for share
+      """)
+  SkillPackageDO lockPackageForShare(@Param("packageName") String packageName);
+
+  @ResultMap("skillPackageResultMap")
+  @Select(
+      """
+      select package_name, description, repository_url, branch, current_commit,
+             observed_head_commit, head_checked_at, head_check_error, skills, version,
+             create_time, update_time
+      from skill_package
+      where package_name = #{packageName}
       for update
       """)
   SkillPackageDO lockPackage(@Param("packageName") String packageName);

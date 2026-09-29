@@ -53,6 +53,10 @@ public interface McpServerMapper extends BaseMapper {
   @ResultMap("mcpServerResultMap")
   McpServerDO getByName(@Param("name") String name);
 
+  @Select("select " + SERVER_COLUMNS + " from mcp_server where name = #{name} for share")
+  @ResultMap("mcpServerResultMap")
+  McpServerDO lockForShare(@Param("name") String name);
+
   @Select("select " + SERVER_COLUMNS + " from mcp_server where name = #{name} for update")
   @ResultMap("mcpServerResultMap")
   McpServerDO getForUpdate(@Param("name") String name);
@@ -104,6 +108,10 @@ public interface McpServerMapper extends BaseMapper {
   @Select("select " + TOOL_COLUMNS + " from mcp_tool where name = #{name}")
   @ResultMap("mcpToolResultMap")
   McpToolDO getTool(@Param("name") String name);
+
+  @Select("select " + TOOL_COLUMNS + " from mcp_tool where name = #{name} for share")
+  @ResultMap("mcpToolResultMap")
+  McpToolDO lockToolForShare(@Param("name") String name);
 
   @Select(
       "select "
