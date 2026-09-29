@@ -1,0 +1,147 @@
+# kk-studio process scope platform matrix.
+#
+# OS 级执行范围（POSIX 进程组 / Windows Job Object）只用一个平台验证不完：Linux 覆盖 POSIX
+# 分支，macOS 覆盖同一套代码在另一种 POSIX 实现上的行为，Windows 覆盖 kernel32 的 Job 语义与
+# 命令行拼装。矩阵只跑与执行范围直接相关的测试，全部是本机进程行为，不需要外部服务、凭证或
+# 模型（真模型/L1 API 回归另见 `scripts/dev/verify/e2e/run.sh`）。
+name: process-scope
+
+on:
+  push:
+    branches:
+      - worktree/audit-process-scope
+      - main
+      - dev
+    paths:
+      - 'harness/daemon/**'
+      - 'harness/environment/**'
+      - 'pom.xml'
+      - '.github/workflows/process-scope.yml'
+  pull_request:
+    paths:
+      - 'harness/daemon/**'
+      - 'harness/environment/**'
+      - 'pom.xml'
+      - '.github/workflows/process-scope.yml'
+  workflow_dispatch:
+
+# 只读仓库内容：本工作流不发布任何产物，也不读取 secrets。
+permissions:
+  contents: read
+
+concurrency:
+  group: process-scope-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '21'
+
+jobs:
+  scope_tests:
+    name: process scope (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      # ProcessScopeCrossPlatformTest 是三个平台上都必须真跑的核心验收：它用只依赖 JDK 的夹具造出真实进程层级，
+      # 因此没有 assumeFalse 可以把它在这台 runner 上跳过。其余用例走平台的 shell 语义（Windows 上由 Git Bash 承担）。
+      # helper 覆盖率开关在这台 runner 上打开：执行范围的核心逻辑一半在 helper 的独立 JVM 里，而它的平台分支只有在
+      # 对应平台上才会被执行，三平台数据必须一起收集才能合并出有意义的数字。
+      - name: Run process scope tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            # Linux 跑完整 daemon 套件：执行范围的行为散布在 bash 能力与编码能力的边界用例里，只挑几个类会让覆盖率与真实
+            # 覆盖面脱节（本机完整套件里 BashCapability 比 CI 的局部运行高约 5 个百分点）。
+            env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
+              -Dkk-studio.process-scope.helper-coverage=true
+          else
+            # Windows/macOS 跑全部与执行范围相关的类（含新增的 State/Posix/helper 失败去向用例），helper 覆盖率同样打开。
+            env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
+              -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,ProcessScopeHelperFailureTest,PosixProcessGroupTest,BashCapabilityTest,CodingCapabilitiesTest,CodingCapabilitiesEdgeTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+              -Dkk-studio.process-scope.helper-coverage=true \
+              -Dsurefire.failIfNoSpecifiedTests=false
+          fi
+      # 验收不允许被跳过、也不允许被漏跑：按用例名核对，数量断言会被新增用例弄陈旧。
+      - name: Assert every selected case really ran
+        shell: bash
+        run: |
+          set -euo pipefail
+          py=$(command -v python3 || command -v python)
+          "$py" scripts/dev/verify/process-scope/assert-surefire-reports.py \
+            harness/daemon/target/surefire-reports "${{ matrix.os }}"
+      # 覆盖率输入必须每次都上传：任何一条平台的缺口都会让合并报告失真，而不是让门禁恰好通过。
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-coverage-${{ matrix.os }}
+          path: |
+            harness/daemon/target/jacoco.exec
+            harness/daemon/target/jacoco-helper/
+            harness/daemon/target/classes/
+          if-no-files-found: error
+      - name: Upload surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-${{ matrix.os }}
+          path: harness/daemon/target/surefire-reports/
+          if-no-files-found: ignore
+
+  scope_coverage:
+    name: merged scope coverage
+    needs: scope_tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - name: Download the coverage data of every platform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scope-coverage-*
+          path: coverage/platforms
+      # 三平台的类文件必须逐字节一致，否则 JaCoCo 会按 class id 静默丢掉 session；这里把它变成显式失败。
+      - name: Collect exec files and verify the class files agree
+        shell: bash
+        run: python3 scripts/dev/verify/process-scope/collect-coverage-inputs.py coverage/platforms coverage/inputs
+      - name: Fetch the JaCoCo CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp dependency:copy \
+            -Dartifact=org.jacoco:org.jacoco.cli:0.8.11:jar:nodeps \
+            -DoutputDirectory=coverage/tools
+      - name: Merge every platform and build the report
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli=coverage/tools/org.jacoco.cli-0.8.11-nodeps.jar
+          java -jar "$cli" merge $(cat coverage/inputs/exec-files.txt) --destfile coverage/merged.exec
+          java -jar "$cli" report coverage/merged.exec \
+            --classfiles coverage/inputs/classes \
+            --sourcefiles harness/daemon/src/main/java \
+            --xml coverage/coverage.xml
+      # 父进程与 helper 的核心行覆盖门禁：数字只能来自三平台合并，单平台（尤其是本地 Linux）不构成结论。
+      - name: Enforce the core line coverage gate
+        shell: bash
+        run: python3 scripts/dev/verify/process-scope/gate-core-coverage.py coverage/coverage.xml

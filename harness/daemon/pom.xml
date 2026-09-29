@@ -16,6 +16,8 @@
     <properties>
         <!-- 标准 Java LSP 客户端（JSON-RPC 分帧与协议模型）。 -->
         <lsp4j.version>1.0.0</lsp4j.version>
+        <!-- 执行范围的原生边界：POSIX setsid/kill 与 Windows Job Object/CreateProcessW。 -->
+        <jna.version>5.17.0</jna.version>
     </properties>
 
     <dependencies>
@@ -50,6 +52,17 @@
             <groupId>org.eclipse.lsp4j</groupId>
             <artifactId>org.eclipse.lsp4j.jsonrpc</artifactId>
             <version>${lsp4j.version}</version>
+        </dependency>
+        <!-- OS 执行范围：JNA 直接提供 POSIX 进程组与 Windows Job Object 的原生调用，无需本地 C 编译器。 -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>${jna.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna-platform</artifactId>
+            <version>${jna.version}</version>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
@@ -90,6 +103,9 @@
                                         <exclude>META-INF/*.DSA</exclude>
                                         <exclude>META-INF/*.RSA</exclude>
                                         <exclude>META-INF/INDEX.LIST</exclude>
+                                        <!-- 交付声明只由下面的 IncludeResourceTransformer 追加一份；留在这里会让「重复 verify」时的输入
+                                             （上一轮已经打包好声明的 jar）与本轮的声明撞成 duplicate entry。 -->
+                                        <exclude>META-INF/THIRD_PARTY_NOTICES</exclude>
                                         <!-- 多份 module-info 合并会互相覆盖；Daemon 运行在 unnamed module 中。 -->
                                         <exclude>module-info.class</exclude>
                                         <exclude>META-INF/versions/**/module-info.class</exclude>
