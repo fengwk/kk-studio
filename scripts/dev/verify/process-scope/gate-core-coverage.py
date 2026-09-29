@@ -70,11 +70,18 @@ def main() -> int:
         print("FAIL the merged report contains no core class at all")
         return 1
     percentage = 100.0 * aggregate_covered / aggregate_total
-    gap = max(0, round((TARGET - percentage) / 100.0 * aggregate_total))
-    print(
-        "核心路径合计            line %5.1f%% (%d/%d)  距 %.1f%% 目标还差约 %d 行"
-        % (percentage, aggregate_covered, aggregate_total, TARGET, gap)
+    summary = "核心路径合计            line %5.1f%% (%d/%d)" % (
+        percentage,
+        aggregate_covered,
+        aggregate_total,
     )
+    if percentage < TARGET:
+        # 达标时不打印缺口：那会读成「还差一点」。
+        summary += "  距 %.1f%% 目标还差约 %d 行" % (
+            TARGET,
+            round((TARGET - percentage) / 100.0 * aggregate_total),
+        )
+    print(summary)
     if failures:
         for failure in failures:
             print("FAIL " + failure)
