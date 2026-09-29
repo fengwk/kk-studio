@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -85,6 +86,7 @@ class ToolProcessorCallbackTest {
     assertEquals(txBefore, txAfter, "partial progress must not acquire store transactions");
     assertEquals(1, fixture.sink.events.size());
     RealtimeEvent.ToolPartial event = (RealtimeEvent.ToolPartial) fixture.sink.events.get(0);
+    assertNotNull(event.eventId());
     assertEquals(fixture.baseline.threadId(), event.threadId());
     assertEquals(fixture.toolInvocationId, event.toolInvocationId());
     assertEquals(1, event.attempt());
@@ -96,10 +98,30 @@ class ToolProcessorCallbackTest {
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
+  /** 同 ms、同 payload 的两条 partial 是两条独立投影事件：identity 完全由各自 eventId 承担。 */
+  @Test
+  void identicalPartialsGetDistinctEventIds() {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+
+    ToolResult partial = ToolProcessorTestSupport.partialResult("call-1");
+    listener.onPartial(partial);
+    listener.onPartial(partial);
+
+    assertEquals(2, fixture.sink.events.size());
+    RealtimeEvent.ToolPartial first = (RealtimeEvent.ToolPartial) fixture.sink.events.get(0);
+    RealtimeEvent.ToolPartial second = (RealtimeEvent.ToolPartial) fixture.sink.events.get(1);
+    assertNotNull(first.eventId());
+    assertNotNull(second.eventId());
+    assertNotEquals(first.eventId(), second.eventId());
+    // 同一固定时钟与同一 ToolResult：payload 与 createdAt 完全相同，去重只能依赖 eventId。
+    assertEquals(first.partial(), second.partial());
+    assertEquals(first.createdAt(), second.createdAt());
+  }
+
   /** partial toolCallId 不匹配 request：协议破坏，确定性 FAILED(INVALID_PARTIAL)。 */
   @Test
-  void partialWithMismatchedToolCallIdFails() {
-    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+  void partialWithMismatchedToolCallIdFails() {    ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("other-call"));

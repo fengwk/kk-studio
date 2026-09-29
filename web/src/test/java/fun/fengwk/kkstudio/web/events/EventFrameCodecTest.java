@@ -6,14 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** 事件通道帧的严格 JSON 契约：客户端帧精确字段集、canonical UUID；服务端帧确定性编码。 */
@@ -243,5 +246,27 @@ class EventFrameCodecTest {
   void resyncSignalIsNotAnEventFrame() {
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.event(THREAD_KEY, new Signal.Resync()));
+  }
+
+  /** realtime 帧对 ToolPartial 只做原样透传：data 就是 runtime codec 的 canonical Tool partial JSON，eventId 不丢失。 */
+  @Test
+  void passesThroughCanonicalToolPartialData() {
+    RealtimeEvent.ToolPartial partial =
+        new RealtimeEvent.ToolPartial(
+            THREAD,
+            new UUID(0L, 7L),
+            1,
+            new UUID(0L, 9L),
+            new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}"),
+            Instant.parse("2026-08-05T00:00:00Z"));
+    String data = new RealtimeEventJsonCodec().encode(partial);
+
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"name\":\"realtime\",\"data\":"
+            + data
+            + "}",
+        CODEC.event(THREAD_KEY, new Signal.Realtime(partial)));
   }
 }

@@ -415,7 +415,8 @@ final class ToolExecution implements ToolGateway.Listener {
           publishes);
     }
     Instant now = clock.instant();
-    publishes.add(new Publish(partial, now));
+    // 每次生产一个 partial event 生成独立 UUID：同 ms、同 payload 的两条 progress 仍是两个事件，客户端按 eventId 去重。
+    publishes.add(new Publish(UUID.randomUUID(), partial, now));
     return Applied.PROGRESSED;
   }
 
@@ -666,14 +667,20 @@ final class ToolExecution implements ToolGateway.Listener {
 
   private void publishAll(List<Publish> publishes) {
     for (Publish publish : publishes) {
-      appendRealtime(publish.partial, publish.createdAt);
+      appendRealtime(publish);
     }
   }
 
-  private void appendRealtime(ToolResult partial, Instant createdAt) {
+  private void appendRealtime(Publish publish) {
     try {
       realtimeEventSink.append(
-          new RealtimeEvent.ToolPartial(threadId, invocationId, attempt, partial, createdAt));
+          new RealtimeEvent.ToolPartial(
+              threadId,
+              invocationId,
+              attempt,
+              publish.eventId(),
+              publish.partial(),
+              publish.createdAt()));
     } catch (RuntimeException failure) {
       log.warn("realtime tool partial projection failed for invocation {}", invocationId, failure);
     }
@@ -723,7 +730,7 @@ final class ToolExecution implements ToolGateway.Listener {
       ToolGateway.Failure failure,
       ToolInvocationError error) {}
 
-  private record Publish(ToolResult partial, Instant createdAt) {}
+  private record Publish(UUID eventId, ToolResult partial, Instant createdAt) {}
 
   /** 内部回滚信号：callback 事务失去 Work ownership 时使当前事务完整回滚。 */
   private static final class ClaimLostSignal extends RuntimeException {
