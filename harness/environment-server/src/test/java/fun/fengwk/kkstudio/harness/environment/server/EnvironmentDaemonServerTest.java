@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCode
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.SerialListener;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -55,9 +56,16 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * {@link EnvironmentDaemonServer} 的会话、并发、重连恢复与终态所有权契约测试。
@@ -225,6 +233,247 @@ class EnvironmentDaemonServerTest {
     assertEquals("chunk-1", listener.partialText(0));
     assertEquals("chunk-2", listener.partialText(1));
     assertEquals("done", listener.completedText());
+  }
+
+  /**
+   * 测试意图（C05）：并发 receive 下回调顺序仍由连接的 gate 决定。首条 PROGRESS 的回调在锁外阻塞时，第二条 receive 的 COMPLETED
+   * 只能完成状态推进与批次入队，不得抢先投递终态；释放后观察顺序必须仍是 partial -> terminal。
+   */
+  @Test
+  void inFlightPartialCallbackBlocksLaterTerminalUntilOrdered() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-ordered-callback");
+    CountDownLatch partialEntered = new CountDownLatch(1);
+    CountDownLatch releasePartial = new CountDownLatch(1);
+    SerialListener listener =
+        new SerialListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {
+            partialEntered.countDown();
+            await(releasePartial);
+            super.onPartial(partial);
+          }
+        };
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    Thread deliveringPartial =
+        new Thread(
+            () ->
+                fixture.receive(
+                    channel,
+                    DaemonMessageType.PROGRESS,
+                    CALL_ONE.toString(),
+                    partialPayload(CALL_ONE, "chunk")));
+    deliveringPartial.start();
+    await(partialEntered);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "done"));
+    assertEquals(List.of(), listener.events());
+
+    releasePartial.countDown();
+    assertTrue(join(deliveringPartial), "drain owner must finish after the callback returns");
+    assertEquals(List.of("partial:chunk", "complete:done"), listener.events());
+  }
+
+  /** 测试意图（C05）：callback 在核心锁外执行，因此回调内重入同一连接的 receive 不得死锁；重入产生的批次由同一 drainer 依次补投。 */
+  @Test
+  void reentrantReceiveInsideCallbackDoesNotDeadlock() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-reentrant-receive");
+    AtomicBoolean reentered = new AtomicBoolean();
+    SerialListener listener =
+        new SerialListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {
+            super.onPartial(partial);
+            if (reentered.compareAndSet(false, true)) {
+              fixture.receive(
+                  channel,
+                  DaemonMessageType.PROGRESS,
+                  CALL_ONE.toString(),
+                  partialPayload(CALL_ONE, "nested"));
+            }
+          }
+        };
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    Thread driver =
+        new Thread(
+            () ->
+                fixture.receive(
+                    channel,
+                    DaemonMessageType.PROGRESS,
+                    CALL_ONE.toString(),
+                    partialPayload(CALL_ONE, "outer")));
+    driver.start();
+
+    assertTrue(join(driver), "reentrant receive must not deadlock the drain owner");
+    assertEquals(List.of("partial:outer", "partial:nested"), listener.events());
+  }
+
+  /**
+   * 测试意图（C05）：单个 listener 抛异常不得阻断同一批次中其余 invocation 的终态投递，也不得让 drain 所有权滞留。
+   *
+   * <p>接管帧会在同一批次里依次回收两个在途调用：先投递的 listener 抛异常后，第二个调用仍须收到唯一终态；之后的帧仍能正常收敛。
+   */
+  @Test
+  void listenerFailureDoesNotBlockRemainingTerminalCallbacks() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-listener-failure");
+    AtomicInteger failures = new AtomicInteger();
+    RecordingListener second = new RecordingListener();
+    fixture.server.invoke(
+        ENVIRONMENT_ID,
+        capabilityRequest(CALL_ONE),
+        new EnvironmentCapabilityExecutionListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {}
+
+          @Override
+          public void onComplete(EnvironmentCapabilityResult result) {}
+
+          @Override
+          public void onError(Throwable error) {
+            failures.incrementAndGet();
+            throw new IllegalStateException("listener failed");
+          }
+        });
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
+
+    // 身份不同的新进程接管：两个在途调用在同一回调批次里以结果不确定收敛。
+    fixture.leaseStore.activeLeaseToken = false;
+    FakeChannel takeover =
+        fixture.connectReady("channel-listener-failure-takeover", OTHER_INSTANCE_ID);
+
+    assertEquals(1, failures.get(), "异常必须传播到测试可观察点而不是被吞掉");
+    assertEquals(1, second.errorCount);
+    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, second.error);
+    assertTrue(takeover.isOpen());
+
+    // drain 所有权已释放：接管后的新调用仍能正常收敛终态。
+    UUID next = UUID.randomUUID();
+    RecordingListener third = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(next), third);
+    fixture.receive(
+        takeover, DaemonMessageType.COMPLETED, next.toString(), completedPayload(next, "next"));
+    assertEquals("next", third.completedText());
+    assertFalse(takeover.closed());
+  }
+
+  /**
+   * 测试意图（C05 跨代际边界）：新进程接管时，旧连接队列中「尚未开始」的 partial 必须在 drain 时被丢弃，不得在新连接的 terminal 之后投递给同一 listener。
+   *
+   * <p>已经在旧连接上进入 listener 的 partial（阻塞中的 chunk-1）是既成事实，本测试不对其做任何撤销承诺；它只精确断言旧连接 drain 期间排队的第二个
+   * partial 不会在接管终态之后出现。单连接 FIFO 顺序域加上 drain 时刻的活动性复核即可保证这一点，无需跨连接排序机制。
+   */
+  @Test
+  void takeoverDropsQueuedOldConnectionPartialInsteadOfDeliveringItAfterTerminal() {
+    Fixture fixture = new Fixture();
+    FakeChannel first = fixture.connectReady("channel-takeover-partial-first");
+    CountDownLatch partialEntered = new CountDownLatch(1);
+    CountDownLatch releasePartial = new CountDownLatch(1);
+    SerialListener listener =
+        new SerialListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {
+            super.onPartial(partial);
+            partialEntered.countDown();
+            await(releasePartial);
+          }
+        };
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    Thread oldDrainer =
+        new Thread(
+            () ->
+                fixture.receive(
+                    first,
+                    DaemonMessageType.PROGRESS,
+                    CALL_ONE.toString(),
+                    partialPayload(CALL_ONE, "chunk-1")));
+    oldDrainer.start();
+    await(partialEntered);
+
+    // 旧连接 drain 被阻塞期间排队第二个 partial：它尚未进入 listener。
+    fixture.receive(
+        first,
+        DaemonMessageType.PROGRESS,
+        CALL_ONE.toString(),
+        partialPayload(CALL_ONE, "chunk-2"));
+    assertEquals(List.of("partial:chunk-1"), listener.events());
+
+    // 身份不同的新进程接管：旧连接的 invocation 恰好一次收敛为结果不确定，终态投递在新连接的顺序域内完成。
+    fixture.leaseStore.activeLeaseToken = false;
+    FakeChannel second = fixture.connectReady("channel-takeover-partial-second", OTHER_INSTANCE_ID);
+    assertTrue(first.closed());
+    assertEquals(
+        List.of("partial:chunk-1", "error:EnvironmentCapabilitySendUncertainException"),
+        listener.events());
+
+    // 旧 drainer 恢复后必须丢掉排队的旧 partial，而不是把它补投在新 terminal 之后。
+    releasePartial.countDown();
+    assertTrue(join(oldDrainer));
+    assertEquals(
+        List.of("partial:chunk-1", "error:EnvironmentCapabilitySendUncertainException"),
+        listener.events());
+    assertTrue(second.isOpen());
+  }
+
+  /**
+   * 测试意图（C05）：等待执行的回调批次达到每连接上界时必须 fail-closed —— 关闭连接，并把仍在途的调用一次性回收为结果不确定且不再随重连重放， 而不是让回调积压无界增长。
+   */
+  @Test
+  void callbackBacklogOverflowClosesConnectionAndReclaimsInvocations() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-callback-overflow");
+    CountDownLatch partialEntered = new CountDownLatch(1);
+    CountDownLatch releasePartial = new CountDownLatch(1);
+    SerialListener listener =
+        new SerialListener() {
+          @Override
+          public void onPartial(EnvironmentCapabilityResult partial) {
+            partialEntered.countDown();
+            await(releasePartial);
+            super.onPartial(partial);
+          }
+        };
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    Thread draining =
+        new Thread(
+            () ->
+                fixture.receive(
+                    channel,
+                    DaemonMessageType.PROGRESS,
+                    CALL_ONE.toString(),
+                    partialPayload(CALL_ONE, "chunk-0")));
+    draining.start();
+    await(partialEntered);
+
+    // drain 所有权被阻塞的线程持有：同一线程顺序投递即可把每连接队列推进到上界。
+    for (int index = 1; index <= 256 && !channel.closed(); index++) {
+      fixture.receive(
+          channel,
+          DaemonMessageType.PROGRESS,
+          CALL_ONE.toString(),
+          partialPayload(CALL_ONE, "chunk-" + index));
+    }
+    assertTrue(channel.closed(), "回调积压超限必须关闭连接");
+
+    releasePartial.countDown();
+    assertTrue(join(draining));
+    // 未执行的批次不再投递 partial（调用已被回收），回收终态恰好一次且排在已投递的 partial 之后。
+    assertEquals(
+        List.of("partial:chunk-0", "error:EnvironmentCapabilitySendUncertainException"),
+        listener.events());
+
+    // 已回收的调用不再随同一实例重连重放。
+    FakeChannel reconnected = fixture.reconnectReady("channel-callback-overflow-retry");
+    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
   }
 
   /**
@@ -469,6 +718,63 @@ class EnvironmentDaemonServerTest {
     fixture.server.close(channel.connectionId());
     FakeChannel reconnected = fixture.connectReady("channel-expire-retry");
     assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+  }
+
+  /**
+   * 测试意图（C03 反证）：`expire` 与 daemon 终态帧在同一 inventory 临界区竞争时，至多产生 0 或 1 个 listener 终态回调； 已经收敛的
+   * invocation 其后续重放终态既不得再触发回调，也不得被判为协议错误关闭连接。
+   *
+   * <p>32 轮真实并发：barrier 同时放行 `expire(handle)`（调用方放弃路径）与 COMPLETED 帧（远端终态路径），覆盖两种胜者。
+   */
+  @Test
+  void expireRacingTerminalFrameYieldsAtMostOneTerminalCallback() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-expire-terminal-race");
+    ExecutorService racers = Executors.newFixedThreadPool(2);
+    try {
+      for (int round = 0; round < 32; round++) {
+        UUID invocationId = UUID.randomUUID();
+        RecordingListener listener = new RecordingListener();
+        String completedText = "round-" + round;
+        EnvironmentCapabilityExecutionHandle handle =
+            fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(invocationId), listener);
+
+        CyclicBarrier start = new CyclicBarrier(2);
+        Future<?> expiring =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  fixture.server.expire(handle);
+                });
+        Future<?> terminating =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  fixture.receive(
+                      channel,
+                      DaemonMessageType.COMPLETED,
+                      invocationId.toString(),
+                      completedPayload(invocationId, completedText));
+                });
+        expiring.get();
+        terminating.get();
+
+        int terminals = (listener.completed == null ? 0 : 1) + listener.errorCount;
+        assertTrue(terminals <= 1, "expire 与终态竞争只能产生 0 或 1 个终态回调: round=" + round);
+        assertEquals(0, listener.partials.size(), "round=" + round);
+        if (listener.completed != null) {
+          assertEquals(completedText, listener.completedText());
+        }
+
+        // 已收敛的 invocation 不接受任何重放终态：没有第二次回调，也不会变成协议错误。
+        fixture.receive(
+            channel, DaemonMessageType.FAILED, invocationId.toString(), "{\"message\":\"late\"}");
+        assertEquals(terminals, (listener.completed == null ? 0 : 1) + listener.errorCount);
+        assertFalse(channel.closed());
+      }
+    } finally {
+      racers.shutdownNow();
+    }
   }
 
   /** 测试意图：expire 只接受本核心签发的执行句柄。 */
@@ -1918,6 +2224,18 @@ class EnvironmentDaemonServerTest {
       return false;
     }
     return !thread.isAlive();
+  }
+
+  /** 让两个并发 racer 在同一 barrier 上同时放行；超时或 barrier 破坏都视为测试环境失效。 */
+  private static void awaitStart(CyclicBarrier start) {
+    try {
+      start.await(5, TimeUnit.SECONDS);
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("racer interrupted", error);
+    } catch (BrokenBarrierException | TimeoutException error) {
+      throw new IllegalStateException("racers did not start together", error);
+    }
   }
 
   private static EnvironmentCapabilityExecutionRequest requestWithDescriptor(
