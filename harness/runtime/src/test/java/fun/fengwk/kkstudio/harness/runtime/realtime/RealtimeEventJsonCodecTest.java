@@ -129,19 +129,44 @@ class RealtimeEventJsonCodecTest {
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-000000000063"),
             2,
+            UUID.fromString("00000000-0000-0000-0000-0000000000e1"),
             new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}"),
             now);
     String canonical =
         "{\"threadId\":\"00000000-0000-0000-0000-000000000007\","
             + "\"subjectKind\":\"TOOL_INVOCATION\","
             + "\"subjectId\":\"00000000-0000-0000-0000-000000000063\","
-            + "\"attempt\":2,\"type\":\"TOOL_PARTIAL\","
+            + "\"attempt\":2,\"eventId\":\"00000000-0000-0000-0000-0000000000e1\","
+            + "\"type\":\"TOOL_PARTIAL\","
             + "\"payload\":{\"toolCallId\":\"call-1\",\"contents\":[{\"type\":\"text\","
             + "\"text\":\"partial\"}],\"error\":false,\"details\":{}},"
             + "\"createdAt\":\"2026-01-05T00:00:00Z\"}";
 
     assertEquals(canonical, codec.encode(event));
     assertEquals(event, codec.decode(canonical));
+  }
+
+  /** eventId 是 Tool partial 的事件 identity：缺失、空白、非 UUID 或非 canonical 变体都必须拒绝。 */
+  @Test
+  void rejectsToolPartialWithoutCanonicalEventId() {
+    ObjectNode missing = canonicalToolPartialNode();
+    missing.remove("eventId");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missing));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(toolPartialNodeWithEventId("")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(toolPartialNodeWithEventId("not-a-uuid")));
+    // UUID.fromString 会宽松接受缺组的大写变体；wire 只允许 canonical 文本。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(toolPartialNodeWithEventId("1-2-3-4-5")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeNode(toolPartialNodeWithEventId("ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB")));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decodeNode(toolPartialNodeWithEventId(7)));
   }
 
   @Test
@@ -153,6 +178,14 @@ class RealtimeEventJsonCodecTest {
     ObjectNode invalidPayload = canonicalToolPartialNode();
     ((ObjectNode) invalidPayload.get("payload")).put("extra", true);
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(invalidPayload));
+  }
+
+  /** eventId 只属于 TOOL_PARTIAL：MODEL_DELTA 携带它会被 exact field set 拒绝。 */
+  @Test
+  void rejectsModelDeltaCarryingEventId() {
+    ObjectNode node = canonicalTextDeltaNode();
+    node.put("eventId", "00000000-0000-0000-0000-0000000000e1");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
   }
 
   @Test
@@ -439,6 +472,7 @@ class RealtimeEventJsonCodecTest {
     node.put("subjectKind", "TOOL_INVOCATION");
     node.put("subjectId", "00000000-0000-0000-0000-000000000063");
     node.put("attempt", 2);
+    node.put("eventId", "00000000-0000-0000-0000-0000000000e1");
     node.put("type", "TOOL_PARTIAL");
     ObjectNode payload = NODES.objectNode();
     payload.put("toolCallId", "call-1");
@@ -447,6 +481,19 @@ class RealtimeEventJsonCodecTest {
     payload.set("details", NODES.objectNode());
     node.set("payload", payload);
     node.put("createdAt", "2026-01-05T00:00:00Z");
+    return node;
+  }
+
+  /** 用给定形态替换 canonical Tool partial 的 eventId：String 写成文本、Integer 写成数字、其他写成 null。 */
+  private static ObjectNode toolPartialNodeWithEventId(Object eventId) {
+    ObjectNode node = canonicalToolPartialNode();
+    if (eventId instanceof String text) {
+      node.put("eventId", text);
+    } else if (eventId instanceof Integer number) {
+      node.put("eventId", number.intValue());
+    } else {
+      node.putNull("eventId");
+    }
     return node;
   }
 }

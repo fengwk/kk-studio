@@ -78,9 +78,18 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
     }
   }
 
-  /** ToolInvocation attempt 发出的 best-effort partial result。 */
+  /**
+   * ToolInvocation attempt 发出的 best-effort partial result。
+   *
+   * <p>{@code eventId} 是这条投影事件自身的稳定 identity：同一次生产恰好生成一个，重投递保留同一个，客户端据此做有界精确去重。
+   */
   record ToolPartial(
-      UUID threadId, UUID toolInvocationId, int attempt, ToolResult partial, Instant createdAt)
+      UUID threadId,
+      UUID toolInvocationId,
+      int attempt,
+      UUID eventId,
+      ToolResult partial,
+      Instant createdAt)
       implements RealtimeEvent {
 
     public ToolPartial {
@@ -89,6 +98,7 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
       if (attempt <= 0) {
         throw new IllegalArgumentException("attempt must be positive");
       }
+      Objects.requireNonNull(eventId, "eventId");
       partial = Objects.requireNonNull(partial, "partial");
       createdAt =
           HarnessStoreTime.requireMillisecondPrecision(
