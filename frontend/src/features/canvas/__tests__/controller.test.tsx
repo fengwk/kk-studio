@@ -1583,4 +1583,124 @@ describe('useCanvasController real snapshot runtime', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(result.current.state.draftPersistPending).toBe(false)
   })
+
+  it('rapid edits generations 同步性：连续快速修改同步自增世代，绝不因 React 延迟 updater 返回旧值', async () => {
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '1' }] } })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '2' }] } })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '3' }] } })
+    })
+
+    expect(result.current.state.drafts[NODE_FN]?.generation).toBe(3)
+    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt.segments[0].text).toBe('3')
+  })
+
+  it('canvas 切换 queued writes 隔离：画布切换时排队的持久化任务严格被 scope/epoch 拦截，绝不跨画布写入', async () => {
+    const CANVAS_2 = '99999999-9999-4000-8000-000000000099'
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => {
+      // 在画布 1 产生草稿
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 555, y: 666, width: 320, height: 260 },
+      }])
+      // 紧接着立即切换至画布 2，此时前序 persist 任务仍在异步队列中
+      result.current.openEditor(CANVAS_2)
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    const draftsCanvas2 = await loadCanvasDrafts(CANVAS_2)
+    expect(draftsCanvas2[NODE_NOTE]).toBeUndefined()
+  })
+
+  it('ACK 后紧接 persist 不复活：ACK 成功后同一边界更新权威草稿，后续 persist 绝不复活已确认草稿', async () => {
+    const release = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {
+      commands.push(request)
+      return release.promise
+    })
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 移动节点产生草稿并提交命令
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 300, y: 400, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 命令在途期间，草稿已持久化落盘
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_NOTE]?.position).toEqual({ x: 300, y: 400 })
+    })
+
+    // 2. 服务端响应返回，命令完成，触发队列 settle 及 ACK 清理
+    await act(async () => {
+      release.resolve(diffPatch(snapshot(1)))
+      await release.promise
+    })
+
+    await waitFor(async () => {
+      const storedAfterAck = await loadCanvasDrafts(CANVAS_ID)
+      expect(storedAfterAck[NODE_NOTE]?.position).toBeUndefined()
+    })
+
+    // 3. 紧接着在同一组件实例中触发另一次草稿持久化（编辑另一节点）
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: 'another' }] } })
+    })
+
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_FN]?.function?.args.prompt.segments[0].text).toBe('another')
+      // 关键断言：NODE_NOTE 的 position 绝不被复活写回 IDB！
+      expect(stored[NODE_NOTE]?.position).toBeUndefined()
+    })
+  })
+
+  it('先 queue persist A、ACK、queued persist 严格测试：旧 target 不在执行时复活已 ACK 草稿', async () => {
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 产生草稿，persist A 入队
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 777, y: 888, width: 320, height: 260 },
+      }])
+    })
+
+    // 2. 紧接着入队 ACK 任务与后续的 persist 任务
+    const ackPromise = result.current.ackDurableDrafts([{
+      nodeId: NODE_NOTE,
+      field: 'position',
+      generation: 1,
+    }])
+
+    result.current.retryDraftPersist()
+
+    await act(async () => {
+      await ackPromise
+    })
+
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_NOTE]?.position).toBeUndefined()
+    })
+  })
 })

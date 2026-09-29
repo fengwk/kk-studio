@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getEditingSessionId,
   handlePageshow,
+  isSessionReloading,
   resetEditingSessionForTests,
 } from '@/features/canvas/canvas-editing-session'
 
@@ -147,6 +148,7 @@ describe('Canvas 编辑会话身份', () => {
 
     expect(reloadMock).toHaveBeenCalled()
     expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+    expect(isSessionReloading()).toBe(true)
   })
 
   it('I10 bfcache: pageshow 恢复时若无活所有者竞争，安全重新 claim 并继续', () => {

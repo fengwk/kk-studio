@@ -23,10 +23,7 @@ import {
   loadCanvasDrafts,
   saveCanvasDraft,
 } from '@/features/canvas/canvas-draft-storage'
-import {
-  getEditingSessionId,
-  handlePageshow,
-} from '@/features/canvas/canvas-editing-session'
+import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
 import {
   CanvasStorageUnavailableError,
   onCanvasStorageError,
@@ -111,10 +108,13 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const reservedNodeAliasesRef = useRef(new Set<string>())
   const applyDraftAcksRef = useRef<(acks: CanvasDraftAck[]) => void>(() => undefined)
   const isMountedRef = useRef(true)
+  const canvasEpochRef = useRef(0)
+  const activeCanvasIdRef = useRef<UUIDString | null>(initialCanvasId ?? null)
+  const draftsRef = useRef<Record<string, CanvasNodeDraft>>({})
+  const positionsRef = useRef<Record<string, { x: number; y: number }>>({})
+  const targetDraftsRef = useRef<Record<string, CanvasNodeDraft>>({})
   const draftPersistChainRef = useRef<Promise<void>>(Promise.resolve())
-  const targetDraftsRef = useRef(state.drafts)
-  targetDraftsRef.current = state.drafts
-  /** 该画布“已落盘草稿”的持久基线；canvasId 不匹配表示尚未加载完成，禁止按差集删除。 */
+  /** 该画布已落盘草稿的持久基线；canvasId 不匹配表示尚未加载完成，禁止按差集删除。 */
   const draftBaselineRef = useRef<{ canvasId: string | null; drafts: Record<string, CanvasNodeDraft> }>({
     canvasId: null,
     drafts: {},
@@ -124,8 +124,20 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+      canvasEpochRef.current += 1
     }
   }, [])
+
+  useEffect(() => {
+    if (state.canvasId !== activeCanvasIdRef.current) {
+      canvasEpochRef.current += 1
+      activeCanvasIdRef.current = state.canvasId
+      draftsRef.current = {}
+      positionsRef.current = {}
+      targetDraftsRef.current = {}
+      draftBaselineRef.current = { canvasId: null, drafts: {} }
+    }
+  }, [state.canvasId])
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
@@ -144,24 +156,29 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       return
     }
     const canvasId = state.canvasId
-    // 加载开始即撤销持久基线：保存 effect 在加载完成前绝不删除（或覆盖）旧的已落盘草稿。
+    const currentEpoch = canvasEpochRef.current
+    // 加载开始即撤销持久基线，加载完成前禁止删除旧草稿
     draftBaselineRef.current = { canvasId: null, drafts: {} }
     let cancelled = false
     void loadCanvasDrafts(canvasId).then((persisted) => {
-      if (cancelled) {
+      if (cancelled || canvasEpochRef.current !== currentEpoch || activeCanvasIdRef.current !== canvasId) {
         return
       }
+      const mergedDrafts = { ...persisted, ...draftsRef.current }
+      const mergedPositions = { ...positionsRef.current }
+      for (const [id, draft] of Object.entries(mergedDrafts)) {
+        if (draft.position && !mergedPositions[id]) {
+          mergedPositions[id] = draft.position
+        }
+      }
+      draftsRef.current = mergedDrafts
+      positionsRef.current = mergedPositions
+      targetDraftsRef.current = mergedDrafts
+      draftBaselineRef.current = { canvasId, drafts: persisted }
+
       setState((current) => {
         if (current.canvasId !== canvasId) {
           return current
-        }
-        // 远端/持久草稿为底，本次会话中已经输入的内容优先，绝不因为加载而丢失用户输入。
-        const mergedDrafts = { ...persisted, ...current.drafts }
-        const mergedPositions = { ...current.positionDrafts }
-        for (const [id, draft] of Object.entries(mergedDrafts)) {
-          if (draft.position && !mergedPositions[id]) {
-            mergedPositions[id] = draft.position
-          }
         }
         return {
           ...current,
@@ -169,11 +186,11 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
           positionDrafts: mergedPositions,
         }
       })
-      // 持久基线 = 真正已落盘的集合；合并后的新增/编辑会在下一轮保存 effect 中落盘。
-      draftBaselineRef.current = { canvasId, drafts: persisted }
       setDraftLoadEpoch((epoch) => epoch + 1)
     }).catch((err) => {
-      console.warn('[canvas] Failed to load drafts from storage:', err)
+      if (cancelled || canvasEpochRef.current !== currentEpoch) {
+        return
+      }
       setState((current) => ({
         ...current,
         storageError: err instanceof Error ? err.message : String(err),
@@ -185,7 +202,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
   }, [state.canvasId, state.view, draftReloadToken])
 
-  // 监听持久化存储异常：IndexedDB 不可用与落盘失败都必须明确告警，绝不假装已保存。
+  // 监听持久化存储异常
   useEffect(() => {
     return onCanvasStorageError((error) => {
       const toast = error instanceof CanvasStorageUnavailableError
@@ -199,71 +216,73 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     })
   }, [])
 
-  // 本地草稿持久化：序列化 await commit 推进基线，同一序列化边界共享于 draft 保存与 ACK 清除。
-  // 关键约束：只有在 saveCanvasDraft / deleteCanvasDraft 的 IDB 事务 complete 成功后才推进 baseline；
-  // 失败保持旧 baseline 并保留 dirty 状态供用户明确重试或下次变更重试，UI 绝不显示已保存。
+  // 本地草稿持久化：按 scope/epoch 隔离，事务成功后推进 baseline
   const runDraftPersistence = useCallback(() => {
-    const canvasId = state.canvasId
-    if (!canvasId || state.view !== 'editor') {
-      draftBaselineRef.current = { canvasId, drafts: {} }
+    const taskEpoch = canvasEpochRef.current
+    const taskCanvasId = activeCanvasIdRef.current
+    if (!taskCanvasId || state.view !== 'editor') {
       return
     }
     const baseline = draftBaselineRef.current
-    if (baseline.canvasId !== canvasId) {
-      // 该画布的已落盘草稿尚未加载完成：跳过，绝不用当前（可能为空）状态删除旧草稿。
+    if (baseline.canvasId !== taskCanvasId) {
       return
     }
 
     draftPersistChainRef.current = draftPersistChainRef.current.then(async () => {
-      if (!isMountedRef.current) {
-        return
-      }
-      const currentCanvasId = state.canvasId
-      if (!currentCanvasId || state.view !== 'editor' || currentCanvasId !== canvasId) {
+      if (
+        !isMountedRef.current
+        || canvasEpochRef.current !== taskEpoch
+        || activeCanvasIdRef.current !== taskCanvasId
+      ) {
         return
       }
       const currentBaseline = draftBaselineRef.current
-      if (currentBaseline.canvasId !== currentCanvasId) {
+      if (currentBaseline.canvasId !== taskCanvasId) {
         return
       }
-      const target = targetDraftsRef.current
+      // 在序列化执行阶段动态获取最新权威草稿引用，避免在排队期间因捕获旧快照而复活已 ACK 的草稿
+      const currentTarget = { ...targetDraftsRef.current }
 
       const toSave: Array<[string, CanvasNodeDraft]> = []
-      for (const [nodeId, draft] of Object.entries(target)) {
+      for (const [nodeId, draft] of Object.entries(currentTarget)) {
         if (currentBaseline.drafts[nodeId] !== draft) {
           toSave.push([nodeId, draft])
         }
       }
       const toDelete: string[] = []
       for (const nodeId of Object.keys(currentBaseline.drafts)) {
-        if (!(nodeId in target)) {
+        if (!(nodeId in currentTarget)) {
           toDelete.push(nodeId)
         }
       }
 
       if (toSave.length === 0 && toDelete.length === 0) {
-        if (isMountedRef.current) {
+        if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
           setState((cur) => cur.draftPersistPending ? { ...cur, draftPersistPending: false } : cur)
         }
         return
       }
 
-      if (isMountedRef.current) {
+      if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
         setState((cur) => cur.draftPersistPending ? cur : { ...cur, draftPersistPending: true })
       }
 
       let hadError = false
       for (const [nodeId, draft] of toSave) {
-        if (!isMountedRef.current) {
+        if (
+          !isMountedRef.current
+          || canvasEpochRef.current !== taskEpoch
+          || activeCanvasIdRef.current !== taskCanvasId
+        ) {
           return
         }
         try {
-          await saveCanvasDraft(currentCanvasId, nodeId, draft)
+          await saveCanvasDraft(taskCanvasId, nodeId, draft)
           currentBaseline.drafts[nodeId] = draft
         } catch (err) {
           hadError = true
           const message = err instanceof Error ? err.message : String(err)
-          if (isMountedRef.current) {
+          if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
             setState((cur) => ({
               ...cur,
               storageError: message,
@@ -276,16 +295,20 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
 
       if (!hadError) {
         for (const nodeId of toDelete) {
-          if (!isMountedRef.current) {
+          if (
+            !isMountedRef.current
+            || canvasEpochRef.current !== taskEpoch
+            || activeCanvasIdRef.current !== taskCanvasId
+          ) {
             return
           }
           try {
-            await deleteCanvasDraft(currentCanvasId, nodeId)
+            await deleteCanvasDraft(taskCanvasId, nodeId)
             delete currentBaseline.drafts[nodeId]
           } catch (err) {
             hadError = true
             const message = err instanceof Error ? err.message : String(err)
-            if (isMountedRef.current) {
+            if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
               setState((cur) => ({
                 ...cur,
                 storageError: message,
@@ -297,7 +320,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         }
       }
 
-      if (isMountedRef.current) {
+      if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
         setState((cur) => ({
           ...cur,
           draftPersistPending: false,
@@ -305,26 +328,15 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         }))
       }
     }).catch(() => {
-      if (isMountedRef.current) {
+      if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
         setState((cur) => ({ ...cur, draftPersistPending: false }))
       }
     })
-  }, [state.canvasId, state.view])
+  }, [state.view])
 
   useEffect(() => {
     runDraftPersistence()
   }, [state.canvasId, state.view, state.drafts, draftLoadEpoch, runDraftPersistence])
-
-  // bfcache 恢复时重新确认 claim 所有权，防止旧实例持有旧会话造成 scope 冲突
-  useEffect(() => {
-    const onPageShow = (event: PageTransitionEvent) => {
-      handlePageshow(event)
-    }
-    window.addEventListener('pageshow', onPageShow)
-    return () => {
-      window.removeEventListener('pageshow', onPageShow)
-    }
-  }, [])
 
   // 远端删除探测：快照中不存在但本地有未提交草稿的节点，标记为 remote_deleted 保留草稿供救援
   useEffect(() => {
@@ -352,6 +364,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       if (!changed) {
         return current
       }
+      draftsRef.current = nextDrafts
+      targetDraftsRef.current = nextDrafts
       return {
         ...current,
         drafts: nextDrafts,
@@ -364,16 +378,26 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     if (acks.length === 0) {
       return Promise.resolve()
     }
-    const canvasId = state.canvasId
-    if (!canvasId) {
+    const taskEpoch = canvasEpochRef.current
+    const taskCanvasId = activeCanvasIdRef.current
+    if (!taskCanvasId) {
       return Promise.resolve()
     }
+
     const ackTask = draftPersistChainRef.current.then(async () => {
-      // 1. 同一序列化边界内执行：等待前序未决 saveCanvasDraft 全部完成，杜绝在途旧 persist 将草稿复活
-      await ackCanvasDrafts(canvasId, acks, { editingSessionId: getEditingSessionId() })
-      // 2. 同步推进基线，防止后续 persist 任务误判为本地新改动再次写回
+      if (
+        !isMountedRef.current
+        || canvasEpochRef.current !== taskEpoch
+        || activeCanvasIdRef.current !== taskCanvasId
+      ) {
+        return
+      }
+
+      await ackCanvasDrafts(taskCanvasId, acks, { editingSessionId: getEditingSessionId() })
+
+      // 同一序列化边界内推进持久基线
       const baseline = draftBaselineRef.current
-      if (baseline.canvasId === canvasId) {
+      if (baseline.canvasId === taskCanvasId) {
         for (const ack of acks) {
           const baseDraft = baseline.drafts[ack.nodeId]
           if (baseDraft) {
@@ -387,12 +411,46 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
           }
         }
       }
-      // 3. 更新内存草稿与位置草稿
-      applyDraftAcksRef.current(acks)
+
+      // 同步更新权威 draftsRef、positionsRef 与 targetDraftsRef，防止后续排队的持久化任务复活已确认草稿
+      const nextDrafts = { ...draftsRef.current }
+      const nextPositions = { ...positionsRef.current }
+      let changed = false
+      for (const ack of acks) {
+        const draft = nextDrafts[ack.nodeId]
+        if (!draft) {
+          continue
+        }
+        if (ack.field === 'position') {
+          if (ack.generation === undefined || draft.generation <= ack.generation) {
+            delete nextPositions[ack.nodeId]
+            changed = true
+          }
+        }
+        const field = ack.field === 'group' ? 'groupId' : ack.field
+        const next = removeDraftField(draft, field, ack.generation)
+        if (next !== draft) {
+          if (next) {
+            nextDrafts[ack.nodeId] = next
+          } else {
+            delete nextDrafts[ack.nodeId]
+          }
+          changed = true
+        }
+      }
+      if (changed) {
+        draftsRef.current = nextDrafts
+        positionsRef.current = nextPositions
+        targetDraftsRef.current = nextDrafts
+      }
+
+      if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
+        setState((current) => changed ? { ...current, drafts: nextDrafts, positionDrafts: nextPositions } : current)
+      }
     })
     draftPersistChainRef.current = ackTask.catch(() => undefined)
     return ackTask
-  }, [state.canvasId])
+  }, [])
 
   useEffect(() => {
     if (!snapshotQuery.data || !state.canvasId) {
@@ -565,6 +623,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
               }
             }
           }
+          draftsRef.current = nextDrafts
+          targetDraftsRef.current = nextDrafts
           return {
             ...current,
             drafts: nextDrafts,
@@ -598,32 +658,32 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       executeCommands,
       getSnapshot: () => queueRef.current?.currentSnapshot() ?? snapshotQuery.data,
       onImmediateDraft: (nodeId, modelKey, config) => {
-        let nextGen = 1
-        setState((current) => {
-          const existing = current.drafts[nodeId] ?? { generation: 0, updatedAt: Date.now() }
-          nextGen = (existing.generation ?? 0) + 1
-          return {
-            ...current,
-            drafts: {
-              ...current.drafts,
-              [nodeId]: {
-                ...existing,
-                generation: nextGen,
-                updatedAt: Date.now(),
-                function: {
-                  name: modelKey,
-                  args: {
-                    prompt: config.prompt,
-                    parameters: config.parameters,
-                  },
-                },
-              },
+        const existing = draftsRef.current[nodeId] ?? { generation: 0, updatedAt: Date.now() }
+        const nextGen = (existing.generation ?? 0) + 1
+        const nextDraft: CanvasNodeDraft = {
+          ...existing,
+          generation: nextGen,
+          updatedAt: Date.now(),
+          function: {
+            name: modelKey,
+            args: {
+              prompt: config.prompt,
+              parameters: config.parameters,
             },
-          }
-        })
+          },
+        }
+        draftsRef.current = {
+          ...draftsRef.current,
+          [nodeId]: nextDraft,
+        }
+        targetDraftsRef.current = draftsRef.current
+        setState((current) => ({
+          ...current,
+          drafts: draftsRef.current,
+        }))
         return nextGen
       },
-      getDraftGeneration: (nodeId) => state.drafts[nodeId]?.generation,
+      getDraftGeneration: (nodeId) => draftsRef.current[nodeId]?.generation,
     })
   const { startFunctionRun, cancelFunctionRun, resolveFunctionRun } = useCanvasFunctionRun({
     canvasId: state.canvasId,
@@ -639,59 +699,59 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const setPositionDrafts = useCallback((
     updater: (current: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>,
   ) => {
-    setState((current) => {
-      const nextPositions = updater(current.positionDrafts)
-      if (nextPositions === current.positionDrafts) {
-        return current
+    const nextPositions = updater(positionsRef.current)
+    if (nextPositions === positionsRef.current) {
+      return
+    }
+    positionsRef.current = nextPositions
+    const nextDrafts = { ...draftsRef.current }
+    let changed = false
+    for (const [id, pos] of Object.entries(nextPositions)) {
+      const existing = nextDrafts[id]
+      if (existing?.position?.x === pos.x && existing.position.y === pos.y) {
+        continue
       }
-      const nextDrafts = { ...current.drafts }
-      let changed = false
-      for (const [id, pos] of Object.entries(nextPositions)) {
-        const existing = nextDrafts[id]
-        if (existing?.position?.x === pos.x && existing.position.y === pos.y) {
-          continue
-        }
-        const base = existing ?? { generation: 0, updatedAt: Date.now() }
-        nextDrafts[id] = {
-          ...base,
-          generation: (base.generation ?? 0) + 1,
-          position: pos,
-          updatedAt: Date.now(),
-        }
-        changed = true
+      const base = existing ?? { generation: 0, updatedAt: Date.now() }
+      nextDrafts[id] = {
+        ...base,
+        generation: (base.generation ?? 0) + 1,
+        position: pos,
+        updatedAt: Date.now(),
       }
-      for (const id of Object.keys(current.positionDrafts)) {
-        if (id in nextPositions) {
-          continue
-        }
-        const existing = nextDrafts[id]
-        if (!existing) {
-          continue
-        }
-        const stripped = removeDraftField(existing, 'position')
-        if (stripped) {
-          nextDrafts[id] = stripped
-        } else {
-          delete nextDrafts[id]
-        }
-        changed = true
+      changed = true
+    }
+    for (const id of Object.keys(positionsRef.current)) {
+      if (id in nextPositions) {
+        continue
       }
-      if (!changed) {
-        return current
+      const existing = nextDrafts[id]
+      if (!existing) {
+        continue
       }
-      return {
-        ...current,
-        positionDrafts: nextPositions,
-        drafts: nextDrafts,
+      const stripped = removeDraftField(existing, 'position')
+      if (stripped) {
+        nextDrafts[id] = stripped
+      } else {
+        delete nextDrafts[id]
       }
-    })
+      changed = true
+    }
+    if (changed) {
+      draftsRef.current = nextDrafts
+      targetDraftsRef.current = nextDrafts
+    }
+    setState((current) => ({
+      ...current,
+      positionDrafts: nextPositions,
+      drafts: draftsRef.current,
+    }))
   }, [])
 
   const transformBatch = useCanvasTransformBatch({
     snapshot: snapshotQuery.data,
     executeCommands,
     setPositionDrafts,
-    getDraftGeneration: (nodeId) => state.drafts[nodeId]?.generation,
+    getDraftGeneration: (nodeId) => draftsRef.current[nodeId]?.generation,
   })
   const { moveNodes, commitTransforms, reset: resetTransformBatch } = transformBatch
 
@@ -764,7 +824,11 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     resetFunctionConfigDrafts()
     reservedNodeAliasesRef.current.clear()
     queueRef.current = null
-    // 重新打开画布：先撤销持久基线，等待重新加载后再允许保存/删除，避免用空状态清掉旧草稿。
+    canvasEpochRef.current += 1
+    activeCanvasIdRef.current = canvasId
+    draftsRef.current = {}
+    positionsRef.current = {}
+    targetDraftsRef.current = {}
     draftBaselineRef.current = { canvasId: null, drafts: {} }
     setDraftReloadToken((token) => token + 1)
     setInitialFitPending(!hasStoredCanvasViewport(canvasId))
@@ -788,6 +852,12 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     resetUploads()
     reservedNodeAliasesRef.current.clear()
     setInitialFitPending(false)
+    canvasEpochRef.current += 1
+    activeCanvasIdRef.current = null
+    draftsRef.current = {}
+    positionsRef.current = {}
+    targetDraftsRef.current = {}
+    draftBaselineRef.current = { canvasId: null, drafts: {} }
     setState((current) => ({
       ...current,
       view: 'library',
@@ -799,6 +869,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       storageError: null,
       addMenuOpen: false,
       textEditor: null,
+      conflictMessage: null,
     }))
   }, [resetTransformBatch, resetUploads])
 
@@ -828,6 +899,9 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   }, [])
 
   const dismissDraft = useCallback((nodeId: string) => {
+    delete draftsRef.current[nodeId]
+    delete positionsRef.current[nodeId]
+    targetDraftsRef.current = { ...draftsRef.current }
     setState((current) => {
       const nextDrafts = { ...current.drafts }
       delete nextDrafts[nodeId]
@@ -1020,7 +1094,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       const updatedEditor = { ...current.textEditor, ...patch }
       if (updatedEditor.mode === 'edit') {
         const nodeId = updatedEditor.nodeId
-        const existingDraft = current.drafts[nodeId] ?? { generation: 0, updatedAt: Date.now() }
+        const existingDraft = draftsRef.current[nodeId] ?? { generation: 0, updatedAt: Date.now() }
         const nextDraft: CanvasNodeDraft = {
           ...existingDraft,
           generation: existingDraft.generation + 1,
@@ -1030,13 +1104,15 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
             markdown: updatedEditor.markdown,
           },
         }
+        draftsRef.current = {
+          ...draftsRef.current,
+          [nodeId]: nextDraft,
+        }
+        targetDraftsRef.current = draftsRef.current
         return {
           ...current,
           textEditor: updatedEditor,
-          drafts: {
-            ...current.drafts,
-            [nodeId]: nextDraft,
-          },
+          drafts: draftsRef.current,
         }
       }
       return { ...current, textEditor: updatedEditor }
@@ -1440,6 +1516,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     dismissDraft,
     retryDraft,
     retryDraftPersist: runDraftPersistence,
+    ackDurableDrafts,
     retryRecovery,
     dismissConflictMessage,
     saveDraftAsNewNode,
