@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clearUnknownUploads,
   composerDraftStorageKey,
   loadStoredComposerDraft,
+  loadUnknownUploads,
   restoreComposerDraft,
   storeComposerDraft,
+  storeUnknownUploads,
 } from '@/features/ai/composer/composer-draft'
 import {
   createAttachmentPart,
@@ -155,5 +158,27 @@ describe('composer draft storage', () => {
 
     expect(loadStoredComposerDraft(scope, storage)).toEqual([])
     expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+  })
+
+  it('stores and restores unknown uploads metadata without storing File bytes', () => {
+    // 测试意图：验证未知结果下的 upload 元数据能够与现有 composer draft scope 绑定持久化，reload 后可完整恢复
+    const storage = new MemoryStorage()
+    const scope = 'thread:t1'
+    const unknownUpload = {
+      localId: 'loc-1',
+      uploadId: 'up-1',
+      filename: 'image.png',
+      mediaType: 'image/png',
+      sizeBytes: 1024,
+      sha256: 'abc123',
+      imageTier: '1080P' as const,
+    }
+
+    storeUnknownUploads(scope, [unknownUpload], storage)
+    const loaded = loadUnknownUploads(scope, storage)
+    expect(loaded).toEqual([unknownUpload])
+
+    clearUnknownUploads(scope, storage)
+    expect(loadUnknownUploads(scope, storage)).toEqual([])
   })
 })

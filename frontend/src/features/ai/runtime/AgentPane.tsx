@@ -35,6 +35,7 @@ export function AgentPane({
   focused = false,
   onFocus,
   initialTarget,
+  onTargetConsumed,
   capabilities,
   onSubmitInstruction,
   onStop,
@@ -47,6 +48,7 @@ export function AgentPane({
   focused?: boolean
   onFocus?: () => void
   initialTarget?: PaneTarget
+  onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
   onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
   onStop?: () => Promise<void> | void
@@ -61,6 +63,7 @@ export function AgentPane({
     focused,
     onFocus,
     initialTarget,
+    onTargetConsumed,
     capabilities,
     onSubmitInstruction,
     onStop,

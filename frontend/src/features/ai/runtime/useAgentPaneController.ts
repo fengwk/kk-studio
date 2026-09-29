@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useBoundBranchPanel,
@@ -128,6 +128,7 @@ export interface UseAgentPaneControllerOptions {
   focused: boolean
   onFocus?: () => void
   initialTarget?: PaneTarget
+  onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
   onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
   onStop?: () => Promise<void> | void
@@ -142,6 +143,7 @@ export function useAgentPaneController({
   focused,
   onFocus,
   initialTarget,
+  onTargetConsumed,
   capabilities,
   onSubmitInstruction,
   onStop,
@@ -159,12 +161,6 @@ export function useAgentPaneController({
       : { kind: 'BOUND_THREAD', threadId: paneId }),
   )
 
-  useEffect(() => {
-    if (initialTarget && !samePaneTarget(targetRef.current, initialTarget)) {
-      targetRef.current = initialTarget
-      setTargetState(initialTarget)
-    }
-  }, [initialTarget])
   const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
@@ -227,9 +223,11 @@ export function useAgentPaneController({
   })
   const controller = branchPanel.controller
   const controllerRef = useRef(controller)
-  controllerRef.current = controller
   const branchPanelRef = useRef(branchPanel)
-  branchPanelRef.current = branchPanel
+  useEffect(() => {
+    controllerRef.current = controller
+    branchPanelRef.current = branchPanel
+  })
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const models = controller.models
 
@@ -624,7 +622,7 @@ export function useAgentPaneController({
   }
 
   /** 事件同步栅栏：state commit 前也能看到刚写入 pendingAcceptanceRef。 */
-  function hasPendingOperation(): boolean {
+  const hasPendingOperation = useCallback((): boolean => {
     return renamePendingRef.current
       || pendingAcceptanceRef.current != null
       || controller.pending
@@ -634,25 +632,53 @@ export function useAgentPaneController({
       || controller.approvalPending
       || controller.replayPending
       || controller.queuedCommands.length > 0
-  }
+  }, [
+    controller.approvalPending,
+    controller.compactPending,
+    controller.pending,
+    controller.queuedCommands.length,
+    controller.replayPending,
+    controller.stopPending,
+    controller.stopReplayPending,
+  ])
 
-  function changeTarget(next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean {
-    if (!owner || owner.type === 'ISSUE_AGENT') {
-      return false
+  const changeTarget = useCallback(
+    (next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean => {
+      if (!owner || owner.type === 'ISSUE_AGENT') {
+        return false
+      }
+      if (hasPendingOperation()) {
+        setActionError(t('ai.runtime.action.operationPending'))
+        return false
+      }
+      generationRef.current += 1
+      targetRef.current = next
+      setTargetState(next)
+      setLocalDraft(draft == null ? null : cloneDraft(draft))
+      setInteraction(null)
+      setActionError(null)
+      setConflict(null)
+      return true
+    },
+    [activeDraft, hasPendingOperation, owner, t],
+  )
+
+  useEffect(() => {
+    if (!initialTarget) {
+      return
+    }
+    if (samePaneTarget(targetRef.current, initialTarget)) {
+      onTargetConsumed?.(initialTarget)
+      return
     }
     if (hasPendingOperation()) {
       setActionError(t('ai.runtime.action.operationPending'))
-      return false
+      return
     }
-    generationRef.current += 1
-    targetRef.current = next
-    setTargetState(next)
-    setLocalDraft(draft == null ? null : cloneDraft(draft))
-    setInteraction(null)
-    setActionError(null)
-    setConflict(null)
-    return true
-  }
+    if (changeTarget(initialTarget)) {
+      onTargetConsumed?.(initialTarget)
+    }
+  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t])
 
   function abandonPendingAcceptance(): void {
     const pending = pendingAcceptanceRef.current
@@ -1242,6 +1268,7 @@ export function useAgentPaneController({
       : true)
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const composer: ChatPanelComposerInput = {
+    scope: composerScope,
     parts: composerDraft,
     pending,
     disabled:

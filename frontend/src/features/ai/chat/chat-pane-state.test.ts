@@ -130,4 +130,24 @@ describe('Chat pane layout state', () => {
     expect(saveChatPaneState('', applyChatLayout(loadChatPaneState('', store), 'split-2'), store)).toBeUndefined()
     expect(store.length).toBe(0)
   })
+
+  it('safely handles storage write and read exceptions without throwing', () => {
+    // 测试意图：验证 Storage 在 setItem 抛出 QuotaExceededError / SecurityError 时 fail-open，不抛出异常破坏页面 effect
+    const throwingStore: Storage = {
+      length: 0,
+      clear: () => {},
+      getItem: () => {
+        throw new Error('SecurityError: access denied')
+      },
+      key: () => null,
+      removeItem: () => {},
+      setItem: () => {
+        throw new Error('QuotaExceededError')
+      },
+    }
+    const defaultState = loadChatPaneState('chat-1', throwingStore)
+    expect(defaultState.layout).toBe('single')
+    expect(defaultState.focusedPaneId).toBe('pane-1')
+    expect(() => saveChatPaneState('chat-1', defaultState, throwingStore)).not.toThrow()
+  })
 })

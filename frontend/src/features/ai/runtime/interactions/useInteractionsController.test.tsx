@@ -92,4 +92,55 @@ describe('useInteractionsController', () => {
     expect(result.current.items[0].interactionId).toBe('int-2')
     expect(result.current.hasMore).toBe(false)
   })
+
+  it('discards stale loadMore responses and does not reset state across refresh generation fence', async () => {
+    // 测试意图：验证 loadMore 在途时触发 refresh，旧代 loadMore 的迟到响应会被 generation fence 丢弃，
+    // 不会污染刚刷新的列表和游标，且旧代 finally 不会破坏新状态
+    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+      resolveSlowLoadMore = resolve
+    })
+
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage) // 挂载首屏
+      .mockImplementationOnce(() => slowLoadMorePromise) // loadMore 挂起
+      .mockResolvedValueOnce(refreshedPage) // refresh 重新拉取第一页
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.nextCursor).toBe('cursor-page-2')
+
+    // 触发 loadMore（进入在途状态，Promise 未 resolve）
+    let loadMorePromise!: Promise<void>
+    act(() => {
+      loadMorePromise = result.current.loadMore()
+    })
+    expect(result.current.isFetchingMore).toBe(true)
+
+    // 此时用户触发 refresh（开启新 generation）
+    await act(async () => {
+      await result.current.refresh()
+    })
+
+    // refresh 已经完成，列表已切换为 refreshedPage
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0].interactionId).toBe('int-2')
+    expect(result.current.nextCursor).toBe('cursor-refreshed')
+
+    // 此时旧代的 slow loadMore 响应返回
+    const staleItem: InteractionDTO = { ...mockItem1, interactionId: 'stale-int-old' }
+    await act(async () => {
+      resolveSlowLoadMore({ items: [staleItem], nextCursor: 'stale-cursor-old' })
+      await loadMorePromise
+    })
+
+    // 验证：旧代 items 没有被追加到刷新后的列表中，nextCursor 没有被旧游标覆写
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0].interactionId).toBe('int-2')
+    expect(result.current.nextCursor).toBe('cursor-refreshed')
+  })
 })

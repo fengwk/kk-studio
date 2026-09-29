@@ -1114,6 +1114,14 @@ export const aiCatalog = {
     'en-US': 'Uploading…',
     'zh-CN': '上传中…',
   },
+  'ai.runtime.composer.completeUnknown': {
+    'en-US': 'Status unknown, retry',
+    'zh-CN': '状态未知，可重试',
+  },
+  'ai.runtime.composer.retryComplete': {
+    'en-US': 'Retry complete {{name}}',
+    'zh-CN': '重试完成 {{name}}',
+  },
   'ai.runtime.composer.uploadFailed': {
     'en-US': 'Upload failed',
     'zh-CN': '上传失败',
