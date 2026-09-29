@@ -217,6 +217,7 @@ export function IssueDetailModal({
   const displayError = actionError || (queryError instanceof Error ? queryError.message : null)
   const [conflictDetail, setConflictDetail] = useState<string | null>(null)
   const [isActionPending, setIsActionPending] = useState(false)
+  const isActionPendingRef = useRef(false)
 
   // 0. 未决操作持久化侧车与 unknown / 异常状态 (I07)
   const [pendingActionResult, setPendingActionResult] = useState<LoadPendingActionResult>(() => {
@@ -312,6 +313,7 @@ export function IssueDetailModal({
   // 关闭时清理临时对话框、未提交草稿与本地证据 (I09)
   useEffect(() => {
     if (!isOpen) {
+      isActionPendingRef.current = false
       setIsEditingSpec(false)
       setIsBlockModalOpen(false)
       setIsResolveUnknownOpen(false)
@@ -456,7 +458,7 @@ export function IssueDetailModal({
 
   // 放弃损坏的挂起记录并解锁界面
   const handleDiscardCorruptAction = () => {
-    if (!issueId) return
+    if (!issueId || isActionPendingRef.current) return
     clearPendingAction(issueId, undefined, undefined, true)
     setPendingActionResult({ type: 'NONE' })
   }
@@ -465,13 +467,22 @@ export function IssueDetailModal({
   const currentWorkflowState = workflow?.states.find((s) => s.state === issue?.state)
   const availableNextStates = currentWorkflowState?.next ?? []
 
-  // 刷新最新数据（保留草稿）
+  // 刷新最新数据（保留草稿，不进行无提示 rebasing）
   const handleReloadFreshData = async () => {
     setActionError(null)
-    setConflictDetail(null)
     const fresh = await refetch()
-    if (fresh.data?.issue) {
-      setSpecVersion(fresh.data.issue.version)
+    const freshIssue = fresh.data?.issue
+    if (freshIssue) {
+      if (!isEditingSpec) {
+        setConflictDetail(null)
+        setSpecVersion(freshIssue.version)
+      } else if (freshIssue.version !== specVersion) {
+        // 正在编辑且远端已出现新版本：绝不静默覆写 specVersion！
+        // 保留原 version 直到用户显式确认或取消编辑，避免无提示 rebasing 导致并发覆盖
+        setConflictDetail(
+          `服务端版本已更新为 v${freshIssue.version}（当前草稿基于 v${specVersion}）。已保留草稿；如确认使用最新版本覆盖，请显式确认，或取消编辑重新载入。`,
+        )
+      }
     }
   }
 
@@ -485,7 +496,7 @@ export function IssueDetailModal({
     onExplicitSuccess: () => void,
   ) => {
     if (!issue) return
-    if (pendingUnknownAction || corruptActionInfo || storageLoadError) {
+    if (isWriteBlocked || isActionPendingRef.current) {
       setActionError('当前存在未确认结果或损坏的写操作记录，禁止新请求；请先处理或放弃')
       return
     }
@@ -508,6 +519,7 @@ export function IssueDetailModal({
       return
     }
 
+    isActionPendingRef.current = true
     setIsActionPending(true)
     setActionError(null)
     setConflictDetail(null)
@@ -537,6 +549,7 @@ export function IssueDetailModal({
         setActionError(err instanceof Error ? err.message : '网络请求未收到确定响应，结果未知')
       }
     } finally {
+      isActionPendingRef.current = false
       setIsActionPending(false)
     }
   }
@@ -545,12 +558,17 @@ export function IssueDetailModal({
   const handleSaveSpec = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
+    if (isWriteBlocked || isActionPendingRef.current) {
+      setActionError('当前存在未确认结果或损坏的写操作记录，禁止修改 Spec；请先处理或放弃')
+      return
+    }
     const trimmedTitle = draftTitle.trim()
     if (!trimmedTitle) {
       setActionError('标题不能为空')
       return
     }
 
+    isActionPendingRef.current = true
     setIsActionPending(true)
     setActionError(null)
     setConflictDetail(null)
@@ -570,13 +588,15 @@ export function IssueDetailModal({
         setActionError(err instanceof Error ? err.message : '更新 Issue 失败')
       }
     } finally {
+      isActionPendingRef.current = false
       setIsActionPending(false)
     }
   }
 
   // 2. 精确重试未决未知操作（完整版本与 payload 严格从冻结 pending 读取，不可因刷新而改变）
   const handleRetryPendingAction = async () => {
-    if (!pendingUnknownAction || !issue) return
+    if (!pendingUnknownAction || !issue || isActionPendingRef.current) return
+    isActionPendingRef.current = true
     setIsActionPending(true)
     setActionError(null)
     setConflictDetail(null)
@@ -678,13 +698,14 @@ export function IssueDetailModal({
         setActionError(err instanceof Error ? err.message : '重试依然未收到响应，结果未知')
       }
     } finally {
+      isActionPendingRef.current = false
       setIsActionPending(false)
     }
   }
 
   // 3. 明确放弃未决操作（清理侧车与 unknown 状态）
   const handleDiscardPendingAction = () => {
-    if (!issueId || !pendingUnknownAction) return
+    if (!issueId || !pendingUnknownAction || isActionPendingRef.current) return
     clearPendingAction(issueId, pendingUnknownAction.requestKey)
     setPendingActionResult({ type: 'NONE' })
     setIsDiscardConfirmOpen(false)
@@ -857,6 +878,11 @@ export function IssueDetailModal({
   // 10. 删除 Issue
   const handleDeleteIssue = async () => {
     if (!issue) return
+    if (isWriteBlocked || isActionPendingRef.current) {
+      setActionError('当前存在未确认结果或损坏的写操作记录，禁止删除 Issue；请先处理或放弃')
+      return
+    }
+    isActionPendingRef.current = true
     setIsActionPending(true)
     setActionError(null)
     try {
@@ -867,6 +893,7 @@ export function IssueDetailModal({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '删除 Issue 失败')
     } finally {
+      isActionPendingRef.current = false
       setIsActionPending(false)
     }
   }
@@ -875,6 +902,10 @@ export function IssueDetailModal({
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !issue) return
+    if (isWriteBlocked || isActionPendingRef.current) {
+      setActionError('当前存在未确认结果或损坏的写操作记录，禁止上传证据')
+      return
+    }
     try {
       validateUploadFile(file)
     } catch (err) {
@@ -882,6 +913,7 @@ export function IssueDetailModal({
       return
     }
 
+    isActionPendingRef.current = true
     setIsUploadingEvidence(true)
     setActionError(null)
     try {
@@ -906,6 +938,7 @@ export function IssueDetailModal({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '上传证据失败')
     } finally {
+      isActionPendingRef.current = false
       setIsUploadingEvidence(false)
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -971,6 +1004,7 @@ export function IssueDetailModal({
               type="button"
               className="ghost-btn danger"
               onClick={() => setIsDeleteModalOpen(true)}
+              disabled={isWriteBlocked}
               title="删除 Issue"
               aria-label="删除 Issue"
             >
@@ -1211,15 +1245,34 @@ export function IssueDetailModal({
               <AlertTriangle size={16} aria-hidden="true" />
               <span>{conflictDetail}</span>
             </div>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => void handleReloadFreshData()}
-              style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
-            >
-              <RefreshCw size={12} aria-hidden="true" />
-              <span>刷新并保留草稿</span>
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isEditingSpec && detail?.issue && detail.issue.version !== specVersion && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => {
+                    if (detail?.issue) {
+                      setSpecVersion(detail.issue.version)
+                      setConflictDetail(null)
+                    }
+                  }}
+                  disabled={isWriteBlocked}
+                  style={{ fontSize: '12px', whiteSpace: 'nowrap', padding: '2px 8px' }}
+                  title="确认风险：可能覆盖远端最新修改，确认用最新版本重试保留的草稿"
+                >
+                  可能覆盖远端最新修改，确认用最新版本重试保留的草稿
+                </button>
+              )}
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => void handleReloadFreshData()}
+                style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
+              >
+                <RefreshCw size={12} aria-hidden="true" />
+                <span>刷新并保留草稿</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -1306,7 +1359,7 @@ export function IssueDetailModal({
                           className="form-input"
                           value={draftTitle}
                           onChange={(e) => setDraftTitle(e.target.value)}
-                          disabled={isActionPending}
+                          disabled={isWriteBlocked}
                           autoFocus
                         />
                       </div>
@@ -1317,7 +1370,7 @@ export function IssueDetailModal({
                           rows={8}
                           value={draftDescription}
                           onChange={(e) => setDraftDescription(e.target.value)}
-                          disabled={isActionPending}
+                          disabled={isWriteBlocked}
                         />
                       </div>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
@@ -1328,6 +1381,8 @@ export function IssueDetailModal({
                             setIsEditingSpec(false)
                             setDraftTitle(issue.title)
                             setDraftDescription(issue.description)
+                            setSpecVersion(issue.version)
+                            setConflictDetail(null)
                           }}
                           disabled={isActionPending}
                         >
@@ -1336,7 +1391,7 @@ export function IssueDetailModal({
                         <button
                           type="submit"
                           className="btn-primary"
-                          disabled={isActionPending}
+                          disabled={isWriteBlocked}
                         >
                           {isActionPending ? '保存中...' : '保存更改'}
                         </button>
@@ -1350,6 +1405,7 @@ export function IssueDetailModal({
                           type="button"
                           className="ghost-btn"
                           onClick={() => setIsEditingSpec(true)}
+                          disabled={isWriteBlocked}
                           title="编辑需求标题与描述"
                         >
                           <Pencil size={14} aria-hidden="true" />
@@ -1643,13 +1699,13 @@ export function IssueDetailModal({
                       type="file"
                       style={{ display: 'none' }}
                       onChange={handleFileSelected}
-                      disabled={isUploadingEvidence}
+                      disabled={isUploadingEvidence || isWriteBlocked}
                     />
                     <button
                       type="button"
                       className="btn-primary"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploadingEvidence}
+                      disabled={isUploadingEvidence || isWriteBlocked}
                       style={{ fontSize: '13px' }}
                     >
                       <Upload size={14} aria-hidden="true" />
@@ -1888,7 +1944,7 @@ export function IssueDetailModal({
                 <button
                   type="button"
                   className="btn-primary danger"
-                  disabled={isActionPending}
+                  disabled={isWriteBlocked}
                   onClick={handleDeleteIssue}
                 >
                   {isActionPending ? '删除中...' : '确认删除'}
