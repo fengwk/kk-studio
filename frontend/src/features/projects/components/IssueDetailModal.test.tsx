@@ -885,4 +885,137 @@ describe('IssueDetailModal', () => {
     const reopenedTextarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i) as HTMLTextAreaElement
     expect(reopenedTextarea.value).toBe('')
   })
+
+  it('when pending unknown action exists, editing spec, save spec and delete issue are blocked with 0 API calls', async () => {
+    // 测试意图：验证侧车中存在未确认结果的 UNKNOWN 写操作时，
+    // isWriteBlocked 门禁生效：删除 Issue 按钮与 Spec 编辑/保存按钮均 disabled，
+    // 且 handler 门禁严格拦截，api.updateIssue 与 api.deleteIssue 调用次数严格为 0。
+    const api = createMockApi()
+    storePendingAction(issueId, {
+      issueId,
+      kind: 'TRANSITION',
+      requestKey: 'pending-req-key-1',
+      expectedVersion: '3',
+      payload: { toState: 'DONE' },
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    // 验证 UNKNOWN 警告横幅出现
+    await screen.findByText(/检测到未确认结果的写操作/i)
+
+    // 1. 验证顶部删除 Issue 按钮被 disabled 禁用
+    const deleteBtn = screen.getByRole('button', { name: '删除 Issue' })
+    expect(deleteBtn).toBeDisabled()
+
+    // 2. 验证 Spec 区域编辑需求按钮被 disabled 禁用
+    const editSpecBtn = screen.getByRole('button', { name: /编辑需求/i })
+    expect(editSpecBtn).toBeDisabled()
+
+    // 关键断言：写 API 绝对未被调用
+    expect(api.updateIssue).toHaveBeenCalledTimes(0)
+    expect(api.deleteIssue).toHaveBeenCalledTimes(0)
+  })
+
+  it('when editing spec, manual reload does not silently update specVersion, and subsequent save retains original expectedVersion', async () => {
+    // 测试意图：验证用户在编辑 Spec 期间，普通刷新（handleReloadFreshData）绝对不能自动静默推进 specVersion（绝不自动无提示 rebase），
+    // 再次保存时仍严格保留原有 expectedVersion 发送 CAS（或由冲突拦截）；
+    // 只有用户显式点击“可能覆盖远端最新修改，确认用最新版本重试保留的草稿”确认按钮后，才推进 version 并保存。
+    const api = createMockApi()
+    let currentVersion = '3'
+    api.getIssue = vi.fn().mockImplementation(async () => ({
+      ...mockActiveIssueDetail,
+      issue: {
+        ...mockActiveIssueDetail.issue,
+        version: currentVersion,
+      },
+    }))
+
+    // 真实 CAS 校验：服务端若 version 不匹配则返回 409
+    api.updateIssue = vi.fn().mockImplementation(async (_id, req) => {
+      if (req.expectedVersion !== currentVersion) {
+        throw new ApiError('Conflict: expectedVersion mismatch', 409)
+      }
+      return {
+        ...mockActiveIssueDetail.issue,
+        version: String(Number(currentVersion) + 1),
+        title: req.title,
+      }
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+
+    // 1. 进入 Spec 编辑状态
+    fireEvent.click(screen.getByRole('button', { name: /编辑需求/i }))
+    const titleInput = screen.getByDisplayValue('Implement OAuth2 login')
+    fireEvent.change(titleInput, { target: { value: 'Implement OAuth2 login with PKCE updated' } })
+
+    // 2. 此时服务端版本更新推进至 '4'（模拟并发写入或其他端修改）
+    currentVersion = '4'
+
+    // 3. 用户点击右上角“刷新数据”按钮（普通刷新）
+    fireEvent.click(screen.getByRole('button', { name: '刷新数据' }))
+
+    // 4. 验证出现冲突/风险提示横幅，提示可能覆盖远端修改
+    await screen.findByText(/服务端版本已更新为 v4/i)
+
+    // 5. 用户此时直接点击“保存更改”表单提交
+    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
+
+    await waitFor(() => {
+      expect(api.updateIssue).toHaveBeenCalledTimes(1)
+    })
+    // 核心断言：调用的 expectedVersion 依然是原有的 '3'，绝不被普通刷新静默替换成 '4'！
+    expect(api.updateIssue).toHaveBeenLastCalledWith(
+      issueId,
+      expect.objectContaining({
+        expectedVersion: '3',
+        title: 'Implement OAuth2 login with PKCE updated',
+      }),
+    )
+
+    // 6. 由于服务端已是 '4'，第 1 次 updateIssue 409 拦截，草稿保留，用户显式点击确认按钮
+    const explicitConfirmBtn = await screen.findByRole('button', {
+      name: /可能覆盖远端最新修改，确认用最新版本重试保留的草稿/i,
+    })
+    fireEvent.click(explicitConfirmBtn)
+
+    // 7. 用户再次点击“保存更改”
+    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
+
+    await waitFor(() => {
+      expect(api.updateIssue).toHaveBeenCalledTimes(2)
+    })
+    // 核心断言：显式确认后，才推进使用最新版本 '4' 提交保存成功！
+    expect(api.updateIssue).toHaveBeenLastCalledWith(
+      issueId,
+      expect.objectContaining({
+        expectedVersion: '4',
+        title: 'Implement OAuth2 login with PKCE updated',
+      }),
+    )
+  })
 })

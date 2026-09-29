@@ -59,8 +59,9 @@ export function useInteractionsController(limit = 20): UseInteractionsController
       setLoadMoreError(null)
     } else if (isUpdatedTimestamp) {
       // 结构共享导致 initialPage 为同一引用（无新 data 但数据更新时间更新，如外部 invalidate 新页与旧页完全相同且 cursor 一样）
-      // 旧下一页不必变，但外部刷新帧到达必须重置 in-flight 状态
+      // 每次接受新的 dataUpdatedAt 都必须废弃旧 request generation（列表可保留），游标与加载状态严格由新代拥有
       lastDataUpdatedAtRef.current = dataUpdatedAt
+      generationRef.current += 1
       isFetchingMoreRef.current = false
       setIsFetchingMore(false)
       setLoadMoreError(null)
@@ -108,7 +109,8 @@ export function useInteractionsController(limit = 20): UseInteractionsController
       if (generation === generationRef.current) {
         setLoadMoreError(err instanceof Error ? err : new Error(String(err)))
       }
-      throw err
+      // 不直接向外抛出未捕获异常，避免 UI 层触发未处理的 unhandled rejection
+      // stale 世代静默 resolve，current 世代写入受控 loadMoreError 供 UI 呈现
     } finally {
       // 旧代 finally 不得重置新状态
       if (generation === generationRef.current) {
