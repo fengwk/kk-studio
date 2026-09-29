@@ -67,11 +67,7 @@ final class GeminiRequestEncoder {
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
 
-  // data:[<mediatype>][;base64],<data>
-  private static final Pattern DATA_URI_PATTERN =
-      Pattern.compile("^data:([^;,]+)(?:;base64)?,(.*)$", Pattern.CASE_INSENSITIVE);
-
-  // data:<mediatype>;base64,<data>：工具结果只接受内联 Base64 媒体
+  // data:<mediatype>;base64,<data>：用户内容与工具结果统一只接受内联 Base64 媒体
   private static final Pattern BASE64_DATA_URI_PATTERN =
       Pattern.compile("^data:([^;,]+);base64,(.*)$", Pattern.CASE_INSENSITIVE);
 
@@ -376,25 +372,27 @@ final class GeminiRequestEncoder {
         ProviderErrorKind.INVALID_REQUEST, "unsupported content block in user message");
   }
 
+  /**
+   * 媒体来源必须是内联 Base64 data URI：percent/非 Base64 形态、非法 Base64 与空载荷都在编码期以 {@code INVALID_REQUEST}
+   * 拒绝，绝不把无效 Base64 发往上游；http(s)/{@code gs} fileUri 仍按协议透传。
+   */
   private static void encodeMediaBlock(ArrayNode parts, String mediaType, String source) {
     if (source == null || source.isBlank()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "media source URI must not be blank");
     }
     if (source.startsWith("data:")) {
-      Matcher matcher = DATA_URI_PATTERN.matcher(source);
-      if (matcher.matches()) {
-        String dataMime = matcher.group(1);
-        String base64Data = matcher.group(2);
-        String finalMime = (dataMime != null && !dataMime.isBlank()) ? dataMime : mediaType;
-        ObjectNode part = parts.addObject();
-        ObjectNode inlineData = part.putObject("inlineData");
-        inlineData.put("mimeType", finalMime);
-        inlineData.put("data", base64Data);
-        return;
+      String[] inline = parseBase64DataUri(source);
+      if (inline == null) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "media source must be a base64 data URI with a non-empty decodable payload");
       }
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid data URI in media source");
+      ObjectNode part = parts.addObject();
+      ObjectNode inlineData = part.putObject("inlineData");
+      inlineData.put("mimeType", inline[0]);
+      inlineData.put("data", inline[1]);
+      return;
     }
 
     try {
@@ -502,19 +500,30 @@ final class GeminiRequestEncoder {
 
   /** 工具结果媒体来源必须是 MIME 与声明一致的 Base64 data URI；任何其他形态都 fail closed。 */
   private static String extractToolResultBase64(String source, String mediaType) {
-    Matcher matcher = source == null ? null : BASE64_DATA_URI_PATTERN.matcher(source);
-    if (matcher != null && matcher.matches()) {
-      String dataUriMediaType = matcher.group(1);
-      String base64Data = matcher.group(2);
-      if (dataUriMediaType != null
-          && dataUriMediaType.equalsIgnoreCase(mediaType)
-          && decodedBase64Payload(base64Data)) {
-        return base64Data;
-      }
+    String[] inline = parseBase64DataUri(source);
+    if (inline != null && inline[0].equalsIgnoreCase(mediaType)) {
+      return inline[1];
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST,
         "tool result media source must be a base64 data URI matching mediaType");
+  }
+
+  /**
+   * 解析严格 Base64 data URI，返回 {@code [mediaType, payload]}；形态不严格、payload 为空或非法 Base64 时返回 {@code
+   * null}。 用户内容与工具结果共用同一套判定，避免两处规则漂移。
+   */
+  private static String[] parseBase64DataUri(String source) {
+    Matcher matcher = source == null ? null : BASE64_DATA_URI_PATTERN.matcher(source);
+    if (matcher == null || !matcher.matches()) {
+      return null;
+    }
+    String mediaType = matcher.group(1);
+    String payload = matcher.group(2);
+    if (mediaType == null || mediaType.isBlank() || !decodedBase64Payload(payload)) {
+      return null;
+    }
+    return new String[] {mediaType, payload};
   }
 
   /** 只校验 payload 可解码且非空，不保留解码后的字节。 */

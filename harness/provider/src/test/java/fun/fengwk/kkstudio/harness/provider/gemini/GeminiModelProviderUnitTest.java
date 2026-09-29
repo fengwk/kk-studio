@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
@@ -51,6 +52,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** GeminiModelProvider 生命周期调度与传输层交互单元测试。 */
@@ -648,6 +650,77 @@ class GeminiModelProviderUnitTest {
 
     assertNotNull(errorRef.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, errorRef.get().kind());
+  }
+
+  /**
+   * 测试意图：普通用户媒体 data URI 不合规（无 base64 标记的 percent/普通 data、非法 Base64、空载荷）时，编码器在发起 HTTP 之前就以一次
+   * INVALID_REQUEST 终态失败，transport 完全不被调用。
+   */
+  @Test
+  void rejectsInvalidMediaDataUriBeforeTransport() {
+    AtomicInteger streamCalls = new AtomicInteger(0);
+    JdkHttpSseTransport countingTransport =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest req,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            streamCalls.incrementAndGet();
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+    URI targetUri = URI.create("https://example.com/stream");
+    GeminiModelProvider provider =
+        new GeminiModelProvider(countingTransport, descriptor, "k", targetUri);
+
+    for (String source :
+        List.of("data:image/png,abc", "data:image/png;base64,%%%", "data:image/png;base64,")) {
+      ProviderRequest mediaRequest =
+          new ProviderRequest(
+              request.model(),
+              request.variant(),
+              1024,
+              request.systemInstruction(),
+              List.of(
+                  new ProviderMessage(
+                      ProviderMessageRole.USER,
+                      List.of(new ProviderImageBlock("image/png", source)))),
+              List.of(),
+              ProviderCacheControl.none());
+
+      AtomicInteger errors = new AtomicInteger(0);
+      AtomicReference<ProviderException> errorRef = new AtomicReference<>();
+      provider.stream(
+          mediaRequest,
+          new ProviderStreamHandler() {
+            @Override
+            public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+            @Override
+            public void onError(ProviderException error, ProviderStream stream) {
+              errors.incrementAndGet();
+              errorRef.set(error);
+            }
+
+            @Override
+            public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          });
+
+      assertEquals(1, errors.get());
+      assertNotNull(errorRef.get());
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, errorRef.get().kind());
+    }
+    assertEquals(0, streamCalls.get());
   }
 
   /**
