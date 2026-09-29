@@ -81,7 +81,7 @@ EnvironmentCapabilityExecutionHandle invoke(
 | [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java) | 服务不可用，调用确定未执行 |
 | [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) | 请求可能已被远端接收且可能已产生副作用，调用方必须停止自动重放 |
 
-拿到执行句柄后，事件严格遵循 `PROGRESS* -> exactly one terminal`：远端 `FAILED` 与 `CANCELLED` 分别转换为 [`EnvironmentCapabilityFailedException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityFailedException.java) 与 [`EnvironmentCapabilityCancelledException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCancelledException.java) 交给监听器。终态产生后到达的事件一律丢弃，取消指令直接透传给底层句柄。
+拿到执行句柄后，事件严格遵循 `PROGRESS* -> exactly one terminal`：远端 `FAILED` 与 `CANCELLED` 分别转换为 [`EnvironmentCapabilityFailedException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityFailedException.java) 与 [`EnvironmentCapabilityCancelledException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCancelledException.java) 交给监听器。终态产生后到达的事件一律丢弃，取消指令直接透传给底层句柄。服务端在并发入站帧、接管与回收竞态下如何维持该顺序，见 [Harness Environment Server 的回调顺序与背压上界](harness-environment-server.md#回调顺序与背压上界)。
 
 [`EnvironmentCapabilityExecutionHandle`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionHandle.java) 是执行收尾的窄契约：
 

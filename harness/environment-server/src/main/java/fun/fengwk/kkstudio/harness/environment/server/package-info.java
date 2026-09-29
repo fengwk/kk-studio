@@ -13,6 +13,8 @@
  * 与持久化实现。
  *
  * <p>并发模型：同一 Environment 允许任意数量的 invocation 并发在途，仅以 invocationId 区分；不存在按 Environment
- * 的容量、信号量或排队。每次发送前都以租约围栏复核归属，发送结果不确定时按 fail-closed 断开连接并失败在途调用。
+ * 的容量、信号量或排队。同一连接上的并发 {@code receive} 由 {@code gate} 串行化状态推进，listener 回调按该顺序由单一 drainer
+ * 在核心锁外同步投递，因此并发调用不会重排 {@code PARTIAL* -> exactly one terminal} 的观察序列。每次发送前都以租约围栏复核归属，发送结果不确定时按
+ * fail-closed 断开连接并失败在途调用。
  */
 package fun.fengwk.kkstudio.harness.environment.server;

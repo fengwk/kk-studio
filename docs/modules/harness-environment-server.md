@@ -91,19 +91,29 @@ COMPLETED
 
 资源上传控制帧与终态的先后顺序由两端共同保证：Daemon 只在「调用仍活动」与「发送」的临界区内出站控制帧，核心则在终态核对前拒绝一切未就绪、伪造、重复或与申请不符的上传引用。
 
+### 回调顺序与背压上界
+
+`DaemonEndpoint.receive` 不要求调用方串行化同一连接的多帧。核心的保证是：状态推进在 `gate` 内按到达顺序完成，回调批次在该顺序下入队，再由单一 drainer 在锁外同步执行，因此并发 `receive` 不会让同一连接上的 `PARTIAL*` 越过其后的 terminal。批次的执行不走任何异步 executor，drain 就发生在投递该帧的调用线程上：回调耗时直接构成该调用方的背压，而不是转嫁给另一个线程池形成无界积压。
+
+等待执行的批次以每连接固定上界 `MAX_PENDING_CALLBACK_BATCHES = 64` 约束（入站排队本身由传输适配器拥有，核心不感知其容量）。达到上界即 fail-closed：丢弃该帧、关闭连接，并把该 Environment 仍在途的调用一次性回收为 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java)，与实例接管同语义（回收回调追加在同一队列尾部，因此不会迟到于已入队的 partial）。
+
+跨连接代际的精确边界：被接管或回收的 invocation 不再活动，因此旧连接队列里**尚未开始**的 partial 会在 drain 时复核活动性并静默丢弃，不会在新连接的 terminal 之后投递；已经进入 listener 的 partial 回调不做撤销承诺。
+
 ## 锁边界
 
 核心只用五个 monitor，锁顺序固定为 `gate > state > inventory`：
 
 | monitor | 保护对象 |
 | --- | --- |
-| 每个连接代际的 `gate` | 该连接的入站协议处理序列 |
+| 每个连接代际的 `gate` | 该连接的入站协议处理序列与该连接待执行回调批次的排队 |
 | `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS） |
 | 核心 `inventory` | 环境目录、连接目录、`invocationId` 目录与 tombstone |
 | 每个 `ActiveInvocation` | 其 transfer 集合与取消、终态标记 |
 | 每个 `TransferBinding` | 该 transfer 的请求事实、已签发 uploadId、票据缓存与释放标记 |
 
-租约存储访问发生在连接 `gate` 内，但不持有 `state`、`inventory`、`ActiveInvocation` 或 `TransferBinding`；`invoke` 的围栏复核、票据服务 I/O、上传释放、连接关闭与全部 listener/session 回调都在上述锁之外执行，因此回调中重入核心 API 不会死锁。核心不持久化任何状态：进程重启后的会话事实由 daemon 重新握手建立。
+租约存储访问发生在连接 `gate` 内，但不持有 `state`、`inventory`、`ActiveInvocation` 或 `TransferBinding`；`invoke` 的围栏复核、票据服务 I/O、上传释放、连接关闭与全部 listener/session 回调都在上述锁之外执行，因此回调中重入核心 API 不会死锁。
+
+回调本身不占用 `gate`：一帧产生的回调批次只在 `gate` 内按处理顺序入队，之后由单一 drainer 在锁外同步执行，其余并发 `receive` 把批次留在队列里即返回。因此同一连接上不存在两个线程同时执行回调，`onPartial` 阻塞只会推迟该连接后续批次的 drain，不会阻塞其他连接的协议处理，也允许回调内重入 `receive`。核心不持久化任何状态：进程重启后的会话事实由 daemon 重新握手建立。
 
 ## 注入端口与宿主设置
 
@@ -129,7 +139,7 @@ COMPLETED
 
 测试守卫：
 
-- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 驱动完整状态机，覆盖同环境并发调用、终态唯一、超时 `expire`、队列 `BUSY` 拒绝、同实例重连重放、异实例接管、连接代际接管、上传申请/提交幂等与伪造/漂移拒绝、终态引用核对与清理、握手校验与租约围栏 fail-closed。
+- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 驱动完整状态机，覆盖同环境并发调用、终态唯一、超时 `expire`、队列 `BUSY` 拒绝、同实例重连重放、异实例接管、连接代际接管、上传申请/提交幂等与伪造/漂移拒绝、终态引用核对与清理、握手校验与租约围栏 fail-closed，以及并发回调顺序（阻塞中 partial 不越过后到 terminal、回调内重入 `receive`、listener 抛异常不阻剩余终态、接管时丢弃旧连接排队 partial、回调积压超限 fail-closed）与 `expire` 对终态帧 32 轮真实竞态。
 - [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java)：测试基座，只表达核心真正依赖的窄端口语义，不模拟 SQL 或 WebSocket。
 - [`EnvironmentServerModuleArchitectureTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerModuleArchitectureTest.java)：守卫主源码 import 白名单与 POM 生产依赖白名单。
 
