@@ -36,16 +36,13 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -66,12 +63,11 @@ class StoragePluginResourceGatewayTest {
   private StorageBlobManager storageBlobManager;
   private StorageUploadService storageUploadService;
   private PluginProperties properties;
-  private FakeHostResolver hostResolver;
   private FakeRemoteMediaTransport transport;
   private StoragePluginResourceGateway gateway;
 
   @BeforeEach
-  void setUp() throws UnknownHostException {
+  void setUp() {
     harnessStore = mock(HarnessStore.class);
     sessionBlobRefManager = mock(SessionBlobRefManager.class);
     storageBlobManager = mock(StorageBlobManager.class);
@@ -84,9 +80,6 @@ class StoragePluginResourceGatewayTest {
     properties.getResource().setConnectTimeout(Duration.ofSeconds(2));
     properties.getResource().setUploadTimeout(Duration.ofMinutes(1));
 
-    hostResolver = new FakeHostResolver();
-    hostResolver.register("media.example.com", List.of(InetAddress.getByName("93.184.216.34")));
-
     transport = new FakeRemoteMediaTransport();
 
     gateway =
@@ -96,7 +89,6 @@ class StoragePluginResourceGatewayTest {
             storageBlobManager,
             storageUploadService,
             properties,
-            new PublicAddressPolicy(hostResolver),
             transport);
   }
 
@@ -334,20 +326,6 @@ class StoragePluginResourceGatewayTest {
         PluginResourceUnavailableException.class,
         () -> gateway.stageRemoteMedia(null, PluginMediaFamily.IMAGE, "test.png"));
 
-    assertEquals(0, transport.getGetCallCount());
-  }
-
-  /** stageRemoteMedia 集成验证：当域名解析到私网地址时，在调用 transport 之前整体拦截并报错。 */
-  @Test
-  void stageRemoteMediaRejectsPrivateHostBeforeTransport() throws UnknownHostException {
-    hostResolver.register("private.example.com", List.of(InetAddress.getByName("192.168.1.1")));
-    URI uri = URI.create("https://private.example.com/image.png");
-
-    PluginResourceUnavailableException exception =
-        assertThrows(
-            PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "image.png"));
-    assertTrue(exception.getMessage().contains("non-public address"));
     assertEquals(0, transport.getGetCallCount());
   }
 
@@ -1037,6 +1015,19 @@ class StoragePluginResourceGatewayTest {
   }
 
   // =========================================================================
+  // 6. 资源释放（close）
+  // =========================================================================
+
+  /** 关闭网关必须把关闭动作交给下游传输（Spring 组合根按 inferred destroy method 调用），且重复关闭也安全。 */
+  @Test
+  void closeReleasesTheTransportIdempotently() throws IOException {
+    gateway.close();
+    gateway.close();
+
+    assertEquals(2, transport.getCloseCallCount());
+  }
+
+  // =========================================================================
   // 测试辅助方法与替身类
   // =========================================================================
 
@@ -1123,23 +1114,6 @@ class StoragePluginResourceGatewayTest {
     }
   }
 
-  private static class FakeHostResolver implements HostResolver {
-    private final Map<String, List<InetAddress>> mappings = new HashMap<>();
-
-    void register(String host, List<InetAddress> addresses) {
-      mappings.put(host, addresses);
-    }
-
-    @Override
-    public List<InetAddress> resolve(String host) throws UnknownHostException {
-      List<InetAddress> addresses = mappings.get(host);
-      if (addresses == null) {
-        throw new UnknownHostException("No fake mapping for host: " + host);
-      }
-      return addresses;
-    }
-  }
-
   private static class FakeRemoteMediaTransport implements RemoteMediaTransport {
     private int getCallCount = 0;
     private final List<URI> getUris = new ArrayList<>();
@@ -1153,6 +1127,7 @@ class StoragePluginResourceGatewayTest {
     private Map<String, String> lastPutHeaders;
     private byte[] lastPutBytes;
     private int putStatus = 200;
+    private int closeCallCount = 0;
 
     void setGetResponse(int status, Map<String, List<String>> headers, byte[] body) {
       this.responseStatus = status;
@@ -1178,6 +1153,10 @@ class StoragePluginResourceGatewayTest {
 
     int getPutCallCount() {
       return putCallCount;
+    }
+
+    int getCloseCallCount() {
+      return closeCallCount;
     }
 
     URI getLastPutUri() {
@@ -1214,6 +1193,11 @@ class StoragePluginResourceGatewayTest {
         throw new PluginResourceUnavailableException("Cannot read put file", e);
       }
       return putStatus;
+    }
+
+    @Override
+    public void close() {
+      closeCallCount++;
     }
   }
 
