@@ -51,11 +51,24 @@ final class IssueActivityIdempotency {
   /**
    * 返回该身份已提交的活动：{@code null} 表示首次执行；同键同指纹返回原活动供调用方精确重放；同键异指纹抛冲突。
    *
-   * <p>调用方必须在任何版本校验、状态/额度校验与外部派发之前调用本方法。
+   * <p>锁前调用只是快速路径。调用方在取得 owner 锁之后、版本/状态/额度校验与外部派发之前必须再调用一次。
    */
   static IssueActivity findApplied(
       IssueActivityRepository repository, UUID issueId, Identity identity) {
-    IssueActivity existing = repository.findByIdempotencyKey(issueId, identity.key());
+    return match(repository.findByIdempotencyKey(issueId, identity.key()), identity);
+  }
+
+  /**
+   * owner 锁之后的 receipt 判定。
+   *
+   * <p>必须在单独的行锁语句提交等待并返回之后调用。随后这次查询拿到新的 READ COMMITTED 快照，并绕过锁前查询留下的 MyBatis 一级缓存。
+   */
+  static IssueActivity findAppliedUnderLock(
+      IssueActivityRepository repository, UUID issueId, Identity identity) {
+    return match(repository.findByIdempotencyKeyUnderLock(issueId, identity.key()), identity);
+  }
+
+  private static IssueActivity match(IssueActivity existing, Identity identity) {
     if (existing == null) {
       return null;
     }

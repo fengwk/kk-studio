@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -64,6 +65,16 @@ public interface IssueActivityMapper extends BaseMapper {
           + " and idempotency_key = #{idempotencyKey}")
   @ResultMap("issueActivityResultMap")
   IssueActivityDO findByIdempotencyKey(
+      @Param("issueId") UUID issueId, @Param("idempotencyKey") String idempotencyKey);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_activity where issue_id = #{issueId}"
+          + " and idempotency_key = #{idempotencyKey}")
+  @ResultMap("issueActivityResultMap")
+  @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
+  IssueActivityDO findByIdempotencyKeyUnderLock(
       @Param("issueId") UUID issueId, @Param("idempotencyKey") String idempotencyKey);
 
   @Select(

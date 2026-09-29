@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 
@@ -96,6 +97,105 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         () ->
             projectService.updateWorkflow(
                 project.getId(), project.getVersion(), workflowJson(agent, agent, 5)));
+  }
+
+  /**
+   * 现存 Issue 正在使用的工作阶段、阻塞来源和已归档引用都不能从新 workflow 中消失。
+   *
+   * <p>没有被任何 Issue 引用的阶段可以删除；保留状态本来就必须存在。
+   */
+  @Test
+  void updateWorkflowRejectsRemovalOfReferencedStatesIncludingArchivedIssues() {
+    String agent = createAgent();
+    Project project = projectService.createProject("引用完整性", "描述", true);
+    projectService.updateWorkflow(
+        project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
+    Issue live = createIssue(project.getId());
+    issueService.transition(live.getId(), live.getVersion(), key("t"), "DESIGN");
+    Issue blocked =
+        issueService.blockIssue(
+            issueService.getIssue(live.getId()).getId(),
+            issueService.getIssue(live.getId()).getVersion(),
+            key("block"),
+            "等待外部");
+    Issue archived = createIssue(project.getId());
+    issueService.transition(archived.getId(), archived.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueService.getIssue(archived.getId());
+    IssueRun archivedRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
+    UUID archivedEnd = appendHistoryEntry(archivedRun.getThreadId());
+    issueRunService.completeRun(
+        archivedRun.getId(),
+        archivedRun.getVersion(),
+        key("complete"),
+        archivedEnd,
+        null,
+        "REVIEW");
+    Issue inReview = issueService.getIssue(archived.getId());
+    issueService.archiveIssue(inReview.getId(), inReview.getVersion());
+    Project current = projectService.getProject(project.getId());
+    String withoutDesign =
+        "{"
+            + "\"states\":["
+            + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"REVIEW\"]},"
+            + "{\"state\":\"REVIEW\",\"name\":\"检查\",\"agent\":\""
+            + agent
+            + "\",\"instructions\":\"检查\",\"maxRuns\":1,\"next\":[\"DONE\"]},"
+            + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+            + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+            + "]}";
+    assertThrows(
+        ProjectValidationException.class,
+        () -> projectService.updateWorkflow(current.getId(), current.getVersion(), withoutDesign));
+
+    String withoutReview =
+        "{"
+            + "\"states\":["
+            + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"DESIGN\"]},"
+            + "{\"state\":\"DESIGN\",\"name\":\"设计\",\"agent\":\""
+            + agent
+            + "\",\"instructions\":\"完成可交付方案\",\"maxRuns\":3,\"next\":[\"DONE\"]},"
+            + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+            + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+            + "]}";
+    assertThrows(
+        ProjectValidationException.class,
+        () -> projectService.updateWorkflow(current.getId(), current.getVersion(), withoutReview));
+    assertEquals(
+        blocked.getBlockedFromState(),
+        issueService.getIssue(blocked.getId()).getBlockedFromState());
+    assertEquals("REVIEW", issueService.getIssue(archived.getId()).getState());
+    assertEquals(
+        current.getWorkflowJson(), projectService.getProject(project.getId()).getWorkflowJson());
+  }
+
+  /** 未被任何现存 Issue 引用的工作阶段可以删除，保留状态仍然留在新 workflow 中。 */
+  @Test
+  void updateWorkflowAllowsRemovingUnreferencedStage() {
+    String agent = createAgent();
+    Project project = projectService.createProject("删除空阶段", "描述", true);
+    projectService.updateWorkflow(
+        project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
+    Issue issue = createIssue(project.getId());
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Project current = projectService.getProject(project.getId());
+    String withoutReview =
+        "{"
+            + "\"states\":["
+            + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"DESIGN\"]},"
+            + "{\"state\":\"DESIGN\",\"name\":\"设计\",\"agent\":\""
+            + agent
+            + "\",\"instructions\":\"完成可交付方案\",\"maxRuns\":3,\"next\":[\"DONE\"]},"
+            + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+            + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+            + "]}";
+
+    Project updated =
+        projectService.updateWorkflow(current.getId(), current.getVersion(), withoutReview);
+
+    assertEquals(
+        withoutReview,
+        new ProjectWorkflowJsonCodec().encode(codec.decode(updated.getWorkflowJson())));
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
   }
 
   /** 存在活动主 Run 时拒绝影响职责/结构的工作流调整。 */

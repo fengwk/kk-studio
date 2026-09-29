@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -267,6 +268,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 List<UUID> threadIds = invocation.getArgument(0);
                 int deleted = 0;
                 for (UUID threadId : threadIds) {
+                  jdbc.update("delete from harness_thread_command where thread_id = ?", threadId);
                   deleted += jdbc.update("delete from harness_thread where id = ?", threadId);
                 }
                 return deleted;
@@ -327,19 +329,60 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
                 + " name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, 'IDLE', 1, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, 'IDLE', ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
             "0".repeat(64),
             "thread-" + threadId,
             newSession.yoloEnabled(),
+            command.commands().size() + 1L,
             now,
             now);
+        insertCommands(jdbc, threadId, 1, command.commands(), now);
         return accepted(rootEntryId);
       }
       AcceptCommandsTarget.Thread thread = (AcceptCommandsTarget.Thread) target;
+      insertCommands(
+          jdbc,
+          thread.threadId(),
+          thread.expectedNextCommandSequence(),
+          command.commands(),
+          Timestamp.from(Instant.now()));
+      jdbc.update(
+          "update harness_thread set next_command_sequence = next_command_sequence + ? where id = ?",
+          command.commands().size(),
+          thread.threadId());
       return accepted(thread.expectedHeadEntryId());
+    }
+
+    /** 记录本次接受的真实命令行，供并发幂等测试断言「只派发一次」。 */
+    private static void insertCommands(
+        JdbcTemplate jdbc,
+        UUID threadId,
+        long sequence,
+        List<NewThreadCommand> commands,
+        Timestamp now) {
+      Long stored =
+          jdbc.queryForObject(
+              "select coalesce(max(sequence), 0) + 1 from harness_thread_command where thread_id = ?",
+              Long.class,
+              threadId);
+      if (stored != null) {
+        sequence = stored;
+      }
+      for (NewThreadCommand item : commands) {
+        jdbc.update(
+            "insert into harness_thread_command (thread_id, sequence, command_type, payload,"
+                + " idempotency_key, request_hash, created_at) values (?, ?, 'USER_MESSAGE',"
+                + " '{}'::jsonb, ?, ?, ?)",
+            threadId,
+            sequence,
+            item.idempotencyKey(),
+            item.requestHash(),
+            now);
+        sequence++;
+      }
     }
 
     private static AcceptedCommands accepted(UUID rootEntryId) {

@@ -27,6 +27,11 @@ import fun.fengwk.kkstudio.project.model.Project;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 目标 Project/Issue 编辑、活动流与请求键幂等契约的集成测试（真实 PostgreSQL Testcontainers）。
@@ -203,7 +208,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             issue.getId()));
   }
 
-  /** 缺失响应后的重试：对已归档的 Issue 再次归档直接返回当前事实，不重复写行、不推进版本。 */
+  /** 当前版本重复归档是 no-op；陈旧版本即使目标已经归档也必须版本冲突。 */
   @Test
   void archiveReplayWhenAlreadyArchived() {
     UUID projectId = createProject();
@@ -215,13 +220,15 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     Issue replayed = issueService.archiveIssue(issue.getId(), 1L);
     assertEquals(1L, replayed.getVersion());
+    assertThrows(
+        ProjectVersionConflictException.class, () -> issueService.archiveIssue(issue.getId(), 0L));
     assertTrue(replayed.isArchived());
     assertEquals(
         1L,
         count("select count(*) from project_issue where id = ? and version = 1", issue.getId()));
   }
 
-  /** 缺失响应后的重试：对未归档的 Issue 再次恢复归档直接返回当前事实，不重复写行。 */
+  /** 当前版本重复恢复归档是 no-op；陈旧版本必须版本冲突，不能借 no-op 绕过 CAS。 */
   @Test
   void unarchiveReplayWhenAlreadyUnarchived() {
     UUID projectId = createProject();
@@ -242,6 +249,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     // 恢复归档后的重复调用直接返回当前事实
     Issue reUnarchived = issueService.unarchiveIssue(issue.getId(), 2L);
     assertEquals(2L, reUnarchived.getVersion());
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> issueService.unarchiveIssue(issue.getId(), 1L));
     assertFalse(reUnarchived.isArchived());
   }
 
@@ -673,10 +683,13 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
 
-    // 重复归档（丢响应重试）返回当前事实
+    // 当前版本重复归档返回当前事实；陈旧版本冲突。
     Project reArchived = projectService.archiveProject(project.getId(), 1L);
     assertTrue(reArchived.isArchived());
     assertEquals(1L, reArchived.getVersion());
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> projectService.archiveProject(project.getId(), 0L));
 
     // 恢复归档
     Project unarchived = projectService.unarchiveProject(project.getId(), 1L);
@@ -688,10 +701,13 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         projectService.listProjects(true).stream()
             .anyMatch(p -> p.getId().equals(project.getId())));
 
-    // 重复恢复归档（丢响应重试）
+    // 当前版本重复恢复归档返回当前事实；陈旧版本冲突。
     Project reUnarchived = projectService.unarchiveProject(project.getId(), 2L);
     assertFalse(reUnarchived.isArchived());
     assertEquals(2L, reUnarchived.getVersion());
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> projectService.unarchiveProject(project.getId(), 1L));
   }
 
   /** 下属 Issue 存在活动 Run 时拒绝归档项目。 */
@@ -712,6 +728,91 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0L,
         count("select count(*) from project where id = ? and archived_at is not null", projectId));
+  }
+
+  /**
+   * 并发同键同 payload 必须在 owner 锁内重放：两个请求都返回同一 Issue，且只留下一条评论活动。
+   *
+   * <p>只在锁前查 receipt 时，后到的请求会穿过重放窗口，在版本校验处误报 409。
+   */
+  @Test
+  void concurrentSameCommentKeyAndPayloadReplaysAfterOwnerLock() throws Exception {
+    UUID projectId = createProject();
+    Issue issue = createIssue(projectId);
+    String commentKey = key("cmt");
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<Issue> first =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return issueService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
+              });
+      Future<Issue> second =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return issueService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
+              });
+      Issue left = first.get(15, TimeUnit.SECONDS);
+      Issue right = second.get(15, TimeUnit.SECONDS);
+      assertEquals(left.getId(), right.getId());
+      assertEquals(left.getVersion(), right.getVersion());
+    } finally {
+      executor.shutdownNow();
+    }
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+            issue.getId(),
+            "comment:" + commentKey));
+  }
+
+  /** 并发同键但正文不同必须稳定冲突，且只保留先提交的那一条评论。 */
+  @Test
+  void concurrentSameCommentKeyWithDifferentPayloadConflicts() throws Exception {
+    UUID projectId = createProject();
+    Issue issue = createIssue(projectId);
+    String commentKey = key("cmt");
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<Object> first =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return invokeComment(issue.getId(), commentKey, "第一条");
+              });
+      Future<Object> second =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return invokeComment(issue.getId(), commentKey, "第二条");
+              });
+      Object left = first.get(15, TimeUnit.SECONDS);
+      Object right = second.get(15, TimeUnit.SECONDS);
+      assertTrue(left instanceof Issue ^ right instanceof Issue);
+      assertTrue(
+          left instanceof ProjectDuplicateException || right instanceof ProjectDuplicateException);
+    } finally {
+      executor.shutdownNow();
+    }
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+            issue.getId(),
+            "comment:" + commentKey));
+  }
+
+  private Object invokeComment(UUID issueId, String commentKey, String body) {
+    try {
+      return issueService.appendComment(issueId, 0L, commentKey, body);
+    } catch (ProjectDuplicateException conflict) {
+      return conflict;
+    }
   }
 
   /** deleteProject 深删除项目及其下属 Issue；过期版本 CAS 冲突。 */

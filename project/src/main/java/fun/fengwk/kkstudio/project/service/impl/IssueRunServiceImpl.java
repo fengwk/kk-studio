@@ -67,9 +67,10 @@ import java.util.UUID;
  * 绑定、Run 与 RUN 活动、Issue Work；已有 Thread 则冻结当前 head 后继续接受本次命令。任一步失败整体回滚，包括已接受的 Harness 初始命令与
  * Work。模型/工具外部调用发生在事务外，锁内不做网络 I/O；部署缺少 Harness Runtime 时确定失败，绝不退回本地假执行。
  *
- * <p>幂等（设计 §4.6）：每个写操作都要求调用方请求键，活动身份为 {@code kind:requestKey}，指纹含动作与规范化请求字段。判定在任何版本、 状态、额度校验与
- * Harness 派发之前完成——同键同指纹按原 RUN 活动精确重放并返回原 Run，不新建 Session/Thread/命令、不重新扣额度、不重复推进
- * 状态；同键异指纹确定性冲突。行级"已在目标状态"的重试（WAITING/RUNNING）是无写操作的空重放。
+ * <p>幂等（设计 §4.6）：每个写操作都要求调用方请求键，活动身份为 {@code kind:requestKey}，指纹含动作与规范化请求字段。锁前检查只是快速路径； owner
+ * 锁（Project SHARE → Issue UPDATE → Run）之后、版本/状态/额度校验与 Harness 派发之前必须再查一次 receipt。同键同指纹按原活动精确重放并返回当前
+ * Run，不新建 Session/Thread/命令、不重新扣额度、不重复推进状态；同键异指纹确定性冲突。无交接的完成使用 CONTROL/COMPLETE_RUN 活动作为同一事务
+ * receipt。 行级"已在目标状态"的重试（WAITING/RUNNING）是无写操作的空重放。
  *
  * <p>收尾额外复验 Run 身份/版本/合法边/门禁与历史区间：区间按 Entry 父链解释（设计 §4.5），仅靠外键只能保证 Entry 属于同一 Session，不能保证 {@code
  * (start,end]} 落在该 Thread 的历史路径上。
@@ -116,15 +117,20 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (project == null) {
       throw new ProjectNotFoundException("project");
     }
-    if (project.isArchived()) {
-      throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
-    }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new ProjectNotFoundException("issue");
     }
     if (!issue.getProjectId().equals(project.getId())) {
       throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
+    }
+    applied =
+        IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity);
+    if (applied != null) {
+      return replayAcceptedRun(applied);
+    }
+    if (project.isArchived()) {
+      throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
     }
     if (issue.isArchived()) {
       throw new ProjectValidationException("issue", "Cannot accept a run for an archived issue");
@@ -293,7 +299,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     RunLock locked = lockRun(runId);
     IssueRun run = locked.run();
     if (run.getStatus() == IssueRunStatus.WAITING) {
-      // 丢响应后的重试：已经是安全等待状态，幂等返回而不重复写行。
+      // 已经是安全等待：不重复写行，也不再校验调用方版本。
       return issueRunRepository.getById(runId);
     }
     requireActive(run);
@@ -314,7 +320,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     RunLock locked = lockRun(runId);
     IssueRun run = locked.run();
     if (run.getStatus() == IssueRunStatus.RUNNING) {
-      // 丢响应后的重试：已经是执行状态，幂等返回而不重复写行。
+      // 已经是执行状态：不重复写行，也不再校验调用方版本。
       return issueRunRepository.getById(runId);
     }
     if (run.getStatus() != IssueRunStatus.WAITING) {
@@ -348,27 +354,38 @@ public class IssueRunServiceImpl implements IssueRunService {
     Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(endEntryId, "endEntryId");
     String key = requireRequestKey(requestKey);
+    boolean handoff = nextState != null;
     Identity identity =
-        IssueActivityIdempotency.identity(
-            IssueActivityKind.STATE_CHANGE,
-            "HANDOFF",
-            key,
-            runId,
-            endEntryId,
-            finalAnswerEntryId,
-            nextState);
+        handoff
+            ? IssueActivityIdempotency.identity(
+                IssueActivityKind.STATE_CHANGE,
+                "HANDOFF",
+                key,
+                runId,
+                endEntryId,
+                finalAnswerEntryId,
+                nextState)
+            : IssueActivityIdempotency.identity(
+                IssueActivityKind.CONTROL,
+                "COMPLETE_RUN",
+                key,
+                runId,
+                endEntryId,
+                finalAnswerEntryId);
     if (replayed(runId, identity)) {
       return requireRun(runId);
     }
     RunLock locked = lockRun(runId);
+    if (replayedUnderLock(locked, identity)) {
+      return locked.run();
+    }
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
     requireWithinRunInterval(
         entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, finalAnswerEntryId, true);
     Issue issue = locked.issue();
-    boolean issueChanged = false;
-    if (nextState != null) {
+    if (handoff) {
       ProjectWorkflow workflow = workflowCodec.decode(locked.project().getWorkflowJson());
       ProjectStateCode from = ProjectStateCode.of(run.getState());
       ProjectStateCode to = ProjectStateCode.of(nextState);
@@ -380,7 +397,10 @@ public class IssueRunServiceImpl implements IssueRunService {
       data.put("to", to.value());
       appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, null, null, data);
       issue.setState(to.value());
-      issueChanged = true;
+    } else {
+      ObjectNode data = objectMapper.createObjectNode();
+      data.put("action", "COMPLETE_RUN");
+      appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, runId, null, data);
     }
     run.setStatus(IssueRunStatus.COMPLETED);
     run.setEndEntryId(endEntryId);
@@ -390,9 +410,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     run.setEndedAt(Instant.now());
     run.setError(null);
     updateRun(run, expectedVersion);
-    if (issueChanged) {
-      persistIssue(issue, locked.issueVersion());
-    }
+    persistIssue(issue, locked.issueVersion());
     return issueRunRepository.getById(runId);
   }
 
@@ -414,6 +432,9 @@ public class IssueRunServiceImpl implements IssueRunService {
       return requireRun(runId);
     }
     RunLock locked = lockRun(runId);
+    if (replayedUnderLock(locked, identity)) {
+      return locked.run();
+    }
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
@@ -441,6 +462,9 @@ public class IssueRunServiceImpl implements IssueRunService {
       return requireRun(runId);
     }
     RunLock locked = lockRun(runId);
+    if (replayedUnderLock(locked, identity)) {
+      return locked.run();
+    }
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
@@ -468,6 +492,9 @@ public class IssueRunServiceImpl implements IssueRunService {
       return requireRun(runId);
     }
     RunLock locked = lockRun(runId);
+    if (replayedUnderLock(locked, identity)) {
+      return locked.run();
+    }
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
@@ -500,11 +527,22 @@ public class IssueRunServiceImpl implements IssueRunService {
     persistIssue(locked.issue(), locked.issueVersion());
   }
 
-  /** 精确重试判定：命中同键同指纹时跳过版本、状态与区间校验，返回当前 Run 而不重复收尾或重复写门禁。 */
+  /**
+   * 锁前快速路径：命中同键同指纹时跳过版本、状态与区间校验。
+   *
+   * <p>未命中不能作为最终结论。并发首次提交可能落在本次检查与 owner 锁之间，调用方必须持锁后再查一次。
+   */
   private boolean replayed(UUID runId, Identity identity) {
     IssueRun peek = requireRun(runId);
     return IssueActivityIdempotency.findApplied(
             issueActivityRepository, peek.getIssueId(), identity)
+        != null;
+  }
+
+  /** owner 锁内的精确重试判定：同键同指纹返回当前 Run，同键异指纹冲突，未命中才继续版本与状态校验。 */
+  private boolean replayedUnderLock(RunLock locked, Identity identity) {
+    return IssueActivityIdempotency.findAppliedUnderLock(
+            issueActivityRepository, locked.issue().getId(), identity)
         != null;
   }
 
@@ -632,8 +670,8 @@ public class IssueRunServiceImpl implements IssueRunService {
   /**
    * 追加一条业务活动（设计 §4.6 一个动作一条活动）：请求键与指纹来自调用方身份，正文与 Run 引用按动作填写。
    *
-   * <p>调用方必须在任何 Harness 派发之前完成 {@link IssueActivityIdempotency#findApplied 精确重试判定}；本方法只在首次执行路径调用，
-   * 因此同键活动的出现要么来自并发请求（由主键与唯一键兜底失败关闭），要么是编程错误。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
+   * <p>调用方必须在 owner 锁内、版本/状态校验与 Harness 派发之前完成 {@link IssueActivityIdempotency#findApplied
+   * 精确重试判定}；本方法只在首次执行路径调用。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
    */
   private void appendActivity(
       Issue issue,
