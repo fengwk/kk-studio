@@ -15,8 +15,8 @@ on:
     tags:
       - 'v*'
 
-# 发布不可并发：取消正在上传的 workflow 会留下半套资产。同一 ref 的重跑排队执行，
-# 后一次以 `--clobber` 覆盖同名资产。
+# 发布不可并发：取消正在上传的 workflow 会留下半套资产。同一 ref 的重跑排队执行。
+# 已发布 Release 的资产不重写：校验和完全一致则跳过，否则失败。只有草稿可以补齐资产。
 concurrency:
   group: daemon-release-${{ github.ref }}
   cancel-in-progress: false
@@ -167,14 +167,87 @@ jobs:
             assets+=("${RELEASE_DIR}/${name}")
           done
 
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            # 重跑：只覆盖同名资产，保留已生成的 notes，并把上次未发布的草稿重新发布。
-            gh release upload "${GITHUB_REF_NAME}" --clobber "${assets[@]}"
+          if gh release view "${GITHUB_REF_NAME}" --json isDraft,assets >/dev/null 2>&1; then
+            draft=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft')
+            remote_names=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+              --jq '.assets[].name' | LC_ALL=C sort)
+            compare_remote=true
+            upload_names=()
+            if [ "${draft}" != "true" ]; then
+              # 已发布资产不可替换。五个校验和都一致才是一次无操作重跑。
+              if [ "${remote_names}" != "${expected}" ]; then
+                echo "published release assets differ from the staged set; refusing to replace them" >&2
+                exit 1
+              fi
+            elif [ -n "${remote_names}" ]; then
+              # 草稿可以补齐缺失资产，但不能覆盖已有内容，也不能带着额外资产发布。
+              while IFS= read -r name; do
+                case $'\n'"${expected}"$'\n' in
+                  *$'\n'"${name}"$'\n'*) ;;
+                  *)
+                    echo "draft release has an asset outside the release contract: ${name}" >&2
+                    exit 1
+                    ;;
+                esac
+              done <<<"${remote_names}"
+            fi
+            if [ "${draft}" = "true" ]; then
+              compare_remote=false
+              if [ -n "${remote_names}" ]; then
+                for name in "${expected_names[@]}"; do
+                  case $'\n'"${remote_names}"$'\n' in
+                    *$'\n'"${name}"$'\n'*) compare_remote=true ;;
+                    *) upload_names+=("${name}") ;;
+                  esac
+                done
+              else
+                upload_names=("${expected_names[@]}")
+              fi
+            fi
+            if [ "${compare_remote}" = true ]; then
+              for name in "${expected_names[@]}"; do
+                if [ "${draft}" = "true" ]; then
+                  case $'\n'"${remote_names}"$'\n' in
+                    *$'\n'"${name}"$'\n'*) ;;
+                    *) continue ;;
+                  esac
+                fi
+                url=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+                  --jq ".assets[] | select(.name == \"${name}\") | .url")
+                [ -n "${url}" ] || { echo "cannot read release asset ${name}" >&2; exit 1; }
+                checksum=$(mktemp)
+                if ! gh api "${url}" >"${checksum}"; then
+                  rm -f "${checksum}"
+                  echo "cannot read release asset ${name}" >&2
+                  exit 1
+                fi
+                remote=$(sha256sum "${checksum}" | awk '{ print $1 }')
+                rm -f "${checksum}"
+                local_digest=$(sha256sum "${RELEASE_DIR}/${name}" | awk '{ print $1 }')
+                if [ "${remote}" != "${local_digest}" ]; then
+                  echo "release asset ${name} differs from the staged asset; refusing to replace it" >&2
+                  exit 1
+                fi
+              done
+            fi
+            if [ "${draft}" != "true" ]; then
+              echo "published release already has the staged assets"
+              exit 0
+            fi
+            if [ "${#upload_names[@]}" -gt 0 ]; then
+              pending=()
+              for name in "${upload_names[@]}"; do
+                pending+=("${RELEASE_DIR}/${name}")
+              done
+              gh release upload "${GITHUB_REF_NAME}" "${pending[@]}"
+            fi
             gh release edit "${GITHUB_REF_NAME}" --draft=false
           else
             gh release create "${GITHUB_REF_NAME}" \
+              --draft \
               --verify-tag \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes \
               "${assets[@]}"
+            gh release edit "${GITHUB_REF_NAME}" --draft=false
           fi
