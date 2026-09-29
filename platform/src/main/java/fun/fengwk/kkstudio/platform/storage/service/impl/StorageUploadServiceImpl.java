@@ -67,7 +67,7 @@ import java.util.UUID;
  * lease，事务外幂等删除临时/候选对象，最后以 token-fenced 短事务删除上传事实，显式请求 READY 不重复 release。
  *
  * <p>complete/stage 与后台清理共用 {@link StorageUploadOperationLock}：complete/stage 在「写对象 +
- * 绑定」的整个窗口独占锁，后台清理在 claim 前
+ * 绑定」的整个窗口独占锁，stage 连行登记都发生在取锁之后（锚点一出现就受锁保护，不存在「行已登记但未被锁保护」的间隙），后台清理在 claim 前
  * 非阻塞尝试同一把锁并跳过忙的行，因此删除证据（临时对象、候选对象、上传行）永远不可能与写对象交错。锁在任何业务事务之前取得，绝不在事务或行锁内做 S3 I/O。
  *
  * <p>complete 先校验并探针临时对象，再复制候选 blob 的最终对象，最后才在事务内去重插入/并发消解并绑定上传 —— DB 绝不引用缺失的最终对象； 同一上传的并发 complete
@@ -287,14 +287,17 @@ public class StorageUploadServiceImpl implements StorageUploadService {
             fileFacts.sizeBytes(),
             fileFacts.sha256(),
             expiresAt);
-    transactionTemplate.executeWithoutResult(
-        status -> {
-          if (!uploadRepository.insert(upload)) {
-            throw new IllegalStateException("insert storage upload failed: " + uploadId);
-          }
-        });
-
+    // 先取操作锁再登记行：行登记完成的那一刻就已经在锁保护内，后台清理不可能在「行已登记、写窗口还没开始」的间隙
+    // claim 并删除锚点（否则登记后线程停顿超过 TTL，GC 可先删行，随后 PUT/copy 落盘的就是无事实的孤儿对象）。
     try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
+      // 登记失败直接上抛：失败发生在任何对象写入之前，没有对象需要（也不应该）删除。
+      transactionTemplate.executeWithoutResult(
+          status -> {
+            if (!uploadRepository.insert(upload)) {
+              throw new IllegalStateException("insert storage upload failed: " + uploadId);
+            }
+          });
+
       // 失败清理（mark cleanup request，必要时兜底幂等删除已知对象键）也必须在同一把锁内：
       // 任何对象删除路径都不能与后台清理或其它写窗口并发。
       try {
