@@ -2291,4 +2291,370 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       expect(nullResult.current.composer.settings).toBeUndefined()
     })
   })
+
+  describe('Bound thread replay persistence and real UI controls', () => {
+    it('renders retry/abandon controls on unknown post failure and retries exact command batch via real button click', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      vi.mocked(harnessService.acceptCommandBatch)
+        .mockRejectedValueOnce(new Error('Network disconnected'))
+        .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.type(composer, 'Hello bound unknown')
+      const sendButton = screen.getByRole('button', { name: '发送消息' })
+      await user.click(sendButton)
+
+      // 验证初次发送
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      const firstBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+      expect(firstBatch).toBeDefined()
+      const firstKey = firstBatch?.commands[0]?.idempotencyKey
+
+      // 界面渲染出真实的 bound-pending-controls
+      const controls = await screen.findByTestId('bound-pending-controls')
+      expect(controls).toBeInTheDocument()
+
+      // 输入框被禁用（aria-disabled="true" 且 contenteditable="false"），防止在 unknown 状态下修改身份
+      expect(composer).toHaveAttribute('aria-disabled', 'true')
+      expect(composer).toHaveAttribute('contenteditable', 'false')
+
+      // 验证 localStorage 存在冻结的 pending 消息
+      const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
+      expect(localStorage.getItem(pendingKey)).not.toBeNull()
+
+      // 点击真实的“重试”按钮
+      const retryButton = screen.getByRole('button', { name: '重试' })
+      await user.click(retryButton)
+
+      // 验证重试发送了完全相同的 batch（逐字节复用相同 idempotencyKey）
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+      const secondBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
+      expect(secondBatch?.commands[0]?.idempotencyKey).toBe(firstKey)
+
+      // 成功后，controls 消失，localStorage 被清空，输入框解锁
+      await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
+      expect(localStorage.getItem(pendingKey)).toBeNull()
+      expect(composer).toHaveAttribute('aria-disabled', 'false')
+    })
+
+    it('cleans up local storage pending message and unlocks composer on abandon click', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      vi.mocked(harnessService.acceptCommandBatch)
+        .mockRejectedValueOnce(new Error('Gateway timeout'))
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.type(composer, 'Abandon me')
+      await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      await screen.findByTestId('bound-pending-controls')
+      const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
+      expect(localStorage.getItem(pendingKey)).not.toBeNull()
+      expect(composer).toHaveAttribute('aria-disabled', 'true')
+
+      // 点击真实的“取消/放弃”按钮
+      const abandonButton = screen.getByRole('button', { name: '取消' })
+      await user.click(abandonButton)
+
+      // 验证控制栏消失，本地 pending 清理，输入框解锁，且未发起新的网络请求
+      await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
+      expect(localStorage.getItem(pendingKey)).toBeNull()
+      expect(composer).toHaveAttribute('aria-disabled', 'false')
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+    })
+
+    it('aborts sending before POST when localStorage persistence fails (fail-closed)', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      const originalSetItem = localStorage.setItem.bind(localStorage)
+      const storageSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, val) => {
+        if (key.includes('agent-thread-pending')) {
+          throw new Error('QuotaExceeded')
+        }
+        return originalSetItem(key, val)
+      })
+
+      try {
+        renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+        const composer = await screen.findByLabelText('给 AI 发送消息')
+        await user.click(composer)
+        await user.type(composer, 'Fail closed attempt')
+        await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+        // 验证 fail-closed：未调用 acceptCommandBatch
+        expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+        // 出现明确的存储失败可重试错误提示
+        await waitFor(() => {
+          expect(screen.getByText(/无法安全记录请求状态/)).toBeInTheDocument()
+        })
+      } finally {
+        storageSpy.mockRestore()
+      }
+    })
+
+    it('restores unknown pending message from localStorage on reload and allows retry via real button', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
+      // 模拟 POST 刚发出后页面被立即刷新（unknownOutcome 初始存为 false）
+      localStorage.setItem(
+        pendingKey,
+        JSON.stringify({
+          threadId: THREAD_ID,
+          unknownOutcome: false,
+          targetDraft: {
+            agentName: 'assistant',
+            model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+            environmentName: null,
+            yoloEnabled: false,
+          },
+          localDraft: [{ type: 'text', partId: 'p-reload', text: 'reload test message' }],
+          request: {
+            owner: { type: 'CHAT', chatId: CHAT_ID },
+            target: {
+              type: 'THREAD',
+              threadId: THREAD_ID,
+              expectedHeadEntryId: 'h1',
+              expectedNextCommandSequence: '1',
+            },
+            commands: [
+              {
+                type: 'USER_MESSAGE',
+                idempotencyKey: 'cmd-reloaded-key-1',
+                contents: [{ type: 'TEXT', text: 'reload test message' }],
+              },
+            ],
+          },
+        }),
+      )
+      vi.mocked(harnessService.acceptCommandBatch).mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+      // 验证刷新挂载后自动恢复 unknownOutcome = true，并展示 controls
+      const controls = await screen.findByTestId('bound-pending-controls')
+      expect(controls).toBeInTheDocument()
+
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      expect(composer).toHaveAttribute('aria-disabled', 'true')
+
+      // 点击真实的“重试”按钮
+      const retryButton = screen.getByRole('button', { name: '重试' })
+      await user.click(retryButton)
+
+      // 验证使用原请求 command idempotencyKey 重发
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      const batch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+      expect(batch?.commands[0]?.idempotencyKey).toBe('cmd-reloaded-key-1')
+
+      // 重试成功后状态清理
+      await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
+      expect(localStorage.getItem(pendingKey)).toBeNull()
+      expect(composer).toHaveAttribute('aria-disabled', 'false')
+    })
+
+    it('removes retry/abandon controls while a retry is in flight and accepts only one retry request', async () => {
+      // 测试意图：unknown 重试会同步把 unknownOutcome 置为 false，控件随之从 DOM 移除；
+      // 连点因此无法再次触发重试。同步 in-flight ref 另由 thread controller 单测覆盖。
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      let resolveRetry!: (val: HarnessThreadCommandDTO[]) => void
+      const retryPromise = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+        resolveRetry = resolve
+      })
+
+      vi.mocked(harnessService.acceptCommandBatch)
+        .mockRejectedValueOnce(new Error('Network disconnected'))
+        .mockReturnValueOnce(retryPromise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.type(composer, 'Hello rapid click test')
+      await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+      await screen.findByTestId('bound-pending-controls')
+      const retryBtn = screen.getByRole('button', { name: '重试' })
+      const cancelBtn = screen.getByRole('button', { name: '取消' })
+      expect(retryBtn).not.toBeDisabled()
+      expect(cancelBtn).not.toBeDisabled()
+
+      await user.click(retryBtn)
+      await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
+      expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+      expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
+      await user.click(composer)
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+
+      resolveRetry([])
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+      expect(screen.queryByTestId('bound-pending-controls')).toBeNull()
+    })
+
+    it('keeps an externally updated draft after an in-flight submission succeeds', async () => {
+      // 测试意图：绑定 composer 在 pending 期间对用户输入禁用，不能靠 user.type 改草稿。
+      // 通过真实 onPartsChange 模拟飞行中的外部草稿更新，成功返回后不得被清空。
+      let resolveFirst!: (val: HarnessThreadCommandDTO[]) => void
+      const firstCallPromise = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+        resolveFirst = resolve
+      })
+      vi.mocked(harnessService.acceptCommandBatch).mockReturnValueOnce(firstCallPromise)
+
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      const { result } = renderHook(
+        () =>
+          useAgentPaneController({
+            owner: { type: 'CHAT', chatId: CHAT_ID },
+            paneId: 'pane-draft',
+            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+            agents,
+            environments: [],
+            defaults: {},
+            focused: true,
+          }),
+        { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+      )
+      await waitFor(() => expect(result.current.composer.disabled).toBe(false))
+
+      act(() => result.current.composer.onPartsChange([createTextPart('first message')]))
+      let submission!: Promise<void>
+      act(() => {
+        submission = result.current.composer.onSubmit()
+      })
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      expect(result.current.composer.disabled).toBe(true)
+
+      act(() => result.current.composer.onPartsChange([createTextPart('typing next message while in flight')]))
+      expect(result.current.composer.parts).toEqual([
+        expect.objectContaining({ type: 'text', text: 'typing next message while in flight' }),
+      ])
+
+      await act(async () => {
+        resolveFirst([])
+        await submission
+      })
+      await waitFor(() => expect(result.current.composer.pending).toBe(false))
+      expect(result.current.composer.parts).toEqual([
+        expect.objectContaining({ type: 'text', text: 'typing next message while in flight' }),
+      ])
+    })
+
+    it('rejects interleaved pane from overwriting first pane pending and protects first pending on stop', async () => {
+      // 测试意图：第二 pane 先挂载并持有自己的 request，第一 pane 随后写入不同身份。
+      // storage 必须拒绝覆盖；第二 pane 的 stop 因身份不匹配不得清理第一 pane 的 pending。
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      let resolvePane2!: (val: HarnessThreadCommandDTO[]) => void
+      const pane2Request = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+        resolvePane2 = resolve
+      })
+      vi.mocked(harnessService.acceptCommandBatch)
+        .mockReturnValueOnce(pane2Request)
+        .mockRejectedValueOnce(new Error('Network error on pane 1'))
+      vi.mocked(harnessService.stopThread).mockResolvedValueOnce({
+        status: 'IDLE',
+        thread: thread(),
+        stoppedTurnEndEntryId: null,
+        cancelledCommandCount: 0,
+        cancelledUserMessages: [],
+      })
+
+      const client2 = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      const { result: controller2 } = renderHook(
+        () =>
+          useAgentPaneController({
+            owner: { type: 'CHAT', chatId: CHAT_ID },
+            paneId: 'pane-2',
+            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        { wrapper: ({ children }) => <QueryClientProvider client={client2}>{children}</QueryClientProvider> },
+      )
+      await waitFor(() => expect(controller2.current.composer.disabled).toBe(false))
+      expect(controller2.current.pendingMessage).toBeNull()
+
+      act(() => controller2.current.composer.onPartsChange([createTextPart('pane 2 message')]))
+      act(() => {
+        void controller2.current.composer.onSubmit()
+      })
+      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
+      const pane2Stored = localStorage.getItem(pendingKey)
+      expect(pane2Stored).not.toBeNull()
+      expect(controller2.current.pendingMessage?.request).toBeDefined()
+
+      await act(async () => {
+        resolvePane2([])
+      })
+      await waitFor(() => expect(controller2.current.pendingMessage).toBeNull())
+      expect(localStorage.getItem(pendingKey)).toBeNull()
+
+      const pane1 = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer1 = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer1)
+      await user.type(composer1, 'pane 1 message')
+      await user.click(screen.getByRole('button', { name: '发送消息' }))
+      await screen.findByTestId('bound-pending-controls')
+
+      const pane1Stored = localStorage.getItem(pendingKey)
+      expect(pane1Stored).not.toBeNull()
+      expect(pane1Stored).not.toBe(pane2Stored)
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+
+      act(() => controller2.current.composer.onPartsChange([createTextPart('pane 2 retry')]))
+      await act(async () => {
+        await controller2.current.composer.onSubmit()
+      })
+      expect(controller2.current.error).toMatch(/无法安全记录请求状态/)
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+      expect(localStorage.getItem(pendingKey)).toBe(pane1Stored)
+      expect(controller2.current.pendingMessage).toBeNull()
+
+      await act(async () => {
+        const stopped = controller2.current.controller.stopThread()
+        await Promise.resolve()
+        await stopped
+      })
+      expect(harnessService.stopThread).toHaveBeenCalledTimes(1)
+      expect(localStorage.getItem(pendingKey)).toBe(pane1Stored)
+      expect(controller2.current.pendingMessage).toBeNull()
+
+      pane1.unmount()
+    })
+  })
 })

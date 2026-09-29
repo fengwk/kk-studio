@@ -251,6 +251,9 @@ export function acceptanceCompletionApplies(
 
 export function isDefiniteAcceptanceFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
+    if (error.status === 408 || error.status === 429) {
+      return false
+    }
     return error.status != null && error.status >= 400 && error.status < 500
   }
   return false

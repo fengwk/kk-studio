@@ -156,10 +156,36 @@ export function AgentPane({
           </button>
         </div>
       ) : null}
+      {pane.pendingMessage && pane.pendingMessage.unknownOutcome ? (
+        <div className="thread-acceptance-retry" data-testid="bound-pending-controls">
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={pane.controller.pending}
+            onClick={pane.retryPendingMessage}
+          >
+            {t('shared.conflict.retry')}
+          </button>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={pane.controller.pending}
+            onClick={pane.abandonPendingMessage}
+          >
+            {t('shared.cancel')}
+          </button>
+        </div>
+      ) : null}
       <ConflictPresenter
         conflict={pane.conflict}
         onRefresh={() => void pane.refreshPaneProjection()}
-        onRetry={pane.pendingAcceptance?.unknownOutcome ? pane.retryAcceptance : undefined}
+        onRetry={
+          pane.pendingAcceptance?.unknownOutcome
+            ? pane.retryAcceptance
+            : pane.pendingMessage?.unknownOutcome
+              ? pane.retryPendingMessage
+              : undefined
+        }
         onClose={pane.dismissConflict}
       />
     </section>

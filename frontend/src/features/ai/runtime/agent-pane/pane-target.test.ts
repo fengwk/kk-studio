@@ -1,16 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import {
+  clearBoundPendingMessage,
   clearPaneTarget,
   clearPendingAcceptance,
+  isBoundPendingMessageValue,
   isBoundTarget,
+  isCommandContent,
+  isImageTier,
   isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
+  loadBoundPendingMessage,
   loadPaneTarget,
   loadPendingAcceptance,
   normalizePaneTarget,
+  sameBatchRequestIdentity,
+  saveBoundPendingMessage,
   savePaneTarget,
   savePendingAcceptance,
+  type BoundPendingMessage,
   type PendingAcceptance,
   type PaneTarget,
 } from '@/features/ai/runtime/agent-pane'
@@ -774,5 +782,205 @@ describe('PaneTarget durable-local FSM', () => {
       }))
       expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     }
+  })
+
+  describe('BoundPendingMessage durable local storage and imageTier validation', () => {
+    const threadId = 't-image-test-1'
+    const validPending: BoundPendingMessage = {
+      threadId,
+      unknownOutcome: false,
+      targetDraft: {
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        environmentName: null,
+        yoloEnabled: false,
+      },
+      localDraft: [
+        createTextPart('inspect image'),
+        {
+          type: 'attachment',
+          partId: 'part-att-1',
+          uploadId: 'upload-img-1',
+          filename: 'photo.jpg',
+          imageTier: '1080P',
+        },
+        createResourcePart('blob-res-1', 'chart.png', 'data:image/png;base64,aaa', 'ORIGINAL'),
+      ],
+      request: {
+        owner: { type: 'CHAT', chatId: 'c1' },
+        target: {
+          type: 'THREAD',
+          threadId,
+          expectedHeadEntryId: 'h1',
+          expectedNextCommandSequence: '2',
+        },
+        commands: [
+          {
+            type: 'USER_MESSAGE',
+            idempotencyKey: 'cmd-user-img-1',
+            contents: [
+              { type: 'TEXT', text: 'inspect image' },
+              { type: 'ATTACHMENT', uploadId: 'upload-img-1', imageTier: '1080P' },
+              {
+                type: 'RESOURCE',
+                blobId: 'blob-res-1',
+                name: 'chart.png',
+                preview: 'data:image/png;base64,aaa',
+                imageTier: 'ORIGINAL',
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    it('strictly validates imageTier enum and rejects unknown keys in command contents', () => {
+      // 严格枚举：720P | 1080P | ORIGINAL
+      expect(isImageTier('720P')).toBe(true)
+      expect(isImageTier('1080P')).toBe(true)
+      expect(isImageTier('ORIGINAL')).toBe(true)
+      expect(isImageTier('480P')).toBe(false)
+      expect(isImageTier('2K')).toBe(false)
+      expect(isImageTier('4K')).toBe(false)
+      expect(isImageTier('')).toBe(false)
+      expect(isImageTier(null)).toBe(false)
+      expect(isImageTier(undefined)).toBe(false)
+      expect(isImageTier(1080)).toBe(false)
+
+      // ATTACHMENT content validation
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1' })).toBe(true)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1', imageTier: '720P' })).toBe(true)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1', imageTier: '1080P' })).toBe(true)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1', imageTier: 'ORIGINAL' })).toBe(true)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1', imageTier: 'INVALID' })).toBe(false)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: 'u1', extraKey: true })).toBe(false)
+      expect(isCommandContent({ type: 'ATTACHMENT', uploadId: '' })).toBe(false)
+
+      // RESOURCE content validation
+      expect(isCommandContent({ type: 'RESOURCE', blobId: 'b1', name: 'img.png' })).toBe(true)
+      expect(isCommandContent({ type: 'RESOURCE', blobId: 'b1', name: 'img.png', preview: 'data:image' })).toBe(true)
+      expect(isCommandContent({ type: 'RESOURCE', blobId: 'b1', name: 'img.png', imageTier: 'ORIGINAL' })).toBe(true)
+      expect(isCommandContent({
+        type: 'RESOURCE',
+        blobId: 'b1',
+        name: 'img.png',
+        preview: 'data:image',
+        imageTier: '720P',
+      })).toBe(true)
+      expect(isCommandContent({ type: 'RESOURCE', blobId: 'b1', name: 'img.png', imageTier: 'BAD' })).toBe(false)
+      expect(isCommandContent({ type: 'RESOURCE', blobId: 'b1', name: 'img.png', unknown: 1 })).toBe(false)
+    })
+
+    it('roundtrips bound pending message with imageTier and verifies fail-closed storage', () => {
+      const storage = memoryStorage()
+      expect(isBoundPendingMessageValue(validPending)).toBe(true)
+
+      // 写入并 roundtrip 读取
+      saveBoundPendingMessage(threadId, validPending, storage)
+      const loaded = loadBoundPendingMessage(threadId, storage)
+      expect(loaded).toBeDefined()
+      // 刷新恢复时：因原本 unknownOutcome=false，load 自动将其标为 true，并回写 storage
+      expect(loaded?.unknownOutcome).toBe(true)
+      expect(loaded?.request.commands[0]?.contents).toHaveLength(3)
+
+      // Fail-closed 存储校验：当存储写入验证失败时抛出错误
+      const faultyStorage: Storage = {
+        ...memoryStorage(),
+        setItem: () => {},
+        getItem: () => null, // 模拟存储失败写入不生效
+      }
+      expect(() => saveBoundPendingMessage(threadId, validPending, faultyStorage)).toThrow(
+        /Persistence verification failed/,
+      )
+
+      // 非法 shape 拒绝写入并 fail-closed 抛错
+      const invalidPending = {
+        ...validPending,
+        request: {
+          ...validPending.request,
+          commands: [
+            {
+              ...validPending.request.commands[0],
+              unknownKey: 'forbidden',
+            },
+          ],
+        },
+      }
+      expect(() => saveBoundPendingMessage(threadId, invalidPending as unknown as BoundPendingMessage, storage)).toThrow(
+        /Invalid bound pending message shape/,
+      )
+    })
+
+    it('preserves pending message across multi-pane when matchingRequest differs', () => {
+      const storage = memoryStorage()
+      saveBoundPendingMessage(threadId, validPending, storage)
+
+      const differentRequest = {
+        ...validPending.request,
+        commands: [
+          {
+            ...validPending.request.commands[0]!,
+            idempotencyKey: 'cmd-diff-pane-999',
+          },
+        ],
+      }
+      expect(sameBatchRequestIdentity(validPending.request, differentRequest)).toBe(false)
+
+      // 另一个 pane 完成/清理时传入不同 request 身份：不得清理当前 pending，返回 false
+      const clearedDiff = clearBoundPendingMessage(threadId, differentRequest, storage)
+      expect(clearedDiff).toBe(false)
+      expect(loadBoundPendingMessage(threadId, storage)).not.toBeNull()
+
+      // 匹配当前 request 身份：正常清理并返回 true
+      const clearedSame = clearBoundPendingMessage(threadId, validPending.request, storage)
+      expect(clearedSame).toBe(true)
+      expect(loadBoundPendingMessage(threadId, storage)).toBeNull()
+    })
+
+    it('rejects overwriting an existing pending message with a different request identity', () => {
+      const storage = memoryStorage()
+      saveBoundPendingMessage(threadId, validPending, storage)
+
+      const conflictingPending: BoundPendingMessage = {
+        ...validPending,
+        request: {
+          ...validPending.request,
+          commands: [
+            {
+              type: 'USER_MESSAGE',
+              idempotencyKey: 'cmd-conflict-key-different',
+              contents: [{ type: 'TEXT', text: 'conflict attempt' }],
+            },
+          ],
+        },
+      }
+
+      // 拒绝覆盖并抛出 Conflict 错误
+      expect(() => saveBoundPendingMessage(threadId, conflictingPending, storage)).toThrow(
+        /Conflict: another pending message exists for this thread/,
+      )
+
+      // 原 pending 状态完好无损
+      const preserved = loadBoundPendingMessage(threadId, storage)
+      expect(preserved?.request.commands[0]?.idempotencyKey).toBe('cmd-user-img-1')
+
+      // 相同 request 身份（例如更新 unknownOutcome）允许正常更新
+      const updatedUnknown: BoundPendingMessage = {
+        ...validPending,
+        unknownOutcome: true,
+      }
+      expect(() => saveBoundPendingMessage(threadId, updatedUnknown, storage)).not.toThrow()
+    })
+
+    it('safely handles null storage and throwing storage without uncaught crashes', () => {
+      const throwingStorage = {
+        getItem: () => { throw new Error('SecurityError') },
+        setItem: () => { throw new Error('SecurityError') },
+        removeItem: () => { throw new Error('SecurityError') },
+      }
+      expect(loadBoundPendingMessage(threadId, throwingStorage)).toBeNull()
+      expect(() => saveBoundPendingMessage(threadId, validPending, throwingStorage)).toThrow(/SecurityError/)
+      expect(clearBoundPendingMessage(threadId, validPending.request, throwingStorage)).toBe(false)
+    })
   })
 })
