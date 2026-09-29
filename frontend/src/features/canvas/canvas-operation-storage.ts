@@ -21,7 +21,10 @@ import {
   toStorageError,
   type CanvasLocalStoreOptions,
 } from '@/features/canvas/canvas-local-store'
-import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
+import {
+  getEditingSessionId,
+  isSessionReloading,
+} from '@/features/canvas/canvas-editing-session'
 
 const DB_NAME = 'kkstudio.canvas.operations'
 const DB_VERSION = 1
@@ -71,7 +74,14 @@ interface ResolvedScope {
   sessionKey: string
 }
 
+function assertSessionWritable(): void {
+  if (isSessionReloading()) {
+    throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
+  }
+}
+
 function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions): ResolvedScope {
+  assertSessionWritable()
   const userId = options?.userId ?? getCurrentUserId()
   const editingSessionId = options?.editingSessionId ?? getEditingSessionId()
   return {
@@ -121,6 +131,7 @@ export async function saveCanvasOperation(
   operation: CanvasPendingOperation,
   options?: CanvasLocalStoreOptions,
 ): Promise<void> {
+  assertSessionWritable()
   const factory = resolveIdbFactory(options)
   if (!factory) {
     throw declareUnavailable()
@@ -163,6 +174,7 @@ export async function deleteCanvasOperation(
   operationId: string,
   options?: CanvasLocalStoreOptions,
 ): Promise<void> {
+  assertSessionWritable()
   const factory = resolveIdbFactory(options)
   if (!factory) {
     // 无可落盘内容，删除是幂等空操作；不重复告警。

@@ -724,6 +724,70 @@ describe('Canvas generic generation panel', () => {
     view.unmount()
   })
 
+  it('I11: 合法到非法部分输入保留草稿、外部 config 更新不覆盖 dirty、收起重开重置权威/修正输入有效', async () => {
+    // 测试意图：验证当用户在 JSON 编辑器中输入未闭合的非法部分内容时，草稿保留在文本框中供继续修改；组件外部属性或重渲染不覆盖用户的 dirty 草稿；收起重开时重置为权威配置，修正为合法 JSON 后成功提交
+    const view = renderPanel(null, models)
+
+    // 1. 展开参数 JSON
+    const toggleBtn = screen.getByRole('button', { name: '编辑参数 JSON' })
+    fireEvent.click(toggleBtn)
+
+    const textarea = screen.getByRole('textbox', { name: '参数 JSON' }) as HTMLTextAreaElement
+    expect(JSON.parse(textarea.value)).toEqual({ ratio: '1:1' })
+
+    // 2. 从合法输入修改为非法部分输入（如输了一半的属性）
+    const partialInput = '{\n  "ratio": "16:9",\n  "incomplete": '
+    fireEvent.change(textarea, { target: { value: partialInput } })
+
+    // 验证文本框草稿仍完整保留该部分输入，并提示语法错误，不向底层 schedule
+    expect(textarea.value).toBe(partialInput)
+    expect(screen.getByRole('alert')).toHaveTextContent('JSON 语法错误')
+    const scheduledCalls = view.scheduleFunctionConfig.mock.calls.length
+
+    // 3. 外部 config 更新或组件受外部状态重渲染时，由于处于 dirty 状态，绝不冲掉文本框里的用户输入草稿
+    const externalUpdatedTarget: ResourceNode = {
+      ...view.target,
+      function: {
+        ...view.target.function!,
+        configJson: JSON.stringify({
+          prompt: { segments: [{ type: 'TEXT', text: 'external change' }] },
+          parameters: { ratio: '4:3', external: 'yes' },
+        }),
+      },
+    }
+    view.rerenderPanel(view.snapshot, externalUpdatedTarget)
+
+    // dirty 草稿必须依然保留，不被 external config 覆盖
+    expect(textarea.value).toBe(partialInput)
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCalls)
+
+    // 4. 用户修正为合法输入：错误提示消失，并立即有效调度提交
+    const correctedInput = '{\n  "ratio": "16:9",\n  "steps": 25\n}'
+    fireEvent.change(textarea, { target: { value: correctedInput } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCalls + 1)
+    expect(
+      (view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+        .parameters,
+    ).toEqual({ ratio: '16:9', steps: 25 })
+
+    // 5. 再次输入非法内容后，点击“收起参数 JSON”并重新打开：重置为权威 parameters
+    fireEvent.change(textarea, { target: { value: 'invalid-json' } })
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+
+    // 点击收起
+    fireEvent.click(screen.getByRole('button', { name: '收起参数 JSON' }))
+    expect(screen.queryByRole('textbox', { name: '参数 JSON' })).not.toBeInTheDocument()
+
+    // 再次点击展开：从当前权威 parameters 重置初始化，无错误提示
+    fireEvent.click(screen.getByRole('button', { name: '编辑参数 JSON' }))
+    const reopenedTextarea = screen.getByRole('textbox', { name: '参数 JSON' }) as HTMLTextAreaElement
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(JSON.parse(reopenedTextarea.value)).toEqual({ ratio: '16:9', steps: 25 })
+
+    view.unmount()
+  })
+
   it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
     // 1. 设置坏记录到 localStorage，打开面板
     const corruptRaw = 'corrupt-raw-json-data'

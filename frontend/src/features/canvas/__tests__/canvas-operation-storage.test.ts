@@ -2,13 +2,21 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMockIDBFactory } from './mock-idb'
 import {
   buildPendingOperation,
+  createCanvasOperationStore,
   deleteCanvasOperation,
   loadCanvasOperations,
   resetCanvasOperationStorage,
   saveCanvasOperation,
   type CanvasPendingOperation,
 } from '@/features/canvas/canvas-operation-storage'
-import { onCanvasStorageError } from '@/features/canvas/canvas-local-store'
+import {
+  CanvasStorageUnavailableError,
+  onCanvasStorageError,
+} from '@/features/canvas/canvas-local-store'
+import {
+  handlePageshow,
+  resetEditingSessionForTests,
+} from '@/features/canvas/canvas-editing-session'
 import type { CanvasCommandDTO, UUIDString } from '@/shared/api/contracts/studio'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
@@ -231,5 +239,79 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const loaded = await loadCanvasOperations(CANVAS_ID, scoped)
     expect(loaded.map((item) => item.createdAt)).toEqual([100, 300])
     expect(loaded[0]?.ack).toEqual([])
+  })
+
+  it('I10: sessionReloading 期间 operation store 各入口（save/remove/list）全部 fail-closed 拒写，且不污染已持久化的旧 session 记录', async () => {
+    // 测试意图：验证当 bfcache 导致 sessionReloading 为 true 时，待确认操作存储的所有入口（save/remove/list）全部拒绝抛出 CanvasStorageUnavailableError，且旧 session 已存记录完好无损未被篡改
+    resetEditingSessionForTests()
+    const idbFactory = createMockIDBFactory()
+    const validOp = operation(1, 'key-persisted-1', 'initial-state', 'tab-1')
+
+    // 1. 在正常状态下预先写入一条合法记录
+    await saveCanvasOperation(validOp, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' })
+    const initialList = await loadCanvasOperations(CANVAS_ID, {
+      idbFactory,
+      userId: 'user-1',
+      editingSessionId: 'tab-1',
+    })
+    expect(initialList).toHaveLength(1)
+    expect(initialList[0].idempotencyKey).toBe('key-persisted-1')
+
+    // 2. 在正常状态下创建 store 实例
+    const store = createCanvasOperationStore(CANVAS_ID, {
+      idbFactory,
+      userId: 'user-1',
+      editingSessionId: 'tab-1',
+    })
+
+    // 3. 模拟 bfcache 冲突触发 sessionReloading = true
+    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+    const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, 'tab-1')
+    window.localStorage.setItem(
+      OWNER_STORAGE_KEY,
+      JSON.stringify({ 'tab-1': { pageId: 'another-live-page', at: Date.now() } }),
+    )
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { ...window.location, reload: vi.fn() },
+    })
+    handlePageshow({ persisted: true })
+
+    // 4. 测试已建 store 调用 save/remove/list 均拒绝
+    const newOp = operation(2, 'key-persisted-2', 'polluting-state', 'tab-1')
+
+    await expect(store.save(newOp)).rejects.toThrow(CanvasStorageUnavailableError)
+    await expect(store.remove(validOp.id)).rejects.toThrow(CanvasStorageUnavailableError)
+    await expect(store.list()).rejects.toThrow(CanvasStorageUnavailableError)
+
+    // 5. 测试 sessionReloading 期间新建 store 亦直接拒创
+    expect(() =>
+      createCanvasOperationStore(CANVAS_ID, {
+        idbFactory,
+        userId: 'user-1',
+        editingSessionId: 'tab-1',
+      }),
+    ).toThrow(CanvasStorageUnavailableError)
+
+    // 6. 测试独立函数 saveCanvasOperation / deleteCanvasOperation / loadCanvasOperations 亦全部 fail-closed
+    await expect(saveCanvasOperation(newOp, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+      .rejects.toThrow(CanvasStorageUnavailableError)
+    await expect(deleteCanvasOperation(validOp.id, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+      .rejects.toThrow(CanvasStorageUnavailableError)
+    await expect(loadCanvasOperations(CANVAS_ID, { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }))
+      .rejects.toThrow(CanvasStorageUnavailableError)
+
+    // 7. 恢复会话后验证旧记录未被污染或误删除
+    resetEditingSessionForTests()
+    const verifyList = await loadCanvasOperations(CANVAS_ID, {
+      idbFactory,
+      userId: 'user-1',
+      editingSessionId: 'tab-1',
+    })
+    expect(verifyList).toHaveLength(1)
+    expect(verifyList[0].idempotencyKey).toBe('key-persisted-1')
+    expect(verifyList[0].commands).toEqual([renameCommand('initial-state')])
   })
 })
