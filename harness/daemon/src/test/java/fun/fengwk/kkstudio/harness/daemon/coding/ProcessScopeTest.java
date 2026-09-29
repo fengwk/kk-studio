@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -390,6 +391,78 @@ class ProcessScopeTest {
       for (long pid : recordedPids(pidFile)) {
         assertFalse(alive(pid), "取消窗口里启动的 " + pid + " 必须已经消失");
       }
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
+   * keeper 被杀之后父进程仍必须收敛剩下的后代，且只能强杀「身份被重新核验过」的成员。
+   *
+   * <p>这是「keeper 先死、后代还在」这条真实去向的确定性构造：直接强杀 helper（模拟它被外部杀掉，因此不会走它自己的收敛 hook），此时组 id 已经没有 helper
+   * 可问，只能靠成员快照逐个确认「它此刻仍然属于本次范围、启动时刻与快照一致」之后再强杀。
+   */
+  @Test
+  void terminateConvergesRemainingMembersAfterTheKeeperIsKilled() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    Path pidFile = workdir.resolve("keeper-dead.pids");
+    ProcessScope scope =
+        ProcessScope.start(
+            workdir,
+            List.of(
+                "sh",
+                "-c",
+                "echo $$ >> '"
+                    + pidFile
+                    + "'; (trap '' TERM; sleep 60) & echo $! >> '"
+                    + pidFile
+                    + "'; wait"));
+    try {
+      long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+      while (!Files.exists(pidFile) && System.nanoTime() < deadline) {
+        Thread.sleep(20);
+      }
+      assertTrue(Files.exists(pidFile), "命令必须先真的跑起来");
+      List<Long> recorded = recordedPids(pidFile);
+      assertFalse(recorded.isEmpty(), "命令必须记下自己的 pid");
+
+      // keeper 直接消失：没有温和信号、没有收敛 hook，只剩父进程自己收尾。
+      scope.process().destroyForcibly();
+      assertTrue(scope.process().waitFor(20, TimeUnit.SECONDS), "keeper 必须先消失");
+      assertFalse(scope.process().isAlive(), "keeper 必须先消失");
+
+      assertTrue(scope.terminate(), "keeper 消失后父进程仍必须自己收敛剩下的成员");
+      assertTrue(scope.converged(), "收敛结论必须来自内核");
+      for (long pid : recorded) {
+        assertFalse(alive(pid), "keeper 死亡后 " + pid + " 必须被收敛");
+      }
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
+   * 只有身份被核验过的 pid 才允许强杀：启动时刻不符或不属于本次范围的进程一律不动。
+   *
+   * <p>这里用 pid 1 做「不属于本次范围但确实存在的进程」：它永远活着、也永远不在本次调用新建的进程组里。任何一次误杀都会
+   * 立刻表现为这个断言失败，因此这条用例把「绝不杀错进程」从注释变成事实。
+   */
+  @Test
+  void killVerifiedMemberNeverSignalsAnUnverifiedProcess() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    ProcessHandle foreign = ProcessHandle.of(1).orElse(null);
+    assertNotNull(foreign, "需要 pid 1 作为「存在但不属于本次范围」的进程");
+    Instant foreignStart = foreign.info().startInstant().orElse(null);
+    assertNotNull(foreignStart, "需要能读到 pid 1 的启动时刻");
+
+    ProcessScope scope = ProcessScope.start(workdir, List.of("sh", "-c", "sleep 30"));
+    try {
+      // 启动时刻不符：同一个 pid 但换了进程（pid 复用）时绝不能动手。
+      scope.killVerifiedMember(new PosixProcessGroup.GroupMember(1, foreignStart.plusSeconds(60)));
+      assertTrue(foreign.isAlive(), "启动时刻不符时绝不能发信号");
+      // 身份对得上、但不属于本次调用的进程组：同样绝不能动手。
+      scope.killVerifiedMember(new PosixProcessGroup.GroupMember(1, foreignStart));
+      assertTrue(foreign.isAlive(), "不属于本次范围的进程绝不能发信号");
     } finally {
       scope.close();
     }

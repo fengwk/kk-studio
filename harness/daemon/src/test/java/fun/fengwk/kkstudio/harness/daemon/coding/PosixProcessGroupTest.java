@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -68,45 +69,44 @@ class PosixProcessGroupTest {
     assertEquals(-1L, PosixProcessGroup.parseProcessId("12a"));
   }
 
-  /** 已经退出的进程按「信号已经交付」处理：收敛判定不该因为回收时序而失败。 */
+  /** 成员快照必须带身份（启动时刻）：只带 pid 的快照无法对抗 pid 复用，调用方要靠它重新核验。 */
   @Test
-  void signalProcessTreatsAGoneProcessAsDelivered() {
-    assumeFalse(isWindows(), "需要 POSIX 信号语义");
-    assertTrue(PosixProcessGroup.signalProcess(ProcessHandle.current().pid(), 0));
-    long gone = aProcessIdThatHasExited();
-    assertTrue(PosixProcessGroup.signalProcess(gone, PosixProcessGroup.SIGTERM));
-  }
-
-  /** 被内核拒绝（不是 ESRCH）时绝不能报成成功：那会把「还在跑的后代」判成已经收敛。 */
-  @Test
-  void signalProcessReportsRefusalInsteadOfSuccess() {
-    assumeFalse(isWindows(), "需要 POSIX 信号语义");
-    assumeFalse(isRoot(), "root 身份不会被内核拒绝，无法表达这条失败");
-    assertFalse(PosixProcessGroup.signalProcess(1, PosixProcessGroup.SIGTERM));
-    assertTrue(PosixProcessGroup.groupExists(1), "被拒绝的组必须按「仍然存在」处理");
-  }
-
-  /** 不存在的进程组对组信号来说是「已经收敛」，这是收敛判定最常见的正常结局。 */
-  @Test
-  void signalGroupTreatsAMissingGroupAsDelivered() {
-    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
-    assertTrue(PosixProcessGroup.signalGroup(goneGroup(), PosixProcessGroup.SIGTERM));
-    assertFalse(PosixProcessGroup.groupExists(goneGroup()));
-    assertFalse(PosixProcessGroup.hasLiveMember(goneGroup(), PosixProcessGroup.NO_PROCESS));
-  }
-
-  /** 成员枚举必须只看本次范围：自己可以被排除，别的组不会被算进来。 */
-  @Test
-  void enumeratesOnlyMembersOfTheGivenGroup() {
+  void memberSnapshotCarriesIdentityAndHonoursExclusion() {
     assumeTrueLinux();
     long group = PosixProcessGroup.currentGroup();
     long self = ProcessHandle.current().pid();
-    List<Long> withSelf =
-        asList(PosixProcessGroup.liveMembers(group, PosixProcessGroup.NO_PROCESS));
-    List<Long> withoutSelf = asList(PosixProcessGroup.liveMembers(group, self));
-    assertTrue(withSelf.contains(self) || withoutSelf.isEmpty(), "当前进程组至少包含自己");
-    assertFalse(withoutSelf.contains(self), "被排除的进程绝不出现在结果里");
-    assertTrue(withSelf.stream().anyMatch(pid -> pid > 0), "枚举结果只包含真实 pid");
+    List<PosixProcessGroup.GroupMember> withSelf =
+        PosixProcessGroup.membersSnapshot(group, PosixProcessGroup.NO_PROCESS);
+    assertNotNull(withSelf, "Linux 上必须能枚举成员");
+    assertTrue(
+        withSelf.stream().anyMatch(member -> member.pid() == self && member.start() != null),
+        "当前进程必须出现在自己的进程组里，并带上启动时刻");
+    List<PosixProcessGroup.GroupMember> withoutSelf =
+        PosixProcessGroup.membersSnapshot(group, self);
+    assertNotNull(withoutSelf);
+    assertFalse(withoutSelf.stream().anyMatch(member -> member.pid() == self), "被排除的进程绝不出现在快照里");
+  }
+
+  /** 不存在的进程组没有成员，进程组查询也要如实返回「查不到」。 */
+  @Test
+  void emptyGroupHasNoMembersAndUnknownProcessHasNoGroup() {
+    assumeTrueLinux();
+    List<PosixProcessGroup.GroupMember> members =
+        PosixProcessGroup.membersSnapshot(goneGroup(), PosixProcessGroup.NO_PROCESS);
+    assertNotNull(members);
+    assertEquals(List.of(), members);
+    assertEquals(-1L, PosixProcessGroup.processGroupOf(goneGroup()));
+    assertEquals(
+        PosixProcessGroup.currentGroup(),
+        PosixProcessGroup.processGroupOf(ProcessHandle.current().pid()));
+  }
+
+  /** 已经被内核拒绝的组必须按「仍然存在」处理：否则会跳过强杀阶段，把还在跑的后代当成已经收敛。 */
+  @Test
+  void groupExistsTreatsRefusalAsStillExisting() {
+    assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    assumeFalse(isRoot(), "root 身份不会被内核拒绝，无法表达这条失败");
+    assertTrue(PosixProcessGroup.groupExists(1), "被拒绝的组必须按「仍然存在」处理");
   }
 
   /** 建立 session 的失败必须显式报错：静默回退会让「整组收敛」的承诺失真。 */
@@ -122,12 +122,14 @@ class PosixProcessGroupTest {
   }
 
   private List<String> sessionFixtureCommand(Path marker) {
-    return List.of(
-        System.getProperty("java.home") + "/bin/java",
-        "-cp",
-        System.getProperty("java.class.path"),
-        PosixProcessGroupSessionFixture.class.getName(),
-        marker.toString());
+    List<String> command = new ArrayList<>();
+    command.add(System.getProperty("java.home") + "/bin/java");
+    command.addAll(TestCoverageAgentArguments.forwarded());
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(PosixProcessGroupSessionFixture.class.getName());
+    command.add(marker.toString());
+    return command;
   }
 
   private Path statFile(String content) throws IOException {

@@ -276,7 +276,7 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   `ProcessScopeCrossPlatformTest` 承担：它在三个平台上都用真实 Java 进程层级（含两层嵌套）与原生 pid 说话，且矩阵会断言这组
   用例在每台 runner 上都真跑、一个都不跳过。平台 shell 语义（`bash -lc`、`cmd /c`）与 `WindowsJobScope` 的 kernel32 路径
   仍只能在各自平台上由 `BashCapabilityTest`、`ProcessScopeTest`、`WindowsCommandLineTest` 给出结论，CI 矩阵
-  （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）负责这件事；Linux 与 macOS 上该矩阵已通过。LSP 客户端所用的
+  （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）负责这件事。LSP 客户端所用的
   `ProcessTree` 仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows
   上的验证同样只能来自该矩阵。
 - **命令的 stdin 与信号处置是范围的一部分。** 命令的 stdin 是一条只由 keeper 持有写端的空管道（keeper 启动后立刻关闭写端），
@@ -308,24 +308,21 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   矩阵每台 runner 都带 `-Dkk-studio.process-scope.helper-coverage=true` 运行并总是上传 `jacoco.exec`、`jacoco-helper/*.exec`
   与 `target/classes`；合并作业先核对三份 class 文件逐字节一致（不一致会让 JaCoCo 按 class id 静默丢 session），再合并出
   报告并核对「七类必须全部出现在报告里」。
-  最近一次真实三平台合并（run 36596508961，含 Windows 与 macOS 数据）的合计是 **83.3%**，逐类为 `ProcessScope` 85.0%、
-  `ProcessScopeHelper` 82.2%、`PosixProcessGroup` 81.8%、`ProcessScopeState` 96.4%、`WindowsJobScope` 72.8%、
-  `WindowsCommandLine` 100%、`BashCapability` 86.7%，距 90% 还差约 64 行。因此门禁当前**故意保持红色**：它记录的是目标，
-  而不是把下限调低换绿色。已补齐的与仍缺的分别如下：
-  - 已补：`PosixProcessGroupTest` 覆盖 `/proc/<pid>/stat` 解析（含带括号空格的 `comm`、僵尸状态、结构不完整与非数字字段）、
-    pid 解析、`signalProcess`/`signalGroup`/`groupExists` 的 errno 语义（不存在的组按已交付处理、被内核拒绝绝不报成功），
-    以及 `createSession` 的独立进程夹具（首次成功、已是组长时显式失败）——本地单平台 `PosixProcessGroup` 因此从 78.8% 升到
-    86.8%。`ProcessScopeStateTest` 覆盖握手面的真实文件系统拒绝，`ProcessScopeState` 为 96.4%。
-  - 仍缺（按缺口从大到小）：`WindowsJobScope` 的深层失败分支（`CreateProcess` 失败、属性列表失败、句柄关闭路径）需要
-    Windows runner 上的可注入 kernel 接口；`BashCapability` 与 `ProcessScope` 的异常去向（信号被拒、不可中断的等待、
-    helper 拒绝退出）；`ProcessScopeHelper` 的 Windows 分支与许可/闸门超时（后者需要可构造的 deadline 时钟）。
-- **父进程侧仍有无法确定性构造的分支。**- **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
-  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/
-  `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 78.1%/78.8%/73.6%，模块整体行 86.6%）；缺口是 Windows
-  专属分支（helper 的 `runWindows` 与 Windows 分派、`WindowsJobScope` 全类）、中断/信号被拒/闸门与许可超时这类只在异常时序到达的
-  失败关闭分支，以及需要跨 JVM 采集的 helper 侧代码。收敛 hook 本身由派发窗口取消用例覆盖。helper 侧用
-  `-Dkk-studio.process-scope.helper-coverage=true` 收集，把 `target/jacoco.exec` 与 `target/jacoco-helper/*.exec` 串接成一个文件后交给
-  `jacoco:report` 即可合并测量；真正补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的补测。
+  跨平台数据不能与单平台数据混着报数：类文件一变，同一份 `jacoco.exec` 就不再对应同一个 class id，因此门禁数字只能来自同一
+  次矩阵的三份产物。最近一次真实三平台合并（run 36596508961）的合计是 **83.3%**；它之后又补了 `WindowsJobScope` 的包内可注入
+  kernel 绑定与失败分支/句柄释放计数用例、`PosixProcessGroupTest` 的会话夹具、`ProcessScope` 的 pid 复用核验与「keeper 先死、
+  后代还在」用例、helper 入口与许可预算用例，这些改动都改变了 class id。改动后的本地单平台（Linux，七类合计）实测为
+  **86.2%**：`ProcessScope` 81.3%、`ProcessScopeHelper` 73.0%、`PosixProcessGroup` 88.9%、`ProcessScopeState` 96.4%、
+  `WindowsJobScope` 91.2%、`WindowsCommandLine` 100%、`BashCapability` 91.8%。新的三平台合计必须由改动后的矩阵重新跑出来，
+  不能用旧数据或单平台数据声明达标。
+  仍缺的行只能由对应平台或异常时序提供：`ProcessScopeHelper` 的 `runWindows` 与 Windows 分派、`ProcessScope` 的 Windows Job
+  分支与 `WindowsJobScope` 余下的句柄路径（Windows runner），以及「信号被内核拒绝、调用线程被中断、helper 拒绝退出」这类
+  失败关闭分支与 `helperCoverageArguments`/`helperCoverageDirectory` 中「父进程没有代理」的守卫分支（只有不带代理运行时才成立）。
+  补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的补测，也不通过放宽阈值把它们变成绿色。
+- **保活与身份核验是两件事。** 「keeper 先死、后代还在」时不能照着快照直接发信号：快照与强杀之间存在时间差，pid 可能已被复用。
+  `ProcessScope` 因此对每个成员重新核验「仍然存活、启动时刻与快照一致、此刻仍属于本次进程组」之后才强杀，任一不成立就只报告未收敛。
+  这条性质由 `ProcessScope` 的「keeper 被杀之后仍收敛」与「绝不向未核验进程发信号」两条用例守卫。
+
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
   在下一次调用重建存储；输出内容与失败终态都不受影响。
 - **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」

@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -83,24 +84,24 @@ final class PosixProcessGroup {
     LibC.INSTANCE.signal(SIGTERM, SIG_IGN);
   }
 
-  /** 本平台是否能枚举组内成员：只有 Linux/WSL 能通过 {@code /proc} 做到，其它 POSIX 平台只能问「组还在不在」。 */
-  static boolean canEnumerateMembers() {
-    return isLinux();
-  }
+  /**
+   * 组内成员的快照项：pid 与它在快照时刻的身份（启动时刻）。
+   *
+   * <p>只带 pid 的快照无法对抗 pid 复用：调用方必须在强杀之前重新核验身份，因此快照把身份一起带出来。
+   */
+  record GroupMember(long pid, Instant start) {}
 
   /**
-   * 组里当前活着（非僵尸）的成员，排除 {@code excludedProcess}；无法枚举的平台返回空数组。
+   * 组里当前活着（非僵尸）的成员的快照，排除 {@code excludedProcess}。
    *
-   * <p>这是一个**快照**：调用方只能在紧接着的强杀里使用它，然后必须重新判定收敛。逐个 pid 发信号的价值在于「keeper 已经退出、组 id
-   * 可能被复用」时不再广播：信号只发给刚刚确认过属于本组的 pid。
-   *
-   * <p>扫描不可判定时返回单个 {@code -1}：调用方必须把它当成「还没有收敛」，不可判定绝不等于收敛。
+   * <p>返回 {@code null} 表示「不可判定」：本平台没有 {@code /proc}（无法枚举），或者扫描本身失败。调用方必须把它当成
+   * 「还没有收敛」，绝不可判定绝不等于收敛——但也绝不因此向任何 pid 发信号。身份（启动时刻）读不到的成员同样不进快照：只强杀 身份可核验的成员。
    */
-  static long[] liveMembers(long processGroup, long excludedProcess) {
+  static List<GroupMember> membersSnapshot(long processGroup, long excludedProcess) {
     if (!isLinux()) {
-      return new long[0];
+      return null;
     }
-    List<Long> members = new ArrayList<>();
+    List<GroupMember> members = new ArrayList<>();
     try (DirectoryStream<Path> entries = Files.newDirectoryStream(PROC)) {
       for (Path entry : entries) {
         long pid = parseProcessId(entry.getFileName().toString());
@@ -108,23 +109,26 @@ final class PosixProcessGroup {
           continue;
         }
         ProcessStat stat = readProcessStat(entry.resolve("stat"));
-        if (stat != null && stat.group == processGroup && isLiveState(stat.state)) {
-          members.add(pid);
+        if (stat == null || stat.group != processGroup || !isLiveState(stat.state)) {
+          continue;
+        }
+        Instant start =
+            ProcessHandle.of(pid).flatMap(handle -> handle.info().startInstant()).orElse(null);
+        if (start != null) {
+          members.add(new GroupMember(pid, start));
         }
       }
     } catch (IOException error) {
       // 扫描失败按「不可判定」处理：调用方会把它当成「还没有收敛」，绝不据此宣布收敛。
-      return new long[] {-1};
+      return null;
     }
-    return members.stream().mapToLong(Long::longValue).toArray();
+    return members;
   }
 
-  /** 向单个进程发信号；返回 {@code true} 表示信号已经交付或进程已经不在了。 */
-  static boolean signalProcess(long process, int signal) {
-    if (LibC.INSTANCE.kill((int) process, signal) == 0) {
-      return true;
-    }
-    return Native.getLastError() == ESRCH;
+  /** 进程此刻所属的进程组；进程已经不存在或状态不可读时返回 {@code -1}。 */
+  static long processGroupOf(long pid) {
+    ProcessStat stat = readProcessStat(PROC.resolve(Long.toString(pid)).resolve("stat"));
+    return stat == null ? -1 : stat.group;
   }
 
   /**
@@ -207,12 +211,13 @@ final class PosixProcessGroup {
     if (!groupExists(processGroup)) {
       return false;
     }
-    if (!canEnumerateMembers()) {
-      // 没有 /proc 的平台只能把「组仍然存在」当成「还没有收敛」——僵尸会被 init 快速回收，因此这个保守判定通常不会真的
-      // 阻塞；反过来谎称已经收敛会让收尾跳过强杀阶段。
+    List<GroupMember> members = membersSnapshot(processGroup, excludedProcess);
+    if (members == null) {
+      // 没有 /proc 的平台，或扫描不可判定：只能把「组仍然存在」当成「还没有收敛」。僵尸会被 init 快速回收，因此这个保守判定
+      // 通常不会真的阻塞；反过来谎称已经收敛会让收尾跳过强杀阶段。
       return true;
     }
-    return liveMembers(processGroup, excludedProcess).length > 0;
+    return !members.isEmpty();
   }
 
   /** {@code /proc/<pid>/stat} 的状态字段：{@code Z}/{@code X}/{@code x} 是不会再执行任何代码的成员。 */

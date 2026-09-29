@@ -80,15 +80,17 @@ public final class WindowsJobScope {
 
   private final HANDLE job;
   private final boolean owner;
+  private final WindowsKernel kernel;
   private HANDLE process;
   private HANDLE thread;
   private long processId;
   private boolean resumed;
   private boolean closed;
 
-  private WindowsJobScope(HANDLE job, boolean owner) {
+  private WindowsJobScope(HANDLE job, boolean owner, WindowsKernel kernel) {
     this.job = job;
     this.owner = owner;
+    this.kernel = kernel;
   }
 
   /** 从调用私有的状态目录派生 Job 名：父进程与 helper 对同一个目录得到同一个名字。 */
@@ -115,15 +117,23 @@ public final class WindowsJobScope {
    * 在这条指令之前被打死也不会留下无主进程。
    */
   static WindowsJobScope createSuspended(String jobName, List<String> command, Path workdir) {
+    return createSuspended(WindowsKernel.INSTANCE, jobName, command, workdir);
+  }
+
+  /**
+   * 与 {@link #createSuspended(String, List, Path)} 相同的实现，只是显式给出 kernel 绑定：包内测试用假实现驱动失败分支与
+   * 句柄释放计数（真实失败只有在真实 Windows 上才能构造），生产调用方永远走真实绑定。
+   */
+  static WindowsJobScope createSuspended(
+      WindowsKernel kernel, String jobName, List<String> command, Path workdir) {
     if (command.isEmpty()) {
       throw new IllegalArgumentException("command must not be empty");
     }
-    WindowsKernel kernel = WindowsKernel.INSTANCE;
     HANDLE job = kernel.CreateJobObject(null, jobName);
     if (job == null) {
       throw new IllegalStateException("cannot create the scope job object: " + lastError());
     }
-    WindowsJobScope scope = new WindowsJobScope(job, true);
+    WindowsJobScope scope = new WindowsJobScope(job, true, kernel);
     try {
       scope.limitJobLifetimeToHandle();
       WinBase.PROCESS_INFORMATION information = scope.createSuspendedProcess(command, workdir);
@@ -143,12 +153,16 @@ public final class WindowsJobScope {
    * <p>只有拿到这个句柄，父进程才能在 helper 之外终止整组并查询整组是否已经结束。
    */
   static WindowsJobScope attach(String jobName) {
-    WindowsKernel kernel = WindowsKernel.INSTANCE;
+    return attach(WindowsKernel.INSTANCE, jobName);
+  }
+
+  /** 与 {@link #attach(String)} 相同的实现，只是显式给出 kernel 绑定；包内测试用它驱动打开失败与重试预算。 */
+  static WindowsJobScope attach(WindowsKernel kernel, String jobName) {
     long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(ATTACH_BUDGET_MILLIS);
     while (true) {
       HANDLE job = kernel.OpenJobObject(JOB_OBJECT_ALL_ACCESS, false, jobName);
       if (job != null) {
-        return new WindowsJobScope(job, false);
+        return new WindowsJobScope(job, false, kernel);
       }
       if (System.nanoTime() >= deadline) {
         throw new IllegalStateException(
@@ -168,7 +182,7 @@ public final class WindowsJobScope {
     if (thread == null) {
       throw new IllegalStateException("the scope job object has no suspended command process");
     }
-    if (WindowsKernel.INSTANCE.ResumeThread(thread) == -1) {
+    if (kernel.ResumeThread(thread) == -1) {
       throw new IllegalStateException("cannot resume the command process: " + lastError());
     }
     resumed = true;
@@ -176,7 +190,6 @@ public final class WindowsJobScope {
 
   /** helper 侧：等待首个进程退出并原样返回它自己的退出码。 */
   int awaitExit() {
-    WindowsKernel kernel = WindowsKernel.INSTANCE;
     if (kernel.WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0) {
       throw new IllegalStateException("cannot wait for the command process: " + lastError());
     }
@@ -194,7 +207,7 @@ public final class WindowsJobScope {
    * 的查询回答。
    */
   boolean terminateAndDrain(long budgetMillis) {
-    WindowsKernel.INSTANCE.TerminateJobObject(job, 1);
+    kernel.TerminateJobObject(job, 1);
     return awaitEmpty(budgetMillis);
   }
 
@@ -219,7 +232,6 @@ public final class WindowsJobScope {
       return;
     }
     closed = true;
-    WindowsKernel kernel = WindowsKernel.INSTANCE;
     if (owner && process != null) {
       if (!resumed) {
         // 从未运行过的挂起进程：helper 失败关闭时必须自己结束它，而不是把它留给句柄语义。
@@ -236,7 +248,7 @@ public final class WindowsJobScope {
   private Integer activeProcesses() {
     JobBasicAccountingInformation accounting = new JobBasicAccountingInformation();
     IntByReference returned = new IntByReference();
-    if (!WindowsKernel.INSTANCE.QueryInformationJobObject(
+    if (!kernel.QueryInformationJobObject(
         job,
         JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION_CLASS,
         accounting.getPointer(),
@@ -252,7 +264,7 @@ public final class WindowsJobScope {
     JobExtendedLimitInformation limits = new JobExtendedLimitInformation();
     limits.basicLimitInformation.limitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     limits.write();
-    if (!WindowsKernel.INSTANCE.SetInformationJobObject(
+    if (!kernel.SetInformationJobObject(
         job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS, limits.getPointer(), limits.size())) {
       throw new IllegalStateException("cannot limit the scope job object lifetime: " + lastError());
     }
@@ -265,53 +277,54 @@ public final class WindowsJobScope {
    * 可继承的，这里是显式校验/设置，而不是假定 Java 启动的进程一定给了可继承句柄。
    */
   private WinBase.PROCESS_INFORMATION createSuspendedProcess(List<String> command, Path workdir) {
-    WindowsKernel kernel = WindowsKernel.INSTANCE;
     HANDLEByReference stdinRead = new HANDLEByReference();
     HANDLEByReference stdinWrite = new HANDLEByReference();
     if (!kernel.CreatePipe(stdinRead, stdinWrite, inheritableAttributes(), 0)) {
       throw new IllegalStateException("cannot create the command stdin pipe: " + lastError());
     }
-    // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
-    if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
-      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
-      throw new IllegalStateException(
-          "cannot make the command stdin write end private: " + lastError());
-    }
-    HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
-    STARTUPINFOEX startupInfoEx = new STARTUPINFOEX();
-    startupInfoEx.StartupInfo.cb = new DWORD(startupInfoEx.size());
-    startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfoEx.StartupInfo.hStdInput = stdinRead.getValue();
-    startupInfoEx.StartupInfo.hStdOutput = standardOutput;
-    startupInfoEx.StartupInfo.hStdError = standardOutput;
-    CreationAttributes attributes =
-        CreationAttributes.create(kernel, job, new HANDLE[] {stdinRead.getValue(), standardOutput});
-    startupInfoEx.lpAttributeList = attributes;
-    startupInfoEx.write();
-    WinBase.PROCESS_INFORMATION information = new WinBase.PROCESS_INFORMATION();
-    boolean created;
+    // 管道两端从这一刻起就属于这次调用：无论后面是校验标准句柄、创建属性列表还是创建进程失败，都必须交还给系统，
+    // 因此它们统一由这个 finally 关闭（而不是只在 CreateProcessW 附近关）。
+    CreationAttributes attributes = null;
     try {
-      created =
-          kernel.CreateProcessW(
-              applicationName(command.getFirst()),
-              WindowsCommandLine.join(command),
-              null,
-              null,
-              true,
-              new DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED),
-              null,
-              workdir.toString(),
-              startupInfoEx.getPointer(),
-              information);
+      // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
+      if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
+        throw new IllegalStateException(
+            "cannot make the command stdin write end private: " + lastError());
+      }
+      HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+      STARTUPINFOEX startupInfoEx = new STARTUPINFOEX();
+      startupInfoEx.StartupInfo.cb = new DWORD(startupInfoEx.size());
+      startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+      startupInfoEx.StartupInfo.hStdInput = stdinRead.getValue();
+      startupInfoEx.StartupInfo.hStdOutput = standardOutput;
+      startupInfoEx.StartupInfo.hStdError = standardOutput;
+      attributes =
+          CreationAttributes.create(
+              kernel, job, new HANDLE[] {stdinRead.getValue(), standardOutput});
+      startupInfoEx.lpAttributeList = attributes;
+      startupInfoEx.write();
+      WinBase.PROCESS_INFORMATION information = new WinBase.PROCESS_INFORMATION();
+      if (!kernel.CreateProcessW(
+          applicationName(command.getFirst()),
+          WindowsCommandLine.join(command),
+          null,
+          null,
+          true,
+          new DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED),
+          null,
+          workdir.toString(),
+          startupInfoEx.getPointer(),
+          information)) {
+        throw new IllegalStateException(
+            "cannot start command " + command.getFirst() + " in " + workdir + ": " + lastError());
+      }
+      return information;
     } finally {
-      attributes.close(kernel);
+      if (attributes != null) {
+        attributes.close(kernel);
+      }
       closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
     }
-    if (!created) {
-      throw new IllegalStateException(
-          "cannot start command " + command.getFirst() + " in " + workdir + ": " + lastError());
-    }
-    return information;
   }
 
   /** 管道与 Job 句柄都不参与继承：它们只由 helper 与父进程各自持有。 */
