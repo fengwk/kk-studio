@@ -57,7 +57,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
-    referenceResolver.requireCurrentSkills(config.getSkills());
+    referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
     referenceResolver.requireSubagentsForCreate(definition.getName(), config.getSubagents());
     try {
       if (!agentDefinitionRepository.create(definition)) {
@@ -84,15 +84,16 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       throw new AiValidationException(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    AgentDefinition definition = referenceResolver.requireAgent(name);
-    ensureExpectedVersion(definition, name, rawExpected, expected);
+    AgentDefinition current = referenceResolver.requireAgent(name);
+    ensureExpectedVersion(current, name, rawExpected, expected);
     ModelRef modelRef = parseModelRef(updateDTO.getModel());
     referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    AgentDefinition definition = copy(current);
     definitionMutationFactory.update(definition, updateDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
-    referenceResolver.requireCurrentSkills(config.getSkills());
+    referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
     AgentDefinition locked =
         referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
     ensureExpectedVersion(locked, name, rawExpected, expected);
@@ -130,6 +131,21 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
+  }
+
+  private static AgentDefinition copy(AgentDefinition source) {
+    AgentDefinition copy = new AgentDefinition();
+    copy.setName(source.getName());
+    copy.setDescription(source.getDescription());
+    copy.setSystemPrompt(source.getSystemPrompt());
+    copy.setModelProviderName(source.getModelProviderName());
+    copy.setModelName(source.getModelName());
+    copy.setVariant(source.getVariant());
+    copy.setConfigJson(source.getConfigJson());
+    copy.setVersion(source.getVersion());
+    copy.setCreateTime(source.getCreateTime());
+    copy.setUpdateTime(source.getUpdateTime());
+    return copy;
   }
 
   private static void ensureExpectedVersion(

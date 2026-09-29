@@ -442,6 +442,11 @@ public class SkillCatalogServiceImplTest {
     }
 
     @Override
+    public SkillPackage lockPackageForShare(String packageName) {
+      return packages.get(packageName);
+    }
+
+    @Override
     public SkillPackage lockPackage(String packageName) {
       return packages.get(packageName);
     }

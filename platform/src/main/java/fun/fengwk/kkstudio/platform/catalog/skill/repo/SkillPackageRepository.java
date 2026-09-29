@@ -17,6 +17,13 @@ public interface SkillPackageRepository {
   /** 读取某 Package；不存在返回 null。 */
   SkillPackage getPackage(String packageName);
 
+  /**
+   * 以 {@code FOR SHARE} 读取某 Package；不存在返回 null。
+   *
+   * <p>共享锁与删除、发布等 {@code FOR UPDATE} 互斥，从而拦住 manifest 等非键列修改，同时允许并发的 Agent 引用事务共存。
+   */
+  SkillPackage lockPackageForShare(String packageName);
+
   /** 以 {@code FOR UPDATE} 读取某 Package；不存在返回 null。 */
   SkillPackage lockPackage(String packageName);
 
