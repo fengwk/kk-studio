@@ -13,6 +13,7 @@ dependency-provided notices are also retained in the JAR.
 | Eclipse LSP4J (`org.eclipse.lsp4j`, `org.eclipse.lsp4j.jsonrpc`) | Eclipse Public License（版本声明不一致，见下节） |
 | Gson | Apache License 2.0 |
 | SLF4J | MIT License |
+| JNA and JNA Platform (`net.java.dev.jna:jna`, `net.java.dev.jna:jna-platform`) | Apache License 2.0（双许可，本项目按 Apache-2.0 使用） |
 | RE2/J | Go License (BSD-style) |
 
 ## RE2/J
