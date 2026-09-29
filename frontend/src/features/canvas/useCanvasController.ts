@@ -104,6 +104,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const dockAddRef = useRef<HTMLButtonElement | null>(null)
   const closeContextMenuRef = useRef<(() => void) | null>(null)
   const queueRef = useRef<CanvasCommandQueue | null>(null)
+  const queueCanvasIdRef = useRef<UUIDString | null>(null)
   const pendingCommandCountRef = useRef(0)
   const reservedNodeAliasesRef = useRef(new Set<string>())
   const applyDraftAcksRef = useRef<(acks: CanvasDraftAck[]) => void>(() => undefined)
@@ -125,6 +126,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     return () => {
       isMountedRef.current = false
       canvasEpochRef.current += 1
+      queueRef.current = null
+      queueCanvasIdRef.current = null
     }
   }, [])
 
@@ -132,6 +135,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     if (state.canvasId !== activeCanvasIdRef.current) {
       canvasEpochRef.current += 1
       activeCanvasIdRef.current = state.canvasId
+      queueRef.current = null
+      queueCanvasIdRef.current = null
       draftsRef.current = {}
       positionsRef.current = {}
       targetDraftsRef.current = {}
@@ -374,30 +379,35 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     })
   }, [snapshotQuery.data, state.canvasId])
 
-  const ackDurableDrafts = useCallback((acks: CanvasDraftAck[]): Promise<void> => {
+  const ackDurableDraftsForScope = useCallback((
+    targetCanvasId: UUIDString,
+    targetSessionId: string,
+    targetEpoch: number,
+    acks: CanvasDraftAck[],
+  ): Promise<void> => {
     if (acks.length === 0) {
-      return Promise.resolve()
-    }
-    const taskEpoch = canvasEpochRef.current
-    const taskCanvasId = activeCanvasIdRef.current
-    if (!taskCanvasId) {
       return Promise.resolve()
     }
 
     const ackTask = draftPersistChainRef.current.then(async () => {
-      if (
-        !isMountedRef.current
-        || canvasEpochRef.current !== taskEpoch
-        || activeCanvasIdRef.current !== taskCanvasId
-      ) {
+      // 持久 ACK 针对原 identity 即使卸载或画布切换也必须 await 实际 IDB commit
+      // 若 IDB 写入失败则自然抛出异常，使得 ackTask reject，保留 operation
+      await ackCanvasDrafts(targetCanvasId, acks, { editingSessionId: targetSessionId })
+
+      // 内存 state / baseline 变更只能当 captured generation 仍 active，绝不改新 canvas
+      const isStillActive = (
+        isMountedRef.current
+        && canvasEpochRef.current === targetEpoch
+        && activeCanvasIdRef.current === targetCanvasId
+      )
+
+      if (!isStillActive) {
         return
       }
 
-      await ackCanvasDrafts(taskCanvasId, acks, { editingSessionId: getEditingSessionId() })
-
       // 同一序列化边界内推进持久基线
       const baseline = draftBaselineRef.current
-      if (baseline.canvasId === taskCanvasId) {
+      if (baseline.canvasId === targetCanvasId) {
         for (const ack of acks) {
           const baseDraft = baseline.drafts[ack.nodeId]
           if (baseDraft) {
@@ -444,28 +454,51 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         targetDraftsRef.current = nextDrafts
       }
 
-      if (isMountedRef.current && canvasEpochRef.current === taskEpoch) {
+      if (isMountedRef.current && canvasEpochRef.current === targetEpoch && activeCanvasIdRef.current === targetCanvasId) {
         setState((current) => changed ? { ...current, drafts: nextDrafts, positionDrafts: nextPositions } : current)
       }
     })
+
+    // 链序保证：前序 queued writes -> ACK -> 后续 writes
     draftPersistChainRef.current = ackTask.catch(() => undefined)
     return ackTask
   }, [])
+
+  const ackDurableDrafts = useCallback((acks: CanvasDraftAck[]): Promise<void> => {
+    const canvasId = activeCanvasIdRef.current
+    if (!canvasId) {
+      return Promise.resolve()
+    }
+    return ackDurableDraftsForScope(canvasId, getEditingSessionId(), canvasEpochRef.current, acks)
+  }, [ackDurableDraftsForScope])
 
   useEffect(() => {
     if (!snapshotQuery.data || !state.canvasId) {
       return
     }
+    if (queueRef.current && queueCanvasIdRef.current !== state.canvasId) {
+      queueRef.current = null
+      queueCanvasIdRef.current = null
+    }
     if (!queueRef.current) {
       const canvasId = state.canvasId
+      const capturedSessionId = getEditingSessionId()
+      const capturedEpoch = canvasEpochRef.current
+
+      // 创建该 queue 专属的 onDraftAcks：严格捕获原 canvasId、editingSessionId 与 epoch
+      const queueDraftAcks = (acks: CanvasDraftAck[]): Promise<void> =>
+        ackDurableDraftsForScope(canvasId, capturedSessionId, capturedEpoch, acks)
+
       const queue = new CanvasCommandQueue(canvasId, {
         initialSnapshot: snapshotQuery.data,
+        editingSessionId: capturedSessionId,
         onSnapshot: (snapshot) => {
           queryClient.setQueryData(queryKeys.studio.canvas(canvasId as string), snapshot)
         },
-        onDraftAcks: ackDurableDrafts,
+        onDraftAcks: queueDraftAcks,
       })
       queueRef.current = queue
+      queueCanvasIdRef.current = canvasId
       // 刷新 / 路由切换后，按冻结顺序精确重放原 idempotencyKey 与原始命令体。
       void queue.recover()
         .then((result) => {
@@ -499,7 +532,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         queryClient.setQueryData(queryKeys.studio.canvas(state.canvasId), authoritative)
       }
     }
-  }, [ackDurableDrafts, queryClient, snapshotQuery.data, state.canvasId])
+  }, [ackDurableDraftsForScope, queryClient, snapshotQuery.data, state.canvasId])
 
   // 应用事件 WebSocket 订阅：更高 revision 直接刷新权威 Snapshot
   const refreshCanvasSnapshot = useCallback(() => {
@@ -831,6 +864,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     resetFunctionConfigDrafts()
     reservedNodeAliasesRef.current.clear()
     queueRef.current = null
+    queueCanvasIdRef.current = null
     canvasEpochRef.current += 1
     activeCanvasIdRef.current = canvasId
     draftsRef.current = {}
@@ -861,6 +895,8 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     setInitialFitPending(false)
     canvasEpochRef.current += 1
     activeCanvasIdRef.current = null
+    queueRef.current = null
+    queueCanvasIdRef.current = null
     draftsRef.current = {}
     positionsRef.current = {}
     targetDraftsRef.current = {}
