@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
+import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
@@ -33,8 +34,9 @@ import java.util.Map;
 @RestControllerAdvice(
     assignableTypes = {
       StudioCanvasController.class,
-      StudioChatController.class,
       StudioCanvasFunctionController.class,
+      StudioCanvasResourceController.class,
+      StudioChatController.class,
       StudioHarnessCommandBatchController.class,
       StudioHarnessProviderRequestPreviewController.class,
       StudioHarnessSessionController.class,

@@ -634,23 +634,23 @@ export async function stopThreadForCleanup(
 
 /**
  * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。返回当前 ToolInvocationDTO。
- * Java 事实：HarnessToolApprovalDTO {decision: ALLOW|DENY, decisionId, actor, reason}；
+ * Java 事实：HarnessToolApprovalDTO {decision: ALLOW|DENY, decisionId, reason}；actor 由服务端从认证主体解析，
+ * 请求体绝不允许携带身份字段（携带即未知字段 → 400）。
  * ALLOWED 恢复为 READY 并请求 TOOL Work，DENIED 终止为 FAILED；Thread version touch 一次。
  */
 export async function approveToolInvocation(
   ctx,
   threadId,
   toolInvocationId,
-  { decision, decisionId, actor = 'web', reason = null },
+  { decision, decisionId, reason = null },
 ) {
   assert(decision === 'ALLOW' || decision === 'DENY', `decision must be ALLOW|DENY: ${decision}`)
   assert(decisionId && typeof decisionId === 'string', 'decisionId required')
-  assert(actor && typeof actor === 'string', 'actor required')
   assert(reason == null || typeof reason === 'string', 'reason must be string|null')
   const { status, json } = await ctx.call(
     'PUT',
     `/api/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
-    { decision, decisionId, actor, reason },
+    { decision, decisionId, reason },
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)
   const invocation = envelopeData(json)

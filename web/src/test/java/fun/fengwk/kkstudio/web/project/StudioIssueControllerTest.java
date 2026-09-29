@@ -83,15 +83,16 @@ class StudioIssueControllerTest {
     projectService = mock(ProjectService.class);
     issueActivityRepository = mock(IssueActivityRepository.class);
 
+    IssueDetailAssembler issueDetailAssembler =
+        new IssueDetailAssembler(
+            issueService, issueRunService, projectService, new ProjectDtoMapper(), codec);
     StudioIssueController controller =
         new StudioIssueController(
             issueService,
-            issueRunService,
             issueEvidenceService,
-            projectService,
             new ProjectDtoMapper(),
             issueActivityRepository,
-            codec);
+            issueDetailAssembler);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)

@@ -15,35 +15,23 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
-import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
-import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
-import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.CreateIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
-import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
 import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
-import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
@@ -56,12 +44,8 @@ import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -78,62 +62,25 @@ public class StudioIssueController {
   private static final int MAX_ACTIVITY_LIMIT = 200;
 
   private final IssueService issueService;
-  private final IssueRunService issueRunService;
   private final IssueEvidenceService issueEvidenceService;
-  private final ProjectService projectService;
   private final ProjectDtoMapper mapper;
   private final IssueActivityRepository issueActivityRepository;
-  private final ProjectWorkflowJsonCodec workflowCodec;
+  private final IssueDetailAssembler issueDetailAssembler;
 
   @Autowired
   public StudioIssueController(
       IssueService issueService,
-      IssueRunService issueRunService,
       IssueEvidenceService issueEvidenceService,
-      ProjectService projectService,
       ProjectDtoMapper mapper,
       IssueActivityRepository issueActivityRepository,
-      ProjectWorkflowJsonCodec workflowCodec) {
+      IssueDetailAssembler issueDetailAssembler) {
     this.issueService = Objects.requireNonNull(issueService, "issueService");
-    this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
     this.issueEvidenceService =
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
-    this.projectService = projectService;
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.issueActivityRepository = issueActivityRepository;
-    this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
-  }
-
-  public StudioIssueController(
-      IssueService issueService,
-      IssueRunService issueRunService,
-      IssueEvidenceService issueEvidenceService,
-      ProjectService projectService,
-      ProjectDtoMapper mapper,
-      IssueActivityRepository issueActivityRepository) {
-    this(
-        issueService,
-        issueRunService,
-        issueEvidenceService,
-        projectService,
-        mapper,
-        issueActivityRepository,
-        new ProjectWorkflowJsonCodec());
-  }
-
-  public StudioIssueController(
-      IssueService issueService,
-      IssueRunService issueRunService,
-      IssueEvidenceService issueEvidenceService,
-      ProjectDtoMapper mapper) {
-    this(
-        issueService,
-        issueRunService,
-        issueEvidenceService,
-        null,
-        mapper,
-        null,
-        new ProjectWorkflowJsonCodec());
+    this.issueDetailAssembler =
+        Objects.requireNonNull(issueDetailAssembler, "issueDetailAssembler");
   }
 
   @PostMapping("/api/projects/{projectId}/issues")
@@ -155,86 +102,7 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
-
-    Issue issue = issueService.getIssue(issueId);
-    List<IssueActivity> activities =
-        issueService.listActivities(issueId, afterSequence, activityLimit);
-    List<IssueActivityDTO> activityDtos = activities.stream().map(mapper::toDto).toList();
-
-    String nextActivityCursor = null;
-    if (activities.size() == activityLimit) {
-      long lastSequence = activities.get(activities.size() - 1).getSequence();
-      nextActivityCursor = String.valueOf(lastSequence);
-    }
-
-    List<IssueAgentThread> agentThreads = issueService.listAgentThreads(issueId);
-    List<IssueAgentThreadDTO> agentThreadDtos = agentThreads.stream().map(mapper::toDto).toList();
-    Map<UUID, String> threadToAgent = new HashMap<>();
-    for (IssueAgentThread thread : agentThreads) {
-      threadToAgent.put(thread.threadId(), thread.agentName());
-    }
-
-    List<IssueRun> runs = issueRunService.listRuns(issueId);
-    List<IssueRunDTO> runDtos = new ArrayList<>(runs.size());
-    for (IssueRun run : runs) {
-      runDtos.add(mapper.toDto(run, threadToAgent.get(run.getThreadId())));
-    }
-
-    IssueRun activeRun =
-        runs.stream()
-            .filter(
-                run ->
-                    run.getStatus() == IssueRunStatus.RUNNING
-                        || run.getStatus() == IssueRunStatus.WAITING)
-            .findFirst()
-            .orElse(null);
-    IssueRunDTO currentRunDto =
-        activeRun != null
-            ? mapper.toDto(activeRun, threadToAgent.get(activeRun.getThreadId()))
-            : null;
-
-    IssueRun latestRun =
-        runs.stream().max(Comparator.comparingLong(IssueRun::getOrdinal)).orElse(null);
-    IssueRunDTO latestRunDto =
-        latestRun != null
-            ? mapper.toDto(latestRun, threadToAgent.get(latestRun.getThreadId()))
-            : null;
-
-    List<IssueStageBudgetDTO> stageBudgets = new ArrayList<>();
-    if (projectService != null) {
-      try {
-        Project project = projectService.getProject(issue.getProjectId());
-        if (project != null
-            && project.getWorkflowJson() != null
-            && !project.getWorkflowJson().isBlank()) {
-          ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
-          for (ProjectWorkflowState state : workflow.workStages()) {
-            try {
-              StageBudgetView view = issueService.getStageBudget(issueId, state.state().value());
-              stageBudgets.add(mapper.toDto(view));
-            } catch (ProjectNotFoundException ignored) {
-              // 阶段额度尚未授权时静默跳过
-            }
-          }
-        }
-      } catch (ProjectNotFoundException ignored) {
-        // 项目未找到时跳过
-      }
-    }
-
-    IssueDetailDTO detail =
-        IssueDetailDTO.builder()
-            .issue(mapper.toDto(issue))
-            .activities(activityDtos)
-            .nextActivityCursor(nextActivityCursor)
-            .runs(runDtos)
-            .currentRun(currentRunDto)
-            .latestRun(latestRunDto)
-            .stageBudgets(stageBudgets)
-            .agentThreads(agentThreadDtos)
-            .build();
-
-    return Results.ok(detail);
+    return Results.ok(issueDetailAssembler.assemble(issueId, afterSequence, activityLimit));
   }
 
   @GetMapping("/api/issues/{issueId}/activities")

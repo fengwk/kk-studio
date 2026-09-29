@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.web.project;
 
-import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
@@ -26,9 +27,11 @@ import java.util.UUID;
  *
  * <p>读取 Project、未归档 Issues 与每 Issue 的当前/最近 Run 概要（含解析自稳定 Thread 的 Agent 名称）。
  *
+ * <p>整个组装在同一个只读 {@code REPEATABLE_READ} 事务内完成（声明式，由 Spring 代理生效）：否则多个独立查询之间可能有其它事务提交， 从而拼出旧 Project
+ * + 新 Issue/Run 的撕裂响应。
+ *
  * <p>对所有跨表实体严格执行 {@code projectId} 与 {@code issueId} 归属校验，任何不一致立即 fail-closed 抛出异常，绝不泄漏外国实体。
  */
-@AllArgsConstructor
 @Component
 public class ProjectSnapshotAssembler {
 
@@ -37,6 +40,18 @@ public class ProjectSnapshotAssembler {
   private final IssueRunService issueRunService;
   private final ProjectDtoMapper mapper;
 
+  public ProjectSnapshotAssembler(
+      ProjectService projectService,
+      IssueService issueService,
+      IssueRunService issueRunService,
+      ProjectDtoMapper mapper) {
+    this.projectService = Objects.requireNonNull(projectService, "projectService");
+    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
+    this.mapper = Objects.requireNonNull(mapper, "mapper");
+  }
+
+  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
   public ProjectSnapshotDTO assemble(UUID projectId) {
     Objects.requireNonNull(projectId, "projectId");
 

@@ -246,11 +246,14 @@ export interface HarnessCancelledUserMessageDTO {
   messageJson: string
 }
 
-/** Tool 审批决定请求；decisionId 是稳定的客户端幂等键。 */
+/**
+ * Tool 审批决定请求；decisionId 是稳定的客户端幂等键。
+ *
+ * <p>请求体绝不携带操作者身份：actor 由服务端从认证主体解析，客户端无法伪造。
+ */
 export interface HarnessToolApprovalDTO {
   decision: 'ALLOW' | 'DENY'
   decisionId: string
-  actor: string
   reason: string | null
 }
 
