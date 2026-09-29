@@ -9,18 +9,19 @@ name: process-scope
 on:
   push:
     branches:
-      - worktree/audit-process-scope
       - main
       - dev
     paths:
       - 'harness/daemon/**'
       - 'harness/environment/**'
+      - 'scripts/dev/verify/process-scope/**'
       - 'pom.xml'
       - '.github/workflows/process-scope.yml'
   pull_request:
     paths:
       - 'harness/daemon/**'
       - 'harness/environment/**'
+      - 'scripts/dev/verify/process-scope/**'
       - 'pom.xml'
       - '.github/workflows/process-scope.yml'
   workflow_dispatch:
