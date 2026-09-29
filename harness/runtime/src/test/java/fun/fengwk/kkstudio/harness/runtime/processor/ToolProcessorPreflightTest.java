@@ -293,7 +293,7 @@ class ToolProcessorPreflightTest {
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
             "token",
-            ToolProcessorTestSupport.NOW.plusSeconds(5));
+            Duration.ofSeconds(5));
 
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread thread = new Thread(() -> result.set(fixture.processor.process(claimed)));
@@ -323,7 +323,7 @@ class ToolProcessorPreflightTest {
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
             "near-expiry",
-            ToolProcessorTestSupport.NOW.plusSeconds(1));
+            Duration.ofSeconds(1));
     fixture.gateway.queuePreflightAllow();
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 

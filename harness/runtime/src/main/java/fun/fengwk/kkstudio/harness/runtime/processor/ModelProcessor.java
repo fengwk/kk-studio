@@ -448,7 +448,7 @@ public final class ModelProcessor implements AutoCloseable {
       return new Prepare.Lost();
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
+    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     tx.updateModelInvocation(model.beginDispatch(now));
     tx.updateThread(thread.touchVersion(now));
     Entry turnStart =

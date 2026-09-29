@@ -5,7 +5,6 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
@@ -40,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -47,6 +47,13 @@ import java.util.UUID;
 
 /** Work mailbox 协议：target 存在性、lost wake、due 排序、lease fence 与 rollback。 */
 public abstract class HarnessStoreWorkContract {
+
+  /**
+   * claim / renew 使用的标准租约时长。
+   *
+   * <p>契约只约束「lease 覆盖权威时间 + duration」，不约束绝对 deadline：生产权威时间是数据库时钟，测试不得用 JVM 绝对时间反推。
+   */
+  protected static final Duration CLAIM_LEASE = Duration.ofMinutes(10);
 
   protected HarnessStore store;
 
@@ -57,9 +64,16 @@ public abstract class HarnessStoreWorkContract {
 
   abstract HarnessStore createStore();
 
+  /**
+   * 让 target 当前 lease 在各自权威时间域内确定过期。
+   *
+   * <p>PostgreSQL 直接改写持久化行的 lease deadline，内存实现改写内存 lease deadline；两者都不依赖 JVM 与数据库的时钟关系。
+   */
+  protected abstract void expireLease(WorkTarget target);
+
   protected ClaimedWork claimNext(WorkTargetType type, Instant now) {
     return store
-        .transaction(tx -> tx.claimNextWork(type, now, "lease-token", now.plusSeconds(60)))
+        .transaction(tx -> tx.claimNextWork(type, now, "lease-token", CLAIM_LEASE))
         .orElseThrow();
   }
 
@@ -287,16 +301,20 @@ public abstract class HarnessStoreWorkContract {
         IllegalArgumentException.class,
         () ->
             store.transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, T1.plusNanos(1), "token-a", T5)));
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.THREAD, T1.plusNanos(1), "token-a", CLAIM_LEASE)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             store.transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-b", T5.plusNanos(1))));
+                tx ->
+                    tx.claimNextWork(
+                        WorkTargetType.THREAD, T1, "token-b", CLAIM_LEASE.plusNanos(1))));
 
     ClaimedWork claim =
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-c", T5))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-c", CLAIM_LEASE))
             .orElseThrow();
     assertThrows(
         IllegalArgumentException.class,
@@ -309,7 +327,7 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.renewWork(claim, T2, T5.plusSeconds(1).plusNanos(1));
+                  tx.renewWork(claim, T2, CLAIM_LEASE.plusNanos(1));
                   return null;
                 }));
     requestWork(target, T0);
@@ -411,7 +429,7 @@ public abstract class HarnessStoreWorkContract {
     assertEquals(thread2, claimNext(WorkTargetType.THREAD, T3).target().id());
     assertTrue(
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token", T4))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token", CLAIM_LEASE))
             .isEmpty());
   }
 
@@ -423,22 +441,23 @@ public abstract class HarnessStoreWorkContract {
     // 尚未可用
     assertTrue(
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", T4))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", CLAIM_LEASE))
             .isEmpty());
     // 在可用时刻 claim
     ClaimedWork claimed =
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T2, "token-1", T4))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T2, "token-1", CLAIM_LEASE))
             .orElseThrow();
     // 活跃 lease 阻塞其他 claim
     assertTrue(
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token-2", T4))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token-2", CLAIM_LEASE))
             .isEmpty());
-    // lease 在 now 已过期，可用新 token reclaim
+    // lease 在权威时间域内过期后，可用新 token reclaim
+    expireLease(target);
     ClaimedWork reclaimed =
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T4, "token-3", T5))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "token-3", CLAIM_LEASE))
             .orElseThrow();
     assertNotEquals(claimed.leaseToken(), reclaimed.leaseToken());
     assertEquals(1L, reclaimed.claimedWakeVersion());
@@ -523,21 +542,31 @@ public abstract class HarnessStoreWorkContract {
                         T2)));
   }
 
+  /** 测试意图：renew 只在目标时点严格晚于现有 lease 时延展 deadline 并保留 token；不缩短（返回 false）且不改动 row。 */
   @Test
-  void renewWorkExtendsTheActiveLease() {
+  void renewWorkExtendsTheActiveLeaseWithoutShorteningIt() {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
     ClaimedWork claim = claimNext(WorkTargetType.THREAD, T1);
-    Instant newUntil = T2.plusSeconds(120);
-    inTransaction(store, tx -> tx.renewWork(claim, T2, newUntil));
+    Instant before = claim.leaseUntil();
+
+    // 目标时点未超过现有 lease：保持不变并返回 false，避免把更长的 lease 缩短。
+    boolean shortened = store.transaction(tx -> tx.renewWork(claim, T2, Duration.ofSeconds(1)));
+    assertFalse(shortened);
+    assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow().leaseUntil());
+
+    // 目标时点严格晚于现有 lease：延展并保留 token。
+    boolean extended =
+        store.transaction(tx -> tx.renewWork(claim, T2, CLAIM_LEASE.plusSeconds(120)));
+    assertTrue(extended);
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
-    assertEquals(newUntil, work.leaseUntil());
+    assertTrue(work.leaseUntil().isAfter(before));
     assertEquals(claim.leaseToken(), work.leaseToken());
   }
 
   @Test
-  void renewWorkRejectsStaleTokenStaleLeaseAndNonExtendingUntil() {
+  void renewWorkRejectsStaleTokenAndExpiredLease() {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target, T0);
@@ -553,18 +582,12 @@ public abstract class HarnessStoreWorkContract {
                         new ClaimedWork(
                             target, claim.claimedWakeVersion(), "wrong", claim.leaseUntil()),
                         T2,
-                        T3)));
-    // 必须严格延长当前 lease
+                        CLAIM_LEASE.plusSeconds(60))));
+    // lease 在权威时间域内过期后再 renew 是 lost lease
+    expireLease(target);
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> tx.renewWork(claim, T2, claim.leaseUntil())));
-    // lease 过期后再 renew
-    Instant afterExpiry = claim.leaseUntil().plusSeconds(5);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store, tx -> tx.renewWork(claim, afterExpiry, afterExpiry.plusSeconds(10))));
+        () -> inTransaction(store, tx -> tx.renewWork(claim, T2, CLAIM_LEASE.plusSeconds(60))));
   }
 
   @Test
@@ -626,7 +649,7 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", T2.plusSeconds(60));
+                  tx.claimNextWork(WorkTargetType.THREAD, T1, "token-1", CLAIM_LEASE);
                   throw new IllegalStateException("boom");
                 }));
     // 失败事务中的 lease 不可见
@@ -636,8 +659,7 @@ public abstract class HarnessStoreWorkContract {
     // 同一 row 之后仍可被 claim
     assertTrue(
         store
-            .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-2", T2.plusSeconds(60)))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token-2", CLAIM_LEASE))
             .isPresent());
   }
 
@@ -686,15 +708,13 @@ public abstract class HarnessStoreWorkContract {
                             target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil()),
                         T2))
             .isEmpty());
-    // lease 在 now 已过期属 stale ownership
-    assertTrue(
-        store
-            .transaction(tx -> tx.lockClaimedWork(claim, claim.leaseUntil().plusSeconds(1)))
-            .isEmpty());
     // 失败的 ownership 检查不会改动 row
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(claim.leaseToken(), work.leaseToken());
     assertEquals(claim.leaseUntil(), work.leaseUntil());
+    // lease 在权威时间域内过期属 stale ownership（用实现自己的过期方式，不依赖 JVM 与数据库的时钟关系）
+    expireLease(target);
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T2)).isEmpty());
   }
 
   @Test
@@ -725,7 +745,8 @@ public abstract class HarnessStoreWorkContract {
     assertThrows(
         IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim, T2)));
     assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.renewWork(claim, T2, T3)));
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.renewWork(claim, T2, CLAIM_LEASE)));
     assertThrows(
         IllegalStateException.class,
         () -> inTransaction(store, tx -> tx.rescheduleWork(claim, T2, T3)));

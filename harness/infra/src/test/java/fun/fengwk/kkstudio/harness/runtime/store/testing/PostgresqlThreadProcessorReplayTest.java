@@ -195,7 +195,7 @@ class PostgresqlThreadProcessorReplayTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "first-claim", now.plusSeconds(30)))
+                          WorkTargetType.THREAD, now, "first-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(first));
       var applied =
@@ -226,7 +226,7 @@ class PostgresqlThreadProcessorReplayTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "continuation-claim", now.plusSeconds(30)))
+                          WorkTargetType.THREAD, now, "continuation-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(second));
       var continued =

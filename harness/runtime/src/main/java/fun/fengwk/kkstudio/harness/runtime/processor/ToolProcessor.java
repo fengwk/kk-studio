@@ -342,7 +342,7 @@ public final class ToolProcessor implements AutoCloseable {
       return new Prepare.Input(thread.id());
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
+    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     if (tool.approval() == null) {
