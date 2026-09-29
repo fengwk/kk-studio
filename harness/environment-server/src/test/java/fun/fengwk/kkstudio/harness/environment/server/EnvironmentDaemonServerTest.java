@@ -848,7 +848,6 @@ class EnvironmentDaemonServerTest {
   /** 测试意图：终态帧与实例接管同时从目录取走同一调用时，listener 恰好收到一次终态。后到者看到的是已经取出的调用，不得再发第二终态。 */
   @Test
   void terminalAndAbandonRaceDeliversExactlyOneOutcome() throws Exception {
-    int terminalWins = 0;
     for (int index = 0; index < 32; index++) {
       int attempt = index;
       Fixture fixture = new Fixture();
@@ -884,12 +883,41 @@ class EnvironmentDaemonServerTest {
       assertTrue(join(abandon));
       int outcomes = (listener.completed == null ? 0 : 1) + listener.errorCount;
       assertEquals(1, outcomes, "第 " + attempt + " 次竞争必须恰好一个终态");
-      if (listener.completed != null) {
-        terminalWins++;
+    }
+  }
+
+  /** 测试意图：分别确定性覆盖两种先后顺序；竞争测试不依赖线程调度随机产生特定赢家分布。 */
+  @Test
+  void terminalAndAbandonEachWinWhenDeliveredFirst() {
+    for (boolean terminalFirst : List.of(true, false)) {
+      Fixture fixture = new Fixture();
+      FakeChannel channel = fixture.connectReady("channel-ordered-" + terminalFirst);
+      RecordingListener listener = new RecordingListener();
+      fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+      Runnable terminal =
+          () ->
+              fixture.receive(
+                  channel,
+                  DaemonMessageType.COMPLETED,
+                  CALL_ONE.toString(),
+                  completedPayload(CALL_ONE, "done"));
+      Runnable abandon =
+          () -> {
+            fixture.leaseStore.activeLeaseToken = false;
+            fixture.connectReady("channel-takeover-" + terminalFirst, OTHER_INSTANCE_ID);
+          };
+      if (terminalFirst) {
+        terminal.run();
+        abandon.run();
+        assertEquals("done", listener.completedText());
+        assertEquals(0, listener.errorCount);
+      } else {
+        abandon.run();
+        terminal.run();
+        assertNull(listener.completed);
+        assertEquals(1, listener.errorCount);
       }
     }
-    assertTrue(
-        terminalWins > 0 && terminalWins < 32, "竞争必须同时观察到终态帧与接管两条赢家路径，实际终态帧赢了 " + terminalWins);
   }
 
   /** 测试意图：WELCOME 递交被拒绝时必须关闭该连接，不能停在已绑定但未完成握手的状态。 */
