@@ -301,15 +301,25 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   `target/jacoco-helper/*.exec`，用 `mvn org.jacoco:jacoco-maven-plugin:merge -DdestFile=... fileSets=...` 或 JaCoCo CLI
   合并后即可在报告里看到 `ProcessScopeHelper`/`PosixProcessGroup` 的 helper 侧行覆盖。默认关闭是因为被插桩的 helper 冷启动更慢，
   会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
-- **三平台合并覆盖率是 CI 的固定门禁入口。** 执行范围的核心逻辑一半在 helper 的独立 JVM 里，而平台专属分支只会在对应平台上
-  被执行（Windows 的 Job 语义、macOS 的非 Linux 分支、Linux 的 `/proc` 判定），因此矩阵每台 runner 都带
-  `-Dkk-studio.process-scope.helper-coverage=true` 运行并总是上传 `jacoco.exec`、`jacoco-helper/*.exec` 与 `target/classes`；
-  合并作业先核对三份 class 文件逐字节一致（否则 JaCoCo 会按 class id 静默丢 session），再合并出报告并核对「核心类必须出现在
-  报告里、且不低于已记录下限」，同时每次都打印与 90% 目标的差距。本地（Linux 单平台，含 helper 数据）现状是 `ProcessScope`
-  77.7%、`ProcessScopeHelper` 71.2%、`PosixProcessGroup` 78.8%、`ProcessScopeState` 96.4%，核心合计 76.7%；合并三平台后
-  Windows 与 macOS 的分支会补上一部分，剩余缺口来自只能靠失败注入构造的防御分支（helper 拒绝退出、不可中断的等待、信号被拒），
-  需要按 `gate-core-coverage.py` 打印的逐类差距继续补测。
-- **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
+- **三平台合并覆盖率是 CI 的固定门禁入口，且门禁是核心路径合计而非逐类。** 执行范围的核心路径是七类：`ProcessScope`、
+  `ProcessScopeHelper`、`PosixProcessGroup`、`ProcessScopeState`、`WindowsJobScope`、`WindowsCommandLine`、`BashCapability`。
+  把 Windows 实现或 bash 能力留在集合外，等于用「最关键的平台没有数字」换门禁通过，因此它们一并纳入，门禁只要求这七类的
+  **合计**行覆盖达到 90%（逐类差异很大，逐类阈值会把不可达分支当成失败信号），但每一类的数字都打印出来。
+  矩阵每台 runner 都带 `-Dkk-studio.process-scope.helper-coverage=true` 运行并总是上传 `jacoco.exec`、`jacoco-helper/*.exec`
+  与 `target/classes`；合并作业先核对三份 class 文件逐字节一致（不一致会让 JaCoCo 按 class id 静默丢 session），再合并出
+  报告并核对「七类必须全部出现在报告里」。
+  最近一次真实三平台合并（run 36596508961，含 Windows 与 macOS 数据）的合计是 **83.3%**，逐类为 `ProcessScope` 85.0%、
+  `ProcessScopeHelper` 82.2%、`PosixProcessGroup` 81.8%、`ProcessScopeState` 96.4%、`WindowsJobScope` 72.8%、
+  `WindowsCommandLine` 100%、`BashCapability` 86.7%，距 90% 还差约 64 行。因此门禁当前**故意保持红色**：它记录的是目标，
+  而不是把下限调低换绿色。已补齐的与仍缺的分别如下：
+  - 已补：`PosixProcessGroupTest` 覆盖 `/proc/<pid>/stat` 解析（含带括号空格的 `comm`、僵尸状态、结构不完整与非数字字段）、
+    pid 解析、`signalProcess`/`signalGroup`/`groupExists` 的 errno 语义（不存在的组按已交付处理、被内核拒绝绝不报成功），
+    以及 `createSession` 的独立进程夹具（首次成功、已是组长时显式失败）——本地单平台 `PosixProcessGroup` 因此从 78.8% 升到
+    86.8%。`ProcessScopeStateTest` 覆盖握手面的真实文件系统拒绝，`ProcessScopeState` 为 96.4%。
+  - 仍缺（按缺口从大到小）：`WindowsJobScope` 的深层失败分支（`CreateProcess` 失败、属性列表失败、句柄关闭路径）需要
+    Windows runner 上的可注入 kernel 接口；`BashCapability` 与 `ProcessScope` 的异常去向（信号被拒、不可中断的等待、
+    helper 拒绝退出）；`ProcessScopeHelper` 的 Windows 分支与许可/闸门超时（后者需要可构造的 deadline 时钟）。
+- **父进程侧仍有无法确定性构造的分支。**- **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
   退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/
   `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 78.1%/78.8%/73.6%，模块整体行 86.6%）；缺口是 Windows
   专属分支（helper 的 `runWindows` 与 Windows 分派、`WindowsJobScope` 全类）、中断/信号被拒/闸门与许可超时这类只在异常时序到达的

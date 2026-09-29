@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
-"""合并报告的门禁：执行范围「父进程 + helper」核心类必须被真正合并进来，且不得低于已记录的下限。
+"""合并报告的门禁：执行范围的核心路径必须整体达到 90% 行覆盖。
 
-核心类的可达分支并不集中在单个平台上：Windows Job 语义只在 Windows runner 上被执行，非 Linux 分支只在 macOS 上被执行，
-Linux 的 `/proc` 收敛判定只在 Linux 上被执行。因此这里的输入必须是三平台合并后的报告：
+核心路径不是一两个类，而是「让命令在 OS 级执行范围里跑起来并在各种去向都收敛」的整条链路：父进程侧的编排、helper 侧的
+派生与收敛、两侧共用的原语、Windows Job 实现、Windows 命令行拼装，以及 bash 能力本身。把 Windows 实现或 bash 能力留在
+集合外，等于用「最关键的平台没有数字」换取门禁通过，因此这里把它们一并纳入。
 
-- 核心类在报告里缺席 ⇒ 合并丢了数据（多半是各平台 class 文件不一致），必须显式失败；
-- 行覆盖低于该类的下限 ⇒ 回归，必须显式失败；
-- 与 90% 目标的差距每次都打印出来，缺口不会被藏起来，但它本身还不是门禁（目标由后续补齐的失败注入用例抬升）。
+门禁是**核心集合的合计**（仓库对核心路径的目标），不是每个类各自 90%：同类内不同文件的可达性差异很大，逐类阈值会把
+不可达分支当成失败信号。每个类的数字都会打印出来，缺口不会被藏起来。
+
+只有平台专属分支会在对应平台上被执行（Windows Job 语义、macOS 的非 Linux 分支、Linux 的 `/proc` 判定），因此输入必须是
+三平台合并后的报告：核心类在报告里缺席就意味着合并丢了数据，必须显式失败，而不是当成「没有这个类」。
 """
 
 import sys
 import xml.etree.ElementTree as ElementTree
 
-# 核心类与它们的行覆盖下限：下限是「已经做到的事实」，只能上调不能下调。
-CORE_CLASSES = {
-    "ProcessScope": 75.0,
-    "ProcessScopeHelper": 70.0,
-    "PosixProcessGroup": 76.0,
-    "ProcessScopeState": 90.0,
-}
+# 核心路径：执行范围编排、helper 派生/收敛、共用原语、Windows 实现、命令行拼装与 bash 能力。
+CORE_CLASSES = (
+    "ProcessScope",
+    "ProcessScopeHelper",
+    "PosixProcessGroup",
+    "ProcessScopeState",
+    "WindowsJobScope",
+    "WindowsCommandLine",
+    "BashCapability",
+)
 
-# 仓库对核心路径的目标；差距每次都要打印，不能被门禁的通过掩盖。
+# 仓库对核心路径的目标。
 TARGET = 90.0
 
 
@@ -42,50 +48,41 @@ def main() -> int:
                     covered += 1
                 elif int(line.get("mi", "0")) > 0:
                     missed += 1
-            if missed + covered:
+            if covered + missed:
                 coverage[name[: -len(".java")]] = (covered, missed)
 
     failures = []
-    for name, floor in CORE_CLASSES.items():
+    aggregate_covered = aggregate_total = 0
+    for name in CORE_CLASSES:
         if name not in coverage:
             failures.append(f"{name}: missing from the merged report (merged data was dropped)")
             continue
         covered, missed = coverage[name]
-        percentage = 100.0 * covered / (covered + missed)
-        gap = max(0.0, (TARGET - percentage) / 100.0 * (covered + missed))
+        total = covered + missed
+        aggregate_covered += covered
+        aggregate_total += total
         print(
-            "%-22s line %5.1f%% (%d/%d)  下限 %.0f%%  距 %.0f%% 目标还差约 %d 行"
-            % (name, percentage, covered, covered + missed, floor, TARGET, round(gap))
+            "%-22s line %5.1f%% (%d/%d)"
+            % (name, 100.0 * covered / total, covered, total)
         )
-        if percentage < floor:
-            failures.append(f"{name}: {percentage:.1f}% is below the recorded floor {floor:.0f}%")
 
-    core_only = [coverage[name] for name in CORE_CLASSES if name in coverage]
-    aggregate = (
-        sum(covered for covered, _ in core_only),
-        sum(missed for _, missed in core_only),
+    if aggregate_total == 0:
+        print("FAIL the merged report contains no core class at all")
+        return 1
+    percentage = 100.0 * aggregate_covered / aggregate_total
+    gap = max(0, round((TARGET - percentage) / 100.0 * aggregate_total))
+    print(
+        "核心路径合计            line %5.1f%% (%d/%d)  距 %.1f%% 目标还差约 %d 行"
+        % (percentage, aggregate_covered, aggregate_total, TARGET, gap)
     )
-    total = aggregate[0] + aggregate[1]
-    if total == 0:
-        failures.append("the merged report contains no source file at all")
-    else:
-        print(
-            "%-22s line %5.1f%% (%d/%d)  距 %.0f%% 目标还差约 %d 行"
-            % (
-                "核心类合计",
-                100.0 * aggregate[0] / total,
-                aggregate[0],
-                total,
-                TARGET,
-                round(max(0.0, (TARGET - 100.0 * aggregate[0] / total) / 100.0 * total)),
-            )
-        )
-
     if failures:
         for failure in failures:
             print("FAIL " + failure)
         return 1
-    print("PASS every core class is present in the merged report and above its floor")
+    if percentage < TARGET:
+        print("FAIL core path line coverage %.1f%% is below %.1f%%" % (percentage, TARGET))
+        return 1
+    print("PASS core path line coverage %.1f%% >= %.0f%%" % (percentage, TARGET))
     return 0
 
 

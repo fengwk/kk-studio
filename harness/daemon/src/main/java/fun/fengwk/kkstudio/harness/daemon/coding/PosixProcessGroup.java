@@ -207,6 +207,11 @@ final class PosixProcessGroup {
     if (!groupExists(processGroup)) {
       return false;
     }
+    if (!canEnumerateMembers()) {
+      // 没有 /proc 的平台只能把「组仍然存在」当成「还没有收敛」——僵尸会被 init 快速回收，因此这个保守判定通常不会真的
+      // 阻塞；反过来谎称已经收敛会让收尾跳过强杀阶段。
+      return true;
+    }
     return liveMembers(processGroup, excludedProcess).length > 0;
   }
 
@@ -216,7 +221,8 @@ final class PosixProcessGroup {
   }
 
   /** {@code /proc/<pid>/stat} 中本类需要的两个字段：状态与进程组 id。 */
-  private static ProcessStat readProcessStat(Path stat) {
+  /** 解析 {@code /proc/<pid>/stat}：包级可见是为了让纯解析规则可以按真实样本回归（不改变任何行为）。 */
+  static ProcessStat readProcessStat(Path stat) {
     try {
       String content = Files.readString(stat);
       // 格式为 "pid (comm) state ppid pgrp ..."，而 comm 可以包含空格与括号，因此从最后一个 ')' 之后开始解析。
@@ -234,7 +240,8 @@ final class PosixProcessGroup {
     }
   }
 
-  private static long parseProcessId(String name) {
+  /** 解析 {@code /proc} 目录项里的 pid：包级可见是为了让解析规则可以按真实样本回归（不改变任何行为）。 */
+  static long parseProcessId(String name) {
     try {
       return Long.parseLong(name);
     } catch (NumberFormatException error) {
@@ -249,7 +256,7 @@ final class PosixProcessGroup {
   }
 
   /** {@code /proc/<pid>/stat} 的投影。 */
-  private record ProcessStat(char state, long group) {}
+  record ProcessStat(char state, long group) {}
 
   /** libc 绑定；只在 POSIX 平台访问，因此 Windows 上不会被初始化。 */
   interface LibC extends Library {
