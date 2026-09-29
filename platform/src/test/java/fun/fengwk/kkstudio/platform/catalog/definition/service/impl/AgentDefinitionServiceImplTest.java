@@ -119,7 +119,7 @@ public class AgentDefinitionServiceImplTest {
     when(repository.create(definition)).thenReturn(true);
 
     service.createAgent(create);
-    verify(resolver).requireCurrentSkills(List.of(skillRef));
+    verify(resolver).requireReferencedLifecycles(List.of(skillRef), List.of());
   }
 
   /** 测试意图：验证更新 Agent 时会校验全局 Skill 引用。 */
@@ -145,7 +145,7 @@ public class AgentDefinitionServiceImplTest {
     update.getConfig().setSkills(List.of(skillRef));
 
     service.updateAgent("agent", update);
-    verify(resolver).requireCurrentSkills(List.of(skillRef));
+    verify(resolver).requireReferencedLifecycles(List.of(skillRef), List.of());
   }
 
   @Test

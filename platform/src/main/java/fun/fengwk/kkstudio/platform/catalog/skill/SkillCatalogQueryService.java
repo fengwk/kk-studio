@@ -35,4 +35,16 @@ public class SkillCatalogQueryService {
     }
     return repository.getPackage(packageName);
   }
+
+  /**
+   * 以 {@code FOR SHARE} 读取某 Package；不存在返回 null。
+   *
+   * <p>调用方必须已开启事务，并在任何 Agent 行锁之前按 package name 升序调用。
+   */
+  public SkillPackage lockPackageForShare(String packageName) {
+    if (packageName == null) {
+      return null;
+    }
+    return repository.lockPackageForShare(packageName);
+  }
 }

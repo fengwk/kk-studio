@@ -30,6 +30,11 @@ public class PostgresqlSkillPackageRepository implements SkillPackageRepository 
   }
 
   @Override
+  public SkillPackage lockPackageForShare(String packageName) {
+    return toPackage(skillPackageMapper.lockPackageForShare(packageName));
+  }
+
+  @Override
   public SkillPackage lockPackage(String packageName) {
     return toPackage(skillPackageMapper.lockPackage(packageName));
   }

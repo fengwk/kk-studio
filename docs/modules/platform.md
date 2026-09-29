@@ -86,6 +86,9 @@ Agent 的严格 `config` 保存 `tools`、`skills`、`subagents` 与
   严格解析去重的 `tools`、`SkillRef(packageName, name)` 与 subagent 配置；`tools`
   必须是合法模型可见 tool name（旧 wire 字段 `toolIds` 被严格拒绝）且只能引用运行时
   目录中的 selectable entry；每个 SkillRef 必须命中对应 Package 当前 `skills` 快照。
+  创建与更新在任何 Agent 行锁之前，按 package/server 名升序以 `FOR SHARE` 锁定被引用的
+  Skill Package 与 MCP server，并在锁内重读 manifest 与工具归属；builtin/plugin 工具没有
+  MCP 行，不取 server 锁。删除与 discover 仍用 `FOR UPDATE`，工具行替换先锁父 server。
 
 ### Git Skill Package
 
