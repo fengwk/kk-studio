@@ -36,8 +36,8 @@ public class PostgresqlIssueActivityRepository implements IssueActivityRepositor
   }
 
   @Override
-  public IssueActivity findByIdempotencyKeyForUpdate(UUID issueId, String idempotencyKey) {
-    IssueActivityDO row = mapper.findByIdempotencyKeyForUpdate(issueId, idempotencyKey);
+  public IssueActivity findByIdempotencyKeyUnderLock(UUID issueId, String idempotencyKey) {
+    IssueActivityDO row = mapper.findByIdempotencyKeyUnderLock(issueId, idempotencyKey);
     return row == null ? null : toModel(row);
   }
 

@@ -117,9 +117,6 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (project == null) {
       throw new ProjectNotFoundException("project");
     }
-    if (project.isArchived()) {
-      throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
-    }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new ProjectNotFoundException("issue");
@@ -131,6 +128,9 @@ public class IssueRunServiceImpl implements IssueRunService {
         IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity);
     if (applied != null) {
       return replayAcceptedRun(applied);
+    }
+    if (project.isArchived()) {
+      throw new ProjectValidationException("project", "Cannot accept a run in an archived project");
     }
     if (issue.isArchived()) {
       throw new ProjectValidationException("issue", "Cannot accept a run for an archived issue");
@@ -299,7 +299,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     RunLock locked = lockRun(runId);
     IssueRun run = locked.run();
     if (run.getStatus() == IssueRunStatus.WAITING) {
-      // 当前版本已经是安全等待：不重复写行。陈旧版本在下方被拒绝。
+      // 已经是安全等待：不重复写行，也不再校验调用方版本。
       return issueRunRepository.getById(runId);
     }
     requireActive(run);
@@ -320,7 +320,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     RunLock locked = lockRun(runId);
     IssueRun run = locked.run();
     if (run.getStatus() == IssueRunStatus.RUNNING) {
-      // 当前版本已经是执行状态：不重复写行。陈旧版本在下方被拒绝。
+      // 已经是执行状态：不重复写行，也不再校验调用方版本。
       return issueRunRepository.getById(runId);
     }
     if (run.getStatus() != IssueRunStatus.WAITING) {
