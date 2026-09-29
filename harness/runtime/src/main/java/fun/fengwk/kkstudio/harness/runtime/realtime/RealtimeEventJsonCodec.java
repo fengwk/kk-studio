@@ -23,9 +23,11 @@ import java.util.UUID;
 /**
  * 有界 realtime projection 的确定性 strict JSON codec。
  *
- * <p>支持 Model delta 与 Tool partial；top-level exact field set {@code {threadId, subjectKind,
- * subjectId, attempt, sequence, type, payload, createdAt}}。{@code attempt} 与 {@code sequence} 只出现在
- * top-level。
+ * <p>支持 Model delta 与 Tool partial；top-level exact field set：Model delta 为 {@code {threadId,
+ * subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Tool partial 为 {@code
+ * {threadId, subjectKind, subjectId, attempt, eventId, type, payload, createdAt}}。{@code
+ * attempt} 与 {@code sequence} 只出现在 top-level；{@code eventId} 是 Tool partial 事件自身的
+ * canonical UUID identity。
  *
  * <p>{@code payload} discriminator 严格大小写：
  *
@@ -47,7 +49,8 @@ public final class RealtimeEventJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> TOOL_EVENT_FIELDS =
-      orderedSet("threadId", "subjectKind", "subjectId", "attempt", "type", "payload", "createdAt");
+      orderedSet(
+          "threadId", "subjectKind", "subjectId", "attempt", "eventId", "type", "payload", "createdAt");
   private static final Set<String> MODEL_EVENT_FIELDS =
       orderedSet(
           "threadId",
@@ -121,11 +124,11 @@ public final class RealtimeEventJsonCodec {
         type == RealtimeEventType.MODEL_DELTA ? MODEL_EVENT_FIELDS : TOOL_EVENT_FIELDS,
         "realtimeEvent");
 
-    UUID threadId = requiredPositiveUuid(node, "threadId", "realtimeEvent");
+    UUID threadId = requiredCanonicalUuid(node, "threadId", "realtimeEvent");
     String subjectKindName = requiredText(node, "subjectKind", "realtimeEvent");
     RealtimeEvent.SubjectKind subjectKind =
         readEnum(RealtimeEvent.SubjectKind.class, subjectKindName, "realtimeEvent.subjectKind");
-    UUID subjectId = requiredPositiveUuid(node, "subjectId", "realtimeEvent");
+    UUID subjectId = requiredCanonicalUuid(node, "subjectId", "realtimeEvent");
     int attempt = requiredPositiveInt(node, "attempt", "realtimeEvent");
     JsonNode payloadNode = node.get("payload");
     if (payloadNode == null || !payloadNode.isObject()) {
@@ -155,7 +158,8 @@ public final class RealtimeEventJsonCodec {
             "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
       }
       ToolResult partial = ToolResultJsonCodec.decode(write((ObjectNode) payloadNode));
-      return new RealtimeEvent.ToolPartial(threadId, subjectId, attempt, partial, createdAt);
+      UUID eventId = requiredCanonicalUuid(node, "eventId", "realtimeEvent");
+      return new RealtimeEvent.ToolPartial(threadId, subjectId, attempt, eventId, partial, createdAt);
     }
     throw new IllegalArgumentException("unsupported realtimeEvent.type: " + typeName);
   }
@@ -181,6 +185,7 @@ public final class RealtimeEventJsonCodec {
     node.put("subjectKind", TOOL_INVOCATION);
     node.put("subjectId", partial.toolInvocationId().toString());
     node.put("attempt", partial.attempt());
+    node.put("eventId", partial.eventId().toString());
     node.put("type", TOOL_PARTIAL);
     node.set("payload", ToolResultJsonCodec.encodeNode(partial.partial()));
     node.put("createdAt", partial.createdAt().toString());
@@ -290,19 +295,26 @@ public final class RealtimeEventJsonCodec {
     return value.textValue();
   }
 
-  private static UUID requiredPositiveUuid(ObjectNode node, String field, String context) {
+  private static UUID requiredCanonicalUuid(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (!value.isTextual()) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string");
     }
     String text = value.textValue();
+    UUID uuid;
     try {
-      return UUID.fromString(text);
+      uuid = UUID.fromString(text);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           context + "." + field + " must be a canonical UUID string", error);
     }
+    // UUID.fromString 也接受缺组或大写/混合大小写变体；wire 只允许唯一的 canonical 文本表示。
+    if (!uuid.toString().equals(text)) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID string");
+    }
+    return uuid;
   }
 
   private static long requiredPositiveIntegralLong(ObjectNode node, String field, String context) {

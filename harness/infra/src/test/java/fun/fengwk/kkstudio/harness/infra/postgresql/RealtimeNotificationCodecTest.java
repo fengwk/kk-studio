@@ -7,11 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 /** PostgreSQL realtime notification envelope 的 strict canonical codec 契约。 */
 class RealtimeNotificationCodecTest {
@@ -34,6 +38,21 @@ class RealtimeNotificationCodecTest {
     RealtimeNotificationCodec.Envelope.Event decoded =
         assertInstanceOf(RealtimeNotificationCodec.Envelope.Event.class, codec.decode(encoded));
     assertEquals(event, decoded.event());
+  }
+
+  /** TOOL_PARTIAL 复用同一 EVENT envelope：携带 eventId 的 canonical 事件稳定往返。 */
+  @Test
+  void toolPartialEnvelopeRoundTripsEventIdentity() {
+    RealtimeEvent.ToolPartial event = toolPartial(id(99L));
+    String expected = "{\"kind\":\"EVENT\",\"event\":" + eventCodec.encode(event) + "}";
+
+    String encoded = codec.encodeEvent(event);
+
+    assertEquals(expected, encoded);
+    RealtimeNotificationCodec.Envelope.Event decoded =
+        assertInstanceOf(RealtimeNotificationCodec.Envelope.Event.class, codec.decode(encoded));
+    assertEquals(event, decoded.event());
+    assertEquals(id(99L), ((RealtimeEvent.ToolPartial) decoded.event()).eventId());
   }
 
   /** RESYNC 只携带 canonical threadId 与非空 reason，保持固定字段顺序。 */
@@ -96,5 +115,15 @@ class RealtimeNotificationCodecTest {
   private static RealtimeEvent.ModelDelta modelDelta(String text) {
     return new RealtimeEvent.ModelDelta(
         id(1L), id(42L), 2, 3L, new ProviderStreamEvent.TextDelta(text), NOW);
+  }
+
+  private static RealtimeEvent.ToolPartial toolPartial(UUID eventId) {
+    return new RealtimeEvent.ToolPartial(
+        id(1L),
+        id(42L),
+        2,
+        eventId,
+        new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}"),
+        NOW);
   }
 }

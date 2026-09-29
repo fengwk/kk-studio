@@ -12,8 +12,10 @@ import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +29,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** PostgresqlRealtimeEventSink 的单条与批量 pg_notify、payload 上限、顺序保持、分块与异常传播契约。 */
@@ -99,6 +102,24 @@ class PostgresqlRealtimeEventSinkTest {
         assertInstanceOf(
             RealtimeNotificationCodec.Envelope.Event.class, codec.decode(jdbcTemplate.payload));
     assertEquals(event, notification.event());
+  }
+
+  /** TOOL_PARTIAL 与 MODEL_DELTA 共享同一条 pg_notify 通道：eventId 随 canonical envelope 完整往返。 */
+  @Test
+  void appendSendsCanonicalToolPartialEvent() {
+    RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    RealtimeEvent.ToolPartial event = toolPartial(id(99L));
+
+    sink.append(event);
+
+    assertEquals("select pg_notify(?, ?)", jdbcTemplate.sql);
+    assertEquals("harness_realtime", jdbcTemplate.channel);
+    RealtimeNotificationCodec.Envelope.Event notification =
+        assertInstanceOf(
+            RealtimeNotificationCodec.Envelope.Event.class, codec.decode(jdbcTemplate.payload));
+    assertEquals(event, notification.event());
+    assertEquals(id(99L), ((RealtimeEvent.ToolPartial) notification.event()).eventId());
   }
 
   /** JdbcTemplate/数据库异常不在 sink 内吞掉，交由 Runtime 既有 append 边界隔离。 */
@@ -274,6 +295,16 @@ class PostgresqlRealtimeEventSinkTest {
   private static RealtimeEvent.ModelDelta modelDelta(String text) {
     return new RealtimeEvent.ModelDelta(
         id(1L), id(42L), 1, 1L, new ProviderStreamEvent.TextDelta(text), NOW);
+  }
+
+  private static RealtimeEvent.ToolPartial toolPartial(UUID eventId) {
+    return new RealtimeEvent.ToolPartial(
+        id(1L),
+        id(42L),
+        1,
+        eventId,
+        new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}"),
+        NOW);
   }
 
   /**

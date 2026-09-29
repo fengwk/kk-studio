@@ -100,6 +100,7 @@ class RealtimeEventTest {
   @Test
   void toolPartialExposesIdentityAndRejectsInvalidValues() {
     Instant now = Instant.parse("2026-07-23T00:00:00Z");
+    UUID eventId = UUID.fromString("00000000-0000-0000-0000-0000000000ff");
     ToolResult partial =
         new ToolResult("call-1", List.of(new TextResultContent("partial")), false, "{}");
     RealtimeEvent.ToolPartial event =
@@ -107,6 +108,7 @@ class RealtimeEventTest {
             UUID.fromString("00000000-0000-0000-0000-000000000001"),
             UUID.fromString("00000000-0000-0000-0000-000000000002"),
             3,
+            eventId,
             partial,
             now);
 
@@ -116,6 +118,7 @@ class RealtimeEventTest {
             UUID.fromString("00000000-0000-0000-0000-000000000002")),
         event.subject());
     assertEquals(RealtimeEventType.TOOL_PARTIAL, event.type());
+    assertEquals(eventId, event.eventId());
     assertEquals(now, event.createdAt());
     assertThrows(
         IllegalArgumentException.class,
@@ -124,6 +127,18 @@ class RealtimeEventTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 0,
+                eventId,
+                partial,
+                now));
+    // eventId 是投影事件自身的 identity：缺失即拒绝。
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RealtimeEvent.ToolPartial(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                1,
+                null,
                 partial,
                 now));
     assertThrows(
@@ -133,6 +148,7 @@ class RealtimeEventTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 1,
+                eventId,
                 null,
                 now));
     assertThrows(
@@ -142,6 +158,7 @@ class RealtimeEventTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 1,
+                eventId,
                 partial,
                 null));
     assertThrows(
@@ -151,6 +168,7 @@ class RealtimeEventTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 1,
+                eventId,
                 partial,
                 now.plusNanos(1)));
   }
