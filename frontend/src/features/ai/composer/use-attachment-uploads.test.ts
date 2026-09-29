@@ -4,7 +4,7 @@ import { ApiError } from '@/shared/api/client'
 import type { StorageUploadDTO, StorageUploadReserveRequestDTO } from '@/shared/api/contracts/storage'
 import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/ai/composer/composer-parts'
-import { loadUnknownUploads } from '@/features/ai/composer/composer-draft'
+import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/ai/composer/composer-draft'
 import {
   createWorkerHasher,
   isAmbiguousUploadOutcome,
@@ -119,6 +119,65 @@ describe('Attachment uploads lifecycle & safety', () => {
         )
       })
       await expect(secondPromise).resolves.toBe('hash-ok')
+    })
+
+    it('rejects pending requests and recreates worker on messageerror event', async () => {
+      // 测试意图：验证当 Worker 收到反序列化失败的 messageerror 事件时，当前等待的 Promise 被拒绝，且实例被销毁，下次调用重建全新 Worker 成功执行
+      let workerInstanceCount = 0
+
+      class MockWorker {
+        listeners: Record<string, EventCallback[]> = {}
+        lastPostedRequestId: string | null = null
+        constructor() {
+          workerInstanceCount++
+          mockWorkers.push(this)
+        }
+        addEventListener(event: string, fn: EventCallback) {
+          this.listeners[event] = this.listeners[event] || []
+          this.listeners[event].push(fn)
+        }
+        removeEventListener(event: string, fn: EventCallback) {
+          if (this.listeners[event]) {
+            this.listeners[event] = this.listeners[event].filter((f) => f !== fn)
+          }
+        }
+        postMessage(data: unknown) {
+          if (data && typeof data === 'object' && 'requestId' in data) {
+            this.lastPostedRequestId = String((data as { requestId: string }).requestId)
+          }
+        }
+        terminate = vi.fn()
+      }
+
+      const mockWorkers: MockWorker[] = []
+      vi.stubGlobal('Worker', MockWorker)
+
+      const hasher = createWorkerHasher()
+      const dummyFile = new File(['abc'], 'test.txt', { type: 'text/plain' })
+      const hashPromise = hasher(dummyFile)
+
+      expect(workerInstanceCount).toBe(1)
+      const currentWorker = mockWorkers[0]
+
+      // 触发 Worker messageerror 事件
+      act(() => {
+        currentWorker.listeners['messageerror']?.forEach((fn) => fn(new MessageEvent('messageerror')))
+      })
+
+      await expect(hashPromise).rejects.toThrow('Hash worker message deserialization error')
+      expect(currentWorker.terminate).toHaveBeenCalledTimes(1)
+
+      // 下一次散列调用应重建全新 Worker 实例，且能成功响应
+      const secondPromise = hasher(dummyFile)
+      expect(workerInstanceCount).toBe(2)
+      const secondWorker = mockWorkers[1]
+      act(() => {
+        const reqId = secondWorker.lastPostedRequestId ?? 'any'
+        secondWorker.listeners['message']?.forEach((fn) =>
+          fn({ data: { requestId: reqId, sha256: 'hash-after-messageerror' } }),
+        )
+      })
+      await expect(secondPromise).resolves.toBe('hash-after-messageerror')
     })
 
     it('settles immediately when postMessage throws', async () => {
@@ -581,6 +640,123 @@ describe('Attachment uploads lifecycle & safety', () => {
       expect(reloaded.current.uploads).toHaveLength(1)
       expect(reloaded.current.uploads[0].uploadId).toBe('res-1')
       expect(reloaded.current.uploads[0].status).toBe('complete_unknown')
+    })
+
+    it('readback failure in persistPendingUnknownUpload aborts pipeline with zero completeUpload calls', async () => {
+      // 测试意图：验证在 completeUpload 前进行 unknown upload 持久化时，若 readback 读回校验失败，
+      // 必须遵循 fail-closed 契约，绝不继续调用 completeUpload（调用次数为 0），并清理已预留的 uploadId
+      const scope = 'scope-readback-fail'
+      const service = createFakeStorageService()
+      const errors: AttachmentUploadError[] = []
+
+      // 模拟 localStorage.getItem 在 readback 时返回损毁内容导致校验失败
+      const originalGetItem = localStorage.getItem.bind(localStorage)
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+        if (key.includes('unknown-uploads') && key.includes(scope)) {
+          return 'corrupted-readback-data'
+        }
+        return originalGetItem(key)
+      })
+
+      const { result } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-readback-fail',
+          scope,
+          onError: (err) => errors.push(err),
+        }),
+      )
+
+      act(() => {
+        result.current.addFiles([new File(['test'], 'readback-fail.png', { type: 'image/png' })])
+      })
+
+      await vi.waitFor(() => {
+        expect(errors).toHaveLength(1)
+      })
+
+      // 关键断言：completeUpload 调用次数必须为 0
+      expect(service.completeUpload).toHaveBeenCalledTimes(0)
+      // 已预留的 uploadId 必须被释放删除
+      expect(service.deleteUpload).toHaveBeenCalledWith('res-1')
+      // 该失败项被从 UI uploads 列表中 drop 掉
+      expect(result.current.uploads).toHaveLength(0)
+    })
+
+    it('retryComplete respects scope generation gate: cleans persisted entry for captured scope but does not pollute new scope UI', async () => {
+      // 测试意图：验证针对 scope-A 的 unknown upload 进行 retryComplete 时，若在途期间切换到 scope-B，
+      // complete 成功后必须清理原 scope-A 中的持久条目，但绝不能调用 patchUpload 污染 scope-B 的 UI 列表。
+      const scopeA = 'scope-retry-A'
+      const scopeB = 'scope-retry-B'
+
+      // 先在 scopeA 中持久化一条 unknown upload
+      persistPendingUnknownUpload(scopeA, {
+        localId: 'local-a-1',
+        uploadId: 'upload-a-1',
+        filename: 'fileA.png',
+        mediaType: 'image/png',
+        sizeBytes: 1234,
+        sha256: 'sha-a',
+      })
+
+      let resolveSlowComplete!: (v: StorageUploadDTO) => void
+      const slowCompletePromise = new Promise<StorageUploadDTO>((resolve) => {
+        resolveSlowComplete = resolve
+      })
+
+      const service = createFakeStorageService({
+        completeUpload: vi.fn().mockImplementation(() => slowCompletePromise),
+      })
+
+      let currentScope = scopeA
+      const { result, rerender } = renderHook(() =>
+        useAttachmentUploads({
+          storageService: service,
+          hashFile: async () => 'sha-1',
+          scope: currentScope,
+        }),
+      )
+
+      // 挂载后 scopeA 应恢复出一条 complete_unknown 条目
+      expect(result.current.uploads).toHaveLength(1)
+      expect(result.current.uploads[0].localId).toBe('local-a-1')
+      expect(result.current.uploads[0].status).toBe('complete_unknown')
+
+      // 触发 retryComplete 进入在途
+      act(() => {
+        void result.current.retryComplete('local-a-1')
+      })
+      expect(result.current.uploads[0].status).toBe('uploading')
+
+      // 此时用户切换至 scopeB（触发 generation 递增和 scope 改变）
+      currentScope = scopeB
+      rerender()
+
+      // scopeB 当前为空
+      expect(result.current.uploads).toHaveLength(0)
+
+      // 此时旧 scopeA 的 completeUpload 成功返回
+      await act(async () => {
+        resolveSlowComplete({
+          id: 'upload-a-1',
+          blobId: 'blob-a-1',
+          mediaKind: 'image',
+          state: 'READY',
+          presignedPut: null,
+          filename: 'fileA.png',
+          mediaType: 'image/png',
+          sizeBytes: 1234,
+          sha256: 'sha-a',
+          expiresAt: '2026-01-01T00:00:00Z',
+          createTime: '2026-01-01T00:00:00Z',
+        })
+      })
+
+      // 验证：原 scopeA 的持久化 unknown 记录被正确清除
+      expect(loadUnknownUploads(scopeA)).toHaveLength(0)
+
+      // 关键验证：当前 scopeB 的 UI 列表绝未被旧响应污染
+      expect(result.current.uploads).toHaveLength(0)
     })
   })
 })
