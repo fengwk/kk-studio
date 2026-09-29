@@ -143,4 +143,188 @@ describe('useInteractionsController', () => {
     expect(result.current.items[0].interactionId).toBe('int-2')
     expect(result.current.nextCursor).toBe('cursor-refreshed')
   })
+
+  it('discards in-flight loadMore when external invalidation pushes a new initial page and keeps new loadMore usable', async () => {
+    // 测试意图：验证当 loadMore 请求在途时，卡片外部操作触发 queryClient.invalidateQueries 导致首屏第一页数据更新，
+    // 该第一页更新推进了代际，旧 loadMore 迟到响应被丢弃（旧数据不 append、旧 cursor 不写覆盖），
+    // 并且 isFetchingMore 及时恢复为 false，使针对新第一页的下一次 loadMore 能够正常触发执行。
+    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+      resolveSlowLoadMore = resolve
+    })
+
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const externalInvalidatedPage = { items: [{ ...mockItem1, interactionId: 'int-new-first' }], nextCursor: 'cursor-new-page-2' }
+    const subsequentPage = { items: [mockItem2], nextCursor: null }
+
+    const listSpy = vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage) // 挂载首屏
+      .mockImplementationOnce(() => slowLoadMorePromise) // 旧 loadMore 挂起在途
+      .mockResolvedValueOnce(externalInvalidatedPage) // 外部 invalidate 触发首屏重新拉取
+      .mockResolvedValueOnce(subsequentPage) // 新代后续 loadMore
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items[0].interactionId).toBe('int-1')
+    expect(result.current.nextCursor).toBe('cursor-page-2')
+
+    // 触发 loadMore 进入在途
+    let loadMorePromise!: Promise<void>
+    act(() => {
+      loadMorePromise = result.current.loadMore()
+    })
+    expect(result.current.isFetchingMore).toBe(true)
+
+    // 外部（如 ApprovalCard/QuestionnaireCard）触发 invalidateQueries
+    await act(async () => {
+      await queryClient.invalidateQueries()
+    })
+
+    // 外部 invalidation 已经完成，首屏已替换为 externalInvalidatedPage
+    await waitFor(() => expect(result.current.items[0].interactionId).toBe('int-new-first'))
+    expect(result.current.nextCursor).toBe('cursor-new-page-2')
+    expect(result.current.isFetchingMore).toBe(false)
+
+    // 此时旧在途 loadMore 返回
+    await act(async () => {
+      resolveSlowLoadMore({ items: [{ ...mockItem1, interactionId: 'stale-int-old' }], nextCursor: 'stale-cursor-old' })
+      await loadMorePromise
+    })
+
+    // 验证：旧数据没有 append，游标没有被污染为 stale-cursor-old
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0].interactionId).toBe('int-new-first')
+    expect(result.current.nextCursor).toBe('cursor-new-page-2')
+    expect(result.current.isFetchingMore).toBe(false)
+
+    // 验证新 loadMore 可用：针对新 cursor-new-page-2 进行 loadMore
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(listSpy).toHaveBeenLastCalledWith('cursor-new-page-2', 10)
+    expect(result.current.items).toHaveLength(2)
+    expect(result.current.items[1].interactionId).toBe('int-2')
+    expect(result.current.hasMore).toBe(false)
+  })
+
+  it('resets isFetchingMore on refresh so subsequent loadMore is not permanently blocked', async () => {
+    // 测试意图：验证 loadMore 在途时触发 refresh，refresh 立即同步重置 isFetchingMore，
+    // 避免旧代 finally 栅栏跳过重置导致 isFetchingMore 永久卡在 true。
+    let resolveSlowLoadMore!: (val: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((resolve) => {
+      resolveSlowLoadMore = resolve
+    })
+
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage)
+      .mockImplementationOnce(() => slowLoadMorePromise)
+      .mockResolvedValueOnce(refreshedPage)
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    act(() => {
+      void result.current.loadMore()
+    })
+    expect(result.current.isFetchingMore).toBe(true)
+
+    // 触发 refresh
+    await act(async () => {
+      await result.current.refresh()
+    })
+
+    // 验证：refresh 完成后 isFetchingMore 恢复为 false，游标更新
+    expect(result.current.isFetchingMore).toBe(false)
+    expect(result.current.nextCursor).toBe('cursor-refreshed')
+
+    // 释放旧 loadMore
+    await act(async () => {
+      resolveSlowLoadMore({ items: [mockItem1], nextCursor: 'old' })
+    })
+    expect(result.current.isFetchingMore).toBe(false)
+  })
+
+  it('guards against duplicate loadMore calls within the same tick using ref guard', async () => {
+    // 测试意图：验证同一 tick 内连续同步触发两次 loadMore 时，
+    // ref guard 能同步拦截第二次请求，只发出一次网络调用，防止竞态拉取两份分页。
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const listSpy = vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage)
+      .mockResolvedValue({ items: [mockItem2], nextCursor: null })
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    // 同一 tick 内同时发起两次 loadMore
+    await act(async () => {
+      const p1 = result.current.loadMore()
+      const p2 = result.current.loadMore()
+      await Promise.all([p1, p2])
+    })
+
+    // 首屏 1 次 + loadMore 1 次，共 2 次，第二项 loadMore 必须被 guard 拦下
+    expect(listSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('prevents stale loadMore error from polluting new generation state', async () => {
+    // 测试意图：验证旧代 loadMore 在途时触发 refresh，随后旧代抛出网络错误，
+    // 该 stale error 不会污染新世代的 isError 与 error 状态。
+    let rejectSlowLoadMore!: (err: Error) => void
+    const slowLoadMorePromise = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>((_, reject) => {
+      rejectSlowLoadMore = reject
+    })
+
+    const initialPage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    const refreshedPage = { items: [mockItem2], nextCursor: 'cursor-refreshed' }
+
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce(initialPage)
+      .mockImplementationOnce(() => slowLoadMorePromise)
+      .mockResolvedValue(refreshedPage)
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    let loadMorePromise!: Promise<void>
+    act(() => {
+      loadMorePromise = result.current.loadMore()
+    })
+
+    await act(async () => {
+      await result.current.refresh()
+    })
+
+    // 让旧 loadMore 抛错
+    await act(async () => {
+      rejectSlowLoadMore(new Error('Old loadMore network failure'))
+      await loadMorePromise.catch(() => undefined)
+    })
+
+    // 验证：新世代没有被旧 error 污染
+    expect(result.current.isError).toBe(false)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('resets in-flight loadMore when external invalidate returns structurally identical first page', async () => {
+    // 测试意图：验证当 React Query structural sharing 导致外部 invalidate 返回 same object（initialPage 引用未变但 dataUpdatedAt 推进）时，
+    // 也能正确触发更新并 reset in-flight 状态，且原有已加载的分页不丢失。
+    const samePage = { items: [mockItem1], nextCursor: 'cursor-page-2' }
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValue(samePage)
+
+    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items).toHaveLength(1)
+
+    // 触发外部 invalidate
+    await act(async () => {
+      await queryClient.invalidateQueries()
+    })
+
+    expect(result.current.isFetchingMore).toBe(false)
+    expect(result.current.items).toHaveLength(1)
+  })
 })

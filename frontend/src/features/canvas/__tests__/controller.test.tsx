@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
+import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
+import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
 import { createMockIDBFactory } from './mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type {
@@ -1702,5 +1704,169 @@ describe('useCanvasController real snapshot runtime', () => {
       const stored = await loadCanvasDrafts(CANVAS_ID)
       expect(stored[NODE_NOTE]?.position).toBeUndefined()
     })
+  })
+
+  it('canvas unmount 期间 ACK 排队：原草稿落盘清理成功后才 remove 原 op', async () => {
+    // 测试意图：验证命令发送后在 ACK 排队处理期间组件被 unmount，
+    // 队列专属 onDraftAcks 针对原 identity 即使卸载也必须 await 实际 IDB commit 清理原草稿，
+    // 且只有在持久草稿被成功清除后，queue 才能 settle 并 remove 该 operation。
+    const releasePost = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {
+      commands.push(request)
+      current = applyCommandBatch(current, request.commands)
+      return releasePost.promise
+    })
+
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 产生本地草稿并提交命令（命令在途挂起）
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 555, y: 666, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 验证 operation 已经写入 operation store
+    await waitFor(async () => {
+      const ops = await loadCanvasOperations(CANVAS_ID)
+      expect(ops.length).toBeGreaterThan(0)
+    })
+
+    // 2. 在服务端响应未返回前卸载组件（unmount）
+    unmount()
+
+    // 3. 服务端响应返回，触发队列 settle -> onDraftAcks
+    await act(async () => {
+      releasePost.resolve(diffPatch(current))
+      await releasePost.promise
+    })
+
+    // 验证：即使卸载，原 canvas 的 draft 也必须在 IDB 中被清除
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_NOTE]?.position).toBeUndefined()
+    })
+
+    // 验证：原 operation 也在持久草稿清除后被成功 remove
+    await waitFor(async () => {
+      const ops = await loadCanvasOperations(CANVAS_ID)
+      expect(ops.length).toBe(0)
+    })
+  })
+
+  it('canvas 切换期间 ACK 排队：不动新 canvas 草稿（同 nodeId 双 canvas 隔离）', async () => {
+    // 测试意图：验证存在同 nodeId 的两个画布 CANVAS_A 和 CANVAS_B，
+    // CANVAS_A 提交操作在途时切换到 CANVAS_B 并产生同 nodeId 的新草稿，
+    // CANVAS_A 的迟到 ACK 响应仅清理 CANVAS_A 的持久草稿，绝不误删或回滚 CANVAS_B 的内存与持久草稿。
+    const CANVAS_B = '99999999-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+    const snapshotB: CanvasSnapshotDTO = {
+      ...snapshot(0),
+      document: { ...snapshot(0).document, id: CANVAS_B },
+      nodes: snapshot(0).nodes.map((n) => ({ ...n, canvasId: CANVAS_B })),
+      groups: snapshot(0).groups.map((g) => ({ ...g, canvasId: CANVAS_B })),
+    }
+
+    vi.mocked(getCanvas).mockImplementation(async (id) => {
+      if (id === CANVAS_B) return snapshotB
+      return current
+    })
+
+    const releasePostA = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementation(async (canvasId, request) => {
+      commands.push(request)
+      if (canvasId === CANVAS_ID) {
+        current = applyCommandBatch(current, request.commands)
+        return releasePostA.promise
+      }
+      return diffPatch(applyCommandBatch(snapshotB, request.commands))
+    })
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 在 CANVAS_A 产生 NODE_NOTE 草稿并提交，请求挂起
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 111, y: 111, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 2. 切换至 CANVAS_B
+    act(() => {
+      result.current.openEditor(CANVAS_B)
+    })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_B))
+
+    // 3. 在 CANVAS_B 下为同名 NODE_NOTE 产生新草稿
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 999, y: 999, width: 320, height: 260 },
+      }])
+    })
+    await waitFor(async () => {
+      const storedB = await loadCanvasDrafts(CANVAS_B)
+      expect(storedB[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+    })
+    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+
+    // 4. 此时 CANVAS_A 的慢响应返回并执行 ACK
+    await act(async () => {
+      releasePostA.resolve(diffPatch(current))
+      await releasePostA.promise
+    })
+
+    // 5. 验证：CANVAS_A 的草稿已被清除
+    await waitFor(async () => {
+      const storedA = await loadCanvasDrafts(CANVAS_ID)
+      expect(storedA[NODE_NOTE]?.position).toBeUndefined()
+    })
+
+    // 关键验证：CANVAS_B 的内存草稿与 IDB 草稿绝不被误删或改动！
+    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+    const storedBAfter = await loadCanvasDrafts(CANVAS_B)
+    expect(storedBAfter[NODE_NOTE]?.position).toEqual({ x: 999, y: 999 })
+  })
+
+  it('durable ACK 失败时必须 reject 并保留 operation，不可伪装成功删除操作', async () => {
+    // 测试意图：验证若 ackCanvasDrafts 在持久提交过程中失败抛错，
+    // onDraftAcks 必须向队列 reject 抛错，阻止队列删除 operation，避免持久草稿未清理却丢失待确认操作。
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 模拟 ackCanvasDrafts 抛出 IDB 错误
+    const ackSpy = vi.spyOn(draftStorageModule, 'ackCanvasDrafts').mockRejectedValueOnce(
+      new Error('IndexedDB commit failed'),
+    )
+
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 333, y: 444, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 验证：由于 ACK 失败，operation 依然保留在 operation store 中，未被删除
+    await waitFor(async () => {
+      const ops = await loadCanvasOperations(CANVAS_ID)
+      expect(ops.length).toBeGreaterThan(0)
+    })
+
+    ackSpy.mockRestore()
   })
 })

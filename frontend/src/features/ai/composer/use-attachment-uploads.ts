@@ -282,12 +282,23 @@ export function useAttachmentUploads(options?: {
   const previewUrlsRef = useRef(new Map<string, string>())
   const activeRef = useRef(new Set<string>())
   const abortControllersRef = useRef(new Map<string, AbortController>())
+  const isMountedRef = useRef(true)
+  const generationRef = useRef(0)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      generationRef.current += 1
+    }
+  }, [])
 
   // 严格仅在 scope 改变时隔离清理旧在途并加载新 scope 的未知上传，绝不在 parts 改变时重复 restore
   const prevScopeRef = useRef(scope)
   useEffect(() => {
     if (prevScopeRef.current !== scope) {
       prevScopeRef.current = scope
+      generationRef.current += 1
       for (const controller of abortControllersRef.current.values()) {
         controller.abort()
       }
@@ -407,7 +418,13 @@ export function useAttachmentUploads(options?: {
     async (record: AttachmentUpload, file: File) => {
       const localId = record.localId
       const capturedScope = scopeRef.current
-      const active = () => activeRef.current.has(localId) && scopeRef.current === capturedScope
+      const capturedGeneration = generationRef.current
+      const active = () => (
+        isMountedRef.current
+        && generationRef.current === capturedGeneration
+        && activeRef.current.has(localId)
+        && scopeRef.current === capturedScope
+      )
       const controller = abortControllersRef.current.get(localId)
       let reservedUploadId: string | null = null
       try {
@@ -529,15 +546,29 @@ export function useAttachmentUploads(options?: {
     async (target: string | AttachmentUpload) => {
       const localId = typeof target === 'string' ? target : target.localId
       const capturedScope = scopeRef.current
+      const capturedGeneration = generationRef.current
       const record = uploadsRef.current.find((u) => u.localId === localId)
       if (!record || !record.uploadId || record.status !== 'complete_unknown') {
         return
       }
+      const capturedUploadId = record.uploadId
+      const capturedFilename = record.filename
+      const isStillActive = () => (
+        isMountedRef.current
+        && generationRef.current === capturedGeneration
+        && scopeRef.current === capturedScope
+      )
+
       patchUpload(localId, { status: 'uploading', progress: 0.9 })
       try {
-        const completed = await service.completeUpload(record.uploadId)
+        const completed = await service.completeUpload(capturedUploadId)
+        // 原 scope 持久清理按原 identity 执行，防范旧条目残留
         if (capturedScope) {
           removeStoredUnknownUpload(capturedScope, localId)
+        }
+        // 作用域切换或组件卸载后，旧响应绝不污染新 UI
+        if (!isStillActive()) {
+          return
         }
         patchUpload(localId, {
           uploadId: completed.id,
@@ -546,17 +577,26 @@ export function useAttachmentUploads(options?: {
         })
       } catch (error) {
         if (isAmbiguousUploadOutcome(error)) {
+          if (!isStillActive()) {
+            return
+          }
           patchUpload(localId, { status: 'complete_unknown', progress: 0.8 })
         } else {
-          // 确定未接受错误：释放并 drop
-          void service.deleteUpload(record.uploadId).catch(() => undefined)
+          // 确定未接受错误：释放原句柄，清理原 scope
+          void service.deleteUpload(capturedUploadId).catch(() => undefined)
           if (capturedScope) {
             removeStoredUnknownUpload(capturedScope, localId)
           }
+          if (!isStillActive()) {
+            return
+          }
           dropUpload(localId)
         }
+        if (!isStillActive()) {
+          return
+        }
         onErrorRef.current?.({
-          filename: record.filename,
+          filename: capturedFilename,
           reason: error instanceof Error ? error.message : String(error),
           localId,
         })

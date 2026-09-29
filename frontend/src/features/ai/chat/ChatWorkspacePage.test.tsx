@@ -340,6 +340,79 @@ describe('ChatWorkspacePage', () => {
       expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain(NEW_THREAD)
     })
   })
+
+  it('blocks deep-link target switch when pane has pending operation', async () => {
+    // 测试意图：验证当 pane 处于在途操作（如 acceptCommandBatch 在途）时，
+    // URL deep-link 触发 initialTarget 变更会被 hasPendingOperation 门禁拦截，
+    // 不切换目标且不消费 URL query
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const user = userEvent.setup()
+    let resolveBatch!: () => void
+    const pendingPromise = new Promise<{ thread: HarnessThreadDTO; entries: HarnessSessionEntryDTO[] }>((resolve) => {
+      resolveBatch = () => resolve({
+        thread: {
+          threadId: THREAD_ID,
+          sessionId: 'sess-1',
+          state: 'IDLE',
+          yolo: false,
+          activeAttemptId: null,
+          pinnedAgentName: null,
+          pinnedEnvironmentName: null,
+          lastActivityTime: '2026-01-01T00:00:00Z',
+          version: '1',
+          createTime: '2026-01-01T00:00:00Z',
+          updateTime: '2026-01-01T00:00:00Z',
+        },
+        entries: [],
+      })
+    })
+
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(() => pendingPromise)
+
+    const NEW_THREAD = '44444444-5555-6666-7777-888888888888'
+    let testNavigate!: (to: string) => void
+    function NavTestBridge() {
+      const nav = useNavigate()
+      useEffect(() => {
+        testNavigate = nav
+      }, [nav])
+      return <ChatWorkspacePage />
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${CHAT_ID}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<NavTestBridge />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await screen.findByRole('heading', { name: 'Workspace' })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+
+    // 发送消息，使 acceptCommandBatch 进入在途挂起
+    await user.type(composer, 'Hello{enter}')
+    await waitFor(() => {
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalled()
+    })
+
+    // 此时尝试通过 deepLink 切换目标
+    act(() => {
+      testNavigate(`/chats/${CHAT_ID}?thread=${NEW_THREAD}`)
+    })
+
+    // 门禁拦截：目标未切换为 NEW_THREAD，仍保持原有目标
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).not.toContain(NEW_THREAD)
+
+    // 释放挂起请求
+    act(() => {
+      resolveBatch()
+    })
+  })
 })
 
 function renderWorkspace(chatId = CHAT_ID) {
