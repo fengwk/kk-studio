@@ -47,6 +47,9 @@ public final class ProcessScopeHelper {
   /** 测试闸门的等待预算：没有释放就必须显式失败，绝不静默继续。 */
   private static final Duration SPAWN_LATCH_BUDGET = Duration.ofSeconds(20);
 
+  /** 双向标准流模式的属性值；属性名与父进程 {@code ProcessScope} 的约定一致。 */
+  private static final String STDIO_PROPERTY = "kk-studio.process-scope.stdio";
+
   private static final String SPAWN_LATCH_READY_FILE = "spawn-ready";
   private static final String SPAWN_LATCH_RELEASE_FILE = "spawn-go";
 
@@ -104,6 +107,9 @@ public final class ProcessScopeHelper {
     private final Path workdir;
     private final List<String> command;
 
+    /** 双向标准流：命令的 stdin/stdout/stderr 直接继承 keeper 的三条流（供常驻协议收发消息）。 */
+    private final boolean duplex;
+
     /**
      * 派生与收敛的互斥锁：{@code stopping} 一旦在锁内成立，就不再有任何命令被派生。
      *
@@ -134,6 +140,7 @@ public final class ProcessScopeHelper {
       this.stateDir = stateDir;
       this.workdir = workdir;
       this.command = command;
+      this.duplex = "duplex".equalsIgnoreCase(System.getProperty(STDIO_PROPERTY));
     }
 
     private int run() throws Exception {
@@ -166,15 +173,24 @@ public final class ProcessScopeHelper {
       Process child = null;
       synchronized (spawnLock) {
         if (!stopping) {
-          // 命令的 stderr 与 stdout 合并进捕获管道；helper 的诊断已经指向诊断文件，不会被继承。
-          PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
-          child =
+          // 捕获模式把命令的 stderr 合并进 stdout（helper 的诊断已经指向诊断文件，不会被继承）；双向模式必须让 stderr 保持
+          // 独立，父进程才能像对待一个直接启动的进程那样分别读它。
+          if (!duplex) {
+            PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
+          }
+          ProcessBuilder builder =
               new ProcessBuilder(command)
                   .directory(workdir.toFile())
-                  .redirectInput(ProcessBuilder.Redirect.PIPE)
                   .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-                  .redirectError(ProcessBuilder.Redirect.INHERIT)
-                  .start();
+                  .redirectError(ProcessBuilder.Redirect.INHERIT);
+          if (duplex) {
+            // 命令的 stdin 就是 keeper 自己的 stdin（父进程持有的管道）：既不新建空管道，也不关闭它，EOF 只在父进程关闭
+            // 自己那一端时到达。
+            builder.redirectInput(ProcessBuilder.Redirect.INHERIT);
+          } else {
+            builder.redirectInput(ProcessBuilder.Redirect.PIPE);
+          }
+          child = builder.start();
           // 派生事实在同一把锁内成立：收敛若在锁内看到 stopping，就一定也看到「有没有派生过」的最终值。
           spawned = true;
           // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布
@@ -187,9 +203,11 @@ public final class ProcessScopeHelper {
         awaitConvergenceFinished();
         return convergenceResult ? 0 : 1;
       }
-      // 命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于这里，
-      // 而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。
-      closeQuietly(child.getOutputStream());
+      // 捕获模式下命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于
+      // 这里，而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。双向模式没有这条管道，也不去动它。
+      if (!duplex) {
+        closeQuietly(child.getOutputStream());
+      }
       int exitCode = child.waitFor();
       ProcessScopeState.publish(stateDir, ProcessScopeState.EXIT_FILE, Integer.toString(exitCode));
       // 命令的退出码已经回收，此后 waitpid(-1) 只会回收被收养的孤儿，不会偷走命令的状态。
@@ -309,7 +327,8 @@ public final class ProcessScopeHelper {
      */
     private int runWindows() throws Exception {
       WindowsJobScope scope =
-          WindowsJobScope.createSuspended(WindowsJobScope.jobNameFor(stateDir), command, workdir);
+          WindowsJobScope.createSuspended(
+              WindowsJobScope.jobNameFor(stateDir), command, workdir, duplex);
       try {
         ProcessScopeState.publish(
             stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(scope.processId()));

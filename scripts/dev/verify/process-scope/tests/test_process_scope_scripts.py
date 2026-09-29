@@ -17,6 +17,8 @@ REQUIRED_CASES = (
     "terminateConvergesNestedProcesses",
     "unpermittedStartNeverRunsTheFixture",
     "stdinEofLetsTheFixtureExitNaturally",
+    "duplexStdioCarriesInputAndKeepsStderrSeparate",
+    "duplexStdioConvergesLiveChildrenAfterNaturalExit",
 )
 SELECTED_CLASSES = (
     "ProcessScopeCrossPlatformTest",
@@ -27,7 +29,6 @@ SELECTED_CLASSES = (
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
     "CodingCapabilitiesEdgeTest",
-    "ProcessTreeTest",
     "WindowsCommandLineTest",
     "WindowsJobScopeTest",
 )
@@ -256,7 +257,7 @@ class AssertSurefireReportsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             reports = Path(tmp)
             write_complete_reports(reports)
-            (reports / f"TEST-{PACKAGE}.ProcessTreeTest.xml").unlink()
+            (reports / f"TEST-{PACKAGE}.WindowsJobScopeTest.xml").unlink()
             result = run_script("assert-surefire-reports.py", reports, "test-os")
             self.assertEqual(1, result.returncode)
             self.assertIn("missing surefire report", result.stdout)

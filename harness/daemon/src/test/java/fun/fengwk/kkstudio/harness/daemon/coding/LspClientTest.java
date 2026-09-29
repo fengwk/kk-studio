@@ -401,6 +401,29 @@ class LspClientTest {
     assertTrue(elapsedMillis >= 200, "必须先给出关闭宽限，实际 " + elapsedMillis + "ms");
   }
 
+  /**
+   * 意图：服务器在初始化前退出时，它留下的、忽略温和信号的子进程也必须一起消失。
+   *
+   * <p>这是「执行范围拥有整组」在 LSP 生命周期上的直接事实：启动失败只收掉服务器自己是不够的，否则每一次启动失败都会在后台留下一个 拒绝退出的进程，而这个进程与本次连接已经没有任何关系。
+   */
+  @Test
+  void launchFailureReapsTheServersStubbornChildren() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 信号语义：子进程忽略 TERM，只能由强杀阶段收敛");
+    Path childPid = root.resolve("stubborn-child.pid");
+    LspServerConfig config =
+        FakeLspServers.deadServerWithStubbornChild("died-with-child", 7, childPid);
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> LspClient.launch(config, root, config.command().getFirst(), dispatch));
+    assertTrue(error.getMessage().contains("exited before initialization"), error.getMessage());
+    assertTrue(error.getMessage().contains("exit code 7"), error.getMessage());
+
+    long child = Long.parseLong(Files.readString(childPid).trim());
+    FakeLspServers.awaitProcessGone(child, Duration.ofSeconds(20));
+  }
+
   /** 意图：二进制文件在发送 didOpen 之前就被拒绝，不把字节当作文本发给服务器。 */
   @Test
   void binaryDocumentIsRejected() throws Exception {

@@ -78,6 +78,21 @@ final class FakeLspServers {
         id, List.of("/bin/sh", "-c", "exit " + exitCode), List.of(".java"), List.of(), List.of());
   }
 
+  /**
+   * 立即退出、并且留下一个忽略 {@code TERM} 的子进程的"服务器"：用于验证启动失败时整棵范围都被收敛，而不只是服务器自己。
+   *
+   * <p>子进程的 pid 由 shell 在退出之前写下，因此「启动失败」这一事实成立时，pid 一定已经可读。
+   */
+  static LspServerConfig deadServerWithStubbornChild(String id, int exitCode, Path childPid) {
+    String script =
+        "(trap '' TERM; sleep 600) & echo $! > "
+            + quote(childPid.toString())
+            + "; exit "
+            + exitCode;
+    return new LspServerConfig(
+        id, List.of("/bin/sh", "-c", script), List.of(".java"), List.of(), List.of());
+  }
+
   static LspDiscovery discovery(LspServerConfig... servers) {
     return LspDiscovery.of(List.of(servers));
   }

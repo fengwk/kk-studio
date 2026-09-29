@@ -18,11 +18,13 @@ import java.util.Locale;
  * <p>用法（第一个参数是模式，第二个参数永远是自己写 pid 的目标文件）：
  *
  * <pre>
- *   hold      &lt;pidFile&gt;                             写完 pid 后长时间存活（不会自己退出）
- *   eof       &lt;pidFile&gt; [exitCode]                  读 stdin 直到 EOF，再用给定退出码自然退出
- *   fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出，留下活着的子进程
- *   fork-hold &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
- *   nest-hold &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
+ *   hold             &lt;pidFile&gt;                             写完 pid 后长时间存活（不会自己退出）
+ *   eof              &lt;pidFile&gt; [exitCode]                  读 stdin 直到 EOF，再用给定退出码自然退出
+ *   duplex-echo      &lt;pidFile&gt; [exitCode]                  先写 stderr 标记，再把 stdin 的字节原样回写到 stdout，读到 EOF 后自然退出
+ *   fork-exit        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出，留下活着的子进程
+ *   duplex-fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出（双向标准流下的自然退出）
+ *   fork-hold        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
+ *   nest-hold        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
  * </pre>
  *
  * <p>所有子进程的实际存活时间都是 {@link #HOLD_MILLIS}，远长于任何测试窗口，因此「pid 不再存活」只能来自执行范围的收敛。
@@ -34,6 +36,13 @@ public final class ProcessScopeFixtureMain {
 
   /** 等待子进程写出 pid 的预算。 */
   private static final Duration CHILD_BUDGET = Duration.ofSeconds(20);
+
+  /**
+   * 写在 stderr 上的固定标记：测试用它判断命令的诊断是否走了自己的通道。
+   *
+   * <p>捕获模式会把命令的 stderr 合并进 stdout，双向模式必须保持两路独立——这个标记落在哪一路就是这条区别的证据。
+   */
+  static final String STDERR_MARKER = "FIXTURE-STDERR-MARKER";
 
   private ProcessScopeFixtureMain() {}
 
@@ -59,6 +68,17 @@ public final class ProcessScopeFixtureMain {
       case "eof" -> {
         readUntilEof();
         System.exit(exitCode(args));
+      }
+      case "duplex-echo" -> {
+        // 双向模式：先把诊断写进 stderr，再把 stdin 的字节原样回写 stdout，最后等 EOF 自然退出。
+        System.err.println(STDERR_MARKER);
+        System.err.flush();
+        echoUntilEof();
+        System.exit(exitCode(args));
+      }
+      case "duplex-fork-exit" -> {
+        spawn("hold", args[2]);
+        awaitChild(args[2]);
       }
       case "fork-exit" -> {
         spawn("hold", args[2]);
@@ -125,6 +145,16 @@ public final class ProcessScopeFixtureMain {
     byte[] buffer = new byte[4096];
     while (System.in.read(buffer) >= 0) {
       // 调用方不向命令写入数据，因此这里只等到 EOF。
+    }
+  }
+
+  /** 把 stdin 的字节原样回写到 stdout，直到 EOF；每一段都立刻 flush，调用方才能按行等待。 */
+  private static void echoUntilEof() throws IOException {
+    byte[] buffer = new byte[4096];
+    int read;
+    while ((read = System.in.read(buffer)) >= 0) {
+      System.out.write(buffer, 0, read);
+      System.out.flush();
     }
   }
 

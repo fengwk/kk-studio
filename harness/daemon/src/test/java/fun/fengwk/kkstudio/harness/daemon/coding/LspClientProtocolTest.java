@@ -161,7 +161,11 @@ class LspClientProtocolTest {
         noSource.getMessage().contains("Could not load or decompile"), noSource.getMessage());
   }
 
-  /** 意图：spawn 成功后 stderr 派发被拒时，已拉起的进程必须被终止，调用方拿到的是原始拒绝异常而不是进程泄漏。 */
+  /**
+   * 意图：stderr 派发被拒时整棵执行范围必须收敛，调用方拿到的是原始拒绝异常而不是进程泄漏。
+   *
+   * <p>命令与派发互斥：拒绝发生在命令真正运行之前时它根本没有机会产生副作用，发生在之后时它必须已经消失。
+   */
   @Test
   void rejectedDispatchAfterSpawnTerminatesTheProcess() throws Exception {
     Path pidFile = root.resolve("held.pid");
@@ -179,13 +183,12 @@ class LspClientProtocolTest {
             },
             "lsp-reject-launch");
     launch.start();
-    long pid = awaitPidFile(pidFile);
     launch.join(Duration.ofSeconds(20).toMillis());
 
     assertFalse(launch.isAlive(), "拒绝后的 launch 必须返回");
     assertTrue(
         rejecting.failure instanceof RejectedExecutionException, String.valueOf(rejecting.failure));
-    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+    assertConvergedCommand(pidFile);
   }
 
   /** 意图：stderr 任务已进入所有权窗口但尚未返回时，启动探测失败必须终止同一进程，而不是把活进程交还给调用方。 */
@@ -416,15 +419,28 @@ class LspClientProtocolTest {
         "held", List.of(wrapper.toString()), List.of(".java"), List.of(), List.of());
   }
 
-  private static long awaitPidFile(Path pidFile) throws Exception {
-    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-    while (System.nanoTime() < deadline) {
-      if (Files.exists(pidFile) && !Files.readString(pidFile).isBlank()) {
-        return Long.parseLong(Files.readString(pidFile).trim());
-      }
-      Thread.sleep(10);
+  /**
+   * 启动失败返回之后，命令要么从未跑起来（pid 文件没有被写下），要么已经消失。
+   *
+   * <p>判断发生在 launch 返回之后，而当时范围已经收敛，因此不可能再有「稍后才出现」的进程：文件不存在就说明命令没有机会执行。
+   */
+  private static void assertConvergedCommand(Path pidFile) {
+    long pid = readPidQuietly(pidFile);
+    if (pid > 0) {
+      FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
     }
-    throw new AssertionError("held launch did not record its pid: " + pidFile);
+  }
+
+  private static long readPidQuietly(Path pidFile) {
+    try {
+      if (!Files.isRegularFile(pidFile)) {
+        return -1;
+      }
+      String content = Files.readString(pidFile).trim();
+      return content.isEmpty() ? -1 : Long.parseLong(content);
+    } catch (Exception error) {
+      return -1;
+    }
   }
 
   private static String shellQuote(String value) {

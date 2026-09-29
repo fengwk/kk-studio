@@ -110,6 +110,10 @@ final class LspClient {
   private final LspServerConfig server;
   private final Path root;
   private final Process process;
+
+  /** 承载服务器命令的执行范围：命令的自然退出事实与整组收敛都由它回答。 */
+  private final ProcessScope scope;
+
   private final Launcher<JdtlsServer> launcher;
   private final JdtlsServer remote;
   private final ByteTailBuffer stderrTail;
@@ -121,12 +125,13 @@ final class LspClient {
   private LspClient(
       LspServerConfig server,
       Path root,
-      Process process,
+      ProcessScope scope,
       Launcher<JdtlsServer> launcher,
       ByteTailBuffer stderrTail) {
     this.server = server;
     this.root = root;
-    this.process = process;
+    this.scope = scope;
+    this.process = scope.process();
     this.launcher = launcher;
     this.remote = launcher.getRemoteProxy();
     this.stderrTail = stderrTail;
@@ -135,7 +140,8 @@ final class LspClient {
   /**
    * 启动服务器进程并建立 stdio JSON-RPC 会话，但尚未握手。
    *
-   * <p>调用方随后必须调用 {@link #initialize(Duration)}；启动失败会终止整棵进程树，绝不留下半初始化的进程。
+   * <p>服务器运行在一个 OS 级执行范围里（双向标准流），因此「服务器退出」与「整棵进程范围收敛」都由范围回答；调用方随后必须调用 {@link
+   * #initialize(Duration)}。启动失败会终止整棵范围（含服务器自己派生的后代），绝不留下半初始化的进程。
    *
    * @param executable 已解析的绝对可执行文件，用于替换命令首元素（确保 {@code ~}/{@code $HOME} 展开生效）
    */
@@ -143,24 +149,20 @@ final class LspClient {
       LspServerConfig server, Path root, String executable, ExecutorService dispatch) {
     List<String> command = new ArrayList<>(server.command());
     command.set(0, executable);
-    Process process = spawn(server, root, command);
+    ProcessScope scope = startScope(server, root, command);
+    Process process = scope.process();
     ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
     try {
-      // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止进程，不能把泄漏留给调用方。
+      // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止整棵范围，不能把泄漏留给调用方。
       dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
-      if (waitForExit(process, PROCESS_PROBE_MILLIS)) {
-        throw new IllegalStateException(
-            "LSP server '"
-                + command.getFirst()
-                + "' exited before initialization for "
-                + root
-                + exitDetail(process, stderrTail));
+      if (scope.awaitNaturalExit(PROCESS_PROBE_MILLIS)) {
+        throw new IllegalStateException(earlyExitMessage(server, root, command, scope, stderrTail));
       }
       LspClient client =
           new LspClient(
               server,
               root,
-              process,
+              scope,
               new LSPLauncher.Builder<JdtlsServer>()
                   .setLocalService(new ClientEndpoint(root))
                   /*
@@ -177,17 +179,16 @@ final class LspClient {
       client.launcher.startListening();
       return client;
     } catch (RuntimeException error) {
-      ProcessTree.terminate(process);
+      scope.close();
       throw error;
     }
   }
 
-  private static Process spawn(LspServerConfig server, Path root, List<String> command) {
-    ProcessBuilder builder = new ProcessBuilder(command);
-    builder.directory(root.toFile());
+  /** 启动承载服务器命令的执行范围；建立范围之前的任何失败都是「服务器无法启动」。 */
+  private static ProcessScope startScope(LspServerConfig server, Path root, List<String> command) {
     try {
-      return builder.start();
-    } catch (IOException error) {
+      return ProcessScope.startDuplex(root, command);
+    } catch (IOException | RuntimeException error) {
       throw new IllegalStateException(
           "LSP server '"
               + server.id()
@@ -199,6 +200,36 @@ final class LspClient {
               + root,
           error);
     }
+  }
+
+  /**
+   * 服务器在握手之前就结束（或根本没有启动起来）时的失败说明。
+   *
+   * <p>两类事实必须分开：helper 发布的启动失败说明命令从未跑起来（可执行文件不存在、不可执行、工作目录不可用）；否则就是命令自己
+   * 跑过又退出，退出码只能取命令自己发布的那个，诊断尾部仍是有界的 stderr 归集。
+   */
+  private static String earlyExitMessage(
+      LspServerConfig server,
+      Path root,
+      List<String> command,
+      ProcessScope scope,
+      ByteTailBuffer stderrTail) {
+    String failure = scope.startFailure();
+    if (failure != null) {
+      return "LSP server '"
+          + server.id()
+          + "' cannot be started: "
+          + failure
+          + ". Command '"
+          + command.getFirst()
+          + "', directory "
+          + root;
+    }
+    return "LSP server '"
+        + server.id()
+        + "' exited before initialization for "
+        + root
+        + exitDetail(scope, stderrTail);
   }
 
   /**
@@ -257,9 +288,18 @@ final class LspClient {
     return capabilities;
   }
 
-  /** 服务器进程是否仍在运行；传输失败或已关闭的实例不再被复用。 */
+  /** 服务器进程是否仍在运行；自然退出、传输失败或已关闭的实例不再被复用。 */
   boolean isAlive() {
-    return !stopped.get() && process.isAlive();
+    return !stopped.get() && running();
+  }
+
+  /**
+   * 服务器命令是否仍在运行：范围没有发布它的退出码，承载它的进程也还活着。
+   *
+   * <p>只看 helper 的存活是不够的：命令退出后 helper 还要收敛整组才会结束，那段时间里「服务器还在跑」会是错的。
+   */
+  private boolean running() {
+    return scope.naturalExitCode() == null && process.isAlive();
   }
 
   boolean supports(String method) {
@@ -471,7 +511,7 @@ final class LspClient {
       return;
     }
     try {
-      if (process.isAlive()) {
+      if (running()) {
         long graceMillis = Math.max(0, grace.toMillis());
         try {
           await(remote.shutdown(), Duration.ofMillis(graceMillis), "shutdown", false);
@@ -487,7 +527,8 @@ final class LspClient {
       }
     } finally {
       documents.clear();
-      ProcessTree.terminate(process);
+      // 关闭整棵范围：服务器自己派生的后代也必须在这次调用里消失，而不是留给操作系统。
+      scope.close();
     }
   }
 
@@ -505,9 +546,9 @@ final class LspClient {
     if (stopped.get()) {
       throw new IllegalStateException("LSP client stopped");
     }
-    if (!process.isAlive()) {
+    if (!running()) {
       throw new IllegalStateException(
-          "LSP server '" + server.id() + "' exited" + exitDetail(process, stderrTail));
+          "LSP server '" + server.id() + "' exited" + exitDetail(scope, stderrTail));
     }
   }
 
@@ -745,8 +786,14 @@ final class LspClient {
     }
   }
 
-  private static String exitDetail(Process process, ByteTailBuffer tail) {
-    String detail = " (exit code " + process.exitValue() + ")";
+  /**
+   * 退出的诊断说明：退出码取命令自己发布的那一个，而不是承载它的 helper 的退出码。
+   *
+   * <p>命令还没有发布退出码（helper 被杀这类范围失败）时如实说「未知」，不拿别的数字顶替。
+   */
+  private static String exitDetail(ProcessScope scope, ByteTailBuffer tail) {
+    Integer exitCode = scope.naturalExitCode();
+    String detail = " (exit code " + (exitCode == null ? "unknown" : exitCode) + ")";
     String diagnostics = diagnostics(tail);
     return diagnostics.isEmpty() ? detail : detail + ": " + diagnostics;
   }

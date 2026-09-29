@@ -77,7 +77,7 @@ ripgrep / fd 子进程加一层 TypeScript 工具包装实现。两者对外契�
 | `keeps partial fd output from non-zero exits` | 排除：不启动子进程，不存在「非零退出附带部分输出」状态；不完整结果的对应处理是未搜索路径枚举 | `NativeSearchCapabilitiesTest#findReportsUnsearchedPathsWhenNothingMatches` | 不适用（状态不存在） |
 | `leaves byte truncation to the shared tool-output layer` | 适用 | `FindGrepCapabilitiesTest#findSpoolsLargeResultsToBoundedTextResultWithPath` | 通过 |
 | `aborts before and during fd execution` | 适用（取消在遍历前与遍历中都必须及时终止） | `NativeSearchCapabilitiesTest#findTimesOutOnTinyDeadline`、`#searchControlActivelyChecksTimeoutAndCancellation`、`#deadlineCheckedSequenceSurfacesCancellationAsInterruption` | 通过 |
-| `keeps the default force-kill watchdog after cancellation rejects` | 排除：检索不启动子进程；强制终止契约由承载子进程的能力（命令执行、LSP）验证 | `ProcessTreeTest` | 不适用（层次不同） |
+| `keeps the default force-kill watchdog after cancellation rejects` | 排除：检索不启动子进程；强制终止契约由承载子进程的能力（命令执行、LSP）验证 | `ProcessScopeTest.terminateLetsTheCommandRunItsTerminationTrap` | 不适用（层次不同） |
 
 ## grep/find 工具包装（`pi-base/tests/search-tools.test.ts`）
 

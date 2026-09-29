@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.Structure;
 import com.sun.jna.platform.win32.BaseTSD.SIZE_T;
 import com.sun.jna.platform.win32.WinBase;
 import com.sun.jna.platform.win32.WinDef.DWORD;
@@ -282,6 +282,77 @@ class WindowsJobScopeTest {
   }
 
   /**
+   * 双向模式：命令直接继承 helper 自己的三条标准流，既不创建 stdin 管道，也不把 stderr 指向 stdout。
+   *
+   * <p>这是常驻双向协议（LSP）会走的那条路，因此三件事必须同时成立：命令收到的三条流是调用方持有的那三条；句柄列表恰好列出
+   * 它们（多一个少一个都会让继承集合与约定不符）；本次调用没有任何管道句柄需要交还。归属仍然与创建是同一条内核指令。
+   */
+  @Test
+  void duplexInheritsTheThreeStandardStreamsWithoutPipes() {
+    FakeKernel kernel = new FakeKernel().withDuplexStandardHandles();
+    WindowsJobScope scope =
+        WindowsJobScope.createSuspended(kernel, "job", List.of("cmd", "/c", "exit"), WORKDIR, true);
+    try {
+      assertEquals(
+          List.of(FakeKernel.STDIN_HANDLE, FakeKernel.STDOUT_HANDLE, FakeKernel.STDERR_HANDLE),
+          kernel.handlesOf(WindowsJobScope.PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+          "句柄列表必须恰好是命令继承的三条标准流");
+      assertEquals(
+          List.of(FakeKernel.JOB_HANDLE),
+          kernel.handlesOf(WindowsJobScope.PROC_THREAD_ATTRIBUTE_JOB_LIST),
+          "归属必须与创建是同一条内核指令的一部分");
+      assertEquals(
+          List.of(FakeKernel.STDIN_HANDLE, FakeKernel.STDOUT_HANDLE, FakeKernel.STDERR_HANDLE),
+          List.of(
+              kernel.createdStandardStreams()[0],
+              kernel.createdStandardStreams()[1],
+              kernel.createdStandardStreams()[2]),
+          "命令的 stdin/stdout/stderr 必须分别是三条独立的流");
+      assertEquals(List.of(), kernel.closedHandles(), "双向模式没有属于本次调用的管道句柄");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
+   * 三条标准流指向同一个句柄时，句柄列表必须去重：重复项会让 {@code CreateProcess} 直接失败。
+   *
+   * <p>这个前提在调用方把命令的 stderr 与 stdout 接到同一个管道时就成立，因此不能在实现里假定三条流互不相同。
+   */
+  @Test
+  void duplexDeduplicatesIdenticalStandardHandles() {
+    FakeKernel kernel = new FakeKernel().withDuplexStandardHandles().withStderrAliasingStdout();
+    WindowsJobScope scope =
+        WindowsJobScope.createSuspended(kernel, "job", List.of("cmd", "/c", "exit"), WORKDIR, true);
+    try {
+      assertEquals(
+          List.of(FakeKernel.STDIN_HANDLE, FakeKernel.STDOUT_HANDLE),
+          kernel.handlesOf(WindowsJobScope.PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+          "同一个句柄在继承列表里只能出现一次");
+      assertEquals(List.of(), kernel.closedHandles(), "双向模式没有属于本次调用的管道句柄");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /** 捕获模式与双向模式的判别事实：捕获把两路输出指向同一个句柄，双向保持独立。 */
+  @Test
+  void captureMergesStandardErrorIntoTheCapturedStream() {
+    FakeKernel kernel = new FakeKernel();
+    WindowsJobScope scope =
+        WindowsJobScope.createSuspended(
+            kernel, "job", List.of("cmd", "/c", "exit"), WORKDIR, false);
+    try {
+      long[] streams = kernel.createdStandardStreams();
+      assertEquals(FakeKernel.STDIN_READ, streams[0], "捕获模式的 stdin 是本次调用新建的管道读端");
+      assertEquals(FakeKernel.STDOUT_HANDLE, streams[1]);
+      assertEquals(streams[1], streams[2], "捕获模式必须把命令的 stderr 合并进捕获流");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
    * 真实 kernel32 上的失败去向：命令不存在、工作目录不存在、Job 名不存在。
    *
    * <p>这些只有真实 Windows 能构造，因此它们由 Windows runner 断言；假实现覆盖的是句柄所有权，不替代真实 API 的错误语义。
@@ -295,14 +366,17 @@ class WindowsJobScopeTest {
             IllegalStateException.class,
             () ->
                 WindowsJobScope.createSuspended(
-                    jobName, List.of("kk-studio-missing-exe"), WORKDIR));
+                    jobName, List.of("kk-studio-missing-exe"), WORKDIR, false));
     assertTrue(missingExecutable.getMessage().contains("kk-studio-missing-exe"));
     IllegalStateException missingWorkdir =
         assertThrows(
             IllegalStateException.class,
             () ->
                 WindowsJobScope.createSuspended(
-                    jobName, List.of("cmd", "/c", "exit"), WORKDIR.resolve("missing-workdir")));
+                    jobName,
+                    List.of("cmd", "/c", "exit"),
+                    WORKDIR.resolve("missing-workdir"),
+                    false));
     assertTrue(missingWorkdir.getMessage().contains("missing-workdir"));
     assertThrows(IllegalStateException.class, () -> WindowsJobScope.attach(jobName));
   }
@@ -321,7 +395,9 @@ class WindowsJobScopeTest {
     static final long JOB_HANDLE = 301;
     static final long STDIN_READ = 101;
     static final long STDIN_WRITE = 102;
+    static final long STDIN_HANDLE = 203;
     static final long STDOUT_HANDLE = 201;
+    static final long STDERR_HANDLE = 204;
     static final long PROCESS_HANDLE = 401;
     static final long THREAD_HANDLE = 402;
     static final long PROCESS_HANDLE_PID = 4321;
@@ -330,6 +406,8 @@ class WindowsJobScopeTest {
     private boolean jobAvailable = true;
     private boolean standardOutputAvailable = true;
     private boolean standardOutputInheritable;
+    private boolean duplexStandardHandles;
+    private boolean stderrAliasesStdout;
     private boolean attributeListInitialization = true;
     private int failingUpdateAttributeCall = -1;
     private int updateAttributeCalls;
@@ -339,6 +417,9 @@ class WindowsJobScopeTest {
     private boolean exitCodeRead = true;
     private int exitCode;
     private boolean resume = true;
+
+    private final Map<Long, List<Long>> attributeHandles = new LinkedHashMap<>();
+    private long[] createdStandardStreams;
 
     int deletedAttributeLists;
     int standardHandleRewriteCount;
@@ -360,6 +441,28 @@ class WindowsJobScopeTest {
     FakeKernel withInheritableStandardOutput() {
       standardOutputInheritable = true;
       return this;
+    }
+
+    /** 双向模式的三条标准流都存在且互不相同。 */
+    FakeKernel withDuplexStandardHandles() {
+      duplexStandardHandles = true;
+      return this;
+    }
+
+    /** 让 stderr 与 stdout 指向同一个句柄：句柄列表必须去重。 */
+    FakeKernel withStderrAliasingStdout() {
+      stderrAliasesStdout = true;
+      return this;
+    }
+
+    /** 每一种属性实参实际传给内核的句柄；句柄列表与 Job 列表都走同一个 API。 */
+    List<Long> handlesOf(long attribute) {
+      return attributeHandles.getOrDefault(attribute, List.of());
+    }
+
+    /** 命令实际收到的三条标准流（hStdInput/hStdOutput/hStdError）。 */
+    long[] createdStandardStreams() {
+      return createdStandardStreams;
     }
 
     FakeKernel withAttributeListInitialization(boolean value) {
@@ -427,6 +530,17 @@ class WindowsJobScopeTest {
       if (stdHandle == -11 && standardOutputAvailable) {
         return handle(STDOUT_HANDLE);
       }
+      if (duplexStandardHandles) {
+        if (stdHandle == -10) {
+          return handle(STDIN_HANDLE);
+        }
+        if (stdHandle == -11) {
+          return handle(STDOUT_HANDLE);
+        }
+        if (stdHandle == -12) {
+          return handle(stderrAliasesStdout ? STDOUT_HANDLE : STDERR_HANDLE);
+        }
+      }
       return null;
     }
 
@@ -488,6 +602,16 @@ class WindowsJobScopeTest {
       if (!createProcess) {
         return false;
       }
+      // 从内核实际收到的内存回读标准流：布局本身已由结构体用例固定，这里只断言写进去的是哪三条流。
+      WindowsJobScope.STARTUPINFOEX startup =
+          Structure.newInstance(WindowsJobScope.STARTUPINFOEX.class, startupInfo);
+      startup.read();
+      createdStandardStreams =
+          new long[] {
+            value(startup.StartupInfo.hStdInput),
+            value(startup.StartupInfo.hStdOutput),
+            value(startup.StartupInfo.hStdError)
+          };
       processInformation.hProcess = handle(PROCESS_HANDLE);
       processInformation.hThread = handle(THREAD_HANDLE);
       processInformation.dwProcessId = new DWORD(PROCESS_HANDLE_PID);
@@ -522,6 +646,12 @@ class WindowsJobScopeTest {
         Pointer previousValue,
         Pointer returnSize) {
       updateAttributeCalls++;
+      List<Long> handles = new ArrayList<>();
+      for (long offset = 0; offset < size.longValue(); offset += Native.POINTER_SIZE) {
+        // 假句柄本身是指向「值」的指针，与生产代码写入列表的内容一致，因此这里按同样的方式解引用。
+        handles.add(value(new HANDLE(value.getPointer(offset))));
+      }
+      attributeHandles.put(Pointer.nativeValue(attribute), handles);
       return failingUpdateAttributeCall != updateAttributeCalls;
     }
 
@@ -568,14 +698,13 @@ class WindowsJobScopeTest {
       return true;
     }
 
+    /** 假句柄按真实 API 的形状构造：句柄自己的指针值就是「句柄值」，因此相等性与去重语义与真实句柄一致。 */
     private static HANDLE handle(long value) {
-      Pointer pointer = new Memory(Native.POINTER_SIZE);
-      pointer.setPointer(0, Pointer.createConstant(value));
-      return new HANDLE(pointer);
+      return new HANDLE(Pointer.createConstant(value));
     }
 
     private static long value(HANDLE handle) {
-      return Pointer.nativeValue(handle.getPointer().getPointer(0));
+      return Pointer.nativeValue(handle.getPointer());
     }
   }
 }

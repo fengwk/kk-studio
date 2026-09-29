@@ -298,6 +298,38 @@ class ProcessScopeTest {
   }
 
   /**
+   * 终止必须先温和：命令自己的 SIGTERM 处理必须有机会执行完，然后范围才收敛。
+   *
+   * <p>这是「先温和、后强制」顺序的可观察事实——只发强杀信号也能让断言里的「进程已经消失」成立，因此标记文件是否存在才是这条契约 真正的判据。
+   */
+  @Test
+  void terminateLetsTheCommandRunItsTerminationTrap() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 信号语义：Windows 的终止没有可执行的温和阶段");
+    Path marker = workdir.resolve("term-marker.txt");
+    Path pidFile = workdir.resolve("term.pid");
+    ProcessScope scope =
+        ProcessScope.start(
+            workdir,
+            List.of(
+                "sh",
+                "-c",
+                "echo $$ >> '"
+                    + pidFile
+                    + "'; trap 'printf term > \""
+                    + marker
+                    + "\"; exit 0' TERM; while true; do sleep 0.05; done"));
+    try {
+      awaitFile(pidFile);
+      // 等命令真正进入事件循环，避免 TERM 早于 trap 安装而走默认处理。
+      Thread.sleep(300);
+      assertTrue(scope.terminate(), "终止后整组必须由内核确认收敛");
+      assertEquals("term", Files.readString(marker), "命令必须先收到 SIGTERM 并执行自己的清理");
+    } finally {
+      scope.close();
+    }
+  }
+
+  /**
    * 取消落在「helper 已经就位、但命令还没有派生」的位置时，命令绝不会被派生。
    *
    * <p>这是派发与收敛互斥的确定性断言：收敛一旦开始就再也不允许派生，因此这里既不会出现「收敛扫描过一次、命令随后才
