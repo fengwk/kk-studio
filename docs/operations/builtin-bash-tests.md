@@ -294,6 +294,12 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   条件」跳过，而不是把 WSL 的失败伪装成能力行为。CI 的 Windows runner 自带 Git Bash（矩阵自己的 `shell: bash` 用的就是它），
   因此该平台照常验收命令执行；只有那两个用**裸名** `bash` 的遗留编码能力夹具（`CodingCapabilitiesTest`、
   `CodingCapabilitiesEdgeTest`）不参与 Windows 腿——它们不是执行范围的用例，仍由 Linux 完整套件与 macOS 覆盖。
+- **超时类用例的触发时机由测试决定，不靠墙钟。** `timeoutKeepsCapturedOutputWithoutLeavingStagingResidue`、
+  `timeoutPublishesSpilledOutputAndKeepsCountsFaithful`、`timeoutTerminatesWholeProcessTree` 与
+  `termIgnoringDescendantIsForceKilledOnTimeout` 先等命令自身的屏障（就绪标记 / 标记文件已有内容）成立，再手动触发被捕获的超时
+  任务，走的仍是生产那条 `schedule → timedOut → 收敛整组` 路径；`closesStdinSoCommandsWaitingForEofFinishNaturally` 则干脆不设
+  deadline，因为它的断言只关于 stdin 写端是否关闭。否则「超时保留已捕获输出」会退化成对 runner 启动速度的断言——Windows 上
+  helper 与 Git Bash 的冷启动确实可能吃掉两秒预算，把用例变成随机门禁。
 - **命令不存在时的失败形态与平台有关。** POSIX 上命令进程在范围建立之后才 `exec`，失败发生在已建立的范围内；Windows 上首个
   进程必须先创建并归属 Job，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭、都带上命令名，
   调用方（`BashCapability`）对两者的终态都按失败处理。
