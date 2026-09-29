@@ -113,6 +113,15 @@ public final class ProcessScopeHelper {
 
     private boolean stopping;
 
+    /**
+     * 命令是否真的被派生过。
+     *
+     * <p>取值只在 {@code spawnLock} 内改变，因此「{@code stopping} 已经成立」配上「{@code spawned} 仍为 false」是一条确定性的「
+     * 本次调用没有任何成员」证明：锁内一旦声明不再派生，就不可能有新成员诞生；此前也没派生过，就没有任何后代需要收敛。收敛因此 不必扫描、更不必向整组广播强杀（那一条会打到 helper
+     * 自己），permit/工作目录这类启动失败也就不会把父进程看到的事实变成 「被强杀」。
+     */
+    private volatile boolean spawned;
+
     /** 收敛只执行一次：main 的自然退出路径与 shutdown hook 用它同步。 */
     private final AtomicBoolean convergenceStarted = new AtomicBoolean();
 
@@ -166,6 +175,8 @@ public final class ProcessScopeHelper {
                   .redirectOutput(ProcessBuilder.Redirect.INHERIT)
                   .redirectError(ProcessBuilder.Redirect.INHERIT)
                   .start();
+          // 派生事实在同一把锁内成立：收敛若在锁内看到 stopping，就一定也看到「有没有派生过」的最终值。
+          spawned = true;
           // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布
           // 完成。放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell 无法为「进入时已被忽略」的信号注册 trap。
           PosixProcessGroup.ignoreTerminationSignal();
@@ -323,6 +334,11 @@ public final class ProcessScopeHelper {
      * 自身），因此收敛的最终判定由父进程的内核检查收口。
      */
     private boolean convergeGroup(long processGroup) {
+      if (!spawned) {
+        // 从未派生过命令：stopping 已经在同一把锁内成立，因此不可能再有成员诞生。这是一条确定性的「没有成员」证明，不需要
+        // 扫描，更不需要向整组广播强杀——那一条会把 helper 自己也带走，让父进程只能看到「被信号杀掉」而不是真实的失败原因。
+        return true;
+      }
       PosixProcessGroup.signalGroup(processGroup, PosixProcessGroup.SIGTERM);
       if (awaitGroupGone(processGroup, TERMINATION_GRACE)) {
         return true;

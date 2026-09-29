@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -401,10 +402,15 @@ class ProcessScopeTest {
    *
    * <p>这是「keeper 先死、后代还在」这条真实去向的确定性构造：直接强杀 helper（模拟它被外部杀掉，因此不会走它自己的收敛 hook），此时组 id 已经没有 helper
    * 可问，只能靠成员快照逐个确认「它此刻仍然属于本次范围、启动时刻与快照一致」之后再强杀。
+   *
+   * <p>这条兜底只在有 {@code /proc} 的平台上成立：没有成员枚举能力时，「组里还有谁」根本答不上来，父进程只能如实报告未收敛，绝不
+   * 可能在没有身份信息的前提下逐个核验并强杀。这是能力边界而不是缺陷，也不是本能力承诺覆盖的场景——命令自然退出（含 timeout 与取消）的收敛由 keeper 自己完成，只有 keeper
+   * 被外部强杀才轮到这条兜底；因此这里显式要求 Linux/WSL，不在其它平台伪造结论。
    */
   @Test
   void terminateConvergesRemainingMembersAfterTheKeeperIsKilled() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX 进程组语义");
+    assumeTrue(isLinuxLike(), "需要 /proc：没有 keeper 时识别并核验剩余成员依赖成员枚举");
     Path pidFile = workdir.resolve("keeper-dead.pids");
     ProcessScope scope =
         ProcessScope.start(

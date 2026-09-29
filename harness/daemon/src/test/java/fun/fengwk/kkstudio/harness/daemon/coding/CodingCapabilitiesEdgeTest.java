@@ -191,8 +191,11 @@ class CodingCapabilitiesEdgeTest {
     assertEquals(
         nested.resolve("@file.txt").toRealPath(),
         EnvironmentPaths.existing("@file.txt", nested.toRealPath()));
+    // 还不存在的新文件只能拿「真实根目录」拼出来：workdir 要的是绝对且真实存在的目录，返回的路径挂在真实根之下。
+    // 直接用 junit 给的 @TempDir 拼会在两种平台上跑偏：macOS 的 /var 是指向 /private/var 的符号链接，Windows 的临时
+    // 目录名可能是 8.3 短名（RUNNER~1 与 runneradmin 指向同一个目录但字符串不同）。
     assertEquals(
-        nested.resolve("future/file.txt"),
+        nested.toRealPath().resolve("future/file.txt"),
         EnvironmentPaths.writable("future/file.txt", nested.toRealPath()));
     assertEquals(
         nested.resolve("file.txt").toRealPath(),
