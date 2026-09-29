@@ -50,18 +50,28 @@ class ProcessScopeCrossPlatformTest {
    * 根进程自然退出、子进程仍在运行时，范围完结后子进程必须已经消失。
    *
    * <p>这正是 C01 的核心事实：自然退出不靠「根进程死了」结案，而是靠整组收敛结案。
+   *
+   * <p>根进程的出口时间点由用例自己许可（捕获模式下命令的 stdin 是一条已关闭的空管道，许可只能靠文件）：先确认子进程还活着，再放根进程走。否则
+   * 「子进程曾经活着」只是推断——快机器上范围可能在用例读到 pid 之前就已经把整组收敛干净了。
    */
   @Test
   void naturalExitConvergesLiveChildren() throws Exception {
     Path rootPid = workdir.resolve("root.pid");
     Path childPid = workdir.resolve("child.pid");
-    ProcessScope scope = ProcessScope.start(workdir, fixture("fork-exit", rootPid, childPid));
+    Path permit = workdir.resolve("permit");
+    ProcessScope scope =
+        ProcessScope.start(workdir, fixture("fork-exit", rootPid, childPid, permit));
     try {
+      long child = awaitPid(childPid, PID_BUDGET);
+      assertTrue(awaitPid(rootPid, PID_BUDGET) > 0, "根进程必须真的运行过");
+      // 活前置条件：根进程还在等许可，范围不可能已经收敛，子进程只可能是活的。
+      assertTrue(isAlive(child), "根进程退出之前子进程必须仍然存活：" + child);
+
+      Files.writeString(permit, "permit", StandardCharsets.UTF_8);
+
       // 读到 EOF 才结束：捕获管道只有在范围内所有进程都不再持有写端时才会关闭。
       readAll(scope.process().getInputStream());
       scope.process().waitFor();
-      long child = awaitPid(childPid, PID_BUDGET);
-      assertTrue(awaitPid(rootPid, PID_BUDGET) > 0, "根进程必须真的运行过");
       assertTrue(scope.terminate(), "范围必须由内核或 Job 确认为已经收敛");
       assertTrue(awaitGone(child, GONE_BUDGET), "自然退出后子进程 " + child + " 必须已经被收敛");
     } finally {
@@ -163,6 +173,9 @@ class ProcessScopeCrossPlatformTest {
    * 双向标准流下根进程自然退出：它留下的活着的子进程同样必须被收敛。
    *
    * <p>双向模式没有「捕获管道读到 EOF」这个信号可用，因此范围完结只能靠命令自己的退出事实与整组收敛来判定；这条用例确认 收敛并不依赖捕获管道。
+   *
+   * <p>双向模式下 stdin 是调用方与命令之间的真实通道，所以出口时间点用 stdin 上的一个字节来许可：先确认子进程存活，再放根进程走。没有这一步时，
+   * 用例的「子进程还活着」只能靠与收敛抢时间——快机器上范围完全可能在断言之前就已经收敛干净（那是正确行为）。
    */
   @Test
   void duplexStdioConvergesLiveChildrenAfterNaturalExit() throws Exception {
@@ -171,8 +184,15 @@ class ProcessScopeCrossPlatformTest {
     ProcessScope scope =
         ProcessScope.startDuplex(workdir, fixture("duplex-fork-exit", rootPid, childPid));
     try {
+      assertTrue(awaitPid(rootPid, PID_BUDGET) > 0, "根进程必须真的运行过");
       long child = awaitPid(childPid, PID_BUDGET);
-      assertTrue(isAlive(child), "子进程必须仍然存活：" + child);
+      // 活前置条件：根进程还在等许可，范围不可能已经收敛，子进程只可能是活的。
+      assertTrue(isAlive(child), "根进程退出之前子进程必须仍然存活：" + child);
+
+      OutputStream permit = scope.process().getOutputStream();
+      permit.write(0x1);
+      permit.flush();
+
       assertTrue(scope.awaitNaturalExit(PID_BUDGET.toMillis()), "根进程必须在自己派生子进程之后自然退出");
       assertTrue(scope.terminate(), "范围必须由内核或 Job 确认为已经收敛");
       assertTrue(awaitGone(child, GONE_BUDGET), "自然退出后子进程 " + child + " 必须已经被收敛");
