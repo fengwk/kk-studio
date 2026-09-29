@@ -261,9 +261,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -306,9 +304,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -383,9 +379,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
@@ -450,9 +444,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
@@ -550,9 +542,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -594,9 +584,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -649,9 +637,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatch,
-          new Map(),
         ),
       { wrapper },
     )
@@ -688,9 +674,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -703,7 +687,11 @@ describe('useAgentThreadController', () => {
     const firstId = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
       .commands[0]?.idempotencyKey
 
-    // 将 composer 编辑成不同内容时，会重置回放身份。
+    // unknown 状态下不允许直接通过修改草稿解锁原回放身份（勿用生成新 key 解锁）；
+    // 用户必须先显式调用 abandonPendingMessage 放弃旧未决消息，然后再提交新内容铸造新 key。
+    act(() => {
+      result.current.abandonPendingMessage()
+    })
     act(() => result.current.setDraft([createTextPart('changed content')]))
     await act(async () => {
       await result.current.submitMessage()
@@ -725,9 +713,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -751,9 +737,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, draft),
-          new Map(),
         ),
       { wrapper },
     )
@@ -1374,9 +1358,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
@@ -1458,9 +1440,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
@@ -1523,9 +1503,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           () => null,
-          new Map(),
         ),
       { wrapper },
     )
@@ -1548,9 +1526,7 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
@@ -1562,19 +1538,25 @@ describe('useAgentThreadController', () => {
       await pendingSubmit
     })
     await waitFor(() => expect(result.current.actionError).toContain('queue full'))
-    // 失败时 composer 已有更新内容：绝不覆盖为失败快照；编辑本身已重置回放身份。
+    // 失败时 composer 已有更新内容：绝不覆盖为失败快照；同时 unknown 状态下锁定原身份，必须显式放弃
     expect(partsToText(result.current.draft)).toBe('newer draft')
+    expect(result.current.replayPending).toBe(true)
+    act(() => {
+      result.current.abandonPendingMessage()
+    })
     expect(result.current.replayPending).toBe(false)
   })
 
-  it('only clears the exact replay when the completing request is still the latest one', async () => {
-    const releases: Array<() => void> = []
-    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(
-      () =>
-        new Promise<HarnessThreadCommandDTO[]>((resolve) => {
-          releases.push(() => resolve([] as HarnessThreadCommandDTO[]))
-        }),
-    )
+  it('blocks overlapping in-flight submission and prevents second submit from overwriting first pending', async () => {
+    let releaseFirst!: (val: HarnessThreadCommandDTO[]) => void
+    vi.mocked(harnessService.acceptCommandBatch)
+      .mockImplementationOnce(
+        () =>
+          new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+            releaseFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
     const currentThread = threadFixture()
     const base = branchDraftFromThread(currentThread)
     const { result } = renderHook(
@@ -1582,41 +1564,173 @@ describe('useAgentThreadController', () => {
         useAgentThreadController(
           currentThread.threadId,
           [],
-          undefined,
           buildBatchFor(currentThread, base, base),
-          new Map(),
         ),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
     act(() => result.current.setDraft([createTextPart('first')]))
-    await act(async () => {
-      // 两个请求都 deferred：不能 await 完成，只启动它们。
+    act(() => {
+      // 启动第一个请求进入飞行状态
       void result.current.submitMessage()
     })
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+
+    // 在第一个请求飞行中：试图发送第二个请求，被同步 ref 阻止，不能覆盖首请求
     act(() => result.current.setDraft([createTextPart('second')]))
-    await act(async () => {
+    act(() => {
       void result.current.submitMessage()
     })
-    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
-    const firstPlan = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
-    const secondPlan = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
-    expect(secondPlan?.commands[0]?.idempotencyKey).not.toBe(
-      firstPlan?.commands[0]?.idempotencyKey,
-    )
-    // 较新的请求先完成：replay 被清空。
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+
+    // 释放首个请求成功返回
     await act(async () => {
-      releases[1]?.()
-    })
-    await waitFor(() => expect(result.current.replayPending).toBe(false))
-    expect(result.current.pending).toBe(true)
-    // 较旧的请求随后完成：身份已不匹配，绝不再触碰 replay/状态。
-    await act(async () => {
-      releases[0]?.()
+      releaseFirst([] as HarnessThreadCommandDTO[])
     })
     await waitFor(() => expect(result.current.pending).toBe(false))
-    expect(result.current.actionError).toBeNull()
-    expect(result.current.replayPending).toBe(false)
+
+    // 首请求完成后，新请求可以正常发送
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves latest rebuilt cursor across error handling when stale cursor rebuild fails subsequently', async () => {
+    const currentThread = threadFixture({
+      version: '1',
+      headEntryId: 'h1',
+      nextCommandSequence: '3',
+    })
+    const updatedThread = {
+      ...currentThread,
+      version: '2',
+      headEntryId: 'h1',
+      nextCommandSequence: '4',
+    }
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(currentThread))
+      .mockResolvedValueOnce(snapshotOf(updatedThread))
+
+    // 第一次调用返回 STALE_COMMAND_CURSOR，触发游标更新为 h1/4；第二次重试调用遭遇未知网络故障
+    vi.mocked(harnessService.acceptCommandBatch)
+      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }))
+      .mockRejectedValueOnce(new Error('Network drop on rebuilt request'))
+
+    const base = branchDraftFromThread(currentThread)
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          buildBatchFor(currentThread, base, base),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('rebuild cursor test')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    // 验证第二次调用确实使用了更新后的 h1/4 游标
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+    const secondReq = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
+    expect(secondReq?.target.expectedHeadEntryId).toBe('h1')
+    expect(secondReq?.target.expectedNextCommandSequence).toBe('4')
+
+    // 关键回归点：随后的 unknown 错误处理保留确切最新已发的 request（h1/4），绝不被旧闭包覆盖
+    expect(result.current.pendingMessage?.unknownOutcome).toBe(true)
+    expect(result.current.pendingMessage?.request.target.expectedHeadEntryId).toBe('h1')
+    expect(result.current.pendingMessage?.request.target.expectedNextCommandSequence).toBe('4')
+  })
+
+  it('fails closed when persisting rebuilt cursor in stale retry loop fails', async () => {
+    const currentThread = threadFixture({ version: '1', headEntryId: 'h1', nextCommandSequence: '3' })
+    const updatedThread = { ...currentThread, version: '2', headEntryId: 'h1', nextCommandSequence: '4' }
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(currentThread))
+      .mockResolvedValueOnce(snapshotOf(updatedThread))
+
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
+      new ApiError('stale cursor', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+    )
+
+    const originalSetItem = localStorage.setItem.bind(localStorage)
+    let pendingSaveCount = 0
+    const storageSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((key, val) => {
+      if (key.includes('agent-thread-pending')) {
+        pendingSaveCount += 1
+        if (pendingSaveCount > 1) {
+          throw new Error('QuotaExceededOnRebuild')
+        }
+      }
+      return originalSetItem(key, val)
+    })
+
+    try {
+      const base = branchDraftFromThread(currentThread)
+      const { result } = renderHook(
+        () =>
+          useAgentThreadController(
+            currentThread.threadId,
+            [],
+            buildBatchFor(currentThread, base, base),
+          ),
+        { wrapper },
+      )
+      await waitFor(() => expect(result.current.disabled).toBe(false))
+
+      act(() => result.current.setDraft([createTextPart('rebuild fail-closed')]))
+      await act(async () => {
+        await result.current.submitMessage()
+      })
+
+      // 验证 fail-closed：持久化失败后中止重试，绝未发出第二次 acceptCommandBatch
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+      expect(result.current.actionError).toMatch(/QuotaExceededOnRebuild/)
+    } finally {
+      storageSpy.mockRestore()
+    }
+  })
+
+  it('rejects stale retry when targetDraft diverges from projected settings in snapshot', async () => {
+    const currentThread = threadFixture({ version: '1', headEntryId: 'h1', nextCommandSequence: '3' })
+    // 服务端 snapshot 已经变更了 agentName 为 'planner'
+    const divergentThread = threadFixture({
+      version: '2',
+      headEntryId: 'h1',
+      nextCommandSequence: '4',
+      branchSettings: branchSettings({ agentName: 'planner' }),
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(currentThread))
+      .mockResolvedValueOnce(snapshotOf(divergentThread))
+
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
+      new ApiError('stale cursor', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
+    )
+
+    const base = branchDraftFromThread(currentThread)
+    const { result } = renderHook(
+      () =>
+        useAgentThreadController(
+          currentThread.threadId,
+          [],
+          buildBatchFor(currentThread, base, base),
+        ),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('target draft guard test')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+
+    // 验证：因配置不匹配（targetDraft 守护），canRetryStaleMessageBatch 拦截，未进行自动重试
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
   })
 
   it('skips localStorage persistence for non-edit draft change sources', async () => {

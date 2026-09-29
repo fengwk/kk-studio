@@ -8,6 +8,7 @@ import type {
   HarnessCommandCreateDTO,
   HarnessGoalSettingDTO,
   HarnessModelSelectionDTO,
+  ImageInputTier,
 } from '@/shared/api/contracts/ai-runtime'
 
 export type PaneTarget =
@@ -151,7 +152,11 @@ function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
   return false
 }
 
-function isCommandContent(value: unknown): boolean {
+export function isImageTier(value: unknown): value is ImageInputTier {
+  return value === '720P' || value === '1080P' || value === 'ORIGINAL'
+}
+
+export function isCommandContent(value: unknown): boolean {
   if (!isRecord(value) || typeof value.type !== 'string') {
     return false
   }
@@ -160,17 +165,23 @@ function isCommandContent(value: unknown): boolean {
       && typeof value.text === 'string'
   }
   if (value.type === 'ATTACHMENT') {
-    return hasExactKeys(value, ['type', 'uploadId'])
-      && nonBlank(value.uploadId)
+    const validKeys =
+      hasExactKeys(value, ['type', 'uploadId'])
+      || (hasExactKeys(value, ['type', 'uploadId', 'imageTier']) && isImageTier(value.imageTier))
+    return validKeys && nonBlank(value.uploadId)
   }
-  return value.type === 'RESOURCE'
-    && (
+  if (value.type === 'RESOURCE') {
+    const validKeys =
       hasExactKeys(value, ['type', 'blobId', 'name'])
       || hasExactKeys(value, ['type', 'blobId', 'name', 'preview'])
-    )
-    && nonBlank(value.blobId)
-    && nonBlank(value.name)
-    && (value.preview == null || typeof value.preview === 'string')
+      || (hasExactKeys(value, ['type', 'blobId', 'name', 'imageTier']) && isImageTier(value.imageTier))
+      || (hasExactKeys(value, ['type', 'blobId', 'name', 'preview', 'imageTier']) && isImageTier(value.imageTier))
+    return validKeys
+      && nonBlank(value.blobId)
+      && nonBlank(value.name)
+      && (value.preview == null || typeof value.preview === 'string')
+  }
+  return false
 }
 
 function isCommand(value: unknown): value is HarnessCommandCreateDTO {
@@ -234,12 +245,15 @@ function isComposerPart(value: unknown): value is ComposerPart {
     return typeof value.text === 'string'
   }
   if (value.type === 'attachment') {
-    return nonBlank(value.uploadId) && typeof value.filename === 'string'
+    return nonBlank(value.uploadId)
+      && typeof value.filename === 'string'
+      && (value.imageTier === undefined || isImageTier(value.imageTier))
   }
   return value.type === 'resource'
     && nonBlank(value.blobId)
     && nonBlank(value.name)
     && (value.preview === undefined || typeof value.preview === 'string')
+    && (value.imageTier === undefined || isImageTier(value.imageTier))
 }
 
 function isPendingAcceptanceValue(value: unknown): value is PendingAcceptance {
@@ -434,5 +448,182 @@ export function clearPendingAcceptance(
     storage.removeItem(pendingStorageKey(owner, paneId))
   } catch {
     // Ignore storage errors.
+  }
+}
+
+export interface BoundPendingMessage {
+  threadId: string
+  request: AgentCommandBatchRequestDTO
+  targetDraft: BranchDraft
+  localDraft: ComposerPart[]
+  unknownOutcome: boolean
+}
+
+const BOUND_PENDING_STORAGE_PREFIX = 'kk-studio.agent-thread-pending.'
+
+export function boundPendingStorageKey(threadId: string): string {
+  return `${BOUND_PENDING_STORAGE_PREFIX}${threadId}`
+}
+
+function resolveStorage(
+  injected?: Partial<Storage>,
+): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+  if (injected) {
+    return injected as Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+  }
+  try {
+    if (typeof globalThis !== 'undefined' && globalThis.localStorage) {
+      return globalThis.localStorage
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+export function isBoundPendingMessageValue(value: unknown): value is BoundPendingMessage {
+  return isRecord(value)
+    && hasExactKeys(value, ['threadId', 'request', 'targetDraft', 'localDraft', 'unknownOutcome'])
+    && nonBlank(value.threadId)
+    && typeof value.unknownOutcome === 'boolean'
+    && isCommandBatchRequest(value.request)
+    && value.request.target.type === 'THREAD'
+    && value.request.target.threadId === value.threadId
+    && isBranchDraft(value.targetDraft)
+    && Array.isArray(value.localDraft)
+    && value.localDraft.every(isComposerPart)
+}
+
+export function sameBatchRequestIdentity(
+  left: AgentCommandBatchRequestDTO,
+  right: AgentCommandBatchRequestDTO,
+): boolean {
+  if (left === right) {
+    return true
+  }
+  if (left.commands.length !== right.commands.length) {
+    return false
+  }
+  return left.commands.every(
+    (cmd, index) => cmd.idempotencyKey === right.commands[index]?.idempotencyKey,
+  )
+}
+
+export function loadBoundPendingMessage(
+  threadId: string,
+  storage?: Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>,
+): BoundPendingMessage | null {
+  const resolved = resolveStorage(storage)
+  if (!resolved || !nonBlank(threadId)) {
+    return null
+  }
+  const key = boundPendingStorageKey(threadId)
+  try {
+    const raw = resolved.getItem(key)
+    if (!raw) {
+      return null
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (!isBoundPendingMessageValue(parsed) || parsed.threadId !== threadId) {
+      try {
+        resolved.removeItem(key)
+      } catch {
+        // Ignore storage errors.
+      }
+      return null
+    }
+    // 重点：刷新发生 POST 已发但还没有 catch 标 unknown 时，load 必须按未知可重试恢复，
+    // 避免因为 unknownOutcome=false 造成界面永远无重试按钮而死锁。
+    if (!parsed.unknownOutcome) {
+      const normalized: BoundPendingMessage = {
+        ...parsed,
+        unknownOutcome: true,
+      }
+      try {
+        resolved.setItem(key, JSON.stringify(normalized))
+      } catch {
+        // best-effort writeback
+      }
+      return normalized
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function saveBoundPendingMessage(
+  threadId: string,
+  pending: BoundPendingMessage,
+  storage?: Pick<Storage, 'setItem' | 'getItem'>,
+): void {
+  const resolved = resolveStorage(storage)
+  if (!resolved) {
+    throw new Error('Storage is unavailable')
+  }
+  if (!nonBlank(threadId)) {
+    throw new Error('threadId is required to persist bound pending message')
+  }
+  if (!isBoundPendingMessageValue(pending) || pending.threadId !== threadId) {
+    throw new Error('Invalid bound pending message shape')
+  }
+  const key = boundPendingStorageKey(threadId)
+  // 检查已有未决状态：若同 thread 已有不同 request 身份的未决记录，拒绝覆盖以保护多 pane / 交错场景
+  const existingRaw = resolved.getItem(key)
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(existingRaw)
+      if (isBoundPendingMessageValue(existing)) {
+        if (!sameBatchRequestIdentity(existing.request, pending.request)) {
+          throw new Error('Conflict: another pending message exists for this thread')
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Conflict:')) {
+        throw err
+      }
+      // 损坏数据允许覆写修复
+    }
+  }
+  const serialized = JSON.stringify(pending)
+  resolved.setItem(key, serialized)
+  const stored = resolved.getItem(key)
+  if (stored !== serialized) {
+    throw new Error('Persistence verification failed for bound pending message')
+  }
+}
+
+export function clearBoundPendingMessage(
+  threadId: string,
+  matchingRequest?: AgentCommandBatchRequestDTO,
+  storage?: Pick<Storage, 'getItem' | 'removeItem'>,
+): boolean {
+  const resolved = resolveStorage(storage)
+  if (!resolved || !nonBlank(threadId)) {
+    return true
+  }
+  const key = boundPendingStorageKey(threadId)
+  try {
+    if (matchingRequest != null) {
+      const raw = resolved.getItem(key)
+      if (!raw) {
+        return true
+      }
+      try {
+        const parsed = JSON.parse(raw) as { request?: unknown }
+        if (parsed && isCommandBatchRequest(parsed.request)) {
+          if (!sameBatchRequestIdentity(parsed.request, matchingRequest)) {
+            // multi-pane 同 thread pending：避免清理属于另一个请求身份的 pending
+            return false
+          }
+        }
+      } catch {
+        // 如果 JSON 解析失败则为损坏数据，允许删除
+      }
+    }
+    resolved.removeItem(key)
+    return true
+  } catch {
+    return false
   }
 }
