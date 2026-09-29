@@ -266,6 +266,7 @@ BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending 
 顺序和 cursor）；明确 `409` 表示 batch 未被接受，保留 command id 与 payload，
 只在 `STALE_COMMAND_CURSOR` 且仍是同一 branch 的纯 message batch 时读取最新 Snapshot
 并有限重试（最多两次）；其他情况保留本地 Composer parts，不自动重放语义命令。
+Bound Thread 发送前按 `threadId` 将冻结的 `CommandBatchPlan.request` 与 `localDraft` 持久化写入 `kk-studio.agent-thread-pending.<threadId>`（写入失败 fail-closed 中止发送并提示错误）。发生网络断开、超时或 408/429 等未知失败时锁定输入框原请求身份，界面提供逐字节相同重试与显式放弃控件；组件刷新重新挂载自动恢复 unknown pending 状态，清理时通过 `sameBatchRequestIdentity` 比对命令 keys 保护多 Pane 并发，放弃仅清理本地存储并明确提示不撤销服务端可能已接受的命令。图片类 CommandContent 的 `imageTier` 严格枚举校验为 `'720P' | '1080P' | 'ORIGINAL'`，拒绝非法未知键。
 
 Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-queue.ts)
 串行化浏览器操作，每批以当前 Snapshot 的 `expectedVersion` 和 UUID `idempotencyKey`

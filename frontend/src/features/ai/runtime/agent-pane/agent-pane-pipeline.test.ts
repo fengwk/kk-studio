@@ -162,6 +162,10 @@ describe('AgentPane acceptance pipeline', () => {
     })
     expect(plan.request.commands[0]?.idempotencyKey).toBe('stable-command')
     expect(isUnknownAcceptanceOutcome(new Error('timeout'))).toBe(true)
+    expect(isUnknownAcceptanceOutcome(new ApiError('timeout', 408))).toBe(true)
+    expect(isUnknownAcceptanceOutcome(new ApiError('too many requests', 429))).toBe(true)
+    expect(isDefiniteAcceptanceFailure(new ApiError('timeout', 408))).toBe(false)
+    expect(isDefiniteAcceptanceFailure(new ApiError('too many requests', 429))).toBe(false)
     expect(isDefiniteAcceptanceFailure(new ApiError('stale', 409))).toBe(true)
     expect(
       acceptanceCompletionApplies(
