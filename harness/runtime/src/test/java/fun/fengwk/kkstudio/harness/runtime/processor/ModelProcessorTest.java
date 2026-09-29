@@ -1227,6 +1227,10 @@ class ModelProcessorTest {
     assertEquals(1, afterFirst.failedAttempts().size());
     assertEquals(NOW.plusSeconds(2), afterFirst.failedAttempts().getFirst().failedAt());
     assertEquals(NOW.plusSeconds(7), afterFirst.failedAttempts().getFirst().retryAt());
+    // Work 的 in-memory due 等于业务 retryAt：剩余 delay 基于同一 JVM 采样 leaseNow 计算，业务语义未被改动。
+    assertEquals(
+        NOW.plusSeconds(7),
+        work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)).availableAt());
 
     // attempt 2：N+10 启动（durable 抬升到 N+10），随后把 clock 回拨到 N+4（低于上一 retryAt）再失败。
     clock.advance(Duration.ofSeconds(8));
@@ -1246,6 +1250,10 @@ class ModelProcessorTest {
         afterSecond.failedAttempts().get(1).failedAt(),
         "failedAt 必须抬升到 N+10（thread/model durable 下界，而非回拨的 N+4）");
     assertEquals(NOW.plusSeconds(15), afterSecond.failedAttempts().get(1).retryAt());
+    // clock 回拨时仍以 durable 下界为准：Work due = 回拨后 leaseNow + (retryAt - leaseNow) = 业务 retryAt。
+    assertEquals(
+        NOW.plusSeconds(15),
+        work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)).availableAt());
 
     // attempt 3：N+16 启动，retry 预算耗尽 -> FAILED terminal + THREAD wake。
     clock.advance(Duration.ofSeconds(12));

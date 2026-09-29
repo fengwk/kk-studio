@@ -1040,7 +1040,7 @@ public final class ThreadProcessor {
               if (tx.lockClaimedWork(claim, now).isEmpty()) {
                 return false;
               }
-              tx.rescheduleWork(claim, now, now.plus(delay));
+              tx.rescheduleWork(claim, now, delay);
               return true;
             }));
   }

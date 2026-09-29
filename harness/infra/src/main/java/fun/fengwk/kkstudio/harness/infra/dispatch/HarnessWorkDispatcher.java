@@ -442,7 +442,7 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
             if (tx.lockClaimedWork(claim, now).isEmpty()) {
               return null;
             }
-            tx.rescheduleWork(claim, now, now.plus(config.executorRejectionDelay()));
+            tx.rescheduleWork(claim, now, config.executorRejectionDelay());
             return null;
           });
     } catch (RuntimeException error) {

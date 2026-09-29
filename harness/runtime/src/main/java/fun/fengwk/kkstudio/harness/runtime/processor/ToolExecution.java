@@ -578,7 +578,7 @@ final class ToolExecution implements ToolGateway.Listener {
               }
               tx.updateToolInvocations(List.of(tool.retryReady(now)));
               tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, now, now.plus(delay));
+              tx.rescheduleWork(claim, now, delay);
               return true;
             }));
   }

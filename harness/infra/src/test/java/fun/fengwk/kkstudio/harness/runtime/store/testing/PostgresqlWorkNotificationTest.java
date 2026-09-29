@@ -105,7 +105,7 @@ class PostgresqlWorkNotificationTest {
                           WorkTargetType.THREAD, T2, "lease-2", Duration.between(T2, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.rescheduleWork(second, T2, T3));
+      inTransaction(store, tx -> tx.rescheduleWork(second, T2, Duration.ZERO));
       assertNotification(notifications);
 
       ClaimedWork third =
@@ -201,7 +201,7 @@ class PostgresqlWorkNotificationTest {
                 failing.transaction(
                     tx -> {
                       try {
-                        tx.rescheduleWork(claim, T1, T2);
+                        tx.rescheduleWork(claim, T1, Duration.ofSeconds(1));
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }

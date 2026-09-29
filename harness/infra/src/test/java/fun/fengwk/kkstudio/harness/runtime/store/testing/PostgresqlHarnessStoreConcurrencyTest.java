@@ -273,6 +273,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
           tx.lockThread(baseline.threadId());
           tx.requestWork(target, T0);
         });
+    // accept 的 due 由数据库权威时间写入，先记录初始值用于断言后置 min 语义（不在 JVM 侧假设绝对时刻）。
+    Work initial = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     ClaimedWork claim =
         store
             .transaction(
@@ -321,7 +323,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
 
     Work stored = store.transaction(tx -> tx.findWork(target).orElseThrow());
     assertEquals(2L, stored.wakeVersion());
-    assertEquals(T0, stored.availableAt());
+    assertEquals(initial.availableAt(), stored.availableAt());
     assertNull(stored.leaseToken());
   }
 

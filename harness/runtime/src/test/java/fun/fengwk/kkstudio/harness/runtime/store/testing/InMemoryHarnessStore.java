@@ -174,6 +174,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
   }
 
+  /** 测试钩子：直接把已存在 Work 行的 availableAt 改写为给定值（通常已 due），用于验证“立即唤醒/到期即可 claim”路径。 */
+  public void forceAvailableAt(WorkTarget target, Instant availableAt) {
+    Objects.requireNonNull(target, "target");
+    requireMillisecondPrecision(availableAt);
+    synchronized (monitor) {
+      Work work = committed.works.get(target);
+      if (work == null) {
+        throw new IllegalStateException("work does not exist to rewrite: " + target);
+      }
+      committed.works.put(
+          target,
+          new Work(
+              work.target(),
+              availableAt,
+              work.wakeVersion(),
+              work.leaseToken(),
+              work.leaseUntil(),
+              work.requiredEnvironmentId()));
+    }
+  }
+
   @Override
   public <T> T transaction(Function<Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
@@ -1893,17 +1914,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void requestWork(WorkTarget target, Instant requestedAt) {
-      requestWork(target, requestedAt, null);
+    public void requestWork(WorkTarget target, Instant now) {
+      requestWork(target, now, null);
     }
 
     @Override
-    public void requestWork(
-        WorkTarget target, Instant requestedAt, EnvironmentId requiredEnvironmentId) {
+    public void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
       checkOpen();
       Objects.requireNonNull(target, "target");
-      Objects.requireNonNull(requestedAt, "requestedAt");
-      requireMillisecondPrecision(requestedAt);
+      Objects.requireNonNull(now, "now");
+      requireMillisecondPrecision(now);
       if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
         throw new IllegalArgumentException(
             "requiredEnvironmentId must be null for target type " + target.type());
@@ -1913,8 +1933,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Work existing = state.works.get(target);
       Work next =
           existing == null
-              ? Work.initial(target, requestedAt, requiredEnvironmentId)
-              : existing.request(requestedAt, requiredEnvironmentId);
+              ? Work.initial(target, now, requiredEnvironmentId)
+              : existing.request(now, requiredEnvironmentId);
       state.works.put(target, next);
       recordWorkLock(target);
     }
@@ -2068,15 +2088,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void rescheduleWork(ClaimedWork claim, Instant now, Instant requestedAt) {
+    public void rescheduleWork(ClaimedWork claim, Instant now, Duration delay) {
       checkOpen();
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
-      Objects.requireNonNull(requestedAt, "requestedAt");
+      HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
       requireMillisecondPrecision(now);
-      requireMillisecondPrecision(requestedAt);
       Work work = lockedWork(claim.target());
-      Work next = work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, requestedAt);
+      Work next =
+          work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, now.plus(delay));
       state.works.put(next.target(), next);
     }
 

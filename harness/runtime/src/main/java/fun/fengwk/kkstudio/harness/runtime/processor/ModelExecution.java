@@ -1003,9 +1003,9 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * RUNNING -&gt; READY：记录瞬态失败并排程重试。lease 所有权（{@code lockClaimedWork} / {@code
-   * rescheduleWork}）继续使用原始 wall-clock 采样 {@code leaseNow}；持久化 failedAt 在锁内取 thread/model/上一 retryAt
-   * 的下界，回拨时钟也不会违反 failedAttempts 不变量或后续 Entry 链时间顺序。
+   * RUNNING -&gt; READY：记录瞬态失败并排程重试。持久化 {@code retryAt} 仍是业务重试时刻（{@code failedAt + delay}），不受时钟域影响；
+   * Work 的 due 只传「相对该业务时刻的剩余延迟」（{@code retryAt - leaseNow}），由 Store 用自己的权威时间域重新计算绝对 due，从而既不改变业务
+   * retry 语义，也不让 JVM 时钟偏差提前或推迟实际唤醒。
    */
   private boolean commitRetry(Duration delay, ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
@@ -1038,7 +1038,8 @@ final class ModelExecution implements ModelGateway.Listener {
                       retryAt);
               tx.updateModelInvocation(model.retryReady(failure, failedAt));
               tx.updateThread(thread.touchVersion(failedAt));
-              tx.rescheduleWork(claim, leaseNow, retryAt);
+              // 只把业务 retryAt 相对同一 JVM 采样 leaseNow 的剩余延迟交给 Store；绝对 due 由 Store 的权威时间域决定。
+              tx.rescheduleWork(claim, leaseNow, Duration.between(leaseNow, retryAt));
               return true;
             }));
   }

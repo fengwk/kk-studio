@@ -22,15 +22,28 @@ import java.time.Instant;
 
 class InMemoryWorkTest extends HarnessStoreWorkContract {
 
+  /** 内存实现的权威时间域：调用方传入的 now 同时就是它的时钟；契约测试统一用这个固定「此刻」。 */
+  private static final Instant CLOCK = Instant.ofEpochMilli(1_700_000_000_000L);
+
   @Override
   HarnessStore createStore() {
     return new InMemoryHarnessStore();
+  }
+
+  @Override
+  protected Instant authorityNow() {
+    return CLOCK;
   }
 
   /** 内存实现没有独立时钟：lease deadline 只能以传入的 {@code now} 为权威时间域，过期也直接改写内存 deadline。 */
   @Override
   protected void expireLease(WorkTarget target) {
     ((InMemoryHarnessStore) store).forceLeaseUntil(target, Instant.EPOCH);
+  }
+
+  @Override
+  protected void forceWorkAvailable(WorkTarget target) {
+    ((InMemoryHarnessStore) store).forceAvailableAt(target, Instant.EPOCH);
   }
 
   /**
