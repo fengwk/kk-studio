@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -30,6 +31,7 @@ public class PlatformEvidenceBlobPort implements EvidenceBlobPort {
 
   private final StorageUploadService uploadService;
   private final StorageBlobManager blobManager;
+  private final SessionBlobRefManager sessionBlobRefManager;
 
   @Override
   public ReadyUpload lockReadyUpload(UUID uploadId) {
@@ -67,5 +69,13 @@ public class PlatformEvidenceBlobPort implements EvidenceBlobPort {
   public boolean isBlobActive(UUID blobId) {
     StorageBlob blob = blobManager.getBlob(blobId);
     return blob != null && blob.getState() == StorageBlobState.ACTIVE;
+  }
+
+  @Override
+  public boolean isSessionBlobRef(UUID sessionId, UUID blobId) {
+    if (sessionId == null || blobId == null) {
+      return false;
+    }
+    return sessionBlobRefManager.contains(sessionId, blobId);
   }
 }

@@ -56,6 +56,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -76,7 +78,10 @@ import java.util.UUID;
  *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时先关停派发门禁，在途执行收敛为静止后再安全失败收尾，绝不杀死在途副作用。
  *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞与控制暂停一致关闭派发门禁，阻止自动派发与 WAITING 恢复。
  *   <li><b>指示不丢</b>：交接与正常收尾前必须投递全部定向指示，扫描至事实流尾，普通评论与系统事件不卡游标。
- *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，并发布报告证据；无交接时保持当前阶段，之后的催促按额度新建 Run。
+ *   <li><b>结果未定</b>：工具 UNKNOWN 不是静止点。排队命令、非终态模型与在途工具仍延后；只有这些都已收敛、仅余结果未定的工具时，才按 markUnknown
+ *       收尾并保留人工核查，绝不自动完成或交接。
+ *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，只发布该最终答复明确引用且来源 Session 持有的
+ *       Resource；无交接时保持当前阶段，之后的催促按额度新建 Run。
  *   <li><b>迟到回调拒绝</b>：旧 Run 仅在静止点安全收尾，绝不提交旧交接目标推进当前阶段。
  *   <li><b>确定性调度决策</b>：在写路径前完成归档/门禁/额度/阶段/证据合法性判定，不以全局 try-catch 吞掉数据库或编程异常。
  * </ul>
@@ -90,6 +95,7 @@ public class IssueReconciler {
 
   private static final String BUDGET_REASON = "Run active execution budget is exhausted";
   private static final String STALE_REASON = "Run no longer matches the current issue stage";
+  private static final int UNKNOWN_REASON_LIMIT = 512;
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
@@ -263,13 +269,17 @@ public class IssueReconciler {
         deliverInstruction(issue, run, binding, staleSnapshot, deliverable);
         return finish(claim, now, true, now, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
       }
+      String staleUnknown = unknownToolReason(staleSnapshot);
+      if (staleUnknown != null) {
+        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim, now);
+      }
       if (hasProgress(run, staleSnapshot)) {
         UUID finalAnswerId =
             findFinalAnswerEntryId(
                 staleSnapshot.entryPath(),
                 run.getStartEntryId(),
                 staleSnapshot.thread().headEntryId());
-        publishEvidence(issue, run, binding, staleSnapshot, staleSnapshot.thread().headEntryId());
+        publishEvidence(issue, run, binding, staleSnapshot, finalAnswerId);
         issueRunService.completeRun(
             run.getId(),
             run.getVersion(),
@@ -294,6 +304,11 @@ public class IssueReconciler {
     }
 
     ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
+    String unknownReason = isProcessing(snapshot) ? null : unknownToolReason(snapshot);
+    if (unknownReason != null) {
+      // 外部副作用结果未定优先于额度与静态收尾：按既有 UNKNOWN 入口收敛并保留人工核查。
+      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim, now);
+    }
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
       if (isProcessing(snapshot)) {
         if (!issue.isPaused()) {
@@ -375,7 +390,7 @@ public class IssueReconciler {
       UUID finalAnswerId =
           findFinalAnswerEntryId(
               snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
-      publishEvidence(issue, run, binding, snapshot, snapshot.thread().headEntryId());
+      publishEvidence(issue, run, binding, snapshot, finalAnswerId);
       issueRunService.completeRun(
           run.getId(),
           run.getVersion(),
@@ -390,7 +405,7 @@ public class IssueReconciler {
       UUID finalAnswerId =
           findFinalAnswerEntryId(
               snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
-      publishEvidence(issue, run, binding, snapshot, snapshot.thread().headEntryId());
+      publishEvidence(issue, run, binding, snapshot, finalAnswerId);
       issueRunService.completeRun(
           run.getId(),
           run.getVersion(),
@@ -553,6 +568,19 @@ public class IssueReconciler {
     return finish(claim, now, true, now.plus(properties.getBlockedDelay()), outcome);
   }
 
+  /** 结果未定的工具调用走既有 UNKNOWN 收尾：不发布证据、不完成、不交接，人工核查后才能重试。 */
+  private IssueReconcileOutcome unknownRun(
+      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim, Instant now) {
+    issueRunService.markUnknown(
+        run.getId(), run.getVersion(), unknownKey(run, endEntryId), endEntryId, reason);
+    return finish(
+        claim,
+        now,
+        true,
+        now.plus(properties.getBlockedDelay()),
+        IssueReconcileOutcome.RUN_UNKNOWN);
+  }
+
   private boolean hasProgress(IssueRun run, ThreadSnapshot snapshot) {
     if (snapshot == null || snapshot.entryPath() == null) {
       return false;
@@ -591,14 +619,22 @@ public class IssueReconciler {
     return null;
   }
 
-  /** 将历史区间内包含的合法受管 Resource Blob 证据发布到 Issue。 */
+  /**
+   * 只发布最终 assistant 答复明确引用、且来源 Run Session 当前持有的 Resource。
+   *
+   * <p>中间消息、工具结果与用户附件保持私有。{@code finalAnswerEntryId} 必须落在本次 Run 的可见区间内。
+   */
   private void publishEvidence(
       Issue issue,
       IssueRun run,
       IssueAgentThread binding,
       ThreadSnapshot snapshot,
-      UUID endEntryId) {
-    if (binding == null || snapshot == null || snapshot.entryPath() == null) {
+      UUID finalAnswerEntryId) {
+    if (finalAnswerEntryId == null
+        || binding == null
+        || snapshot == null
+        || snapshot.entryPath() == null
+        || snapshot.thread() == null) {
       return;
     }
     EntryPath path = snapshot.entryPath();
@@ -608,20 +644,24 @@ public class IssueReconciler {
     }
     List<UUID> entryIds = entries.stream().map(Entry::id).toList();
     int start = entryIds.indexOf(run.getStartEntryId());
-    int end = entryIds.indexOf(endEntryId);
-    if (start < 0 || end <= start) {
+    int end = entryIds.indexOf(snapshot.thread().headEntryId());
+    int answer = entryIds.indexOf(finalAnswerEntryId);
+    if (start < 0 || answer <= start || end < answer) {
       return;
     }
-    for (int i = start + 1; i <= end; i++) {
-      Entry entry = entries.get(i);
-      if (entry != null && entry.payload() instanceof MessagePayload msg) {
-        for (AgentMessageContent content : msg.message().contents()) {
-          if (content instanceof ResourceMessageContent res
-              && isPublishableResource(res, binding)) {
-            issueEvidenceService.publishBlob(
-                issue.getId(), binding.agentName(), run.getId(), res.blobId(), res.name());
-          }
-        }
+    Entry entry = entries.get(answer);
+    if (entry == null || !(entry.payload() instanceof MessagePayload msg)) {
+      return;
+    }
+    if (msg.message().role() != AgentMessageRole.ASSISTANT) {
+      return;
+    }
+    UUID sessionId = snapshot.thread().sessionId();
+    for (AgentMessageContent content : msg.message().contents()) {
+      if (content instanceof ResourceMessageContent res
+          && isPublishableResource(res, binding, sessionId)) {
+        issueEvidenceService.publishBlob(
+            issue.getId(), binding.agentName(), run.getId(), res.blobId(), res.name());
       }
     }
   }
@@ -631,8 +671,12 @@ public class IssueReconciler {
    *
    * <p>在调用 `@Transactional` 参与方 {@code publishBlob} 之前完成所有前置判定，避免异常逃逸导致共享事务被标记为 rollback-only。
    */
-  private boolean isPublishableResource(ResourceMessageContent res, IssueAgentThread binding) {
-    if (res == null || res.blobId() == null) {
+  private boolean isPublishableResource(
+      ResourceMessageContent res, IssueAgentThread binding, UUID sessionId) {
+    if (res == null || res.blobId() == null || sessionId == null) {
+      return false;
+    }
+    if (!evidenceBlobPort.isSessionBlobRef(sessionId, res.blobId())) {
       return false;
     }
     if (binding == null || binding.agentName() == null || binding.agentName().isBlank()) {
@@ -654,7 +698,11 @@ public class IssueReconciler {
     return evidenceBlobPort.isBlobActive(res.blobId());
   }
 
-  /** 本 Thread 或其委派子树尚未静止时，Run 不得投递指示或收尾。 */
+  /**
+   * 在途命令、模型或工具仍未静止时，Run 不得投递指示或收尾。
+   *
+   * <p>{@code UNKNOWN} 不在这里：它是已收敛但结果未定的终态，由 {@link #unknownToolReason} 进入人工核查，而不是无限延后。
+   */
   private boolean isProcessing(ThreadSnapshot snapshot) {
     if (snapshot == null) {
       return false;
@@ -682,6 +730,47 @@ public class IssueReconciler {
       }
     }
     return delegatedWorkActivityPort.hasPendingDelegatedWork(snapshot.thread().id());
+  }
+
+  /**
+   * 列举结果未定的工具调用。没有 UNKNOWN 时返回 {@code null}。
+   *
+   * <p>原因按工具名与调用标识排序，保证同一次事实的幂等键稳定。
+   */
+  private static String unknownToolReason(ThreadSnapshot snapshot) {
+    if (snapshot == null || snapshot.toolSiblings() == null) {
+      return null;
+    }
+    List<String> labels = new ArrayList<>();
+    for (ToolInvocation tool : snapshot.toolSiblings()) {
+      if (tool != null && tool.status() == ToolInvocationStatus.UNKNOWN) {
+        labels.add(toolLabel(tool));
+      }
+    }
+    if (labels.isEmpty()) {
+      return null;
+    }
+    labels.sort(Comparator.naturalOrder());
+    String joined = String.join(", ", labels);
+    String reason = "Tool invocation outcome unknown: " + joined;
+    if (reason.length() <= UNKNOWN_REASON_LIMIT) {
+      return reason;
+    }
+    return reason.substring(0, UNKNOWN_REASON_LIMIT);
+  }
+
+  private static String toolLabel(ToolInvocation tool) {
+    // 架构守卫只允许 project 导入 harness.runtime：用 var 推断 harness.tool.ToolCall，避免引入宿主/额外模块导入。
+    var call = tool.call();
+    String name =
+        call == null || call.toolName() == null || call.toolName().isBlank()
+            ? "tool"
+            : call.toolName();
+    String id =
+        call == null || call.id() == null || call.id().isBlank()
+            ? String.valueOf(tool.id())
+            : call.id();
+    return name + "#" + id;
   }
 
   /** 判断是否存在处于安全等待点（等待输入或等待审批）的工具调用。 */
@@ -802,6 +891,10 @@ public class IssueReconciler {
 
   private static String failKey(IssueRun run, UUID endEntryId) {
     return "reconciler-fail:" + run.getId() + ":" + endEntryId;
+  }
+
+  private static String unknownKey(IssueRun run, UUID endEntryId) {
+    return "reconciler-unknown:" + run.getId() + ":" + endEntryId;
   }
 
   /**
