@@ -21,11 +21,15 @@ import java.util.Locale;
  *   hold             &lt;pidFile&gt;                             写完 pid 后长时间存活（不会自己退出）
  *   eof              &lt;pidFile&gt; [exitCode]                  读 stdin 直到 EOF，再用给定退出码自然退出
  *   duplex-echo      &lt;pidFile&gt; [exitCode]                  先写 stderr 标记，再把 stdin 的字节原样回写到 stdout，读到 EOF 后自然退出
- *   fork-exit        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出，留下活着的子进程
- *   duplex-fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出（双向标准流下的自然退出）
+ *   fork-exit        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;permitFile&gt; 派生子进程，等它写出 pid、且调用方写下许可文件后自己退出，留下当时仍活着的子进程
+ *   duplex-fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid、且调用方在 stdin 上写下许可后自己退出
  *   fork-hold        &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
  *   nest-hold        &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
  * </pre>
+ *
+ * <p>两种「自然退出」模式都必须先拿到调用方许可才返回：{@code fork-exit} 等许可文件（捕获模式下命令的 stdin 是一条已关闭的空管道，许可选不到 stdin），{@code
+ * duplex-fork-exit} 等 stdin 上的一个字节。许可让「根进程退出时子进程仍然活着」成为调用方掌握的事实，而不是让用例与收敛赛跑—— 没有许可时，快机器完全可能在用例读到子进程
+ * pid 之前就已经把整组收敛干净，那是正确行为，却会让活前置条件随机失败。
  *
  * <p>所有子进程的实际存活时间都是 {@link #HOLD_MILLIS}，远长于任何测试窗口，因此「pid 不再存活」只能来自执行范围的收敛。
  */
@@ -79,10 +83,12 @@ public final class ProcessScopeFixtureMain {
       case "duplex-fork-exit" -> {
         spawn("hold", args[2]);
         awaitChild(args[2]);
+        awaitStdinPermit();
       }
       case "fork-exit" -> {
         spawn("hold", args[2]);
         awaitChild(args[2]);
+        awaitReleaseFile(Path.of(args[3]));
       }
       case "fork-hold" -> {
         spawn("hold", args[2]);
@@ -114,6 +120,31 @@ public final class ProcessScopeFixtureMain {
     while (readPid(Path.of(pidFile)) <= 0) {
       if (System.nanoTime() >= deadline) {
         throw new IllegalStateException("child did not publish its pid within " + CHILD_BUDGET);
+      }
+      Thread.sleep(10);
+    }
+  }
+
+  /**
+   * 等调用方在 stdin 上写下「可以退出」的许可（双向标准流模式）。
+   *
+   * <p>读到 EOF 也算许可：调用方若直接关掉自己那一端，夹具照样结束，而不会把「没等到许可」变成一个挂起的用例。
+   */
+  private static void awaitStdinPermit() throws IOException {
+    System.in.read();
+  }
+
+  /**
+   * 等调用方写下许可文件（捕获模式）。
+   *
+   * <p>捕获模式下命令的 stdin 是一条已经关闭的空管道，许可无法从 stdin 传来，所以留一个文件作为调用方可控的出口时间点。
+   */
+  private static void awaitReleaseFile(Path permitFile) throws Exception {
+    long deadline = System.nanoTime() + CHILD_BUDGET.toNanos();
+    while (!Files.exists(permitFile)) {
+      if (System.nanoTime() >= deadline) {
+        throw new IllegalStateException(
+            "no permit published in " + permitFile + " within " + CHILD_BUDGET);
       }
       Thread.sleep(10);
     }
