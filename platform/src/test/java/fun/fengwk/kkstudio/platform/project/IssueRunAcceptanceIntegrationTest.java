@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -11,13 +12,23 @@ import org.springframework.dao.DataIntegrityViolationException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 原子 Run 接受与收尾：同事务提交 Harness 事实与业务行，任一步失败整体回滚；请求键幂等以原 RUN 活动精确重放。
@@ -189,6 +200,28 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
+  /** 每 Issue 唯一活动 Run：已存在活动 Run 时新的接受被拒绝，且不新建 Harness 事实或第二条 Run 行。 */
+  @Test
+  void acceptRunRejectedWhileActiveRunExists() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("唯一活动 Run", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun active = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    ProjectValidationException rejected =
+        assertThrows(
+            ProjectValidationException.class,
+            () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+
+    assertTrue(rejected.getMessage().contains("active run"), rejected.getMessage());
+    assertEquals(active.getId(), issueRunService.getActiveRun(issue.getId()).getId());
+    assertEquals(
+        1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+    assertEquals(1L, count("select count(*) from harness_session"));
+    assertEquals(1L, budgetUsed(issue.getId()));
+  }
+
   /**
    * 请求键复用（同键异指纹）在 Harness 派发之前确定性冲突：不创建 Session/Thread/Entry、不插入 Run、不消耗额度。
    *
@@ -313,6 +346,137 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_activity where idempotency_key = ?",
             "state_change:" + completeKey));
     assertEquals(3L, activityCount(issue.getId()));
+  }
+
+  /**
+   * 无交接完成写入 CONTROL/COMPLETE_RUN receipt 并推进活动游标；同键同 payload 重放不新增活动、不重复推进游标。
+   *
+   * <p>有交接目标时仍只写一条 HANDOFF，不混入完成 receipt。
+   */
+  @Test
+  void completeRunWithoutHandoffWritesReceiptAndReplaysOnce() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("无交接完成", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    Issue before = issueService.getIssue(issue.getId());
+    UUID endEntryId = appendHistoryEntry(run.getThreadId());
+    String completeKey = key("complete");
+
+    IssueRun completed =
+        issueRunService.completeRun(
+            run.getId(), run.getVersion(), completeKey, endEntryId, null, null);
+
+    assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
+    assertNull(completed.getNextState());
+    Issue after = issueService.getIssue(issue.getId());
+    assertEquals("DESIGN", after.getState());
+    assertEquals(before.getNextActivitySequence() + 1, after.getNextActivitySequence());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and kind = 'CONTROL'"
+                + " and idempotency_key = ? and data->>'action' = 'COMPLETE_RUN'",
+            issue.getId(),
+            "control:" + completeKey));
+
+    IssueRun replayed =
+        issueRunService.completeRun(
+            run.getId(), completed.getVersion(), completeKey, endEntryId, null, null);
+
+    assertEquals(completed.getId(), replayed.getId());
+    Issue afterReplay = issueService.getIssue(issue.getId());
+    assertEquals(after.getVersion(), afterReplay.getVersion());
+    assertEquals(after.getNextActivitySequence(), afterReplay.getNextActivitySequence());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where idempotency_key = ?",
+            "control:" + completeKey));
+  }
+
+  /**
+   * 两线程同时接受同一请求键：只创建一条活动、一个 Run 和一条 Harness 命令，双方都返回同一个 Run。
+   *
+   * <p>锁前 receipt 检查不能关闭这个窗口；锁内再次检查后，后到请求必须重放而不是版本冲突。
+   */
+  @Test
+  void concurrentAcceptWithSameKeyCreatesOneRunAndOneCommand() throws Exception {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("并发接受", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    String acceptKey = key("accept");
+    List<IssueRun> accepted = race(() -> issueRunService.acceptRun(issue.getId(), acceptKey));
+    IssueRun first = accepted.get(0);
+    IssueRun second = accepted.get(1);
+
+    assertEquals(first.getId(), second.getId());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and kind = 'RUN'",
+            issue.getId()));
+    assertEquals(
+        1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+    assertEquals(1L, count("select count(*) from harness_session"));
+    assertEquals(1L, count("select count(*) from harness_thread_command"));
+  }
+
+  /** 同键但收尾区间不同是稳定冲突：不完成 Run，也不留下半截活动。 */
+  @Test
+  void completeRunDifferentPayloadConflictsWithoutTerminalWrite() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("完成冲突", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID firstEnd = appendHistoryEntry(run.getThreadId());
+    UUID secondEnd = appendHistoryEntry(run.getThreadId());
+    String completeKey = key("complete");
+    issueRunService.completeRun(run.getId(), run.getVersion(), completeKey, firstEnd, null, null);
+
+    assertThrows(
+        ProjectDuplicateException.class,
+        () ->
+            issueRunService.completeRun(
+                run.getId(), run.getVersion(), completeKey, secondEnd, null, null));
+
+    IssueRun stored = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.COMPLETED, stored.getStatus());
+    assertEquals(firstEnd, stored.getEndEntryId());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where idempotency_key = ?",
+            "control:" + completeKey));
+  }
+
+  /** 新请求键仍走版本 CAS：陈旧版本不能完成、取消、失败或标记不明。 */
+  @Test
+  void runTerminalRequestsRejectStaleVersion() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("收尾版本", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID end = appendHistoryEntry(run.getThreadId());
+    long stale = run.getVersion();
+    issueRunService.waitRun(run.getId(), stale);
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> issueRunService.completeRun(run.getId(), stale, key("complete"), end, null, null));
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> issueRunService.cancelRun(run.getId(), stale, key("cancel"), end));
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> issueRunService.failRun(run.getId(), stale, key("fail"), end, "失败"));
+    assertThrows(
+        ProjectVersionConflictException.class,
+        () -> issueRunService.markUnknown(run.getId(), stale, key("unknown"), end, "不明"));
+    assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
   }
 
   /**
@@ -490,6 +654,44 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertNull(unchanged.getActiveSince());
     assertEquals("UNKNOWN", issueService.getIssue(issue.getId()).getPauseReason());
     assertEquals(1L, budgetUsed(issue.getId()));
+  }
+
+  /** 两线程在同一屏障后提交同一调用；任一方的冲突或执行异常都原样抛出。 */
+  private static <T> List<T> race(Callable<T> call) throws Exception {
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<T> left =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return call.call();
+              });
+      Future<T> right =
+          executor.submit(
+              () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return call.call();
+              });
+      List<T> results = new ArrayList<>(2);
+      results.add(unwrap(left));
+      results.add(unwrap(right));
+      return results;
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  private static <T> T unwrap(Future<T> future) throws Exception {
+    try {
+      return future.get(20, TimeUnit.SECONDS);
+    } catch (ExecutionException error) {
+      Throwable cause = error.getCause();
+      if (cause instanceof Exception exception) {
+        throw exception;
+      }
+      throw error;
+    }
   }
 
   private long activityCount(UUID issueId) {

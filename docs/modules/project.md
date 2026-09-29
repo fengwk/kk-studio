@@ -16,7 +16,7 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 
 | 包 | 内容 |
 | --- | --- |
-| [domain](../../project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转、阶段预算与 Run/Thread 身份等纯规则 |
+| [domain](../../project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
 | [model](../../project/src/main/java/fun/fengwk/kkstudio/project/model) | Issue、Project、Run、Activity、Evidence 与 Work 的领域对象 |
 | [repo](../../project/src/main/java/fun/fengwk/kkstudio/project/repo) | 仓库契约与 PostgreSQL 实现（`repo/impl` 下另有 mapper 与 DO） |
 | [service](../../project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project/Issue/Run/Evidence 与 Work 邮箱 |
@@ -55,14 +55,17 @@ not found、「未 READY/已 cleanup」译为 validation），模块内不做第
 ## 预算与运行记录
 
 [`IssueStageBudget`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStageBudget.java)
-只计本 Issue、本阶段、序号超过授权高水位的全部 Run；失败、取消和 UNKNOWN 也消耗一次。
-授权重置只能将高水位推进到 `nextRunOrdinal - 1`。它限制**新 Run**，不限制已接受 Run 的恢复。
+承载授权事实：只面向 workflow 中启用且有 Agent 的工作阶段，`maxRuns` 为正，重置高水位只能推进到
+`nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
+Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
 
-[`IssueAgentThread`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueAgentThread.java)
-冻结 `(issueId, agentName) -> threadId` 身份；
-[`IssueRun`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueRun.java)
-冻结 `(startEntryId, endEntryId]`、Session/Thread、阶段及终态事实。每 Issue 唯一活动 Run
-由数据库部分唯一索引最终保证；领域层不能代替 Entry 父链、跨表外键或锁序校验。
+执行记录落在 model 行：
+[`IssueAgentThread`](../../project/src/main/java/fun/fengwk/kkstudio/project/model/IssueAgentThread.java)
+保存 `(issueId, agentName) -> threadId` 稳定绑定；
+[`IssueRun`](../../project/src/main/java/fun/fengwk/kkstudio/project/model/IssueRun.java)
+保存 `(startEntryId, endEntryId]`、Session/Thread、阶段与终态事实。每 Issue 唯一活动 Run、
+终态必须冻结区间、FAILED/UNKNOWN 必须给出原因等不变量由 `project_issue_run` 的检查约束与
+部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
 ## 用例事务与持久化
 
