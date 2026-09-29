@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** 验证 Spring Boot 管理并经过 {@link StrictJacksonConfiguration} 定制的 {@link JsonMapper} wire 行为。 */
@@ -181,6 +182,32 @@ class StrictJacksonConfigurationTest {
               () ->
                   mapper.readValue(
                       "{\"id\":\"default\",\"temperature\":0.5}", AgentModelVariantDTO.class));
+        });
+  }
+
+  /**
+   * 测试意图：真实 Jackson3 wire mapper 下 {@code protocolOptionsJson} 只接受 JSON 字符串 token。数字/布尔/对象/数组都不是
+   * String，必须被拒绝而不是被默认标量强制转换吞掉（否则声明的“保留 JSON token 实际类型”约束失效）。
+   */
+  @Test
+  void shouldRejectNonStringProtocolOptionsJsonTokens() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+
+          AgentModelVariantDTO accepted =
+              mapper.readValue(
+                  "{\"id\":\"default\",\"protocolOptionsJson\":\"{}\"}",
+                  AgentModelVariantDTO.class);
+          assertEquals("{}", accepted.getProtocolOptionsJson());
+
+          for (String token : List.of("123", "1.5", "true", "false", "{}", "[]")) {
+            String json = "{\"id\":\"default\",\"protocolOptionsJson\":" + token + "}";
+            assertThrows(
+                JacksonException.class,
+                () -> mapper.readValue(json, AgentModelVariantDTO.class),
+                "non-string protocolOptionsJson token must be rejected: " + token);
+          }
         });
   }
 

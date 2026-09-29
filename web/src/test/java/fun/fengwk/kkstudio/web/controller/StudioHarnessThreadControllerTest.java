@@ -497,6 +497,80 @@ class StudioHarnessThreadControllerTest {
     verifyNoInteractions(runtime);
   }
 
+  /**
+   * 测试意图：Issue Agent Thread 的重命名由 Issue 工作流统一维护，通用 rename 必须先完成严格形状校验再 409 拒绝， 且绝不触达
+   * Runtime（否则形成第二条 Issue-owned 写入口）。
+   */
+  @Test
+  void renameRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"renamed\"}"))
+        .andExpect(status().isConflict());
+
+    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
+    verifyNoInteractions(runtime);
+  }
+
+  /**
+   * 测试意图：手动压缩会产生新的 Turn/Work，Issue Agent Thread 必须在产品锁内由 Issue 工作流发起；通用 compact 对 Issue-owned
+   * Thread 直接 409，Runtime 调用次数必须为 0。
+   */
+  @Test
+  void compactRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
+
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/compact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\"}"))
+        .andExpect(status().isConflict());
+
+    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
+    verifyNoInteractions(runtime);
+  }
+
+  /** 意图：形状校验先于归属判定——非 canonical threadId 不得因为 owner 判定顺序而改变错误语义。 */
+  @Test
+  void compactRejectsNonCanonicalThreadIdBeforeOwnershipCheck() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/harness/threads/not-a-uuid/compact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\"}"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(projectThreadOwnerResolver);
+    verifyNoInteractions(runtime);
+  }
+
+  /** 测试意图：审批身份只能来自服务端认证主体。请求体携带 actor（无论伪造与否）都是未知字段 → 400，且绝不触达交互服务。 */
+  @Test
+  void approvalRejectsForgedActorFieldWithoutTouchingService() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/harness/threads/"
+                    + idText(1)
+                    + "/tool-invocations/"
+                    + idText(100)
+                    + "/approval")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"decision\":\"ALLOW\",\"decisionId\":\""
+                        + idText(1)
+                        + "\",\"actor\":\"admin\"}")
+                .principal(() -> "alice"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(interactionService);
+    verifyNoInteractions(runtime);
+  }
+
   /** 意图：验证 POST stop 与 PUT tool approval 路径与方法映射正常工作。 */
   @Test
   void stopAndApprovalRoutesRemainAvailable() throws Exception {
@@ -536,16 +610,16 @@ class StudioHarnessThreadControllerTest {
                     + idText(100)
                     + "/approval")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"decision\":\"ALLOW\",\"decisionId\":\""
-                        + idText(1)
-                        + "\",\"actor\":\"alice\"}"))
+                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(1) + "\"}")
+                .principal(() -> "alice"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(interactionService).decideApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
+    // 审批 actor 只能来自认证主体，请求体不再携带身份。
+    assertEquals("alice", captor.getValue().actor());
   }
 
   /**
@@ -567,10 +641,8 @@ class StudioHarnessThreadControllerTest {
                     + idText(100)
                     + "/approval")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"decision\":\"ALLOW\",\"decisionId\":\""
-                        + idText(51)
-                        + "\",\"actor\":\"alice\"}"))
+                .content("{\"decision\":\"ALLOW\",\"decisionId\":\"" + idText(51) + "\"}")
+                .principal(() -> "alice"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
 
@@ -579,5 +651,6 @@ class StudioHarnessThreadControllerTest {
     assertEquals(childThreadId, captor.getValue().threadId());
     assertEquals(toolInvocationId, captor.getValue().toolInvocationId());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
+    assertEquals("alice", captor.getValue().actor());
   }
 }

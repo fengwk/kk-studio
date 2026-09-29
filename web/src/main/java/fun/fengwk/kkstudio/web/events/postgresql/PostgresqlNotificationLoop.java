@@ -60,6 +60,11 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       if (running) {
         return;
       }
+      Thread previous = loopThread;
+      if (previous != null && previous.isAlive()) {
+        throw new IllegalStateException(
+            "notification loop thread is still alive; restart is refused until it exits");
+      }
       running = true;
       Thread thread =
           Thread.ofPlatform()
@@ -129,13 +134,15 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   private void runLoop() {
     try {
-      while (running) {
+      while (running && loopThread == Thread.currentThread()) {
         listenUntilDisconnected();
       }
     } finally {
       synchronized (lifecycleLock) {
-        running = false;
-        loopThread = null;
+        if (loopThread == Thread.currentThread()) {
+          running = false;
+          loopThread = null;
+        }
       }
     }
   }
@@ -146,7 +153,7 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       connection = dataSource.getConnection();
       listenOnConnection(connection);
     } catch (SQLException | RuntimeException error) {
-      if (running) {
+      if (currentGenerationRunning()) {
         log.warn("PostgreSQL notification connection lost; reconnecting", error);
         sleepBeforeReconnect();
       }
@@ -167,18 +174,18 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
       }
       PGConnection pgConnection = connection.unwrap(PGConnection.class);
       listen(connection);
-      if (!running) {
+      if (!currentGenerationRunning()) {
         return;
       }
       handlers.values().forEach(this::resync);
-      while (running) {
+      while (currentGenerationRunning()) {
         PGNotification[] notifications = pgConnection.getNotifications(notificationPollMillis);
-        if (!running) {
+        if (!currentGenerationRunning()) {
           return;
         }
         if (notifications != null) {
           for (PGNotification notification : notifications) {
-            if (!running) {
+            if (!currentGenerationRunning()) {
               return;
             }
             PostgresqlNotificationHandler handler = handlers.get(notification.getName());
@@ -193,7 +200,7 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   private boolean installConnection(Connection connection) {
     synchronized (lifecycleLock) {
-      if (!running) {
+      if (!running || loopThread != Thread.currentThread()) {
         return false;
       }
       activeConnection = connection;
@@ -221,7 +228,7 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
   }
 
   private void resync(PostgresqlNotificationHandler handler) {
-    if (!running) {
+    if (!currentGenerationRunning()) {
       return;
     }
     try {
@@ -235,6 +242,9 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
   }
 
   private void notify(PostgresqlNotificationHandler handler, String payload) {
+    if (!currentGenerationRunning()) {
+      return;
+    }
     try {
       handler.onNotification(payload);
     } catch (RuntimeException error) {
@@ -249,6 +259,10 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
     } catch (InterruptedException ignored) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  private boolean currentGenerationRunning() {
+    return running && loopThread == Thread.currentThread();
   }
 
   private static void abortConnection(Connection connection) {

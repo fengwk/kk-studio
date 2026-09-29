@@ -170,8 +170,9 @@ public final class HarnessRuntimeRequestMapper {
         parseUuid(threadId, "threadId"), requireText(dto.getName(), "name"));
   }
 
+  /** 把审批请求映射为命令。操作者身份由调用方从认证上下文解析后显式传入，绝不读取请求体中的身份字段。 */
   public static ToolApprovalCommand toToolApprovalCommand(
-      String threadId, String toolInvocationId, HarnessToolApprovalDTO dto) {
+      String threadId, String toolInvocationId, HarnessToolApprovalDTO dto, String actor) {
     requireNonNull(dto, "approvalDTO");
     String decision = requireText(dto.getDecision(), "decision");
     ToolApprovalDecision parsed =
@@ -186,7 +187,7 @@ public final class HarnessRuntimeRequestMapper {
         parseUuid(toolInvocationId, "toolInvocationId"),
         parsed,
         parseUuid(dto.getDecisionId(), "decisionId"),
-        requireText(dto.getActor(), "actor"),
+        requireText(actor, "actor"),
         dto.getReason());
   }
 
