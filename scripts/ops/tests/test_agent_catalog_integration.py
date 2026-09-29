@@ -1225,6 +1225,92 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             self.assertEqual(counts(target), [1, 1, 2])
 
     # -------------------------------------------------------------------------
+    # Test 12: Export under concurrent writes is one recoverable snapshot
+    # -------------------------------------------------------------------------
+
+    def test_12_export_under_concurrent_writes_is_always_restorable(self) -> None:
+        # Test intent:
+        # Run a writer that keeps committing version bumps on all three tables (row counts never
+        # change, so neither a count nor an ABA fingerprint check could notice). Every successful
+        # export must still come from a single REPEATABLE READ snapshot: re-importing it into a
+        # fresh V1 database must succeed, because the restore transaction verifies the restored
+        # rows against the exported fingerprints. A package spliced across sessions would fail
+        # that verification.
+        source = self.register_db(f"probe_snapshot_src_{uuid.uuid4().hex[:8]}")
+        self.create_v1_database(source)
+        self.run_psql_file(source, CURRENT_FIXTURE_SQL)
+
+        # Each statement runs in its own transaction, so the writer commits continuously while
+        # the export reads. -f (without --single-transaction) owns one transaction per statement.
+        statements = []
+        for _ in range(300):
+            statements.append("update agent_provider set version = version + 1;")
+            statements.append("update agent_model set version = version + 1;")
+            statements.append("update agent_definition set version = version + 1;")
+            statements.append("select pg_sleep(0.02);")
+        writer_sql = Path(self.test_dir.name) / "concurrent_writer.sql"
+        writer_sql.write_text("\n".join(statements) + "\n", encoding="utf-8")
+
+        writer = subprocess.Popen(
+            [
+                "psql", "-X", "-q", "--no-password", "-d", source,
+                "-v", "ON_ERROR_STOP=1", "-f", str(writer_sql),
+            ],
+            env=self.client_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            # Wait until the writer is really committing before the first export.
+            deadline = time.time() + 15
+            started = False
+            while time.time() < deadline:
+                version = int(
+                    self.run_psql_command(
+                        source, "SELECT version FROM agent_provider WHERE name = 'probe-provider'"
+                    )
+                )
+                if version > 2:
+                    started = True
+                    break
+                time.sleep(0.1)
+            self.assertTrue(started, "the concurrent writer did not start in time")
+
+            for attempt in range(3):
+                export_work_dir = Path(self.test_dir.name) / f"snapshot_export_{attempt}"
+                res_export = self.run_script(
+                    EXPORT_SCRIPT,
+                    ["--work-dir", str(export_work_dir)],
+                    env_override={"PGDATABASE": source},
+                )
+                self.assertEqual(
+                    res_export.returncode,
+                    0,
+                    f"export {attempt} failed: {sanitize_error(res_export.stderr)}",
+                )
+                pkg_dir = Path(self.parse_facts(res_export.stdout)["package_dir"])
+
+                target = self.register_db(f"probe_snapshot_tgt_{uuid.uuid4().hex[:8]}")
+                self.create_v1_database(target)
+                res_import = self.run_script(
+                    IMPORT_SCRIPT,
+                    [
+                        "--package", str(pkg_dir),
+                        "--work-dir", str(Path(self.test_dir.name) / f"snapshot_log_{attempt}"),
+                    ],
+                    env_override={"PGDATABASE": target},
+                )
+                self.assertEqual(
+                    res_import.returncode,
+                    0,
+                    "an export taken under concurrent writes was not restorable: "
+                    f"{sanitize_error(res_import.stderr)}",
+                )
+        finally:
+            writer.terminate()
+            writer.wait()
+
+    # -------------------------------------------------------------------------
     # Test 5: Reset guards
     # -------------------------------------------------------------------------
 

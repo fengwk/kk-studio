@@ -323,6 +323,16 @@ class TestDaemonInstallInterface(DaemonInstallTestCase):
         self.assertEqual([], fixture.tools())
         self.assertFalse(fixture.unit.exists())
 
+    def test_help_states_platform_specific_status_semantics(self):
+        """status is `active` on Linux and `loaded` on macOS, never a plain `running` claim."""
+        fixture = self.fixture()
+        result = fixture.run("--help")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("when the unit is active", result.stdout)
+        self.assertIn("when the LaunchAgent is loaded", result.stdout)
+        self.assertIn("Loaded is not a", result.stdout)
+        self.assertNotIn("Exit 0 when running", result.stdout)
+
     def test_missing_command_and_unknown_command_fail_closed(self):
         """No command or an unknown command must print the usage and exit non-zero."""
         fixture = self.fixture()
