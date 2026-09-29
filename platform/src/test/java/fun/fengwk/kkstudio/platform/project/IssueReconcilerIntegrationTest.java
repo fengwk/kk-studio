@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
@@ -153,6 +154,48 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             + "values (?, ?, 1024, 'application/pdf', 1, 'ACTIVE')",
         blobId,
         sha256);
+  }
+
+  /** 模拟来源 Run Session 当前持有该 Blob：公开证据必须能证明归属，而不是只看 Blob 活跃。 */
+  private void retainSessionBlob(UUID threadId, UUID blobId) {
+    UUID sessionId =
+        jdbc.queryForObject(
+            "select session_id from harness_thread where id = ?", UUID.class, threadId);
+    jdbc.update(
+        "insert into session_blob_ref (session_id, blob_id) values (?, ?)", sessionId, blobId);
+  }
+
+  private ToolInvocation unknownTool(String toolName, String callId) {
+    ToolInvocation tool = mock(ToolInvocation.class);
+    when(tool.status()).thenReturn(ToolInvocationStatus.UNKNOWN);
+    when(tool.call()).thenReturn(new ToolCall(callId, toolName, "{}"));
+    when(tool.id()).thenReturn(UUID.randomUUID());
+    return tool;
+  }
+
+  private ThreadSnapshot withTools(UUID threadId, List<ToolInvocation> tools) {
+    return overlay(threadId, List.of(), null, tools);
+  }
+
+  /**
+   * 在真实 Thread 行之上投影一组受控命令/模型/工具状态。
+   *
+   * <p>真实 {@link ThreadSnapshot} 构造会校验 live context 形状不变量，而这些测试只需要驱动 Reconciler 对状态分类的读取， 因此用 mock
+   * 只覆盖被消费的访问器。
+   */
+  private ThreadSnapshot overlay(
+      UUID threadId,
+      List<ThreadCommand> commands,
+      ModelInvocation model,
+      List<ToolInvocation> tools) {
+    ThreadSnapshot base = createSnapshot(threadId);
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(base.thread());
+    when(snapshot.entryPath()).thenReturn(base.entryPath());
+    when(snapshot.queuedCommands()).thenReturn(commands);
+    when(snapshot.model()).thenReturn(model);
+    when(snapshot.toolSiblings()).thenReturn(tools);
+    return snapshot;
   }
 
   private MessagePayload assistantMessage(AgentMessageContent... contents) {
@@ -838,15 +881,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
     ThreadSnapshot processing =
-        new ThreadSnapshot(
-            base.thread(),
-            base.entryPath(),
-            List.of(mock(ThreadCommand.class)),
-            null,
-            List.of(),
-            List.of());
+        overlay(run.getThreadId(), List.of(mock(ThreadCommand.class)), null, List.of());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(processing);
 
     IssueWorkClaim claim = claimWork(issue.getId());
@@ -869,11 +905,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
     ModelInvocation model = mock(ModelInvocation.class);
     when(model.status()).thenReturn(ModelInvocationStatus.RUNNING);
-    ThreadSnapshot processing =
-        new ThreadSnapshot(base.thread(), base.entryPath(), List.of(), model, List.of(), List.of());
+    ThreadSnapshot processing = overlay(run.getThreadId(), List.of(), model, List.of());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(processing);
 
     IssueWorkClaim claim = claimWork(issue.getId());
@@ -971,16 +1005,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     // 模拟工具处于 WAITING_INPUT 状态（问卷安全等待）
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
-    ThreadSnapshot waitingSnapshot =
-        new ThreadSnapshot(
-            base.thread(),
-            base.entryPath(),
-            List.of(),
-            null,
-            List.of(mockTool(ToolInvocationStatus.WAITING_INPUT)),
-            List.of());
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(waitingSnapshot);
+    ThreadSnapshot waiting =
+        withTools(run.getThreadId(), List.of(mockTool(ToolInvocationStatus.WAITING_INPUT)));
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(waiting);
 
     IssueWorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -998,7 +1025,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(remainingBudget, issueRunService.getRun(run.getId()).getRemainingExecutionMs());
 
     // 工具回答完成，进入普通静止点
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(base);
+    ThreadSnapshot settled = createSnapshot(run.getThreadId());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(settled);
     IssueWorkClaim resumeClaim = claimWork(issue.getId());
     IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
@@ -1210,6 +1238,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     UUID blobId = UUID.randomUUID();
     insertStorageBlob(blobId);
+    retainSessionBlob(run.getThreadId(), blobId);
 
     UUID assistantEntryId = appendHistoryEntry(run.getThreadId());
     customPayloads.put(
@@ -1240,6 +1269,203 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /**
+   * E01：工具 UNKNOWN 不是静止点。在途命令或模型尚未收敛时只延后；一旦只剩结果未定的工具，按既有 markUnknown 收尾并保留人工核查，
+   * 禁止自动完成、交接或发布证据。阶段保持不动，核查解除后 mailbox 仍在，显式恢复才会继续。
+   */
+  @Test
+  void unknownToolMarksRunUnknownWithoutCompletionOrEvidence() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("UNKNOWN工具人工核查", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueTransitionService.accept(run.getThreadId(), "REVIEW");
+
+    UUID blobId = UUID.randomUUID();
+    insertStorageBlob(blobId);
+    retainSessionBlob(run.getThreadId(), blobId);
+    UUID assistantEntryId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        assistantEntryId,
+        assistantMessage(
+            new TextMessageContent("中间报告"),
+            ResourceMessageContent.media(blobId, "should-stay-private.pdf")));
+
+    // 真实快照构造会校验 tool sibling 形状；这里只覆盖 Reconciler 消费的工具列表。
+    ThreadSnapshot settled = createSnapshot(run.getThreadId());
+    List<ToolInvocation> unknownTools =
+        List.of(unknownTool("shell", "call-z"), unknownTool("http", "call-a"));
+    ThreadSnapshot stillRunning = mock(ThreadSnapshot.class);
+    when(stillRunning.thread()).thenReturn(settled.thread());
+    when(stillRunning.entryPath()).thenReturn(settled.entryPath());
+    when(stillRunning.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
+    when(stillRunning.model()).thenReturn(null);
+    when(stillRunning.toolSiblings()).thenReturn(unknownTools);
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(stillRunning);
+
+    IssueReconcileOutcome deferred = reconciler.reconcile(claimWork(issue.getId()));
+    assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, deferred);
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+
+    ThreadSnapshot unknownSnapshot = withTools(run.getThreadId(), unknownTools);
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(unknownSnapshot);
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_UNKNOWN, outcome);
+    IssueRun closed = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.UNKNOWN, closed.getStatus());
+    assertNull(closed.getFinalAnswerEntryId());
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    Issue paused = issueService.getIssue(issue.getId());
+    assertEquals(PauseReason.UNKNOWN.name(), paused.getPauseReason());
+    assertTrue(paused.getPauseDetail().contains("http#call-a"));
+    assertTrue(
+        paused.getPauseDetail().indexOf("http#call-a")
+            < paused.getPauseDetail().indexOf("shell#call-z"));
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from project_issue_evidence where issue_id = ? and blob_id = ?",
+            issue.getId(),
+            blobId));
+    assertEquals(
+        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+
+    issue = issueService.getIssue(issue.getId());
+    issueService.resolveUnknown(issue.getId(), issue.getVersion(), key("verify"), "外部副作用已核对");
+    issue = issueService.getIssue(issue.getId());
+    assertEquals(PauseReason.USER.name(), issue.getPauseReason());
+    issueService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
+    IssueReconcileOutcome resumed = reconciler.reconcile(claimWork(issue.getId()));
+    assertEquals(IssueReconcileOutcome.RUN_ACCEPTED, resumed);
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where issue_id = ? and status = 'RUNNING'",
+            issue.getId()));
+  }
+
+  /**
+   * E01 边界：UNKNOWN 优先于审批/输入等待。
+   *
+   * <p>WAITING_APPROVAL/WAITING_INPUT 只是安全静止点，不能掩盖同一快照中结果未定的外部副作用；必须收敛为人工核查。
+   */
+  @Test
+  void unknownToolOutranksApprovalWaiting() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("UNKNOWN优先于审批等待", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    appendHistoryEntry(run.getThreadId());
+
+    ThreadSnapshot snapshot =
+        withTools(
+            run.getThreadId(),
+            List.of(
+                unknownTool("shell", "call-1"), mockTool(ToolInvocationStatus.WAITING_APPROVAL)));
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(snapshot);
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_UNKNOWN, outcome);
+    assertEquals(IssueRunStatus.UNKNOWN, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals(PauseReason.UNKNOWN.name(), issueService.getIssue(issue.getId()).getPauseReason());
+  }
+
+  /**
+   * E01 边界：迟到（阶段或归属已不匹配）的旧 Run 遇到结果未定的工具时也走 UNKNOWN，而不是安全完成或失败。
+   *
+   * <p>旧 Run 不得推进当前阶段；结果未定必须保留人工核查，绝不自动收尾为 COMPLETED。
+   */
+  @Test
+  void staleRunWithUnknownToolConvergesUnknownWithoutAdvancingStage() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("迟到UNKNOWN工具收敛", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    appendHistoryEntry(run.getThreadId());
+
+    // 强制推进 Issue 阶段，使 Run 成为迟到回调
+    jdbc.update(
+        "update project_issue set state = 'REVIEW', version = version + 1 where id = ?",
+        issue.getId());
+
+    ThreadSnapshot stale =
+        withTools(run.getThreadId(), List.of(unknownTool("shell", "call-stale")));
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(stale);
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_UNKNOWN, outcome);
+    assertEquals(IssueRunStatus.UNKNOWN, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals(PauseReason.UNKNOWN.name(), issueService.getIssue(issue.getId()).getPauseReason());
+  }
+
+  /** E02：只有最终 assistant 答复明确引用、且来源 Session 持有的 Resource 才公开。中间消息、工具/用户附件和非本 Session 的 Blob 保持私有。 */
+  @Test
+  void closeoutPublishesOnlyFinalAssistantResourcesHeldByRunSession() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("最终答复证据边界", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    UUID intermediateBlob = UUID.randomUUID();
+    UUID userBlob = UUID.randomUUID();
+    UUID finalBlob = UUID.randomUUID();
+    UUID foreignBlob = UUID.randomUUID();
+    for (UUID blobId : List.of(intermediateBlob, userBlob, finalBlob, foreignBlob)) {
+      insertStorageBlob(blobId);
+    }
+    retainSessionBlob(run.getThreadId(), intermediateBlob);
+    retainSessionBlob(run.getThreadId(), userBlob);
+    retainSessionBlob(run.getThreadId(), finalBlob);
+
+    UUID intermediateId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        intermediateId,
+        assistantMessage(ResourceMessageContent.media(intermediateBlob, "scratch.pdf")));
+    UUID userId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        userId,
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(ResourceMessageContent.media(userBlob, "user-note.pdf"))),
+            null,
+            null));
+    UUID finalId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        finalId,
+        assistantMessage(
+            new TextMessageContent("终稿"),
+            ResourceMessageContent.media(finalBlob, "final-report.pdf"),
+            ResourceMessageContent.media(foreignBlob, "foreign.pdf")));
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+    assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
+    assertEquals(finalId, issueRunService.getRun(run.getId()).getFinalAnswerEntryId());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_evidence where issue_id = ? and blob_id = ? and name = 'final-report.pdf'",
+            issue.getId(),
+            finalBlob));
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from project_issue_evidence where issue_id = ? and blob_id in (?, ?, ?)",
+            issue.getId(),
+            intermediateBlob,
+            userBlob,
+            foreignBlob));
+  }
+
+  /**
    * 缺陷 6 测试意图：迟到（stale）的旧 Run 在处于在途执行时不得强制收尾，必须挂起等待（DEFERRED_PROCESSING）； 静止后安全收尾为
    * COMPLETED，且其原本携带的 next_state 绝对不得推进当前 Issue 的阶段。
    */
@@ -1260,16 +1486,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         run.getId());
 
     // 模拟迟到 Run 正在执行工具调用
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
-    ThreadSnapshot inFlight =
-        new ThreadSnapshot(
-            base.thread(),
-            base.entryPath(),
-            List.of(),
-            null,
-            List.of(mockTool(ToolInvocationStatus.RUNNING)),
-            List.of());
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlight);
+    ThreadSnapshot inFlightSnapshot =
+        withTools(run.getThreadId(), List.of(mockTool(ToolInvocationStatus.RUNNING)));
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlightSnapshot);
 
     IssueWorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);

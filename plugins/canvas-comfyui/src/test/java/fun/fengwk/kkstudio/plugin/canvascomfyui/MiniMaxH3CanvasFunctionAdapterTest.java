@@ -12,6 +12,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -230,16 +231,60 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     verify(uploadService).delete(UPLOAD_ID);
   }
 
+  /**
+   * 提交前的输入准备失败仍按 FAILED 清理 staged media，且不得调用 submit。
+   *
+   * <p>一旦进入 oneShot.submit，异常不能证明接受事实未成立：必须转 UNKNOWN，禁止删除可能已被消费的 staged media，恢复时不得再次 submit。
+   */
   @Test
-  void submitFailureDiscardsPreparedMedia() {
+  void promptSubmitExceptionBecomesUnknownWithoutDiscardingStagedMedia() {
     when(oneShot.submit(anyString(), anyString(), any(), any()))
-        .thenThrow(new IllegalStateException("submit failed"));
+        .thenThrow(new IllegalStateException("response lost after accept"));
+
+    RecordingContext context = new RecordingContext();
+    CanvasFunctionUnknownException unknown =
+        assertThrows(
+            CanvasFunctionUnknownException.class,
+            () -> adapter.submit(context, run("QUEUED", Map.of())));
+    assertFalse(unknown.getMessage().isBlank());
+    verify(uploadService, never()).delete(UPLOAD_ID);
+    assertEquals(
+        List.of(
+            MiniMaxH3CanvasFunctionAdapter.INITIALIZED,
+            MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING),
+        context.stages);
+
+    CanvasFunctionFrozenRun crashed =
+        run(
+            MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING,
+            H3AdapterState.empty().withSeed(contextSeed(context)).encode());
+    assertThrows(
+        CanvasFunctionUnknownException.class,
+        () -> adapter.submit(new RecordingContext(), crashed));
+    verify(oneShot, times(1)).submit(anyString(), anyString(), any(), any());
+  }
+
+  @Test
+  void validationBeforeSubmitStillFailsAndCleansStagedMedia() {
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    InputStream first = new ByteArrayInputStream(new byte[] {1, 2, 3});
+    when(context.openOriginal(any()))
+        .thenReturn(new CanvasFunctionResourceStream(first, 3L, first::close));
+    when(uploadService.stage(any(), any(), any(InputStream.class), anyLong()))
+        .thenReturn(
+            new StorageUploadService.StagedUpload(
+                UPLOAD_ID, BLOB_ID, "source.png", "image/jpeg", 3L, "a".repeat(64)));
 
     assertThrows(
-        IllegalStateException.class,
-        () -> adapter.submit(new RecordingContext(), run("QUEUED", Map.of())));
+        IllegalArgumentException.class, () -> adapter.submit(context, run("QUEUED", Map.of())));
 
     verify(uploadService).delete(UPLOAD_ID);
+    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
+  }
+
+  private static long contextSeed(RecordingContext context) {
+    Object seed = context.lastAdapterState.get("seed");
+    return ((Number) seed).longValue();
   }
 
   @Test
