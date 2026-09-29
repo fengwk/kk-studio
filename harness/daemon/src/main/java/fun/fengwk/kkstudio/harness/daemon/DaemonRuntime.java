@@ -415,6 +415,9 @@ public final class DaemonRuntime implements AutoCloseable {
                   nextReconnectDelay = config.initialReconnectDelay();
                   if (sendHello(active)) {
                     active.markHelloSent();
+                  } else {
+                    // HELLO 未进入传输：停留在 CONNECTING 会挡住后续重连，必须关闭这条连接。
+                    closeFailedHandshake(active);
                   }
                 }
               });
@@ -561,13 +564,30 @@ public final class DaemonRuntime implements AutoCloseable {
       // 资源字节预算由服务端在 WELCOME 中通告；缺失或非正数时不接受任何 resource/binary 结果。
       maxResourceBytes.set(
           requiredPositiveLong(envelopeCodec.readPayload(envelope), "maxResourceBytes"));
-      if (sendReady(connection) && activeConnection.get() == connection) {
+      if (!sendReady(connection)) {
+        // WELCOME 已接受但 READY 未进入传输：不得停在 CONNECTING，关闭后由既有重连恢复。
+        if (activeConnection.get() == connection) {
+          closeFailedHandshake(connection);
+        }
+        return;
+      }
+      if (activeConnection.get() == connection) {
         connection.markReady();
         state = DaemonRuntimeState.READY;
         // 只有 READY 连接才能递交上传控制帧；放行在断连期间等待重连的上传继续重放同一 transfer。
         resourceTransferClient.onConnectionReady();
       }
     }
+  }
+
+  /** 握手帧未成功递交时关闭当前连接，让既有断开路径调度重连；不额外轮询。 */
+  private void closeFailedHandshake(ActiveConnection connection) {
+    try {
+      connection.connection().close();
+    } catch (RuntimeException ignored) {
+      // 关闭失败仍要走代际断开，避免停在 CONNECTING。
+    }
+    handleDisconnected(connection.generation());
   }
 
   /** 严格读取一个正 long 字段：缺失、非整数或非正都是协议错误。 */

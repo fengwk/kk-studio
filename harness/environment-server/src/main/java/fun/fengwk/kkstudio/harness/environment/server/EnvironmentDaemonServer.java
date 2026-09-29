@@ -69,7 +69,9 @@ import java.util.function.Supplier;
  * FAILED/CANCELLED、实例接管与超时会幂等释放全部传输；COMPLETED 只释放未被结果引用的上传，被引用上传交给 history 物化事务转移 owner。
  *
  * <p><b>锁边界：</b>每个连接一代的 {@code gate} 只串行化入站协议处理；{@code state} 只保护该连接的协议字段；{@code inventory} 保护环境 与
- * invocation 目录。锁顺序固定为 {@code gate > state > inventory}；租约存储访问、票据服务回调、会话监听器回调与连接关闭都在这些锁之外执行。
+ * invocation 目录。锁顺序固定为 {@code gate > state >
+ * inventory}；租约存储访问、票据服务回调、会话监听器回调与连接关闭都在这些锁之外执行。同一连接上的并行 {@code receive} 仍由调用方保证不会并发进入 {@code
+ * gate}；本轮不新增回调队列来吸收这个风险。
  *
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
  */
@@ -333,13 +335,8 @@ public final class EnvironmentDaemonServer
     if (!(handle instanceof ActiveInvocation active)) {
       throw new IllegalArgumentException("execution handle is not owned by this server");
     }
-    boolean shouldCancel;
     synchronized (active) {
       active.cancelled = true;
-      if (active.terminal.get() || active.cancelSent.getAndSet(true)) {
-        return;
-      }
-      shouldCancel = true;
     }
     ConnectionState state;
     synchronized (inventory) {
@@ -350,8 +347,9 @@ public final class EnvironmentDaemonServer
       addTombstone(active.environmentId, active.invocationId);
       state = connectionOf(active.environmentId);
     }
-    if (shouldCancel && state != null) {
-      offer(state, DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+    // 已移出在途目录，不再随重连重放；仍尝试把一次 CANCEL 交给当前连接。
+    if (state != null) {
+      active.deliverCancel(state);
     }
     releaseAllTransfers(active);
   }
@@ -543,7 +541,10 @@ public final class EnvironmentDaemonServer
       welcomePayload.put("environmentId", environmentId.toString());
       welcomePayload.put("name", registration.displayName());
       welcomePayload.put("maxResourceBytes", settings().maxResourceBytes());
-      offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString());
+      if (!offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString())) {
+        // WELCOME 未进入传输：连接不得停在已绑定但未完成握手的状态，关闭后由既有重连恢复。
+        close(state.connection.connectionId());
+      }
     }
   }
 
@@ -561,16 +562,24 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 取走该 Environment 的全部在途调用并登记 tombstone：新进程无法再提供它们的终态，其迟到帧一律忽略。 */
+  /**
+   * 取走该 Environment 的全部在途调用并登记 tombstone：新进程无法再提供它们的终态，其迟到帧一律忽略。
+   *
+   * <p>移除与标记终态在同一次目录锁内完成，因此与终态帧、expire 的原子取出至多一个赢家。
+   */
   private List<ActiveInvocation> takeAbandonedInvocations(EnvironmentId environmentId) {
-    List<ActiveInvocation> abandoned;
+    List<ActiveInvocation> abandoned = new ArrayList<>();
     synchronized (inventory) {
       LinkedHashMap<UUID, ActiveInvocation> invocations =
           invocationsByEnvironment.remove(environmentId);
-      abandoned = invocations == null ? List.of() : List.copyOf(invocations.values());
+      if (invocations != null) {
+        for (ActiveInvocation active : invocations.values()) {
+          active.markTerminal();
+          abandoned.add(active);
+        }
+      }
     }
     for (ActiveInvocation active : abandoned) {
-      active.markTerminal();
       addTombstone(environmentId, active.invocationId);
     }
     return abandoned;
@@ -672,38 +681,65 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 以相同 invocationId 重放尚未在当前连接代际发出的在途 INVOKE。
+   * 重放尚未在当前连接代际发出的在途调用。
    *
-   * <p>Daemon 的 invocation journal 以 invocationId 去重：RUNNING 重放 STARTED，已终结重放终态，因此重放不会重复执行副作用。
-   * 本地队列拒绝不改变在途调用的存在，仅留待下一次 READY 或由调用方 deadline 收敛。
+   * <p>已记录取消意图的调用只发 CANCEL，绝不重发 INVOKE。尚未取消的调用以相同 invocationId 重放 INVOKE：Daemon journal 以
+   * invocationId 去重，RUNNING 重放 STARTED，已终结重放终态，因此重放不会重复执行副作用。本地队列拒绝不改变在途调用的存在；BUSY/CLOSED
+   * 关闭当前连接，由既有重连在新代际再试，不新增轮询。
    */
   private void resendActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
     for (ActiveInvocation active : activeInvocations(environmentId)) {
-      if (active.sentGeneration == state.generation || active.isTerminal()) {
+      if (active.isTerminal()) {
+        continue;
+      }
+      boolean cancelOnly = active.cancellationRequested();
+      if (!cancelOnly && active.sentGeneration == state.generation) {
+        continue;
+      }
+      if (cancelOnly && active.cancelDeliveredGeneration == state.generation) {
         continue;
       }
       DaemonOfferResult outcome;
       synchronized (state) {
-        if (!state.isReady() || active.sentGeneration == state.generation) {
-          continue;
+        if (!state.isReady()) {
+          return;
         }
-        try {
-          outcome =
-              state.offer(
-                  DaemonMessageType.INVOKE, active.invocationId.toString(), active.invokePayload);
-        } catch (RuntimeException transportFailure) {
-          outcome = null;
-        }
-        if (outcome == DaemonOfferResult.ACCEPTED) {
-          active.sentGeneration = state.generation;
+        if (active.cancellationRequested()) {
+          if (active.cancelDeliveredGeneration == state.generation) {
+            continue;
+          }
+          try {
+            outcome = state.offer(DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+          } catch (RuntimeException transportFailure) {
+            outcome = null;
+          }
+          if (outcome == DaemonOfferResult.ACCEPTED) {
+            active.noteCancelDelivered(state.generation);
+          }
+        } else {
+          if (active.sentGeneration == state.generation) {
+            continue;
+          }
+          try {
+            outcome =
+                state.offer(
+                    DaemonMessageType.INVOKE, active.invocationId.toString(), active.invokePayload);
+          } catch (RuntimeException transportFailure) {
+            outcome = null;
+          }
+          if (outcome == DaemonOfferResult.ACCEPTED) {
+            active.sentGeneration = state.generation;
+          }
         }
       }
-      if (outcome == null) {
-        // 传输在递交过程中失败：连接已失效。关闭包含租约存储访问，必须在连接状态锁之外执行。
+      if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
+        // 传输失败或连接已关：关闭包含租约存储访问，必须在连接状态锁之外执行。
         close(state.connection.connectionId());
         return;
       }
-      if (outcome == DaemonOfferResult.CLOSED) {
+      if (outcome == DaemonOfferResult.BUSY) {
+        // 帧肯定未发送，连接仍可用；关掉它以触发既有重连，而不是在本代际空转。
+        close(state.connection.connectionId());
         return;
       }
     }
@@ -1078,17 +1114,16 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 原子终结并移除匹配 invocationId 的活动调用，并登记 tombstone。
+   * 在活动目录内原子取出并标记终态，再登记 tombstone。
    *
-   * <p>tombstone 让同一 invocation 的迟到/重放终态被静默忽略：Daemon 的 journal 会在重连后重放终态，重放不是越权回调，也不得触发协议错误。
+   * <p>取出与标记必须是同一次目录操作的结果：unregister 失败说明调用已被 abandon/expire 取走，不得把仍登记的活动调用当成第二次终态返回。 tombstone 让同一
+   * invocation 的迟到/重放终态被静默忽略：Daemon journal 会在重连后重放终态，重放不是越权回调，也不得触发协议错误。
    */
   private ActiveInvocation takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
+    ActiveInvocation active = takeRegistered(state.environmentId, invocationId);
     if (active != null) {
-      unregister(active);
-      active.markTerminal();
       addTombstone(state.environmentId, invocationId);
       return active;
     }
@@ -1099,14 +1134,54 @@ public final class EnvironmentDaemonServer
         "daemon terminal callback does not own invocationId: " + envelope.invocationId());
   }
 
+  /**
+   * 从活动目录移除并标记终态；移除失败返回 null。
+   *
+   * <p>目录锁内完成「取出 + mark terminal」，因此并发的终态帧、expire 与实例接管至多一个赢家。
+   */
+  private ActiveInvocation takeRegistered(EnvironmentId environmentId, UUID invocationId) {
+    synchronized (inventory) {
+      LinkedHashMap<UUID, ActiveInvocation> invocations =
+          invocationsByEnvironment.get(environmentId);
+      if (invocations == null) {
+        return null;
+      }
+      ActiveInvocation active = invocations.remove(invocationId);
+      if (active == null) {
+        return null;
+      }
+      if (invocations.isEmpty()) {
+        invocationsByEnvironment.remove(environmentId);
+      }
+      active.markTerminal();
+      return active;
+    }
+  }
+
   /** 递交一帧；传输同步失败意味着连接已失效：断开该连接并返回 false。 */
   private boolean offer(
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
+    return offerResult(state, type, invocationId, payloadJson) == DaemonOfferResult.ACCEPTED;
+  }
+
+  /**
+   * 递交一帧并返回确定性结果。
+   *
+   * <p>BUSY/CLOSED 表示帧肯定未发送。传输同步抛错时关闭连接并视为 CLOSED，避免调用方把未送达记成已送达。
+   */
+  private DaemonOfferResult offerResult(
+      ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
     try {
-      return state.offer(type, invocationId, payloadJson) == DaemonOfferResult.ACCEPTED;
+      DaemonOfferResult outcome = state.offer(type, invocationId, payloadJson);
+      if (type == DaemonMessageType.CANCEL
+          && (outcome == DaemonOfferResult.BUSY || outcome == DaemonOfferResult.CLOSED)) {
+        // 取消帧肯定未发送：关掉当前连接，由既有重连在新代际再发 CANCEL，不在本代际空转。
+        close(state.connection.connectionId());
+      }
+      return outcome;
     } catch (RuntimeException error) {
       close(state.connection.connectionId());
-      return false;
+      return DaemonOfferResult.CLOSED;
     }
   }
 
@@ -1329,9 +1404,10 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 一次能力调用的所有权记录：终态唯一、CANCEL 至多一次，cancel/expire/连接清理竞争只产生一个赢家。
+   * 一次能力调用的所有权记录：终态唯一、取消意图与已送达代际分离，cancel/expire/连接清理竞争只产生一个赢家。
    *
-   * <p>{@link #cancel()} 只表达取消请求，不终结本地所有权；终态仍由 daemon 回调、实例接管或调用方 deadline 给出。
+   * <p>{@link #cancel()} 只记录取消意图，不终结本地所有权；只有当代连接接受 CANCEL 才记下送达代际。终态仍由 daemon 回调、实例接管或调用方 deadline
+   * 给出。旧代际的接受不能抹掉更新代际上尚未送达的意图。
    */
   private final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
 
@@ -1340,14 +1416,16 @@ public final class EnvironmentDaemonServer
     private final EnvironmentCapabilityExecutionListener listener;
     private final String invokePayload;
     private final AtomicBoolean terminal = new AtomicBoolean();
-    private final AtomicBoolean cancelSent = new AtomicBoolean();
     private volatile boolean cancelled;
 
     /**
      * 最近一次成功递交 INVOKE 的连接代际；0 表示尚未递交。重连后与当前代际不同即触发重放，因此该字段的良性竞争最多导致一次冗余重放 （Daemon journal 以
-     * invocationId 去重）。
+     * invocationId 去重）。已取消的调用不再使用该字段重发 INVOKE。
      */
     private volatile long sentGeneration;
+
+    /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
+    private volatile long cancelDeliveredGeneration;
 
     /**
      * 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。
@@ -1371,7 +1449,7 @@ public final class EnvironmentDaemonServer
     public void cancel() {
       synchronized (this) {
         cancelled = true;
-        if (terminal.get() || cancelSent.getAndSet(true)) {
+        if (terminal.get() || cancelDeliveredGeneration > 0) {
           return;
         }
       }
@@ -1379,13 +1457,18 @@ public final class EnvironmentDaemonServer
       synchronized (inventory) {
         state = connectionOf(environmentId);
       }
-      if (state != null) {
-        offer(state, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
+      if (state == null) {
+        return;
       }
+      deliverCancel(state);
     }
 
     @Override
     public boolean isCancelled() {
+      return cancelled;
+    }
+
+    private boolean cancellationRequested() {
       return cancelled;
     }
 
@@ -1395,6 +1478,33 @@ public final class EnvironmentDaemonServer
 
     private void markTerminal() {
       terminal.set(true);
+    }
+
+    /**
+     * 向指定连接代际递交一次 CANCEL，只有该代际仍然是当前连接且接受帧时才记下送达。
+     *
+     * <p>旧代际在递交期间被替换时，即使它接受了帧，也不能抹掉新代际上尚未送达的取消意图。
+     */
+    private void deliverCancel(ConnectionState offered) {
+      long offeredGeneration = offered.generation;
+      DaemonOfferResult outcome =
+          offerResult(offered, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
+      if (outcome != DaemonOfferResult.ACCEPTED) {
+        return;
+      }
+      ConnectionState current;
+      synchronized (inventory) {
+        current = connectionOf(environmentId);
+      }
+      if (current != null && current.generation == offeredGeneration) {
+        noteCancelDelivered(offeredGeneration);
+      }
+    }
+
+    private void noteCancelDelivered(long generation) {
+      if (generation > cancelDeliveredGeneration) {
+        cancelDeliveredGeneration = generation;
+      }
     }
   }
 
