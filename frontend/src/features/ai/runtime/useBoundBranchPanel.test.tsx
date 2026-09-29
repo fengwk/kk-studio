@@ -813,29 +813,39 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(true)
   })
 
-  it('presents a yolo 409 as a conflict without rolling back the optimistic draft', async () => {
+  it('rolls back optimistic yolo and refetches authoritative thread on 409 conflict, preserving other draft changes', async () => {
+    // 测试意图：验证 YOLO 切换遇到 409 CAS 冲突时，先回滚 optimistic draft.yoloEnabled 到权威值，
+    // 保留用户编辑的其它草稿（如 model/agent），拉取最新权威快照并展示 conflict，消除假乐观
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new ApiError('version moved', 409, 'CONFLICT', {
         reason: 'STALE_VERSION',
         detail: 'head moved',
       }),
     )
+    const freshThread = threadFixture(THREAD_ID, { version: '2', yoloEnabled: false })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValueOnce(snapshotOf(freshThread))
+
     const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
+      result.current.selectModel(modelSelection({ modelName: 'CustomModel' }))
       result.current.setYoloEnabled(true)
     })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+
     await act(async () => {
       await Promise.resolve()
     })
-    // 409 分支：conflict 展示、乐观 draft 保留（等待刷新后重试）、错误通道干净。
-    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
+
+    await waitFor(() => expect(result.current.conflict?.reason).toBe('STALE_VERSION'))
     expect(result.current.conflict?.detail).toContain('head moved')
     expect(result.current.yoloError).toBeNull()
-    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
     expect(result.current.branchState?.base.yoloEnabled).toBe(false)
     act(() => result.current.dismissConflict())
     expect(result.current.conflict).toBeNull()

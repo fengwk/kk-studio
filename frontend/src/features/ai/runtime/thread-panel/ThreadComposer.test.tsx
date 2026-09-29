@@ -15,6 +15,8 @@ import {
   THREAD_COMMANDS,
 } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { firstEnabledCommandIndex } from '@/features/ai/runtime/thread-panel/thread-command-navigation'
+import { storeUnknownUploads } from '@/features/ai/composer/composer-draft'
+import type { StorageService } from '@/features/ai/composer'
 
 function ControlledComposer() {
   const [parts, setParts] = useState<ComposerPart[]>([])
@@ -545,6 +547,70 @@ describe('ThreadComposer and commands', () => {
         type: 'text',
         text: 'inspect message please',
       })
+    })
+
+    it('restores complete_unknown attachment on reload and retries complete with same uploadId via retry button', async () => {
+      // 测试意图：验证 reload 后未知 complete 附件展示重试按钮，点击真实按钮能触发同一 uploadId 重新 complete
+      const scope = 'test-composer-scope'
+      const localId = 'loc-unknown-1'
+      const uploadId = 'upload-id-same-123'
+      storeUnknownUploads(scope, [
+        {
+          localId,
+          uploadId,
+          filename: 'ambiguous.png',
+          mediaType: 'image/png',
+          sizeBytes: 2048,
+          sha256: 'sha-same',
+        },
+      ])
+
+      const fakeStorage = {
+        reserveUpload: vi.fn(),
+        completeUpload: vi.fn().mockResolvedValue({
+          id: uploadId,
+          blobId: 'blob-123',
+          mediaKind: 'image',
+          state: 'READY',
+          presignedPut: { url: 'put', method: 'PUT', headers: {} },
+          filename: 'ambiguous.png',
+          mediaType: 'image/png',
+          sizeBytes: 2048,
+          sha256: 'sha-same',
+          expiresAt: '2026',
+          createTime: '2026',
+        }),
+        deleteUpload: vi.fn().mockResolvedValue(undefined),
+        uploadFile: vi.fn().mockResolvedValue(undefined),
+        getBlobDownloadUrl: vi.fn(),
+        getBlobPreviewUrl: vi.fn(),
+      }
+
+      const user = userEvent.setup()
+      const draftPart = createAttachmentPart(localId, 'ambiguous.png')
+      render(
+        <ThreadComposer
+          parts={[draftPart]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          scope={scope}
+          storageService={fakeStorage as unknown as StorageService}
+        />,
+      )
+
+      expect(screen.getAllByText('[ambiguous.png]').length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('状态未知，可重试')).toBeInTheDocument()
+
+      const retryBtn = screen.getByRole('button', { name: '重试完成 ambiguous.png' })
+      expect(retryBtn).toBeInTheDocument()
+
+      await user.click(retryBtn)
+
+      expect(fakeStorage.completeUpload).toHaveBeenCalledWith('upload-id-same-123')
+      expect(await screen.findByText('2.0 KB')).toBeInTheDocument()
     })
   })
 })

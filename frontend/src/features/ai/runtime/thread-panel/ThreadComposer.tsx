@@ -113,6 +113,7 @@ export function ThreadComposer({
   onPreview,
   previewLoading = false,
   previewDisabled = false,
+  scope,
 }: {
   parts: ComposerPart[]
   pending: boolean
@@ -143,6 +144,7 @@ export function ThreadComposer({
   onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   previewLoading?: boolean
   previewDisabled?: boolean
+  scope?: string
 }) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -247,9 +249,10 @@ export function ThreadComposer({
     uploads,
     addFiles,
     releaseUpload,
+    retryComplete,
     markDetached,
     updateImageTier,
-  } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError })
+  } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError, scope, parts })
 
   const handleTierChange = useCallback(
     (upload: AttachmentUpload, tier: ImageInputTier) => {
@@ -800,6 +803,7 @@ export function ThreadComposer({
           parts={parts}
           disabled={disabled}
           onRemove={handleRemoveUpload}
+          onRetry={retryComplete}
           onTierChange={handleTierChange}
         />
         <div

@@ -134,12 +134,27 @@ export function visibleChatPanes(state: ChatPaneState): ChatPane[] {
   return state.panes.slice(0, CHAT_LAYOUT_CAPACITY[state.layout])
 }
 
-export function loadChatPaneState(chatId: string, storage: Storage = localStorage): ChatPaneState {
+function resolveStorage(storage?: Storage): Storage | null {
+  if (storage !== undefined) {
+    return storage
+  }
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null
+  } catch {
+    return null
+  }
+}
+
+export function loadChatPaneState(chatId: string, storage?: Storage): ChatPaneState {
   if (!chatId) {
     return createDefaultChatPaneState()
   }
   try {
-    const raw = storage.getItem(storageKey(chatId))
+    const store = resolveStorage(storage)
+    if (!store) {
+      return createDefaultChatPaneState()
+    }
+    const raw = store.getItem(storageKey(chatId))
     return raw == null ? createDefaultChatPaneState() : normalizeChatPaneState(JSON.parse(raw))
   } catch {
     return createDefaultChatPaneState()
@@ -149,10 +164,18 @@ export function loadChatPaneState(chatId: string, storage: Storage = localStorag
 export function saveChatPaneState(
   chatId: string,
   state: ChatPaneState,
-  storage: Storage = localStorage,
+  storage?: Storage,
 ): void {
   if (!chatId) {
     return
   }
-  storage.setItem(storageKey(chatId), JSON.stringify(normalizeChatPaneState(state)))
+  try {
+    const store = resolveStorage(storage)
+    if (!store) {
+      return
+    }
+    store.setItem(storageKey(chatId), JSON.stringify(normalizeChatPaneState(state)))
+  } catch {
+    // 写入异常（QuotaExceededError、SecurityError 等）fail-open，不从 effect 抛出。
+  }
 }

@@ -7,6 +7,7 @@ import {
   FileText,
   FileVideo,
   Image as ImageIcon,
+  RotateCw,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -30,12 +31,14 @@ export function AttachmentStrip({
   parts,
   disabled,
   onRemove,
+  onRetry,
   onTierChange,
 }: {
   uploads: AttachmentUpload[]
   parts: ComposerPart[]
   disabled: boolean
   onRemove: (upload: AttachmentUpload) => void
+  onRetry?: (upload: AttachmentUpload) => void
   onTierChange?: (upload: AttachmentUpload, tier: ImageInputTier) => void
 }) {
   const { t } = useI18n()
@@ -65,7 +68,9 @@ export function AttachmentStrip({
         const status =
           upload.status === 'uploading'
             ? `${t('ai.runtime.composer.uploading')} ${progress}%`
-            : formatFileSize(upload.sizeBytes)
+            : upload.status === 'complete_unknown'
+              ? t('ai.runtime.composer.completeUnknown')
+              : formatFileSize(upload.sizeBytes)
         const isImage = mediaKindOf(upload.mediaType) === 'image'
         return (
           <div
@@ -87,6 +92,17 @@ export function AttachmentStrip({
               </span>
               <span className="attachment-reference-status-row">
                 <span className="attachment-reference-status">{status}</span>
+                {upload.status === 'complete_unknown' && onRetry ? (
+                  <button
+                    type="button"
+                    className="ghost-btn attachment-reference-retry"
+                    aria-label={t('ai.runtime.composer.retryComplete', { name: displayName })}
+                    disabled={disabled}
+                    onClick={() => onRetry(upload)}
+                  >
+                    <RotateCw size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
                 {isImage && (
                   <select
                     className="attachment-reference-tier-select"

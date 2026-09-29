@@ -3,6 +3,7 @@ import {
   createTextPart,
   hasMessageContent,
   type ComposerPart,
+  type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 
 const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
@@ -162,4 +163,111 @@ function hasExactKeys(record: Record<string, unknown>, keys: string[]): boolean 
 function hasOnlyKeys(record: Record<string, unknown>, keys: string[]): boolean {
   const allowed = new Set(keys)
   return Object.keys(record).every((key) => allowed.has(key))
+}
+
+export interface StoredUnknownUpload {
+  localId: string
+  uploadId: string
+  filename: string
+  mediaType: string
+  sizeBytes: number
+  sha256: string | null
+  imageTier?: ImageInputTier
+}
+
+export function unknownUploadsStorageKey(scope: string): string {
+  return `${STORAGE_PREFIX}${scope}:unknown-uploads`
+}
+
+export function storeUnknownUploads(
+  scope: string,
+  uploads: StoredUnknownUpload[],
+  storage: Storage = localStorage,
+): void {
+  if (!scope) {
+    return
+  }
+  const key = unknownUploadsStorageKey(scope)
+  try {
+    if (uploads.length === 0) {
+      storage.removeItem(key)
+      return
+    }
+    storage.setItem(key, JSON.stringify({ version: 1, uploads }))
+  } catch {
+    try {
+      storage.removeItem(key)
+    } catch {
+      // localStorage 受限容错
+    }
+  }
+}
+
+export function loadUnknownUploads(
+  scope: string,
+  storage: Storage = localStorage,
+): StoredUnknownUpload[] {
+  if (!scope) {
+    return []
+  }
+  const key = unknownUploadsStorageKey(scope)
+  try {
+    const raw = storage.getItem(key)
+    if (!raw) {
+      return []
+    }
+    const parsed = JSON.parse(raw)
+    if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.uploads)) {
+      storage.removeItem(key)
+      return []
+    }
+    const validated: StoredUnknownUpload[] = []
+    for (const item of parsed.uploads) {
+      if (
+        isRecord(item)
+        && typeof item.localId === 'string' && item.localId.trim()
+        && typeof item.uploadId === 'string' && item.uploadId.trim()
+        && typeof item.filename === 'string' && item.filename.trim()
+        && typeof item.mediaType === 'string'
+        && typeof item.sizeBytes === 'number' && Number.isSafeInteger(item.sizeBytes) && item.sizeBytes >= 0
+        && (item.sha256 === null || typeof item.sha256 === 'string')
+        && (item.imageTier === undefined
+          || item.imageTier === '720P'
+          || item.imageTier === '1080P'
+          || item.imageTier === 'ORIGINAL')
+      ) {
+        validated.push({
+          localId: item.localId,
+          uploadId: item.uploadId,
+          filename: item.filename,
+          mediaType: item.mediaType,
+          sizeBytes: item.sizeBytes,
+          sha256: item.sha256,
+          ...(item.imageTier ? { imageTier: item.imageTier } : {}),
+        })
+      }
+    }
+    return validated
+  } catch {
+    try {
+      storage.removeItem(key)
+    } catch {
+      // 容错
+    }
+    return []
+  }
+}
+
+export function clearUnknownUploads(
+  scope: string,
+  storage: Storage = localStorage,
+): void {
+  if (!scope) {
+    return
+  }
+  try {
+    storage.removeItem(unknownUploadsStorageKey(scope))
+  } catch {
+    // 容错
+  }
 }
