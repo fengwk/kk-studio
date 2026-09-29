@@ -1155,6 +1155,71 @@ describe('CanvasCommandQueue', () => {
     // 关键断言：409 终端失败时不清除草稿 ACK，保留草稿供用户救援
     expect(onDraftAcks).not.toHaveBeenCalled()
   })
+
+  it('I02: 草稿 ACK 成功但 operation delete 失败后，重载 recover 严格以原 key 和原 body 幂等重放', async () => {
+    // 测试意图：验证服务端执行成功且草稿 ACK 成功落盘后，若 operation store 删除失败（如持久层故障），残留的操作在重载后由 recover() 按照原 idempotencyKey 与原 commands 再次发起幂等重放，且重放成功后再次触发 store.remove 完成清理
+    const { saved, store } = createFakeOperationStore()
+    const onDraftAcks = vi.fn(async () => undefined)
+
+    // 第一次删除注入失败
+    let removeShouldFail = true
+    const originalRemove = store.remove
+    store.remove = vi.fn(async (opId: string) => {
+      if (removeShouldFail) {
+        throw new Error('IndexedDB operation delete failed')
+      }
+      await originalRemove(opId)
+    })
+
+    const initialCommands: CanvasCommandDTO[] = [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name: 'after' }]
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: vi.fn(async () => advancePatch(2)),
+      refetch: vi.fn(),
+      operationStore: store,
+      onDraftAcks,
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-000000000099',
+    })
+
+    const ack = [{ nodeId: NODE_ID, field: 'text' as const, generation: 1 }]
+    // 入队执行：服务端成功，onDraftAcks 成功，但 store.remove 失败
+    await queue.enqueue(initialCommands, { ack })
+
+    // 草稿 ACK 已被成功调用并物理落盘
+    expect(onDraftAcks).toHaveBeenCalledTimes(1)
+    expect(onDraftAcks).toHaveBeenCalledWith(ack)
+
+    // 因 store.remove 失败，残留操作依然保存在 store 中
+    expect(saved.size).toBe(1)
+    const residualOp = [...saved.values()][0]
+    expect(residualOp.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-000000000099')
+
+    // 模拟重载后：创建新的队列实例并执行 recover
+    removeShouldFail = false // 后续存储故障恢复
+    const replayedRequests: ApplyCanvasCommandsRequestDTO[] = []
+    const recoverApply = vi.fn(async (_canvasId: UUIDString, request: ApplyCanvasCommandsRequestDTO) => {
+      replayedRequests.push(request)
+      return advancePatch(3)
+    })
+
+    const reloadedQueue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(2),
+      apply: recoverApply,
+      refetch: vi.fn(),
+      operationStore: store,
+    })
+
+    const recoveryResult = await reloadedQueue.recover()
+
+    // 验证 recover 按照原 idempotencyKey 与原 commands 再次提交重放
+    expect(recoveryResult.replayed).toBe(1)
+    expect(replayedRequests).toHaveLength(1)
+    expect(replayedRequests[0].idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-000000000099')
+    expect(replayedRequests[0].commands).toEqual(initialCommands)
+
+    // 重放成功后，store.remove 再次被调用，且最终残留操作被彻底清除
+    expect(saved.size).toBe(0)
+  })
 })
 
 function noopStore() {

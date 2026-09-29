@@ -168,4 +168,38 @@ describe('Canvas 编辑会话身份', () => {
     expect(reloadMock).not.toHaveBeenCalled()
     expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe(mySessionId)
   })
+
+  it('I10: pageshow 事件中 persisted: false（普通页面展示）不触发重载或轮换，persisted: true（bfcache恢复）才处理冲突', () => {
+    // 测试意图：验证普通 pageshow（如正常导航、刷新等 persisted 为 false）绝不强制重载或清除 sessionStorage；仅当 persisted: true 且检测到活所有者冲突时，才触发安全 reload 隔离
+    resetEditingSessionForTests()
+    const mySessionId = getEditingSessionId()
+
+    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+    const otherPageOwner = {
+      [mySessionId]: {
+        pageId: 'other-live-page-id',
+        at: Date.now(),
+      },
+    }
+    window.localStorage.setItem(OWNER_STORAGE_KEY, JSON.stringify(otherPageOwner))
+
+    const reloadMock = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { ...window.location, reload: reloadMock },
+    })
+
+    // 1. 普通 pageshow (persisted: false)
+    handlePageshow({ persisted: false })
+    expect(reloadMock).not.toHaveBeenCalled()
+    expect(isSessionReloading()).toBe(false)
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe(mySessionId)
+
+    // 2. bfcache 恢复 pageshow (persisted: true)
+    handlePageshow({ persisted: true })
+    expect(reloadMock).toHaveBeenCalledTimes(1)
+    expect(isSessionReloading()).toBe(true)
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+  })
 })

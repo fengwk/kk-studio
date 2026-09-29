@@ -659,6 +659,9 @@ describe('useHarnessThreadRealtime', () => {
     // 空 eventId 与非 canonical eventId 的 partial 一律被拒绝：只保留后续合法事件。
     emitRealtime(sockets, toolPartial('bad', 'inv-tool-1', 1, ''))
     emitRealtime(sockets, toolPartial('bad', 'inv-tool-1', 1, 'not-a-uuid'))
+    // H09: 大写与混合大小写 UUID 亦被拒绝（只允许小写规范 canonical UUID）
+    emitRealtime(sockets, toolPartial('bad-upper', 'inv-tool-1', 1, '44444444-4444-4444-8444-44444444444A'))
+    emitRealtime(sockets, toolPartial('bad-mixed', 'inv-tool-1', 1, '44444444-4444-4444-8444-44444444444B'))
     emitRealtime(sockets, toolPartial('ok', 'inv-tool-1', 1, '44444444-4444-4444-8444-444444444444'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('samesamesameok'),

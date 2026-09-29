@@ -179,21 +179,7 @@ export function ProjectDetailPage({
     pendingInstructionRef.current = null
     await invalidateSnapshot()
     await queryClient.invalidateQueries({
-      queryKey: queryKeys.projects.issue(projectId, issueDetail.issue.id),
-    })
-  }
-
-  const handleStopIssue = async () => {
-    if (!issueDetail) return
-    const requestKey = createUuid()
-    await api.stopIssue(issueDetail.issue.id, {
-      expectedVersion: issueDetail.issue.version,
-      requestKey,
-      detail: '用户在 Agent 视图中终止执行',
-    })
-    await invalidateSnapshot()
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.projects.issue(projectId, issueDetail.issue.id),
+      queryKey: queryKeys.projects.issue(projectId, issueId),
     })
   }
 
@@ -206,28 +192,28 @@ export function ProjectDetailPage({
 
   const inflightIssuesRef = useRef<Set<string>>(new Set())
 
-  // 看板上的动作：通过通用 executor 统一处理防重防覆盖、连点阻断、侧车持久化与受控错误处理
+  // 看板与 Agent 视图共用的动作执行器：通过通用 executor 统一处理防重防覆盖、连点阻断、侧车持久化与受控错误处理
   const executeBoardIssueAction = async (
     issueId: string,
     expectedVersion: string,
     action: PendingIssueAction,
     runApi: (requestKey: string, expectedVersion: string) => Promise<unknown>,
     failureLabel: string,
-  ) => {
+  ): Promise<boolean> => {
     // 阻断连点：同一 issue 若正在执行中，忽略重复触发
     if (inflightIssuesRef.current.has(issueId)) {
-      return
+      return false
     }
 
     const loadResult = loadPendingAction(issueId)
     if (loadResult.type === 'STORAGE_ERROR') {
       setActionError(`无法访问本地存储，已安全拦截操作: ${loadResult.error}`)
-      return
+      return false
     }
     if (loadResult.type === 'CORRUPT') {
       setActionError('该 Issue 存在未确认结果的损坏写操作记录，为防覆盖已安全拦截；请在详情中确认或放弃')
       handleSelectIssue(issueId)
-      return
+      return false
     }
 
     if (loadResult.type === 'VALID') {
@@ -244,20 +230,23 @@ export function ProjectDetailPage({
           await runApi(existing.requestKey, existing.expectedVersion)
           clearPendingAction(issueId, existing.requestKey)
           await invalidateSnapshot()
-          return
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.projects.issue(projectId, issueId),
+          })
+          return true
         } catch (err) {
           if (!isNetworkUnknownError(err)) {
             clearPendingAction(issueId, existing.requestKey)
           }
           setActionError(err instanceof Error ? err.message : `${failureLabel}重试失败`)
-          return
+          return false
         } finally {
           inflightIssuesRef.current.delete(issueId)
         }
       } else {
         setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
         handleSelectIssue(issueId)
-        return
+        return false
       }
     }
 
@@ -266,7 +255,7 @@ export function ProjectDetailPage({
       storePendingAction(issueId, action)
     } catch (err) {
       setActionError(`操作无法持久化侧车，已安全拦截: ${err instanceof Error ? err.message : String(err)}`)
-      return
+      return false
     }
 
     inflightIssuesRef.current.add(issueId)
@@ -275,13 +264,52 @@ export function ProjectDetailPage({
       await runApi(action.requestKey, expectedVersion)
       clearPendingAction(issueId, action.requestKey)
       await invalidateSnapshot()
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.issue(projectId, issueId),
+      })
+      return true
     } catch (err) {
       if (!isNetworkUnknownError(err)) {
         clearPendingAction(issueId, action.requestKey)
       }
       setActionError(err instanceof Error ? err.message : `${failureLabel}失败`)
+      return false
     } finally {
       inflightIssuesRef.current.delete(issueId)
+    }
+  }
+
+  const handleStopIssue = async () => {
+    if (!issueDetail) return
+    const targetIssueId = issueDetail.issue.id
+    if (inflightIssuesRef.current.has(targetIssueId)) {
+      return
+    }
+    const targetVersion = issueDetail.issue.version
+    const requestKey = createUuid()
+    const action: PendingIssueAction = {
+      issueId: targetIssueId,
+      kind: 'STOP',
+      requestKey,
+      expectedVersion: targetVersion,
+      payload: { detail: '用户在 Agent 视图中终止执行' },
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    }
+    const ok = await executeBoardIssueAction(
+      targetIssueId,
+      targetVersion,
+      action,
+      (reqKey, expVer) =>
+        api.stopIssue(targetIssueId, {
+          expectedVersion: expVer,
+          requestKey: reqKey,
+          detail: '用户在 Agent 视图中终止执行',
+        }),
+      '终止 Issue',
+    )
+    if (!ok) {
+      throw new Error('终止 Issue 失败')
     }
   }
 
