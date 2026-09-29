@@ -13,7 +13,6 @@ const axiosMock = vi.hoisted(() => {
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
-    patch: vi.fn(),
     delete: vi.fn(),
     interceptors: {
       request: {
@@ -125,19 +124,16 @@ describe('apiClient', () => {
     axiosMock.client.get.mockResolvedValueOnce({ ok: true })
     axiosMock.client.post.mockResolvedValueOnce({ created: true })
     axiosMock.client.put.mockResolvedValueOnce({ updated: true })
-    axiosMock.client.patch.mockResolvedValueOnce({ patched: true })
     axiosMock.client.delete.mockResolvedValueOnce(undefined)
 
     await expect(apiClient.get('/ai/catalog/agents', { params: { pageNumber: 1 } })).resolves.toEqual({ ok: true })
     await expect(apiClient.post('/ai/chat', { agentName: 'assistant' })).resolves.toEqual({ created: true })
     await expect(apiClient.put('/ai/catalog/agents/default-assistant', { name: 'Default' })).resolves.toEqual({ updated: true })
-    await expect(apiClient.patch('/projects/project-1', { name: 'Project' })).resolves.toEqual({ patched: true })
     await expect(apiClient.delete('/ai/catalog/agents/default-assistant')).resolves.toBeUndefined()
 
     expect(axiosMock.client.get).toHaveBeenCalledWith('/ai/catalog/agents', { params: { pageNumber: 1 } })
     expect(axiosMock.client.post).toHaveBeenCalledWith('/ai/chat', { agentName: 'assistant' })
     expect(axiosMock.client.put).toHaveBeenCalledWith('/ai/catalog/agents/default-assistant', { name: 'Default' })
-    expect(axiosMock.client.patch).toHaveBeenCalledWith('/projects/project-1', { name: 'Project' })
     expect(axiosMock.client.delete).toHaveBeenCalledWith('/ai/catalog/agents/default-assistant')
   })
 })

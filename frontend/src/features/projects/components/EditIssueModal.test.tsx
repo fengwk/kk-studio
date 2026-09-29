@@ -59,7 +59,7 @@ describe('EditIssueModal', () => {
     blockIssue: vi.fn(),
     recoverIssue: vi.fn(),
     reopenIssue: vi.fn(),
-    resolveUnknownIssue: vi.fn(),
+    resolveUnknown: vi.fn(),
     pauseIssue: vi.fn(),
     stopIssue: vi.fn(),
     resetStageBudget: vi.fn(),

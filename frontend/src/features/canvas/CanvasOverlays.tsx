@@ -5,13 +5,24 @@ export function CanvasOverlays() {
     state,
     dismissDraft,
     retryDraft,
+    retryRecovery,
+    dismissConflictMessage,
     saveDraftAsNewNode,
-    setToast,
   } = useCanvasRuntime()
   const uploads = Object.entries(state.uploadProgress)
 
   const conflictedEntries = Object.entries(state.drafts).filter(
     ([, draft]) => Boolean(draft.conflict),
+  )
+
+  const isRecoverableConflict = Boolean(
+    state.conflictMessage && (
+      state.conflictMessage.includes('未确认操作')
+      || state.conflictMessage.includes('恢复')
+      || state.conflictMessage.includes('阻塞')
+      || state.conflictMessage.includes('受阻')
+      || state.conflictMessage.includes('重试')
+    ),
   )
 
   return (
@@ -73,10 +84,19 @@ export function CanvasOverlays() {
         <div className="canvas-conflict-banner" role="alert">
           <span className="canvas-conflict-message">{state.conflictMessage}</span>
           <div className="canvas-conflict-actions">
+            {isRecoverableConflict ? (
+              <button
+                type="button"
+                className="canvas-conflict-action-retry"
+                onClick={() => void retryRecovery().catch(() => undefined)}
+              >
+                重试
+              </button>
+            ) : null}
             <button
               type="button"
               className="canvas-conflict-action-dismiss"
-              onClick={() => setToast('')}
+              onClick={dismissConflictMessage}
             >
               关闭
             </button>
