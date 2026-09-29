@@ -169,7 +169,7 @@ class ModelProcessorTest {
             .<Optional<ClaimedWork>>transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.THREAD, NOW, "thread-token", NOW.plusSeconds(60)))
+                        WorkTargetType.THREAD, NOW, "thread-token", Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -2389,7 +2389,8 @@ class ModelProcessorTest {
             .store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.MODEL, NOW, "near-expiry", NOW.plusSeconds(1)))
+                    tx.claimNextWork(
+                        WorkTargetType.MODEL, NOW, "near-expiry", Duration.ofSeconds(1)))
             .orElseThrow();
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
 
@@ -2847,7 +2848,8 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.MODEL, NOW, "partial", NOW.plusSeconds(15)))
+                tx ->
+                    tx.claimNextWork(WorkTargetType.MODEL, NOW, "partial", Duration.ofSeconds(15)))
             .orElseThrow();
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
 
@@ -2867,7 +2869,7 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.MODEL, NOW, "exact", NOW.plusSeconds(30)))
+                tx -> tx.claimNextWork(WorkTargetType.MODEL, NOW, "exact", Duration.ofSeconds(30)))
             .orElseThrow();
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
 
@@ -3052,7 +3054,7 @@ class ModelProcessorTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.MODEL, now, "token-" + invocationId, now.plusMillis(400)))
+                        WorkTargetType.MODEL, now, "token-" + invocationId, Duration.ofMillis(400)))
             .orElseThrow();
 
     assertEquals(ProcessResult.STARTED, processor.process(claimed));
@@ -3599,7 +3601,8 @@ class ModelProcessorTest {
   private static ClaimedWork claim(
       HarnessStore store, UUID invocationId, Instant now, String token) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, now, token, now.plusSeconds(60)))
+        .transaction(
+            tx -> tx.claimNextWork(WorkTargetType.MODEL, now, token, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 

@@ -127,6 +127,16 @@ class WorkHeartbeatTest {
     HarnessStore blockingStore =
         new HarnessStore() {
           @Override
+          public void afterCommit(Runnable action) {
+            fixture.store.afterCommit(action);
+          }
+
+          @Override
+          public void assertNoAmbientTransaction() {
+            fixture.store.assertNoAmbientTransaction();
+          }
+
+          @Override
           public <T> T transaction(Function<Transaction, T> callback) {
             return fixture.store.transaction(
                 tx -> {
@@ -590,7 +600,7 @@ class WorkHeartbeatTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, NOW, "token-" + threadId, NOW.plusSeconds(15)))
+                          WorkTargetType.THREAD, NOW, "token-" + threadId, Duration.ofSeconds(15)))
               .orElseThrow();
       this.heartbeat =
           new WorkHeartbeat(

@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -135,6 +136,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
   }
 
   private int transactionCount;
+  private final ThreadLocal<ArrayList<Runnable>> afterCommitActions = new ThreadLocal<>();
 
   /** 测试钩子：在每个事务开始前执行，用于确定性地观察事务与并发回调的因果关系。 */
   public volatile Runnable beforeTransaction;
@@ -151,6 +153,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
   }
 
+  /** 测试钩子：直接把已存在 Work 行的 lease deadline 改写为给定值（通常已过期），用于验证 stale ownership 路径。 */
+  public void forceLeaseUntil(WorkTarget target, Instant leaseUntil) {
+    Objects.requireNonNull(target, "target");
+    requireMillisecondPrecision(leaseUntil);
+    synchronized (monitor) {
+      Work work = committed.works.get(target);
+      if (work == null || work.leaseToken() == null) {
+        throw new IllegalStateException("work has no lease to rewrite: " + target);
+      }
+      committed.works.put(
+          target,
+          new Work(
+              work.target(),
+              work.availableAt(),
+              work.wakeVersion(),
+              work.leaseToken(),
+              leaseUntil,
+              work.requiredEnvironmentId()));
+    }
+  }
+
   @Override
   public <T> T transaction(Function<Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
@@ -158,8 +181,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
     if (hook != null) {
       hook.run();
     }
+    ArrayList<Runnable> pending = new ArrayList<>();
+    afterCommitActions.set(pending);
+    T result;
     synchronized (monitor) {
       if (inTransaction) {
+        afterCommitActions.remove();
         throw new IllegalStateException("nested transactions are not supported");
       }
       inTransaction = true;
@@ -167,19 +194,38 @@ public final class InMemoryHarnessStore implements HarnessStore {
       try {
         InMemoryTransaction tx = new InMemoryTransaction(State.copyOf(committed));
         try {
-          T result = callback.apply(tx);
+          result = callback.apply(tx);
           tx.close();
           committed = tx.state;
-          return result;
         } catch (RuntimeException | Error error) {
           tx.close();
+          afterCommitActions.remove();
           throw error;
         }
       } finally {
         inTransaction = false;
       }
     }
+    afterCommitActions.remove();
+    for (Runnable action : pending) {
+      action.run();
+    }
+    return result;
   }
+
+  @Override
+  public void afterCommit(Runnable action) {
+    Objects.requireNonNull(action, "action");
+    ArrayList<Runnable> pending = afterCommitActions.get();
+    if (pending == null) {
+      throw new IllegalStateException("afterCommit must be registered inside a store transaction");
+    }
+    pending.add(action);
+  }
+
+  /** 内存实现没有环境事务；手动压缩的事务外入口在这里始终放行。 */
+  @Override
+  public void assertNoAmbientTransaction() {}
 
   /** 已提交的 working state；每个 transaction 都基于 shallow copy 工作。 */
   private static final class State {
@@ -1922,8 +1968,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, Instant now, String leaseToken, Instant leaseUntil) {
-      return claimNextWork(targetType, now, leaseToken, leaseUntil, null);
+        WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration) {
+      return claimNextWork(targetType, now, leaseToken, leaseDuration, null);
     }
 
     @Override
@@ -1931,15 +1977,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
         WorkTargetType targetType,
         Instant now,
         String leaseToken,
-        Instant leaseUntil,
+        Duration leaseDuration,
         UUID nodeInstanceId) {
       checkOpen();
       Objects.requireNonNull(targetType, "targetType");
       Objects.requireNonNull(now, "now");
       Objects.requireNonNull(leaseToken, "leaseToken");
-      Objects.requireNonNull(leaseUntil, "leaseUntil");
+      HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
       requireMillisecondPrecision(now);
-      requireMillisecondPrecision(leaseUntil);
+      Instant leaseUntil = now.plus(leaseDuration);
       requireCanClaimWork();
       List<Work> due =
           state.works.values().stream()
@@ -1981,16 +2027,21 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void renewWork(ClaimedWork claim, Instant now, Instant newLeaseUntil) {
+    public boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration) {
       checkOpen();
       Objects.requireNonNull(claim, "claim");
       Objects.requireNonNull(now, "now");
-      Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
+      HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
       requireMillisecondPrecision(now);
-      requireMillisecondPrecision(newLeaseUntil);
       Work work = lockedWork(claim.target());
-      Work renewed = work.renew(claim.leaseToken(), now, newLeaseUntil);
+      Instant target = now.plus(leaseDuration);
+      if (!target.isAfter(work.leaseUntil())) {
+        // 现有 lease 已覆盖目标 margin：保持不变，避免把更长的 lease 缩短。
+        return false;
+      }
+      Work renewed = work.renew(claim.leaseToken(), now, target);
       state.works.put(renewed.target(), renewed);
+      return true;
     }
 
     @Override

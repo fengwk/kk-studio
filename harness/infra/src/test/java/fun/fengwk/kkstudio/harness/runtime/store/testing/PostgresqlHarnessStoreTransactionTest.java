@@ -20,6 +20,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -27,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 class PostgresqlHarnessStoreTransactionTest {
@@ -258,9 +261,7 @@ class PostgresqlHarnessStoreTransactionTest {
 
   @Test
   void storeJoinsAnOuterSpringTransactionAndRollsBackWithIt() {
-    TransactionTemplate outer =
-        new TransactionTemplate(
-            new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()));
+    TransactionTemplate outer = outerTemplate();
 
     assertThrows(
         IllegalStateException.class,
@@ -282,6 +283,97 @@ class PostgresqlHarnessStoreTransactionTest {
 
     assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
     assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(2L)).isPresent()));
+  }
+
+  /** 测试意图：无外层事务时，afterCommit 在本 store transaction 提交成功后、返回前执行恰一次，且提交状态在动作内已可见。 */
+  @Test
+  void afterCommitRunsAfterTheCommitWhenThereIsNoOuterTransaction() {
+    List<String> events = new ArrayList<>();
+
+    store.transaction(
+        tx -> {
+          tx.insertSession(session(id(1L)));
+          store.afterCommit(
+              () -> {
+                // 动作执行时本事务已提交：新事务必须能看到刚插入的 Session。
+                assertTrue(
+                    store.<Boolean>transaction(inner -> inner.findSession(id(1L)).isPresent()));
+                events.add("after-commit");
+              });
+          events.add("callback");
+          return null;
+        });
+
+    assertEquals(List.of("callback", "after-commit"), events);
+  }
+
+  /**
+   * 测试意图：加入外层 Spring 事务时，afterCommit 只在物理 commit 时执行——外层 lambda 返回前不执行（提交前绝无副作用）， execute
+   * 返回后每个登记动作恰执行一次。
+   */
+  @Test
+  void afterCommitWaitsForTheOuterSpringTransactionCommit() {
+    TransactionTemplate outer = outerTemplate();
+    AtomicInteger executions = new AtomicInteger();
+
+    outer.execute(
+        status -> {
+          store.transaction(
+              tx -> {
+                tx.insertSession(session(id(1L)));
+                store.afterCommit(executions::incrementAndGet);
+                store.afterCommit(executions::incrementAndGet);
+                return null;
+              });
+          assertEquals(0, executions.get(), "outer transaction has not committed yet");
+          return null;
+        });
+
+    assertEquals(2, executions.get(), "each registered action must run exactly once after commit");
+  }
+
+  /** 测试意图：外层 Spring 事务 rollback 时 afterCommit 一次都不执行，durable 写入也保持回滚（不再出现“DB 未提交、进程内已取消”的分裂）。 */
+  @Test
+  void afterCommitDoesNotRunWhenTheOuterSpringTransactionRollsBack() {
+    TransactionTemplate outer = outerTemplate();
+    AtomicInteger executions = new AtomicInteger();
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            outer.execute(
+                status -> {
+                  store.transaction(
+                      tx -> {
+                        tx.insertSession(session(id(1L)));
+                        store.afterCommit(executions::incrementAndGet);
+                        return null;
+                      });
+                  throw new IllegalStateException("rollback outer");
+                }));
+
+    assertEquals(0, executions.get(), "rolled back outer transaction must not run afterCommit");
+    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
+  }
+
+  /** 手动压缩等事务外入口的守卫：无环境事务时放行，真实 Spring 事务内必须在工作开始前拒绝。 */
+  @Test
+  void assertNoAmbientTransactionRejectsRealSpringTransactionsOnly() {
+    store.assertNoAmbientTransaction();
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            outerTemplate()
+                .execute(
+                    status -> {
+                      store.assertNoAmbientTransaction();
+                      return null;
+                    }));
+  }
+
+  private static TransactionTemplate outerTemplate() {
+    return new TransactionTemplate(
+        new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()));
   }
 
   @Test

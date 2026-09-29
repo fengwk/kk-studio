@@ -752,7 +752,7 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
-    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed, config.leaseConfig(), now);
+    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     Instant planNow = HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
     return planBuilder.build(thread.id(), path, reason, queued, tx::nextId, planNow, preparation);
   }

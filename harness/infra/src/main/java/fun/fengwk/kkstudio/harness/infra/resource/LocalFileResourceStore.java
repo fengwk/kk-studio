@@ -31,6 +31,10 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>非法输入（null、超限 content、非 file 引用、根目录之外/嵌套路径等）抛 {@link IllegalArgumentException}；存储/IO
  * 失败与损坏（size/摘要不匹配、符号链接、非普通文件、文件系统不支持硬链接）抛 {@link IllegalStateException}。
+ *
+ * <p><b>耐久性契约</b>：临时文件在发布前 {@code force(true)}，因此对象数据在 put 返回时已同步；但硬链接产生的目录项不额外 fsync
+ * 根目录。因此本实现保证的是<b>进程级原子可见性</b>（返回引用前对最终目标做精确 size + sha 校验，绝不返回部分对象）， <b>不承诺掉电/崩溃后 target
+ * 仍存在</b>；要求掉电耐久的部署必须自行保证文件系统与目录项的持久化策略。
  */
 public final class LocalFileResourceStore implements ResourceStore {
 
@@ -199,23 +203,66 @@ public final class LocalFileResourceStore implements ResourceStore {
    * inode。
    */
   private static Path writeTempFile(Path root, byte[] payload) throws IOException {
-    ByteBuffer buffer = ByteBuffer.wrap(payload);
+    return writeTempFile(root, payload, LocalFileResourceStore::writeAndForce);
+  }
+
+  /** {@link #writeTempFile(Path, byte[])} 的可注入形态：写入步骤由调用方提供，使“文件已创建、写入或 force 失败”的清理路径可被确定性测试。 */
+  @FunctionalInterface
+  interface TempWriter {
+
+    void write(FileChannel channel, ByteBuffer payload) throws IOException;
+  }
+
+  /**
+   * 以 NOFOLLOW/CREATE_NEW 创建临时文件并交给 {@code writer} 写入：创建成功即由本方法负责清理。
+   *
+   * <p>一旦文件创建成功，本方法在转移所有权（正常返回）之前对任何异常都 {@link Files#deleteIfExists}，清理自身的失败只作为 suppressed
+   * 附加而不掩盖原始故障；名称碰撞时文件不是本方法创建的，绝不删除。
+   */
+  static Path writeTempFile(Path root, byte[] payload, TempWriter writer) throws IOException {
     for (int attempt = 0; attempt < 3; attempt++) {
       Path temp =
           root.resolve(
               TEMP_PREFIX + Long.toHexString(ThreadLocalRandom.current().nextLong()) + TEMP_SUFFIX);
+      boolean created = false;
       try (FileChannel channel =
           FileChannel.open(temp, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW)) {
-        while (buffer.hasRemaining()) {
-          channel.write(buffer);
-        }
-        channel.force(true);
+        created = true;
+        writer.write(channel, ByteBuffer.wrap(payload));
         return temp;
       } catch (FileAlreadyExistsException collision) {
         // 名称碰撞（极低概率）：换名重试。
+      } catch (IOException failure) {
+        if (created) {
+          deleteFailedTemp(temp, failure);
+        }
+        throw failure;
       }
     }
     throw new IOException("cannot allocate a unique temp file in " + root);
+  }
+
+  /**
+   * 把 payload 写入临时文件并强制落盘：写入或 force 失败向上抛出，由 {@link #writeTempFile(Path, byte[], TempWriter)} 负责清理。
+   */
+  private static void writeAndForce(FileChannel channel, ByteBuffer payload) throws IOException {
+    while (payload.hasRemaining()) {
+      channel.write(payload);
+    }
+    channel.force(true);
+  }
+
+  /**
+   * 失败路径清理已创建的临时文件。
+   *
+   * <p>清理失败（例如条目已被替换为非空目录）作为 suppressed 附加到原始故障上，绝不掩盖真正的写入失败。
+   */
+  static void deleteFailedTemp(Path temp, IOException failure) {
+    try {
+      Files.deleteIfExists(temp);
+    } catch (IOException cleanupFailure) {
+      failure.addSuppressed(cleanupFailure);
+    }
   }
 
   /** 以 NOFOLLOW_LINKS 打开并精确读取 expectedSize 字节：文件提前结束视为 I/O 失败，多出字节同样视为 I/O 失败。 */

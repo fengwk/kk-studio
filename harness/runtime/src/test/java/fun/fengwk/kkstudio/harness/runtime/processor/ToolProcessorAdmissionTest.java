@@ -466,7 +466,7 @@ class ToolProcessorAdmissionTest {
             fixture.toolInvocationId,
             ToolProcessorTestSupport.NOW,
             "near-expiry",
-            ToolProcessorTestSupport.NOW.plusSeconds(1));
+            Duration.ofSeconds(1));
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));

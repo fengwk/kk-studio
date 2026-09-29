@@ -37,6 +37,7 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -82,10 +83,13 @@ class PostgresqlWorkNotificationTest {
 
       ClaimedWork first =
           store
-              .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "lease-1", T5))
+              .transaction(
+                  tx ->
+                      tx.claimNextWork(
+                          WorkTargetType.THREAD, T1, "lease-1", Duration.between(T1, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.renewWork(first, T1, T5.plusSeconds(1)));
+      inTransaction(store, tx -> tx.renewWork(first, T1, Duration.ofSeconds(5)));
       assertNoNotification(notifications);
 
       requestWork(baseline.threadId(), target, T1);
@@ -95,7 +99,10 @@ class PostgresqlWorkNotificationTest {
 
       ClaimedWork second =
           store
-              .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T2, "lease-2", T5))
+              .transaction(
+                  tx ->
+                      tx.claimNextWork(
+                          WorkTargetType.THREAD, T2, "lease-2", Duration.between(T2, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
       inTransaction(store, tx -> tx.rescheduleWork(second, T2, T3));
@@ -103,7 +110,10 @@ class PostgresqlWorkNotificationTest {
 
       ClaimedWork third =
           store
-              .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T3, "lease-3", T5))
+              .transaction(
+                  tx ->
+                      tx.claimNextWork(
+                          WorkTargetType.THREAD, T3, "lease-3", Duration.ofSeconds(60)))
               .orElseThrow();
       assertNoNotification(notifications);
       assertTrue(store.transaction(tx -> tx.completeWork(third, T4)).isEmpty());
@@ -176,7 +186,9 @@ class PostgresqlWorkNotificationTest {
         });
     ClaimedWork claim =
         durable
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", T5))
+            .transaction(
+                tx ->
+                    tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
     Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
@@ -212,7 +224,9 @@ class PostgresqlWorkNotificationTest {
         });
     ClaimedWork claim =
         durable
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", T5))
+            .transaction(
+                tx ->
+                    tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
     inTransaction(
         durable,

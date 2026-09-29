@@ -98,9 +98,16 @@ class HarnessStoreContractTest {
     List<String> methodNames =
         Arrays.stream(HarnessStore.class.getDeclaredMethods())
             .map(Method::getName)
+            .sorted()
             .collect(Collectors.toList());
-    assertEquals(List.of("transaction"), methodNames);
-    Method transaction = HarnessStore.class.getDeclaredMethods()[0];
+    // 根边界只有 transaction 根方法，外加两个与物理事务边界直接相关的原语：afterCommit（提交后副作用）与
+    // assertNoAmbientTransaction（必须离开事务的入口守卫）。
+    assertEquals(List.of("afterCommit", "assertNoAmbientTransaction", "transaction"), methodNames);
+    Method transaction =
+        Arrays.stream(HarnessStore.class.getDeclaredMethods())
+            .filter(method -> method.getName().equals("transaction"))
+            .findFirst()
+            .orElseThrow();
     assertEquals(1, transaction.getParameterCount());
     assertEquals(Function.class, transaction.getParameterTypes()[0]);
   }

@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -495,14 +496,22 @@ class HarnessRuntimeToolInputTest {
 
     // MODEL 与 TOOL 的工作认领均为空
     Optional<ClaimedWork> modelWork =
-        store.transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, T5, "probe-model", T6));
+        store.transaction(
+            tx ->
+                tx.claimNextWork(
+                    WorkTargetType.MODEL, T5, "probe-model", Duration.between(T5, T6)));
     assertTrue(modelWork.isEmpty());
     Optional<ClaimedWork> toolWork =
-        store.transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, T5, "probe-tool", T6));
+        store.transaction(
+            tx ->
+                tx.claimNextWork(WorkTargetType.TOOL, T5, "probe-tool", Duration.between(T5, T6)));
     assertTrue(toolWork.isEmpty());
     // THREAD 的工作认领存在且指向该 thread
     Optional<ClaimedWork> threadWork =
-        store.transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T5, "probe-thread", T6));
+        store.transaction(
+            tx ->
+                tx.claimNextWork(
+                    WorkTargetType.THREAD, T5, "probe-thread", Duration.between(T5, T6)));
     assertTrue(threadWork.isPresent());
     assertEquals(
         new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), threadWork.get().target());
