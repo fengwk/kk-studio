@@ -242,11 +242,13 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 | `ProcessScopeCrossPlatformTest.naturalExitConvergesLiveChildren` | 根进程自然退出时：子进程自己写下原生 pid（夹具存活 600 秒）后必须被整组收敛，与平台 shell 无关 |
 | `ProcessScopeCrossPlatformTest.terminateConvergesNestedProcesses` | 终止必须覆盖孙进程：三层真实 Java 进程的原生 pid 在收敛后都不再存活 |
 | `ProcessScopeCrossPlatformTest.unpermittedStartNeverRunsTheFixture` | 许可之前取消：夹具连自己的 pid 文件都不会写出，即从未执行过任何指令 |
+| `ProcessScopeCrossPlatformTest.stdinEofLetsTheFixtureExitNaturally` | stdin 关掉写端后命令必须读到 EOF 并自然退出：夹具读 `System.in` 到 EOF 再以退出码 42 结束，不经过任何平台 shell |
 | `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore` | 启动前已取消的调用不启动 helper、不创建中转/durable 文件，也不留下命令副作用 |
 | `BashCapabilityTest.preTimedOutCallDoesNotStartShellOrTouchStore` | 启动前已超时的调用共享同一条 fail-closed 检查，且终态仍是超时而非取消 |
 | `BashCapabilityTest.closesStdinSoCommandsWaitingForEofFinishNaturally` | 命令以参数传入、不读 stdin：等待 EOF 的命令自然退出，而不是阻塞到超时 |
 | `BashCapabilityTest.keepsPayloadBeyondPipeBufferComplete` | 超过管道缓冲与内联阈值的大输出完整捕获并发布全文，字节与行计数忠实 |
 | `BashCapabilityTest.mergedStreamsBeyondPipeBufferCompleteWithoutDeadlock` | 合并流两路同时写满管道缓冲时仍必须完成，不能互相等待 |
+| `BashCapabilityTest.commandCanTrapTerminationBeforeTheForceKill` | 命令必须能自行处理温和信号：脚本的 `SIGTERM` trap 必须真的执行，优雅收尾不能静默退化成强杀 |
 | `BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 超时收尾收敛整个执行范围（含后台后代），收尾后不得继续写入 |
 | `BashCapabilityTest.cancellationTerminatesWholeProcessTree` | 取消收尾同样收敛整个执行范围，且不把 kill 退出码当成命令事实 |
 | `BashCapabilityTest.rejectedTimeoutSchedulingConvergesBeforeTerminalCallback` | 超时调度被拒（运行时已停机）时，整个执行范围（主进程与后台子进程）在终态通知时已经不存活 |
@@ -274,6 +276,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）负责这件事；Linux 与 macOS 上该矩阵已通过。LSP 客户端所用的
   `ProcessTree` 仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows
   上的验证同样只能来自该矩阵。
+- **命令的 stdin 与信号处置是范围的一部分。** 命令的 stdin 是一条只由 keeper 持有写端的空管道（keeper 启动后立刻关闭写端），
+  因此「等待 EOF 的命令自然退出」不依赖调用方何时关闭写端，也不依赖 Windows 的句柄继承是否干净；POSIX 上 keeper 只在 fork 的瞬间把
+  `SIGTERM` 处置恢复为默认，命令因此可以注册自己的 `trap`，而 keeper 仍忽略 `SIGTERM` 活到强杀阶段。
 - **Windows 上必须显式指定 Git Bash。** 命令解析遵循 `CreateProcess` 的搜索顺序，系统目录永远先于 `PATH`，因此系统里存在
   WSL 时裸名 `bash` 会命中 `System32\bash.exe`（打印「no installed distributions」并以退出码 1 结束），命令一行都不会执行。
   Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；测试侧显式挑选 Git Bash，找不到时以「缺少环境前置条件」跳过，
@@ -281,9 +286,10 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 - **命令不存在时的失败形态与平台有关。** POSIX 上命令进程在范围建立之后才 `exec`，失败发生在已建立的范围内；Windows 上首个
   进程必须先创建并归属 Job，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭、都带上命令名，
   调用方（`BashCapability`）对两者的终态都按失败处理。
-- **Windows 侧首个进程在放行之前一直挂起。** 命令进程先以 suspended 状态被归属进 Job，父进程拿到 Job 句柄之后才恢复它；因此
-  取消（即使在启动阶段）只需要终止整组，不会留下任何执行过命令逻辑的进程。helper 在许可之前失败时自己结束这个从未运行过的
-  挂起进程，父进程也持有同一个 Job 的句柄作为第二重保证。
+- **Windows 侧首个进程在放行之前一直挂起，且归属与创建是同一件事。** 命令进程由 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 在创建时就
+  直接进入 Job（不再有「创建后归属」的间隙，helper 在归属之前被打死也不会留下无主挂起进程），并保持 suspended 直到父进程持有
+  同一个 Job 的句柄；因此取消（即使在启动阶段）只需要终止整组，不会留下任何执行过命令逻辑的进程。helper 在许可之前失败时自己结束
+  这个从未运行过的挂起进程，父进程也持有同一个 Job 的句柄作为第二重保证。
 - **范围不是恶意命令沙箱。** 命令主动 `setsid`/`set -m` 重新分组、或把进程交给其它 session 时不受这条边界约束；本能力
   不承诺阻止自我再分组，也不对这类逃逸做伪装。
 - **helper 的覆盖数据默认不进主报告，但可以测量。** helper 在独立 JVM 中执行，父进程的 JaCoCo 报告天然看不到它；需要 helper

@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -120,7 +121,25 @@ public final class ProcessScopeHelper {
       awaitPermit();
       // 命令的 stderr 与 stdout 合并进捕获管道；helper 的诊断已经指向诊断文件，不会被继承。
       PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
-      Process child = new ProcessBuilder(command).directory(workdir.toFile()).inheritIO().start();
+      Process child;
+      // 信号处置随 fork 继承：helper 忽略 SIGTERM 是为了不被父进程的整组温和信号打死，但命令不能带着这个忽略状态开始——
+      // POSIX 规定非交互 shell 无法注册「进入时已被忽略」的信号，脚本里的 trap 会静默失效、只剩强杀。因此只在 fork 的瞬间
+      // 恢复默认处置，命令一启动就重新忽略；这个窗口里若真的收到整组温和信号，父进程自己的内核检查仍是唯一结论来源。
+      PosixProcessGroup.restoreDefaultTerminationSignal();
+      try {
+        child =
+            new ProcessBuilder(command)
+                .directory(workdir.toFile())
+                .redirectInput(ProcessBuilder.Redirect.PIPE)
+                .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start();
+      } finally {
+        PosixProcessGroup.ignoreTerminationSignal();
+      }
+      // 命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于这里，
+      // 而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。
+      closeQuietly(child.getOutputStream());
       int exitCode = child.waitFor();
       ProcessScopeState.publish(stateDir, ProcessScopeState.EXIT_FILE, Integer.toString(exitCode));
       // 命令的退出码已经回收，此后 waitpid(-1) 只会回收被收养的孤儿，不会偷走命令的状态。
@@ -230,6 +249,14 @@ public final class ProcessScopeHelper {
     private static String describe(Throwable error) {
       String message = error.getMessage();
       return message == null || message.isBlank() ? error.toString() : message;
+    }
+
+    private static void closeQuietly(OutputStream stream) {
+      try {
+        stream.close();
+      } catch (IOException ignored) {
+        // 关闭失败只影响命令能否读到 EOF：命令自身的去向仍由退出码与收敛结论决定。
+      }
     }
 
     private static void sleepQuietly() {

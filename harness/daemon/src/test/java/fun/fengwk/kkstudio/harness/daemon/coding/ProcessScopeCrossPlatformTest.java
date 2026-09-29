@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 执行范围的跨平台真实进程验收：用 {@link ProcessScopeFixtureMain} 造出真实的父子/孙进程层级，并用原生 PID 断言收敛。
@@ -87,6 +90,29 @@ class ProcessScopeCrossPlatformTest {
     }
   }
 
+  /**
+   * 命令从不写 stdin 的调用方那里拿到的是确定性的 EOF：夹具读 {@code System.in} 直到 EOF，再用给定退出码自然退出。
+   *
+   * <p>这条事实不经过任何平台的 shell，因此「stdin 管道是否还有别的写端持有者」会被真正检验：只要还有任何一个写端活着， 命令就永远读不到 EOF，只能等超时。
+   */
+  @Test
+  void stdinEofLetsTheFixtureExitNaturally() throws Exception {
+    Path rootPid = workdir.resolve("root.pid");
+    ProcessScope scope = ProcessScope.start(workdir, fixture("eof", rootPid, "42"));
+    try {
+      awaitPid(rootPid, PID_BUDGET);
+      // 调用方从不向命令写入数据，只关闭自己那一侧的写端。
+      scope.process().getOutputStream().close();
+      assertTrue(scope.process().waitFor(30, TimeUnit.SECONDS), "命令必须在读到 EOF 后自然退出，而不是阻塞到超时");
+      Integer exitCode = scope.naturalExitCode();
+      assertNotNull(exitCode, "helper 必须发布命令的自然退出码");
+      assertEquals(42, exitCode.intValue(), "自然退出码必须来自命令自身");
+      assertTrue(scope.terminate(), "收敛必须由内核或 Job 确认");
+    } finally {
+      scope.close();
+    }
+  }
+
   /** 许可之前的取消：夹具从未运行，因此连自己的 pid 文件都不会出现（Windows 上它可能已被创建但绝不会被执行）。 */
   @Test
   void unpermittedStartNeverRunsTheFixture() throws Exception {
@@ -106,7 +132,7 @@ class ProcessScopeCrossPlatformTest {
    * <p>刻意不用 {@code java.class.path}：surefire 可能用清单 JAR 启动测试 JVM，那时这个属性并不等于测试类路径；夹具只依赖 JDK，
    * 因此它需要的类路径就只有它自己所在的位置，嵌套子进程再原样传递下去。
    */
-  private static List<String> fixture(String mode, Path... files) {
+  private static List<String> fixture(String mode, Object... arguments) {
     List<String> command =
         new ArrayList<>(
             List.of(
@@ -115,8 +141,8 @@ class ProcessScopeCrossPlatformTest {
                 fixtureClasspath(),
                 ProcessScopeFixtureMain.class.getName(),
                 mode));
-    for (Path file : files) {
-      command.add(file.toString());
+    for (Object argument : arguments) {
+      command.add(String.valueOf(argument));
     }
     return command;
   }

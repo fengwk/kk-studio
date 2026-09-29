@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +19,7 @@ import java.util.Locale;
  *
  * <pre>
  *   hold      &lt;pidFile&gt;                             写完 pid 后长时间存活（不会自己退出）
+ *   eof       &lt;pidFile&gt; [exitCode]                  读 stdin 直到 EOF，再用给定退出码自然退出
  *   fork-exit &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后自己退出，留下活着的子进程
  *   fork-hold &lt;pidFile&gt; &lt;childPidFile&gt;              派生子进程，等它写出 pid 后继续存活
  *   nest-hold &lt;pidFile&gt; &lt;childPidFile&gt; &lt;grandPidFile&gt; 派生子进程（fork-hold），等孙进程写出 pid 后继续存活
@@ -54,6 +56,10 @@ public final class ProcessScopeFixtureMain {
     record(Path.of(args[1]));
     switch (mode) {
       case "hold" -> sleepForever();
+      case "eof" -> {
+        readUntilEof();
+        System.exit(exitCode(args));
+      }
       case "fork-exit" -> {
         spawn("hold", args[2]);
         awaitChild(args[2]);
@@ -108,6 +114,22 @@ public final class ProcessScopeFixtureMain {
 
   private static void sleepForever() throws InterruptedException {
     Thread.sleep(HOLD_MILLIS);
+  }
+
+  /**
+   * 读 stdin 直到 EOF。
+   *
+   * <p>这条路径的用途是「等待 EOF 的命令必须自然退出」：只要 stdin 管道还有任何一个写端活着，这里就永远读不到 EOF。
+   */
+  private static void readUntilEof() throws IOException {
+    byte[] buffer = new byte[4096];
+    while (System.in.read(buffer) >= 0) {
+      // 调用方不向命令写入数据，因此这里只等到 EOF。
+    }
+  }
+
+  private static int exitCode(String[] args) {
+    return args.length > 2 ? Integer.parseInt(args[2]) : 0;
   }
 
   private static String classpath() {
