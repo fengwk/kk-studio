@@ -111,10 +111,8 @@ public final class WindowsJobScope {
    *
    * <p>任一步失败都释放已经拿到的句柄、结束从未运行过的挂起进程，再以带原因的异常失败关闭。
    *
-   * <p>已知窗口：{@code CreateProcessW} 与 {@code AssignProcessToJobObject} 之间创建出来的进程还不属于 Job。若 helper 恰在
-   * 这条指令间隙被强杀，它会留下一个从未执行过任何指令的挂起进程对象。要彻底消除这个窗口需要用 {@code STARTUPINFOEX} + {@code
-   * PROC_THREAD_ATTRIBUTE_JOB_LIST} 让进程一创建就属于 Job，这属于另一层架构改动，
-   * 不在本切片范围内；因此这里只保证「没有任何用户代码被执行」和「收敛判定绝不覆盖未归属进程」。
+   * <p>{@code PROC_THREAD_ATTRIBUTE_JOB_LIST} 让进程由内核在创建时直接放进 Job，因此不存在「创建完成但尚未归属」的窗口： helper
+   * 在这条指令之前被打死也不会留下无主进程。
    */
   static WindowsJobScope createSuspended(String jobName, List<String> command, Path workdir) {
     if (command.isEmpty()) {
@@ -392,19 +390,18 @@ public final class WindowsJobScope {
    */
   private static final class CreationAttributes extends Memory {
 
+    /** 属性列表的预留容量：两个属性只需数十字节，留足空间后容量本身不再影响行为。 */
+    private static final int CAPACITY = 4096;
+
     private CreationAttributes(int capacity) {
       super(capacity);
     }
 
     static CreationAttributes create(WindowsKernel kernel, HANDLE job, HANDLE[] inherited) {
-      IntByReference size = new IntByReference();
-      // 第一次调用只用来取所需大小：按文档，缓冲区不足时它返回失败并给出大小。
-      kernel.InitializeProcThreadAttributeList(null, CREATION_ATTRIBUTE_COUNT, 0, size);
-      if (size.getValue() <= 0) {
-        throw new IllegalStateException(
-            "cannot size the process creation attribute list: " + lastError());
-      }
-      CreationAttributes attributes = new CreationAttributes(size.getValue());
+      CreationAttributes attributes = new CreationAttributes(CAPACITY);
+      // 容量按 SIZE_T（指针宽度）写出：属性列表只需数十字节，这里留足空间，容量不足时 Initialize 会显式失败。
+      Memory size = new Memory(Math.max(Native.POINTER_SIZE, Long.BYTES));
+      size.setLong(0, CAPACITY);
       if (!kernel.InitializeProcThreadAttributeList(
           attributes, CREATION_ATTRIBUTE_COUNT, 0, size)) {
         throw new IllegalStateException(
@@ -565,7 +562,7 @@ public final class WindowsJobScope {
         int size);
 
     boolean InitializeProcThreadAttributeList(
-        Pointer attributeList, int attributeCount, int flags, IntByReference size);
+        Pointer attributeList, int attributeCount, int flags, Pointer size);
 
     boolean UpdateProcThreadAttribute(
         Pointer attributeList,
