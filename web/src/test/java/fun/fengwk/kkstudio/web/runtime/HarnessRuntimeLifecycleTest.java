@@ -70,10 +70,17 @@ class HarnessRuntimeLifecycleTest {
     assertTrue(lifecycle.isRunning());
   }
 
+  /**
+   * 测试意图：底层 {@code HarnessWorkDispatcher.stop()} 当前在置位后不会抛出；这里注入异常以固定契约—— 一旦 stop
+   * 抛异常（未观察到成功关闭），绝不能假装已停止，必须保留 running 以允许重试，且重试会真正再次调用 stop。
+   */
   @Test
-  void stopFailureStillResetsRunningState() {
+  void stopFailureKeepsRunningSoCleanupCanBeRetried() {
     HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
-    doThrow(new IllegalStateException("dispatcher stop failed")).when(dispatcher).stop();
+    doThrow(new IllegalStateException("dispatcher stop failed"))
+        .doNothing()
+        .when(dispatcher)
+        .stop();
     HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
 
     lifecycle.start();
@@ -81,7 +88,28 @@ class HarnessRuntimeLifecycleTest {
 
     assertEquals("dispatcher stop failed", thrown.getMessage());
     verify(dispatcher).stop();
+    // 未确认关闭：状态如实保持 running，绝不写 running=false 谎报已停止。
+    assertTrue(lifecycle.isRunning());
+
+    // 重试必须再次真实调用 stop，成功后状态才转为 stopped。
+    lifecycle.stop();
+    verify(dispatcher, times(2)).stop();
     assertFalse(lifecycle.isRunning());
+  }
+
+  /** 测试意图：stop(Runnable) 在 stop 失败时仍必须在 finally 中回调，且状态保持可重试。 */
+  @Test
+  void stopCallbackRunsEvenWhenStopFailsAndKeepsRunning() {
+    HarnessWorkDispatcher dispatcher = mock(HarnessWorkDispatcher.class);
+    doThrow(new IllegalStateException("dispatcher stop failed")).when(dispatcher).stop();
+    HarnessRuntimeLifecycle lifecycle = new HarnessRuntimeLifecycle(true, dispatcher);
+    AtomicBoolean callbackRan = new AtomicBoolean();
+
+    lifecycle.start();
+    assertThrows(IllegalStateException.class, () -> lifecycle.stop(() -> callbackRan.set(true)));
+
+    assertTrue(callbackRan.get(), "callback 必须无条件执行");
+    assertTrue(lifecycle.isRunning(), "停止未确认时必须保持 running");
   }
 
   @Test

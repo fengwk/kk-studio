@@ -58,6 +58,29 @@ class IssueControllerRuntimeLifecycleTest {
     verify(dispatcher, times(1)).stop();
   }
 
+  /**
+   * 测试意图：底层 {@code IssueControllerDispatcher.stop()} 当前在置位后不会抛出；这里注入异常以固定契约—— stop 抛异常时不得假装已停止，必须保留
+   * running 以允许重试，且重试会真正再次调用 stop。
+   */
+  @Test
+  void stopFailureKeepsRunningSoCleanupCanBeRetried() {
+    IssueControllerDispatcher dispatcher = mock(IssueControllerDispatcher.class);
+    doThrow(new RuntimeException("stop failed")).doNothing().when(dispatcher).stop();
+
+    IssueControllerRuntimeLifecycle lifecycle =
+        new IssueControllerRuntimeLifecycle(true, dispatcher);
+
+    lifecycle.start();
+    assertThrows(RuntimeException.class, lifecycle::stop);
+
+    verify(dispatcher).stop();
+    assertTrue(lifecycle.isRunning(), "停止未确认时必须保持 running，不得谎报已停止");
+
+    lifecycle.stop();
+    verify(dispatcher, times(2)).stop();
+    assertFalse(lifecycle.isRunning());
+  }
+
   /** 测试意图：验证 stop(Runnable callback) 始终在 finally 块中调用 callback。 */
   @Test
   void stopWithCallbackInvokesCallback() {

@@ -270,7 +270,6 @@ export function useAgentThreadController(
       harnessService.decideApproval(targetThreadId, invocationId, {
         decision,
         decisionId,
-        actor: 'web',
         reason: null,
       }),
     onSuccess: async (_result, variables) => {

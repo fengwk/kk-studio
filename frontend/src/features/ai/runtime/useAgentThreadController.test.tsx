@@ -1125,9 +1125,9 @@ describe('useAgentThreadController', () => {
     expect(firstCall?.[1]).toBe('tool-1')
     expect(firstCall?.[2]).toMatchObject({
       decision: 'ALLOW',
-      actor: 'web',
       reason: null,
     })
+    expect(firstCall?.[2]).not.toHaveProperty('actor')
     const firstDecisionId = firstCall?.[2]?.decisionId
     expect(firstDecisionId).toBeTruthy()
 
@@ -1158,9 +1158,9 @@ describe('useAgentThreadController', () => {
     expect(bId).not.toBe(aId)
     expect(vi.mocked(harnessService.decideApproval).mock.calls[1]?.[2]).toMatchObject({
       decision: 'DENY',
-      actor: 'web',
       reason: null,
     })
+    expect(vi.mocked(harnessService.decideApproval).mock.calls[1]?.[2]).not.toHaveProperty('actor')
   })
 
   it('relays child-thread approvals to the target thread with an isolated replay key', async () => {

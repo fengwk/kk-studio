@@ -221,8 +221,8 @@ Base64 内联媒体；与上述不包含 Base64 的结构化诊断、活动请�
 - Stop 请求是 `{stopRequestId, expectedVersion}`。同一个 `stopRequestId` 用于不确定
   失败的 exact replay，成功结果把 `cancelledUserMessages` 按 sequence 前置回
   Composer，`IDLE` 是 no-op。
-- Tool approval 使用 `{decision, decisionId, actor: "web", reason: null}`；同一
-  Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY 切换生成新 id。
+- Tool approval 使用 `{decision, decisionId, reason: null}`；请求体不携带操作者身份（actor 由服务端从认证主体
+  解析，客户端无法伪造）。同一 Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY 切换生成新 id。
 - Thread 与委派子 Thread 的进度都来自同一份快照派生字段：`processing` 等价于 `status != IDLE`，
   `WAITING_CHILDREN` 表示该 Thread 本地已静止但仍有活跃直接孩子（因而仍在处理）。前端按 Thread
   维度读取同一份快照渲染进度，没有独立的子任务状态通道。

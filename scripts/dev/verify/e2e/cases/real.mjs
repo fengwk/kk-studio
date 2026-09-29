@@ -2094,7 +2094,6 @@ registerCase({
       const decided = await approveToolInvocation(ctx, tid, readInvocation.id, {
         decision: 'ALLOW',
         decisionId,
-        actor: 'web',
         reason: null,
       })
       assert(String(decided.id) === String(readInvocation.id), safeDiagnosticJson(decided))
@@ -2107,7 +2106,6 @@ registerCase({
       const replay = await approveToolInvocation(ctx, tid, readInvocation.id, {
         decision: 'ALLOW',
         decisionId,
-        actor: 'web',
         reason: null,
       })
       const replayApproval = JSON.parse(replay.approvalJson || '{}')

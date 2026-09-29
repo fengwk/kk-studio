@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,11 +13,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
@@ -39,6 +42,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
+import java.security.Principal;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -57,6 +61,9 @@ public class StudioHarnessThreadController {
   /** Issue Agent Branch 的 YOLO 由 Project 启动策略与 Issue 工作流统一维护，通用 Branch API 不得覆盖。 */
   private static final String ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT =
       "Issue Agent Branch YOLO is owned by the project settings";
+
+  /** 单用户部署边界下没有认证主体时使用的固定操作者，与问卷输入使用同一服务端身份来源。 */
+  private static final String LOCAL_OPERATOR = "local-user";
 
   private final HarnessRuntime runtime;
   private final ModelRequestDebugService modelRequestDebugService;
@@ -105,31 +112,45 @@ public class StudioHarnessThreadController {
                     HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId"))));
   }
 
-  /** 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。 */
+  /**
+   * 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。
+   *
+   * <p>属于 Issue+Agent 的 Thread（含其分支）的名称由 Issue 工作流统一维护，因此这里先严格校验请求，再以 409 拒绝且绝不触达 {@link
+   * HarnessRuntime}。Chat Thread 不受影响。
+   */
   @PutMapping("/{threadId}/name")
   public Result<HarnessThreadDTO> rename(
       @PathVariable String threadId, @RequestBody HarnessNameUpdateDTO request) {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              ThreadState updated =
-                  runtime.renameThread(
-                      HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request));
+              RenameThreadCommand command =
+                  HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request);
+              rejectIssueAgentBranch(
+                  command.threadId(), "Issue Agent Branch rename is owned by the Issue workflow");
+              ThreadState updated = runtime.renameThread(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
             }));
   }
 
-  /** 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩；返回 202 Accepted。 */
+  /**
+   * 直接调用 HarnessRuntime 执行受 expectedVersion 守护的手动压缩；返回 202 Accepted。
+   *
+   * <p>压缩会产生 Turn / model invocation / 后续 work，因此 Issue+Agent Thread 必须先经过 Issue 工作流的产品锁，
+   * 通用入口在严格校验后直接 409，不允许在 Issue 暂停或归档期间直达 Runtime。
+   */
   @PostMapping("/{threadId}/compact")
   public Result<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
     return Results.accepted(
         withRuntimeTranslation(
             () -> {
-              CompactThreadResult result =
-                  runtime.compactThread(
-                      HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request));
+              CompactThreadCommand command =
+                  HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request);
+              rejectIssueAgentBranch(
+                  command.threadId(), "Issue Agent Branch compact is owned by the Issue workflow");
+              CompactThreadResult result = runtime.compactThread(command);
               return HarnessRuntimeResponseMapper.toCompactResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
             }));
@@ -152,10 +173,7 @@ public class StudioHarnessThreadController {
             () -> {
               SetThreadYoloCommand command =
                   HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request);
-              if (projectThreadOwnerResolver.isIssueAgentBranch(command.threadId())) {
-                throw new ResponseStatusException(
-                    HttpStatus.CONFLICT, ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT);
-              }
+              rejectIssueAgentBranch(command.threadId(), ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT);
               ThreadState updated = runtime.setThreadYolo(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
@@ -170,10 +188,8 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () -> {
               StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId, request);
-              if (projectThreadOwnerResolver.isIssueAgentBranch(command.threadId())) {
-                throw new ResponseStatusException(
-                    HttpStatus.CONFLICT, "Issue Agent Branch stop is owned by the Issue workflow");
-              }
+              rejectIssueAgentBranch(
+                  command.threadId(), "Issue Agent Branch stop is owned by the Issue workflow");
               StopResult result = runtime.stop(command);
               return HarnessRuntimeResponseMapper.toStopResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
@@ -184,20 +200,44 @@ public class StudioHarnessThreadController {
    * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。
    *
    * <p>审批与问卷回答共用 platform 交互服务的产品锁序与门禁：Issue+Agent Thread 先按 {@code Project SHARE -> Issue UPDATE}
-   * 锁定产品层级，再进入 Harness Runtime 决策，因此审批入口同样不能绕过 Issue 的暂停/归档约束。
+   * 锁定产品层级，再进入 Harness Runtime 决策，因此审批入口同样不能绕过 Issue 的暂停/归档约束。操作者只取自服务端认证上下文。
    */
   @PutMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
   public Result<ToolInvocationDTO> decideApproval(
       @PathVariable String threadId,
       @PathVariable String toolInvocationId,
-      @RequestBody HarnessToolApprovalDTO request) {
+      @RequestBody HarnessToolApprovalDTO request,
+      HttpServletRequest httpRequest) {
+    String operator = resolveOperator(httpRequest);
     return Results.ok(
         withRuntimeTranslation(
             () ->
                 HarnessRuntimeResponseMapper.toToolInvocationDto(
                     interactionService.decideApproval(
                         HarnessRuntimeRequestMapper.toToolApprovalCommand(
-                            threadId, toolInvocationId, request)))));
+                            threadId, toolInvocationId, request, operator)))));
+  }
+
+  /**
+   * Issue+Agent Thread 的通用写入口在请求形状校验之后、Runtime 之前拒绝。缺失 Thread 的 resolver 判定为 false， 仍交给 {@link
+   * HarnessRuntime} 翻译为 404。
+   */
+  private void rejectIssueAgentBranch(UUID threadId, String reason) {
+    if (projectThreadOwnerResolver.isIssueAgentBranch(threadId)) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, reason);
+    }
+  }
+
+  /** 操作者只取自部署边界建立的认证主体；没有主体时回退到单用户边界的固定操作者，绝不信任客户端传入的身份。 */
+  private static String resolveOperator(HttpServletRequest request) {
+    Principal principal = request.getUserPrincipal();
+    if (principal != null) {
+      String name = principal.getName();
+      if (name != null && !name.isBlank()) {
+        return name.strip();
+      }
+    }
+    return LOCAL_OPERATOR;
   }
 
   /** 将 Harness Runtime 异常翻译为统一 HTTP 错误响应。 */

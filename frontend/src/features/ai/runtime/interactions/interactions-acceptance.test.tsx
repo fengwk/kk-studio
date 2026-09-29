@@ -262,9 +262,10 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     expect(decideSpy).toHaveBeenCalledWith('th-app', 'inv-app-1', {
       decision: 'ALLOW',
       decisionId: expect.any(String),
-      actor: 'web',
       reason: null,
     })
+    // 审批请求绝不携带 actor：身份只能来自服务端认证主体。
+    expect(decideSpy.mock.calls[0]?.[2]).not.toHaveProperty('actor')
   })
 
   // 场景 5: 草稿保留
