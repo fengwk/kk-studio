@@ -151,12 +151,29 @@ class GeminiErrorMapperTest {
     assertNull(
         GeminiErrorMapper.mapTransportException(
             new TransportException(TransportErrorKind.CANCELLED, "cancelled")));
-    assertNull(
+    ProviderException rejected =
         GeminiErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected")));
-    assertNull(
+            new TransportException(
+                TransportErrorKind.EXECUTOR_REJECTED,
+                "rejected",
+                new IllegalStateException("secret sk-gemini")));
+    assertEquals(ProviderErrorKind.TRANSIENT, rejected.kind());
+    assertEquals("Gemini executor rejected the request", rejected.getMessage());
+    assertFalse(rejected.getMessage().contains("sk-gemini"));
+    assertNull(rejected.getCause());
+    ProviderException callbackFailed =
         GeminiErrorMapper.mapTransportException(
-            new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback")));
+            new TransportException(
+                TransportErrorKind.CALLBACK_FAILED,
+                "callback",
+                401,
+                "{\"error\":{\"status\":\"UNAUTHENTICATED\"}}".getBytes(StandardCharsets.UTF_8),
+                null,
+                new RuntimeException("handler sk-gemini")));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, callbackFailed.kind());
+    assertEquals(GeminiErrorMapper.MSG_INVALID_RESPONSE, callbackFailed.getMessage());
+    assertFalse(callbackFailed.getMessage().contains("UNAUTHENTICATED"));
+    assertNull(callbackFailed.getCause());
 
     ProviderException timeoutEx =
         GeminiErrorMapper.mapTransportException(

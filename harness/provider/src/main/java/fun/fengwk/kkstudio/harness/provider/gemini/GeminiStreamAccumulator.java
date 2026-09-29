@@ -195,6 +195,15 @@ final class GeminiStreamAccumulator {
   }
 
   private void processCandidate(JsonNode candidate) {
+    boolean hasContent = candidate.has("content") && candidate.get("content").isObject();
+    boolean hasFinishReason =
+        candidate.has("finishReason")
+            && !candidate.get("finishReason").isNull()
+            && !candidate.get("finishReason").asText().isBlank();
+    if (terminalChunkReceived && (hasContent || hasFinishReason)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "content received after Gemini terminal chunk");
+    }
     // 检查 finishReason
     if (candidate.has("finishReason")
         && !candidate.get("finishReason").isNull()
@@ -243,7 +252,7 @@ final class GeminiStreamAccumulator {
     validateParts(partsArray);
 
     for (int i = 0; i < partsArray.size(); i++) {
-      processPart(i, partsArray.get(i));
+      processPart(i, partsArray.get(i), partsArray.size() == 1);
     }
   }
 
@@ -254,7 +263,7 @@ final class GeminiStreamAccumulator {
    * 双方均无签名」的累计快照替换，以及双方都仅含 text/thought 的朴素增量累积。其余 part（functionCall、inlineData / toolResponse 等
    * union 成员，以及任何带未知字段的 part）一律作为完整原生边界原样保留，绝不递归、拼接或猜测未知字段，也绝不跨 part 迁移或改写 thoughtSignature。
    */
-  private void processPart(int index, JsonNode partNode) {
+  private void processPart(int index, JsonNode partNode, boolean singlePartFrame) {
     boolean functionCallPart = partNode.has("functionCall");
     String signature = readThoughtSignature(partNode);
     String text = readPartText(partNode);
@@ -280,7 +289,11 @@ final class GeminiStreamAccumulator {
     }
 
     // 3) 朴素 text/thought part 的增量累积：双方都只含 text/thought，累积不会丢失任何字段语义。
-    if (text != null && signature == null && !functionCallPart && isPlainPartShape(partNode)) {
+    if (text != null
+        && signature == null
+        && !functionCallPart
+        && isPlainPartShape(partNode)
+        && singlePartFrame) {
       TrackedPart lastPart = lastTrackedPart();
       if (lastPart != null
           && lastPart.plainShape

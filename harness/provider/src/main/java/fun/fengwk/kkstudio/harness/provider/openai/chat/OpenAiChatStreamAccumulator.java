@@ -117,6 +117,10 @@ final class OpenAiChatStreamAccumulator {
       seenDone = true;
       return;
     }
+    if (seenDone) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "semantic payload received after [DONE]");
+    }
 
     JsonNode root;
     try {
@@ -249,13 +253,19 @@ final class OpenAiChatStreamAccumulator {
             String nameDelta = null;
             String argsDelta = null;
             JsonNode fn = tcNode.get("function");
-            if (fn.has("name") && fn.get("name").isTextual()) {
-              nameDelta = fn.get("name").textValue();
-              builder.appendName(nameDelta);
-            }
-            if (fn.has("arguments") && fn.get("arguments").isTextual()) {
-              argsDelta = fn.get("arguments").textValue();
-              builder.appendArguments(argsDelta);
+            if (fn != null) {
+              if (fn.isNull() || !fn.isObject()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_RESPONSE, "tool call function must be an object");
+              }
+              if (fn.has("name") && fn.get("name").isTextual()) {
+                nameDelta = fn.get("name").textValue();
+                builder.appendName(nameDelta);
+              }
+              if (fn.has("arguments") && fn.get("arguments").isTextual()) {
+                argsDelta = fn.get("arguments").textValue();
+                builder.appendArguments(argsDelta);
+              }
             }
 
             String projectedId = idDelta == null || builder.id().isBlank() ? null : builder.id();

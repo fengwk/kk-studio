@@ -1716,7 +1716,24 @@ class GeminiRequestEncoderTest {
                 new ProviderImageBlock("image/png", "data:image/png;base64,"),
                 false,
                 null,
+                null)),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "data-uri-invalid-base64-rejected",
+                new ProviderImageBlock("image/png", "data:image/png;base64,%%%"),
+                false,
+                null,
                 null)));
+  }
+
+  /** 测试意图：ProviderMessage 构造期已禁止 TOOL 携带非 tool-result，边界在消息模型而不是编码器静默丢弃。 */
+  @Test
+  void toolMessageRejectsNonToolResultAtConstruction() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderMessage(
+                ProviderMessageRole.TOOL, List.of(new ProviderTextBlock("not a tool result"))));
   }
 
   /** 验证工具结果媒体只以内联 part 挂在 functionResponse 内，绝不作为外层 Content.parts 的同级 part。 */

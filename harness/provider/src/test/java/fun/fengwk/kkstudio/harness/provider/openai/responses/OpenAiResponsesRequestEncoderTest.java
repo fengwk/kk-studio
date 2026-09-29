@@ -393,6 +393,79 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(encodedTools(tool), encodedTools(tool));
   }
 
+  /** 测试意图：strict 归一化必须进入组合与定义位置中的 object，但不得改写 default/enum 字面量，也不得把已有 nullable anyOf 再包一层。 */
+  @Test
+  void test_strictSchemaRecursesCombinatorsWithoutTouchingLiterals() throws Exception {
+    String schema =
+        """
+        {"type":"object",
+         "properties":{
+           "choice":{"anyOf":[
+             {"type":"object","properties":{"x":{"type":"string","default":" keep ","enum":[" keep ","x"]}}},
+             {"type":"null"}]},
+           "alt":{"oneOf":[{"type":"object","properties":{"y":{"type":"integer"}}}]},
+           "all":{"allOf":[{"type":"object","properties":{"z":{"type":"boolean"}}}]},
+           "ref":{"$ref":"#/$defs/Box"}},
+         "required":["choice"],
+         "$defs":{"Box":{"type":"object","properties":{"n":{"type":"string"}}}},
+         "definitions":{"Legacy":{"type":"object","properties":{"m":{"type":"number"}}}}}
+        """;
+    ProviderToolDefinition tool = new ProviderToolDefinition("shape", "shape", schema);
+    JsonNode parameters = encodedTools(tool).get(0).path("parameters");
+
+    JsonNode choice = parameters.path("properties").path("choice");
+    assertFalse(choice.has("anyOf") && choice.path("anyOf").size() == 3, "nullable anyOf 不得再包裹");
+    JsonNode choiceObject = choice.path("anyOf").get(0);
+    assertEquals(List.of("x"), requiredOf(choiceObject));
+    assertFalse(choiceObject.path("additionalProperties").asBoolean());
+    JsonNode x = choiceObject.path("properties").path("x").path("anyOf").get(0);
+    assertEquals(" keep ", x.path("default").asText());
+    assertEquals(" keep ", x.path("enum").get(0).asText());
+
+    JsonNode oneOfObject =
+        parameters.path("properties").path("alt").path("anyOf").get(0).path("oneOf").get(0);
+    assertEquals(List.of("y"), requiredOf(oneOfObject));
+    assertFalse(oneOfObject.path("additionalProperties").asBoolean());
+    JsonNode allOfObject =
+        parameters.path("properties").path("all").path("anyOf").get(0).path("allOf").get(0);
+    assertEquals(List.of("z"), requiredOf(allOfObject));
+    assertFalse(allOfObject.path("additionalProperties").asBoolean());
+
+    JsonNode defsBox = parameters.path("$defs").path("Box");
+    assertEquals(List.of("n"), requiredOf(defsBox));
+    assertFalse(defsBox.path("additionalProperties").asBoolean());
+    JsonNode legacy = parameters.path("definitions").path("Legacy");
+    assertEquals(List.of("m"), requiredOf(legacy));
+    assertFalse(legacy.path("additionalProperties").asBoolean());
+  }
+
+  /** 测试意图：allOf 中仅一个分支可空、oneOf 出现多个 null，以及 anyOf 被兄弟 type 禁止 null 时，都不能当成整体已可空；拿不准时安全外包一层 null。 */
+  @Test
+  void test_strictSchemaDoesNotTreatAmbiguousCombinatorsAsNullable() throws Exception {
+    String schema =
+        """
+        {"type":"object","properties":{
+           "mixed":{"allOf":[{"type":"string"},{"type":"null"}]},
+           "exclusive":{"oneOf":[{"type":"null"},{"type":"null"}]},
+           "blocked":{"type":"string","anyOf":[{"type":"string"},{"type":"null"}]}
+         }}
+        """;
+    JsonNode properties =
+        encodedTools(new ProviderToolDefinition("shape", "shape", schema))
+            .get(0)
+            .path("parameters")
+            .path("properties");
+
+    assertEquals("null", properties.path("mixed").path("anyOf").get(1).path("type").asText());
+    assertEquals(
+        "null",
+        properties.path("mixed").path("anyOf").get(0).path("allOf").get(1).path("type").asText());
+    assertEquals("null", properties.path("exclusive").path("anyOf").get(1).path("type").asText());
+    assertEquals(2, properties.path("exclusive").path("anyOf").get(0).path("oneOf").size());
+    assertEquals("null", properties.path("blocked").path("anyOf").get(1).path("type").asText());
+    assertEquals("string", properties.path("blocked").path("anyOf").get(0).path("type").asText());
+  }
+
   /** 验证 prompt_cache_key 直接取自 runtime 派生的 cache affinity identity：稳定、可复现、不同 session 不同。 */
   @Test
   void test_promptCacheKeyComesFromRuntimeAffinityIdentity() throws Exception {
