@@ -312,7 +312,10 @@ class ModelExecutionDecodeDurationTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.MODEL, NOW, "token-" + invocationId, NOW.plusSeconds(60)))
+                          WorkTargetType.MODEL,
+                          NOW,
+                          "token-" + invocationId,
+                          Duration.ofSeconds(60)))
               .orElseThrow();
       // 模拟 ModelProcessor prepare：READY -> DISPATCHING。
       store.transaction(

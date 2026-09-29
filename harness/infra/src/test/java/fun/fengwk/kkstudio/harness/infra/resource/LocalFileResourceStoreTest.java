@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.infra.resource;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -520,5 +522,65 @@ class LocalFileResourceStoreTest {
     assertEquals(1, objectCount(root));
     assertArrayEquals(
         content, store.read(newStore(root, DEFAULT_MAX_BYTES).put(MEDIA_TYPE, NAME, content)));
+  }
+
+  /** 测试意图：临时文件创建成功后的写入失败必须由 writeTempFile 自己清理——部分写入（如 ENOSPC）不得在 root 遗留 .tmp 残留。 */
+  @Test
+  void writeTempFileCleansUpAfterPartialWriteFailure() throws IOException {
+    Path root = newRoot();
+    IOException partialWriteFailure = new IOException("simulated partial write failure");
+
+    IOException failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                LocalFileResourceStore.writeTempFile(
+                    root,
+                    bytes("payload"),
+                    (channel, payload) -> {
+                      channel.write(ByteBuffer.wrap(new byte[] {1, 2, 3}));
+                      throw partialWriteFailure;
+                    }));
+
+    assertSame(partialWriteFailure, failure, "cleanup must not replace the original failure");
+    assertEquals(0, failure.getSuppressed().length, "cleanup itself succeeded");
+    assertEquals(0L, objectCount(root), "failed writeTempFile must not leave temp residue");
+  }
+
+  /** 测试意图：写入完成但 force（fsync）失败同属“创建后失败”，同样必须清理临时文件且保持原始故障。 */
+  @Test
+  void writeTempFileCleansUpAfterForceFailure() throws IOException {
+    Path root = newRoot();
+    IOException forceFailure = new IOException("simulated fsync failure");
+
+    IOException failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                LocalFileResourceStore.writeTempFile(
+                    root,
+                    bytes("payload"),
+                    (channel, payload) -> {
+                      channel.write(payload);
+                      throw forceFailure;
+                    }));
+
+    assertSame(forceFailure, failure);
+    assertEquals(0L, objectCount(root), "failed writeTempFile must not leave temp residue");
+  }
+
+  /** 测试意图：清理自身失败（条目已变成非空目录）只作为 suppressed 附加，绝不掩盖原始写入故障。 */
+  @Test
+  void deleteFailedTempAttachesCleanupFailureAsSuppressed() throws IOException {
+    Path undeletable = tempDir.resolve("non-empty-directory");
+    Files.createDirectory(undeletable);
+    Files.writeString(undeletable.resolve("child"), "x");
+    IOException primaryFailure = new IOException("primary write failure");
+
+    LocalFileResourceStore.deleteFailedTemp(undeletable, primaryFailure);
+
+    assertEquals(1, primaryFailure.getSuppressed().length);
+    assertTrue(primaryFailure.getSuppressed()[0] instanceof IOException);
+    assertTrue(Files.exists(undeletable), "undelatable entry is left for the operator to inspect");
   }
 }

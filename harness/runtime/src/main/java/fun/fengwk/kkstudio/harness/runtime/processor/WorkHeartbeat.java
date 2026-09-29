@@ -162,10 +162,9 @@ final class WorkHeartbeat {
         }
         try {
           Instant now = clock.instant();
-          Instant until = now.plus(config.leaseDuration());
           store.transaction(
               tx -> {
-                tx.renewWork(claim, now, until);
+                tx.renewWork(claim, now, config.leaseDuration());
                 return null;
               });
         } catch (RuntimeException failure) {

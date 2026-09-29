@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -734,7 +735,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
           assertNotNull(threadWork.leaseToken());
         };
     ClaimedWork claim =
-        claimThreadWork(fixture.store, baseline.threadId(), NOW, NOW.plusSeconds(4));
+        claimThreadWork(fixture.store, baseline.threadId(), NOW, Duration.ofSeconds(4));
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
     assertEquals(

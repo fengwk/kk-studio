@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -275,7 +276,9 @@ class HarnessRuntimeStopRecursivePropagationTest {
     ClaimedWork childModelClaim =
         store.transaction(
             tx ->
-                tx.claimNextWork(WorkTargetType.MODEL, T3, "child-model-lease", T6).orElseThrow());
+                tx.claimNextWork(
+                        WorkTargetType.MODEL, T3, "child-model-lease", Duration.between(T3, T6))
+                    .orElseThrow());
 
     runtime.stop(new StopCommand(root.threadId(), TestIds.id(5), 0));
 

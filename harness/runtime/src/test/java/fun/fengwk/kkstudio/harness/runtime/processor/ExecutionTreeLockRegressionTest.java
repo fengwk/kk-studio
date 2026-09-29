@@ -100,7 +100,7 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.MODEL, NOW, "token-model-1", NOW.plusSeconds(60)))
+                        WorkTargetType.MODEL, NOW, "token-model-1", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelExecution execution =
@@ -192,7 +192,7 @@ class ExecutionTreeLockRegressionTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.MODEL, NOW, "token-model-2", NOW.plusSeconds(60)))
+                        WorkTargetType.MODEL, NOW, "token-model-2", Duration.ofSeconds(60)))
             .orElseThrow();
 
     StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
@@ -315,6 +315,16 @@ class ExecutionTreeLockRegressionTest {
 
     void clearLogs() {
       recordedOperations.clear();
+    }
+
+    @Override
+    public void afterCommit(Runnable action) {
+      delegate.afterCommit(action);
+    }
+
+    @Override
+    public void assertNoAmbientTransaction() {
+      delegate.assertNoAmbientTransaction();
     }
 
     @Override

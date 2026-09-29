@@ -2549,7 +2549,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx ->
                 tx.claimNextWork(
-                    WorkTargetType.MODEL, now, "token-" + invocationId, now.plusSeconds(60)))
+                    WorkTargetType.MODEL, now, "token-" + invocationId, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 
@@ -2724,6 +2724,16 @@ class ModelExecutionStreamFlushTest {
       transactionCount.set(0);
       modelInvocationLockCount.set(0);
       claimedWorkLockCount.set(0);
+    }
+
+    @Override
+    public void afterCommit(Runnable action) {
+      delegate.afterCommit(action);
+    }
+
+    @Override
+    public void assertNoAmbientTransaction() {
+      delegate.assertNoAmbientTransaction();
     }
 
     @Override
