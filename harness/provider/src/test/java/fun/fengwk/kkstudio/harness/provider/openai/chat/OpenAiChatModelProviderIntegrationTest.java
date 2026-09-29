@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -10,7 +12,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
+import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
+import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
+import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -41,8 +48,10 @@ import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -50,9 +59,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 测试意图：端到端集成测试，验证本地 HTTP 服务下连续多步工具循环、HTTP 异常分类映射与客户端取消。 */
+/** 测试意图：端到端集成测试，验证本地 HTTP 服务下连续多步工具循环、HTTP 异常分类映射、流终态封闭与回调崩溃的单次终态。 */
 class OpenAiChatModelProviderIntegrationTest {
 
   private HttpServer server;
@@ -302,5 +312,180 @@ class OpenAiChatModelProviderIntegrationTest {
     assertTrue(latch.await(5, TimeUnit.SECONDS));
     assertNotNull(errorRef.get());
     assertEquals(ProviderErrorKind.AUTHENTICATION, errorRef.get().kind());
+  }
+
+  /**
+   * 测试意图：real transport 下 finish_reason 后的语义帧必须 fail closed——handler 恰好收到一次 INVALID_RESPONSE
+   * 终态错误，不产生 completion，也不因已收到 usage 而再发第二次终态。
+   */
+  @Test
+  void rejectsSemanticFrameAfterFinishReasonWithExactlyOneTerminal() throws Exception {
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(
+                ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n"
+                        + "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n"
+                        + "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\" polluted\"},\"finish_reason\":\"length\"}]}\n\n"
+                        + "data: [DONE]\n\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          }
+        });
+
+    ModelProvider provider = new OpenAiChatProviderAdapter(transport, "sk-test").create(descriptor);
+    AtomicInteger errors = new AtomicInteger(0);
+    AtomicInteger completes = new AtomicInteger(0);
+    AtomicReference<ProviderException> caught = new AtomicReference<>();
+    CountDownLatch firstTerminal = new CountDownLatch(1);
+    // 终态计数为 2：只允许一次终态，出现第二次即释放
+    CountDownLatch duplicateTerminal = new CountDownLatch(2);
+
+    provider.stream(
+        simpleRequest(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+            completes.incrementAndGet();
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            errors.incrementAndGet();
+            caught.set(error);
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+        });
+
+    assertTrue(firstTerminal.await(5, TimeUnit.SECONDS));
+    assertFalse(duplicateTerminal.await(500, TimeUnit.MILLISECONDS));
+    assertEquals(1, errors.get());
+    assertEquals(0, completes.get());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, caught.get().kind());
+  }
+
+  /**
+   * 测试意图：provider 内部回调逃逸的非 ProviderException 由真实 transport 转换为 CALLBACK_FAILED，经 ErrorMapper 脱敏为
+   * INVALID_RESPONSE 后 handler 恰好收到一次终态错误（不静默、不重复、无 completion）。用户 handler 自身抛错属于 0-onError
+   * 契约，不在本例范围。
+   */
+  @Test
+  void callbackCrashIsDeliveredAsExactlyOneTerminalError() throws Exception {
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          }
+        });
+
+    JdkHttpSseTransport crashingTransport =
+        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest httpRequest,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            // 先让 provider 正常处理真实帧，再故意抛出非 ProviderException：真实 transport 的故障隔离会把它转成
+            // CALLBACK_FAILED 终态，而不是让用户侧无终态挂死。
+            HttpSseCallback crashingCallback =
+                new HttpSseCallback() {
+                  @Override
+                  public void onOpen(HttpOpenMetadata metadata) {
+                    callback.onOpen(metadata);
+                  }
+
+                  @Override
+                  public void onEvent(ServerSentEvent event) {
+                    callback.onEvent(event);
+                    throw new IllegalStateException(
+                        "deliberate non-ProviderException callback crash");
+                  }
+
+                  @Override
+                  public void onComplete() {
+                    callback.onComplete();
+                  }
+
+                  @Override
+                  public void onFailure(TransportException error) {
+                    callback.onFailure(error);
+                  }
+                };
+            return super.stream(httpRequest, timeoutPolicy, limits, crashingCallback);
+          }
+        };
+    ModelProvider provider =
+        new OpenAiChatProviderAdapter(crashingTransport, "sk-test").create(descriptor);
+
+    AtomicInteger errors = new AtomicInteger(0);
+    AtomicInteger completes = new AtomicInteger(0);
+    List<ProviderStreamEvent> deltas = new ArrayList<>();
+    AtomicReference<ProviderException> caught = new AtomicReference<>();
+    CountDownLatch firstTerminal = new CountDownLatch(1);
+    // 终态计数为 2：只允许一次终态，出现第二次即释放
+    CountDownLatch duplicateTerminal = new CountDownLatch(2);
+
+    provider.stream(
+        simpleRequest(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            deltas.add(event);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+            completes.incrementAndGet();
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            errors.incrementAndGet();
+            caught.set(error);
+            firstTerminal.countDown();
+            duplicateTerminal.countDown();
+          }
+        });
+
+    assertTrue(firstTerminal.await(5, TimeUnit.SECONDS));
+    assertFalse(duplicateTerminal.await(500, TimeUnit.MILLISECONDS));
+    // 崩溃前该帧已被 provider 正常交付，说明确实发生在回调内部而不是未开始流
+    assertEquals(1, deltas.size());
+    assertEquals("hi", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
+    assertEquals(1, errors.get());
+    assertEquals(0, completes.get());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, caught.get().kind());
+    assertEquals("OpenAI invalid response", caught.get().getMessage());
+    assertNull(caught.get().getCause());
+  }
+
+  private ProviderRequest simpleRequest() {
+    return new ProviderRequest(
+        modelDesc,
+        defaultVariant,
+        1024,
+        "Test system instruction.",
+        List.of(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+        List.of(),
+        ProviderCacheControl.none());
   }
 }

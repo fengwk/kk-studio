@@ -67,6 +67,9 @@ final class OpenAiChatStreamAccumulator {
   private GenerationStopReason stopReason = null;
   private boolean seenDone = false;
 
+  /** {@code choices[0]} 首个有效 finish_reason 之后语义封闭：只允许无语义尾帧，绝不再改写任何已累积事实。 */
+  private boolean choiceFinalized = false;
+
   private final StringBuilder contentBuilder = new StringBuilder();
   private final StringBuilder refusalBuilder = new StringBuilder();
   private final StringBuilder reasoningContentBuilder = new StringBuilder();
@@ -167,6 +170,20 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private void parseChoice(JsonNode choice) {
+    if (choiceFinalized) {
+      // 语义终态已封闭：此后只允许 usage-only 空 choices、无语义尾帧（如 provider 尾帧）与 [DONE]/keepalive，
+      // 任何非空 delta（包括仅 native 字段）或再次出现的 finish_reason 都 fail closed。
+      if (carriesFinishReason(choice)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "finish_reason repeated after finalized choice");
+      }
+      if (!isEmptyTailDelta(choice)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "semantic delta received after finalized choice");
+      }
+      return;
+    }
+
     if (choice.has("delta") && choice.get("delta").isObject()) {
       JsonNode delta = choice.get("delta");
       mergeNativeDelta(delta);
@@ -281,17 +298,55 @@ final class OpenAiChatStreamAccumulator {
       }
     }
 
-    // 检查 finish_reason
-    if (choice.has("finish_reason") && !choice.get("finish_reason").isNull()) {
-      String reasonText = choice.get("finish_reason").asText();
-      if (!reasonText.isBlank()) {
-        if (!VALID_FINISH_REASONS.contains(reasonText)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
-        }
-        this.stopReason = mapFinishReason(reasonText);
+    // 检查 finish_reason：首个非 null 有效值即封闭该 choice 的语义；同帧尾随 content 已在上方正常累积后才封闭
+    if (carriesFinishReason(choice)) {
+      String reasonText = choice.get("finish_reason").textValue();
+      if (!VALID_FINISH_REASONS.contains(reasonText)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
       }
+      this.stopReason = mapFinishReason(reasonText);
+      this.choiceFinalized = true;
     }
+  }
+
+  /**
+   * 判定 choice 是否携带有效 finish_reason：非 null 且非空白字符串。非字符串形态一律 fail closed，绝不被 {@code asText} 静默吞掉；显式
+   * null 与空白字符串属于无语义尾帧。
+   */
+  private static boolean carriesFinishReason(JsonNode choice) {
+    JsonNode node = choice.get("finish_reason");
+    if (node == null || node.isNull()) {
+      return false;
+    }
+    if (!node.isTextual()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "finish_reason must be a string");
+    }
+    return !node.textValue().isBlank();
+  }
+
+  /** 无语义尾帧：{@code delta} 缺失、null，或所有字段都是 null、空字符串、空容器。 */
+  private static boolean isEmptyTailDelta(JsonNode choice) {
+    return isEmptyValue(choice.get("delta"));
+  }
+
+  private static boolean isEmptyValue(JsonNode node) {
+    if (node == null || node.isNull()) {
+      return true;
+    }
+    if (node.isTextual()) {
+      return node.textValue().isEmpty();
+    }
+    if (node.isArray() || node.isObject()) {
+      for (JsonNode child : node) {
+        if (!isEmptyValue(child)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   /**

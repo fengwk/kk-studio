@@ -44,6 +44,11 @@ import java.util.Set;
 /** 测试意图：全面验证 OpenAI Chat 流式累积器状态机、事件派发、终态映射、截断诊断、互斥用量度量及 Replay 保真。 */
 class OpenAiChatStreamAccumulatorTest {
 
+  private static final String MSG_REPEATED_FINISH_REASON =
+      "finish_reason repeated after finalized choice";
+  private static final String MSG_SEMANTIC_DELTA_AFTER_FINALIZE =
+      "semantic delta received after finalized choice";
+
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private ProviderDescriptor descriptor;
@@ -118,6 +123,87 @@ class OpenAiChatStreamAccumulatorTest {
             ProviderException.class,
             () -> accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\" again\"}}]}"));
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
+  /**
+   * 测试意图：choice 首个有效 finish_reason 后语义封闭——usage-only 空 choices、无语义尾帧与重复 [DONE] 仍合法；
+   * 之后的文本/refusal/reasoning/tool/native-only 增量或重复、变更的 finish_reason 一律 fail closed，且已累积结果不可改写。
+   */
+  @Test
+  void finalizesChoiceAfterFirstFinishReasonAndRejectsLaterSemanticFrames() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+
+    // 同帧「尾随 content + finish_reason」：先正常累积，再在本帧末尾封闭
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+
+    // 合法尾帧：usage-only 空 choices、空 delta、delta 为 null、空字符串内容
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":null}]}");
+    accumulator.handleData(
+        "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"}}]}");
+
+    // 封闭后的语义帧：content / refusal / reasoning_content / reasoning_details / tool_calls / native-only
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"content\":\" more\"}}]}");
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"refusal\":\"no\"}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"reasoning_content\":\"more\"}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"x\"}]}}]}");
+    assertSemanticDeltaRejected(
+        accumulator,
+        "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\","
+            + "\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"vendor_field\":\"x\"}}]}");
+    // 嵌套容器与非字符串标量同样视为语义载荷，不被当作空尾帧放行
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"vendor_nested\":{\"inner\":\"x\"}}}]}");
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"vendor_count\":3}}]}");
+    // 重复同一 finish_reason 与变更 finish_reason 都不允许
+    assertInvalidAfterFinalize(
+        accumulator, "{\"choices\":[{\"finish_reason\":\"stop\"}]}", MSG_REPEATED_FINISH_REASON);
+    assertInvalidAfterFinalize(
+        accumulator, "{\"choices\":[{\"finish_reason\":\"length\"}]}", MSG_REPEATED_FINISH_REASON);
+
+    // finish_reason 闸门之后仍允许 [DONE] 与重复 [DONE]，且已封闭事实保持第一份
+    accumulator.handleData("[DONE]");
+    accumulator.handleData("  [DONE]  ");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("hi", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(4L, completion.response().usage().totalTokens());
+    assertEquals("hi", completion.replayState().payload().path("content").asText());
+  }
+
+  /** 测试意图：finish_reason 的非字符串形态绝不被 asText 静默吞掉；null 与空白字符串仍是合法无语义尾帧。 */
+  @Test
+  void rejectsNonTextualFinishReasonInsteadOfSwallowingIt() {
+    for (String payload :
+        List.of(
+            "{\"choices\":[{\"finish_reason\":{}}]}",
+            "{\"choices\":[{\"finish_reason\":[]}]}",
+            "{\"choices\":[{\"finish_reason\":5}]}")) {
+      assertInvalidAfterFinalize(createAccumulator(), payload, "finish_reason must be a string");
+    }
+
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":null}]}");
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":\"\"}]}");
+  }
+
+  private static void assertSemanticDeltaRejected(
+      OpenAiChatStreamAccumulator accumulator, String payload) {
+    assertInvalidAfterFinalize(accumulator, payload, MSG_SEMANTIC_DELTA_AFTER_FINALIZE);
+  }
+
+  private static void assertInvalidAfterFinalize(
+      OpenAiChatStreamAccumulator accumulator, String payload, String expectedMessage) {
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> accumulator.handleData(payload));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals(expectedMessage, error.getMessage());
   }
 
   @Test
