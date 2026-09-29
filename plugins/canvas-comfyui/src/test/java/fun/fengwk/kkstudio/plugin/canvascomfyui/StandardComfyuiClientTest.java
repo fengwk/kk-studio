@@ -15,11 +15,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -38,6 +43,9 @@ class StandardComfyuiClientTest {
   private final AtomicReference<String> viewQuery = new AtomicReference<>();
   private final AtomicReference<String> queueDeleteBody = new AtomicReference<>();
   private final AtomicInteger queueDeleteStatus = new AtomicInteger(200);
+  private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
+  private final AtomicReference<String> uploadContentLength = new AtomicReference<>();
+  private final AtomicInteger uploadStatus = new AtomicInteger(200);
 
   @BeforeEach
   void setUp() throws IOException {
@@ -133,6 +141,214 @@ class StandardComfyuiClientTest {
                 3L,
                 new ByteArrayInputStream(new byte[] {1, 2, 3}),
                 CANVAS));
+  }
+
+  @Test
+  void uploadsExactMultipartBytesWhenContentIsDemandedInOneRequest() {
+    byte[] payload = new byte[] {9, 8, 7, 6};
+    AtomicBoolean closed = new AtomicBoolean();
+    uploadResponse.set(
+        "{\"name\":\"clip.mp4\",\"subfolder\":\"kk-studio/" + CANVAS + "\",\"type\":\"input\"}");
+    H3UploadedFile uploaded =
+        client.upload(
+            "clip.mp4",
+            "video/mp4",
+            payload.length,
+            tracking(new ByteArrayInputStream(payload), closed),
+            CANVAS);
+    assertEquals("clip.mp4", uploaded.name());
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("name=\"subfolder\""));
+    assertTrue(text.contains("kk-studio/" + CANVAS));
+    assertTrue(text.contains("name=\"overwrite\""));
+    assertTrue(text.contains("name=\"image\"; filename=\"clip.mp4\""));
+    assertTrue(text.contains("Content-Type: video/mp4"));
+    int payloadAt = indexOf(body, payload);
+    assertTrue(payloadAt > 0);
+    assertEquals(
+        "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
+    assertTrue(text.trim().endsWith("--"));
+    assertTrue(closed.get());
+  }
+
+  @Test
+  void uploadsWhenSubscriberRequestsOnlyTwoBuffersAtATime() {
+    byte[] payload = new byte[40 * 1024];
+    for (int i = 0; i < payload.length; i++) {
+      payload[i] = (byte) (i & 0xff);
+    }
+    AtomicBoolean closed = new AtomicBoolean();
+    client.upload(
+        "wide.bin",
+        "application/octet-stream",
+        payload.length,
+        tracking(new ChunkedInputStream(payload, 100), closed),
+        CANVAS);
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    assertTrue(indexOf(body, payload) >= 0);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("filename=\"wide.bin\""));
+    assertTrue(text.contains("Content-Type: application/octet-stream"));
+    assertTrue(closed.get());
+  }
+
+  @Test
+  void uploadClosesCallerStreamWhenCancelledBeforeContentIsOpened() {
+    AtomicBoolean closed = new AtomicBoolean();
+    InputStream content =
+        tracking(
+            new InputStream() {
+              @Override
+              public int read() {
+                return 7;
+              }
+            },
+            closed);
+    HttpClient cancelling =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(1))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .executor(
+                command -> {
+                  throw new SecurityException("cancelled before request");
+                })
+            .build();
+    StandardComfyuiClient cancellingClient =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            null,
+            Duration.ofSeconds(2),
+            new ObjectMapper(),
+            cancelling);
+    assertThrows(
+        SecurityException.class,
+        () ->
+            cancellingClient.upload(
+                "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
+    assertTrue(closed.get());
+    assertThrows(IOException.class, () -> content.read(new byte[1]));
+  }
+
+  @Test
+  void exactUploadContentChecksSingleBulkAndZeroReadsOnce() throws Exception {
+    InputStream content =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {1, 2, 3}), 2L)
+            .get();
+    assertEquals(1, content.read());
+    byte[] bulk = new byte[4];
+    assertEquals(1, content.read(bulk, 1, 3));
+    assertEquals(2, bulk[1]);
+    assertEquals(0, content.read(bulk, 0, 0));
+    assertThrows(IOException.class, () -> content.read(bulk, 0, 1));
+
+    InputStream empty =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[0]), 1L).get();
+    assertEquals(0, empty.read(new byte[2], 0, 0));
+    assertThrows(IOException.class, () -> empty.read());
+
+    InputStream exact =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {7}), 1L).get();
+    assertEquals(7, exact.read());
+    assertEquals(-1, exact.read());
+
+    var again = StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {9}), 1L);
+    again.get();
+    IllegalStateException replay = assertThrows(IllegalStateException.class, again::get);
+    assertTrue(replay.getMessage().contains("already open"));
+  }
+
+  @Test
+  void rejectsUploadShorterOrLongerThanDeclaredLength() {
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    UncheckedIOException tooShort =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "short.bin",
+                    "application/octet-stream",
+                    8L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                    CANVAS));
+    assertTrue(tooShort.getCause().getMessage().contains("ended after"));
+    assertTrue(shortClosed.get());
+    assertEquals(null, uploadBody.get());
+
+    AtomicBoolean longClosed = new AtomicBoolean();
+    UncheckedIOException tooLong =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "long.bin",
+                    "application/octet-stream",
+                    2L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2, 3, 4}), longClosed),
+                    CANVAS));
+    assertTrue(tooLong.getCause().getMessage().contains("longer than declared"));
+    assertTrue(longClosed.get());
+    assertEquals(null, uploadBody.get());
+  }
+
+  @Test
+  void rejectsHeaderBreakingFilenameAndMediaType() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\"name.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\r\nname.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "clip.mp4",
+                "video/mp4\r\nX-Injected: 1",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+  }
+
+  @Test
+  void closesUploadStreamWhenReadFailsOrContentIsShorterThanDeclared() {
+    AtomicBoolean failedClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "broken.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new FailingInputStream(), failedClosed),
+                CANVAS));
+    assertTrue(failedClosed.get());
+
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "short.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                CANVAS));
+    assertTrue(shortClosed.get());
   }
 
   @Test
@@ -248,12 +464,96 @@ class StandardComfyuiClientTest {
   }
 
   private void upload(HttpExchange exchange) throws IOException {
-    String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-    if (body.contains("filename=\"../escape.mp4\"")) {
+    byte[] body = exchange.getRequestBody().readAllBytes();
+    uploadBody.set(body);
+    uploadContentLength.set(exchange.getRequestHeaders().getFirst("Content-Length"));
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    if (text.contains("filename=\"../escape.mp4\"")) {
       json(exchange, 400, "{\"error\":\"escape\"}");
       return;
     }
-    json(exchange, 200, uploadResponse.get());
+    json(exchange, uploadStatus.get(), uploadResponse.get());
+  }
+
+  private static InputStream tracking(InputStream content, AtomicBoolean closed) {
+    return new FilterInputStream(content) {
+      @Override
+      public void close() throws IOException {
+        closed.set(true);
+        super.close();
+      }
+
+      @Override
+      public int read() throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read();
+      }
+
+      @Override
+      public int read(byte[] buffer, int offset, int length) throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read(buffer, offset, length);
+      }
+    };
+  }
+
+  private static int indexOf(byte[] body, byte[] needle) {
+    for (int i = 0; i <= body.length - needle.length; i++) {
+      boolean matched = true;
+      for (int j = 0; j < needle.length; j++) {
+        if (body[i + j] != needle[j]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 每次最多读固定字节，迫使 HttpClient 分多次 request。 */
+  private static final class ChunkedInputStream extends InputStream {
+
+    private final byte[] payload;
+    private final int chunk;
+    private int offset;
+
+    private ChunkedInputStream(byte[] payload, int chunk) {
+      this.payload = payload;
+      this.chunk = chunk;
+    }
+
+    @Override
+    public int read(byte[] buffer, int off, int len) {
+      if (offset >= payload.length) {
+        return -1;
+      }
+      int count = Math.min(chunk, Math.min(len, payload.length - offset));
+      System.arraycopy(payload, offset, buffer, off, count);
+      offset += count;
+      return count;
+    }
+
+    @Override
+    public int read() {
+      byte[] one = new byte[1];
+      int read = read(one, 0, 1);
+      return read < 0 ? -1 : one[0] & 0xff;
+    }
+  }
+
+  private static final class FailingInputStream extends InputStream {
+
+    @Override
+    public int read() throws IOException {
+      throw new IOException("read failed");
+    }
   }
 
   private void view(HttpExchange exchange) throws IOException {
