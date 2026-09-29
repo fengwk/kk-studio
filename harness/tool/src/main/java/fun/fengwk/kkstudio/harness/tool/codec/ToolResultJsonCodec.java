@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -27,6 +28,8 @@ import java.util.Objects;
 /** 最终与部分 ToolResult 的严格持久化 codec。 */
 public final class ToolResultJsonCodec {
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final List<String> RESOURCE_BASE_FIELDS =
+      List.of("type", "uri", "mediaType", "name", "size", "sha256");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -117,6 +120,9 @@ public final class ToolResultJsonCodec {
       if (value.preview() != null) {
         generator.writeStringField("preview", value.preview());
       }
+      if (value.textMetadata() != null) {
+        writeTextMetadata(generator, value.textMetadata());
+      }
     } else {
       throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
     }
@@ -145,6 +151,14 @@ public final class ToolResultJsonCodec {
     } catch (JsonProcessingException exception) {
       throw new IllegalArgumentException(name + " is invalid JSON", exception);
     }
+  }
+
+  private static void writeTextMetadata(JsonGenerator generator, TextArtifactMetadata metadata)
+      throws IOException {
+    generator.writeObjectFieldStart("textMetadata");
+    generator.writeNumberField("totalBytes", metadata.totalBytes());
+    generator.writeNumberField("totalLines", metadata.totalLines());
+    generator.writeEndObject();
   }
 
   private static void writeNullableText(JsonGenerator generator, String name, String value)
@@ -206,6 +220,9 @@ public final class ToolResultJsonCodec {
       if (value.preview() != null) {
         node.put("preview", value.preview());
       }
+      if (value.textMetadata() != null) {
+        node.set("textMetadata", textMetadataNode(value.textMetadata()));
+      }
     } else {
       throw new IllegalArgumentException("unsupported tool content: " + content.getClass());
     }
@@ -229,11 +246,14 @@ public final class ToolResultJsonCodec {
         }
       }
       case "resource" -> {
+        List<String> names = new ArrayList<>(RESOURCE_BASE_FIELDS);
         if (node.has("preview")) {
-          requireFields(node, "type", "uri", "mediaType", "name", "size", "sha256", "preview");
-        } else {
-          requireFields(node, "type", "uri", "mediaType", "name", "size", "sha256");
+          names.add("preview");
         }
+        if (node.has("textMetadata")) {
+          names.add("textMetadata");
+        }
+        requireFields(node, names.toArray(String[]::new));
         JsonNode size = node.get("size");
         if (!size.isNull() && (!size.isIntegralNumber() || !size.canConvertToLong())) {
           throw new IllegalArgumentException("size must be an integer or null");
@@ -245,7 +265,8 @@ public final class ToolResultJsonCodec {
                 textOrNull(node, "name"),
                 size.isNull() ? null : size.longValue(),
                 textOrNull(node, "sha256")),
-            node.has("preview") ? textOrNull(node, "preview") : null);
+            node.has("preview") ? textOrNull(node, "preview") : null,
+            node.has("textMetadata") ? textMetadata(node.get("textMetadata")) : null);
       }
       default -> throw new IllegalArgumentException("unknown tool content type: " + type);
     };
@@ -306,6 +327,31 @@ public final class ToolResultJsonCodec {
       throw new IllegalArgumentException(name + " must be text or null");
     }
     return value.textValue();
+  }
+
+  private static ObjectNode textMetadataNode(TextArtifactMetadata metadata) {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    node.put("totalBytes", metadata.totalBytes());
+    node.put("totalLines", metadata.totalLines());
+    return node;
+  }
+
+  private static TextArtifactMetadata textMetadata(JsonNode value) {
+    ObjectNode node = requireObject(value, "textMetadata");
+    requireFields(node, "totalBytes", "totalLines");
+    return new TextArtifactMetadata(
+        nonNegativeLong(node, "totalBytes"), nonNegativeLong(node, "totalLines"));
+  }
+
+  private static long nonNegativeLong(ObjectNode node, String name) {
+    JsonNode value = node.get(name);
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0) {
+      throw new IllegalArgumentException(name + " must be a non-negative integer");
+    }
+    return value.longValue();
   }
 
   private static void putNullableText(ObjectNode node, String name, String value) {

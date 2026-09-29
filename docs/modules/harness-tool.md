@@ -46,7 +46,7 @@ ToolCall normalized = call.validateFor(descriptor);
 
 - [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `descriptor` / `visibility` 两个顶层字段，用于 durable 工具定义；任何旧 wire 的 `id` 字段都按未知字段拒绝，没有兼容读取路径；
 - [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`description`、`rendererKey`、`sideEffect`、`defaultTimeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
-- `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。
+- `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。Resource 的可选 `textMetadata`（`totalBytes` / `totalLines`）同时进入树编码、流式计数与解码；缺省时字段省略，解码结果仍为 null。Daemon 结果协议仍然拒绝该元数据，不因 durable codec 保留它而放宽。空白 descriptor JSON 与空白 input schema JSON 都抛 `IllegalArgumentException`，`null` 入参沿用原有的 `IllegalArgumentException` 契约。
 
 ## 源码与测试
 

@@ -65,6 +65,9 @@ public final class SchemaJsonCodec {
     } catch (JsonProcessingException error) {
       throw new IllegalArgumentException("malformed input schema JSON", error);
     }
+    if (root == null) {
+      throw new IllegalArgumentException("input schema JSON must not be empty");
+    }
     return decodeNode(root, "inputSchema");
   }
 
