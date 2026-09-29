@@ -146,8 +146,10 @@ sequenceDiagram
 - Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag：Model
   checkpoint 可在同一 version 内推进，因此同 version 的权威回读仍参与对账。
 - `realtime` 没有 cursor，只承载 `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
-  `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；tool
-  partial 按 `thread:invocation:attempt` 做有界精确去重。
+  `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；tool partial
+  必须携带生产端逐条生成、重投递复用的 canonical UUID `eventId`，普通 partial 按
+  `thread:invocation:attempt` 内的 `eventId` 做有界（256）精确去重，`process.output`
+  仍按 offset 去重。
 - delta 即时归约进 refs，使 sequence 连续性、缺口检测和去重不依赖 React 刷新时机；
   模型/工具 overlay 的发布合并到单个 `requestAnimationFrame`，每帧发布当前累积内容，
   不做字符级缓动或打字机延时。
