@@ -23,6 +23,8 @@ vi.mock('@/shared/app-events', () => ({
   ApplicationEventProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
+let capturedOnStop: (() => Promise<void> | void) | undefined
+
 vi.mock('@/features/ai/runtime/AgentPane', () => ({
   AgentPane: ({
     owner,
@@ -38,22 +40,25 @@ vi.mock('@/features/ai/runtime/AgentPane', () => ({
     }
     onSubmitInstruction?: (text: string) => Promise<void> | void
     onStop?: () => Promise<void> | void
-  }) => (
-    <div data-testid="controlled-agent-pane" data-owner={JSON.stringify(owner)}>
-      <span data-testid="capabilities-switch-agent">{String(capabilities?.allowSwitchAgent)}</span>
-      <span data-testid="capabilities-branching">{String(capabilities?.allowBranching)}</span>
-      <span data-testid="capabilities-chat">{String(capabilities?.allowGenericChat)}</span>
-      <button data-testid="pane-submit-instruction" onClick={() => void Promise.resolve(onSubmitInstruction?.('Please investigate test')).catch(() => {})}>
-        Send Instruction
-      </button>
-      <button data-testid="pane-submit-instruction-alt" onClick={() => void Promise.resolve(onSubmitInstruction?.('Different instruction content')).catch(() => {})}>
-        Send Alt Instruction
-      </button>
-      <button data-testid="pane-stop-action" onClick={() => void Promise.resolve(onStop?.()).catch(() => {})}>
-        Stop Run
-      </button>
-    </div>
-  ),
+  }) => {
+    capturedOnStop = onStop
+    return (
+      <div data-testid="controlled-agent-pane" data-owner={JSON.stringify(owner)}>
+        <span data-testid="capabilities-switch-agent">{String(capabilities?.allowSwitchAgent)}</span>
+        <span data-testid="capabilities-branching">{String(capabilities?.allowBranching)}</span>
+        <span data-testid="capabilities-chat">{String(capabilities?.allowGenericChat)}</span>
+        <button data-testid="pane-submit-instruction" onClick={() => void Promise.resolve(onSubmitInstruction?.('Please investigate test')).catch(() => {})}>
+          Send Instruction
+        </button>
+        <button data-testid="pane-submit-instruction-alt" onClick={() => void Promise.resolve(onSubmitInstruction?.('Different instruction content')).catch(() => {})}>
+          Send Alt Instruction
+        </button>
+        <button data-testid="pane-stop-action" onClick={() => void Promise.resolve(onStop?.()).catch(() => {})}>
+          Stop Run
+        </button>
+      </div>
+    )
+  },
 }))
 
 function renderPage(ui: React.ReactElement, client?: QueryClient, initialEntries: string[] = ['/']) {
@@ -637,8 +642,8 @@ describe('ProjectDetailPage', () => {
     clearPendingAction(targetIssue.id)
   })
 
-  it('I07: AgentPane.onStop 快速双击连点进行 single-flight 保护，仅触发一次 API', async () => {
-    // 测试意图：验证用户在 Agent 视图中快速双击停止按钮时，inflight 锁生效阻断第二次点击，确保同一执行在途时仅发起单次 API 调用
+  it('I07: AgentPane.onStop 快速双击连点进行 single-flight 保护，仅触发一次 API 且第二个 promise reject', async () => {
+    // 测试意图：验证用户在 Agent 视图中触发停止时，inflight 锁生效阻断并发重复调用；第二个并发调用 promise reject 抛出受控错误，确保同一执行在途时仅发起单次 API 调用
     const targetIssue = mockSnapshot.issues[0].issue
     clearPendingAction(targetIssue.id)
 
@@ -660,18 +665,19 @@ describe('ProjectDetailPage', () => {
     )
 
     await screen.findByTestId('controlled-agent-pane')
-    const stopBtn = screen.getByTestId('pane-stop-action')
+    expect(capturedOnStop).toBeDefined()
 
-    // 快速双击连点
-    fireEvent.click(stopBtn)
-    fireEvent.click(stopBtn)
+    // 1. 测试直接并发调用 onStop：第一个处于执行在途，第二个被 inflight 锁拦截并 reject
+    const p1 = capturedOnStop?.()
+    const p2 = capturedOnStop?.()
 
+    await expect(p2).rejects.toThrow('终止 Issue 失败')
     expect(stopMock).toHaveBeenCalledTimes(1)
 
+    // 完成首个在途调用
     resolveStop()
-    await waitFor(() => {
-      expect(stopMock).toHaveBeenCalledTimes(1)
-    })
+    await p1
+    expect(stopMock).toHaveBeenCalledTimes(1)
 
     clearPendingAction(targetIssue.id)
   })
