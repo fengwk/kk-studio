@@ -31,8 +31,8 @@ public interface StorageUploadService {
   StorageUploadDTO complete(UUID uploadId);
 
   /**
-   * 服务端有界 spool 输入流并准备一个可消费的 READY upload。调用前不得存在活动事务；实现先以独立短事务登记 PENDING
-   * candidate，再在事务外执行对象写入、媒体探针与复制，最后以短事务完成去重绑定。输入流由调用方关闭。
+   * 服务端有界 spool 输入流并准备一个可消费的 READY upload。调用前不得存在活动事务；实现先在 upload 操作锁内以独立短事务登记 PENDING
+   * candidate，再在事务外执行对象写入、媒体探针与复制，最后以短事务完成去重绑定（登记失败在写入任何对象之前直接上抛，不做对象清理）。输入流由调用方关闭。
    *
    * @param maxBytes 允许的最大字节数
    */
