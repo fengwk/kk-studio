@@ -59,14 +59,13 @@ final class IssueActivityIdempotency {
   }
 
   /**
-   * owner 锁内的 receipt 判定。
+   * owner 锁之后的 receipt 判定。
    *
-   * <p>必须使用 {@link IssueActivityRepository#findByIdempotencyKeyForUpdate}：它把 Issue 行锁和活动读取放在同一条语句，
-   * 避免锁等待期间提交的 receipt 被当前事务的旧快照漏掉。
+   * <p>必须在单独的行锁语句提交等待并返回之后调用。随后这次查询拿到新的 READ COMMITTED 快照，并绕过锁前查询留下的 MyBatis 一级缓存。
    */
   static IssueActivity findAppliedUnderLock(
       IssueActivityRepository repository, UUID issueId, Identity identity) {
-    return match(repository.findByIdempotencyKeyForUpdate(issueId, identity.key()), identity);
+    return match(repository.findByIdempotencyKeyUnderLock(issueId, identity.key()), identity);
   }
 
   private static IssueActivity match(IssueActivity existing, Identity identity) {

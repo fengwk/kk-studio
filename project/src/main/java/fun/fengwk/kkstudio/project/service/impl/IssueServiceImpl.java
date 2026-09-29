@@ -208,10 +208,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     appendActivity(
         locked.issue(),
@@ -241,10 +242,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {
@@ -304,10 +306,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
@@ -339,10 +342,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     Issue issue = locked.issue();
     if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
@@ -384,10 +388,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     ObjectNode data = objectMapper.createObjectNode();
     data.put("action", "PAUSE");
@@ -407,10 +412,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
@@ -444,10 +450,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun == null) {
@@ -493,10 +500,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (!PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
       throw new ProjectValidationException(
@@ -552,10 +560,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
@@ -593,10 +602,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getIssue(issueId);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return locked.issue();
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
@@ -663,10 +673,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     ProjectStateCode code = ProjectStateCode.of(state);
     IssueStageBudget authorized =
@@ -707,10 +718,11 @@ public class IssueServiceImpl implements IssueService {
     if (replayed(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
-    Locked locked = lockOwner(issueId, false);
+    Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
       return getStageBudget(issueId, state);
     }
+    requireMutable(locked, false);
     requireVersion(locked, expectedVersion);
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new ProjectValidationException(
@@ -852,13 +864,18 @@ public class IssueServiceImpl implements IssueService {
    * <p>没有活动 receipt 的写路径使用本方法。带请求键的路径必须先 {@link #lockOwner}，在锁内查 receipt，再做版本校验。
    */
   private Locked lock(UUID issueId, long expectedVersion, boolean allowArchivedIssue) {
-    Locked locked = lockOwner(issueId, allowArchivedIssue);
+    Locked locked = lockOwner(issueId);
+    requireMutable(locked, allowArchivedIssue);
     requireVersion(locked, expectedVersion);
     return locked;
   }
 
-  /** 只取得 owner 锁与归属校验，把 receipt 与版本判定留给调用方按固定顺序完成。 */
-  private Locked lockOwner(UUID issueId, boolean allowArchivedIssue) {
+  /**
+   * 只取得 owner 锁与归属校验。
+   *
+   * <p>归档只拒绝首次写入。带 receipt 的路径必须先重放，再调用 {@link #requireMutable}。
+   */
+  private Locked lockOwner(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
     Issue initial = issueRepository.getById(issueId);
     if (initial == null) {
@@ -868,10 +885,6 @@ public class IssueServiceImpl implements IssueService {
     if (project == null) {
       throw new ProjectNotFoundException("project");
     }
-    if (project.isArchived()) {
-      throw new ProjectValidationException(
-          "project", "Cannot modify an issue in an archived project");
-    }
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new ProjectNotFoundException("issue");
@@ -879,10 +892,22 @@ public class IssueServiceImpl implements IssueService {
     if (!issue.getProjectId().equals(project.getId())) {
       throw new ProjectValidationException("issue", "Issue hierarchy is inconsistent");
     }
-    if (issue.isArchived() && !allowArchivedIssue) {
+    return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
+  }
+
+  /** 首次写入前的归档门禁：项目与 Issue 都已归档时拒绝；精确重放不经过这里。 */
+  private static void requireMutable(Locked locked, boolean allowArchivedIssue) {
+    requireProjectMutable(locked);
+    if (locked.issue().isArchived() && !allowArchivedIssue) {
       throw new ProjectValidationException("issue", "Cannot modify an archived issue");
     }
-    return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
+  }
+
+  private static void requireProjectMutable(Locked locked) {
+    if (locked.project().isArchived()) {
+      throw new ProjectValidationException(
+          "project", "Cannot modify an issue in an archived project");
+    }
   }
 
   private void requireVersion(Locked locked, long expectedVersion) {

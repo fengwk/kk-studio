@@ -18,11 +18,12 @@ public interface IssueActivityRepository {
   IssueActivity findByIdempotencyKey(UUID issueId, String idempotencyKey);
 
   /**
-   * 在已经持有 Issue 行锁的同一语句中读取 receipt。
+   * 调用方已经取得 Issue 行锁之后再读 receipt。
    *
-   * <p>单独的后续查询在 READ COMMITTED 下仍可能使用锁等待开始前的快照，从而漏看等待期间提交的活动。
+   * <p>这是锁语句之后的另一次查询：READ COMMITTED 会使用新的语句快照，因此能看见锁等待期间提交的活动。实现必须绕过 MyBatis 一级缓存，避免锁前的 negative
+   * cache 把这次读取短路。
    */
-  IssueActivity findByIdempotencyKeyForUpdate(UUID issueId, String idempotencyKey);
+  IssueActivity findByIdempotencyKeyUnderLock(UUID issueId, String idempotencyKey);
 
   List<IssueActivity> listByIssueId(UUID issueId);
 
