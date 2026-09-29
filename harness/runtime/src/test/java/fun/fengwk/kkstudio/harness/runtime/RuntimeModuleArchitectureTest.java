@@ -151,6 +151,8 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
             "fun.fengwk.kk-studio:kk-studio-harness-mcp",
+            "net.java.dev.jna:jna",
+            "net.java.dev.jna:jna-platform",
             "org.eclipse.lsp4j:org.eclipse.lsp4j",
             "org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc",
             "org.eclipse.jgit:org.eclipse.jgit"));
