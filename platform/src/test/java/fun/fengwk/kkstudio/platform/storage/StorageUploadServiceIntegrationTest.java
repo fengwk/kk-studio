@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -22,13 +25,17 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
@@ -36,6 +43,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
@@ -61,6 +69,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 全局 Blob 存储上传契约的 PostgreSQL 集成测试（内存 S3 假件）。
@@ -95,6 +104,8 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   // 本类显式驱动 expireOnce，禁用会异步消费相同 cleanup rows 的后台 maintenance。
   @MockitoBean private StorageMaintenance storageMaintenance;
   @MockitoBean private StorageBlobPreviewService blobPreviewService;
+  // 用于在「行登记」与「写窗口」之间的精确窗口上做确定性交错（默认透传真实实现，每个测试后由 Spring 重置）。
+  @MockitoSpyBean private StorageUploadRepository uploadRepository;
 
   private TransactionTemplate tx;
 
@@ -166,6 +177,126 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
     assertNotNull(staged.blobId());
     assertFalse(observed.isEmpty());
+  }
+
+  /**
+   * 测试意图：stage 的写窗口锁必须早于 upload 行登记 —— 用 spied repository 把线程停在「行已提交、写窗口还没开始」的 精确窗口（修复前 GC
+   * 正是从这里抢先删掉锚点）：登记语句执行时锁已持有，登记提交后立刻把行改成过期事实并触发后台回收， 回收必须整轮跳过该行且不产生任何对象删除，随后 stage 仍能正常完成。
+   */
+  @Test
+  void stageRegistersTheUploadRowInsideTheOperationLock() throws Exception {
+    CountDownLatch registered = new CountDownLatch(1);
+    CountDownLatch resume = new CountDownLatch(1);
+    AtomicBoolean lockHeldBeforeRegistration = new AtomicBoolean();
+    doAnswer(
+            invocation -> {
+              StorageUpload row = invocation.getArgument(0);
+              try (StorageUploadOperationLock.Handle probe =
+                  storageUploadOperationLock.tryAcquire(row.getId())) {
+                lockHeldBeforeRegistration.set(probe == null);
+              }
+              Object inserted = invocation.callRealMethod();
+              TransactionSynchronizationManager.registerSynchronization(
+                  new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                      registered.countDown();
+                      awaitQuietly(resume);
+                    }
+                  });
+              return inserted;
+            })
+        .when(uploadRepository)
+        .insert(any());
+
+    byte[] content = "staged-lock-window".getBytes(StandardCharsets.UTF_8);
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<StorageUploadService.StagedUpload> staged =
+          executor.submit(
+              () ->
+                  storageUploadService.stage(
+                      "window.bin",
+                      "application/octet-stream",
+                      new ByteArrayInputStream(content),
+                      content.length));
+      assertTrue(
+          registered.await(30, TimeUnit.SECONDS),
+          "stage must register the row before the object write window");
+      assertTrue(
+          lockHeldBeforeRegistration.get(),
+          "the upload lock must already be held before the row is registered");
+      UUID uploadId = jdbc.queryForObject("select id from storage_upload", UUID.class);
+      // 行登记刚提交：写窗口仍持有锁，后台清理拿到候选也必须跳过。
+      assertNull(
+          storageUploadOperationLock.tryAcquire(uploadId),
+          "the registered row must already be protected by the upload lock");
+      backdateUpload(uploadId.toString());
+
+      assertEquals(0, storageUploadService.expireOnce(), "a lock-busy upload must be skipped");
+      assertEquals(
+          1,
+          jdbc.queryForObject(
+              "select count(*) from storage_upload where id = ?", Integer.class, uploadId),
+          "the registered anchor row must survive");
+      assertNull(
+          jdbc.queryForObject(
+              "select cleanup_token from storage_upload where id = ?", String.class, uploadId),
+          "a skipped upload must not be claimed");
+      assertTrue(
+          s3Storage.networkCalls().stream()
+              .noneMatch(call -> "deleteObject".equals(call.operation())),
+          "a skipped cleanup must not delete any object");
+
+      resume.countDown();
+      ExecutionException failure =
+          assertThrows(
+              ExecutionException.class,
+              () -> staged.get(30, TimeUnit.SECONDS),
+              "an upload that expired while its write window was open must fail closed");
+      assertInstanceOf(StorageVerificationException.class, failure.getCause());
+
+      // 写窗口结束后：失败只留下耐久锚点（行 + 已 PUT 的临时对象），清理仍由后台在锁内完成。
+      assertEquals(
+          uploadId,
+          jdbc.queryForObject("select id from storage_upload", UUID.class),
+          "a failed stage must leave the registered row as the durable anchor");
+      assertEquals(
+          1,
+          storageUploadService.expireOnce(),
+          "the failed stage must leave exactly one durable cleanup candidate");
+    } finally {
+      executor.shutdownNow();
+    }
+
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_blob", Integer.class));
+    assertEquals(0, s3Storage.objectCount(), "no temp or candidate object may be orphaned");
+    assertNoActiveBlobReferencesMissingObject();
+  }
+
+  /** 测试意图：行登记失败必须直接上抛且不触发任何对象 I/O —— 失败发生在写入任何对象之前，此时既没有需要清理的对象，也不该 按异常分支去删除确定性对象键。 */
+  @Test
+  void stageRegistrationFailureDoesNotRunObjectCleanup() {
+    doReturn(false).when(uploadRepository).insert(any());
+    byte[] content = "registration-failure".getBytes(StandardCharsets.UTF_8);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                storageUploadService.stage(
+                    "register-fails.bin",
+                    "application/octet-stream",
+                    new ByteArrayInputStream(content),
+                    content.length));
+
+    assertTrue(failure.getMessage().contains("insert storage upload failed"));
+    assertEquals(
+        List.of(),
+        s3Storage.networkCalls(),
+        "no object I/O may happen when the row registration fails");
+    assertEquals(0, jdbc.queryForObject("select count(*) from storage_upload", Integer.class));
   }
 
   @Test
