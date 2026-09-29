@@ -509,7 +509,7 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
   })
 
-  it('deduplicates exact TOOL_PARTIAL redelivery and resets fingerprints on attempt change', async () => {
+  it('deduplicates exact TOOL_PARTIAL redelivery by eventId and resets seen eventIds on attempt change', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
@@ -545,8 +545,8 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('onetwo'),
     )
 
-    // attempt 变化会重置指纹范围：旧 attempt 事件的重投递被忽略，
-    // 而新 attempt 上相同文本的事件是新块。
+    // attempt 变化会重置已见 eventId 范围：旧 attempt 事件的重投递被忽略，
+    // 而新 attempt 上的事件是新块。
     rerender({ invocations: [{ ...active, attempt: 2 }] })
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.attempt).toBe(2),
@@ -561,7 +561,7 @@ describe('useHarnessThreadRealtime', () => {
     )
   })
 
-  it('evicts only the oldest TOOL_PARTIAL fingerprint at the capacity boundary (FIFO)', async () => {
+  it('evicts only the oldest TOOL_PARTIAL eventId at the capacity boundary (FIFO)', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const active: ToolInvocationDTO = {
       id: 'inv-tool-1',
@@ -584,7 +584,7 @@ describe('useHarnessThreadRealtime', () => {
     const { result, sockets } = renderRealtime(client, { invocations: [active] })
     sockets.openLatest()
 
-    // 256 个不同块恰好填满指纹集合；第 257 个只淘汰最旧的一个。
+    // 256 个不同 eventId 恰好填满已见集合；第 257 个只淘汰最旧的一个。
     for (let i = 0; i < 257; i++) {
       emitRealtime(sockets, toolPartial(`chunk-${i}`))
     }
@@ -594,18 +594,74 @@ describe('useHarnessThreadRealtime', () => {
     const textAfterFill = result.current?.toolStreams.get('inv-tool-1')?.text
     expect(textAfterFill?.length ?? 0).toBeGreaterThan(0)
 
-    // 最近块的重新投递必须被去重。整体 clear() 会忘记
-    // 一切并再次追加；FIFO 保留最近 N 个指纹。
+    // 最近事件（同一 eventId）的重新投递必须被去重。整体 clear() 会忘记
+    // 一切并再次追加；FIFO 保留最近 N 个 eventId。
     emitRealtime(sockets, toolPartial('chunk-256'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(textAfterFill),
     )
 
-    // 最旧的块已被淘汰：它的重投递再次成为新块（有界内存，
+    // 最旧的 eventId 已被淘汰：它的重投递再次成为新块（有界内存，
     // 只有最近 N 个受保护）。
     emitRealtime(sockets, toolPartial('chunk-0'))
     await waitFor(() =>
       expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(`${textAfterFill}chunk-0`),
+    )
+  })
+
+  it('appends same-millisecond identical-payload partials by eventId and ignores non-canonical eventIds', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const active: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      callIndex: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'web-search',
+      rendererKey: 'web-search',
+      environment: null,
+      argumentsJson: '{}',
+      approvalJson: null,
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
+
+    // 同一 createdAt、同一 payload，但 eventId 不同：这是两条独立进度，必须各追加一次
+    // （旧实现按 createdAt+payload 指纹去重会把第二条吞掉）。
+    emitRealtime(sockets, toolPartial('same', 'inv-tool-1', 1, '11111111-1111-4111-8111-111111111111'))
+    emitRealtime(sockets, toolPartial('same', 'inv-tool-1', 1, '22222222-2222-4222-8222-222222222222'))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('samesame'),
+    )
+
+    // 同一 eventId 的事件重投递只追加一次。
+    const redelivered = toolPartial(
+      'same',
+      'inv-tool-1',
+      1,
+      '33333333-3333-4333-8333-333333333333',
+    )
+    emitRealtime(sockets, redelivered)
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('samesamesame'),
+    )
+    emitRealtime(sockets, redelivered)
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('samesamesame'),
+    )
+
+    // 空 eventId 与非 canonical eventId 的 partial 一律被拒绝：只保留后续合法事件。
+    emitRealtime(sockets, toolPartial('bad', 'inv-tool-1', 1, ''))
+    emitRealtime(sockets, toolPartial('bad', 'inv-tool-1', 1, 'not-a-uuid'))
+    emitRealtime(sockets, toolPartial('ok', 'inv-tool-1', 1, '44444444-4444-4444-8444-444444444444'))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('samesamesameok'),
     )
   })
 
@@ -1597,6 +1653,7 @@ function toolProcessOutputPartial(
     subjectKind: 'TOOL_INVOCATION',
     subjectId: invocationId,
     attempt,
+    eventId: partialEventId(`${mode}:${startOffset}:${endOffset}:${observedBytes}:${text}`),
     type: 'TOOL_PARTIAL',
     payload: {
       toolCallId: 'call-1',
@@ -1666,12 +1723,38 @@ function modelAttemptFailure(
   }
 }
 
-function toolPartial(text: string, invocationId = 'inv-tool-1', attempt = 1) {
+function toolPartial(
+  text: string,
+  invocationId = 'inv-tool-1',
+  attempt = 1,
+  eventId = partialEventId(text),
+) {
   return JSON.stringify({
     threadId: THREAD_ID, subjectKind: 'TOOL_INVOCATION', subjectId: invocationId, attempt,
+    eventId,
     type: 'TOOL_PARTIAL', payload: { toolCallId: 'call-1', contents: [{ type: 'text', text }], error: null, details: null },
     createdAt: '2026-01-01T00:00:00Z',
   })
+}
+
+/**
+ * 由 partial 内容确定性地派生 canonical UUID：同一内容反复构造出同一条事件（重投递语义），
+ * 不同内容得到不同 eventId。需要精确控制 identity 的用例显式传入 eventId。
+ */
+function partialEventId(text: string): string {
+  const hex = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b]
+    .map((seed) => hash32(`${seed}:${text}`).toString(16).padStart(8, '0'))
+    .join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+}
+
+function hash32(value: string): number {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash >>> 0
 }
 
 function modelInvocation(
