@@ -175,7 +175,7 @@ Branch HEAD 永远不能替代调用参数中的 exact commit。
 退化成「没有范围的直接执行」。**收敛没有被内核或 Job 确认时本次调用显式失败**（不会报告成自然退出），调用方据此知道可能仍有
 进程在运行。
 
-跨平台的收敛事实不依赖任何平台的 shell：验收测试 [`ProcessScopeCrossPlatformTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeCrossPlatformTest.java) 用只依赖 JDK 的夹具 [`ProcessScopeFixtureMain`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeFixtureMain.java) 作为「用户命令」运行，再由它派生子 JVM（含两层嵌套），子进程把自己写下的原生 pid 作为「真的运行过」的事实。因此「根进程自然退出后活着的子进程已在范围完结时消失」「终止覆盖孙进程」「许可之前的取消没有任何副作用」三条事实在 Linux/macOS/Windows 上都由真实进程断言，CI 矩阵（`.github/workflows/process-scope.yml`）还会断言这组用例在每台 runner 上都被真正执行、一个都不跳过。
+跨平台的收敛事实不依赖任何平台的 shell：验收测试 [`ProcessScopeCrossPlatformTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeCrossPlatformTest.java) 用只依赖 JDK 的夹具 [`ProcessScopeFixtureMain`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeFixtureMain.java) 作为「用户命令」运行，再由它派生子 JVM（含两层嵌套），子进程把自己写下的原生 pid 作为「真的运行过」的事实，自然退出的两种夹具还要等用例写下出口许可（捕获模式用许可文件——命令的 stdin 是一条已关闭的空管道；双向模式用 stdin 上的一个字节）之后才返回，用例因此能在根进程退出之前确认子进程仍然存活，而不是与收敛抢时间：没有许可时，快机器完全可能在用例读到 pid 之前就已经把整组收敛干净，那是正确行为，却会让活前置条件随机失败。因此「根进程自然退出后活着的子进程已在范围完结时消失」「终止覆盖孙进程」「许可之前的取消没有任何副作用」三条事实在 Linux/macOS/Windows 上都由真实进程断言，CI 矩阵（`.github/workflows/process-scope.yml`）还会断言这组用例在每台 runner 上都被真正执行、一个都不跳过。
 
 **Windows 上的两个环境事实**：{@code bash} 的解析遵循 {@code CreateProcess} 的搜索顺序，系统目录先于 `PATH`，因此系统里存在 WSL 时裸名 `bash` 会命中 `System32\bash.exe`（无发行版，直接以退出码 1 结束）——需要 Git Bash 时必须由 operator 用 `--bash-executable` 指向它；命令进程在 Windows 上先创建后归属，命令不存在因此表现为范围建立失败（POSIX 上则表现为范围内的启动失败），两条去向都是失败关闭并带上命令名。
 
