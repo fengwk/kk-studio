@@ -224,4 +224,70 @@ public interface PluginCredentialMapper extends BaseMapper {
       @Param("leaseToken") String leaseToken,
       @Param("version") long version,
       @Param("now") Instant now);
+
+  /**
+   * 发请求前的所有权核验：token、version 与未过期截止时刻必须同时成立。
+   *
+   * <p>它是只读查询，因此必须显式 {@code flushCache}：同一 session 刚 claim 或刚被其它语句改写后，不能读到过期的一级缓存。
+   */
+  @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
+  @Select(
+      """
+      select count(*)
+      from plugin_credential
+      where plugin_id = #{pluginId}
+        and refresh_lease_token = #{leaseToken}
+        and version = #{version}
+        and refresh_lease_until > #{now}
+      """)
+  int countOwnedUnexpiredLease(
+      @Param("pluginId") String pluginId,
+      @Param("leaseToken") String leaseToken,
+      @Param("version") long version,
+      @Param("now") Instant now);
+
+  /**
+   * 已安装 Plugin 中最早的可调度刷新时刻；没有可调度行时返回空。
+   *
+   * <p>在途且尚未到期的 lease 不属于本节点可调度集合，避免把别人的截止时刻当成自己的下一次扫描。
+   */
+  @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
+  @Select(
+      """
+      <script>
+      select min(next_refresh_at)
+      from plugin_credential
+      where plugin_id in
+          <foreach item="pluginId" collection="pluginIds" open="(" separator="," close=")">
+              #{pluginId}
+          </foreach>
+        and status in ('CONNECTED', 'REFRESH_FAILED')
+        and (refresh_lease_token is null or refresh_lease_until &lt;= #{now})
+      </script>
+      """)
+  Instant earliestRefreshAt(@Param("pluginIds") List<String> pluginIds, @Param("now") Instant now);
+
+  /**
+   * 作废本次已用凭据：version 或原始密文任一匹配即可，但两者都不再匹配时必须是 0 行。
+   *
+   * <p>重新登录会同时推进 version 并替换密文，因此这条 CAS 不会把新 token 标成 {@code REAUTH_REQUIRED}。
+   */
+  @Update(
+      """
+      update plugin_credential
+      set status = 'REAUTH_REQUIRED',
+          last_refresh_error = #{error},
+          refresh_lease_token = null,
+          refresh_lease_until = null,
+          version = version + 1,
+          update_time = #{now}
+      where plugin_id = #{pluginId}
+        and (version = #{version} or encrypted_payload = #{encryptedPayload})
+      """)
+  int rejectUsedCredential(
+      @Param("pluginId") String pluginId,
+      @Param("version") long version,
+      @Param("encryptedPayload") byte[] encryptedPayload,
+      @Param("error") String error,
+      @Param("now") Instant now);
 }

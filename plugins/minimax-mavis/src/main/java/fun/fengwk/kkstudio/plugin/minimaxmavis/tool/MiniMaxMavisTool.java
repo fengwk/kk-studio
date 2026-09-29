@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
+import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisAuthException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapabilityCatalog;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisClient;
@@ -230,7 +231,9 @@ public final class MiniMaxMavisTool implements Tool {
     return new ToolExecutionHandle() {
       @Override
       public void cancel() {
-        worker.cancel(true);
+        if (completed.compareAndSet(false, true)) {
+          worker.cancel(true);
+        }
       }
 
       @Override
@@ -287,7 +290,13 @@ public final class MiniMaxMavisTool implements Tool {
     PluginCredentialSnapshot snapshot = credentialStore.resolve(MiniMaxMavisPlugin.PLUGIN_ID);
     MavisCredential credential = toCredential(snapshot);
 
-    MavisCapabilityCatalog catalog = capabilityCache.catalog(credential);
+    MavisCapabilityCatalog catalog;
+    try {
+      catalog = capabilityCache.catalog(credential);
+    } catch (MavisAuthException rejected) {
+      rejectUsed(snapshot);
+      throw rejected;
+    }
     if (!catalog.supports(capability)) {
       return errorResult(
           toolCallId,
@@ -295,7 +304,13 @@ public final class MiniMaxMavisTool implements Tool {
           "the MiniMax Mavis gateway no longer offers " + capability.endpoint());
     }
 
-    JsonNode payload = client.invoke(credential, capability, arguments);
+    JsonNode payload;
+    try {
+      payload = client.invoke(credential, capability, arguments);
+    } catch (MavisAuthException rejected) {
+      rejectUsed(snapshot);
+      throw rejected;
+    }
     if (stagesMedia(capability)) {
       List<ResourceRef> staged = resourceAccess.stageOutputs(payload, capability, toolCallId);
       if (!staged.isEmpty()) {
@@ -303,6 +318,19 @@ public final class MiniMaxMavisTool implements Tool {
       }
     }
     return jsonResult(toolCallId, payload);
+  }
+
+  /**
+   * 确定性认证拒绝只作废本次已用凭据。
+   *
+   * <p>作废失败（并发重新登录已经换了 token）不影响本次调用的错误结果，且不得把秘密写进日志。
+   */
+  private void rejectUsed(PluginCredentialSnapshot snapshot) {
+    try {
+      credentialStore.rejectUsed(snapshot, MavisAuthException.REJECTED_MESSAGE);
+    } catch (RuntimeException error) {
+      log.debug("Cannot mark the rejected MiniMax Mavis credential for re-authentication");
+    }
   }
 
   private MavisCredential toCredential(PluginCredentialSnapshot snapshot) {

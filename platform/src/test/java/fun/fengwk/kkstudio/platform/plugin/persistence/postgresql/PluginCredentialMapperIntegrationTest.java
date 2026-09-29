@@ -1053,4 +1053,144 @@ class PluginCredentialMapperIntegrationTest {
     assertEquals(validMaxError, updated.lastRefreshError());
     assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated.status());
   }
+
+  /** 测试意图 11：发请求前的租约核验必须同时要求 token、version 与未过期截止时刻；任一不符都必须返回 false，调用方据此取消外呼。 */
+  @Test
+  void ownsUnexpiredLease_ShouldRequireTokenVersionAndUnexpiredDeadline() {
+    Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
+    String pluginId = "plugin-lease-ownership";
+    assertTrue(
+        repository.upsert(
+            createSampleRow(pluginId, PluginCredentialStatus.CONNECTED, now.minusSeconds(1), now)));
+
+    List<PluginCredentialRow> claimed =
+        repository.claimDue(List.of(pluginId), now, now.plusSeconds(60), "lease-token", 1);
+    assertEquals(1, claimed.size());
+    long version = claimed.get(0).version();
+
+    assertTrue(repository.ownsUnexpiredLease(pluginId, "lease-token", version, now));
+    assertFalse(
+        repository.ownsUnexpiredLease(pluginId, "another-token", version, now),
+        "a foreign lease token must never look owned");
+    assertFalse(
+        repository.ownsUnexpiredLease(pluginId, "lease-token", version + 1, now),
+        "a stale version must never look owned");
+    assertFalse(
+        repository.ownsUnexpiredLease(pluginId, "lease-token", version, now.plusSeconds(60)),
+        "an expired deadline must never look owned");
+    assertFalse(repository.ownsUnexpiredLease("plugin-absent", "lease-token", version, now));
+  }
+
+  /** 测试意图 12：下一次扫描时刻必须来自未被在途租约占用的可调度行，且只考虑 CONNECTED / REFRESH_FAILED。 */
+  @Test
+  void earliestRefreshAt_ShouldIgnoreLeasedAndNonSchedulableRows() {
+    Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
+    String dueSoon = "plugin-earliest-a";
+    String leased = "plugin-earliest-b";
+    String needsLogin = "plugin-earliest-c";
+    assertTrue(
+        repository.upsert(
+            createSampleRow(dueSoon, PluginCredentialStatus.CONNECTED, now.plusSeconds(60), now)));
+    assertTrue(
+        repository.upsert(
+            createSampleRow(leased, PluginCredentialStatus.CONNECTED, now.minusSeconds(5), now)));
+    assertTrue(
+        repository.upsert(
+            createSampleRow(
+                needsLogin, PluginCredentialStatus.REAUTH_REQUIRED, now.plusSeconds(1), now)));
+
+    // 已经到期并被领取，因此处于「在途未过期租约」状态。
+    assertEquals(
+        1,
+        repository.claimDue(List.of(leased), now, now.plusSeconds(300), "lease-token", 1).size());
+
+    assertEquals(
+        Optional.of(now.plusSeconds(60)),
+        repository.earliestRefreshAt(List.of(dueSoon, leased, needsLogin), now),
+        "leased and non-schedulable rows must not decide the next scan time");
+    assertEquals(Optional.empty(), repository.earliestRefreshAt(List.of(leased), now));
+    assertEquals(Optional.empty(), repository.earliestRefreshAt(List.of(), now));
+
+    // 租约过期后该行重新可调度，且它是唯一一行，因此重新成为最早到期时刻。
+    Instant afterLease = now.plusSeconds(301);
+    assertEquals(
+        Optional.of(now.minusSeconds(5)),
+        repository.earliestRefreshAt(List.of(leased), afterLease));
+  }
+
+  /** 测试意图 13：调用期认证拒绝按 version 或原始密文 CAS 作废本行；并发重新登录写入的新 version 与新密文都必须逃过这次作废。 */
+  @Test
+  void rejectUsedCredential_ShouldMatchVersionOrCiphertextAndSpareConcurrentRelogin() {
+    Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
+    String byVersion = "plugin-reject-version";
+    String byCiphertext = "plugin-reject-ciphertext";
+    String relogged = "plugin-reject-relogged";
+    byte[] used = {0x11, 0x22, 0x33};
+    byte[] fresh = {0x44, 0x55, 0x66};
+    byte[] unrelated = {0x2a, 0x2b};
+
+    // 1. version 匹配：在途 claim 已把 version 推进到 1，密文虽然换了参数也必须作废。
+    assertTrue(repository.upsert(rowWithPayload(byVersion, used, now)));
+    List<PluginCredentialRow> claimed =
+        repository.claimDue(List.of(byVersion), now, now.plusSeconds(60), "lease-token", 1);
+    assertEquals(1, claimed.size());
+    assertEquals(1L, claimed.get(0).version());
+    assertTrue(
+        repository.rejectUsedCredential(
+            byVersion, 1L, unrelated, "provider rejected the access token", now),
+        "an advanced version must be invalidated even when the ciphertext argument differs");
+    PluginCredentialRow rejected = repository.find(byVersion).orElseThrow();
+    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
+    assertNull(rejected.refreshLeaseToken());
+    assertNull(rejected.refreshLeaseUntil());
+    assertEquals(2L, rejected.version(), "rejection advances the version once");
+
+    // 2. 密文匹配：重新登录推进了 version，但本次调用用的密文没变，仍必须作废。
+    assertTrue(repository.upsert(rowWithPayload(byCiphertext, used, now)));
+    assertTrue(repository.upsert(rowWithPayload(byCiphertext, used, now)));
+    assertEquals(1L, repository.find(byCiphertext).orElseThrow().version());
+    assertTrue(
+        repository.rejectUsedCredential(
+            byCiphertext, 0L, used, "provider rejected the access token", now),
+        "an unchanged ciphertext must be invalidated even when the version argument is stale");
+    assertEquals(
+        PluginCredentialStatus.REAUTH_REQUIRED,
+        repository.find(byCiphertext).orElseThrow().status());
+
+    // 3. 并发重新登录同时换了 version 与密文：迟到的作废必须是 0 行，且新凭据原样保留。
+    assertTrue(repository.upsert(rowWithPayload(relogged, used, now)));
+    assertTrue(repository.upsert(rowWithPayload(relogged, fresh, now)));
+    assertFalse(
+        repository.rejectUsedCredential(
+            relogged, 0L, used, "provider rejected the access token", now),
+        "a concurrent re-login must not be invalidated by a stale rejection");
+    PluginCredentialRow kept = repository.find(relogged).orElseThrow();
+    assertEquals(PluginCredentialStatus.CONNECTED, kept.status());
+    assertArrayEquals(fresh, kept.encryptedPayload());
+    assertEquals(1L, kept.version());
+    assertFalse(
+        repository.rejectUsedCredential(relogged, 9L, new byte[] {0x77}, "stale", now),
+        "a rejection matching neither version nor ciphertext must be a no-op");
+    assertFalse(
+        repository.rejectUsedCredential("plugin-absent", 0L, used, "stale", now),
+        "an absent row must not report a rejection");
+  }
+
+  private PluginCredentialRow rowWithPayload(
+      String pluginId, byte[] encryptedPayload, Instant now) {
+    return new PluginCredentialRow(
+        pluginId,
+        encryptedPayload,
+        "us-east-1",
+        now.plusSeconds(3600),
+        now.minusSeconds(1),
+        PluginCredentialStatus.CONNECTED,
+        null,
+        null,
+        null,
+        null,
+        0L,
+        now,
+        now);
+  }
 }
