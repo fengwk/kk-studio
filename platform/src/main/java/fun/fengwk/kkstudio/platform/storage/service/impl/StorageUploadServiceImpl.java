@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StoragePresignedUrls;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -62,11 +63,16 @@ import java.util.UUID;
  * 全局 Blob 存储上传契约服务的默认实现。
  *
  * <p>事务边界全部由 {@link TransactionTemplate} 显式控制：S3 的 HEAD/探针/复制/删除绝不发生在数据库事务或上传行锁内。显式删除/消费先在短事务内持久化
- * cleanup request，READY 恰好 release 上传引用并提交后唤醒后台；过期与请求清理再 claim cleanup lease，事务外幂等删除临时/候选对象，最后以
- * token-fenced 短事务删除上传事实，显式请求 READY 不重复 release。
+ * cleanup request，READY 恰好 release 上传引用并提交后唤醒后台；过期与请求清理再在 upload 操作锁内 claim cleanup
+ * lease，事务外幂等删除临时/候选对象，最后以 token-fenced 短事务删除上传事实，显式请求 READY 不重复 release。
+ *
+ * <p>complete/stage 与后台清理共用 {@link StorageUploadOperationLock}：complete/stage 在「写对象 +
+ * 绑定」的整个窗口独占锁，后台清理在 claim 前
+ * 非阻塞尝试同一把锁并跳过忙的行，因此删除证据（临时对象、候选对象、上传行）永远不可能与写对象交错。锁在任何业务事务之前取得，绝不在事务或行锁内做 S3 I/O。
  *
  * <p>complete 先校验并探针临时对象，再复制候选 blob 的最终对象，最后才在事务内去重插入/并发消解并绑定上传 —— DB 绝不引用缺失的最终对象； 同一上传的并发 complete
- * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制），并清理残留的临时/未使用候选对象。
+ * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制），并清理残留的临时/未使用候选对象。绑定失败时只依赖上传行
+ * （{@code candidate_blob_id}）作为耐久锚点，任何对象清理都留给后台按行事实执行，绝不按异常分支盲目删除候选对象。
  *
  * @author fengwk
  */
@@ -82,6 +88,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
+  private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
   private final S3StorageProperties s3Properties;
   private final SystemSettings.StorageMedia storageMedia;
@@ -98,6 +105,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
+      StorageUploadOperationLock operationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
       S3StorageProperties s3Properties,
       SystemSettings.StorageMedia storageMedia,
@@ -111,6 +119,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
+    this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
@@ -187,7 +196,14 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   @Override
   public StorageUploadDTO complete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
+    // 整个「校验/写对象 + 绑定」窗口独占持有该 upload 的操作锁（必须先于任何业务事务取锁）：
+    // 后台清理只有拿到同一把锁才能 claim、删对象或删行，因此 copy 落盘与 bind 之间不可能出现「行已被删、对象成孤儿」的交错。
+    try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
+      return completeLocked(uploadId);
+    }
+  }
 
+  private StorageUploadDTO completeLocked(UUID uploadId) {
     StorageUpload upload = uploadRepository.getById(uploadId);
     if (upload == null) {
       throw new StorageResourceNotFoundException("upload", uploadId.toString());
@@ -278,32 +294,36 @@ public class StorageUploadServiceImpl implements StorageUploadService {
           }
         });
 
-    try {
-      String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
-      try (InputStream input = Files.newInputStream(content)) {
-        // content 是本方法私有 spool：摘要与长度在写完并关闭后冻结，PUT 读取的正是该文件。
-        s3StorageService.putObject(
-            tempKey,
-            input,
-            fileFacts.sizeBytes(),
-            mediaType,
-            Base64.getEncoder().encodeToString(HexFormat.of().parseHex(fileFacts.sha256())));
-      } catch (IOException error) {
-        throw new UncheckedIOException("failed to read staged content", error);
+    try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
+      // 失败清理（mark cleanup request，必要时兜底幂等删除已知对象键）也必须在同一把锁内：
+      // 任何对象删除路径都不能与后台清理或其它写窗口并发。
+      try {
+        String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
+        try (InputStream input = Files.newInputStream(content)) {
+          // content 是本方法私有 spool：摘要与长度在写完并关闭后冻结，PUT 读取的正是该文件。
+          s3StorageService.putObject(
+              tempKey,
+              input,
+              fileFacts.sizeBytes(),
+              mediaType,
+              Base64.getEncoder().encodeToString(HexFormat.of().parseHex(fileFacts.sha256())));
+        } catch (IOException error) {
+          throw new UncheckedIOException("failed to read staged content", error);
+        }
+        S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
+        verifyObject(head, upload);
+        StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
+        UUID blobId = materializeAndBind(upload, facts, true);
+        StorageBlob blob = blobManager.getBlob(blobId);
+        if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+          throw new IllegalStateException("staged upload resolved to a missing blob");
+        }
+        return new StagedUpload(
+            uploadId, blobId, filename, blob.getMediaType(), blob.getSizeBytes(), blob.getSha256());
+      } catch (RuntimeException failure) {
+        requestFailedStageCleanup(upload);
+        throw failure;
       }
-      S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
-      verifyObject(head, upload);
-      StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
-      UUID blobId = materializeAndBind(upload, facts, true);
-      StorageBlob blob = blobManager.getBlob(blobId);
-      if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
-        throw new IllegalStateException("staged upload resolved to a missing blob");
-      }
-      return new StagedUpload(
-          uploadId, blobId, filename, blob.getMediaType(), blob.getSizeBytes(), blob.getSha256());
-    } catch (RuntimeException failure) {
-      requestFailedStageCleanup(upload);
-      throw failure;
     }
   }
 
@@ -405,28 +425,61 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   @Override
   public int expireOnce() {
     String cleanupToken = UUID.randomUUID().toString();
-    Instant now = clock.instant();
-    List<StorageUpload> claimable =
+    List<UUID> candidates =
         transactionTemplate.execute(
             status ->
-                uploadRepository.claimExpired(
-                    StorageUploadService.MAX_EXPIRY_BATCH,
-                    now,
-                    now.plus(cleanupLease),
-                    cleanupToken));
+                uploadRepository.listCleanupCandidateIds(
+                    StorageUploadService.MAX_EXPIRY_BATCH, clock.instant()));
     int finalized = 0;
-    for (StorageUpload row : claimable) {
-      try {
-        cleanupUploadObjects(row);
-        if (finalizeClaimed(row, cleanupToken)) {
-          finalized++;
+    for (UUID uploadId : candidates) {
+      // 先取该 upload 的操作锁，再 claim：正在写对象/绑定的 complete 绝不受影响（claim 会拒绝其绑定），
+      // 而我们也不会在无锁状态下删除可能正被复制的临时/候选对象或上传行。锁忙（complete/stage/其它节点在处理）则跳过本轮。
+      try (StorageUploadOperationLock.Handle handle = operationLock.tryAcquire(uploadId)) {
+        if (handle == null) {
+          continue;
         }
-      } catch (RuntimeException ignored) {
-        // 对象或 finalize 失败时保留 lease；过期后由任意节点幂等重试。
-        log.warn("storage expiry failed for upload {}", row.getId());
+        try {
+          if (cleanupClaimedUpload(uploadId, cleanupToken)) {
+            finalized++;
+          }
+        } catch (RuntimeException ignored) {
+          // 对象或 finalize 失败时保留 lease；过期后由任意节点幂等重试。
+          log.warn("storage expiry failed for upload {}", uploadId);
+        }
       }
     }
     return finalized;
+  }
+
+  /** 持锁后重新读取当下事实并 claim 单行清理事实；不再满足 claim 条件时跳过，绝不使用过期快照。 */
+  private boolean cleanupClaimedUpload(UUID uploadId, String cleanupToken) {
+    Instant claimNow = clock.instant();
+    StorageUpload claimed =
+        transactionTemplate.execute(
+            status -> {
+              StorageUpload fresh = uploadRepository.getById(uploadId);
+              if (!isCleanupDue(fresh, claimNow)) {
+                return null;
+              }
+              return uploadRepository.claimById(
+                  uploadId, claimNow, claimNow.plus(cleanupLease), cleanupToken);
+            });
+    if (claimed == null) {
+      return false;
+    }
+    cleanupUploadObjects(claimed);
+    return finalizeClaimed(claimed, cleanupToken);
+  }
+
+  /** 当下事实是否可清理：显式 cleanup request 或已过期；且没有有效 lease（不会被抢占的 claim 条件）。 */
+  private static boolean isCleanupDue(StorageUpload upload, Instant now) {
+    if (upload == null) {
+      return false;
+    }
+    if (upload.getCleanupRequestedAt() == null && upload.getExpiresAt().isAfter(now)) {
+      return false;
+    }
+    return upload.getCleanupToken() == null || !upload.getCleanupUntil().isAfter(now);
   }
 
   /** 在上传行锁保护的事务内消解或创建去重 Blob，并与当前上传记录安全绑定。 */

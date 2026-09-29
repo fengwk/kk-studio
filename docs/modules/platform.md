@@ -591,18 +591,28 @@ preview → original → 条件删除 Blob 行。
 
 1. `reserve` 在短事务内按 hash/size 命中 ACTIVE 或创建 PENDING upload，未命中再生成
    checksum PUT presign；READY 命中在事务外为图片与视频 best-effort 补生成预览；
-2. `complete` 在数据库事务外 HEAD、校验 size/SHA-256、probe 媒体事实并复制 candidate
-   object，随后短事务锁 upload 行、做 ACTIVE dedup、设置 blobId；并发 complete 只有
-   一个绑定成功；绑定完成后在事务外为图片与视频 best-effort 生成
-   `blobs/{blobId}/preview.webp`，失败不改变 READY 事实；
-3. `delete` 在短事务记录 cleanup request，READY upload 同时 release upload owner；
-4. `expireOnce` 先用 `SKIP LOCKED` claim 有界批次，事务外幂等删除临时/candidate
-   object，再用 cleanup token 做 fenced finalize；删除或 finalize 失败时保留 lease，
-   下一次 maintenance 重试。
+2. `complete` 先在 `StorageUploadOperationLock` 上独占持有该 upload 的操作锁，再在数据库事务外
+   HEAD、校验 size/SHA-256、probe 媒体事实并复制 candidate object，随后短事务锁 upload
+   行、做 ACTIVE dedup、设置 blobId；并发 complete 只有一个绑定成功；绑定完成后在事务外为图片与
+   视频 best-effort 生成 `blobs/{blobId}/preview.webp`，失败不改变 READY 事实；
+3. `delete` 在短事务记录 cleanup request，READY upload 同时 release upload owner；它只写
+   数据库事实、不做对象 I/O，因此不需要操作锁；
+4. `expireOnce` 先列出有界候选（cleanup request 或已过期且无有效 lease），逐行先尝试同一把
+   upload 操作锁、锁内重读当下事实再 claim，事务外幂等删除临时/candidate object，最后用
+   cleanup token 做 fenced finalize；锁忙（complete/stage 正在写对象）的行跳过本轮，删除或
+   finalize 失败时保留 lease，下一次 maintenance 重试。
+
+`StorageUploadOperationLock` 是 PostgreSQL 会话级 advisory lock，使用固定 storage namespace 加由
+upload UUID 稳定折叠的 32bit key（跨进程/跨版本落在同一把锁上，碰撞只导致额外串行）。
+complete/stage 在「写对象 + 绑定」的整个窗口独占持锁，后台清理只在
+拿到同一把锁后才 claim 并删除临时对象、candidate 对象与上传行，因此对象删除永远不会与写对象交错，
+不存在「行已被删、copy 落盘成孤儿」的窗口，绑定失败也只留下上传行（`candidate_blob_id`）作为耐久
+锚点。锁连接是专用 DriverManager 会话（不借用业务连接池，避免持锁耗尽业务连接），每次 acquire
+新建会话、close 释放锁并关闭会话；锁必须在任何业务事务之前取得，S3 I/O 依然不进入数据库事务。
 
 服务端内容统一调用 `stage(InputStream, maxBytes)`：入口显式拒绝活动事务，先在本地做有界
-spool 并单遍计算 size/SHA-256，再以短事务登记 PENDING upload 和 candidate；随后在事务外
-执行 PUT、checksum HEAD、probe 与 copy，最后复用 complete 的去重绑定。
+spool 并单遍计算 size/SHA-256，再以短事务登记 PENDING upload 和 candidate；随后在操作锁内、
+事务外执行 PUT、checksum HEAD、probe 与 copy，最后复用 complete 的去重绑定。
 因此对象写入后的 crash、媒体校验失败、去重落败和业务消费回滚都保留可由既有
 cleanup request/lease 回收的 upload 证据。
 

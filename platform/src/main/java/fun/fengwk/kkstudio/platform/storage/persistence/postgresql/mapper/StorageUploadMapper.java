@@ -21,7 +21,7 @@ import java.util.UUID;
  * {@code storage_upload} 的原子 SQL 入口。
  *
  * <p>状态由 {@code blob_id} 表达：null = PENDING，非 null = READY；显式清理先以 {@code cleanup_requested_at}
- * 持久化请求，过期或请求清理通过 CTE + {@code for update skip locked} 在短事务内写入 cleanup lease，再把对象 I/O 移到事务外。
+ * 持久化请求，过期或请求清理先被后台按候选列出，再在持有 upload 操作锁的短事务内以 cleanup lease 精确 claim 单行，最后把对象 I/O 移到事务外。
  */
 @Mapper
 public interface StorageUploadMapper extends BaseMapper {
@@ -89,33 +89,16 @@ public interface StorageUploadMapper extends BaseMapper {
   int setBlobIdIfNull(
       @Param("id") UUID id, @Param("blobId") UUID blobId, @Param("now") Instant now);
 
-  @ResultMap("storageUploadResultMap")
   @Select(
       """
-      with claimable as (
-          select id
-          from storage_upload
-          where (cleanup_requested_at is not null or expires_at <= #{now})
-            and (cleanup_token is null or cleanup_until <= #{now})
-          order by coalesce(cleanup_requested_at, expires_at), id
-          limit #{limit}
-          for update skip locked
-      )
-      update storage_upload upload
-      set cleanup_token = #{cleanupToken}, cleanup_until = #{leaseUntil}
-      from claimable
-      where upload.id = claimable.id
-      returning
-          upload.id, upload.candidate_blob_id, upload.blob_id, upload.filename,
-          upload.declared_media_type, upload.declared_size, upload.declared_sha256,
-          upload.expires_at, upload.cleanup_requested_at, upload.cleanup_token, upload.cleanup_until,
-          upload.created_at as create_time
+      select id
+      from storage_upload
+      where (cleanup_requested_at is not null or expires_at <= #{now})
+        and (cleanup_token is null or cleanup_until <= #{now})
+      order by coalesce(cleanup_requested_at, expires_at), id
+      limit #{limit}
       """)
-  List<StorageUploadDO> claimExpired(
-      @Param("limit") int limit,
-      @Param("now") Instant now,
-      @Param("leaseUntil") Instant leaseUntil,
-      @Param("cleanupToken") String cleanupToken);
+  List<UUID> listCleanupCandidateIds(@Param("limit") int limit, @Param("now") Instant now);
 
   @ResultMap("storageUploadResultMap")
   @Select(
