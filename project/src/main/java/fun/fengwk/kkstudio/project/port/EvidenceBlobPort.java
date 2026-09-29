@@ -34,6 +34,13 @@ public interface EvidenceBlobPort {
   /** 该 Blob 是否仍处于可读取的活跃状态：已发布证据的可读性依据，URI 本身不是权限凭据。 */
   boolean isBlobActive(UUID blobId);
 
+  /**
+   * 来源 Run 的 Harness Session 当前是否持有该 Blob 引用。
+   *
+   * <p>公开证据必须同时满足最终答复引用与 Session 持有；只凭 Blob 活跃不能把其他 Session 的产物发布到本 Issue。
+   */
+  boolean isSessionBlobRef(UUID sessionId, UUID blobId);
+
   /** READY 人工上传的权威消费事实。 */
   record ReadyUpload(UUID blobId, String filename) {
 

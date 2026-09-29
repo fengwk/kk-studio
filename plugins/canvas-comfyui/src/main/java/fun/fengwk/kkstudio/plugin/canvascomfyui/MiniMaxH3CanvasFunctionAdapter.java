@@ -212,21 +212,24 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     if (state.enhancedPrompt() == null) {
       if (state.harnessThreadId() == null) {
         checkpoint(context, PROMPT_SUBMITTING, state);
+        // 提交前的确定性输入校验与准备：失败必须保持 FAILED，绝不进入 UNKNOWN 保守窗口。
+        String promptAgentName = requireText(settings.promptAgentName(), "promptAgentName");
+        String systemPrompt = promptBuilder.systemPrompt();
         AgentMessage promptRequest = promptBuilder.userMessage(run, manifest);
         PreparedMedia preparedMedia = mediaPreflight(context, manifest);
         UUID threadId;
         try {
           threadId =
               oneShotService
-                  .submit(
-                      requireText(settings.promptAgentName(), "promptAgentName"),
-                      promptBuilder.systemPrompt(),
-                      promptRequest,
-                      preparedMedia.preflight())
+                  .submit(promptAgentName, systemPrompt, promptRequest, preparedMedia.preflight())
                   .threadId();
         } catch (RuntimeException failure) {
-          preparedMedia.staged().forEach(this::discardBestEffort);
-          throw failure;
+          // submit 已越过输入校验：异常不能证明接受事实未成立，禁止删除可能已被消费的 staged media。
+          if (failure instanceof CanvasFunctionUnknownException unknown) {
+            throw unknown;
+          }
+          throw new CanvasFunctionUnknownException(
+              "H3 Prompt Agent submission outcome unknown: " + failure.getMessage());
         }
         state = state.withHarnessThreadId(threadId);
         checkpoint(context, PROMPT_WAITING, state);
