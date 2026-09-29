@@ -420,4 +420,64 @@ describe('ProjectDetailPage', () => {
     const editedRequestKey = appendMock.mock.calls[2][1].requestKey
     expect(editedRequestKey).not.toBe(firstRequestKey)
   })
+
+  it('prevents rapid duplicate clicks from dispatching concurrent requests for same issue (inflight protection)', async () => {
+    // 测试意图：验证看板执行流转时，inflightIssuesRef 阻断快速连点，仅允许首个请求在途执行，避免并发冲撞
+    let resolveTransition: () => void = () => {}
+    const transitionMock = vi.fn().mockImplementation(() => {
+      return new Promise<void>((resolve) => {
+        resolveTransition = resolve
+      })
+    })
+
+    const api = createMockApi({
+      transitionIssue: transitionMock,
+    })
+
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    // 找到看板上 INIT 状态卡片的流转按钮（流转到 IN_PROGRESS）
+    const transitionButtons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    expect(transitionButtons.length).toBeGreaterThanOrEqual(1)
+    const btn = transitionButtons[0]
+
+    // 快速双击连点
+    fireEvent.click(btn)
+    fireEvent.click(btn)
+
+    // transitionIssue 仅被调用一次，第二次点击被直接阻断
+    expect(transitionMock).toHaveBeenCalledTimes(1)
+
+    // 请求完成后释放 inflight 锁
+    resolveTransition()
+    await waitFor(() => {
+      expect(transitionMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('blocks board action and displays error banner when storage throws QuotaExceededError on store', async () => {
+    // 测试意图：验证看板写操作在侧车持久化抛异常时 fail-closed，拦截 API 调用（0 次调用），并在顶部呈现受控错误
+    const transitionMock = vi.fn()
+    const api = createMockApi({
+      transitionIssue: transitionMock,
+    })
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    const transitionButtons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    expect(transitionButtons.length).toBeGreaterThanOrEqual(1)
+    fireEvent.click(transitionButtons[0])
+
+    // API 0 调用
+    expect(transitionMock).not.toHaveBeenCalled()
+
+    // 页面呈现受控错误横幅
+    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+
+    setItemSpy.mockRestore()
+  })
 })

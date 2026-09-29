@@ -26,6 +26,14 @@ import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import { createUuid } from '@/shared/lib/uuid'
 import { queryKeys } from '@/shared/lib/query-keys'
+import {
+  clearPendingAction,
+  isNetworkUnknownError,
+  isPayloadEqual,
+  loadPendingAction,
+  storePendingAction,
+  type PendingIssueAction,
+} from './pending-action-sidecar'
 import './projects.css'
 
 export interface ProjectDetailPageProps {
@@ -196,20 +204,109 @@ export function ProjectDetailPage({
     })
   }
 
-  // 看板上的动作：每个写操作冻结 requestKey 支持相同重试
+  const inflightIssuesRef = useRef<Set<string>>(new Set())
+
+  // 看板上的动作：通过通用 executor 统一处理防重防覆盖、连点阻断、侧车持久化与受控错误处理
+  const executeBoardIssueAction = async (
+    issueId: string,
+    expectedVersion: string,
+    action: PendingIssueAction,
+    runApi: (requestKey: string, expectedVersion: string) => Promise<unknown>,
+    failureLabel: string,
+  ) => {
+    // 阻断连点：同一 issue 若正在执行中，忽略重复触发
+    if (inflightIssuesRef.current.has(issueId)) {
+      return
+    }
+
+    const loadResult = loadPendingAction(issueId)
+    if (loadResult.type === 'STORAGE_ERROR') {
+      setActionError(`无法访问本地存储，已安全拦截操作: ${loadResult.error}`)
+      return
+    }
+    if (loadResult.type === 'CORRUPT') {
+      setActionError('该 Issue 存在未确认结果的损坏写操作记录，为防覆盖已安全拦截；请在详情中确认或放弃')
+      handleSelectIssue(issueId)
+      return
+    }
+
+    if (loadResult.type === 'VALID') {
+      const existing = loadResult.action
+      const isSameAction =
+        existing.kind === action.kind &&
+        isPayloadEqual(existing.payload, action.payload)
+
+      if (isSameAction) {
+        // 精确重试原请求
+        inflightIssuesRef.current.add(issueId)
+        try {
+          setActionError(null)
+          await runApi(existing.requestKey, existing.expectedVersion)
+          clearPendingAction(issueId, existing.requestKey)
+          await invalidateSnapshot()
+          return
+        } catch (err) {
+          if (!isNetworkUnknownError(err)) {
+            clearPendingAction(issueId, existing.requestKey)
+          }
+          setActionError(err instanceof Error ? err.message : `${failureLabel}重试失败`)
+          return
+        } finally {
+          inflightIssuesRef.current.delete(issueId)
+        }
+      } else {
+        setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
+        handleSelectIssue(issueId)
+        return
+      }
+    }
+
+    // 新请求：发送前落盘到侧车（fail closed，处于受控 try/catch 中）
+    try {
+      storePendingAction(issueId, action)
+    } catch (err) {
+      setActionError(`操作无法持久化侧车，已安全拦截: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+
+    inflightIssuesRef.current.add(issueId)
+    try {
+      setActionError(null)
+      await runApi(action.requestKey, expectedVersion)
+      clearPendingAction(issueId, action.requestKey)
+      await invalidateSnapshot()
+    } catch (err) {
+      if (!isNetworkUnknownError(err)) {
+        clearPendingAction(issueId, action.requestKey)
+      }
+      setActionError(err instanceof Error ? err.message : `${failureLabel}失败`)
+    } finally {
+      inflightIssuesRef.current.delete(issueId)
+    }
+  }
+
   const handleTransitionIssue = async (
     issueId: string,
     expectedVersion: string,
     toState: string,
   ) => {
     const requestKey = createUuid()
-    try {
-      setActionError(null)
-      await api.transitionIssue(issueId, { expectedVersion, requestKey, toState })
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '流转 Issue 状态失败')
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'TRANSITION',
+      requestKey,
+      expectedVersion,
+      payload: { toState },
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
     }
+    await executeBoardIssueAction(
+      issueId,
+      expectedVersion,
+      action,
+      (reqKey, expVer) => api.transitionIssue(issueId, { expectedVersion: expVer, requestKey: reqKey, toState }),
+      '流转 Issue 状态',
+    )
   }
 
   const handleBlockIssue = async (issueId: string, _expectedVersion: string) => {
@@ -218,24 +315,42 @@ export function ProjectDetailPage({
 
   const handleRecoverIssue = async (issueId: string, expectedVersion: string) => {
     const requestKey = createUuid()
-    try {
-      setActionError(null)
-      await api.recoverIssue(issueId, { expectedVersion, requestKey })
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'RECOVER',
+      requestKey,
+      expectedVersion,
+      payload: {},
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
     }
+    await executeBoardIssueAction(
+      issueId,
+      expectedVersion,
+      action,
+      (reqKey, expVer) => api.recoverIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
+      '恢复 Issue',
+    )
   }
 
   const handleReopenIssue = async (issueId: string, expectedVersion: string) => {
     const requestKey = createUuid()
-    try {
-      setActionError(null)
-      await api.reopenIssue(issueId, { expectedVersion, requestKey })
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '重新打开 Issue 失败')
+    const action: PendingIssueAction = {
+      issueId,
+      kind: 'REOPEN',
+      requestKey,
+      expectedVersion,
+      payload: {},
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
     }
+    await executeBoardIssueAction(
+      issueId,
+      expectedVersion,
+      action,
+      (reqKey, expVer) => api.reopenIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
+      '重新打开 Issue',
+    )
   }
 
   const handleResolveUnknownIssue = async (issueId: string, _expectedVersion: string) => {
@@ -537,6 +652,7 @@ export function ProjectDetailPage({
       />
 
       <IssueDetailModal
+        key={effectiveIssueId ?? 'none'}
         isOpen={isIssueDetailModalOpen}
         projectId={projectId}
         issueId={effectiveIssueId}

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
@@ -6,6 +6,12 @@ import type { ProjectsApi } from '../projects-api'
 import type { IssueDetailDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
 import type { StorageUploadDTO, StorageUploadResultDTO } from '@/shared/api/contracts/storage'
+import { ApiError } from '@/shared/api/client'
+import {
+  loadPendingAction,
+  pendingActionStorageKey,
+  storePendingAction,
+} from '../pending-action-sidecar'
 
 function renderModal(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
@@ -20,6 +26,11 @@ function renderModal(ui: React.ReactElement, client?: QueryClient) {
 }
 
 describe('IssueDetailModal', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    vi.clearAllMocks()
+  })
+
   const projectId = 'proj-00000000-0000-0000-0000-000000000001'
   const issueId = 'issue-00000000-0000-0000-0000-000000000001'
 
@@ -514,5 +525,364 @@ describe('IssueDetailModal', () => {
     fireEvent.click(openBtn)
 
     expect(onOpenThread).toHaveBeenCalledWith('th-arch-001')
+  })
+
+  const mockWorkflow = {
+    states: [
+      { state: 'IN_PROGRESS', next: ['REVIEW'] },
+    ],
+  }
+
+  it('persists transition request to sidecar and displays unknown banner on network failure; supports exact retry (I07)', async () => {
+    // 测试意图：网络错误或 500 时，流转操作必须持久化至 sidecar 并显示未知状态横幅，按钮被禁用，支持原样精确重试
+    let callCount = 0
+    let recordedRequestKey = ''
+    const api = createMockApi({
+      transitionIssue: vi.fn().mockImplementation((_id, req) => {
+        callCount++
+        recordedRequestKey = req.requestKey
+        if (callCount === 1) {
+          return Promise.reject(new Error('Network offline or Gateway Timeout'))
+        }
+        return Promise.resolve({
+          ...mockActiveIssueDetail.issue,
+          state: 'REVIEW',
+          version: '4',
+        })
+      }),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    fireEvent.click(transitionBtn)
+
+    // 应该出现未知状态横幅，显示操作类型与基准版本
+    const warningTitle = await screen.findByText(/检测到未确认结果的写操作/i)
+    expect(warningTitle).toBeInTheDocument()
+    const banner = warningTitle.closest('[role="alert"]')!
+    expect(banner).toHaveTextContent('TRANSITION')
+    expect(banner).toHaveTextContent('3')
+
+    // 验证 localStorage 中保存了未决操作
+    const sidecar = loadPendingAction(issueId)
+    expect(sidecar.type).toBe('VALID')
+    if (sidecar.type === 'VALID') {
+      expect(sidecar.action.kind).toBe('TRANSITION')
+      expect(sidecar.action.requestKey).toBe(recordedRequestKey)
+      expect(sidecar.action.expectedVersion).toBe('3')
+    }
+
+    // 此时流转按钮应该被禁用，禁止开启新身份请求
+    expect(transitionBtn).toBeDisabled()
+
+    // 点击精确重试未决操作
+    const retryBtn = screen.getByRole('button', { name: '精确重试未决操作' })
+    fireEvent.click(retryBtn)
+
+    // 验证第二次调用使用的是完全相同的 requestKey 与 expectedVersion
+    await waitFor(() => {
+      expect(callCount).toBe(2)
+      expect(api.transitionIssue).toHaveBeenLastCalledWith(
+        issueId,
+        expect.objectContaining({
+          expectedVersion: '3',
+          toState: 'REVIEW',
+          requestKey: recordedRequestKey,
+        }),
+      )
+    })
+
+    // 成功后，未知状态横幅消失，sidecar 清除
+    await waitFor(() => {
+      expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
+      expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+    })
+  })
+
+  it('cleans sidecar on 409 conflict without entering unknown banner (I07)', async () => {
+    // 测试意图：409 Conflict 表示服务端已明确拒绝，必须清理 sidecar，不展示未决警告
+    const api = createMockApi({
+      transitionIssue: vi.fn().mockRejectedValue(new ApiError('Version conflict', 409)),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    fireEvent.click(transitionBtn)
+
+    // 出现冲突提示，但没有未知状态横幅
+    expect(await screen.findByText(/版本冲突/i)).toBeInTheDocument()
+    expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
+    expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+  })
+
+  it('allows explicit discard of unknown action with confirmation warning (I07)', async () => {
+    // 测试意图：对于从 storage 恢复的未知操作，用户点击放弃时弹出显式警告，确认后清除 sidecar
+    storePendingAction(issueId, {
+      issueId,
+      kind: 'STOP',
+      expectedVersion: '3',
+      payload: { detail: 'abandoned task' },
+      requestKey: 'req-unknown-stop-1',
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={createMockApi()}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent(/检测到未确认结果的写操作/i)
+    expect(banner).toHaveTextContent('STOP')
+
+    // 点击放弃未决操作
+    const discardBtn = screen.getByRole('button', { name: '放弃未决操作' })
+    fireEvent.click(discardBtn)
+
+    // 应该出现二次确认警示
+    expect(screen.getByText(/此操作可能已在服务端执行。放弃后将不再跟踪原请求/i)).toBeInTheDocument()
+    const confirmDiscardBtn = screen.getByRole('button', { name: '确认放弃' })
+    fireEvent.click(confirmDiscardBtn)
+
+    // 警告消失，sidecar 清除
+    await waitFor(() => {
+      expect(screen.queryByText(/检测到未确认结果的写操作/i)).toBeNull()
+      expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
+    })
+  })
+
+  it('blocks API calls and displays error when storage throws QuotaExceededError on store', async () => {
+    // 测试意图：持久化侧车抛出异常时 fail-closed，阻止网络请求并呈现受控错误横幅，保证 0 API 发送
+    const api = createMockApi({
+      transitionIssue: vi.fn(),
+    })
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    fireEvent.click(transitionBtn)
+
+    // 提示错误且 API 零调用
+    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+    expect(api.transitionIssue).not.toHaveBeenCalled()
+
+    setItemSpy.mockRestore()
+  })
+
+  it('presents blocked UI for corrupt storage record and unlocks when discarded', async () => {
+    // 测试意图：检测到损坏的未决记录时渲染锁定警告，禁用写操作，支持人工放弃并解锁
+    window.localStorage.setItem(pendingActionStorageKey(issueId), 'corrupted non-json content')
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={createMockApi()}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent(/检测到损坏的本地未决操作记录/i)
+
+    // 所有写操作按钮被锁定
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    expect(transitionBtn).toBeDisabled()
+
+    // 点击放弃损坏记录并解锁
+    const discardCorruptBtn = screen.getByRole('button', { name: '放弃损坏记录并解锁' })
+    fireEvent.click(discardCorruptBtn)
+
+    // 锁定解除，按钮恢复可用
+    await waitFor(() => {
+      expect(screen.queryByText(/检测到损坏的本地未决操作记录/i)).toBeNull()
+      expect(transitionBtn).not.toBeDisabled()
+    })
+  })
+
+  it('safely catches storage read exceptions on load and blocks write UI without crashing', async () => {
+    // 测试意图：读取本地存储抛出异常时不发生 render crash，呈现受控 blocked UI，且按钮被禁用
+    const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('Storage Access Denied (SecurityError)')
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        workflow={mockWorkflow}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={createMockApi()}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const banner = screen.getByRole('alert')
+    expect(banner).toHaveTextContent(/本地存储异常，为防止写操作状态失步已锁定当前 Issue/i)
+
+    const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
+    expect(transitionBtn).toBeDisabled()
+
+    getItemSpy.mockRestore()
+  })
+
+  it('rotates requestKey when payload changes in draft inputs, preventing payload switching under same key (I07)', async () => {
+    // 测试意图：每次草稿输入修改后，下一次提交的 requestKey 必须重新生成，杜绝同一 requestKey 下静默更换 payload
+    const keys: string[] = []
+    const api = createMockApi({
+      blockIssue: vi.fn().mockImplementation((_id, req) => {
+        keys.push(req.requestKey)
+        return Promise.resolve(mockActiveIssueDetail.issue)
+      }),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: '业务阻塞' }))
+
+    const reasonInput = screen.getByPlaceholderText(/说明导致 Issue 无法继续执行的外部原因/i)
+    fireEvent.change(reasonInput, { target: { value: 'Reason A' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认阻塞' }))
+
+    await waitFor(() => {
+      expect(keys.length).toBe(1)
+    })
+
+    // 等待阻塞弹窗完成并关闭
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: /标记业务阻塞/i })).toBeNull()
+    })
+
+    // 再次打开阻塞模态框，修改输入
+    fireEvent.click(screen.getByRole('button', { name: '业务阻塞' }))
+    const reasonInput2 = await screen.findByPlaceholderText(/说明导致 Issue 无法继续执行的外部原因/i)
+    fireEvent.change(reasonInput2, { target: { value: 'Reason B (modified)' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认阻塞' }))
+
+    await waitFor(() => {
+      expect(keys.length).toBe(2)
+      expect(keys[0]).not.toBe(keys[1])
+    })
+  })
+
+  it('draft inputs do not leak across modal close and reopen (I09)', async () => {
+    // 测试意图：在 IssueDetailModal 中输入未提交草稿，关闭弹窗后再打开，草稿输入被重置清理
+    const api = createMockApi()
+    const { rerender } = renderModal(
+      <IssueDetailModal
+        key="open-1"
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onIssueUpdated={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+
+    const textarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'Temporary unsubmitted draft' } })
+    expect(textarea.value).toBe('Temporary unsubmitted draft')
+
+    // 关闭弹窗
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <IssueDetailModal
+          key="closed"
+          isOpen={false}
+          issueId={issueId}
+          onClose={vi.fn()}
+          onIssueUpdated={vi.fn()}
+          api={api}
+          storageService={createMockStorageService()}
+        />
+      </QueryClientProvider>,
+    )
+
+    // 重新打开弹窗（如 ProjectDetailPage 中 key={effectiveIssueId ?? 'none'} 重新挂载）
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <IssueDetailModal
+          key="open-2"
+          isOpen={true}
+          issueId={issueId}
+          onClose={vi.fn()}
+          onIssueUpdated={vi.fn()}
+          api={api}
+          storageService={createMockStorageService()}
+        />
+      </QueryClientProvider>,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByRole('button', { name: /活动时间线/i }))
+    const reopenedTextarea = screen.getByPlaceholderText(/添加一条讨论或事实备注/i) as HTMLTextAreaElement
+    expect(reopenedTextarea.value).toBe('')
   })
 })

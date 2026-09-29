@@ -209,7 +209,7 @@ describe('ProjectsPage', () => {
     fireEvent.change(titleInput, { target: { value: 'My Custom Draft' } })
 
     // Submit
-    const saveBtn = screen.getByRole('button', { name: '保存更改' })
+    const saveBtn = screen.getByRole('button', { name: '保存基础信息' })
     await waitFor(() => {
       expect(saveBtn).not.toBeDisabled()
     })
@@ -235,9 +235,9 @@ describe('ProjectsPage', () => {
 
     // Submit again with updated expectedVersion
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '保存更改' })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: '保存基础信息' })).not.toBeDisabled()
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
 
     await waitFor(() => {
       expect(api.updateProject).toHaveBeenCalledWith(mockProjects[0].id, {

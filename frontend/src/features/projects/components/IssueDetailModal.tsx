@@ -36,6 +36,15 @@ import {
 } from '@/features/ai/composer'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import {
+  clearPendingAction,
+  isNetworkUnknownError,
+  loadPendingAction,
+  storePendingAction,
+  type IssueActionKind,
+  type LoadPendingActionResult,
+  type PendingIssueAction,
+} from '../pending-action-sidecar'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type {
@@ -151,6 +160,20 @@ function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
   )
 }
 
+function safeLoadPendingAction(issueId: string | null): LoadPendingActionResult {
+  if (!issueId) {
+    return { type: 'NONE' }
+  }
+  try {
+    return loadPendingAction(issueId)
+  } catch (err) {
+    return {
+      type: 'STORAGE_ERROR',
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}
+
 export function IssueDetailModal({
   isOpen,
   issueId,
@@ -195,6 +218,19 @@ export function IssueDetailModal({
   const [conflictDetail, setConflictDetail] = useState<string | null>(null)
   const [isActionPending, setIsActionPending] = useState(false)
 
+  // 0. 未决操作持久化侧车与 unknown / 异常状态 (I07)
+  const [pendingActionResult, setPendingActionResult] = useState<LoadPendingActionResult>(() => {
+    return safeLoadPendingAction(issueId)
+  })
+
+  const pendingUnknownAction = pendingActionResult.type === 'VALID' ? pendingActionResult.action : null
+  const corruptActionInfo =
+    pendingActionResult.type === 'CORRUPT'
+      ? { raw: pendingActionResult.raw, error: pendingActionResult.error }
+      : null
+  const storageLoadError = pendingActionResult.type === 'STORAGE_ERROR' ? pendingActionResult.error : null
+  const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false)
+
   // 1. Spec 编辑草稿状态与 409 保护
   const [isEditingSpec, setIsEditingSpec] = useState(false)
   const [draftTitle, setDraftTitle] = useState('')
@@ -205,27 +241,32 @@ export function IssueDetailModal({
   const [activityKind, setActivityKind] = useState<'COMMENT' | 'INSTRUCTION'>('COMMENT')
   const [activityBody, setActivityBody] = useState('')
   const [activityRequestKey, setActivityRequestKey] = useState<string>(() => createUuid())
+  const activityPayloadRef = useRef<{ kind: string; body: string } | null>(null)
 
   // 3. 阻塞表单
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
   const [blockReason, setBlockReason] = useState('')
   const [blockRequestKey, setBlockRequestKey] = useState<string>(() => createUuid())
+  const blockPayloadRef = useRef<{ reason: string } | null>(null)
 
   // 4. UNKNOWN 人工核查表单
   const [isResolveUnknownOpen, setIsResolveUnknownOpen] = useState(false)
   const [verificationInput, setVerificationInput] = useState('')
   const [resolveUnknownRequestKey, setResolveUnknownRequestKey] = useState<string>(() => createUuid())
+  const resolveUnknownPayloadRef = useRef<{ verification: string } | null>(null)
 
   // 5. 阶段预算重置表单
   const [isResetBudgetOpen, setIsResetBudgetOpen] = useState(false)
   const [resetBudgetState, setResetBudgetState] = useState('')
   const [resetBudgetMaxRuns, setResetBudgetMaxRuns] = useState<number>(3)
   const [budgetRequestKey, setBudgetRequestKey] = useState<string>(() => createUuid())
+  const budgetPayloadRef = useRef<{ state: string; maxRuns: number } | null>(null)
 
   // 6. Stop 终止表单
   const [isStopModalOpen, setIsStopModalOpen] = useState(false)
   const [stopDetail, setStopDetail] = useState('')
   const [stopRequestKey, setStopRequestKey] = useState<string>(() => createUuid())
+  const stopPayloadRef = useRef<{ detail: string | null } | null>(null)
 
   // 7. 删除 Issue 确认
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
@@ -248,7 +289,7 @@ export function IssueDetailModal({
     return merged
   }, [localEvidences, serverEvidences])
 
-  // 初始化草稿
+  // 初始化草稿与版本基线
   useEffect(() => {
     if (detail?.issue) {
       if (!isEditingSpec) {
@@ -259,7 +300,16 @@ export function IssueDetailModal({
     }
   }, [detail, isEditingSpec])
 
-  // 关闭时清理临时对话框
+  // 挂载/打开/issueId 变化时同步加载持久化侧车未决操作或异常状态
+  useEffect(() => {
+    if (!issueId || !isOpen) {
+      setPendingActionResult({ type: 'NONE' })
+      return
+    }
+    setPendingActionResult(safeLoadPendingAction(issueId))
+  }, [issueId, isOpen])
+
+  // 关闭时清理临时对话框、未提交草稿与本地证据 (I09)
   useEffect(() => {
     if (!isOpen) {
       setIsEditingSpec(false)
@@ -270,8 +320,114 @@ export function IssueDetailModal({
       setIsDeleteModalOpen(false)
       setActionError(null)
       setConflictDetail(null)
+      setIsDiscardConfirmOpen(false)
+
+      setDraftTitle('')
+      setDraftDescription('')
+      setActivityBody('')
+      setBlockReason('')
+      setVerificationInput('')
+      setStopDetail('')
+      setLocalEvidences([])
+
+      activityPayloadRef.current = null
+      blockPayloadRef.current = null
+      resolveUnknownPayloadRef.current = null
+      stopPayloadRef.current = null
+      budgetPayloadRef.current = null
+
+      setActivityRequestKey(createUuid())
+      setBlockRequestKey(createUuid())
+      setResolveUnknownRequestKey(createUuid())
+      setStopRequestKey(createUuid())
+      setBudgetRequestKey(createUuid())
     }
   }, [isOpen])
+
+  // 草稿修改检测：输入变更时旧 unknown 不能丢，修改 draft 时换用全新 requestKey 防同 key 换 payload
+  const handleActivityBodyChange = (value: string) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
+      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setActivityBody(value)
+    if (activityPayloadRef.current && activityPayloadRef.current.body !== value) {
+      setActivityRequestKey(createUuid())
+      activityPayloadRef.current = null
+    }
+  }
+
+  const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
+      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setActivityKind(kind)
+    if (activityPayloadRef.current && activityPayloadRef.current.kind !== kind) {
+      setActivityRequestKey(createUuid())
+      activityPayloadRef.current = null
+    }
+  }
+
+  const handleBlockReasonChange = (value: string) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'BLOCK') {
+      setActionError('存在未确认结果的阻塞请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setBlockReason(value)
+    if (blockPayloadRef.current && blockPayloadRef.current.reason !== value) {
+      setBlockRequestKey(createUuid())
+      blockPayloadRef.current = null
+    }
+  }
+
+  const handleVerificationInputChange = (value: string) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESOLVE_UNKNOWN') {
+      setActionError('存在未确认结果的人工核查请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setVerificationInput(value)
+    if (resolveUnknownPayloadRef.current && resolveUnknownPayloadRef.current.verification !== value) {
+      setResolveUnknownRequestKey(createUuid())
+      resolveUnknownPayloadRef.current = null
+    }
+  }
+
+  const handleStopDetailChange = (value: string) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'STOP') {
+      setActionError('存在未确认结果的终止请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setStopDetail(value)
+    if (stopPayloadRef.current && stopPayloadRef.current.detail !== (value.trim() || null)) {
+      setStopRequestKey(createUuid())
+      stopPayloadRef.current = null
+    }
+  }
+
+  const handleBudgetStateChange = (value: string) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
+      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setResetBudgetState(value)
+    if (budgetPayloadRef.current && budgetPayloadRef.current.state !== value) {
+      setBudgetRequestKey(createUuid())
+      budgetPayloadRef.current = null
+    }
+  }
+
+  const handleBudgetMaxRunsChange = (value: number) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
+      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先精确重试或明确放弃。')
+      return
+    }
+    setResetBudgetMaxRuns(value)
+    if (budgetPayloadRef.current && budgetPayloadRef.current.maxRuns !== value) {
+      setBudgetRequestKey(createUuid())
+      budgetPayloadRef.current = null
+    }
+  }
 
   // ESC 键关闭
   useEffect(() => {
@@ -296,6 +452,14 @@ export function IssueDetailModal({
   const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
   const isUnknown = issue?.state === 'UNKNOWN' || issue?.pauseReason === 'UNKNOWN'
   const isDone = issue?.state === 'DONE'
+  const isWriteBlocked = isActionPending || Boolean(pendingUnknownAction || corruptActionInfo || storageLoadError)
+
+  // 放弃损坏的挂起记录并解锁界面
+  const handleDiscardCorruptAction = () => {
+    if (!issueId) return
+    clearPendingAction(issueId, undefined, undefined, true)
+    setPendingActionResult({ type: 'NONE' })
+  }
 
   // 从传入的 workflow 找到可转移的 next 列表
   const currentWorkflowState = workflow?.states.find((s) => s.state === issue?.state)
@@ -311,7 +475,71 @@ export function IssueDetailModal({
     }
   }
 
-  // --- 写操作执行封装：冻结 requestKey 支持相同重试，409 保留草稿 ---
+  // --- 核心写操作封装：同 issue 仅一个 pending，发送前侧车落盘 (fail closed)，成功仅清自身 key，unknown 禁新 identity ---
+  const executeIssueAction = async (
+    kind: IssueActionKind,
+    requestKey: string,
+    expectedVersion: string,
+    payload: Record<string, unknown>,
+    runApi: () => Promise<unknown>,
+    onExplicitSuccess: () => void,
+  ) => {
+    if (!issue) return
+    if (pendingUnknownAction || corruptActionInfo || storageLoadError) {
+      setActionError('当前存在未确认结果或损坏的写操作记录，禁止新请求；请先处理或放弃')
+      return
+    }
+
+    const pending = {
+      issueId: issue.id,
+      kind,
+      requestKey,
+      expectedVersion,
+      payload,
+      createdAt: new Date().toISOString(),
+      isUnknown: true,
+    } as PendingIssueAction
+
+    // 1. 发送前落盘侧车（fail closed）
+    try {
+      storePendingAction(issue.id, pending)
+    } catch (err) {
+      setActionError(`操作无法持久化侧车，已安全拦截: ${err instanceof Error ? err.message : String(err)}`)
+      return
+    }
+
+    setIsActionPending(true)
+    setActionError(null)
+    setConflictDetail(null)
+
+    try {
+      await runApi()
+      // 2. 异步成功：只能清自己的 identity！
+      clearPendingAction(issue.id, requestKey)
+      setPendingActionResult({ type: 'NONE' })
+      onExplicitSuccess()
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
+    } catch (err) {
+      if (isConflictError(err)) {
+        // 409 确定被服务端拒绝，清理侧车并保留草稿
+        clearPendingAction(issue.id, requestKey)
+        setPendingActionResult({ type: 'NONE' })
+        setConflictDetail('操作遇到版本冲突 (409)。已为您保留编辑草稿，请刷新版本后重试。')
+      } else if (!isNetworkUnknownError(err)) {
+        // 其余明确 4xx 业务错误，服务端未接受
+        clearPendingAction(issue.id, requestKey)
+        setPendingActionResult({ type: 'NONE' })
+        setActionError(err instanceof Error ? err.message : '操作失败')
+      } else {
+        // 未知网络错误（408, 429, 5xx, 网络中断）：侧车保留并在 UI 标记 unknown！
+        setPendingActionResult({ type: 'VALID', action: pending })
+        setActionError(err instanceof Error ? err.message : '网络请求未收到确定响应，结果未知')
+      }
+    } finally {
+      setIsActionPending(false)
+    }
+  }
 
   // 1. 保存 Spec
   const handleSaveSpec = async (e: React.FormEvent) => {
@@ -346,175 +574,236 @@ export function IssueDetailModal({
     }
   }
 
-  // 2. 流转状态 (Transition) - 每次操作开始时分配 key，重试时沿用 key
-  const handleTransition = async (toState: string, retryKey?: string) => {
-    if (!issue) return
-    const reqKey = retryKey || createUuid()
+  // 2. 精确重试未决未知操作（完整版本与 payload 严格从冻结 pending 读取，不可因刷新而改变）
+  const handleRetryPendingAction = async () => {
+    if (!pendingUnknownAction || !issue) return
     setIsActionPending(true)
     setActionError(null)
     setConflictDetail(null)
+
+    const pending = pendingUnknownAction
+    const { kind, requestKey, expectedVersion, payload } = pending
+
     try {
-      await api.transitionIssue(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: reqKey,
-        toState,
-      })
+      switch (kind) {
+        case 'TRANSITION':
+          await api.transitionIssue(issue.id, {
+            expectedVersion,
+            requestKey,
+            toState: (payload as { toState: string }).toState,
+          })
+          break
+        case 'RECOVER':
+          await api.recoverIssue(issue.id, {
+            expectedVersion,
+            requestKey,
+          })
+          break
+        case 'REOPEN':
+          await api.reopenIssue(issue.id, {
+            expectedVersion,
+            requestKey,
+          })
+          break
+        case 'BLOCK':
+          await api.blockIssue(issue.id, {
+            expectedVersion,
+            requestKey,
+            reason: (payload as { reason: string }).reason,
+          })
+          setIsBlockModalOpen(false)
+          setBlockReason('')
+          blockPayloadRef.current = null
+          setBlockRequestKey(createUuid())
+          break
+        case 'RESOLVE_UNKNOWN':
+          await api.resolveUnknown(issue.id, {
+            expectedVersion,
+            requestKey,
+            verification: (payload as { verification: string }).verification,
+          })
+          setIsResolveUnknownOpen(false)
+          setVerificationInput('')
+          resolveUnknownPayloadRef.current = null
+          setResolveUnknownRequestKey(createUuid())
+          break
+        case 'STOP':
+          await api.stopIssue(issue.id, {
+            expectedVersion,
+            requestKey,
+            detail: (payload as { detail: string | null }).detail,
+          })
+          setIsStopModalOpen(false)
+          setStopDetail('')
+          stopPayloadRef.current = null
+          setStopRequestKey(createUuid())
+          break
+        case 'RESET_BUDGET':
+          await api.resetStageBudget(issue.id, {
+            expectedVersion,
+            requestKey,
+            state: (payload as { state: string }).state,
+            maxRuns: (payload as { maxRuns: number }).maxRuns,
+          })
+          setIsResetBudgetOpen(false)
+          budgetPayloadRef.current = null
+          setBudgetRequestKey(createUuid())
+          break
+        case 'ACTIVITY':
+          await api.appendIssueActivity(issue.id, {
+            expectedVersion,
+            requestKey,
+            kind: (payload as { kind: 'COMMENT' | 'INSTRUCTION' }).kind,
+            body: (payload as { body: string }).body,
+          })
+          setActivityBody('')
+          activityPayloadRef.current = null
+          setActivityRequestKey(createUuid())
+          break
+      }
+      clearPendingAction(issue.id, requestKey)
+      setPendingActionResult({ type: 'NONE' })
       await queryClient.invalidateQueries({ queryKey: issueQueryKey })
       notifyUpdated()
     } catch (err) {
       if (isConflictError(err)) {
-        setConflictDetail(`流转到 ${toState} 失败：版本冲突 (409)，请刷新数据后重试。`)
+        clearPendingAction(issue.id, requestKey)
+        setPendingActionResult({ type: 'NONE' })
+        setConflictDetail('重试操作遇到版本冲突 (409)，请刷新数据后重试。')
+      } else if (!isNetworkUnknownError(err)) {
+        clearPendingAction(issue.id, requestKey)
+        setPendingActionResult({ type: 'NONE' })
+        setActionError(err instanceof Error ? err.message : '操作失败')
       } else {
-        setActionError(err instanceof Error ? err.message : '状态流转失败')
+        setActionError(err instanceof Error ? err.message : '重试依然未收到响应，结果未知')
       }
     } finally {
       setIsActionPending(false)
     }
   }
 
-  // 3. 阻塞 (Block) - 冻结 blockRequestKey
+  // 3. 明确放弃未决操作（清理侧车与 unknown 状态）
+  const handleDiscardPendingAction = () => {
+    if (!issueId || !pendingUnknownAction) return
+    clearPendingAction(issueId, pendingUnknownAction.requestKey)
+    setPendingActionResult({ type: 'NONE' })
+    setIsDiscardConfirmOpen(false)
+  }
+
+  // 4. 流转状态 (Transition)
+  const handleTransition = async (toState: string) => {
+    if (!issue) return
+    const requestKey = createUuid()
+    await executeIssueAction(
+      'TRANSITION',
+      requestKey,
+      issue.version,
+      { toState },
+      () => api.transitionIssue(issue.id, { expectedVersion: issue.version, requestKey, toState }),
+      () => {},
+    )
+  }
+
+  // 5. 恢复 (Recover)
+  const handleRecover = async () => {
+    if (!issue) return
+    const requestKey = createUuid()
+    await executeIssueAction(
+      'RECOVER',
+      requestKey,
+      issue.version,
+      {},
+      () => api.recoverIssue(issue.id, { expectedVersion: issue.version, requestKey }),
+      () => {},
+    )
+  }
+
+  // 6. 重开 (Reopen)
+  const handleReopen = async () => {
+    if (!issue) return
+    const requestKey = createUuid()
+    await executeIssueAction(
+      'REOPEN',
+      requestKey,
+      issue.version,
+      {},
+      () => api.reopenIssue(issue.id, { expectedVersion: issue.version, requestKey }),
+      () => {},
+    )
+  }
+
+  // 7. 阻塞 (Block)
   const handleBlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    if (!blockReason.trim()) {
+    const trimmed = blockReason.trim()
+    if (!trimmed) {
       setActionError('阻塞原因不能为空')
       return
     }
-
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.blockIssue(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: blockRequestKey,
-        reason: blockReason.trim(),
-      })
-      setIsBlockModalOpen(false)
-      setBlockReason('')
-      setBlockRequestKey(createUuid()) // 成功后重置下一次 key
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('阻塞操作遇到版本冲突 (409)。已为您保留输入内容，请刷新版本后以相同请求键重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '阻塞 Issue 失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
+    blockPayloadRef.current = { reason: trimmed }
+    await executeIssueAction(
+      'BLOCK',
+      blockRequestKey,
+      issue.version,
+      { reason: trimmed },
+      () => api.blockIssue(issue.id, { expectedVersion: issue.version, requestKey: blockRequestKey, reason: trimmed }),
+      () => {
+        setIsBlockModalOpen(false)
+        setBlockReason('')
+        blockPayloadRef.current = null
+        setBlockRequestKey(createUuid())
+      },
+    )
   }
 
-  // 4. 恢复 (Recover) - 沿用或分配 requestKey
-  const handleRecover = async (retryKey?: string) => {
-    if (!issue) return
-    const reqKey = retryKey || createUuid()
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.recoverIssue(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: reqKey,
-      })
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('恢复操作遇到版本冲突 (409)，请刷新后重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
-  }
-
-  // 5. 人工核查 UNKNOWN - 冻结 resolveUnknownRequestKey
+  // 8. 人工核查 UNKNOWN
   const handleResolveUnknownSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    if (!verificationInput.trim()) {
+    const trimmed = verificationInput.trim()
+    if (!trimmed) {
       setActionError('人工核查说明不能为空')
       return
     }
-
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.resolveUnknown(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: resolveUnknownRequestKey,
-        verification: verificationInput.trim(),
-      })
-      setIsResolveUnknownOpen(false)
-      setVerificationInput('')
-      setResolveUnknownRequestKey(createUuid())
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('核查操作遇到版本冲突 (409)。已为您保留核查文本，请刷新版本后重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '解除 UNKNOWN 门禁失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
+    resolveUnknownPayloadRef.current = { verification: trimmed }
+    await executeIssueAction(
+      'RESOLVE_UNKNOWN',
+      resolveUnknownRequestKey,
+      issue.version,
+      { verification: trimmed },
+      () => api.resolveUnknown(issue.id, { expectedVersion: issue.version, requestKey: resolveUnknownRequestKey, verification: trimmed }),
+      () => {
+        setIsResolveUnknownOpen(false)
+        setVerificationInput('')
+        resolveUnknownPayloadRef.current = null
+        setResolveUnknownRequestKey(createUuid())
+      },
+    )
   }
 
-  // 6. Stop 终止 - 冻结 stopRequestKey
+  // 9. Stop 终止
   const handleStopSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.stopIssue(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: stopRequestKey,
-        detail: stopDetail.trim() || null,
-      })
-      setIsStopModalOpen(false)
-      setStopDetail('')
-      setStopRequestKey(createUuid())
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('终止操作遇到版本冲突 (409)，请刷新后重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '终止运行失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
+    const trimmedDetail = stopDetail.trim() || null
+    stopPayloadRef.current = { detail: trimmedDetail }
+    await executeIssueAction(
+      'STOP',
+      stopRequestKey,
+      issue.version,
+      { detail: trimmedDetail },
+      () => api.stopIssue(issue.id, { expectedVersion: issue.version, requestKey: stopRequestKey, detail: trimmedDetail }),
+      () => {
+        setIsStopModalOpen(false)
+        setStopDetail('')
+        stopPayloadRef.current = null
+        setStopRequestKey(createUuid())
+      },
+    )
   }
 
-  // 7. 重开 (Reopen) - 沿用或分配 requestKey
-  const handleReopen = async (retryKey?: string) => {
-    if (!issue) return
-    const reqKey = retryKey || createUuid()
-    setIsActionPending(true)
-    setActionError(null)
-    try {
-      await api.reopenIssue(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: reqKey,
-      })
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '重新打开 Issue 失败')
-    } finally {
-      setIsActionPending(false)
-    }
-  }
-
-  // 8. 重置阶段预算 - 冻结 budgetRequestKey
+  // 10. 重置阶段预算
   const handleResetBudgetSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
@@ -526,33 +815,22 @@ export function IssueDetailModal({
       setActionError('最大额度必须大于 0')
       return
     }
-
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.resetStageBudget(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: budgetRequestKey,
-        state: resetBudgetState,
-        maxRuns: resetBudgetMaxRuns,
-      })
-      setIsResetBudgetOpen(false)
-      setBudgetRequestKey(createUuid())
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('重置阶段预算遇到版本冲突 (409)。已保留设置，请刷新版本后重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '重置阶段预算失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
+    budgetPayloadRef.current = { state: resetBudgetState, maxRuns: resetBudgetMaxRuns }
+    await executeIssueAction(
+      'RESET_BUDGET',
+      budgetRequestKey,
+      issue.version,
+      { state: resetBudgetState, maxRuns: resetBudgetMaxRuns },
+      () => api.resetStageBudget(issue.id, { expectedVersion: issue.version, requestKey: budgetRequestKey, state: resetBudgetState, maxRuns: resetBudgetMaxRuns }),
+      () => {
+        setIsResetBudgetOpen(false)
+        budgetPayloadRef.current = null
+        setBudgetRequestKey(createUuid())
+      },
+    )
   }
 
-  // 9. 追加活动 (Activity) - 区分 COMMENT 与 INSTRUCTION，冻结 activityRequestKey
+  // 11. 追加活动 (Activity)
   const handleAppendActivity = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
@@ -561,30 +839,19 @@ export function IssueDetailModal({
       setActionError('内容不能为空')
       return
     }
-
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-    try {
-      await api.appendIssueActivity(issue.id, {
-        expectedVersion: issue.version,
-        requestKey: activityRequestKey,
-        kind: activityKind,
-        body: trimmedBody,
-      })
-      setActivityBody('')
-      setActivityRequestKey(createUuid()) // 提交成功生成新 key
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        setConflictDetail('发布活动遇到版本冲突 (409)。已保留您的输入草稿，请刷新版本后以相同请求键重试。')
-      } else {
-        setActionError(err instanceof Error ? err.message : '发布活动失败')
-      }
-    } finally {
-      setIsActionPending(false)
-    }
+    activityPayloadRef.current = { kind: activityKind, body: trimmedBody }
+    await executeIssueAction(
+      'ACTIVITY',
+      activityRequestKey,
+      issue.version,
+      { kind: activityKind, body: trimmedBody },
+      () => api.appendIssueActivity(issue.id, { expectedVersion: issue.version, requestKey: activityRequestKey, kind: activityKind, body: trimmedBody }),
+      () => {
+        setActivityBody('')
+        activityPayloadRef.current = null
+        setActivityRequestKey(createUuid())
+      },
+    )
   }
 
   // 10. 删除 Issue
@@ -729,7 +996,7 @@ export function IssueDetailModal({
                 key={toState}
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => handleTransition(toState)}
                 title={`流转状态至 ${toState}`}
               >
@@ -743,7 +1010,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action danger"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => setIsResolveUnknownOpen(true)}
                 title="核查外部副作用并解除 UNKNOWN"
               >
@@ -757,7 +1024,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => handleRecover()}
                 title="解除阻塞并恢复至原工作阶段"
               >
@@ -768,7 +1035,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => setIsBlockModalOpen(true)}
                 title="记录原因并标记业务阻塞"
               >
@@ -782,7 +1049,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => setIsStopModalOpen(true)}
                 title="终止当前活动 Run 并置为暂停"
               >
@@ -796,7 +1063,7 @@ export function IssueDetailModal({
               <button
                 type="button"
                 className="btn-action primary"
-                disabled={isActionPending}
+                disabled={isWriteBlocked}
                 onClick={() => handleReopen()}
                 title="重新打开已完成的 Issue 回到 INIT"
               >
@@ -806,6 +1073,132 @@ export function IssueDetailModal({
             )}
           </div>
         </div>
+
+        {/* 存储读取异常警告条 */}
+        {storageLoadError && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              margin: '8px 20px 0 20px',
+              backgroundColor: 'var(--bg-danger-subtle, #330000)',
+              borderColor: 'var(--border-danger, #ef4444)',
+              color: 'var(--fg)',
+            }}
+          >
+            <AlertTriangle size={16} color="#ef4444" aria-hidden="true" />
+            <span>本地存储异常，为防止写操作状态失步已锁定当前 Issue: {storageLoadError}</span>
+          </div>
+        )}
+
+        {/* 损坏挂起记录警告条 */}
+        {corruptActionInfo && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              margin: '8px 20px 0 20px',
+              backgroundColor: 'var(--bg-warning-subtle, #2d2600)',
+              borderColor: 'var(--border-warning, #eab308)',
+              color: 'var(--fg)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
+              <strong style={{ color: '#eab308' }}>检测到损坏的本地未决操作记录（可能包含未确认副作用）</strong>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              解析错误: {corruptActionInfo.error}。为防止直接覆盖外部在途操作已安全锁定写操作。
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="btn-primary danger"
+                onClick={handleDiscardCorruptAction}
+                disabled={isActionPending}
+                style={{ fontSize: '12px', padding: '4px 12px' }}
+              >
+                放弃损坏记录并解锁
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 未决写操作未知状态警告条 (I07) */}
+        {pendingUnknownAction && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              margin: '8px 20px 0 20px',
+              backgroundColor: 'var(--bg-warning-subtle, #2d2600)',
+              borderColor: 'var(--border-warning, #eab308)',
+              color: 'var(--fg)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={16} color="#eab308" aria-hidden="true" />
+              <strong style={{ color: '#eab308' }}>检测到未确认结果的写操作（可能已在服务端生效）</strong>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              操作类型: <code>{pendingUnknownAction.kind}</code> | 冻结请求键: <code>{pendingUnknownAction.requestKey}</code> | 基准版本: <code>{pendingUnknownAction.expectedVersion}</code>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => void handleRetryPendingAction()}
+                disabled={isActionPending}
+                style={{ fontSize: '12px', padding: '4px 12px' }}
+              >
+                {isActionPending ? '重试中...' : '精确重试未决操作'}
+              </button>
+              {!isDiscardConfirmOpen ? (
+                <button
+                  type="button"
+                  className="ghost-btn danger"
+                  onClick={() => setIsDiscardConfirmOpen(true)}
+                  disabled={isActionPending}
+                  style={{ fontSize: '12px', padding: '4px 12px' }}
+                >
+                  放弃未决操作
+                </button>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--danger)' }}>
+                    【警告】此操作可能已在服务端执行。放弃后将不再跟踪原请求，确定放弃吗？
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-primary danger"
+                    onClick={handleDiscardPendingAction}
+                    disabled={isActionPending}
+                    style={{ fontSize: '12px', padding: '2px 8px' }}
+                  >
+                    确认放弃
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => setIsDiscardConfirmOpen(false)}
+                    style={{ fontSize: '12px', padding: '2px 8px' }}
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 冲突与错误提示横幅 */}
         {conflictDetail && (
@@ -1015,7 +1408,7 @@ export function IssueDetailModal({
                         <button
                           type="button"
                           className={`segmented-item ${activityKind === 'COMMENT' ? 'active' : ''}`}
-                          onClick={() => setActivityKind('COMMENT')}
+                          onClick={() => handleActivityKindChange('COMMENT')}
                         >
                           <MessageSquare size={13} aria-hidden="true" />
                           <span>普通评论 (Comment)</span>
@@ -1023,7 +1416,7 @@ export function IssueDetailModal({
                         <button
                           type="button"
                           className={`segmented-item ${activityKind === 'INSTRUCTION' ? 'active' : ''}`}
-                          onClick={() => setActivityKind('INSTRUCTION')}
+                          onClick={() => handleActivityKindChange('INSTRUCTION')}
                         >
                           <Send size={13} aria-hidden="true" />
                           <span>下达指令 (Instruction)</span>
@@ -1040,7 +1433,7 @@ export function IssueDetailModal({
                       rows={3}
                       placeholder={activityKind === 'INSTRUCTION' ? '输入指令内容要求当前 Agent 遵循...' : '添加一条讨论或事实备注...'}
                       value={activityBody}
-                      onChange={(e) => setActivityBody(e.target.value)}
+                      onChange={(e) => handleActivityBodyChange(e.target.value)}
                       disabled={isActionPending}
                     />
 
@@ -1048,7 +1441,7 @@ export function IssueDetailModal({
                       <button
                         type="submit"
                         className="btn-primary"
-                        disabled={isActionPending || !activityBody.trim()}
+                        disabled={isWriteBlocked || !activityBody.trim()}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
                         <Send size={12} aria-hidden="true" />
@@ -1310,7 +1703,7 @@ export function IssueDetailModal({
                       className="form-textarea"
                       rows={3}
                       value={blockReason}
-                      onChange={(e) => setBlockReason(e.target.value)}
+                      onChange={(e) => handleBlockReasonChange(e.target.value)}
                       placeholder="说明导致 Issue 无法继续执行的外部原因..."
                       autoFocus
                     />
@@ -1320,7 +1713,11 @@ export function IssueDetailModal({
                   <button type="button" className="ghost-btn" onClick={() => setIsBlockModalOpen(false)}>
                     取消
                   </button>
-                  <button type="submit" className="btn-primary danger" disabled={isActionPending}>
+                  <button
+                    type="submit"
+                    className="btn-primary danger"
+                    disabled={isWriteBlocked}
+                  >
                     {isActionPending ? '提交中...' : '确认阻塞'}
                   </button>
                 </div>
@@ -1353,7 +1750,7 @@ export function IssueDetailModal({
                       className="form-textarea"
                       rows={4}
                       value={verificationInput}
-                      onChange={(e) => setVerificationInput(e.target.value)}
+                      onChange={(e) => handleVerificationInputChange(e.target.value)}
                       placeholder="说明已核实的内容与外部状态一致性保证..."
                       autoFocus
                     />
@@ -1363,7 +1760,11 @@ export function IssueDetailModal({
                   <button type="button" className="ghost-btn" onClick={() => setIsResolveUnknownOpen(false)}>
                     取消
                   </button>
-                  <button type="submit" className="btn-primary" disabled={isActionPending}>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={isWriteBlocked}
+                  >
                     {isActionPending ? '解除中...' : '确认解除门禁'}
                   </button>
                 </div>
@@ -1390,7 +1791,7 @@ export function IssueDetailModal({
                       className="form-textarea"
                       rows={3}
                       value={stopDetail}
-                      onChange={(e) => setStopDetail(e.target.value)}
+                      onChange={(e) => handleStopDetailChange(e.target.value)}
                       placeholder="说明人工中止执行的原因..."
                       autoFocus
                     />
@@ -1400,7 +1801,11 @@ export function IssueDetailModal({
                   <button type="button" className="ghost-btn" onClick={() => setIsStopModalOpen(false)}>
                     取消
                   </button>
-                  <button type="submit" className="btn-primary danger" disabled={isActionPending}>
+                  <button
+                    type="submit"
+                    className="btn-primary danger"
+                    disabled={isWriteBlocked}
+                  >
                     {isActionPending ? '终止中...' : '确认终止'}
                   </button>
                 </div>
@@ -1428,7 +1833,7 @@ export function IssueDetailModal({
                       type="text"
                       className="form-input"
                       value={resetBudgetState}
-                      onChange={(e) => setResetBudgetState(e.target.value)}
+                      onChange={(e) => handleBudgetStateChange(e.target.value)}
                       placeholder="例如：DESIGN"
                     />
                   </div>
@@ -1440,7 +1845,7 @@ export function IssueDetailModal({
                       min={1}
                       className="form-input"
                       value={resetBudgetMaxRuns}
-                      onChange={(e) => setResetBudgetMaxRuns(Number(e.target.value))}
+                      onChange={(e) => handleBudgetMaxRunsChange(Number(e.target.value))}
                     />
                   </div>
                 </div>
@@ -1448,7 +1853,11 @@ export function IssueDetailModal({
                   <button type="button" className="ghost-btn" onClick={() => setIsResetBudgetOpen(false)}>
                     取消
                   </button>
-                  <button type="submit" className="btn-primary" disabled={isActionPending}>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={isWriteBlocked}
+                  >
                     {isActionPending ? '重置中...' : '确认重置'}
                   </button>
                 </div>
