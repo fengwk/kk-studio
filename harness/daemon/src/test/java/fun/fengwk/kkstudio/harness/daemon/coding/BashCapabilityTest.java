@@ -27,6 +27,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -69,7 +71,7 @@ class BashCapabilityTest {
             "{\"command\":\"printf 'partial-timeout-output\\\\n'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
-            Duration.ofMillis(400));
+            Duration.ofSeconds(2));
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -446,7 +448,7 @@ class BashCapabilityTest {
                 + "'; sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
-            Duration.ofMillis(700));
+            Duration.ofSeconds(3));
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -602,6 +604,225 @@ class BashCapabilityTest {
     assertTrue(Files.isRegularFile(published), "已捕获输出必须被发布，不能随异常丢弃");
     assertTrue(Files.size(published) > 0, "已捕获输出不得为空");
     assertEquals(List.of(), aliveAtCompletion.get(), "终态通知时整棵进程树必须已经收敛：" + tree.get());
+  }
+
+  /**
+   * 自然退出同样必须先收敛执行范围再通知终态：命令结束后不得留下任何普通同组后台后代。
+   *
+   * <p>PID 与就绪标记都由命令自己落盘，因此 onComplete 这个事件点上采集到的存活集合是确定性事实，而不是等待出来的
+   * 结论；「整组已收敛」由进程组判定给出，已退出但尚未回收的僵尸不会被误判为存活。
+   */
+  @Test
+  void naturalExitReapsBackgroundDescendantsBeforeTerminalCallback() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与进程组语义");
+    Path pidFile = workspaceRoot.resolve("natural-exit.pid");
+    Path readyFile = workspaceRoot.resolve("natural-exit.ready");
+    RecordingListener listener =
+        invokeAsync(
+            bash(config()),
+            "{\"command\":\""
+                + trackedCommand(pidFile, readyFile)
+                + "sleep 0.3; exit 0\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ZERO);
+    awaitFile(readyFile);
+    List<Long> tree = trackedTree(pidFile);
+    AtomicReference<List<Long>> aliveAtCompletion = new AtomicReference<>();
+    listener.observeAtCompletion(() -> aliveAtCompletion.set(aliveMembers(tree)));
+
+    assertTrue(listener.await());
+    EnvironmentCapabilityResult result = listener.result;
+    assertFalse(result.error(), text(result));
+    assertEquals("EXITED", details(result).path("process").path("outcome").asText(), text(result));
+    assertEquals(0, details(result).path("process").path("exitCode").asInt());
+    assertEquals(List.of(), aliveAtCompletion.get(), "自然退出后终态通知时整棵进程树必须已收敛：" + tree);
+  }
+
+  /**
+   * 后台作业持有 stdout 时，自然退出仍必须立刻结束：否则排空循环会一直等到那个作业自己退出。
+   *
+   * <p>确定性事实是「自然退出必须收敛持有管道写端的后代」：若收尾没有整组收敛，读取会在 sleep 60 上阻塞，测试会在调用 超时或 15 秒上界上失败。
+   */
+  @Test
+  void naturalExitCompletesEvenWhenBackgroundJobHoldsStdout() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与后台作业");
+    Path pidFile = workspaceRoot.resolve("holding-stdout.pid");
+    long started = System.nanoTime();
+    EnvironmentCapabilityResult result =
+        invoke(
+            bash(config()),
+            "{\"command\":\"sleep 60 & echo $! >> "
+                + pidFile
+                + "; echo done\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(30));
+    long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+
+    assertFalse(result.error(), text(result));
+    assertEquals("done\n", text(result));
+    assertEquals(0, details(result).path("process").path("exitCode").asInt());
+    assertTrue(elapsedMillis < 15_000, "持有 stdout 的后台作业不得拖住自然退出，实际 " + elapsedMillis + "ms");
+    for (long pid : recordedPids(pidFile)) {
+      assertFalse(alive(pid), "自然退出必须收敛持有 stdout 的后台后代 " + pid);
+    }
+  }
+
+  /** 用户的 EXIT trap 与精确退出码都必须原样穿过执行范围：helper 的收尾退出码绝不是命令的事实。 */
+  @Test
+  void userExitTrapAndExactExitCodeSurviveTheScope() throws Exception {
+    EnvironmentCapabilityResult result =
+        invoke(
+            bash(config()),
+            "{\"command\":\"trap 'echo trap-ran' EXIT; exit 42\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(30));
+
+    assertTrue(result.error());
+    assertEquals("EXITED", details(result).path("process").path("outcome").asText(), text(result));
+    assertEquals(42, details(result).path("process").path("exitCode").asInt());
+    assertTrue(text(result).contains("trap-ran"), text(result));
+    assertTrue(text(result).contains("Command exited with code 42"), text(result));
+  }
+
+  /** {@code exec} 让命令替换掉 shell 本身：进程还是同一个，退出码必须原样保留。 */
+  @Test
+  void execReplacedShellKeepsTheCommandExitCode() throws Exception {
+    EnvironmentCapabilityResult result =
+        invoke(
+            bash(config()),
+            "{\"command\":\"exec sh -c 'exit 7'\",\"workdir\":" + json(workspaceRoot) + "}",
+            Duration.ofSeconds(30));
+
+    assertTrue(result.error());
+    assertEquals(7, details(result).path("process").path("exitCode").asInt());
+    assertEquals("EXITED", details(result).path("process").path("outcome").asText());
+  }
+
+  /** {@code disown} 只从 shell 的作业表里摘掉作业，进程组不受影响：自然退出必须照样收敛它。 */
+  @Test
+  void disownedBackgroundJobIsReapedOnNaturalExit() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与 disown");
+    Path pidFile = workspaceRoot.resolve("disowned.pid");
+    EnvironmentCapabilityResult result =
+        invoke(
+            bash(config()),
+            "{\"command\":\"sleep 60 & echo $! >> "
+                + pidFile
+                + "; disown; echo disowned\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(30));
+
+    assertFalse(result.error(), text(result));
+    assertEquals(0, details(result).path("process").path("exitCode").asInt());
+    List<Long> pids = recordedPids(pidFile);
+    assertFalse(pids.isEmpty(), "命令必须记录被 disown 的作业 PID");
+    for (long pid : pids) {
+      assertFalse(alive(pid), "被 disown 的同组作业也必须随自然退出收敛 " + pid);
+    }
+  }
+
+  /** 嵌套 fork 的后代仍在同一个执行范围内：自然退出时整棵嵌套结构都必须收敛。 */
+  @Test
+  void nestedForkDescendantsAreReapedOnNaturalExit() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与嵌套 fork");
+    Path pidFile = workspaceRoot.resolve("nested.pid");
+    EnvironmentCapabilityResult result =
+        invoke(
+            bash(config()),
+            "{\"command\":\"sh -c 'sleep 60 & echo $! >> "
+                + pidFile
+                + "; wait' & sleep 0.3; exit 0\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(30));
+
+    assertFalse(result.error(), text(result));
+    assertEquals(0, details(result).path("process").path("exitCode").asInt());
+    for (long pid : recordedPids(pidFile)) {
+      assertFalse(alive(pid), "嵌套 fork 的后代也必须随自然退出收敛 " + pid);
+    }
+  }
+
+  /**
+   * 忽略温和信号的后代必须在强杀阶段收敛：这是对「只发一次 SIGTERM」实现的显式反向断言。
+   *
+   * <p>timeout 触发整组收敛，后台子进程显式忽略 TERM 并持续写入；若收尾没有升级到强制信号，标记文件会在终态之后继续 增长。
+   */
+  @Test
+  void termIgnoringDescendantIsForceKilledOnTimeout() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与信号语义");
+    Path marker = workspaceRoot.resolve("ignore-term-ticks.log");
+    RecordingListener listener =
+        invokeAsync(
+            bash(config()),
+            "{\"command\":\"(trap '' TERM; while true; do echo tick >> '"
+                + marker
+                + "'; sleep 0.05; done) & while true; do sleep 0.05; done\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(3));
+
+    assertTrue(listener.await());
+    EnvironmentCapabilityResult result = listener.result;
+    assertTrue(result.error(), text(result));
+    assertEquals(
+        "TIMED_OUT", details(result).path("process").path("outcome").asText(), text(result));
+    long ticksAtTermination = lineCount(marker);
+    assertTrue(ticksAtTermination > 0, "超时前忽略 TERM 的后代必须已经在产出输出");
+    Thread.sleep(500);
+    assertEquals(ticksAtTermination, lineCount(marker), "忽略温和信号的后代必须在强杀阶段收敛，不得继续写入");
+  }
+
+  /**
+   * 调用私有的进程范围状态目录必须在收尾时被删除，且与命令去向无关。
+   *
+   * <p>状态目录只在调用期间承载 helper 的握手文件；残留会把私有握手信息留在本地临时目录里。
+   */
+  @Test
+  void privateScopeStateIsRemovedAfterEveryOutcome() throws Exception {
+    Set<String> before = scopeStateEntries();
+    invoke(
+        bash(config()),
+        "{\"command\":\"echo ok\",\"workdir\":" + json(workspaceRoot) + "}",
+        Duration.ZERO);
+
+    Path marker = workspaceRoot.resolve("scope-cleanup-marker");
+    RecordingListener cancelled =
+        invokeAsync(
+            bash(config()),
+            "{\"command\":\"touch '"
+                + marker
+                + "'; sleep 30\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ZERO);
+    awaitFile(marker);
+    cancelled.handle.cancel();
+    assertTrue(cancelled.await());
+    assertTrue(cancelled.result.error());
+
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (!scopeStateEntries().equals(before) && System.nanoTime() < deadline) {
+      Thread.sleep(20);
+    }
+    assertEquals(before, scopeStateEntries(), "调用结束必须删除私有的进程范围状态目录");
+  }
+
+  /** 临时目录里当前存在的进程范围状态目录名；只比较测试前后差集，不关心其它调用留下的历史残留。 */
+  private static Set<String> scopeStateEntries() throws IOException {
+    Path tmp = Path.of(System.getProperty("java.io.tmpdir"));
+    try (var entries = Files.list(tmp)) {
+      Set<String> names = new TreeSet<>();
+      entries
+          .map(path -> path.getFileName().toString())
+          .filter(name -> name.startsWith(ProcessScope.STATE_DIR_PREFIX))
+          .forEach(names::add);
+      return names;
+    }
   }
 
   private BashCapability bash(CodingToolsConfig config) {

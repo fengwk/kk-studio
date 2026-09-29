@@ -133,6 +133,43 @@ Branch HEAD 永远不能替代调用参数中的 exact commit。
 
 命令与文件系统的业务授权由 Platform 的权限判定负责，Daemon 不提供额外的路径沙箱。
 
+### 进程执行范围
+
+`process.exec` 的每一次调用都先由 [`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)
+取得操作系统级的所有权，再启动用户的 `bash -lc`：Daemon 自身无法把 `ProcessBuilder` 放进一个新的 session，因此
+[`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java)
+以独立 JVM 作为范围 keeper。两侧的握手只有调用私有状态目录里的几个原子发布文件（`scope`/`permit`/`exit`/`error`/`cleanup`，
+外加 helper 自己的 `diagnostics`），目录在调用结束时删除。
+
+顺序是这条链路唯一的安全性来源：**helper 建立范围 -> 父进程校验范围并登记自己的收敛手段 -> 父进程放行用户命令**。因此
+「放行之前失败」永远等价于「用户命令没有产生任何副作用」，父进程可以直接结束 keeper；放行之后一律走完整收敛。启动阶段的取消
+与超时同样在放行之前生效，并且 helper 的冷启动也计入调用方的有效 deadline。
+
+- **POSIX（Linux/WSL/macOS）**：helper 先用 JNA 调用 libc `setsid` 建立新 session 与进程组，再以 `inheritIO` 启动
+  `bash -lc`，因此命令与它的普通后代从创建那一刻起就属于同一个进程组。父进程校验发布的 scope id 必须等于 helper 自己的 pid，
+  只对这样一个刚建立的进程组发信号，绝不向状态文件里出现的陌生 id 发信号。收敛 = 组里没有活着的成员：先温和信号，宽限约
+  150 ms 后强杀，再向内核确认（僵尸不算活着——它已经不会再写输出或改副作用；Linux/WSL 上 helper 还会用
+  `PR_SET_CHILD_SUBREAPER` 与 `waitpid` 立刻回收被收养的孤儿）。命令自然退出时 helper 先把退出码原子发布，再收敛整组并把
+  「已经收敛」发布到 `cleanup`，父进程据此恢复精确退出码；只有 Linux/WSL 能区分「只剩 helper 自己」与「还有后代」，其它 POSIX
+  平台的收敛结论由父进程的内核检查收口。
+- **Windows**：helper 建立带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、不开放 breakaway 的命名 Job，并用
+  `CREATE_SUSPENDED` -> `AssignProcessToJobObject` 创建首个进程；父进程用同一个名字打开第二个 Job 句柄，因此「终止整组」
+  与「确认整组结束」都不依赖 helper 自己活着。收敛 = `QueryInformationJobObject(JobObjectBasicAccountingInformation)`
+  报告 `ActiveProcesses == 0`：首个进程退出、helper 退出或句柄关闭都不是整组结束的证据，父进程只有拿到这个查询结果才关闭自己
+  的句柄。命令行按 MSVC 的 argv 规则拼装（裸可执行名交给 `CreateProcess` 按标准顺序解析），命令的 stderr 与 stdout 指向同一
+  个继承句柄从而合并进捕获流。
+
+标准流不经过 `ProcessScope`：用户命令继承 helper 的 stdin/stdout，父进程只是排空同一条管道；helper 自己的诊断（以及 JVM 启动
+提示，例如 `JAVA_TOOL_OPTIONS`）只写调用私有的诊断文件，只在解释失败原因时被读取，因此命令输出不会多出任何合成内容。辅助
+进程与原生边界只在上述平台上存在：平台无法识别、helper 无法启动、JNA 载入失败或 `setsid` 失败一律让本次调用明确失败，绝不
+退化成「没有范围的直接执行」。**收敛没有被内核或 Job 确认时本次调用显式失败**（不会报告成自然退出），调用方据此知道可能仍有
+进程在运行。
+
+**边界**：范围覆盖的是同组普通后代，不是恶意命令沙箱。命令主动 `setsid`/`set -m` 重新分组、或直接把进程交给其它
+session 时，它就不在这条收敛边界内；本能力不承诺阻止命令自我再分组，也不对这类逃逸做任何伪装。LSP 服务器保持原有
+[`ProcessTree`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTree.java) 语义：
+它是常驻客户端的生命周期管理（先 `shutdown`/`exit`，宽限后收敛含后代的进程树），与按调用建立的一次性执行范围无关。
+
 ### 文件读写与检索
 
 `fs.read` 与 `fs.write`/`fs.edit` 共享统一的文件编码与修改边界：文本按既有编码、BOM 与行尾表示写回，同一文件的并发修改通过进程内分段锁串行化。
@@ -174,7 +211,7 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有双线程池资源、驱动握手与重连状态机、按 wire 有效超时裁决能力调用 deadline 并按 message type 校验入站报文。 |
-| `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只用显式 `workdir` 解析相对路径，绝不把 HOME 当作文件系统沙箱或会话默认目录；大文本经 `TextOutputStore` 落盘为本地日志，二进制结果由终态编码阶段直传对象存储；调用之间不继承目录。 |
+| `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只用显式 `workdir` 解析相对路径，绝不把 HOME 当作文件系统沙箱或会话默认目录；`ProcessScope`/`ProcessScopeHelper` 在命令启动前建立 POSIX 进程组或 Windows Job Object 作为收敛边界；大文本经 `TextOutputStore` 落盘为本地日志，二进制结果由终态编码阶段直传对象存储；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 invocation 的 `RUNNING` 与终态，以原子操作保证单次执行并记录终态结果；重连后的重复 `INVOKE` 幂等重放 `STARTED` 或终态报文。日志在进程整个生命周期内有效，连接断开不改变执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.skill` | Skill Package 安装面。`SkillPackageInstaller` 把 Platform 指定的 exact commit 拉取进 `skill-work/cache` 的 bare cache（origin URL 与请求不一致时整份丢弃重建，绝不复用其它仓库的对象）、在 `skill-work/staging` 物化校验后原子替换 `<data-dir>/skills/<package>/`，失败保留旧目录并回滚，重启时清理 staging 残留与残留备份；物化拒绝绝对路径、`..` 逃逸、符号链接与 gitlink。capability 协议本身在 `coding` 包实现。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、文本帧收发与传输监听，强制协商 `permessage-deflate`，并对单消息累积体积与二进制帧执行策略违规关闭。 |
@@ -194,7 +231,7 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 - [`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：握手与重连、`REGISTRATION_REJECTED`/`RETRY_LATER` 分支、入站协议校验、超时裁决与超时/取消收尾窗口（终态类型、已捕获输出注入、兜底收敛、停机收敛）、取消与终态重放、上传在重连后的恢复与去重。
 - [`OkHttpWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransportTest.java)：`permessage-deflate` 协商门禁、文本帧传输、二进制拦截与超限关闭。
 - [`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)、[`FindGrepCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java)、[`GitIgnoreDiscoveryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java)：显式 workdir 语义、编码能力端到端行为、原生检索的匹配/上限/失败/超时、`.gitignore` 与 `info/exclude` 的分层解析、LSP 有效超时与取消终止进程树。检索行为的源用例映射见[内置检索测试映射](../operations/builtin-search-tests.md)。
-- [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`BashCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapabilityTest.java)、[`ProcessTreeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTreeTest.java)：内联与落盘阈值、预览字符边界与重叠去重、行数一致性、捕获预算与磁盘失败降级（含 durable 发布失败）、原子发布、合并流的大输出完整捕获、启动前收尾不启动 shell、stdin 立即关闭、超时/取消/退出三种收尾的输出保留与 `process.outcome` 区分、异常路径（调度被拒、监听器抛错）下先收敛进程树再通知终态（读端在收敛后才关闭，后台后代不会提前脱离可达范围）、终止顺序与平台异常状态（句柄不可用、后代枚举失败、信号被拒绝、存活查询失败）下的收敛。
+- [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`BashCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapabilityTest.java)、[`ProcessScopeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeTest.java)、[`WindowsCommandLineTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WindowsCommandLineTest.java)、[`WindowsJobScopeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WindowsJobScopeTest.java)、[`ProcessTreeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTreeTest.java)：内联与落盘阈值、预览字符边界与重叠去重、行数一致性、捕获预算与磁盘失败降级（含 durable 发布失败）、原子发布、合并流的大输出完整捕获、启动前收尾不启动 helper、stdin 立即关闭、超时/取消/退出三种收尾的输出保留与 `process.outcome` 区分、自然退出/`exec`/`disown`/嵌套 fork 下后台后代在终态通知前收敛、忽略温和信号的后代由强杀阶段收敛、用户 EXIT trap 与精确退出码保真、范围 keeper 的失败关闭与私有状态目录清理、异常路径（调度被拒、监听器抛错）下先收敛范围再通知终态（读端在收敛后才关闭，后台后代不会提前脱离可达范围）、Windows 命令行 argv 转义规则与 Job 结构布局，以及 LSP 客户端生命周期所用的进程树终止顺序与平台异常状态（句柄不可用、后代枚举失败、信号被拒绝、存活查询失败）下的收敛。
 
 ---
 

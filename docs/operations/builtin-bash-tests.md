@@ -12,7 +12,7 @@ pi-base 的 bash 测试集中在单个工具的进程执行、输出裁剪与 TU
 
 | 层次 | 代码 | 负责的事实 | 主要测试类 |
 | --- | --- | --- | --- |
-| 命令执行与捕获 | [`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)、[`ProcessTree`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTree.java) | 合并 stdout/stderr、按阈值落盘、超时/取消/退出三种收尾、进程树终止 | `BashCapabilityTest`、`ProcessTreeTest`、`OutputSpoolTest`、`TextOutputStoreTest` |
+| 命令执行与捕获 | [`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)、[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)、[`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java) | 合并 stdout/stderr、按阈值落盘、超时/取消/退出三种收尾、OS 执行范围收敛 | `BashCapabilityTest`、`ProcessScopeTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、`OutputSpoolTest`、`TextOutputStoreTest` |
 | 输出裁剪与发布 | [`OutputSpool`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpool.java)、[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) | 内联/落盘阈值、精确字节与行计数、有界预览、中转文件发布 | `OutputSpoolTest`、`TextOutputStoreTest` |
 | 协议与终态仲裁 | [`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) | 超时/取消裁决、终态唯一性、重放、收尾窗口（携带已捕获输出） | `DaemonRuntimeTest` |
 | 模型可见契约 | [`bash.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/bash.md)、`process.exec` schema | 工具提示词、workdir 必填、超时解析 | `BuiltinHarnessContributorTest`、`CodingCapabilitiesTest` |
@@ -27,7 +27,7 @@ Backend/Frontend 承担），下表中标记为「不迁移」。
 ```bash
 # bash 内核：进程执行、终止、输出裁剪
 env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/daemon -am test \
-  -Dtest='BashCapabilityTest,ProcessTreeTest,OutputSpoolTest,TextOutputStoreTest' \
+  -Dtest='BashCapabilityTest,ProcessScopeTest,WindowsCommandLineTest,WindowsJobScopeTest,OutputSpoolTest,TextOutputStoreTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 
 # 协议与终态仲裁（含超时/取消收尾窗口）
@@ -61,19 +61,23 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/runtime -am test \
 
 ## tests/process-termination.test.ts（4 例）
 
+bash 命令的终止语义现在由 OS 执行范围承接（POSIX 进程组 / Windows Job Object），因此这几例主要映射到
+`BashCapabilityTest`、`ProcessScopeTest` 与平台无关的 `WindowsCommandLineTest`；`ProcessTree` 仍是 LSP 客户端生命周期的
+终止实现，它的用例继续保留在同一文件里。
+
 | pi-base 用例 | kk-studio 承接 | 说明 |
 | --- | --- | --- |
-| `lets child processes handle SIGTERM before a force kill` | `ProcessTreeTest.terminatesGracefullyBeforeForcing` | 先 `destroy()`，命中不了再强制 |
-| `sends SIGTERM once, force-kills later, and cleanup cancels pending force kill` | `ProcessTreeTest.repeatedTerminationOfExitedAndNullHandlesIsNoOp`、`concurrentTerminationIsIdempotentAndConverges` | 幂等由 `ProcessTree` 的快照与终态收敛保证：重复终止、并发终止与 `null` 句柄都是空操作 |
-| `keeps process-tree escalation armed after the leader exits`（POSIX） | `ProcessTreeTest.forceConvergesDescendantsThatOutliveTheirLeader`、`terminatesDescendantsThatIgnoreSoftTermination` | kk-studio 在发信号前先快照后代：leader 退出后 `descendants()` 无法再发现孤儿，因此快照是升级到强制的唯一依据 |
-| `does not signal a child that already exited` | `ProcessTreeTest.doesNotSignalAlreadyExitedProcess`、`repeatedTerminationOfExitedAndNullHandlesIsNoOp`、`BashCapabilityTest.startFailureIsReportedWithoutStagingResidue` | 真实已退出进程与进程探针都验证「不发温和信号、不发强制信号」；无进程（`process == null`）同样收敛为空操作 |
+| `lets child processes handle SIGTERM before a force kill` | `BashCapabilityTest.termIgnoringDescendantIsForceKilledOnTimeout`、`ProcessScopeTest.liveScopeIsNotReportedAsConverged`、`ProcessTreeTest.terminatesGracefullyBeforeForcing` | bash 范围先对整组发 `SIGTERM`，宽限窗口后才 `SIGKILL`；LSP 客户端仍走 `ProcessTree` 的「先温和、后强制」顺序 |
+| `sends SIGTERM once, force-kills later, and cleanup cancels pending force kill` | `ProcessScopeTest.concurrentTerminationIsIdempotentAndConverges`、`ProcessScopeTest.closeIsIdempotent`、`ProcessTreeTest.repeatedTerminationOfExitedAndNullHandlesIsNoOp` | 幂等由「一次收敛 + 其余调用等待同一次收敛」保证：并发终止、重复终止与已收敛范围都是空操作；等待收敛失败时返回未收敛，不假装成功 |
+| `keeps process-tree escalation armed after the leader exits`（POSIX） | `BashCapabilityTest.naturalExitReapsBackgroundDescendantsBeforeTerminalCallback`、`timeoutTerminatesWholeProcessTree`、`ProcessScopeTest.liveScopeIsNotReportedAsConverged` | kk-studio 不再枚举后代：命令与普通后代一开始就在同一个进程组里，leader 退出后升级仍然覆盖整组 |
+| `does not signal a child that already exited` | `ProcessScopeTest.naturalExitKeepsTheExactCommandExitCode`、`publishedScopeIdIsTheHelperProcessGroup`、`ProcessTreeTest.doesNotSignalAlreadyExitedProcess`、`BashCapabilityTest.startFailureIsReportedWithoutStagingResidue` | 范围收敛直接问内核（组里是否还有活着的成员，僵尸不算），已收敛时是空操作；发信号只针对刚校验过的本次调用范围 |
 
 ## tests/process-termination-windows.test.ts（2 例）
 
 | pi-base 用例 | kk-studio 承接 | 说明 |
 | --- | --- | --- |
-| `keeps Windows process-tree escalation armed after the leader exits` | 部分迁移：`ProcessTreeTest.forceConvergesDescendantsThatOutliveTheirLeader`、`concurrentTerminationIsIdempotentAndConverges`（跨平台执行） | 差异：kk-studio 不调用 `taskkill /T`，而是对预快照的整棵进程树逐个 `destroyForcibly()`；**Windows 上的这条路径没有本机验证证据**，见「已知缺口」 |
-| `falls back to SIGKILL for single-process force termination` | `ProcessTreeTest.terminatesGracefullyBeforeForcing`、`BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 单进程与整树的强制收敛共用同一实现，平台差异只在 `ProcessHandle` 的能力上 |
+| `keeps Windows process-tree escalation armed after the leader exits` | `ProcessScopeTest`（`cmd /c` 路线）与 `WindowsJobScope` 的命名 Job 语义 | 差异：kk-studio 不用 `taskkill /T`，而是用带 `KILL_ON_JOB_CLOSE` 的命名 Job 覆盖整组，并用 `ActiveProcesses == 0` 证明整组结束（首个进程退出不算证据）；Windows 侧的本机证据来自 CI 矩阵，见「已知缺口」 |
+| `falls back to SIGKILL for single-process force termination` | `WindowsCommandLineTest`（argv 拼装）与 `BashCapabilityTest` 的取消/超时用例 | Windows 没有 `SIGKILL` 对应物：终止 helper 即让系统按 Job 收敛整组 |
 
 ## tests/bash-renderer-behavior.test.ts（5 例）
 
@@ -212,15 +216,38 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 | `DaemonRuntimeTest.shutdownDuringHandoffStillConvergesTerminal` | 收尾窗口内的停机立即收敛，关闭不等待能力配合 |
 | `BashCapabilityTest.runtimeTimeoutTerminationReportsTimedOutOutcome` | 运行时的超时收尾不会被报告成取消 |
 | `BashCapabilityTest.runtimeCancelTerminationReportsCancelledOutcome` | 运行时的取消收尾按取消语义产出说明 |
-| `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore` | 启动前已取消的调用不启动 shell、不创建中转/durable 文件，也不留下命令副作用 |
+| `BashCapabilityTest.naturalExitReapsBackgroundDescendantsBeforeTerminalCallback` | 自然退出时终态通知发生在整组收敛之后，后台后代不会在调用结束后继续存活 |
+| `BashCapabilityTest.naturalExitCompletesEvenWhenBackgroundJobHoldsStdout` | 后台作业持有 stdout 时自然退出仍然立刻结束，排空循环不会等到作业自己退出 |
+| `BashCapabilityTest.userExitTrapAndExactExitCodeSurviveTheScope` | 用户 EXIT trap 的输出与精确退出码原样穿过执行范围 |
+| `BashCapabilityTest.execReplacedShellKeepsTheCommandExitCode` | `exec` 替换 shell 后进程仍在范围内，退出码保真 |
+| `BashCapabilityTest.disownedBackgroundJobIsReapedOnNaturalExit` | `disown` 只影响 shell 作业表，被摘掉的同组作业仍随自然退出收敛 |
+| `BashCapabilityTest.nestedForkDescendantsAreReapedOnNaturalExit` | 嵌套 fork 的后代仍在同一执行范围内并被收敛 |
+| `BashCapabilityTest.termIgnoringDescendantIsForceKilledOnTimeout` | 忽略温和信号的后代必须在强杀阶段收敛，不得在终态之后继续写入 |
+| `BashCapabilityTest.privateScopeStateIsRemovedAfterEveryOutcome` | 调用私有的进程范围状态目录在调用结束时被删除 |
+| `ProcessScopeTest.naturalExitKeepsTheExactCommandExitCode` | 命令自然退出码来自 helper 的原子发布，且 helper 在退出前已经发布整组收敛事实 |
+| `ProcessScopeTest.missingExecutableIsReportedAsScopeFailure` | 命令无法启动时在已建立范围内失败关闭，并发布失败原因 |
+| `ProcessScopeTest.liveScopeIsNotReportedAsConverged` | 收敛判定必须看见活着的命令：发过终止信号不等于已经收敛 |
+| `ProcessScopeTest.concurrentTerminationIsIdempotentAndConverges` | 并发终止只执行一次收敛，且都在内核确认范围消失之后返回 |
+| `ProcessScopeTest.closeRemovesThePrivateStateDirectory` | 私有状态目录只在调用期间存在，`close` 必须删除它 |
+| `ProcessScopeTest.outputIsForwardedVerbatim` | 输出原样穿过执行范围，不额外增加内容也不截断 |
+| `ProcessScopeTest.missingDaemonClasspathFailsClosedWithoutLaunchingAHelper` | 无法定位类路径时不启动无法承载 helper 的 JVM |
+| `ProcessScopeTest.helperThatDiesBeforePublishingTheScopeIsReportedAsStartupFailure` | helper 未发布 scope 就退出时必须失败关闭，不退化成无范围执行 |
+| `ProcessScopeTest.corruptedExitStateIsRejected` | 状态文件被破坏时显式失败，绝不把不可读内容当成退出码 |
+| `ProcessScopeTest.closeIsIdempotent` | 重复 close 不抛出，也不改变已收敛的范围 |
+| `ProcessScopeTest.cancelledBeforeThePermitLeavesNoSideEffect` | 许可之前取消：命令从未启动，没有副作用，也不留状态目录 |
+| `ProcessScopeTest.publishedScopeIdIsTheHelperProcessGroup` | 发布的 scope id 必须等于 helper 自己的进程组，父进程只在此基础上发信号 |
+| `ProcessScopeTest.helperDiagnosticsStayOutOfTheCommandOutput` | helper 自己的诊断（含 JVM 启动提示）只进诊断文件，命令输出一个字节都不多 |
+| `WindowsCommandLineTest` | Windows 命令行 argv 拼装规则（空白、空参数、引号与尾部反斜杠转义） |
+| `WindowsJobScopeTest` | Job 相关结构的原生布局（64/144/48 字节）与 Job 名从状态目录派生（跨平台可执行，Windows 上是真实布局校验） |
+| `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore` | 启动前已取消的调用不启动 helper、不创建中转/durable 文件，也不留下命令副作用 |
 | `BashCapabilityTest.preTimedOutCallDoesNotStartShellOrTouchStore` | 启动前已超时的调用共享同一条 fail-closed 检查，且终态仍是超时而非取消 |
 | `BashCapabilityTest.closesStdinSoCommandsWaitingForEofFinishNaturally` | 命令以参数传入、不读 stdin：等待 EOF 的命令自然退出，而不是阻塞到超时 |
 | `BashCapabilityTest.keepsPayloadBeyondPipeBufferComplete` | 超过管道缓冲与内联阈值的大输出完整捕获并发布全文，字节与行计数忠实 |
 | `BashCapabilityTest.mergedStreamsBeyondPipeBufferCompleteWithoutDeadlock` | 合并流两路同时写满管道缓冲时仍必须完成，不能互相等待 |
-| `BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 超时收尾终止整棵进程树（含后台后代），收尾后不得继续写入 |
-| `BashCapabilityTest.cancellationTerminatesWholeProcessTree` | 取消收尾同样终止整棵进程树，且不把 kill 退出码当成命令事实 |
-| `BashCapabilityTest.rejectedTimeoutSchedulingConvergesBeforeTerminalCallback` | 超时调度被拒（运行时已停机）时，整棵进程树（主进程与后台子进程）在终态通知时已经不存活 |
-| `BashCapabilityTest.listenerFailureConvergesAndKeepsCapturedOutput` | 监听器抛错时提交唯一失败终态、发布已捕获输出，且整棵进程树在终态通知前收敛（读端直到收敛后才关闭，后台后代不会因 SIGPIPE 提前脱离可达范围） |
+| `BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 超时收尾收敛整个执行范围（含后台后代），收尾后不得继续写入 |
+| `BashCapabilityTest.cancellationTerminatesWholeProcessTree` | 取消收尾同样收敛整个执行范围，且不把 kill 退出码当成命令事实 |
+| `BashCapabilityTest.rejectedTimeoutSchedulingConvergesBeforeTerminalCallback` | 超时调度被拒（运行时已停机）时，整个执行范围（主进程与后台子进程）在终态通知时已经不存活 |
+| `BashCapabilityTest.listenerFailureConvergesAndKeepsCapturedOutput` | 监听器抛错时提交唯一失败终态、发布已捕获输出，且整个执行范围在终态通知前收敛（读端直到收敛后才关闭，后台后代不会因 SIGPIPE 提前脱离可达范围） |
 | `BashCapabilityTest.timeoutPublishesSpilledOutputAndKeepsCountsFaithful` | 终态说明不进入 durable 全文，也不计入 `totalBytes`/`totalLines` |
 | `OutputSpoolTest.captureBudgetStopsFileCaptureWithoutFailingTheCall` | 达捕获预算只停止文件捕获并继续计数，绝不终止进程 |
 | `BuiltinHarnessContributorTest.bashPromptDescribesConfiguredShellWithoutTemplatePlaceholders` | 环境工具提示词不做模板渲染，不得残留占位符 |
@@ -237,11 +264,24 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 
 ## 已知缺口与平台限制
 
-- **Windows 进程树终止没有本机验证证据。** `ProcessTree` 用 `ProcessHandle.destroy()/destroyForcibly()`
-  对预快照的整棵进程树收敛，而不是 `taskkill /T`；相关测试在 Linux/macOS 上运行。在 Windows 上运行的验证
-  结论需要在这些平台上重新执行本页的 daemon 测试后才能给出。
-- **进程组语义差异。** pi-base 在 POSIX 上用 `kill(-pid, …)` 打整个进程组，kk-studio 逐进程快照并终止，
-  因此覆盖「leader 退出后仍能升级」的方式不同。
+- **Windows 与 macOS 的进程范围只有 CI 原生验证，本地没有证据。** POSIX 进程组（`setsid` + `kill(-pgid)`）在 Linux 上
+  由真实进程用例覆盖；Windows 的 Job Object 路径（`WindowsJobScope`）与 macOS 上的同一套 POSIX 路径需要在各自平台上
+  执行 `ProcessScopeTest`、`WindowsCommandLineTest` 与 `BashCapabilityTest` 才能给出结论，CI 矩阵
+  （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）承担这件事。LSP 客户端所用的 `ProcessTree`
+  仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows 上的
+  验证同样只能来自该矩阵。
+- **Windows 侧首个进程在放行之前一直挂起。** 命令进程先以 suspended 状态被归属进 Job，父进程拿到 Job 句柄之后才恢复它；因此
+  取消（即使在启动阶段）只需要终止整组，不会留下任何执行过命令逻辑的进程。helper 在许可之前失败时自己结束这个从未运行过的
+  挂起进程，父进程也持有同一个 Job 的句柄作为第二重保证。
+- **范围不是恶意命令沙箱。** 命令主动 `setsid`/`set -m` 重新分组、或把进程交给其它 session 时不受这条边界约束；本能力
+  不承诺阻止自我再分组，也不对这类逃逸做伪装。
+- **helper 的覆盖数据默认不进主报告，但可以测量。** helper 在独立 JVM 中执行，父进程的 JaCoCo 报告天然看不到它；需要 helper
+  覆盖率时显式打开开关（`-Dkk-studio.process-scope.helper-coverage=true`），helper 会被同一个代理插桩，数据收集到
+  `target/jacoco-helper/*.exec`，用 `mvn org.jacoco:jacoco-maven-plugin:merge -DdestFile=... fileSets=...` 或 JaCoCo CLI
+  合并后即可在报告里看到 `ProcessScopeHelper`/`PosixProcessGroup` 的 helper 侧行覆盖。默认关闭是因为被插桩的 helper 冷启动更慢，
+  会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
+- **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
+  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
   在下一次调用重建存储；输出内容与失败终态都不受影响。
 - **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」
