@@ -185,7 +185,8 @@ Set-Location kk-studio
 4. 暂存后替换：新产物先暂存到目标同一目录（因此不受跨文件系统改名限制），再替换目标路径。Unix 的
    JAR 与 unit/plist 都是临时文件 + `mv -f` 原子改名；Windows 的 JAR 用同目录 `Move-Item -Force`
    覆盖，任务定义则通过 `Register-ScheduledTask -Force` 重新注册。进入替换阶段后的宿主 API、磁盘或
-   启动失败会明确返回错误，但不承诺自动回滚已完成的服务切换。
+   启动失败会明确返回非 0 错误并给出定位提示（如 `systemctl --user status`、`launchctl print`），
+   但不承诺自动回滚已完成的服务切换。
 5. 直接 Java 动作：服务定义直接执行绝对路径的 `java`/`java.exe`，没有 cmd/shell wrapper、环境变量
    文件、注册表项或 `~/.local/bin` 入口；配置只存在于服务定义本身，`mvn` 与令牌文本都不进入其中。
 6. 启动并验证：在最多 30 秒窗口内等待平台报告运行状态，再要求它在随后 3 秒内**持续**保持——一次瞬时
