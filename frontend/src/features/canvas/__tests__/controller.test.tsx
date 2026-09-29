@@ -1468,4 +1468,119 @@ describe('useCanvasController real snapshot runtime', () => {
 
     await waitFor(() => expect(result.current.state.conflictMessage).toBeNull())
   })
+
+  it('I03 保存状态 fail-closed：草稿落盘失败时不推进基线，维持 dirty 状态与 storageError', async () => {
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 注入底层 IDB 失败
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory({ shouldFailOpen: true }),
+    })
+
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 50, y: 60, width: 320, height: 260 },
+      }])
+    })
+
+    await waitFor(() => expect(result.current.state.storageError).toBeTruthy())
+    // 关键断言：草稿依然保留在内存 dirty 状态，绝不由于失败而丢弃
+    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 50, y: 60 })
+    expect(result.current.state.draftPersistPending).toBe(false)
+  })
+
+  it('I04 变换批次递增世代并携带世代 ACK，落盘 ACK 只精准清除对应世代', async () => {
+    const release = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {
+      commands.push(request)
+      return release.promise
+    })
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 第一次移动：世代 1
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 100, y: 200, width: 320, height: 260 },
+      }])
+      result.current.commitTransforms()
+    })
+    expect(result.current.state.drafts[NODE_NOTE]?.generation).toBe(1)
+    expect(result.current.state.positionDrafts[NODE_NOTE]).toEqual({ x: 100, y: 200 })
+
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 在途请求未返回前，用户再次移动：世代 2
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 110, y: 210, width: 320, height: 260 },
+      }])
+    })
+    expect(result.current.state.drafts[NODE_NOTE]?.generation).toBe(2)
+
+    // 释放第一次请求：完成落盘与世代 1 的 ACK 清理
+    await act(async () => {
+      release.resolve(diffPatch(snapshot(1)))
+      await release.promise
+    })
+
+    // 关键断言：在途期间的新修改（世代 2）未被世代 1 的 ACK 冲掉
+    expect(result.current.state.drafts[NODE_NOTE]?.position).toEqual({ x: 110, y: 210 })
+    expect(result.current.state.positionDrafts[NODE_NOTE]).toEqual({ x: 110, y: 210 })
+  })
+
+  it('I05 函数配置编辑立即持久化草稿，防抖冲刷前即使崩溃也保留最新输入', async () => {
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    const newConfig = {
+      prompt: { segments: [{ type: 'TEXT' as const, text: 'sunset' }] },
+      parameters: { ratio: '16:9' },
+    }
+
+    // 调用 scheduleFunctionConfig（模拟面板输入）：立即写入本地草稿，无需等待 320ms 网络防抖
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', newConfig)
+    })
+
+    // 立即断言内存草稿已就绪并分配了世代
+    expect(result.current.state.drafts[NODE_FN]?.function?.name).toBe('fake-image')
+    expect(result.current.state.drafts[NODE_FN]?.function?.args).toEqual(newConfig)
+    expect(result.current.state.drafts[NODE_FN]?.generation).toBeGreaterThanOrEqual(1)
+
+    // 等待持久化落盘
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_FN]?.function?.name).toBe('fake-image')
+    })
+  })
+
+  it('实例卸载边界安全：卸载后正在排队的异步 persist 任务绝不覆写或删除底层存储', async () => {
+    const { result, unmount } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 产生草稿并立即卸载组件
+    act(() => {
+      result.current.moveNodes([{
+        id: NODE_NOTE,
+        kind: 'text',
+        transform: { x: 999, y: 888, width: 320, height: 260 },
+      }])
+    })
+    unmount()
+
+    // 卸载后等待异步微任务全部跑完，确认已卸载实例不会引发未捕获异常或非法状态写入
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(result.current.state.draftPersistPending).toBe(false)
+  })
 })

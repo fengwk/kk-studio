@@ -203,6 +203,47 @@ function registerUnloadRelease(): void {
   }
   window.addEventListener('pagehide', release)
   window.addEventListener('beforeunload', release)
+  window.addEventListener('pageshow', handlePageshow)
+}
+
+/**
+ * bfcache retained 实例 pageshow 重新确认 claim 所有权：
+ * - 页面进入 bfcache 时 pagehide 释放了 ownership；
+ * - pageshow 恢复时重新检查：若该 session 在休眠期间已被同源其他活页面认领，
+ *   必须避免旧实例与新活页面并发使用同一 scope；
+ * - 采用 KISS 的安全 reload 方案重新分配会话与加载快照（IndexedDB 草稿持久完整保留，不强夺活 owner）；
+ * - 若无其他活 owner，则本实例安全重新 claim 并恢复心跳。
+ */
+export function handlePageshow(_event?: Event | { persisted?: boolean }): void {
+  const targetId = cachedSessionId ?? readSessionStorage()
+  if (!targetId) {
+    getEditingSessionId()
+    return
+  }
+
+  if (isOwnedByAnotherLivePage(targetId)) {
+    console.warn(
+      `[canvas] bfcache 恢复时会话 ${targetId} 已被同源活所有者持有；`
+      + `执行安全 reload 重新隔离，防止旧实例污染旧 scope。`,
+    )
+    cachedSessionId = null
+    ownedSessionId = null
+    stopHeartbeat()
+    try {
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    } catch {
+      // Ignore
+    }
+    if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+      window.location.reload()
+    }
+    return
+  }
+
+  cachedSessionId = targetId
+  ownedSessionId = targetId
+  claimOwnership(targetId)
+  startHeartbeat(targetId)
 }
 
 function releaseOwnership(): void {

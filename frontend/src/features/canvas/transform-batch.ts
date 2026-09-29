@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { isNodeCompletelyOutsideGroup } from '@/features/canvas/group-membership'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
+import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { CanvasPositionUpdate } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
@@ -14,10 +15,11 @@ const TRANSFORM_FLUSH_DEBOUNCE_MS = 180
 
 export interface CanvasTransformBatchOptions {
   snapshot: CanvasSnapshotDTO | undefined
-  executeCommands: (commands: CanvasCommandDTO[]) => Promise<unknown>
+  executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>
   setPositionDrafts: (
     updater: (current: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>,
   ) => void
+  getDraftGeneration?: (nodeId: string) => number | undefined
 }
 
 export interface CanvasTransformBatchActions {
@@ -39,17 +41,23 @@ interface PendingBatch {
 interface SubmittedBatch extends PendingBatch {
   commands: CanvasCommandDTO[]
   drafts: Record<string, { x: number; y: number }>
+  acks: CanvasDraftAck[]
 }
 
 export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): CanvasTransformBatchActions {
-  const { snapshot, executeCommands, setPositionDrafts } = options
+  const { snapshot, executeCommands, setPositionDrafts, getDraftGeneration } = options
   const pendingNodeTransformsRef = useRef<PendingBatch['nodeTransforms']>(new Map())
   const pendingGroupMovesRef = useRef<PendingBatch['groupMoves']>(new Map())
   const pendingUngroupsRef = useRef<PendingBatch['ungroups']>(new Map())
+  const getDraftGenerationRef = useRef(getDraftGeneration)
   const timerRef = useRef<number | null>(null)
   const inFlightEpochRef = useRef<number | null>(null)
   const flushRequestedRef = useRef(false)
   const epochRef = useRef(0)
+
+  useEffect(() => {
+    getDraftGenerationRef.current = getDraftGeneration
+  }, [getDraftGeneration])
 
   useEffect(() => () => {
     epochRef.current += 1
@@ -100,6 +108,7 @@ export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): C
       pendingNodeTransformsRef.current,
       pendingGroupMovesRef.current,
       pendingUngroupsRef.current,
+      getDraftGenerationRef.current,
     )
     if (batch.commands.length === 0) {
       return
@@ -108,7 +117,7 @@ export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): C
     inFlightEpochRef.current = epoch
     flushRequestedRef.current = false
     let failed = false
-    void executeCommands(batch.commands)
+    void executeCommands(batch.commands, batch.acks)
       .then(() => {
         if (epochRef.current !== epoch) {
           return
@@ -210,6 +219,7 @@ function takePendingBatch(
   pendingNodeTransforms: PendingBatch['nodeTransforms'],
   pendingGroupMoves: PendingBatch['groupMoves'],
   pendingUngroups: PendingBatch['ungroups'],
+  getDraftGeneration?: (nodeId: string) => number | undefined,
 ): SubmittedBatch {
   const nodeTransforms = new Map(pendingNodeTransforms)
   const groupMoves = new Map(pendingGroupMoves)
@@ -218,7 +228,7 @@ function takePendingBatch(
   pendingGroupMoves.clear()
   pendingUngroups.clear()
   return {
-    ...submissionOf(snapshot, nodeTransforms, groupMoves, ungroups),
+    ...submissionOf(snapshot, nodeTransforms, groupMoves, ungroups, getDraftGeneration),
     nodeTransforms,
     groupMoves,
     ungroups,
@@ -230,12 +240,16 @@ function submissionOf(
   nodeTransforms: PendingBatch['nodeTransforms'],
   groupMoves: PendingBatch['groupMoves'],
   ungroups: PendingBatch['ungroups'],
-): Pick<SubmittedBatch, 'commands' | 'drafts'> {
+  getDraftGeneration?: (nodeId: string) => number | undefined,
+): Pick<SubmittedBatch, 'commands' | 'drafts' | 'acks'> {
   const commands: CanvasCommandDTO[] = []
   const drafts: Record<string, { x: number; y: number }> = {}
+  const acks: CanvasDraftAck[] = []
 
   for (const [nodeId, item] of nodeTransforms) {
     drafts[nodeId] = { x: item.transform.x, y: item.transform.y }
+    const generation = getDraftGeneration?.(nodeId) ?? 0
+    acks.push({ nodeId, field: 'position', generation })
     commands.push({
       type: 'UPDATE_NODE_TRANSFORM',
       nodeId,
@@ -270,7 +284,7 @@ function submissionOf(
     })
   }
 
-  return { commands, drafts }
+  return { commands, drafts, acks }
 }
 
 function restorePending(

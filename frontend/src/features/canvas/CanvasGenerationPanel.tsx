@@ -68,6 +68,8 @@ export function CanvasGenerationPanel({
   const [verificationText, setVerificationText] = useState('')
   const [showJsonArgs, setShowJsonArgs] = useState(false)
   const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.parameters, null, 2))
+  const [jsonDirty, setJsonDirty] = useState(false)
+  const [jsonError, setJsonError] = useState<string | null>(null)
   const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
   const panelRef = useRef<HTMLElement | null>(null)
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
@@ -201,7 +203,12 @@ export function CanvasGenerationPanel({
     setConfig(sourceConfig)
     cursorRef.current = { segmentIndex: 0, offset: 0 }
     dirtyRef.current = false
+    if (!jsonDirty) {
+      setJsonArgsText(JSON.stringify(sourceConfig.parameters, null, 2))
+      setJsonError(null)
+    }
   }, [
+    jsonDirty,
     node.function,
     sourceIdentity,
     sourceConfig,
@@ -242,6 +249,10 @@ export function CanvasGenerationPanel({
       functionSourceIdentity(nextModelKey, next),
       version,
     )
+    if (!jsonDirty) {
+      setJsonArgsText(JSON.stringify(next.parameters, null, 2))
+      setJsonError(null)
+    }
     runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
   }
 
@@ -553,31 +564,56 @@ export function CanvasGenerationPanel({
             type="button"
             className="generation-subtle-btn"
             style={{ fontSize: 12, padding: '2px 6px', cursor: 'pointer' }}
-            onClick={() => setShowJsonArgs((v) => !v)}
+            onClick={() => {
+              if (!showJsonArgs) {
+                // 切换打开时从当前 config.parameters 生成，确保展示表单已改最新值
+                setJsonArgsText(JSON.stringify(config.parameters, null, 2))
+                setJsonDirty(false)
+                setJsonError(null)
+                setShowJsonArgs(true)
+              } else {
+                setShowJsonArgs(false)
+                setJsonDirty(false)
+                setJsonError(null)
+              }
+            }}
           >
             {showJsonArgs ? '收起参数 JSON' : '编辑参数 JSON'}
           </button>
           {showJsonArgs ? (
-            <textarea
-              aria-label="参数 JSON"
-              className="generation-json-textarea"
-              style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
-              value={jsonArgsText}
-              onChange={(e) => {
-                setJsonArgsText(e.target.value)
-                try {
-                  const parsed = JSON.parse(e.target.value)
-                  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    updateConfig({
-                      ...config,
-                      parameters: parsed,
-                    })
+            <>
+              <textarea
+                aria-label="参数 JSON"
+                className="generation-json-textarea"
+                style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
+                value={jsonArgsText}
+                onChange={(e) => {
+                  const text = e.target.value
+                  setJsonArgsText(text)
+                  setJsonDirty(true)
+                  try {
+                    const parsed = JSON.parse(text)
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                      setJsonError(null)
+                      updateConfig({
+                        ...config,
+                        parameters: parsed,
+                      })
+                    } else {
+                      setJsonError('参数必须为 JSON 对象')
+                    }
+                  } catch {
+                    // 非法 JSON draft 保留在 textarea 中供用户继续修改，但绝不调用 updateConfig 覆盖有效表单值
+                    setJsonError('JSON 语法错误')
                   }
-                } catch {
-                  // user is in the middle of editing json
-                }
-              }}
-            />
+                }}
+              />
+              {jsonError ? (
+                <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 2 }}>
+                  {jsonError}
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
         {node.run?.status === 'UNKNOWN' ? (

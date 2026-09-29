@@ -1,4 +1,5 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
+import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { PendingFunctionConfig } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
@@ -6,6 +7,13 @@ import type {
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
+
+export interface FunctionConfigSyncOptions {
+  executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>
+  getSnapshot?: () => CanvasSnapshotDTO | undefined
+  onImmediateDraft?: (nodeId: UUIDString, modelKey: string, config: CanvasFunctionConfigDTO) => number
+  getDraftGeneration?: (nodeId: UUIDString) => number | undefined
+}
 
 export interface FunctionConfigSync {
   scheduleFunctionConfig: (
@@ -18,18 +26,46 @@ export interface FunctionConfigSync {
   resetPending: () => void
 }
 
+interface PendingItem extends PendingFunctionConfig {
+  generation: number
+}
+
 /**
  * Function config 的 debounce/flush 专用 hook。
  *
- * - schedule：320ms 防抖聚合同节点的最新草稿；
- * - flush：并发去重（同一节点只跑一个 flush 循环），失败保留草稿以便重试，成功后按
- *   提交时的 pending 对象精确清除；start 流程先 flush 再发 run 请求，保证配置先落库。
+ * 依据 docs/canvas-project.md 与 I05：
+ * - 每次编辑瞬间立即写入持久草稿层并推进世代，即使在 320ms 防抖窗口内硬刷新也绝不丢失；
+ * - 防抖仅控制网络发送，不控制本地持久化；
+ * - flush 时携带 { nodeId, field: 'function', generation } ACK，通过同一事实源精确确认与清理。
  */
 export function useFunctionConfigSync(
-  executeCommands: (commands: CanvasCommandDTO[]) => Promise<unknown>,
-  getSnapshot?: () => CanvasSnapshotDTO | undefined,
+  executeCommandsOrOptions:
+    | ((commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>)
+    | FunctionConfigSyncOptions,
+  legacyGetSnapshot?: () => CanvasSnapshotDTO | undefined,
 ): FunctionConfigSync {
-  const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingFunctionConfig>())
+  const options: FunctionConfigSyncOptions = typeof executeCommandsOrOptions === 'function'
+    ? {
+      executeCommands: executeCommandsOrOptions,
+      getSnapshot: legacyGetSnapshot,
+    }
+    : executeCommandsOrOptions
+
+  const { executeCommands, getSnapshot, onImmediateDraft, getDraftGeneration } = options
+
+  const executeCommandsRef = useRef(executeCommands)
+  const getSnapshotRef = useRef(getSnapshot)
+  const onImmediateDraftRef = useRef(onImmediateDraft)
+  const getDraftGenerationRef = useRef(getDraftGeneration)
+
+  useEffect(() => {
+    executeCommandsRef.current = executeCommands
+    getSnapshotRef.current = getSnapshot
+    onImmediateDraftRef.current = onImmediateDraft
+    getDraftGenerationRef.current = getDraftGeneration
+  }, [executeCommands, getSnapshot, onImmediateDraft, getDraftGeneration])
+
+  const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingItem>())
   const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
   const functionConfigFlushesRef = useRef(new Map<UUIDString, Promise<void>>())
 
@@ -49,10 +85,10 @@ export function useFunctionConfigSync(
         if (!pending) {
           return
         }
-        const snapshot = getSnapshot?.()
+        const snapshot = getSnapshotRef.current?.()
         const node = snapshot?.nodes.find((item) => item.id === nodeId)
         const expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
-        await executeCommands([{
+        await executeCommandsRef.current([{
           type: 'SET_NODE_FUNCTION',
           nodeId: pending.nodeId,
           expectedFunction,
@@ -63,6 +99,10 @@ export function useFunctionConfigSync(
               parameters: pending.config.parameters,
             },
           },
+        }], [{
+          nodeId: pending.nodeId,
+          field: 'function',
+          generation: pending.generation,
         }])
         if (pendingFunctionConfigsRef.current.get(nodeId) === pending) {
           pendingFunctionConfigsRef.current.delete(nodeId)
@@ -75,14 +115,24 @@ export function useFunctionConfigSync(
     })
     functionConfigFlushesRef.current.set(nodeId, trackedFlush)
     return trackedFlush
-  }, [executeCommands, getSnapshot])
+  }, [])
 
   const scheduleFunctionConfig = useCallback((
     nodeId: UUIDString,
     modelKey: string,
     config: CanvasFunctionConfigDTO,
   ) => {
-    pendingFunctionConfigsRef.current.set(nodeId, { nodeId, modelKey, config })
+    // 每次编辑立即进持久草稿层，获取新递增的世代号
+    const generation = onImmediateDraftRef.current?.(nodeId, modelKey, config)
+      ?? getDraftGenerationRef.current?.(nodeId)
+      ?? 0
+
+    pendingFunctionConfigsRef.current.set(nodeId, {
+      nodeId,
+      modelKey,
+      config,
+      generation,
+    })
     const existing = functionConfigTimersRef.current.get(nodeId)
     if (existing !== undefined) {
       window.clearTimeout(existing)
