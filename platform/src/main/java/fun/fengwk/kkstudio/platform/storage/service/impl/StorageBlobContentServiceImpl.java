@@ -5,7 +5,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -64,10 +63,12 @@ public class StorageBlobContentServiceImpl implements StorageBlobContentService 
                 + " bytes");
       }
       String objectKey = StorageObjectKeys.blobOriginal(blobId);
-      S3ObjectContent s3Content = s3StorageService.download(objectKey, maxSizeBytes);
-      content =
-          new StorageBlobContent(
-              blobId, s3Content.getBytes(), blob.getMediaType(), blob.getSizeBytes());
+      // 契约：负数表示不限大小。有界下载对任何负上限都会先被大小断言拒绝，因此负数必须走无上限的单参数下载。
+      byte[] bytes =
+          maxSizeBytes < 0
+              ? s3StorageService.download(objectKey)
+              : s3StorageService.download(objectKey, maxSizeBytes).getBytes();
+      content = new StorageBlobContent(blobId, bytes, blob.getMediaType(), blob.getSizeBytes());
     } catch (Throwable error) {
       readError = error;
       throw error;

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.storage.configuration;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.jdbc.autoconfigure.JdbcConnectionDetails;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -32,15 +33,20 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
 
 import java.net.URI;
+import java.sql.DriverManager;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.Properties;
 
 /**
  * S3/全局 Blob 存储配置：必配基础设施，所有 S3/storage bean 固定注册。
@@ -53,6 +59,9 @@ import java.time.Clock;
 @EnableConfigurationProperties({S3StorageProperties.class, StorageMaintenanceProperties.class})
 @Configuration
 public class S3StorageConfiguration {
+
+  /** 阻塞取锁预算：complete/stage 的写窗口通常远短于此；超预算按「上传忙」失败，绝不让请求线程无限挂起。 */
+  private static final Duration UPLOAD_LOCK_ACQUIRE_TIMEOUT = Duration.ofSeconds(10);
 
   @Bean(destroyMethod = "close")
   public S3Client s3Client(S3StorageProperties properties) {
@@ -129,6 +138,28 @@ public class S3StorageConfiguration {
         blobRepository, s3StorageService, s3PresignService, maintenanceWakeup);
   }
 
+  /**
+   * upload 操作锁：complete/stage 的写对象窗口与后台清理在同一 upload 上互斥。
+   *
+   * <p>锁连接是专用 DriverManager 会话，绝不借用业务连接池（持会话锁的连接若来自业务池会耗尽池容量，让需要新连接的嵌套事务永久等待）；连接信息只从 {@link
+   * JdbcConnectionDetails} 读取，不打印 URL 与凭据；每次 acquire 新建会话，close 释放锁并关闭会话。阻塞取锁预算由会话局部 {@code
+   * statement_timeout} 约束，到点按「上传忙」失败而不是无限等待。
+   */
+  @Bean
+  public StorageUploadOperationLock storageUploadOperationLock(
+      JdbcConnectionDetails connectionDetails) {
+    String jdbcUrl = connectionDetails.getJdbcUrl();
+    Properties credentials = new Properties();
+    if (connectionDetails.getUsername() != null) {
+      credentials.setProperty("user", connectionDetails.getUsername());
+    }
+    if (connectionDetails.getPassword() != null) {
+      credentials.setProperty("password", connectionDetails.getPassword());
+    }
+    return new PostgresqlStorageUploadOperationLock(
+        () -> DriverManager.getConnection(jdbcUrl, credentials), UPLOAD_LOCK_ACQUIRE_TIMEOUT);
+  }
+
   /** 最小的 Blob 内容读取边界：短事务 retain 权威元数据，事务外 S3 下载，finally 短事务 release。 */
   @Bean
   public StorageBlobContentService storageBlobContentService(
@@ -149,6 +180,7 @@ public class S3StorageConfiguration {
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
+      StorageUploadOperationLock storageUploadOperationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
       S3StorageProperties s3Properties,
       StorageMaintenanceProperties maintenanceProperties,
@@ -163,6 +195,7 @@ public class S3StorageConfiguration {
         s3PresignService,
         mediaProbe,
         blobPreviewService,
+        storageUploadOperationLock,
         maintenanceWakeup,
         s3Properties,
         snapshot.get().storageMedia(),

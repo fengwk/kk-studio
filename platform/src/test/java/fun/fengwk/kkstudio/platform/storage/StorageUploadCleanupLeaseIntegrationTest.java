@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.storage;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,21 +27,16 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 /**
  * {@code storage_upload} cleanup lease 的真实 PostgreSQL 集成测试。
  *
- * <p>覆盖多节点 claim 唯一性、lease 过期恢复、token fence、对象失败保留事实重试，以及 complete/consume 对 cleanup 所有权的
- * fail-closed 语义。
+ * <p>覆盖候选列表只读、claim 在有效 lease 内唯一、lease 过期恢复、token fence、对象失败保留事实重试，以及 complete/consume 对 cleanup
+ * 所有权的 fail-closed 语义。
  */
 @Import(StorageS3TestConfiguration.class)
 @TestPropertySource(
@@ -82,50 +78,59 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
         "S3 calls must run outside database transactions: " + s3Storage.networkCalls());
   }
 
+  /** 测试意图：候选列表只读——列出当下可清理的行供逐行处理，列出动作本身绝不写入 cleanup lease、不加行锁。 */
   @Test
-  void concurrentNodesClaimEachExpiredUploadExactlyOnce() throws Exception {
-    for (int i = 0; i < 21; i++) {
+  void candidateListingIsReadOnlyAndSelectsCleanupFacts() {
+    List<UUID> expired = new ArrayList<>();
+    for (int i = 0; i < 3; i++) {
       StorageUploadDTO upload =
           storage.reserve(
-              "claim-" + i + ".bin",
+              "candidate-" + i + ".bin",
               "application/octet-stream",
               1,
               storage.sha256Hex(new byte[] {(byte) i}));
       storage.backdateUpload(upload.getId());
+      expired.add(UUID.fromString(upload.getId()));
     }
 
-    CountDownLatch start = new CountDownLatch(1);
-    ExecutorService executor = Executors.newFixedThreadPool(2);
-    try {
-      Future<List<StorageUpload>> first =
-          executor.submit(
-              () -> {
-                start.await(30, TimeUnit.SECONDS);
-                Instant now = Instant.now();
-                return tx.execute(
-                    status ->
-                        uploadRepository.claimExpired(16, now, now.plusSeconds(30), "node-a"));
-              });
-      Future<List<StorageUpload>> second =
-          executor.submit(
-              () -> {
-                start.await(30, TimeUnit.SECONDS);
-                Instant now = Instant.now();
-                return tx.execute(
-                    status ->
-                        uploadRepository.claimExpired(16, now, now.plusSeconds(30), "node-b"));
-              });
-      start.countDown();
+    List<UUID> candidates =
+        tx.execute(status -> uploadRepository.listCleanupCandidateIds(16, Instant.now()));
 
-      List<StorageUpload> claimedA = first.get(30, TimeUnit.SECONDS);
-      List<StorageUpload> claimedB = second.get(30, TimeUnit.SECONDS);
-      Set<UUID> unique = new HashSet<>();
-      claimedA.forEach(upload -> assertTrue(unique.add(upload.getId())));
-      claimedB.forEach(upload -> assertTrue(unique.add(upload.getId())));
-      assertEquals(21, unique.size(), "SKIP LOCKED claims must be disjoint and exhaustive");
-    } finally {
-      executor.shutdownNow();
-    }
+    assertEquals(Set.copyOf(expired), Set.copyOf(candidates));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where cleanup_token is not null", Integer.class),
+        "candidate listing must not claim anything");
+  }
+
+  /** 测试意图：同一行的 cleanup claim 在 lease 有效期内只能有一个 owner，旧 token 永远不能 finalize。 */
+  @Test
+  void claimByIdIsExclusiveWhileLeaseIsHeldAndOldTokenCannotFinalize() {
+    StorageUploadDTO pending =
+        storage.reserve(
+            "exclusive.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {1}));
+    storage.backdateUpload(pending.getId());
+    UUID uploadId = UUID.fromString(pending.getId());
+    Instant now = Instant.now();
+
+    StorageUpload first =
+        tx.execute(
+            status ->
+                uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "first-token"));
+    assertEquals(uploadId, first.getId());
+
+    assertNull(
+        tx.execute(
+            status -> uploadRepository.claimById(uploadId, now, now.plusSeconds(30), "rival")),
+        "a valid lease must not be preempted by another owner");
+    assertFalse(
+        Boolean.TRUE.equals(
+            tx.execute(status -> uploadRepository.finalizePending(uploadId, "rival"))),
+        "the losing owner must not finalize a row it does not own");
+    assertTrue(
+        Boolean.TRUE.equals(
+            tx.execute(status -> uploadRepository.finalizePending(uploadId, "first-token"))));
   }
 
   @Test
@@ -140,24 +145,21 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     StorageUpload first =
         tx.execute(
             status ->
-                uploadRepository
-                    .claimExpired(1, firstNow, firstNow.plusMillis(100), "first-token")
-                    .getFirst());
+                uploadRepository.claimById(
+                    uploadId, firstNow, firstNow.plusMillis(100), "first-token"));
     assertEquals("first-token", first.getCleanupToken());
-    assertTrue(
+    assertNull(
         tx.execute(
-                status ->
-                    uploadRepository.claimExpired(
-                        1, firstNow.plusMillis(50), firstNow.plusSeconds(1), "too-early"))
-            .isEmpty());
+            status ->
+                uploadRepository.claimById(
+                    uploadId, firstNow.plusMillis(50), firstNow.plusSeconds(1), "too-early")),
+        "a still-valid lease must not be reclaimed");
 
     StorageUpload reclaimed =
         tx.execute(
             status ->
-                uploadRepository
-                    .claimExpired(
-                        1, firstNow.plusMillis(101), firstNow.plusSeconds(1), "second-token")
-                    .getFirst());
+                uploadRepository.claimById(
+                    uploadId, firstNow.plusMillis(101), firstNow.plusSeconds(1), "second-token"));
     assertEquals(uploadId, reclaimed.getId());
     assertFalse(
         Boolean.TRUE.equals(
@@ -275,9 +277,8 @@ class StorageUploadCleanupLeaseIntegrationTest extends PostgresSpringTestSupport
     StorageUpload claimed =
         tx.execute(
             status ->
-                uploadRepository
-                    .claimExpired(1, Instant.now(), Instant.now().plusSeconds(30), "requested-node")
-                    .getFirst());
+                uploadRepository.claimById(
+                    uploadId, Instant.now(), Instant.now().plusSeconds(30), "requested-node"));
     assertEquals(uploadId, claimed.getId());
     assertNotNull(claimed.getCleanupRequestedAt());
     assertTrue(
