@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
@@ -9,6 +10,7 @@ import com.sun.jna.platform.win32.BaseTSD.ULONG_PTR;
 import com.sun.jna.platform.win32.WinBase;
 import com.sun.jna.platform.win32.WinDef.DWORD;
 import com.sun.jna.platform.win32.WinNT.HANDLE;
+import com.sun.jna.platform.win32.WinNT.HANDLEByReference;
 import com.sun.jna.platform.win32.WinNT.IO_COUNTERS;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.win32.StdCallLibrary;
@@ -25,16 +27,19 @@ import java.util.concurrent.TimeUnit;
 /**
  * Windows 执行范围：一个带 {@code KILL_ON_JOB_CLOSE} 的命名 Job 覆盖用户命令与它的全部后代。
  *
- * <p>helper 侧 {@link #createSuspended(String, List, Path)} 先建立 Job，再用 {@code CREATE_SUSPENDED}
- * 创建首个进程并 {@code AssignProcessToJobObject}，因此进程在归属完成之前不可能先派生出逃逸的后代；父进程侧 {@link #attach(String)}
- * 用同一个名字打开第二个句柄，从而在 helper 之外独立拥有「终止并查询整组」的能力。
+ * <p>helper 侧 {@link #createSuspended(String, List, Path)} 先建立 Job，再用 {@code CREATE_SUSPENDED} 与
+ * {@code PROC_THREAD_ATTRIBUTE_JOB_LIST} 创建首个进程：进程由内核在创建时就直接进入 Job，不存在「已经创建但尚未归属」的间隙，
+ * 因此进程不可能先派生出逃逸的后代，helper 在归属之前被杀死也不会留下无主进程；父进程侧 {@link #attach(String)} 用同一个名字打开 第二个句柄，从而在 helper
+ * 之外独立拥有「终止并查询整组」的能力。
  *
  * <p>收敛的唯一证据是 {@code QueryInformationJobObject(JobObjectBasicAccountingInformation).ActiveProcesses
  * == 0}： 首个进程的退出（哪怕它是唯一进程）都不等于整组已经结束。父进程只有在拿到这个证据之后才关闭自己的 Job 句柄，因此 「句柄关闭导致整组被杀」只是兜底，而不是收敛判定的依据。
  *
- * <p>stdin/stdout/stderr 通过 {@code STARTF_USESTDHANDLES} 继承 helper 的标准句柄，其中命令的 stderr 指向 helper 的
- * stdout，两路输出因此合并进同一条捕获管道；命令行按 {@link WindowsCommandLine} 的规则拼装；退出码由 {@code GetExitCodeProcess}
- * 原样带回。
+ * <p>命令的句柄集合是显式列举的：{@code STARTUPINFOEX} + {@code PROC_THREAD_ATTRIBUTE_HANDLE_LIST} 只把命令的
+ * stdin/stdout/stderr 交给它，helper JVM 里的其它可继承句柄（surefire、其它调用留下的管道等）不会跟着漏进用户命令。其中 stdout 与 stderr
+ * 指向同一个捕获句柄，两路输出因此合并进同一条管道；stdin 是一条只由 helper 持有写端的空管道，helper 在创建进程后立刻关闭写端， 于是「等待 EOF
+ * 的命令自然退出」不依赖调用方何时关闭自己的写端，也不依赖句柄继承是否干净；命令行按 {@link WindowsCommandLine} 的规则拼装；退出码由 {@code
+ * GetExitCodeProcess} 原样带回。
  *
  * <p>本类只在 Windows 上初始化：JNA 接口按需加载 {@code kernel32}，非 Windows 平台不会触碰它。结构体与接口声明为 public 类型，避免 JNA
  * 反射访问时受包可见性限制。
@@ -46,6 +51,17 @@ public final class WindowsJobScope {
 
   private static final int CREATE_SUSPENDED = 0x0000_0004;
   private static final int STARTF_USESTDHANDLES = 0x0000_0100;
+  private static final int EXTENDED_STARTUPINFO_PRESENT = 0x0008_0000;
+
+  /** 创建属性：只继承明确列举的句柄。 */
+  private static final long PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x0002_0002L;
+
+  /** 创建属性：进程创建时直接进入给定的 Job（Windows 10 及以上）。 */
+  private static final long PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002_000DL;
+
+  /** 属性个数：句柄列表 + Job 列表。 */
+  private static final int CREATION_ATTRIBUTE_COUNT = 2;
+
   private static final int STD_INPUT_HANDLE = -10;
   private static final int STD_OUTPUT_HANDLE = -11;
   private static final int HANDLE_FLAG_INHERIT = 0x0000_0001;
@@ -116,10 +132,6 @@ public final class WindowsJobScope {
       scope.process = information.hProcess;
       scope.thread = information.hThread;
       scope.processId = information.dwProcessId.longValue();
-      if (!kernel.AssignProcessToJobObject(job, scope.process)) {
-        throw new IllegalStateException(
-            "cannot assign the command process to the scope job object: " + lastError());
-      }
       return scope;
     } catch (RuntimeException error) {
       scope.close();
@@ -256,30 +268,68 @@ public final class WindowsJobScope {
    */
   private WinBase.PROCESS_INFORMATION createSuspendedProcess(List<String> command, Path workdir) {
     WindowsKernel kernel = WindowsKernel.INSTANCE;
-    WinBase.STARTUPINFO startupInfo = new WinBase.STARTUPINFO();
-    startupInfo.cb = new DWORD(startupInfo.size());
-    startupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startupInfo.hStdInput = inheritableStandardHandle(kernel, STD_INPUT_HANDLE, "stdin");
-    startupInfo.hStdOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
-    startupInfo.hStdError = startupInfo.hStdOutput;
+    HANDLEByReference stdinRead = new HANDLEByReference();
+    HANDLEByReference stdinWrite = new HANDLEByReference();
+    if (!kernel.CreatePipe(stdinRead, stdinWrite, inheritableAttributes(), 0)) {
+      throw new IllegalStateException("cannot create the command stdin pipe: " + lastError());
+    }
+    // 写端只留在 helper 手里（并且不可继承）：创建进程后立刻关闭，命令因此读到确定性的 EOF。
+    if (!kernel.SetHandleInformation(stdinWrite.getValue(), HANDLE_FLAG_INHERIT, 0)) {
+      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
+      throw new IllegalStateException(
+          "cannot make the command stdin write end private: " + lastError());
+    }
+    HANDLE standardOutput = inheritableStandardHandle(kernel, STD_OUTPUT_HANDLE, "stdout");
+    STARTUPINFOEX startupInfoEx = new STARTUPINFOEX();
+    startupInfoEx.StartupInfo.cb = new DWORD(startupInfoEx.size());
+    startupInfoEx.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startupInfoEx.StartupInfo.hStdInput = stdinRead.getValue();
+    startupInfoEx.StartupInfo.hStdOutput = standardOutput;
+    startupInfoEx.StartupInfo.hStdError = standardOutput;
+    CreationAttributes attributes =
+        CreationAttributes.create(kernel, job, new HANDLE[] {stdinRead.getValue(), standardOutput});
+    startupInfoEx.lpAttributeList = attributes;
+    startupInfoEx.write();
     WinBase.PROCESS_INFORMATION information = new WinBase.PROCESS_INFORMATION();
-    boolean created =
-        kernel.CreateProcess(
-            applicationName(command.getFirst()),
-            WindowsCommandLine.join(command),
-            null,
-            null,
-            true,
-            new DWORD(CREATE_SUSPENDED),
-            null,
-            workdir.toString(),
-            startupInfo,
-            information);
+    boolean created;
+    try {
+      created =
+          kernel.CreateProcessW(
+              applicationName(command.getFirst()),
+              WindowsCommandLine.join(command),
+              null,
+              null,
+              true,
+              new DWORD(EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED),
+              null,
+              workdir.toString(),
+              startupInfoEx.getPointer(),
+              information);
+    } finally {
+      attributes.close(kernel);
+      closeQuietly(kernel, stdinRead.getValue(), stdinWrite.getValue());
+    }
     if (!created) {
       throw new IllegalStateException(
           "cannot start command " + command.getFirst() + " in " + workdir + ": " + lastError());
     }
     return information;
+  }
+
+  /** 管道与 Job 句柄都不参与继承：它们只由 helper 与父进程各自持有。 */
+  private static WinBase.SECURITY_ATTRIBUTES inheritableAttributes() {
+    WinBase.SECURITY_ATTRIBUTES attributes = new WinBase.SECURITY_ATTRIBUTES();
+    attributes.bInheritHandle = true;
+    attributes.write();
+    return attributes;
+  }
+
+  private static void closeQuietly(WindowsKernel kernel, HANDLE... handles) {
+    for (HANDLE handle : handles) {
+      if (handle != null && Pointer.nativeValue(handle.getPointer()) != 0L) {
+        kernel.CloseHandle(handle);
+      }
+    }
   }
 
   /**
@@ -318,6 +368,88 @@ public final class WindowsJobScope {
       Thread.sleep(millis);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * {@code STARTUPINFOEXW}：{@code STARTUPINFO} 之后紧跟属性列表指针，是把句柄列表与 Job 列表交给内核的唯一入口。
+   *
+   * <p>布局是纯 Java 事实，可以脱离 Windows 断言（见 {@code WindowsJobScopeTest}）：x64 上 {@code STARTUPINFO} 为 104
+   * 字节， 属性列表指针跟在它后面。
+   */
+  @FieldOrder({"StartupInfo", "lpAttributeList"})
+  public static final class STARTUPINFOEX extends Structure {
+
+    public WinBase.STARTUPINFO StartupInfo = new WinBase.STARTUPINFO();
+    public Pointer lpAttributeList;
+  }
+
+  /**
+   * 进程创建属性列表：句柄列表（只继承明确列举的句柄）与 Job 列表（创建即归属）。
+   *
+   * <p>两件事都必须在这里完成：句柄列表让 helper JVM 里其它可继承句柄不会漏进用户命令；Job 列表让归属成为创建的一部分，从而没有
+   * 「已经创建但尚未归属」的窗口。任一步失败都显式失败，绝不退化成没有范围或没有句柄约束的创建。
+   */
+  private static final class CreationAttributes extends Memory {
+
+    private CreationAttributes(int capacity) {
+      super(capacity);
+    }
+
+    static CreationAttributes create(WindowsKernel kernel, HANDLE job, HANDLE[] inherited) {
+      IntByReference size = new IntByReference();
+      // 第一次调用只用来取所需大小：按文档，缓冲区不足时它返回失败并给出大小。
+      kernel.InitializeProcThreadAttributeList(null, CREATION_ATTRIBUTE_COUNT, 0, size);
+      if (size.getValue() <= 0) {
+        throw new IllegalStateException(
+            "cannot size the process creation attribute list: " + lastError());
+      }
+      CreationAttributes attributes = new CreationAttributes(size.getValue());
+      if (!kernel.InitializeProcThreadAttributeList(
+          attributes, CREATION_ATTRIBUTE_COUNT, 0, size)) {
+        throw new IllegalStateException(
+            "cannot initialize the process creation attribute list: " + lastError());
+      }
+      Memory handles = new Memory((long) inherited.length * Native.POINTER_SIZE);
+      for (int index = 0; index < inherited.length; index++) {
+        handles.setPointer((long) index * Native.POINTER_SIZE, inherited[index].getPointer());
+      }
+      if (!kernel.UpdateProcThreadAttribute(
+          attributes,
+          0,
+          attribute(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+          handles,
+          new SIZE_T(handles.size()),
+          null,
+          null)) {
+        attributes.close(kernel);
+        throw new IllegalStateException(
+            "cannot limit the inherited handles to the standard streams: " + lastError());
+      }
+      Memory jobValue = new Memory(Native.POINTER_SIZE);
+      jobValue.setPointer(0, job.getPointer());
+      if (!kernel.UpdateProcThreadAttribute(
+          attributes,
+          0,
+          attribute(PROC_THREAD_ATTRIBUTE_JOB_LIST),
+          jobValue,
+          new SIZE_T(Native.POINTER_SIZE),
+          null,
+          null)) {
+        attributes.close(kernel);
+        throw new IllegalStateException(
+            "cannot assign the command process to the scope job object: " + lastError());
+      }
+      return attributes;
+    }
+
+    private static Pointer attribute(long value) {
+      return Pointer.createConstant(value);
+    }
+
+    /** 释放属性列表；缓冲区自身由 GC 管理，这里只让内核释放它自己分配的记录。 */
+    void close(WindowsKernel kernel) {
+      kernel.DeleteProcThreadAttributeList(this);
     }
   }
 
@@ -414,7 +546,7 @@ public final class WindowsJobScope {
         int length,
         IntByReference returnedLength);
 
-    boolean CreateProcess(
+    boolean CreateProcessW(
         String applicationName,
         String commandLine,
         WinBase.SECURITY_ATTRIBUTES processAttributes,
@@ -423,10 +555,28 @@ public final class WindowsJobScope {
         DWORD creationFlags,
         Pointer environment,
         String currentDirectory,
-        WinBase.STARTUPINFO startupInfo,
+        Pointer startupInfo,
         WinBase.PROCESS_INFORMATION processInformation);
 
-    boolean AssignProcessToJobObject(HANDLE job, HANDLE process);
+    boolean CreatePipe(
+        HANDLEByReference readPipe,
+        HANDLEByReference writePipe,
+        WinBase.SECURITY_ATTRIBUTES pipeAttributes,
+        int size);
+
+    boolean InitializeProcThreadAttributeList(
+        Pointer attributeList, int attributeCount, int flags, IntByReference size);
+
+    boolean UpdateProcThreadAttribute(
+        Pointer attributeList,
+        int flags,
+        Pointer attribute,
+        Pointer value,
+        SIZE_T size,
+        Pointer previousValue,
+        Pointer returnSize);
+
+    void DeleteProcThreadAttributeList(Pointer attributeList);
 
     int ResumeThread(HANDLE thread);
 

@@ -415,6 +415,36 @@ class BashCapabilityTest {
     assertEquals(bytes, Files.size(published), "durable 全文必须与进程输出等长");
   }
 
+  /**
+   * 用户命令必须能自己处理温和信号：范围收尾先对整组广播 SIGTERM，宽限窗口之后才强杀，脚本因此可以用 {@code trap} 做优雅清理。
+   *
+   * <p>helper 自己忽略 SIGTERM——否则父进程广播整组信号时它会被提前打死、来不及收敛；但命令不能继承这个忽略状态：POSIX 规定非交互 shell
+   * 无法注册「进入时已被忽略」的信号，继承下去等于用户脚本永远等不到 TERM trap，收尾会直接从温和信号跳到强杀。
+   */
+  @Test
+  void commandCanTrapTerminationBeforeTheForceKill() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX shell 与信号语义");
+    Path marker = workspaceRoot.resolve("term-trap.log");
+    Path ready = workspaceRoot.resolve("term-trap.ready");
+    RecordingListener listener =
+        invokeAsync(
+            bash(config()),
+            "{\"command\":\"trap 'echo trapped >> "
+                + embedded(marker)
+                + "; exit 0' TERM; echo ready >> "
+                + embedded(ready)
+                + "; while true; do sleep 0.05; done\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            Duration.ofSeconds(30));
+    awaitFile(ready);
+
+    listener.handle.cancel();
+    assertTrue(listener.await());
+
+    assertTrue(lineCount(marker) > 0, "命令必须能自己处理温和信号，trap 必须真的执行：" + text(listener.result));
+  }
+
   /** stdout 与 stderr 合并到同一管道：两路同时写满管道缓冲时仍必须完成，不能互相等待。 */
   @Test
   void mergedStreamsBeyondPipeBufferCompleteWithoutDeadlock() throws Exception {

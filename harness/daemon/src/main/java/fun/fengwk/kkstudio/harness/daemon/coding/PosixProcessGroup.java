@@ -49,6 +49,9 @@ final class PosixProcessGroup {
   /** {@code SIG_IGN} 的原生取值，即 {@code (void *) 1}。 */
   private static final Pointer SIG_IGN = new Pointer(1);
 
+  /** {@code SIG_DFL} 的原生取值，即 {@code (void *) 0}。 */
+  private static final Pointer SIG_DFL = new Pointer(0);
+
   private static final Path PROC = Path.of("/proc");
 
   private PosixProcessGroup() {}
@@ -74,6 +77,17 @@ final class PosixProcessGroup {
   /** 让本进程忽略 {@code SIGTERM}：父进程对整组广播温和信号时 helper 必须活到强杀阶段，否则整组会在宽限窗口内失去执行者。 */
   static void ignoreTerminationSignal() {
     LibC.INSTANCE.signal(SIGTERM, SIG_IGN);
+  }
+
+  /**
+   * 让本进程恢复 {@code SIGTERM} 的默认处置，仅供启动命令的极短窗口使用。
+   *
+   * <p>信号处置会随 {@code fork} 继承：helper 若在启动命令时仍忽略 {@code SIGTERM}，命令就带着「进入时已被忽略」的状态开始，而 POSIX 规定非交互
+   * shell 无法为这类信号注册 trap——用户的优雅收尾会静默失效，只剩强杀。因此启动命令之前先恢复默认处置，命令 fork 出来之后再重新忽略（{@link
+   * #ignoreTerminationSignal()}）。
+   */
+  static void restoreDefaultTerminationSignal() {
+    LibC.INSTANCE.signal(SIGTERM, SIG_DFL);
   }
 
   /**

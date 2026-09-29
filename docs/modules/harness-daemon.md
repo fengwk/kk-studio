@@ -145,16 +145,21 @@ Branch HEAD 永远不能替代调用参数中的 exact commit。
 「放行之前失败」永远等价于「用户命令没有产生任何副作用」，父进程可以直接结束 keeper；放行之后一律走完整收敛。启动阶段的取消
 与超时同样在放行之前生效，并且 helper 的冷启动也计入调用方的有效 deadline。
 
-- **POSIX（Linux/WSL/macOS）**：helper 先用 JNA 调用 libc `setsid` 建立新 session 与进程组，再以 `inheritIO` 启动
-  `bash -lc`，因此命令与它的普通后代从创建那一刻起就属于同一个进程组。父进程校验发布的 scope id 必须等于 helper 自己的 pid，
+- **POSIX（Linux/WSL/macOS）**：helper 先用 JNA 调用 libc `setsid` 建立新 session 与进程组，再启动 `bash -lc`，因此命令与它的
+  普通后代从创建那一刻起就属于同一个进程组。命令的 stdin 是一条只有 helper 持有写端的空管道，helper 在启动后立刻关闭写端，所以
+  「等待 EOF 的命令自然退出」只取决于这一步，而不取决于调用方何时关闭自己的写端；命令的信号处置也在 fork 的瞬间恢复为默认，
+  因此脚本可以自行注册 `SIGTERM` trap 做优雅收尾——helper 自己仍然忽略 `SIGTERM`（父进程对整组广播温和信号时它必须活到强杀阶段）。父进程校验发布的 scope id 必须等于 helper 自己的 pid，
   只对这样一个刚建立的进程组发信号，绝不向状态文件里出现的陌生 id 发信号。收敛 = 组里没有活着的成员：先温和信号，宽限约
   150 ms 后强杀，再向内核确认（僵尸不算活着——它已经不会再写输出或改副作用；Linux/WSL 上 helper 还会用
   `PR_SET_CHILD_SUBREAPER` 与 `waitpid` 立刻回收被收养的孤儿）。命令自然退出时 helper 先把退出码原子发布，再收敛整组并把
   「已经收敛」发布到 `cleanup`，父进程据此恢复精确退出码；只有 Linux/WSL 能区分「只剩 helper 自己」与「还有后代」，其它 POSIX
   平台的收敛结论由父进程的内核检查收口。
 - **Windows**：helper 建立带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`、不开放 breakaway 的命名 Job，并用
-  `CREATE_SUSPENDED` -> `AssignProcessToJobObject` 创建首个进程；父进程用同一个名字打开第二个 Job 句柄，因此「终止整组」
-  与「确认整组结束」都不依赖 helper 自己活着。收敛 = `QueryInformationJobObject(JobObjectBasicAccountingInformation)`
+  `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_JOB_LIST` 让首个进程在创建时就直接进入 Job（没有「已经创建但尚未归属」的间隙，
+  helper 即使在此之前被打死也不会留下无主进程），同时以 `CREATE_SUSPENDED` 保持挂起；父进程用同一个名字打开第二个 Job 句柄，
+  因此「终止整组」与「确认整组结束」都不依赖 helper 自己活着。创建进程时还用 `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` 明确只交出
+  命令的 stdin/stdout/stderr 三个句柄，helper JVM 里其它可继承句柄不会漏进用户命令；命令的 stdin 是一条由 helper 立刻关闭写端的
+  空管道，因此「等待 EOF 的命令自然退出」在 Windows 上同样不依赖句柄继承是否干净。收敛 = `QueryInformationJobObject(JobObjectBasicAccountingInformation)`
   报告 `ActiveProcesses == 0`：首个进程退出、helper 退出或句柄关闭都不是整组结束的证据，父进程只有拿到这个查询结果才关闭自己
   的句柄。命令行按 MSVC 的 argv 规则拼装（裸可执行名交给 `CreateProcess` 按标准顺序解析），命令的 stderr 与 stdout 指向同一
   个继承句柄从而合并进捕获流。
