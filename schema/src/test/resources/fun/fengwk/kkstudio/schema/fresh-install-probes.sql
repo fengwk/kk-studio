@@ -497,6 +497,22 @@ select pg_temp.rejects('evidence blocks deleting its source Run',
     'fk_project_issue_evidence_run');
 
 -- ---------------------------------------------------------------------------
+-- Storage object cleanup: a permanent, key-deduplicated delete tombstone.
+-- ---------------------------------------------------------------------------
+insert into storage_object_cleanup (key, next_attempt_at)
+    values ('uploads/' || pg_temp.uid(900) || '/original', now());
+select pg_temp.assert_true('an object cleanup record keeps its key and next attempt time',
+    (select next_attempt_at is not null from storage_object_cleanup
+        where key = 'uploads/' || pg_temp.uid(900) || '/original'));
+select pg_temp.rejects('an object cleanup record is unique by key',
+    $$insert into storage_object_cleanup(key,next_attempt_at)
+      values('uploads/' || pg_temp.uid(900) || '/original', now())$$, '23505',
+    'pk_storage_object_cleanup');
+select pg_temp.rejects('an object cleanup key must not be blank',
+    $$insert into storage_object_cleanup(key,next_attempt_at) values('   ', now())$$, '23514',
+    'ck_storage_object_cleanup_key_nonblank');
+
+-- ---------------------------------------------------------------------------
 -- Canvas: node model, immutable content, real-resource pins, dedup position.
 -- ---------------------------------------------------------------------------
 insert into canvas_document (id, title) values

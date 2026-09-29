@@ -182,6 +182,34 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
     }
   }
 
+  /** 对象清理记录以 key 为主键：空 key 与非幂等重复登记都必须被数据库拒绝。 */
+  @Test
+  void storageObjectCleanupRejectsInvalidKeysAndStaysUniquePerKey() throws SQLException {
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_storage_object_cleanup_key_nonblank",
+          () ->
+              execute(
+                  conn,
+                  "insert into storage_object_cleanup (key, next_attempt_at)"
+                      + " values ('  ', current_timestamp)"));
+      execute(
+          conn,
+          "insert into storage_object_cleanup (key, next_attempt_at)"
+              + " values ('uploads/a/original', current_timestamp)");
+      assertTransactionConstraintViolation(
+          conn,
+          "pk_storage_object_cleanup",
+          () ->
+              execute(
+                  conn,
+                  "insert into storage_object_cleanup (key, next_attempt_at)"
+                      + " values ('uploads/a/original', current_timestamp)"));
+      assertEquals(1L, queryLong(conn, "select count(*) from storage_object_cleanup"));
+    }
+  }
+
   /** 表、每一列与业务索引都必须带非空注释。 */
   @Test
   void storageTablesAreFullyCommented() throws SQLException {
@@ -202,12 +230,21 @@ class PostgresqlStorageSchemaTest extends PostgresSchemaSupport {
           12L,
           queryLong(conn, commentCount("storage_upload", 1)),
           "every storage_upload column must be commented");
+      assertEquals(
+          1L,
+          queryLong(conn, commentCount("storage_object_cleanup", 0)),
+          "storage_object_cleanup table comment is missing");
+      assertEquals(
+          2L,
+          queryLong(conn, commentCount("storage_object_cleanup", 1)),
+          "every storage_object_cleanup column must be commented");
     }
     for (String index :
         new String[] {
           "uk_storage_blob_active_hash",
           "uk_storage_upload_candidate",
-          "idx_storage_upload_cleanup_claim"
+          "idx_storage_upload_cleanup_claim",
+          "idx_storage_object_cleanup_due"
         }) {
       try (Connection conn = newConnection()) {
         assertEquals(

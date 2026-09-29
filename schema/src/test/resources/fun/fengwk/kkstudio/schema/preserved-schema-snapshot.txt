@@ -191,6 +191,8 @@ column	storage_blob	size_bytes	type=bigint notnull=t default=<null> generated= c
 column	storage_blob	state	type=character varying(16) notnull=t default='ACTIVE'::character varying generated= collation="default"
 column	storage_blob	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	storage_blob	width	type=integer notnull=f default=<null> generated= collation=-
+column	storage_object_cleanup	key	type=character varying(512) notnull=t default=<null> generated= collation="default"
+column	storage_object_cleanup	next_attempt_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	storage_upload	blob_id	type=uuid notnull=f default=<null> generated= collation=-
 column	storage_upload	candidate_blob_id	type=uuid notnull=t default=<null> generated= collation=-
 column	storage_upload	cleanup_requested_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
@@ -375,6 +377,8 @@ constraint	storage_blob	ck_storage_blob_sha256	CHECK ((sha256 ~ '^[0-9a-f]{64}$'
 constraint	storage_blob	ck_storage_blob_size_nonneg	CHECK ((size_bytes >= 0))
 constraint	storage_blob	ck_storage_blob_state_ref_count	CHECK (((((state)::text = 'ACTIVE'::text) AND (ref_count > 0)) OR (((state)::text = 'DELETING'::text) AND (ref_count = 0))))
 constraint	storage_blob	storage_blob_pkey	PRIMARY KEY (id)
+constraint	storage_object_cleanup	ck_storage_object_cleanup_key_nonblank	CHECK ((btrim((key)::text) <> ''::text))
+constraint	storage_object_cleanup	pk_storage_object_cleanup	PRIMARY KEY (key)
 constraint	storage_upload	ck_storage_upload_cleanup_pair	CHECK (((cleanup_token IS NULL) = (cleanup_until IS NULL)))
 constraint	storage_upload	ck_storage_upload_cleanup_token	CHECK (((cleanup_token IS NULL) OR ((btrim((cleanup_token)::text) <> ''::text) AND ((cleanup_token)::text = btrim((cleanup_token)::text)) AND (char_length((cleanup_token)::text) <= 128))))
 constraint	storage_upload	ck_storage_upload_expiry	CHECK ((expires_at > created_at))
@@ -439,6 +443,8 @@ index	session_blob_ref	pk_session_blob_ref	CREATE UNIQUE INDEX pk_session_blob_r
 index	skill_package	pk_skill_package	CREATE UNIQUE INDEX pk_skill_package ON public.skill_package USING btree (package_name)
 index	storage_blob	storage_blob_pkey	CREATE UNIQUE INDEX storage_blob_pkey ON public.storage_blob USING btree (id)
 index	storage_blob	uk_storage_blob_active_hash	CREATE UNIQUE INDEX uk_storage_blob_active_hash ON public.storage_blob USING btree (sha256, size_bytes) WHERE ((state)::text = 'ACTIVE'::text)
+index	storage_object_cleanup	idx_storage_object_cleanup_due	CREATE INDEX idx_storage_object_cleanup_due ON public.storage_object_cleanup USING btree (next_attempt_at, key)
+index	storage_object_cleanup	pk_storage_object_cleanup	CREATE UNIQUE INDEX pk_storage_object_cleanup ON public.storage_object_cleanup USING btree (key)
 index	storage_upload	idx_storage_upload_cleanup_claim	CREATE INDEX idx_storage_upload_cleanup_claim ON public.storage_upload USING btree (cleanup_requested_at, expires_at, cleanup_until, id)
 index	storage_upload	storage_upload_pkey	CREATE UNIQUE INDEX storage_upload_pkey ON public.storage_upload USING btree (id)
 index	storage_upload	uk_storage_upload_candidate	CREATE UNIQUE INDEX uk_storage_upload_candidate ON public.storage_upload USING btree (candidate_blob_id)
@@ -463,6 +469,7 @@ table	plugin_credential		preserved
 table	session_blob_ref		preserved
 table	skill_package		preserved
 table	storage_blob		preserved
+table	storage_object_cleanup		preserved
 table	storage_upload		preserved
 table	system_setting		preserved
 trigger	harness_thread	trg_harness_thread_version_notify	CREATE TRIGGER trg_harness_thread_version_notify AFTER INSERT OR UPDATE OF version ON public.harness_thread FOR EACH ROW EXECUTE FUNCTION harness_thread_version_notify() enabled=O

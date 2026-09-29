@@ -74,6 +74,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "session_blob_ref",
           "skill_package",
           "storage_blob",
+          "storage_object_cleanup",
           "storage_upload",
           "system_setting");
 
@@ -393,6 +394,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "state",
         "created_at",
         "updated_at");
+    assertColumns("storage_object_cleanup", "key", "next_attempt_at");
     assertColumns(
         "storage_upload",
         "id",
@@ -665,6 +667,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "skill_package.update_time",
             "storage_blob.created_at",
             "storage_blob.updated_at",
+            "storage_object_cleanup.next_attempt_at",
             "storage_upload.cleanup_requested_at",
             "storage_upload.cleanup_until",
             "storage_upload.created_at",
@@ -672,7 +675,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 74 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 75 timestamptz(3) columns");
 
     assertEquals(
         128L,

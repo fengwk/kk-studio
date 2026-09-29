@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StoragePresignedUrls;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -88,6 +89,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
+  private final StorageObjectCleanupService objectCleanupService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
   private final S3StorageProperties s3Properties;
@@ -105,6 +107,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
       StorageBlobPreviewService blobPreviewService,
+      StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
       S3StorageProperties s3Properties,
@@ -119,6 +122,8 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
+    this.objectCleanupService =
+        Objects.requireNonNull(objectCleanupService, "objectCleanupService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
@@ -464,14 +469,36 @@ public class StorageUploadServiceImpl implements StorageUploadService {
               if (!isCleanupDue(fresh, claimNow)) {
                 return null;
               }
-              return uploadRepository.claimById(
-                  uploadId, claimNow, claimNow.plus(cleanupLease), cleanupToken);
+              StorageUpload claimedRow =
+                  uploadRepository.claimById(
+                      uploadId, claimNow, claimNow.plus(cleanupLease), cleanupToken);
+              if (claimedRow != null) {
+                // 与 claim 同一事务登记：claim 冻结了之后的绑定（setBlobIdIfNull 要求未 claim），
+                // 因此这一刻起该 upload 的对象 key 不再可能被绑定为事实；迟到的 PUT/COPY 由耐久记录收敛。
+                enqueueCleanupTargets(claimedRow);
+              }
+              return claimedRow;
             });
     if (claimed == null) {
       return false;
     }
     cleanupUploadObjects(claimed);
     return finalizeClaimed(claimed, cleanupToken);
+  }
+
+  /**
+   * 登记该 upload 的确定性对象 key：临时对象，以及未被绑定为自身 blob 的 candidate 原始/预览对象。
+   *
+   * <p>{@code candidate_blob_id} 一旦等于 {@code blob_id} 就是被正式引用的 ACTIVE blob，其对象由 blob 生命周期负责，
+   * 绝不在此登记； 其余情况下 candidate 行不存在或注定被回收，登记后即使迟到写入也会被清扫。
+   */
+  private void enqueueCleanupTargets(StorageUpload upload) {
+    objectCleanupService.enqueue(StorageObjectKeys.uploadOriginal(upload.getId()));
+    UUID candidateBlobId = upload.getCandidateBlobId();
+    if (candidateBlobId != null && !candidateBlobId.equals(upload.getBlobId())) {
+      objectCleanupService.enqueue(StorageObjectKeys.blobPreview(candidateBlobId));
+      objectCleanupService.enqueue(StorageObjectKeys.blobOriginal(candidateBlobId));
+    }
   }
 
   /** 当下事实是否可清理：显式 cleanup request 或已过期；且没有有效 lease（不会被抢占的 claim 条件）。 */
@@ -562,19 +589,20 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     }
   }
 
-  /** Stage 失败时优先留下耐久 cleanup request；若过期回收已并发删除行，则直接幂等清理已知对象键，避免存活进程继续写出无事实对象。 */
+  /**
+   * Stage 失败时只留下耐久 cleanup request：登记事务会同样登记该 upload 的清理记录，迟到写入由清扫收敛。
+   *
+   * <p>回收器可能已 claim 或删除该行（此时 claim 事务已经登记了清理记录），因此这里绝不按异常分支盲目删除对象 —— 那会删掉一个已被绑定为 ACTIVE 的
+   * candidate。
+   */
   private void requestFailedStageCleanup(StorageUpload upload) {
     try {
       delete(upload.getId());
-      return;
     } catch (StorageResourceNotFoundException | StorageVerificationException ignored) {
-      // 回收器可能已 claim 或删除该行；下面直接幂等清理确定性对象键。
+      log.warn("deferred storage cleanup for staged upload {}", upload.getId());
     } catch (RuntimeException error) {
       log.warn("failed to request cleanup for staged upload {}", upload.getId());
-      return;
     }
-    deleteObjectBestEffort(StorageObjectKeys.uploadOriginal(upload.getId()));
-    cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
   }
 
   private void cleanupUploadObjects(StorageUpload upload) {

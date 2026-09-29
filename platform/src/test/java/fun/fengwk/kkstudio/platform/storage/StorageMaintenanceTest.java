@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
@@ -40,13 +41,15 @@ class StorageMaintenanceTest {
   void startupWakeAndFixedDelayPollDriveMaintenance() throws Exception {
     CountingUploadService uploads = new CountingUploadService(2);
     CountingBlobManager blobs = new CountingBlobManager(2);
+    CountingObjectCleanupService cleanups = new CountingObjectCleanupService(2);
     StorageMaintenance maintenance =
-        new StorageMaintenance(uploads, blobs, properties(Duration.ofMillis(20)));
+        new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ofMillis(20)));
     try {
       maintenance.start();
 
       assertTrue(uploads.await(), "startup wake and periodic poll must both run");
       assertTrue(blobs.await());
+      assertTrue(cleanups.await());
       assertTrue(maintenance.isRunning());
       maintenance.start();
     } finally {
@@ -74,8 +77,9 @@ class StorageMaintenanceTest {
               blobCalls.countDown();
               return blobResults.remove();
             });
+    StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
     StorageMaintenance maintenance =
-        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
+        new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ofHours(1)));
     try {
       maintenance.start();
 
@@ -83,6 +87,33 @@ class StorageMaintenanceTest {
       assertTrue(blobCalls.await(5, TimeUnit.SECONDS));
       verify(uploads, times(3)).expireOnce();
       verify(blobs, times(3)).sweepDeleting();
+      verify(cleanups, times(3)).sweepOnce();
+    } finally {
+      maintenance.close();
+    }
+  }
+
+  /** 对象清理记录的全批次同样驱动 drain 继续，直到某一轮不足一个批次为止。 */
+  @Test
+  void fullObjectCleanupBatchesKeepDrainingUntilIdle() throws Exception {
+    StorageUploadService uploads = mock(StorageUploadService.class);
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    Queue<Integer> cleanupResults = new ArrayDeque<>(List.of(16, 16, 2));
+    CountDownLatch cleanupCalls = new CountDownLatch(3);
+    StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
+    when(cleanups.sweepOnce())
+        .thenAnswer(
+            ignored -> {
+              cleanupCalls.countDown();
+              return cleanupResults.remove();
+            });
+    StorageMaintenance maintenance =
+        new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ofHours(1)));
+    try {
+      maintenance.start();
+
+      assertTrue(cleanupCalls.await(5, TimeUnit.SECONDS));
+      verify(cleanups, times(3)).sweepOnce();
     } finally {
       maintenance.close();
     }
@@ -93,7 +124,11 @@ class StorageMaintenanceTest {
     BlockingUploadService uploads = new BlockingUploadService();
     CountingBlobManager blobs = new CountingBlobManager(2);
     StorageMaintenance maintenance =
-        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
+        new StorageMaintenance(
+            uploads,
+            blobs,
+            mock(StorageObjectCleanupService.class),
+            properties(Duration.ofHours(1)));
     maintenance.start();
     assertTrue(uploads.entered.await(5, TimeUnit.SECONDS));
 
@@ -116,10 +151,16 @@ class StorageMaintenanceTest {
   void rejectsNullDependenciesInConstructor() {
     StorageUploadService uploads = mock(StorageUploadService.class);
     StorageBlobManager blobs = mock(StorageBlobManager.class);
+    StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
     StorageMaintenanceProperties props = properties(Duration.ofHours(1));
-    assertThrows(NullPointerException.class, () -> new StorageMaintenance(null, blobs, props));
-    assertThrows(NullPointerException.class, () -> new StorageMaintenance(uploads, null, props));
-    assertThrows(NullPointerException.class, () -> new StorageMaintenance(uploads, blobs, null));
+    assertThrows(
+        NullPointerException.class, () -> new StorageMaintenance(null, blobs, cleanups, props));
+    assertThrows(
+        NullPointerException.class, () -> new StorageMaintenance(uploads, null, cleanups, props));
+    assertThrows(
+        NullPointerException.class, () -> new StorageMaintenance(uploads, blobs, null, props));
+    assertThrows(
+        NullPointerException.class, () -> new StorageMaintenance(uploads, blobs, cleanups, null));
   }
 
   /**
@@ -131,7 +172,11 @@ class StorageMaintenanceTest {
     CountingUploadService uploads = new CountingUploadService(1);
     CountingBlobManager blobs = new CountingBlobManager(1);
     StorageMaintenance maintenance =
-        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
+        new StorageMaintenance(
+            uploads,
+            blobs,
+            mock(StorageObjectCleanupService.class),
+            properties(Duration.ofHours(1)));
     try {
       maintenance.start();
       assertTrue(uploads.await());
@@ -165,6 +210,7 @@ class StorageMaintenanceTest {
         new StorageMaintenance(
             mock(StorageUploadService.class),
             mock(StorageBlobManager.class),
+            mock(StorageObjectCleanupService.class),
             properties(Duration.ofHours(1)));
     AtomicBoolean callbackRan = new AtomicBoolean();
     stopped.stop(() -> callbackRan.set(true));
@@ -187,7 +233,11 @@ class StorageMaintenanceTest {
               throw new IllegalStateException("blob failed");
             });
     StorageMaintenance maintenance =
-        new StorageMaintenance(uploads, blobs, properties(Duration.ofHours(1)));
+        new StorageMaintenance(
+            uploads,
+            blobs,
+            mock(StorageObjectCleanupService.class),
+            properties(Duration.ofHours(1)));
     try {
       maintenance.start();
       assertTrue(uploadFailed.await(5, TimeUnit.SECONDS));
@@ -210,7 +260,10 @@ class StorageMaintenanceTest {
             });
     StorageMaintenance failing =
         new StorageMaintenance(
-            failingUploads, mock(StorageBlobManager.class), properties(Duration.ofHours(1)));
+            failingUploads,
+            mock(StorageBlobManager.class),
+            mock(StorageObjectCleanupService.class),
+            properties(Duration.ofHours(1)));
     failing.start();
     try {
       assertTrue(failedDrain.await(5, TimeUnit.SECONDS));
@@ -222,7 +275,10 @@ class StorageMaintenanceTest {
     CountingUploadService uploads = new CountingUploadService(1);
     StorageMaintenance maintenance =
         new StorageMaintenance(
-            uploads, new CountingBlobManager(1), properties(Duration.ofHours(1)));
+            uploads,
+            new CountingBlobManager(1),
+            mock(StorageObjectCleanupService.class),
+            properties(Duration.ofHours(1)));
     maintenance.start();
     assertTrue(uploads.await());
     ScheduledExecutorService owned = executor(maintenance);
@@ -244,16 +300,18 @@ class StorageMaintenanceTest {
   void rejectsInvalidPollDurations() {
     StorageUploadService uploads = mock(StorageUploadService.class);
     StorageBlobManager blobs = mock(StorageBlobManager.class);
+    StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new StorageMaintenance(uploads, blobs, properties(Duration.ZERO)));
+        () -> new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ZERO)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new StorageMaintenance(uploads, blobs, properties(Duration.ofNanos(1))));
+        () -> new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ofNanos(1))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new StorageMaintenance(uploads, blobs, properties(Duration.ofSeconds(Long.MAX_VALUE))));
+            new StorageMaintenance(
+                uploads, blobs, cleanups, properties(Duration.ofSeconds(Long.MAX_VALUE))));
   }
 
   private static StorageMaintenanceProperties properties(Duration pollDelay) {
@@ -395,6 +453,30 @@ class StorageMaintenanceTest {
     @Override
     public StoragePresignedUrlDTO presignPreviewUrl(UUID blobId) {
       throw new UnsupportedOperationException();
+    }
+  }
+
+  private static final class CountingObjectCleanupService implements StorageObjectCleanupService {
+
+    private final CountDownLatch latch;
+
+    private CountingObjectCleanupService(int expectedCalls) {
+      this.latch = new CountDownLatch(expectedCalls);
+    }
+
+    @Override
+    public void enqueue(String objectKey) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int sweepOnce() {
+      latch.countDown();
+      return 0;
+    }
+
+    private boolean await() throws InterruptedException {
+      return latch.await(5, TimeUnit.SECONDS);
     }
   }
 }

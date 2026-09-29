@@ -106,7 +106,7 @@ UNMIGRATED_TABLES = ("environment", "skill_package", "plugin_credential")
 #: The V1 revision this checkout declares.  A changed value means the baseline changed, which is a
 #: maintenance decision: this test must fail so the operator re-verifies the whole flow
 #: (``python3 -m unittest discover -s scripts/ops/tests``) and re-pins the Flyway checksum here.
-DOCUMENTED_V1_CHECKSUM = "1707760979"
+DOCUMENTED_V1_CHECKSUM = "1951585467"
 
 FINGERPRINT_LINE = re.compile(r"^fingerprint\.[a-z_]+=\d+:[0-9a-f]*$")
 COUNT_LINE = re.compile(r"^rows\.[a-z_]+=\d+$")
