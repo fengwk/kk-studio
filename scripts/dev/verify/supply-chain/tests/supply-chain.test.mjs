@@ -263,6 +263,28 @@ function listRunDirectories(reportRoot) {
         .map(entry => entry.name)
 }
 
+/**
+ * 收集仓库内全部 Maven POM。跳过非 Maven 面（`.git`、`.workspace`、`node_modules`、`target`）
+ * 与由 npm 管理的 `frontend`，避免并行 worktree、构建产物或前端目录干扰平台依赖判断。
+ */
+function listRepositoryPoms() {
+    const poms = []
+    const skippedDirectories = new Set(['.git', '.workspace', 'node_modules', 'target', 'frontend'])
+    const walk = (directory) => {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+            if (entry.isDirectory()) {
+                if (!skippedDirectories.has(entry.name)) {
+                    walk(path.join(directory, entry.name))
+                }
+            } else if (entry.name === 'pom.xml') {
+                poms.push(path.join(directory, entry.name))
+            }
+        }
+    }
+    walk(REPOSITORY_ROOT)
+    return poms
+}
+
 test('rejects missing, unknown, and extra command parameters', () => {
     // Intent: malformed invocations must stop before creating an online scan or report.
     for (const args of [[], ['unknown'], ['sbom', 'extra']]) {
@@ -287,6 +309,44 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
     assert.match(profile, /<phase>verify<\/phase>[\s\S]*<goal>aggregate<\/goal>/)
 })
 
+test('keeps the Boot BOM as the only owner of the servlet container and Netty platform', () => {
+    // Intent: Boot 4.x 的受支持平台是 Tomcat 11 / Servlet 6.1 与 Netty 4.2；根 POM 曾把四个 tomcat-embed-*
+    // 固定为 10.1.59（Servlet 6.0），并在 Boot BOM 之前导入 netty-bom 4.1.137.Final，等于把平台静默降回
+    // 上一代。该 guard 只禁止覆盖平台版本：任何重新引入的显式 version 都必须先改这里，因此 platform major
+    // （Tomcat 11 / Netty 4.2）不会被无评审地降级；将来直接声明 Netty/容器构件（不写版本，交给 Boot BOM 管理）
+    // 仍然合法。断言只看 major，不写死 patch 版本。
+    const pom = readFileSync(POM, 'utf8')
+    const bootVersion = /<spring-boot\.version>(\d+)\.\d+/.exec(pom)?.[1]
+    assert.equal(bootVersion, '4', 'Boot 4 is the platform owner that requires Tomcat 11 / Netty 4.2')
+    assert.match(
+        pom,
+        /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<scope>import<\/scope>/,
+    )
+
+    const poms = listRepositoryPoms()
+    assert.ok(poms.length >= 8, `expected the Maven module POMs, found ${poms.length}`)
+    for (const pomFile of poms) {
+        const relativePath = path.relative(REPOSITORY_ROOT, pomFile)
+        const content = readFileSync(pomFile, 'utf8')
+        assert.doesNotMatch(
+            content,
+            /<tomcat\.version>|<netty\.version>/,
+            `${relativePath} must not pin a servlet container or Netty platform version property`,
+        )
+        for (const dependency of content.matchAll(/<dependency>[\s\S]*?<\/dependency>/gu)) {
+            const block = dependency[0]
+            if (!/org\.apache\.tomcat\.embed|io\.netty/.test(block)) {
+                continue
+            }
+            assert.doesNotMatch(
+                block,
+                /<version>/,
+                `${relativePath} must let the Boot BOM own the servlet container and Netty platform: ${block}`,
+            )
+        }
+    }
+})
+
 test('locks tool versions, policy thresholds, and secret indirection', () => {
     // Intent: policy changes must be reviewable as a small static diff and keys must stay out of POM/CLI text.
     const pom = readFileSync(POM, 'utf8')
@@ -296,9 +356,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     const script = readFileSync(SCRIPT, 'utf8')
     assert.match(pom, /<spring-boot\.version>4\.0\.8<\/spring-boot\.version>/)
     assert.match(pom, /<jackson\.version>2\.22\.1<\/jackson\.version>/)
-    assert.match(pom, /<netty\.version>4\.1\.137\.Final<\/netty\.version>/)
     assert.match(pom, /<log4j\.version>2\.26\.1<\/log4j\.version>/)
-    assert.match(pom, /<tomcat\.version>10\.1\.59<\/tomcat\.version>/)
     assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
     assert.match(pom, /<opennlp\.version>2\.5\.11<\/opennlp\.version>/)
     assert.doesNotMatch(pom, /<kotlin\.version>|kotlin-bom|okio-jvm/)
@@ -310,10 +368,6 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(
         pom,
         /<artifactId>jackson-bom<\/artifactId>[\s\S]*<version>\$\{jackson\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
-    )
-    assert.match(
-        pom,
-        /<artifactId>netty-bom<\/artifactId>[\s\S]*<version>\$\{netty\.version\}<\/version>[\s\S]*<scope>import<\/scope>/,
     )
     assert.match(
         pom,
