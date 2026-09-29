@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getEditingSessionId,
+  handlePageshow,
+  isSessionReloading,
   resetEditingSessionForTests,
 } from '@/features/canvas/canvas-editing-session'
 
@@ -119,5 +121,51 @@ describe('Canvas 编辑会话身份', () => {
     } finally {
       Object.defineProperty(crypto, 'randomUUID', { configurable: true, writable: true, value: originalUuid })
     }
+  })
+
+  it('I10 bfcache: pageshow 恢复时若 session 已被其他活页面持有，触发安全 reload 且不强夺所有权', () => {
+    resetEditingSessionForTests()
+    const mySessionId = getEditingSessionId()
+
+    // 模拟进入 bfcache：休眠期间另一标签页以相同的 sessionId（如复制标签页）成为活所有者
+    const OWNER_STORAGE_KEY = 'kkstudio.canvas.editingSessionOwner'
+    const otherPageOwner = {
+      [mySessionId]: {
+        pageId: 'other-live-page-id',
+        at: Date.now(),
+      },
+    }
+    window.localStorage.setItem(OWNER_STORAGE_KEY, JSON.stringify(otherPageOwner))
+
+    const reloadMock = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { ...window.location, reload: reloadMock },
+    })
+
+    handlePageshow({ persisted: true })
+
+    expect(reloadMock).toHaveBeenCalled()
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBeNull()
+    expect(isSessionReloading()).toBe(true)
+  })
+
+  it('I10 bfcache: pageshow 恢复时若无活所有者竞争，安全重新 claim 并继续', () => {
+    resetEditingSessionForTests()
+    const mySessionId = getEditingSessionId()
+
+    // 模拟普通 pageshow 恢复
+    const reloadMock = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { ...window.location, reload: reloadMock },
+    })
+
+    handlePageshow({ persisted: true })
+
+    expect(reloadMock).not.toHaveBeenCalled()
+    expect(window.sessionStorage.getItem(SESSION_STORAGE_KEY)).toBe(mySessionId)
   })
 })

@@ -30,6 +30,11 @@ let ownedSessionId: string | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 let sessionStorageUnavailable = false
 let unloadReleaseRegistered = false
+let sessionReloading = false
+
+export function isSessionReloading(): boolean {
+  return sessionReloading
+}
 
 /**
  * 返回当前编辑会话标识：同一标签页内稳定，多标签页 / 复制标签页相互隔离。
@@ -50,6 +55,7 @@ export function resetEditingSessionForTests(): void {
   cachedSessionId = null
   ownedSessionId = null
   sessionStorageUnavailable = false
+  sessionReloading = false
   stopHeartbeat()
   if (typeof window === 'undefined') {
     return
@@ -203,6 +209,40 @@ function registerUnloadRelease(): void {
   }
   window.addEventListener('pagehide', release)
   window.addEventListener('beforeunload', release)
+  window.addEventListener('pageshow', handlePageshow)
+}
+
+/**
+ * bfcache 页面恢复时重新校验会话所有权。
+ * 若会话已被其他活页面认领，标记重载并刷新页面，避免跨页面覆盖。
+ */
+export function handlePageshow(_event?: Event | { persisted?: boolean }): void {
+  const targetId = cachedSessionId ?? readSessionStorage()
+  if (!targetId) {
+    getEditingSessionId()
+    return
+  }
+
+  if (isOwnedByAnotherLivePage(targetId)) {
+    sessionReloading = true
+    cachedSessionId = null
+    ownedSessionId = null
+    stopHeartbeat()
+    try {
+      window.sessionStorage.removeItem(SESSION_STORAGE_KEY)
+    } catch {
+      // Ignore
+    }
+    if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+      window.location.reload()
+    }
+    return
+  }
+
+  cachedSessionId = targetId
+  ownedSessionId = targetId
+  claimOwnership(targetId)
+  startHeartbeat(targetId)
 }
 
 function releaseOwnership(): void {

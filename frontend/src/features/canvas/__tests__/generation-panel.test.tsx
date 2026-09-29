@@ -164,12 +164,17 @@ function renderPanel(
   const flushFunctionConfig = vi.fn(async () => undefined)
   const setToast = vi.fn()
   const setSelection = vi.fn()
+  const discardPendingRun = vi.fn(() => true)
+  const isNodeInFlight = vi.fn(() => false)
   const runtime = {
     models: availableModels,
     scheduleFunctionConfig,
     flushFunctionConfig,
     setToast,
     setSelection,
+    discardPendingRun,
+    isNodeInFlight,
+    localPendingErrors: {},
   } as unknown as CanvasController
   const { snapshot, target } = fixture(run)
   const anchor = rawAnchor && !('targetNodeId' in rawAnchor)
@@ -204,6 +209,8 @@ function renderPanel(
     flushFunctionConfig,
     setToast,
     setSelection,
+    discardPendingRun,
+    isNodeInFlight,
   }
 }
 
@@ -678,6 +685,78 @@ describe('Canvas generic generation panel', () => {
     fireEvent.change(numberInput, { target: { value: '8' } })
     expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
       .parameters.duration).toBe(8)
+    view.unmount()
+  })
+
+  it('I11 参数 JSON 双向同步与非法输入防御：打开时同步最新值，表单修改联动，非法 JSON 绝不覆盖表单', async () => {
+    const view = renderPanel(null, models)
+
+    // 1. 展开参数 JSON：初始化展示当前参数
+    const toggleBtn = screen.getByRole('button', { name: '编辑参数 JSON' })
+    fireEvent.click(toggleBtn)
+
+    const textarea = screen.getByRole('textbox', { name: '参数 JSON' })
+    expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '1:1' })
+
+    // 2. 表单联动：当未脏态修改 JSON 时，表单控件（比例选择器）修改会联动同步更新 JSON 文本
+    const ratioSelect = screen.getByLabelText('比例')
+    fireEvent.change(ratioSelect, { target: { value: '16:9' } })
+    expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '16:9' })
+
+    // 3. 用户在 JSON 编辑器中输入合法 JSON：更新表单与调度
+    const scheduledCount = view.scheduleFunctionConfig.mock.calls.length
+    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"\n}' } })
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCount + 1)
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+      .parameters.ratio).toBe('1:1')
+
+    // 4. 用户输入非法 JSON（语法错误）：提示错误，绝不调用 scheduleFunctionConfig 破坏已有有效值
+    const beforeInvalidCalls = view.scheduleFunctionConfig.mock.calls.length
+    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"' } }) // 缺少右大括号
+    expect(screen.getByRole('alert')).toHaveTextContent('JSON 语法错误')
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
+
+    // 5. 用户输入非对象 JSON（如数组）：提示错误，不覆盖有效值
+    fireEvent.change(textarea, { target: { value: '[1, 2, 3]' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('参数必须为 JSON 对象')
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
+
+    view.unmount()
+  })
+
+  it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
+    // 1. 设置坏记录到 localStorage，打开面板
+    const corruptRaw = 'corrupt-raw-json-data'
+    const targetId = '9'
+    const storageKey = `kkstudio.canvas.pending-run:1:${targetId}`
+    window.localStorage.setItem(storageKey, corruptRaw)
+
+    const view = renderPanel()
+
+    // 2. 验证出现 local-pending-error 提示条及“放弃本地未决记录”按钮
+    const errorBanner = await screen.findByTestId('local-pending-error')
+    expect(errorBanner).toHaveTextContent('未决运行记录异常')
+    const discardBtn = screen.getByTestId('discard-pending-btn')
+    expect(discardBtn).toBeInTheDocument()
+
+    // 3. 点击“放弃本地未决记录”，展示确认警告对话框
+    fireEvent.click(discardBtn)
+    expect(screen.getByRole('alertdialog', { name: '确认放弃未决记录' })).toBeInTheDocument()
+    expect(screen.getByText('这不会撤销服务端运行，核实后再继续')).toBeInTheDocument()
+
+    // 4. 点击取消：关闭确认框，恢复放弃按钮
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('discard-pending-btn')).toBeInTheDocument()
+
+    // 5. 再次点击放弃并确认，调用 discardPendingRun 并成功清理
+    fireEvent.click(screen.getByTestId('discard-pending-btn'))
+    const confirmBtn = screen.getByTestId('confirm-discard-btn')
+    fireEvent.click(confirmBtn)
+    expect(view.discardPendingRun).toHaveBeenCalledWith(targetId, corruptRaw)
+    expect(screen.queryByTestId('local-pending-error')).not.toBeInTheDocument()
+
+    window.localStorage.removeItem(storageKey)
     view.unmount()
   })
 })
