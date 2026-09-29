@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -132,7 +133,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"printf 'before-cancel-output\\\\n'; touch '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -163,7 +164,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"seq 1 5000; touch '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -219,7 +220,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"printf 'runtime-timeout-output\\\\n'; touch '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -248,7 +249,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"printf 'runtime-cancel-output\\\\n'; touch '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -303,7 +304,11 @@ class BashCapabilityTest {
           invokeAsync(
               config,
               gated,
-              "{\"command\":\"touch '" + marker + "'\",\"workdir\":" + json(workspaceRoot) + "}",
+              "{\"command\":\"touch '"
+                  + embedded(marker)
+                  + "'\",\"workdir\":"
+                  + json(workspaceRoot)
+                  + "}",
               Duration.ofSeconds(5));
       listener.handle.cancel();
       release.countDown();
@@ -338,7 +343,11 @@ class BashCapabilityTest {
           invokeAsync(
               config,
               gated,
-              "{\"command\":\"touch '" + marker + "'\",\"workdir\":" + json(workspaceRoot) + "}",
+              "{\"command\":\"touch '"
+                  + embedded(marker)
+                  + "'\",\"workdir\":"
+                  + json(workspaceRoot)
+                  + "}",
               Duration.ofSeconds(5));
       listener.handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
       release.countDown();
@@ -442,9 +451,9 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"(while true; do echo child >> '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 0.05; done) & while true; do echo parent >> '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -469,9 +478,9 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"(while true; do echo child >> '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 0.05; done) & while true; do echo parent >> '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -653,7 +662,7 @@ class BashCapabilityTest {
         invoke(
             bash(config()),
             "{\"command\":\"sleep 60 & echo $! >> "
-                + pidFile
+                + embedded(pidFile)
                 + "; echo done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -710,7 +719,7 @@ class BashCapabilityTest {
         invoke(
             bash(config()),
             "{\"command\":\"sleep 60 & echo $! >> "
-                + pidFile
+                + embedded(pidFile)
                 + "; disown; echo disowned\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -734,7 +743,7 @@ class BashCapabilityTest {
         invoke(
             bash(config()),
             "{\"command\":\"sh -c 'sleep 60 & echo $! >> "
-                + pidFile
+                + embedded(pidFile)
                 + "; wait' & sleep 0.3; exit 0\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -760,7 +769,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"(trap '' TERM; while true; do echo tick >> '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 0.05; done) & while true; do sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -795,7 +804,7 @@ class BashCapabilityTest {
         invokeAsync(
             bash(config()),
             "{\"command\":\"touch '"
-                + marker
+                + embedded(marker)
                 + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
@@ -830,7 +839,51 @@ class BashCapabilityTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withLimits(workspaceRoot, 2000, 50 * 1024);
+    return TestCodingConfig.withBash(workspaceRoot, 2000, 50 * 1024, bashExecutable());
+  }
+
+  /**
+   * 真实 bash 可执行文件。
+   *
+   * <p>Windows 上不能用裸名 {@code bash}：{@code System32\bash.exe} 是 WSL 的转发程序，而 {@code CreateProcess}
+   * 的搜索顺序 让系统目录永远先于 PATH，因此裸名只会启动一个没有发行版的 WSL 并以退出码 1 结束。生产侧同样需要 operator 用 {@code
+   * --bash-executable} 指向 Git Bash，这里只是把同一件事在测试里固定下来。
+   */
+  private static String bashExecutable() {
+    if (!isWindows()) {
+      return "bash";
+    }
+    for (Path candidate : gitBashCandidates()) {
+      if (Files.isRegularFile(candidate)) {
+        return candidate.toString();
+      }
+    }
+    assumeTrue(false, "需要 Git Bash：Windows 上裸名 bash 只会命中 System32 的 WSL 转发程序");
+    return "bash";
+  }
+
+  private static List<Path> gitBashCandidates() {
+    List<Path> candidates = new ArrayList<>();
+    for (String variable : List.of("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")) {
+      String root = System.getenv(variable);
+      if (root != null && !root.isBlank()) {
+        candidates.add(Path.of(root, "Git", "bin", "bash.exe"));
+      }
+    }
+    String localAppData = System.getenv("LOCALAPPDATA");
+    if (localAppData != null && !localAppData.isBlank()) {
+      candidates.add(Path.of(localAppData, "Programs", "Git", "bin", "bash.exe"));
+    }
+    return candidates;
+  }
+
+  /**
+   * 命令文本里内嵌的路径。
+   *
+   * <p>统一成 {@code /}：同一个值既不会破坏外层 JSON（Windows 反斜杠会被当成非法转义），也不会被 Git Bash 与 POSIX shell 区别对待。
+   */
+  private static String embedded(Path value) {
+    return value.toString().replace('\\', '/');
   }
 
   private EnvironmentCapabilityResult invoke(

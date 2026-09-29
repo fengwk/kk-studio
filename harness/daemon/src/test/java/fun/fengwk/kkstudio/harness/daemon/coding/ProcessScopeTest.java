@@ -69,11 +69,22 @@ class ProcessScopeTest {
     }
   }
 
-  /** 命令无法启动时在已建立的范围内失败关闭：发布失败原因、没有自然退出码、范围仍然收敛。 */
+  /**
+   * 命令无法启动时失败关闭：发布失败原因、没有自然退出码、范围仍然收敛。
+   *
+   * <p>平台差异：POSIX 上命令进程在范围建立之后才 {@code exec}，因此失败发生在已建立的范围内；Windows 上首个进程必须
+   * 先创建并归属，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭且都带上命令名，调用方 据同样的失败终态处理。
+   */
   @Test
   void missingExecutableIsReportedAsScopeFailure() throws Exception {
-    ProcessScope scope =
-        ProcessScope.start(workdir, List.of("kk-studio-missing-command", "-lc", "echo never"));
+    ProcessScope scope;
+    try {
+      scope =
+          ProcessScope.start(workdir, List.of("kk-studio-missing-command", "-lc", "echo never"));
+    } catch (IllegalStateException failure) {
+      assertTrue(failure.getMessage().contains("kk-studio-missing-command"), failure.getMessage());
+      return;
+    }
     try {
       readAll(scope.process().getInputStream());
       scope.process().waitFor();

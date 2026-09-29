@@ -60,6 +60,9 @@ final class ProcessScope implements AutoCloseable {
   /** helper 退出与范围收敛的预算。 */
   private static final long CONVERGENCE_BUDGET_MILLIS = 2_000;
 
+  /** 还没有用户命令时强杀 keeper 的等待预算：它已经忽略温和信号，不需要为它保留收敛时间。 */
+  private static final long HELPER_FORCE_EXIT_BUDGET_MILLIS = 500;
+
   /** 轮询步长：足够细，使正常收敛不必白等整个预算。 */
   private static final long POLL_INTERVAL_MILLIS = 5;
 
@@ -307,12 +310,27 @@ final class ProcessScope implements AutoCloseable {
 
   /** 终止范围的唯一实现；返回范围是否已经收敛。 */
   private boolean stop() {
-    boolean drained = scopeEstablished ? (windows ? drainJob() : drainGroup()) : true;
+    if (!scopeEstablished) {
+      // 没有放行就没有用户命令，helper 也没有需要收敛的后代：直接强杀，不为它等满整个收敛预算。
+      // Windows 上此时 Job 里只可能有一个从未恢复执行的挂起进程，helper 失败关闭时会自己结束它。
+      return forceKillHelper();
+    }
+    boolean drained = windows ? drainJob() : drainGroup();
     if (!awaitHelperExit(CONVERGENCE_BUDGET_MILLIS)) {
       helper.destroyForcibly();
       awaitHelperExit(CONVERGENCE_BUDGET_MILLIS);
     }
-    return drained && (!scopeEstablished || awaitConvergence(CONVERGENCE_BUDGET_MILLIS));
+    return drained && awaitConvergence(CONVERGENCE_BUDGET_MILLIS);
+  }
+
+  /** 强杀 keeper 并等它消失：进程已经不在时是空操作，重复调用不会延长等待。 */
+  private boolean forceKillHelper() {
+    helper.destroyForcibly();
+    if (awaitHelperExit(HELPER_FORCE_EXIT_BUDGET_MILLIS)) {
+      return true;
+    }
+    helper.destroyForcibly();
+    return awaitHelperExit(HELPER_FORCE_EXIT_BUDGET_MILLIS);
   }
 
   /**
