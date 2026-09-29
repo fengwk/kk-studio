@@ -5,6 +5,7 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 export interface RealtimeToolCallDraft {
   index: number
@@ -56,6 +57,11 @@ export interface RealtimeToolPartial {
   threadId: string
   invocationId: string
   attempt: number
+  /**
+   * 生产端为这一条投影事件生成的 canonical UUID。重投递复用同一值，是普通 partial 的
+   * 唯一去重键；不同 eventId 的同 ms、同 payload 事件必须各自追加。
+   */
+  eventId: string
   /** 规范的 partial ToolResult payload：{toolCallId, contents, error, details}。 */
   payload: Record<string, unknown>
   createdAt: string
@@ -203,7 +209,7 @@ function nullableIdentifier(value: unknown): string | null | undefined {
   return value
 }
 
-/** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape）。 */
+/** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape，含 canonical eventId identity）。 */
 export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | null {
   if (typeof data !== 'string') {
     return null
@@ -224,6 +230,8 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     || !isNonBlankString(envelope.threadId)
     || !isNonBlankString(envelope.subjectId)
     || !isPositiveInteger(envelope.attempt)
+    || typeof envelope.eventId !== 'string'
+    || !isCanonicalUuid(envelope.eventId)
     || !isNonBlankString(envelope.createdAt)
     || !isRecord(envelope.payload)
   ) {
@@ -233,6 +241,7 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     threadId: envelope.threadId,
     invocationId: envelope.subjectId,
     attempt: envelope.attempt,
+    eventId: envelope.eventId,
     payload: envelope.payload,
     createdAt: envelope.createdAt,
   }

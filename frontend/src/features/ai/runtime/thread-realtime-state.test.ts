@@ -143,6 +143,7 @@ describe('thread realtime state', () => {
     expect(partial).toEqual({
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 2,
       payload: { toolCallId: 'call-1', contents: [{ type: 'text', text: 'one' }], error: false },
       createdAt: '2026-07-28T10:00:00Z',
@@ -159,6 +160,7 @@ describe('thread realtime state', () => {
       subjectKind: 'TOOL_INVOCATION',
       subjectId: 'inv-t',
       attempt: 1,
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       type: 'TOOL_PARTIAL',
       payload: { toolCallId: 'call-1', contents: [] },
       createdAt: '2026-07-28T10:00:00Z',
@@ -173,6 +175,14 @@ describe('thread realtime state', () => {
     // createdAt 只要求非空字符串（MODEL_DELTA 才有日期解析校验）。
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, createdAt: '  ' }))).toBeNull()
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, payload: 'nope' }))).toBeNull()
+    // eventId 必须是 canonical UUID：缺失、空串、非字符串、非法文本与非 canonical 变体全部拒绝。
+    const withoutEventId: Record<string, unknown> = { ...base }
+    delete withoutEventId.eventId
+    expect(parseRealtimeToolPartial(JSON.stringify(withoutEventId))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '' }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 7 }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'not-a-uuid' }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '1-2-3-4-5' }))).toBeNull()
   })
 
   it('rejects stream checkpoints that are absent, unparsable, or non-record', () => {
@@ -356,6 +366,7 @@ describe('thread realtime state', () => {
     const partial = {
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: {
         toolCallId: 'call-1',
@@ -680,6 +691,7 @@ describe('thread realtime state', () => {
     const partial = (attempt: number, text: string, createdAt: string) => ({
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt,
       payload: {
         toolCallId: 'call-1',
@@ -702,6 +714,7 @@ describe('thread realtime state', () => {
     const chunk = (text: unknown, error: unknown) => ({
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: {
         toolCallId: 'call-1',
@@ -728,6 +741,7 @@ describe('thread realtime state', () => {
     const partial = {
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: { contents: [{ type: 'text', text: 'x' }], error: null, details: null },
       createdAt: '2026-07-28T10:00:00Z',
@@ -743,6 +757,7 @@ describe('thread realtime state', () => {
     const first = reduceRealtimeToolStream(null, {
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: {
         toolCallId: 'call-1',
@@ -754,6 +769,7 @@ describe('thread realtime state', () => {
     const appended = reduceRealtimeToolStream(first, {
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: {
         toolCallId: 'call-1',
@@ -953,6 +969,7 @@ describe('thread realtime state', () => {
     const partial = (contents: unknown[]) => ({
       threadId: '7',
       invocationId: 'inv-t',
+      eventId: DEFAULT_PARTIAL_EVENT_ID,
       attempt: 1,
       payload: { toolCallId: 'call-1', contents, error: null, details: null },
       createdAt: '2026-07-28T10:00:00Z',
@@ -1172,6 +1189,7 @@ describe('thread realtime state', () => {
       const p1 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1190,6 +1208,7 @@ describe('thread realtime state', () => {
       const p2 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1227,6 +1246,7 @@ describe('thread realtime state', () => {
       const p1 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1253,6 +1273,7 @@ describe('thread realtime state', () => {
       const pOverlap = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1277,6 +1298,7 @@ describe('thread realtime state', () => {
       const p1 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1298,6 +1320,7 @@ describe('thread realtime state', () => {
       const pGap = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1322,6 +1345,7 @@ describe('thread realtime state', () => {
       const pSnapshot = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1346,6 +1370,7 @@ describe('thread realtime state', () => {
       const p4 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1520,6 +1545,7 @@ describe('thread realtime state', () => {
       const staleWithError = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1633,6 +1659,7 @@ describe('thread realtime state', () => {
       return {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1654,6 +1681,7 @@ describe('thread realtime state', () => {
       const p1 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 1,
         payload: {
           toolCallId: 'call-proc',
@@ -1676,6 +1704,7 @@ describe('thread realtime state', () => {
       const p2 = {
         threadId: '7',
         invocationId: 'inv-proc',
+        eventId: DEFAULT_PARTIAL_EVENT_ID,
         attempt: 2,
         payload: {
           toolCallId: 'call-proc',
@@ -1735,15 +1764,20 @@ function toolCallEvent(
   })
 }
 
+/** 夹具默认 eventId：满足 canonical UUID 校验；需要精确控制 identity 的用例显式覆盖。 */
+const DEFAULT_PARTIAL_EVENT_ID = '00000000-0000-4000-8000-0000000000e1'
+
 function toolPartialEvent({
   threadId = '7',
   subjectId = 'inv-t',
   attempt = 1,
+  eventId = DEFAULT_PARTIAL_EVENT_ID,
   payload,
 }: {
   threadId?: string
   subjectId?: string
   attempt?: number
+  eventId?: unknown
   payload: Record<string, unknown>
 }): string {
   return JSON.stringify({
@@ -1751,6 +1785,7 @@ function toolPartialEvent({
     subjectKind: 'TOOL_INVOCATION',
     subjectId,
     attempt,
+    eventId,
     type: 'TOOL_PARTIAL',
     payload,
     createdAt: '2026-07-28T10:00:00Z',

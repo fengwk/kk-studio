@@ -18,7 +18,6 @@ import {
   snapshotModelStream,
   snapshotToolStream,
   type RealtimeModelStream,
-  type RealtimeToolPartial,
   type RealtimeToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -74,9 +73,10 @@ export function useHarnessThreadRealtime(
     attempt: number
     sequence: number
   } | null>(null)
-  // TOOL_PARTIAL 的有界精确去重指纹（realtime notification 可能重投递）：按
-  // thread:invocation:attempt 分组，因此 attempt 变化/终态 snapshot 会自然淘汰它们。
-  const toolPartialFingerprintsRef = useRef<Map<string, Set<string>>>(new Map())
+  // TOOL_PARTIAL 的有界精确去重（realtime notification 可能重投递）：按
+  // thread:invocation:attempt 分组、以生产端 eventId 为唯一键，因此 attempt 变化/终态
+  // snapshot 会自然淘汰它们；256 上限只是 best-effort 窗口，绝不吞掉新的合法 eventId。
+  const toolPartialSeenEventIdsRef = useRef<Map<string, Set<string>>>(new Map())
   const subscriptionReady = enabled && version != null
 
   const scheduler = useRealtimeFrameScheduler(
@@ -202,19 +202,19 @@ export function useHarnessThreadRealtime(
         streams.delete(key)
       }
     }
-    // 精确去重指纹只作用于活跃的同 attempt invocation：attempt
+    // 已见 eventId 只作用于活跃的同 attempt invocation：attempt
     // 变化、终态 snapshot 和消失的 invocation 都会淘汰它们。
-    const fingerprints = new Map<string, Set<string>>()
+    const seenEventIds = new Map<string, Set<string>>()
     for (const invocation of toolInvocations) {
       if (invocation.resultJson == null && invocation.errorJson == null) {
         const key = `${threadId}:${invocation.id}:${invocation.attempt}`
-        const existing = toolPartialFingerprintsRef.current.get(key)
+        const existing = toolPartialSeenEventIdsRef.current.get(key)
         if (existing != null) {
-          fingerprints.set(key, existing)
+          seenEventIds.set(key, existing)
         }
       }
     }
-    toolPartialFingerprintsRef.current = fingerprints
+    toolPartialSeenEventIdsRef.current = seenEventIds
     // 检查 React state 或 ref 是否需要对账更新。若有更新则立即同步发布并解除 tool 脏标记，
     // 避免 snapshot 对账与未决帧之间丢失 partial。
     const toolStreamsDirty =
@@ -239,7 +239,7 @@ export function useHarnessThreadRealtime(
       setModelStream(null)
       toolStreamsRef.current = new Map()
       setToolStreams(new Map())
-      toolPartialFingerprintsRef.current = new Map()
+      toolPartialSeenEventIdsRef.current = new Map()
       return undefined
     }
     if (subscription == null || subscription.threadId !== threadId) {
@@ -324,24 +324,24 @@ export function useHarnessThreadRealtime(
       }
       const isProcessOutput = isProcessOutputPartial(partial.payload)
       if (!isProcessOutput) {
-        // 精确去重 fence：仅对普通非 process.output 的 partial 事件使用指纹去重（process.output 依赖 offset 严格去重）
-        const fingerprintKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
-        let fingerprints = toolPartialFingerprintsRef.current.get(fingerprintKey)
-        if (fingerprints == null) {
-          fingerprints = new Set()
-          toolPartialFingerprintsRef.current.set(fingerprintKey, fingerprints)
+        // 事件 identity 去重 fence：只有普通非 process.output 的 partial 以生产端 eventId
+        // 去重；process.output 依赖 offset 严格去重，不进入这里。
+        const seenKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
+        let seenEventIds = toolPartialSeenEventIdsRef.current.get(seenKey)
+        if (seenEventIds == null) {
+          seenEventIds = new Set()
+          toolPartialSeenEventIdsRef.current.set(seenKey, seenEventIds)
         }
-        const fingerprint = fingerprintOf(partial)
-        if (fingerprints.has(fingerprint)) {
+        if (seenEventIds.has(partial.eventId)) {
           return
         }
-        if (fingerprints.size >= TOOL_PARTIAL_FINGERPRINT_LIMIT) {
-          const oldest = fingerprints.values().next().value
+        if (seenEventIds.size >= TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT) {
+          const oldest = seenEventIds.values().next().value
           if (oldest !== undefined) {
-            fingerprints.delete(oldest)
+            seenEventIds.delete(oldest)
           }
         }
-        fingerprints.add(fingerprint)
+        seenEventIds.add(partial.eventId)
       }
       const streams = toolStreamsRef.current
       const current = streams.get(partial.invocationId) ?? null
@@ -375,7 +375,7 @@ export function useHarnessThreadRealtime(
       unsubscribe()
       clearRecoveryLoop()
       scheduler.cancel()
-      toolPartialFingerprintsRef.current = new Map()
+      toolPartialSeenEventIdsRef.current = new Map()
     }
   }, [
     applicationEvents,
@@ -531,7 +531,8 @@ function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream):
 const RECOVERY_BACKOFF_BASE_MS = 200
 const RECOVERY_BACKOFF_MAX_MS = 2000
 const RECOVERY_MAX_ATTEMPTS = 8
-const TOOL_PARTIAL_FINGERPRINT_LIMIT = 256
+/** 每个 thread:invocation:attempt 保留的已见 eventId 上限；仅 best-effort 防重投递。 */
+const TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT = 256
 
 interface GapRecovery {
   threadId: string
@@ -766,6 +767,3 @@ function useGapRecoveryLoop(
   return { requestGapRecovery, clearRecoveryLoop }
 }
 
-function fingerprintOf(partial: RealtimeToolPartial): string {
-  return `${partial.createdAt}|${JSON.stringify(partial.payload)}`
-}
