@@ -90,7 +90,15 @@ public final class WindowsJobScope {
   /**
    * helper 侧：建立命名 Job 并以挂起状态创建首个进程，归属成功后才返回。
    *
-   * <p>任一步失败都释放已经拿到的句柄与已经创建的进程，再以带原因的异常失败关闭。
+   * <p>归属必须早于范围发布，这是父进程可以信赖的不变量：父进程一旦读到范围，就可以认定「要么没有任何命令进程，要么 它已经在 Job 内」，因此终止整组与「Job
+   * 内没有活动进程」这两个结论都不可能漏掉命令进程。
+   *
+   * <p>任一步失败都释放已经拿到的句柄、结束从未运行过的挂起进程，再以带原因的异常失败关闭。
+   *
+   * <p>已知窗口：{@code CreateProcessW} 与 {@code AssignProcessToJobObject} 之间创建出来的进程还不属于 Job。若 helper 恰在
+   * 这条指令间隙被强杀，它会留下一个从未执行过任何指令的挂起进程对象。要彻底消除这个窗口需要用 {@code STARTUPINFOEX} + {@code
+   * PROC_THREAD_ATTRIBUTE_JOB_LIST} 让进程一创建就属于 Job，这属于另一层架构改动，
+   * 不在本切片范围内；因此这里只保证「没有任何用户代码被执行」和「收敛判定绝不覆盖未归属进程」。
    */
   static WindowsJobScope createSuspended(String jobName, List<String> command, Path workdir) {
     if (command.isEmpty()) {

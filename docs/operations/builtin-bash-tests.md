@@ -12,7 +12,7 @@ pi-base 的 bash 测试集中在单个工具的进程执行、输出裁剪与 TU
 
 | 层次 | 代码 | 负责的事实 | 主要测试类 |
 | --- | --- | --- | --- |
-| 命令执行与捕获 | [`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)、[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)、[`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java) | 合并 stdout/stderr、按阈值落盘、超时/取消/退出三种收尾、OS 执行范围收敛 | `BashCapabilityTest`、`ProcessScopeTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、`OutputSpoolTest`、`TextOutputStoreTest` |
+| 命令执行与捕获 | [`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)、[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)、[`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java) | 合并 stdout/stderr、按阈值落盘、超时/取消/退出三种收尾、OS 执行范围收敛 | `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScopeCrossPlatformTest`（夹具 `ProcessScopeFixtureMain`）、`WindowsCommandLineTest`、`WindowsJobScopeTest`、`OutputSpoolTest`、`TextOutputStoreTest` |
 | 输出裁剪与发布 | [`OutputSpool`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpool.java)、[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) | 内联/落盘阈值、精确字节与行计数、有界预览、中转文件发布 | `OutputSpoolTest`、`TextOutputStoreTest` |
 | 协议与终态仲裁 | [`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) | 超时/取消裁决、终态唯一性、重放、收尾窗口（携带已捕获输出） | `DaemonRuntimeTest` |
 | 模型可见契约 | [`bash.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/bash.md)、`process.exec` schema | 工具提示词、workdir 必填、超时解析 | `BuiltinHarnessContributorTest`、`CodingCapabilitiesTest` |
@@ -27,7 +27,7 @@ Backend/Frontend 承担），下表中标记为「不迁移」。
 ```bash
 # bash 内核：进程执行、终止、输出裁剪
 env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/daemon -am test \
-  -Dtest='BashCapabilityTest,ProcessScopeTest,WindowsCommandLineTest,WindowsJobScopeTest,OutputSpoolTest,TextOutputStoreTest' \
+  -Dtest='BashCapabilityTest,ProcessScopeTest,ProcessScopeCrossPlatformTest,WindowsCommandLineTest,WindowsJobScopeTest,OutputSpoolTest,TextOutputStoreTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 
 # 协议与终态仲裁（含超时/取消收尾窗口）
@@ -239,6 +239,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 | `ProcessScopeTest.helperDiagnosticsStayOutOfTheCommandOutput` | helper 自己的诊断（含 JVM 启动提示）只进诊断文件，命令输出一个字节都不多 |
 | `WindowsCommandLineTest` | Windows 命令行 argv 拼装规则（空白、空参数、引号与尾部反斜杠转义） |
 | `WindowsJobScopeTest` | Job 相关结构的原生布局（64/144/48 字节）与 Job 名从状态目录派生（跨平台可执行，Windows 上是真实布局校验） |
+| `ProcessScopeCrossPlatformTest.naturalExitConvergesLiveChildren` | 根进程自然退出时：子进程自己写下原生 pid（夹具存活 600 秒）后必须被整组收敛，与平台 shell 无关 |
+| `ProcessScopeCrossPlatformTest.terminateConvergesNestedProcesses` | 终止必须覆盖孙进程：三层真实 Java 进程的原生 pid 在收敛后都不再存活 |
+| `ProcessScopeCrossPlatformTest.unpermittedStartNeverRunsTheFixture` | 许可之前取消：夹具连自己的 pid 文件都不会写出，即从未执行过任何指令 |
 | `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore` | 启动前已取消的调用不启动 helper、不创建中转/durable 文件，也不留下命令副作用 |
 | `BashCapabilityTest.preTimedOutCallDoesNotStartShellOrTouchStore` | 启动前已超时的调用共享同一条 fail-closed 检查，且终态仍是超时而非取消 |
 | `BashCapabilityTest.closesStdinSoCommandsWaitingForEofFinishNaturally` | 命令以参数传入、不读 stdin：等待 EOF 的命令自然退出，而不是阻塞到超时 |
@@ -264,12 +267,20 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 
 ## 已知缺口与平台限制
 
-- **Windows 与 macOS 的进程范围只有 CI 原生验证，本地没有证据。** POSIX 进程组（`setsid` + `kill(-pgid)`）在 Linux 上
-  由真实进程用例覆盖；Windows 的 Job Object 路径（`WindowsJobScope`）与 macOS 上的同一套 POSIX 路径需要在各自平台上
-  执行 `ProcessScopeTest`、`WindowsCommandLineTest` 与 `BashCapabilityTest` 才能给出结论，CI 矩阵
-  （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）承担这件事。LSP 客户端所用的 `ProcessTree`
-  仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows 上的
-  验证同样只能来自该矩阵。
+- **Windows 与 macOS 的原生证据来自 CI 矩阵，本地（Linux）没有证据。** 不带平台 shell 的核心事实由
+  `ProcessScopeCrossPlatformTest` 承担：它在三个平台上都用真实 Java 进程层级（含两层嵌套）与原生 pid 说话，且矩阵会断言这组
+  用例在每台 runner 上都真跑、一个都不跳过。平台 shell 语义（`bash -lc`、`cmd /c`）与 `WindowsJobScope` 的 kernel32 路径
+  仍只能在各自平台上由 `BashCapabilityTest`、`ProcessScopeTest`、`WindowsCommandLineTest` 给出结论，CI 矩阵
+  （`.github/workflows/process-scope.yml`，ubuntu/macos/windows）负责这件事；Linux 与 macOS 上该矩阵已通过。LSP 客户端所用的
+  `ProcessTree` 仍以 `ProcessHandle.destroy()/destroyForcibly()` 对预快照的整棵进程树收敛（不是 `taskkill /T`），它在 Windows
+  上的验证同样只能来自该矩阵。
+- **Windows 上必须显式指定 Git Bash。** 命令解析遵循 `CreateProcess` 的搜索顺序，系统目录永远先于 `PATH`，因此系统里存在
+  WSL 时裸名 `bash` 会命中 `System32\bash.exe`（打印「no installed distributions」并以退出码 1 结束），命令一行都不会执行。
+  Daemon 侧由 operator 用 `--bash-executable` 指向 Git Bash；测试侧显式挑选 Git Bash，找不到时以「缺少环境前置条件」跳过，
+  而不是把 WSL 的失败伪装成能力行为。
+- **命令不存在时的失败形态与平台有关。** POSIX 上命令进程在范围建立之后才 `exec`，失败发生在已建立的范围内；Windows 上首个
+  进程必须先创建并归属 Job，命令不存在意味着这一步无法完成，于是表现为范围建立失败。两条去向都是失败关闭、都带上命令名，
+  调用方（`BashCapability`）对两者的终态都按失败处理。
 - **Windows 侧首个进程在放行之前一直挂起。** 命令进程先以 suspended 状态被归属进 Job，父进程拿到 Job 句柄之后才恢复它；因此
   取消（即使在启动阶段）只需要终止整组，不会留下任何执行过命令逻辑的进程。helper 在许可之前失败时自己结束这个从未运行过的
   挂起进程，父进程也持有同一个 Job 的句柄作为第二重保证。
@@ -281,7 +292,10 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   合并后即可在报告里看到 `ProcessScopeHelper`/`PosixProcessGroup` 的 helper 侧行覆盖。默认关闭是因为被插桩的 helper 冷启动更慢，
   会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
 - **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
-  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。
+  退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/`ProcessScopeState` 的本地
+  行覆盖低于仓库 90% 目标（约 68%/57%/61%，指令覆盖 87%），缺口主要是 Windows 专属分支与跨 JVM 的 helper 侧代码；helper 侧可用
+  `-Dkk-studio.process-scope.helper-coverage=true` 合并测量，真正补齐这些缺口依赖 Windows runner 的 CI 证据，本地不做无事实依据的
+  补测。
 - **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
   在下一次调用重建存储；输出内容与失败终态都不受影响。
 - **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」

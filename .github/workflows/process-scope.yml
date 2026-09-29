@@ -54,14 +54,26 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-      # Git Bash 在三个平台上都能执行同一段命令；Windows 的 Job 语义由本机 runner 真实覆盖。
+      # ProcessScopeCrossPlatformTest 是三个平台上都必须真跑的核心验收：它用只依赖 JDK 的夹具造出真实进程层级，
+      # 因此没有 assumeFalse 可以把它在这台 runner 上跳过。其余用例走平台的 shell 语义（Windows 上由 Git Bash 承担）。
       - name: Run process scope tests
         shell: bash
         run: |
           set -euo pipefail
           env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-            -Dtest='ProcessScopeTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+            -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
             -Dsurefire.failIfNoSpecifiedTests=false
+      # 核心验收不允许被跳过：报告里既要有全部 3 个用例，也不能出现任何 skipped。
+      - name: Assert the cross-platform acceptance cases really ran
+        shell: bash
+        run: |
+          set -euo pipefail
+          report=harness/daemon/target/surefire-reports/TEST-fun.fengwk.kkstudio.harness.daemon.coding.ProcessScopeCrossPlatformTest.xml
+          test -f "$report" || { echo "missing surefire report: $report"; exit 1; }
+          grep -q 'tests="3"' "$report" || { echo "expected 3 cross-platform cases on ${{ matrix.os }}"; exit 1; }
+          if grep -q 'skipped="[1-9]' "$report"; then
+            echo "ProcessScopeCrossPlatformTest must not skip any case on ${{ matrix.os }}"; exit 1
+          fi
       - name: Upload surefire reports on failure
         if: failure()
         uses: actions/upload-artifact@v4

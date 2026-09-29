@@ -191,9 +191,21 @@ public final class ProcessScopeHelper {
       return false;
     }
 
-    /** 后台回收被收养的孤儿，直到进程结束：僵尸不会长期占住已经结束的进程组。 */
+    /**
+     * 后台回收被收养的孤儿，一直持续到本进程结束。
+     *
+     * <p>不能只扫一遍：被强杀的后代可能在回收线程退出之后才变成僵尸，那样它会一直挂在进程表里，直到 helper 自己也消失。
+     */
     private void startOrphanReaper() {
-      Thread reaper = new Thread(PosixProcessGroup::reapOrphans, "process-scope-orphan-reaper");
+      Thread reaper =
+          new Thread(
+              () -> {
+                while (true) {
+                  PosixProcessGroup.reapOrphans();
+                  sleepQuietly();
+                }
+              },
+              "process-scope-orphan-reaper");
       reaper.setDaemon(true);
       reaper.start();
     }
