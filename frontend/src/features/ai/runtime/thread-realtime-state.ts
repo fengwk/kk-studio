@@ -232,6 +232,7 @@ export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | n
     || !isPositiveInteger(envelope.attempt)
     || typeof envelope.eventId !== 'string'
     || !isCanonicalUuid(envelope.eventId)
+    || envelope.eventId !== envelope.eventId.toLowerCase()
     || !isNonBlankString(envelope.createdAt)
     || !isRecord(envelope.payload)
   ) {

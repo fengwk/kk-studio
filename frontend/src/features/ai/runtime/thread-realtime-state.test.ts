@@ -183,6 +183,10 @@ describe('thread realtime state', () => {
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 7 }))).toBeNull()
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'not-a-uuid' }))).toBeNull()
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '1-2-3-4-5' }))).toBeNull()
+    // H09: eventId 必须是规范全小写 canonical UUID：大写或大小写混合变体必须严格拒绝。
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: DEFAULT_PARTIAL_EVENT_ID.toUpperCase() }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: '00000000-0000-4000-8000-0000000000E1' }))).toBeNull()
+    expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'A0000000-0000-4000-8000-000000000001' }))).toBeNull()
   })
 
   it('rejects stream checkpoints that are absent, unparsable, or non-record', () => {

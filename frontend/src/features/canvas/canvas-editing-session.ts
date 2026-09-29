@@ -214,9 +214,15 @@ function registerUnloadRelease(): void {
 
 /**
  * bfcache 页面恢复时重新校验会话所有权。
+ * 严格仅当 event.persisted 为 true (来自 bfcache) 时才触发冲突处置；
+ * 普通 pageshow (persisted 为 false 或缺失) 不强制 reload / rotate session。
  * 若会话已被其他活页面认领，标记重载并刷新页面，避免跨页面覆盖。
  */
-export function handlePageshow(_event?: Event | { persisted?: boolean }): void {
+export function handlePageshow(event?: Event | { persisted?: boolean }): void {
+  if (!event || !('persisted' in event) || event.persisted !== true) {
+    return
+  }
+
   const targetId = cachedSessionId ?? readSessionStorage()
   if (!targetId) {
     getEditingSessionId()
