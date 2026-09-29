@@ -52,13 +52,25 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class BashCapabilityTest {
 
+  /**
+   * 「超时由测试触发」的调用预算。
+   *
+   * <p>这类用例断言的是「超时保留已捕获输出」，触发时机由 {@link ControlledScheduler#fireTimeout()} 决定，因此这个值不再参与断言：
+   * 它只需要大到让真实时钟不可能抢先决定去向（机器慢时 helper 与 shell 的冷启动仍在预算内），于是「两秒内能否把 helper 与 Git Bash 拉起来」不再决定用例成败。
+   */
+  private static final Duration TIMEOUT_TRIGGERED_BY_THE_TEST = Duration.ofMinutes(5);
+
   @TempDir Path workspaceRoot;
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
+  /** 超时由测试触发的调度器：需要「deadline 何时到达由屏障决定」的用例使用它。 */
+  private final ControlledScheduler timer = new ControlledScheduler();
+
   @AfterEach
   void closeExecutors() {
     scheduler.shutdownNow();
+    timer.shutdownNow();
     executor.shutdownNow();
   }
 
@@ -76,17 +88,29 @@ class BashCapabilityTest {
     }
   }
 
-  /** 超时必须保留已捕获输出并明确区分超时与退出码：小输出仍内联返回，且收尾不产生任何 durable 或残留中转文件。 */
+  /**
+   * 超时必须保留已捕获输出并明确区分超时与退出码：小输出仍内联返回，且收尾不产生任何 durable 或残留中转文件。
+   *
+   * <p>触发时机由屏障决定：命令先把那一行写出来并落下就绪标记，测试看到标记之后才让 deadline 到达，因此「超时保留已捕获输出」不会 退化成「机器必须在启动预算内把 helper 与
+   * shell 拉起来」。
+   */
   @Test
   void timeoutKeepsCapturedOutputWithoutLeavingStagingResidue() throws Exception {
     CodingToolsConfig config = config();
+    Path ready = workspaceRoot.resolve("timeout-small.ready");
     RecordingListener listener =
         invokeAsync(
-            bash(config),
-            "{\"command\":\"printf 'partial-timeout-output\\\\n'; sleep 30\",\"workdir\":"
+            config,
+            executor,
+            timer,
+            "{\"command\":\"printf 'partial-timeout-output\\\\n'; touch '"
+                + embedded(ready)
+                + "'; sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
-            Duration.ofSeconds(2));
+            TIMEOUT_TRIGGERED_BY_THE_TEST);
+    awaitFile(ready);
+    timer.fireTimeout();
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -109,15 +133,27 @@ class BashCapabilityTest {
    * 超时前已经落盘的输出必须发布为 durable 全文：唯一的中转文件只能被发布，不能被 close 删除。
    *
    * <p>同时断言终态说明不进入全文、也不计入捕获总量，因此 {@code totalLines} 仍忠实等于进程自己的输出行数。
+   *
+   * <p>触发时机由屏障决定：命令写完 5000 行之后才落下就绪标记，测试看到标记才让 deadline 到达。因此这些字节要么已经在管道里、要么 已经被捕获，收尾读出的一定是完整 5000
+   * 行；慢机器上 helper 与 Git Bash 的冷启动不再影响结论。
    */
   @Test
   void timeoutPublishesSpilledOutputAndKeepsCountsFaithful() throws Exception {
     CodingToolsConfig config = config();
+    Path ready = workspaceRoot.resolve("timeout-spill.ready");
     RecordingListener listener =
         invokeAsync(
-            bash(config),
-            "{\"command\":\"seq 1 5000; sleep 30\",\"workdir\":" + json(workspaceRoot) + "}",
-            Duration.ofSeconds(2));
+            config,
+            executor,
+            timer,
+            "{\"command\":\"seq 1 5000; touch '"
+                + embedded(ready)
+                + "'; sleep 30\",\"workdir\":"
+                + json(workspaceRoot)
+                + "}",
+            TIMEOUT_TRIGGERED_BY_THE_TEST);
+    awaitFile(ready);
+    timer.fireTimeout();
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -381,14 +417,19 @@ class BashCapabilityTest {
     }
   }
 
-  /** 命令以参数传入，能力不向 stdin 写数据：等待 EOF 的命令必须自然退出，而不是一直阻塞到超时。 */
+  /**
+   * 命令以参数传入，能力不向 stdin 写数据：等待 EOF 的命令必须自然退出，而不是一直阻塞到超时。
+   *
+   * <p>两条调用都不设 deadline：本用例断言的是「stdin 的写端已经关闭」，期限只会把它变成对机器启动速度的断言——命令启动慢时 deadline
+   * 先到，收尾去向就不再是自然退出。真正需要的是「命令必须自己结束」，这由 {@code listener.await()} 的有界等待守卫。
+   */
   @Test
   void closesStdinSoCommandsWaitingForEofFinishNaturally() throws Exception {
     EnvironmentCapabilityResult readUntilEof =
         invoke(
             bash(config()),
             "{\"command\":\"cat\",\"workdir\":" + json(workspaceRoot) + "}",
-            Duration.ofSeconds(3));
+            Duration.ZERO);
 
     assertFalse(readUntilEof.error(), "等待 EOF 的命令必须以成功退出收尾：" + text(readUntilEof));
     JsonNode process = details(readUntilEof).path("process");
@@ -401,7 +442,7 @@ class BashCapabilityTest {
         invoke(
             bash(config()),
             "{\"command\":\"echo done\",\"workdir\":" + json(workspaceRoot) + "}",
-            Duration.ofSeconds(3));
+            Duration.ZERO);
     assertFalse(ignoringStdin.error(), text(ignoringStdin));
     assertEquals("done\n", text(ignoringStdin));
   }
@@ -490,10 +531,13 @@ class BashCapabilityTest {
   @Test
   void timeoutTerminatesWholeProcessTree() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX shell 与进程树语义");
+    CodingToolsConfig config = config();
     Path marker = workspaceRoot.resolve("timeout-ticks.log");
     RecordingListener listener =
         invokeAsync(
-            bash(config()),
+            config,
+            executor,
+            timer,
             "{\"command\":\"(while true; do echo child >> '"
                 + embedded(marker)
                 + "'; sleep 0.05; done) & while true; do echo parent >> '"
@@ -501,7 +545,10 @@ class BashCapabilityTest {
                 + "'; sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
-            Duration.ofSeconds(3));
+            TIMEOUT_TRIGGERED_BY_THE_TEST);
+    // 屏障：整棵进程树已经在产出输出（两个写者都写同一个标记文件），此时才让 deadline 到达。
+    awaitFile(marker);
+    timer.fireTimeout();
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -808,16 +855,22 @@ class BashCapabilityTest {
   @Test
   void termIgnoringDescendantIsForceKilledOnTimeout() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX shell 与信号语义");
+    CodingToolsConfig config = config();
     Path marker = workspaceRoot.resolve("ignore-term-ticks.log");
     RecordingListener listener =
         invokeAsync(
-            bash(config()),
+            config,
+            executor,
+            timer,
             "{\"command\":\"(trap '' TERM; while true; do echo tick >> '"
                 + embedded(marker)
                 + "'; sleep 0.05; done) & while true; do sleep 0.05; done\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
-            Duration.ofSeconds(3));
+            TIMEOUT_TRIGGERED_BY_THE_TEST);
+    // 屏障：忽略 TERM 的后代已经在产出输出，此时才让 deadline 到达。
+    awaitFile(marker);
+    timer.fireTimeout();
 
     assertTrue(listener.await());
     EnvironmentCapabilityResult result = listener.result;
@@ -952,7 +1005,22 @@ class BashCapabilityTest {
   /** 用指定执行器发起调用：调用方决定能力任务何时真正开始，便于构造启动前收尾的确定性时序。 */
   private RecordingListener invokeAsync(
       CodingToolsConfig config, ExecutorService target, String arguments, Duration timeout) {
-    BashCapability capability = new BashCapability(config, target, scheduler);
+    return invokeAsync(config, target, scheduler, arguments, timeout);
+  }
+
+  /**
+   * 用指定 scheduler 发起调用：超时何时到达由测试决定，而不是由真实时钟决定。
+   *
+   * <p>生产代码把超时做成一次 {@code schedule}：到点后置位 {@code timedOut}，再由执行线程收敛整组。真实时钟下这次调度会和 helper 与 shell
+   * 的冷启动赛跑，断言「已经捕获的输出」的用例因此会变成对机器启动速度的断言；这里换上传入的 scheduler，触发时机就落在测试手里。
+   */
+  private RecordingListener invokeAsync(
+      CodingToolsConfig config,
+      ExecutorService target,
+      ScheduledExecutorService timer,
+      String arguments,
+      Duration timeout) {
+    BashCapability capability = new BashCapability(config, target, timer);
     RecordingListener listener = new RecordingListener();
     listener.handle =
         capability.execute(
@@ -1088,6 +1156,37 @@ class BashCapabilityTest {
       Thread.sleep(10);
     }
     assertTrue(Files.exists(file), "命令必须在取消前进入可观测阶段：" + file);
+  }
+
+  /**
+   * 只捕获超时任务的 scheduler：deadline 何时到达由测试决定，而不是由真实时钟与机器启动速度比赛。
+   *
+   * <p>捕获到的任务就是生产代码在 deadline 到点时执行的那一个（置位 {@code timedOut} 并让执行线程收敛整组），因此手动运行它与真实
+   * 时钟触发走的是同一条路径；这里只是不再让「两秒内能否启动完 helper 与 shell」来决定它何时发生。
+   */
+  private static final class ControlledScheduler extends ScheduledThreadPoolExecutor {
+
+    /** 真实调度器上的占位延迟：比任何用例都长，因此真正触发超时的只有 {@link #fireTimeout()}。 */
+    private static final long PLACEHOLDER_DELAY = 1;
+
+    private final AtomicReference<Runnable> timeoutTask = new AtomicReference<>();
+
+    ControlledScheduler() {
+      super(1);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      timeoutTask.set(command);
+      return super.schedule(command, PLACEHOLDER_DELAY, TimeUnit.DAYS);
+    }
+
+    /** 手动到达 deadline：等价于真实时钟走到超时点时调度器执行那个任务。 */
+    void fireTimeout() {
+      Runnable task = timeoutTask.get();
+      assertNotNull(task, "调用必须先把超时任务交给 scheduler");
+      task.run();
+    }
   }
 
   private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
