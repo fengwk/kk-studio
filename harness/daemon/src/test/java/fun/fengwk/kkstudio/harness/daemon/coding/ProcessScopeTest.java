@@ -296,18 +296,61 @@ class ProcessScopeTest {
   }
 
   /**
-   * 取消恰好落在「helper 即将启动命令」的窗口里时，命令与它的后代仍然必须收敛。
+   * 取消落在「helper 已经就位、但命令还没有派生」的位置时，命令绝不会被派生。
    *
-   * <p>这是对「在启动命令的瞬间改动信号处置」这类实现的显式反向断言：父进程此刻对整组广播温和信号，而 helper 紧接着启动命令。 若 helper
-   * 在这个窗口里把温和信号交回默认处置，它会当场消失，留下的后代（这里显式忽略 TERM）就再没有人强杀——收敛结论
-   * 只能靠父进程对内核的复核收口；若它在窗口里改成忽略温和信号，命令又会继承这个忽略状态，用户脚本的 trap 静默失效。
-   *
-   * <p>两种合法结局都要求收敛：命令在强杀之前完成 fork（pid 文件有内容，必须全部消失），或者强杀先到（命令根本没 fork）。
+   * <p>这是派发与收敛互斥的确定性断言：收敛一旦开始就再也不允许派生，因此这里既不会出现「收敛扫描过一次、命令随后才
+   * 诞生」的成员（它会带着忽略状态活到天荒地老），也不会出现「收敛已经宣布清理完成、命令却又跑起来」。命令从未启动由 pid 文件不存在来证明，收敛结论由 helper
+   * 自己发布（而不是退回父进程的内核复核）。
    */
   @Test
-  void cancelDuringTheSpawnWindowStillConvergesRootAndDescendants() throws Exception {
+  void cancelBeforeTheReleaseKeepsTheCommandUnspawned() throws Exception {
     assumeFalse(isWindows(), "需要 POSIX 进程组与信号语义");
-    Path latch = workdir.resolve("spawn-latch");
+    Path latch = workdir.resolve("spawn-latch-held");
+    Files.createDirectories(latch);
+    Path pidFile = workdir.resolve("spawn-held.pids");
+    System.setProperty(ProcessScope.SPAWN_LATCH_PROPERTY, latch.toString());
+    ProcessScope scope;
+    try {
+      scope =
+          ProcessScope.start(
+              workdir,
+              List.of(
+                  "sh",
+                  "-c",
+                  "echo $$ >> '"
+                      + pidFile
+                      + "'; (trap '' TERM; sleep 60) & echo $! >> '"
+                      + pidFile
+                      + "'; wait"));
+    } finally {
+      System.clearProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
+    }
+    try {
+      // helper 停在派生之前，闸门一直不解开：取消必须在这里就收敛，而不是等命令跑起来再收尾。
+      awaitFile(latch.resolve("spawn-ready"));
+      assertTrue(scope.terminate(), "取消之后整组必须由内核确认收敛");
+      assertTrue(scope.converged(), "收敛结论必须来自内核");
+      assertEquals(
+          "true",
+          ProcessScopeState.read(scope.stateDirectory(), ProcessScopeState.CLEANUP_FILE),
+          "helper 必须自己确认收敛，而不是把结论丢给父进程的内核复核");
+      assertFalse(Files.exists(pidFile), "收敛开始之后命令绝不能被派生");
+    } finally {
+      Files.writeString(latch.resolve("spawn-go"), "go", StandardCharsets.UTF_8);
+      scope.close();
+    }
+  }
+
+  /**
+   * 取消与派生真的交叉时，无论谁先拿到锁，根进程与忽略 TERM 的后代都必须收敛。
+   *
+   * <p>两种合法结局都要求收敛：命令在收敛开始之前完成 fork（pid 文件有内容，必须全部消失），或者收敛先拿到锁（命令根本 没有 fork）。这条用例不用 sleep
+   * 去猜窗口，而是让闸门释放与整组信号同时发生，再由内核判定收口。
+   */
+  @Test
+  void cancelRacingWithTheSpawnStillConvergesRootAndDescendants() throws Exception {
+    assumeFalse(isWindows(), "需要 POSIX 进程组与信号语义");
+    Path latch = workdir.resolve("spawn-latch-race");
     Files.createDirectories(latch);
     Path pidFile = workdir.resolve("spawn-window.pids");
     System.setProperty(ProcessScope.SPAWN_LATCH_PROPERTY, latch.toString());
@@ -328,7 +371,6 @@ class ProcessScopeTest {
       System.clearProperty(ProcessScope.SPAWN_LATCH_PROPERTY);
     }
     try {
-      // helper 已经就位、只差启动命令：从这一刻起父进程的温和信号与 helper 的派发互为竞态。
       awaitFile(latch.resolve("spawn-ready"));
       CountDownLatch cancelled = new CountDownLatch(1);
       boolean[] converged = new boolean[1];

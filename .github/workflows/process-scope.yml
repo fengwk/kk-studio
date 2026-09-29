@@ -56,24 +56,35 @@ jobs:
           cache: maven
       # ProcessScopeCrossPlatformTest 是三个平台上都必须真跑的核心验收：它用只依赖 JDK 的夹具造出真实进程层级，
       # 因此没有 assumeFalse 可以把它在这台 runner 上跳过。其余用例走平台的 shell 语义（Windows 上由 Git Bash 承担）。
+      # helper 覆盖率开关在这台 runner 上打开：执行范围的核心逻辑一半在 helper 的独立 JVM 里，而它的平台分支只有在
+      # 对应平台上才会被执行，三平台数据必须一起收集才能合并出有意义的数字。
       - name: Run process scope tests
         shell: bash
         run: |
           set -euo pipefail
           env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am test \
-            -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+            -Dtest='ProcessScopeCrossPlatformTest,ProcessScopeTest,ProcessScopeStateTest,BashCapabilityTest,ProcessTreeTest,WindowsCommandLineTest,WindowsJobScopeTest' \
+            -Dkk-studio.process-scope.helper-coverage=true \
             -Dsurefire.failIfNoSpecifiedTests=false
-      # 核心验收不允许被跳过：报告里既要有全部 3 个用例，也不能出现任何 skipped。
-      - name: Assert the cross-platform acceptance cases really ran
+      # 验收不允许被跳过、也不允许被漏跑：按用例名核对，数量断言会被新增用例弄陈旧。
+      - name: Assert every selected case really ran
         shell: bash
         run: |
           set -euo pipefail
-          report=harness/daemon/target/surefire-reports/TEST-fun.fengwk.kkstudio.harness.daemon.coding.ProcessScopeCrossPlatformTest.xml
-          test -f "$report" || { echo "missing surefire report: $report"; exit 1; }
-          grep -q 'tests="3"' "$report" || { echo "expected 3 cross-platform cases on ${{ matrix.os }}"; exit 1; }
-          if grep -q 'skipped="[1-9]' "$report"; then
-            echo "ProcessScopeCrossPlatformTest must not skip any case on ${{ matrix.os }}"; exit 1
-          fi
+          py=$(command -v python3 || command -v python)
+          "$py" scripts/dev/verify/process-scope/assert-surefire-reports.py \
+            harness/daemon/target/surefire-reports "${{ matrix.os }}"
+      # 覆盖率输入必须每次都上传：任何一条平台的缺口都会让合并报告失真，而不是让门禁恰好通过。
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scope-coverage-${{ matrix.os }}
+          path: |
+            harness/daemon/target/jacoco.exec
+            harness/daemon/target/jacoco-helper/
+            harness/daemon/target/classes/
+          if-no-files-found: error
       - name: Upload surefire reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -81,3 +92,48 @@ jobs:
           name: surefire-${{ matrix.os }}
           path: harness/daemon/target/surefire-reports/
           if-no-files-found: ignore
+
+  scope_coverage:
+    name: merged scope coverage
+    needs: scope_tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - name: Download the coverage data of every platform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: scope-coverage-*
+          path: coverage/platforms
+      # 三平台的类文件必须逐字节一致，否则 JaCoCo 会按 class id 静默丢掉 session；这里把它变成显式失败。
+      - name: Collect exec files and verify the class files agree
+        shell: bash
+        run: python3 scripts/dev/verify/process-scope/collect-coverage-inputs.py coverage/platforms coverage/inputs
+      - name: Fetch the JaCoCo CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -B -ntp dependency:copy \
+            -Dartifact=org.jacoco:org.jacoco.cli:0.8.11:jar:nodeps \
+            -DoutputDirectory=coverage/tools
+      - name: Merge every platform and build the report
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli=coverage/tools/org.jacoco.cli-0.8.11-nodeps.jar
+          java -jar "$cli" merge $(cat coverage/inputs/exec-files.txt) --destfile coverage/merged.exec
+          java -jar "$cli" report coverage/merged.exec \
+            --classfiles coverage/inputs/classes \
+            --sourcefiles harness/daemon/src/main/java \
+            --xml coverage/coverage.xml
+      # 父进程与 helper 的核心行覆盖门禁：数字只能来自三平台合并，单平台（尤其是本地 Linux）不构成结论。
+      - name: Enforce the core line coverage gate
+        shell: bash
+        run: python3 scripts/dev/verify/process-scope/gate-core-coverage.py coverage/coverage.xml

@@ -236,7 +236,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
 | `ProcessScopeTest.closeIsIdempotent` | 重复 close 不抛出，也不改变已收敛的范围 |
 | `ProcessScopeTest.cancelledBeforeThePermitLeavesNoSideEffect` | 许可之前取消：命令从未启动，没有副作用，也不留状态目录 |
 | `ProcessScopeTest.publishedScopeIdIsTheHelperProcessGroup` | 发布的 scope id 必须等于 helper 自己的进程组，父进程只在此基础上发信号 |
-| `ProcessScopeTest.cancelDuringTheSpawnWindowStillConvergesRootAndDescendants` | 取消恰好落在「helper 即将启动命令」的窗口里时，命令与忽略温和信号的后代仍必须由内核确认收敛 |
+| `ProcessScopeTest.cancelBeforeTheReleaseKeepsTheCommandUnspawned` | 收敛开始时命令还没有派生：命令绝不会被派生（pid 文件不存在），且收敛结论由 helper 自己发布 |
+| `ProcessScopeTest.cancelRacingWithTheSpawnStillConvergesRootAndDescendants` | 取消与派生真的交叉时，无论谁先拿到锁，根进程与忽略温和信号的后代都必须由内核确认收敛 |
+| `ProcessScopeStateTest` | 握手面的真实失败形态：目录不可写时发布显式失败且不留半文件、失败报告本身发布失败只能被吞掉、文件读不到按未发布处理、成员删不掉时清理无副作用、清理幂等 |
 | `ProcessScopeTest.helperDiagnosticsStayOutOfTheCommandOutput` | helper 自己的诊断（含 JVM 启动提示）只进诊断文件，命令输出一个字节都不多 |
 | `WindowsCommandLineTest` | Windows 命令行 argv 拼装规则（空白、空参数、引号与尾部反斜杠转义） |
 | `WindowsJobScopeTest` | Job 相关结构的原生布局（64/144/48 字节）与 Job 名从状态目录派生（跨平台可执行，Windows 上是真实布局校验） |
@@ -299,6 +301,14 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   `target/jacoco-helper/*.exec`，用 `mvn org.jacoco:jacoco-maven-plugin:merge -DdestFile=... fileSets=...` 或 JaCoCo CLI
   合并后即可在报告里看到 `ProcessScopeHelper`/`PosixProcessGroup` 的 helper 侧行覆盖。默认关闭是因为被插桩的 helper 冷启动更慢，
   会把短超时用例的时序推向边界。`WindowsJobScope` 与 `WindowsCommandLine` 依旧只能由 Windows runner 覆盖。
+- **三平台合并覆盖率是 CI 的固定门禁入口。** 执行范围的核心逻辑一半在 helper 的独立 JVM 里，而平台专属分支只会在对应平台上
+  被执行（Windows 的 Job 语义、macOS 的非 Linux 分支、Linux 的 `/proc` 判定），因此矩阵每台 runner 都带
+  `-Dkk-studio.process-scope.helper-coverage=true` 运行并总是上传 `jacoco.exec`、`jacoco-helper/*.exec` 与 `target/classes`；
+  合并作业先核对三份 class 文件逐字节一致（否则 JaCoCo 会按 class id 静默丢 session），再合并出报告并核对「核心类必须出现在
+  报告里、且不低于已记录下限」，同时每次都打印与 90% 目标的差距。本地（Linux 单平台，含 helper 数据）现状是 `ProcessScope`
+  77.7%、`ProcessScopeHelper` 71.2%、`PosixProcessGroup` 78.8%、`ProcessScopeState` 96.4%，核心合计 76.7%；合并三平台后
+  Windows 与 macOS 的分支会补上一部分，剩余缺口来自只能靠失败注入构造的防御分支（helper 拒绝退出、不可中断的等待、信号被拒），
+  需要按 `gate-core-coverage.py` 打印的逐类差距继续补测。
 - **父进程侧仍有无法确定性构造的分支。** `ProcessScope` 的剩余未覆盖行集中在 Windows 分支、不可中断的等待分支与「helper 拒绝
   退出」这类防御分支；它们的存在意义是失败关闭，而不是常规路径。`ProcessScope`/`PosixProcessGroup`/
   `ProcessScopeHelper` 的本地行覆盖低于仓库 90% 目标（合并 helper 数据后为 78.1%/78.8%/73.6%，模块整体行 86.6%）；缺口是 Windows

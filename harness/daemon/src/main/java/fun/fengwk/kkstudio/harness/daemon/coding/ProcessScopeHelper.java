@@ -12,6 +12,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -38,6 +40,9 @@ public final class ProcessScopeHelper {
   private static final Duration JOB_DRAIN_BUDGET = Duration.ofSeconds(2);
 
   private static final long POLL_INTERVAL_MILLIS = 5;
+
+  /** 收敛已经在别处执行时的等待预算：等不到就显式失败，绝不提前放走 JVM。 */
+  private static final Duration CONVERGENCE_WAIT_BUDGET = Duration.ofSeconds(10);
 
   /** 测试闸门的等待预算：没有释放就必须显式失败，绝不静默继续。 */
   private static final Duration SPAWN_LATCH_BUDGET = Duration.ofSeconds(20);
@@ -99,10 +104,22 @@ public final class ProcessScopeHelper {
     private final Path workdir;
     private final List<String> command;
 
+    /**
+     * 派生与收敛的互斥锁：{@code stopping} 一旦在锁内成立，就不再有任何命令被派生。
+     *
+     * <p>这把锁同时消掉两个方向的竞态：收敛开始之后诞生的后代不可能存在（所以收敛的扫描之后不会再出现新成员），而命令 fork 的那一刻收敛还没开始（所以它的信号处置不会被收敛改动）。
+     */
+    private final Object spawnLock = new Object();
+
+    private boolean stopping;
+
     /** 收敛只执行一次：main 的自然退出路径与 shutdown hook 用它同步。 */
     private final AtomicBoolean convergenceStarted = new AtomicBoolean();
 
-    private volatile Boolean convergenceResult;
+    /** 收敛完成的闩：谁发现收敛已经在执行，就必须等它真正结束，不能提前返回把 JVM 放走。 */
+    private final CountDownLatch convergenceFinished = new CountDownLatch(1);
+
+    private volatile boolean convergenceResult;
 
     private Helper(Path stateDir, Path workdir, List<String> command) {
       this.stateDir = stateDir;
@@ -135,19 +152,30 @@ public final class ProcessScopeHelper {
           stateDir, ProcessScopeState.SCOPE_FILE, Long.toString(processGroup));
       awaitPermit();
       awaitSpawnRelease();
-      // 命令的 stderr 与 stdout 合并进捕获管道；helper 的诊断已经指向诊断文件，不会被继承。
-      PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
-      Process child =
-          new ProcessBuilder(command)
-              .directory(workdir.toFile())
-              .redirectInput(ProcessBuilder.Redirect.PIPE)
-              .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-              .redirectError(ProcessBuilder.Redirect.INHERIT)
-              .start();
-      // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布完成，
-      // 否则「helper 先死、后代还在」会把收敛结论交回父进程。放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell
-      // 无法为「进入时已被忽略」的信号注册 trap，用户的优雅收尾会因此静默失效。
-      PosixProcessGroup.ignoreTerminationSignal();
+      // 派生与收敛在同一把锁上互斥：收敛开始之后绝不会有新成员诞生，命令 fork 出来的那一刻收敛也还没有开始。整个
+      // ProcessBuilder.start()（含 fork 与 exec 之间的窗口）都在锁内，收敛不可能穿过它扫描一次「看起来已经收敛」的组。
+      Process child = null;
+      synchronized (spawnLock) {
+        if (!stopping) {
+          // 命令的 stderr 与 stdout 合并进捕获管道；helper 的诊断已经指向诊断文件，不会被继承。
+          PosixProcessGroup.mergeStandardErrorIntoStandardOutput();
+          child =
+              new ProcessBuilder(command)
+                  .directory(workdir.toFile())
+                  .redirectInput(ProcessBuilder.Redirect.PIPE)
+                  .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+                  .redirectError(ProcessBuilder.Redirect.INHERIT)
+                  .start();
+          // 命令已经 fork 完成，此刻才开始忽略温和信号：收敛自己的整组信号会打到组长身上，helper 必须活到强杀与结论发布
+          // 完成。放在 fork 之后是为了不让忽略状态被命令继承——非交互 shell 无法为「进入时已被忽略」的信号注册 trap。
+          PosixProcessGroup.ignoreTerminationSignal();
+        }
+      }
+      if (child == null) {
+        // 收敛已经接管，命令绝不会被派生：这里只对齐它的结论，既不制造第二个事实，也不让 JVM 提前退出。
+        awaitConvergenceFinished();
+        return convergenceResult ? 0 : 1;
+      }
       // 命令的 stdin 是一条只有 helper 持有写端的空管道：立刻关闭写端，于是「等待 EOF 的命令自然退出」只取决于这里，
       // 而不是调用方何时关闭自己的写端，也不是是否有别的进程持有了写端的副本。
       closeQuietly(child.getOutputStream());
@@ -164,8 +192,12 @@ public final class ProcessScopeHelper {
           .addShutdownHook(
               new Thread(
                   () -> {
-                    // 收尾期间屏蔽重复的温和信号：hook 一旦开始，任何重复信号都不得打断强杀与收敛发布。
-                    PosixProcessGroup.ignoreTerminationSignal();
+                    // 顺序不能颠倒：先在锁内声明「不再派生」，再忽略温和信号。反过来（先忽略、后加锁）会让一个尚未派生的
+                    // 命令继承忽略状态，也会让收敛扫描与派生互相穿过。收尾期间屏蔽重复的温和信号也是这里的目的之一。
+                    synchronized (spawnLock) {
+                      stopping = true;
+                      PosixProcessGroup.ignoreTerminationSignal();
+                    }
                     convergePosixGroup(processGroup);
                   },
                   "process-scope-convergence"));
@@ -177,20 +209,44 @@ public final class ProcessScopeHelper {
      */
     private boolean convergePosixGroup(long processGroup) {
       if (!convergenceStarted.compareAndSet(false, true)) {
-        Boolean finished = convergenceResult;
-        return finished != null && finished;
+        // 收敛已经在别处执行：必须等它结束再返回。直接返回 false 会让 JVM 在收敛完成之前退出，把「后代还在」留在系统里。
+        awaitConvergenceFinished();
+        return convergenceResult;
       }
-      boolean drained;
       try {
-        drained = convergeGroup(processGroup);
+        boolean drained = convergeGroup(processGroup);
+        ProcessScopeState.publish(
+            stateDir, ProcessScopeState.CLEANUP_FILE, Boolean.toString(drained));
+        convergenceResult = drained;
+        return drained;
       } catch (RuntimeException | Error failure) {
         publishFailure(failure);
-        drained = false;
+        ProcessScopeState.publishQuietly(stateDir, ProcessScopeState.CLEANUP_FILE, "false");
+        convergenceResult = false;
+        return false;
+      } finally {
+        convergenceFinished.countDown();
       }
-      ProcessScopeState.publish(
-          stateDir, ProcessScopeState.CLEANUP_FILE, Boolean.toString(drained));
-      convergenceResult = drained;
-      return drained;
+    }
+
+    /**
+     * 有界等待正在执行的收敛结束。
+     *
+     * <p>等不到就显式失败：报告「还没收敛」比让调用方以为已经收敛安全得多。
+     */
+    private void awaitConvergenceFinished() {
+      try {
+        if (!convergenceFinished.await(CONVERGENCE_WAIT_BUDGET.toMillis(), TimeUnit.MILLISECONDS)) {
+          throw new IllegalStateException(
+              "another convergence was still running after "
+                  + CONVERGENCE_WAIT_BUDGET.toMillis()
+                  + " ms");
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(
+            "interrupted while waiting for the running convergence", interrupted);
+      }
     }
 
     /**
