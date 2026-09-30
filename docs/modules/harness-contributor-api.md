@@ -2,7 +2,7 @@
 
 Harness 的工具、分支自定义状态和模型上下文都来自受信任的 Java 代码——内置工具是其中一个 Contributor，团队自己的 JAR 也可以是。这类扩展的危险不在于写得慢，而在于启动后才发现两个 Contributor 抢了同一个工具名、依赖成环、工具偷偷写了别人的状态、或者模型看到的两份定义其实并不一致。本模块把扩展约束全部前移到启动装配期：Contributor 只声明自己能贡献什么，`HarnessCatalog.from` 收集、校验依赖图并按确定性顺序调用一次，冻结出一份全局唯一、不可变的目录；此后运行期只读这份目录。
 
-模块是纯 Java SPI，不含 store、gateway、transaction 或锁（见 [`HarnessRegistrar`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 的接口注释）。生产依赖只有 [`harness-tool`](harness-tool.md) 与 [`harness-environment`](harness-environment.md) 的值契约（见 [`pom.xml`](../../harness/contributor-api/pom.xml)），由 [`ContributorApiModuleArchitectureTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorApiModuleArchitectureTest.java) 守卫；持久化、事务、网关路由、类加载与 Spring 装配分别在 [`harness-runtime`](harness-runtime.md)、[`platform`](platform.md) 与 [`web`](web.md) 侧。
+模块是纯 Java SPI，不含 store、gateway、transaction 或锁（见 [`HarnessRegistrar`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 的接口注释）。生产依赖只有 [`harness-common`](harness-common.md)、[`harness-tool`](harness-tool.md) 与 [`harness-environment`](harness-environment.md) 的值契约（见 [`pom.xml`](../../harness/contributor-api/pom.xml)），由 [`ContributorApiModuleArchitectureTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorApiModuleArchitectureTest.java) 守卫；持久化、事务、网关路由、类加载与 Spring 装配分别在 [`harness-runtime`](harness-runtime.md)、[`platform`](platform.md) 与 [`web`](web.md) 侧。
 
 ## 包架构
 
@@ -19,7 +19,7 @@ Harness 的工具、分支自定义状态和模型上下文都来自受信任的
 [`HarnessRegistrar`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 有三个类型化入口，每个都带 priority 默认 0 的重载：
 
 ```text
-registerTool(localName, agentToolId, tool, visibility, priority)
+registerTool(localName, tool, visibility, priority)
 registerCustomEntryType(localName, customType, priority)
 registerContextProjector(localName, projector, priority)
 ```
@@ -44,14 +44,15 @@ registerContextProjector(localName, projector, priority)
 
 自定义状态的所有权键是 `(contributorId, customType)`：不同 Contributor 可以各自拥有同名 `customType`，同一 Contributor 内不得重复。冻结阶段还要求每个 `ToolRequirements.stateAccesses` 都能命中本 Contributor 自己注册过的 Custom Entry Type——工具无法声明访问别人的状态，也无法访问一个从未注册的类型。
 
-排序规则是 `requires` 的传递偏序优先，其次 priority 降序，最后 `ContributionId` 字典序。因此 priority 只在彼此无依赖的项之间决定次序，输入集合的原始顺序对结果没有任何影响。冻结完成后 `descriptors`、`tools`、`selectableTools`、`customEntryTypes`、`contextProjectors` 与 `transitiveRequires` 都是不可变集合，查找入口有：
+排序规则是 `requires` 的传递偏序优先，其次 priority 降序，最后 `ContributionId` 字典序。因此 priority 只在彼此无依赖的项之间决定次序，输入集合的原始顺序对结果没有任何影响。冻结完成后 `descriptors`、`tools`、`selectableTools`、`customEntryTypes` 与 `contextProjectors` 都是不可变列表，集合成员与传递依赖分别用以下入口查询：
 
 ```text
 findTool(model-visible name) / findTool(ContributionId)
 findDescriptor / findCustomEntryType(contributorId, customType) / findContextProjector
+transitiveRequires(contributorId)                        # 某 Contributor 的传递依赖集合
 ```
 
-启动期装配意味着 Contributor 集合变更需要重启应用重建目录；JAR 发现与类加载属于 [`web`](web.md) 组合根，不在本模块。
+启动期装配意味着 Contributor 集合变更需要重启应用重建目录；bean 收集与目录冻结属于 [`web`](web.md) 组合根，不在本模块。
 
 ## Tool SPI
 
@@ -71,7 +72,7 @@ ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener 
 
 [`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带最终 descriptor、已归一化并通过 schema 校验的 `ToolCall`（构造期调用 `validateFor`）、已解析的 `timeout` 与可选的 `ToolExecutionContext`。`timeout` 就是 `resolveTimeout` 的结果，执行层不得二次解析。请求不携带 workdir：目录只存在于具体工具的 arguments 中，框架既不把它提升为通用执行状态，也不提供隐藏默认目录。
 
-[`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收 `onPartial(ToolResult)*` 与互斥的 `onComplete(ToolOutcome)` / `onError(Throwable)`：终态至多一次，重复或迟到的回调由运行时侧适配层过滤，实现无需自己防御。
+[`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收 `onPartial(ToolResult)*` 与互斥的 `onComplete` / `onError(Throwable)`：终态至多一次，重复或迟到的回调由运行时侧适配层过滤，实现无需自己防御。`onComplete` 的抽象方法是 `onComplete(ToolOutcome)`（可携带 effects），另有一个只带结果的 default 重载 `onComplete(ToolResult)`，它包成不带 effects 的 outcome。
 
 ### 历史语义渲染
 
@@ -108,11 +109,11 @@ durable 事实。
 
 ## 分支状态与副作用
 
-[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 是只读视图：`customEntries(customType)` 与 `latestCustomEntry(customType)` 读取当前 Contributor 自己的自定义状态，`goal()` 读取该 branch 生效 settings 中的用户 Goal（[`GoalSnapshot`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/GoalSnapshot.java)，nullable）。视图严格限定在当前 Contributor 与当前 Assistant 分支的 root-to-head 路径上：兄弟分支与其他 owner 的状态不可见，底层存储句柄与全量会话历史都不暴露；Platform 用窄查询解析 branch settings，不为只读视图物化完整 EntryPath。
+[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 是只读视图：`customEntries(customType)` 与 `latestCustomEntry(customType)` 读取当前 Contributor 自己的自定义状态，`goal()` 读取该 branch 生效 settings 中的用户 Goal（`Optional<GoalSnapshot>`，未设置或已被用户清除时为空）。视图严格限定在当前 Contributor 与当前 Assistant 分支的 root-to-head 路径上：兄弟分支与其他 owner 的状态不可见，底层存储句柄与全量会话历史都不暴露；Platform 用窄查询解析 branch settings，不为只读视图物化完整 EntryPath。
 
 [`StateDeclaration`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/StateDeclaration.java) 用 `READ` / `WRITE` 声明访问意图，它的用途不只是文档：同一 Assistant 的多个工具共享同一份冻结分支快照，因此同一 `(contributorId, customType)` 一旦已被先前 sibling 声明 WRITE，后续的 READ 或 WRITE 都必然读到陈旧快照，Runtime 在 dispatch 之前就把它确定性拒绝并提示下一轮再调用（[`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 的 sibling state conflict 检查）；READ 之后再来 WRITE 则允许并发。
 
-状态变更通过 [`ToolOutcome`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 声明，而不是直接写存储：`customEntries` 是有序的 [`AppendCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java) 列表，每项含 `customType`、正数 `schemaVersion` 与非空 `dataJson`，owner 由当前 Tool contribution 自动决定。`ToolOutcome` 构造期强制正确性约束：错误结果不得携带任何 effects。真正的落库在 [`harness-runtime`](harness-runtime.md) 的 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java) 中，与 ToolResult Entry 在同一事务里按声明顺序追加，校验失败即整体回滚，不产生部分条目。
+状态变更通过 [`ToolOutcome`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 声明，而不是直接写存储：`customEntries` 是有序的 [`AppendCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java) 列表，每项含 `customType`、正数 `schemaVersion` 与 `dataJson`；`dataJson` 构造期经 `JsonValues.requireValidJson` 校验为**单一严格 JSON 值**并保留原文，`null`、标量、数组与对象都合法，空白、重复字段、尾随内容与畸形一律拒绝；`CustomStateSnapshot` 的 `dataJson` 同样如此，owner 由当前 Tool contribution 自动决定。`ToolOutcome` 构造期强制正确性约束：错误结果不得携带任何 effects。真正的落库在 [`harness-runtime`](harness-runtime.md) 的 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java) 中，与 ToolResult Entry 在同一事务里按声明顺序追加，校验失败即整体回滚，不产生部分条目。
 
 [`ContextProjector`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数式投影为不可变的 `List<ContextFragment>`，只读、不产生副作用。Platform 在规划下一次模型请求时按 Catalog 冻结顺序执行全部投影器，并把片段按空行确定性拼接进本次请求唯一的 `systemInstruction` 中（会话消息中绝不注入系统消息）。
 
@@ -125,9 +126,9 @@ durable 事实。
    降级时仍保留语义就 override `historyRenderer()`。
 3. 要维护分支状态时，先 `registerCustomEntryType(localName, customType, priority)`，再在 `ToolRequirements.stateAccesses` 中声明 READ 或 WRITE；状态载荷与 `AppendCustomEntry` 使用同一个 customType。
 4. 要注入模型上下文时注册 `ContextProjector`，只依据 `BranchView` 计算文本。
-5. 装配到组合根：组件以 Spring bean 注册，由组合根统一交给 `HarnessCatalog.from`。
+5. 装配到组合根：把实现注册成 Spring bean，由 [`web`](web.md) 的 `ContributorCatalogConfiguration` 收集后统一交给 `HarnessCatalog.from`。
 
-Contributor 的能力在两种装配方式下完全相同，但宿主边界不同：
+所有 Contributor 走同一条装配路径，区别只在宿主边界：
 
 - 构建期 Plugin 由 Spring Boot auto-configuration 创建 `HarnessContributor` bean，可以
   同时使用 Platform 的 credential、Blob 和 management services；Plugin 仍只经本 SPI
@@ -137,10 +138,10 @@ Contributor 的能力在两种装配方式下完全相同，但宿主边界不�
   引用后签发短期受控下载地址。因此工具在发送请求前必须自证拿到了 invocation context；取不到
   threadId 时引用会话资源的调用必须确定性失败（如 Mavis 映射为 `MAVIS_RESOURCE_UNAVAILABLE`），
   不允许退化为未鉴权访问或跳过资源解析后发送。
-构建期 Plugin 是唯一的扩展方式，因此不需要隔离 classloader、`ServiceLoader` 或运行时
-jar 目录扫描：扩展代码要么在编译期依赖里，要么不存在。
+外部扩展只经构建期 Plugin 接入，因此不需要隔离 classloader、`ServiceLoader` 或运行时 jar
+目录扫描：扩展代码要么在编译期依赖里，要么不存在。
 
-两种方式都在 `HarnessCatalog.from` 时一次性冻结，运行中不安装、卸载或刷新代码。Plugin
+所有来源都在 `HarnessCatalog.from` 时一次性冻结，运行中不安装、卸载或刷新代码。Plugin
 本身是否存在由 `web` 的 Maven runtime dependency 决定；`EnvironmentSupport.NONE` 的
 远端 API 工具不会因未选择 Environment 被过滤。
 
@@ -149,7 +150,7 @@ jar 目录扫描：扩展代码要么在编译期依赖里，要么不存在。
 - 冻结与校验：[`HarnessCatalog.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java)、[`HarnessRegistrar.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java)、[`HarnessContributor.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java)、[`Identifiers.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Identifiers.java)
 - 执行 SPI：[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)、[`ToolExecutionListener.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java)、[`ToolExecutionHandle.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java)、[`ToolHistoryRenderer.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java)
 - 环境与状态：[`ToolRequirements.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java)、[`BoundEnvironment.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)、[`BranchView.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java)、[`AppendCustomEntry.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)、[`ContextProjector.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java)
-- 改动冻结逻辑先跑 [`HarnessCatalogTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)，它覆盖 DAG、排序、唯一性、freeze 不可变与 registrar 越界拒绝；[`HarnessContractTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContractTest.java) 覆盖 SPI 契约与请求归一化，[`BranchViewTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/BranchViewTest.java) 覆盖 contributor-scoped 状态可见性。参考实现见 [`harness-builtin`](harness-builtin.md)。
+- 改动冻结逻辑先跑 [`HarnessCatalogTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)，它覆盖 DAG、排序、唯一性、freeze 不可变与 registrar 越界拒绝；[`HarnessContractTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContractTest.java) 覆盖 SPI 契约与请求归一化，[`BranchViewTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/BranchViewTest.java) 覆盖 contributor-scoped 状态可见性与用户 Goal 投影。参考实现见 [`harness-builtin`](harness-builtin.md)。
 
 ---
 
