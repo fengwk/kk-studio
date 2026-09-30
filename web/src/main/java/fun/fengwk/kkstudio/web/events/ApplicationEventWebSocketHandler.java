@@ -37,12 +37,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
   public static final String PATH = "/api/events/v1";
 
-  /** 测试便捷构造使用的默认事件软策略（与 SystemSettings.Advanced 默认一致）。 */
-  private static final long TEST_MAX_BYTES = 2L * 1024 * 1024;
-
-  private static final long TEST_SEND_TIMEOUT_MILLIS = 10_000L;
-  private static final long TEST_HEARTBEAT_INTERVAL_MILLIS = 20_000L;
-
   private final ApplicationEventHub hub;
   private final EventFrameCodec codec;
   private final int senderCapacity;
@@ -66,19 +60,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         settings.sendTimeoutMillis(),
         settings.heartbeatIntervalMillis(),
         heartbeatScheduler);
-  }
-
-  /** 测试可注入发送队列容量；其余事件软策略使用仓库默认（与 SystemSettings.Advanced 默认一致）。 */
-  ApplicationEventWebSocketHandler(
-      ApplicationEventHub hub, EventFrameCodec codec, int senderCapacity) {
-    this(
-        hub,
-        codec,
-        senderCapacity,
-        TEST_MAX_BYTES,
-        TEST_SEND_TIMEOUT_MILLIS,
-        TEST_HEARTBEAT_INTERVAL_MILLIS,
-        null);
   }
 
   private ApplicationEventWebSocketHandler(

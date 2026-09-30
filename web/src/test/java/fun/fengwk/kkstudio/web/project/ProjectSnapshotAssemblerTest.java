@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
@@ -48,7 +50,7 @@ class ProjectSnapshotAssemblerTest {
     projectService = mock(ProjectService.class);
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
-    mapper = new ProjectDtoMapper();
+    mapper = new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), ObjectMapperHolder.getInstance());
     assembler = new ProjectSnapshotAssembler(projectService, issueService, issueRunService, mapper);
   }
 

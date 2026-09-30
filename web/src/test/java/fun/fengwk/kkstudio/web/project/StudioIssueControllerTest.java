@@ -83,14 +83,19 @@ class StudioIssueControllerTest {
     projectService = mock(ProjectService.class);
     issueActivityRepository = mock(IssueActivityRepository.class);
 
+    // ProjectDtoMapper 的依赖在测试 fixture 显式提供，与生产注入同一 ObjectMapper 实例。
     IssueDetailAssembler issueDetailAssembler =
         new IssueDetailAssembler(
-            issueService, issueRunService, projectService, new ProjectDtoMapper(), codec);
+            issueService,
+            issueRunService,
+            projectService,
+            new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance()),
+            codec);
     StudioIssueController controller =
         new StudioIssueController(
             issueService,
             issueEvidenceService,
-            new ProjectDtoMapper(),
+            new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance()),
             issueActivityRepository,
             issueDetailAssembler);
 
