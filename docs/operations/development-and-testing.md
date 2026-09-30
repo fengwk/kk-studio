@@ -337,7 +337,7 @@ Backend 启动还要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 buc
 - `TEST_DEEPSEEK_BASE_URL` + `TEST_DEEPSEEK_API_KEY`
 
 对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
-`minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4-flash`，不会静默换 provider/model。OpenAI
+`minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4.1-flash`，不会静默换 provider/model。OpenAI
 与 DeepSeek 的 Base URL 会去掉尾部斜杠并补齐 `/v1`；Gemini 与 MiniMax Anthropic 只去尾部斜杠。
 
 同步通过 backend API 写入 E2E database 中对应的 seed Provider row，credential 不进入 seed

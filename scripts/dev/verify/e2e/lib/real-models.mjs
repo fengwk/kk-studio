@@ -3,7 +3,7 @@
  * - google/gemini-3.8-flash, variant minimal, provider type google
  * - openai/gpt-5.6-luna, variant off, provider type openai_response
  * - minimax-anthropic/MiniMax-M3, variant off, provider type anthropic
- * - deepseek/deepseek-v4-flash, variant off, provider type openai
+ * - deepseek/deepseek-v4.1-flash, variant off, provider type openai
  */
 export const REAL_MODEL_DEFINITIONS = [
   {
@@ -37,7 +37,7 @@ export const REAL_MODEL_DEFINITIONS = [
     idSuffix: 'deepseek_chat',
     title: 'DeepSeek Chat',
     providerName: 'deepseek',
-    modelName: 'deepseek-v4-flash',
+    modelName: 'deepseek-v4.1-flash',
     variant: 'off',
     variants: ['off', 'low', 'high', 'max'],
     providerType: 'openai',
