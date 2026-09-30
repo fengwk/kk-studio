@@ -337,12 +337,13 @@ CAS 作废那一行，并发重新登录产生的新 version 与新密文不会�
 ### Plugin 资源端口
 
 `PluginResourceGateway` 是 Plugin 访问当前 Session Resource 与暂存远端媒体的受控端口。
-Platform 在 `fun.fengwk.kkstudio.platform.plugin.resource` 包中提供了开箱即用的生产实现
-[`StoragePluginResourceGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/StoragePluginResourceGateway.java)，
-由 [`PluginConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfiguration.java)
-通过 `@ConditionalOnMissingBean` 自动装配。它依赖 `HarnessStore`、`SessionBlobRefManager`、
-`StorageBlobManager`、`StorageUploadService` 与 `PluginProperties`，属于 Platform 自带的基础设施，
-不依赖任何具体 Plugin（没有 Plugin 时只是没有调用方）。
+Platform 在 `fun.fengwk.kkstudio.platform.plugin.resource` 包中提供生产实现
+[`StoragePluginResourceGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/StoragePluginResourceGateway.java)；
+它依赖 `HarnessStore`、`SessionBlobRefManager`、`StorageBlobManager`、`StorageUploadService`
+与 `PluginProperties`，因此由持有完整 Harness Runtime 的组合根在 Web 侧装配成
+`PluginResourceGateway` bean
+（[`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)）。
+它属于 Platform 自带的基础设施，不依赖任何具体 Plugin（没有 Plugin 时只是没有调用方）。
 
 端口由两条互不信任的窄路径组成：
 
@@ -452,9 +453,10 @@ catalog 把稳定 Tool 映射到当前 provider endpoint；能力缺失返回确
 Prompt Cache 稳定。
 
 搜索、提取、理解、ASR、音色列表与视频查询声明 `READ_ONLY`；TTS、图片/音乐生成和视频
-提交声明 `NON_IDEMPOTENT`。Studio Plugin 为后者提供 baseline `ASK`；PermissionEvaluator
-按「Plugin baseline → SystemSettings global rules → SystemSettings tool rules」覆盖，
-因此用户显式 DENY/ASK/ALLOW 仍具有最终优先级。批量结果逐项保留 success/failure，部分
+提交声明 `NON_IDEMPOTENT`。side effect 只用于调度与重试判定，不携带权限默认值：
+`PermissionEvaluator` 只按「SystemSettings global rules（`*` 键）→ 同 section 的
+tool-name rules」两组有序规则评估，后匹配者覆盖前者，无任何规则命中时默认 `ALLOW`，
+因此是否询问完全由用户配置的规则决定。批量结果逐项保留 success/failure，部分
 成功不能伪装成整体成功；任何生成调用的断连或超时都返回 uncertain failure，不自动重放。
 
 ## MCP server 与运行时工具目录
@@ -633,7 +635,7 @@ complete/stage 在「写对象 + 绑定」的整个窗口独占持锁，后台�
 锚点。锁连接是专用 DriverManager 会话（不借用业务连接池，避免持锁耗尽业务连接），每次 acquire
 新建会话、close 释放锁并关闭会话；锁必须在任何业务事务之前取得，S3 I/O 依然不进入数据库事务。
 
-服务端内容统一调用 `stage(InputStream, maxBytes)`：入口显式拒绝活动事务，先在本地做有界
+服务端内容统一调用 `stage(filename, mediaType, InputStream content, maxBytes)`：入口显式拒绝活动事务，先在本地做有界
 spool 并单遍计算 size/SHA-256，随后在 upload 操作锁内以短事务登记 PENDING upload 和 candidate，再在
 事务外执行 PUT、checksum HEAD、probe 与 copy，最后复用 complete 的去重绑定。
 因此对象写入后的 crash、媒体校验失败、去重落败和业务消费回滚都保留可由既有
@@ -854,7 +856,7 @@ Skill binding。
 统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
 bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
 Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（该引用既可能来自该 Session 自己消费的附件，也
-可能来自 Issue 已发布证据的幂等授予，因此 Blob 实际可用时规范形态就是活动形态，不可用时确定性拒绝）（无 8 MiB 源文件上限，单次输出最多 48 KiB），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+可能来自 Issue 已发布证据的幂等授予，因此 Blob 实际可用时规范形态就是活动形态，不可用时确定性拒绝）（Blob 文本不设 8 MiB 源文件上限，单次返回窗口 ≤ 2000 行且 ≤ 60000 个 Unicode code point；`read` 是唯一获得 320 KiB / 2020 行内联预算的可信身份，其它工具的内联上限是 50 KiB / 2000 行），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
 路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
 Platform URI 不接受任意 HTTP(S) 透传。
 
@@ -1024,7 +1026,7 @@ Function dispatcher claim + RUNNING lease
 | section | 主要字段与默认值 | 应用时点 |
 | --- | --- | --- |
 | `tool` | permission 默认 `write`/`edit`/`bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s | admission/permission 读取点 live |
-| `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / per-parent concurrency 10 / maxTurns 50 | retry、resolver、subagent 配置读取点 |
+| `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / concurrency 10 / totalConcurrency 0（不限）/ maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 16 MiB、heartbeat 60s | Environment 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
 | `integrations.openCliHub` | disabled、base URL 未配置；connect 5s、request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
@@ -1040,12 +1042,12 @@ token 或 OpenCLI instance identity。
 
 | key | owner | 边界 |
 | --- | --- | --- |
-| `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避与 bounded worker 容量；默认 `64/30s/1s/1s/16/64`（maxDispatchTasks/lease/poll/rejection/worker/queue） |
-| `kk-studio.harness.execution-admission.{model,tool,subagent,skill-sync}` | platform | 进程级容量，默认 `16/64/10/8`；`skill-sync` 约束 Environment Skill Package 同步的并发（单 Environment 串行） |
+| `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避、admission 推迟与 bounded worker 容量；默认 `64/30s/1s/1s/5s/16/64`（maxDispatchTasks/lease/poll/rejection/admissionDeferral/worker/queue） |
+| `kk-studio.harness.execution-admission.{model,tool,skill-sync}` | platform | 进程级容量，默认 `16/64/8`；`skill-sync` 约束 Environment Skill Package 同步的并发（单 Environment 串行） |
 | `kk-studio.harness.runtime.{workers-enabled,resource-root,skill-cache-root}` | platform | worker 开关、内容寻址 Resource 存储根与 bare Skill Git cache 根（默认位于 `<cwd>/.kkstudio/`） |
 | `kk-studio.project.controller.*` | project | Issue Controller lease 30s、poll 1s、retry 5s、blocked 60s、run 30m、continuation 10、worker `8 + queue 64` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | platform | S3/MinIO 服务端与 presign endpoint；bucket 只能由服务端配置 |
-| `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | platform | maintenance 轮询与 cleanup lease，默认 `30s/5m` |
+| `kk-studio.storage.maintenance.{poll-delay,cleanup-lease,object-cleanup-interval,object-cleanup-retry-delay}` | platform | maintenance 轮询、cleanup lease 与对象清理记录的认领间隔/失败重试间隔，默认 `30s/5m/24h/30s` |
 | `kk-studio.plugins.credential-key-file` | platform | Plugin credential AES-256-GCM 主密钥的 owner-only 绝对文件；各 App 节点内容必须一致，不进入数据库 |
 | `kk-studio.plugins.refresh.{poll-delay,lease-duration}` | platform | Plugin credential refresh 扫描与互斥 lease，默认 `1h/2m` |
 | `kk-studio.plugins.resource.{connect-timeout,request-timeout,upload-timeout,max-bytes,temp-directory}` | platform | Plugin 资源端口受控下载与暂存边界；默认连接 `5s`、请求与读取整体期限 `30s`、PUT 直传超时 `5m`、单次暂存上限 `256MiB`（硬上限 `1GiB`）、临时目录留空为 `java.io.tmpdir` |
