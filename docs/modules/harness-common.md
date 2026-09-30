@@ -9,7 +9,7 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
 | `fun.fengwk.kkstudio.harness.common.prompt` | classpath prompt 模板的严格解析、缓存与精确变量渲染 | 只支持 `${name}`，要求变量集合精确相等；表达式求值与业务编排由调用方承接 |
-| `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁与有界 UTF-8 编码器 | 只管语法与体积边界，不做业务数据建模；超限时中止编码而不物化完整输出 |
+| `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 只管语法与体积边界，不做业务数据建模；超限时中止编码而不物化完整输出 |
 | `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 六类 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
@@ -26,13 +26,13 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 
 [`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 是全仓共享的 JSON 门禁，使用的 `ObjectMapper` 开启 `STRICT_DUPLICATE_DETECTION`、`FAIL_ON_TRAILING_TOKENS` 与 `USE_BIG_DECIMAL_FOR_FLOATS`（JSON number 按 `BigDecimal` 读回，`1e-324`、`1e309` 不会在 double 中退化成 0 或 Infinity）：
 
-- `requireValidJson(json)` 要求非空白且严格合法；
+- `requireValidJson(json)` 要求非空白且严格合法，接受任意类型的单一 JSON 值（`null`、标量、数组与对象都合法，不做 object 归一化），并把原文原样返回；
 - `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
 - `readTree` / `write` 提供同一套严格性的树读写。
 
 [`ToolArguments`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」，`render` 把调用方给出的字段渲染函数应用到指定字段。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
 
-[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。
+[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。上限判定与计数由共享的 `BoundedOutputStream` 承担：构造要求正数 `maxBytes`，默认只计数、不保留任何字节，`retainBytes=true` 时保留已写字节并可用 `toUtf8String()` 还原文本；累计超过上限即原子中止（本次写入不生效、不推进计数）并抛出专属的 `LimitExceededException`。它刻意继承 `IOException`：Jackson 生成器会把写入期异常原样上抛而不做二次包装，调用方据此区分「超限中止」与「编码失败」。[`harness-tool`](harness-tool.md) 里 Tool 结果的字节预算判定与它复用同一实现。
 
 ## Resource 引用与 URI 校验
 
@@ -68,12 +68,12 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 ## 源码与测试
 
 - Prompt：[`PromptTemplate.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java)、[`PromptTemplateLoader.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)
-- JSON：[`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)、[`ToolArguments.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java)
+- JSON：[`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)、[`ToolArguments.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java)，字节上限判定复用同包 `BoundedOutputStream`
 - Resource：[`ResourceRef.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java)
 - Result：[`ResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)
 - Skill：[`SkillNames.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/skill/SkillNames.java)
-- 改动前先跑 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 确认依赖方向未破；[`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java) 覆盖六类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码，[`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java) 锁定精确变量匹配。
+- 改动前先跑 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 确认依赖方向未破；[`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java) 覆盖六类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码，[`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java) 锁定精确变量匹配；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 
 ---
 
