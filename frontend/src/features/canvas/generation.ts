@@ -35,18 +35,18 @@ export function functionSupportsReferences(model: CanvasFunctionDefinitionDTO | 
   if (!refsProp || typeof refsProp !== 'object') return false
   const r = refsProp as Record<string, unknown>
   if (r.type !== 'array') return false
-  if (r.items && typeof r.items === 'object') {
-    const items = r.items as Record<string, unknown>
-    if (items.type !== 'resourceReference') {
-      return false
-    }
+  if (!r.items || typeof r.items !== 'object') {
+    return false
   }
-  return true
+  const items = r.items as Record<string, unknown>
+  return items.type === 'resourceReference'
 }
 
 export function isCanonicalResourceReference(item: unknown): item is CanvasResourceReference {
-  if (!item || typeof item !== 'object') return false
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false
   const rec = item as Record<string, unknown>
+  const keys = Object.keys(rec)
+  if (keys.length !== 3) return false
   return (
     rec.type === 'resource'
     && typeof rec.nodeId === 'string'
@@ -54,6 +54,9 @@ export function isCanonicalResourceReference(item: unknown): item is CanvasResou
     && typeof rec.index === 'number'
     && Number.isInteger(rec.index)
     && rec.index >= 0
+    && 'type' in rec
+    && 'nodeId' in rec
+    && 'index' in rec
   )
 }
 
@@ -74,7 +77,7 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
         label: typeof p.title === 'string' ? p.title : key,
         type: 'ENUM',
         required: required.has(key),
-        defaultValue: p.default !== undefined ? p.default : (p.enum[0] ?? null),
+        defaultValue: p.default !== undefined ? p.default : null,
         options: p.enum,
         isInteger: false,
         min: null,
@@ -173,9 +176,18 @@ export function parseFunctionConfig(
         }
       }
     }
+    // 4. 若入参包含 references 但当前模型 schema 不支持 references，不能剥离进 references，必须 raw 保留以防保存时丢弃
+    if (args.references.length > 0 && !functionSupportsReferences(model)) {
+      return {
+        references: [],
+        parameters: {},
+        rawArgs: args,
+        rawError: '当前模型不支持参考资源，但入参包含引用数据，已切换至完整 JSON 模式以防止数据丢失。',
+      }
+    }
   }
 
-  const prompt = typeof args.prompt === 'string' ? args.prompt : ''
+  const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
 
   const references: CanvasResourceReference[] = Array.isArray(args.references)
     ? args.references.map((item) => ({
@@ -220,19 +232,8 @@ export function configToFunctionArgs(
   const args: Record<string, unknown> = {
     ...config.parameters,
   }
-  if (config.prompt !== undefined && config.prompt !== '') {
+  if (config.prompt !== undefined) {
     args.prompt = config.prompt
-  } else if (config.prompt !== undefined) {
-    const hasPromptProp = Boolean(
-      model?.argsSchema
-      && typeof model.argsSchema === 'object'
-      && (model.argsSchema as Record<string, unknown>).properties
-      && typeof (model.argsSchema as Record<string, unknown>).properties === 'object'
-      && 'prompt' in ((model.argsSchema as Record<string, unknown>).properties as Record<string, unknown>),
-    )
-    if (hasPromptProp || !model) {
-      args.prompt = config.prompt
-    }
   }
   // 仅当 model 显式声明 properties.references 为 resourceReference 数组时注入 references
   if (functionSupportsReferences(model)) {

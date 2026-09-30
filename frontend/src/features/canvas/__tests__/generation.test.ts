@@ -280,6 +280,31 @@ describe('Canvas canonical generation codec & policy', () => {
     expect(functionSupportsReferences(reportModelNoRef)).toBe(false)
     expect(functionSupportsReferences(null)).toBe(false)
 
+    // items 不存在或 items.type 并非 resourceReference 必须严格返回 false
+    const missingItemsModel: CanvasFunctionDefinitionDTO = {
+      name: 'model-no-items',
+      outputs: [],
+      argsSchema: {
+        type: 'object',
+        properties: { references: { type: 'array' } },
+      },
+      available: true,
+      unavailableReason: null,
+    }
+    expect(functionSupportsReferences(missingItemsModel)).toBe(false)
+
+    const wrongItemsModel: CanvasFunctionDefinitionDTO = {
+      name: 'model-wrong-items',
+      outputs: [],
+      argsSchema: {
+        type: 'object',
+        properties: { references: { type: 'array', items: { type: 'string' } } },
+      },
+      available: true,
+      unavailableReason: null,
+    }
+    expect(functionSupportsReferences(wrongItemsModel)).toBe(false)
+
     // 即使 referencePolicy 设置了 allowedKinds，但 argsSchema 中未声明 references 属性，绝不推断支持
     const policyOnlyModel: CanvasFunctionDefinitionDTO = {
       name: 'model-policy-only',
@@ -301,6 +326,59 @@ describe('Canvas canonical generation codec & policy', () => {
     // 对不支持引用的模型，configToFunctionArgs 绝不向 wire 注入 references 属性
     const wire = configToFunctionArgs({ prompt: 'test', references: [], parameters: {} }, policyOnlyModel)
     expect(wire).not.toHaveProperty('references')
+  })
+
+  it('four regression contracts: exact keys, enum defaults separation, unsupported schema refs raw retention, and absent prompt preservation', () => {
+    // 1. isCanonicalResourceReference exact keys：引用项含 extra 字段时拒绝，防止 parse 丢弃 extra 字段
+    const extraKeyRefArgs = {
+      prompt: 'test',
+      references: [
+        { type: 'resource', nodeId: NODE_SINGLE, index: 0, extraField: 'drop-risk' },
+      ],
+    }
+    const parsedExtraKeyRef = parseFunctionConfig(extraKeyRefArgs, imageModel)
+    expect(parsedExtraKeyRef.rawArgs).toEqual(extraKeyRefArgs)
+    expect(parsedExtraKeyRef.rawError).toBeDefined()
+
+    // 2. 分清创建默认和解析补 default：
+    // 未显式提供 default 的 enum，在 extractParameters 中 defaultValue 为 null；
+    // createDefaultFunctionConfig 会使用 options[0] 初始化；
+    // 但 parseFunctionConfig 解析时不给未声明 default 的 enum 擅自填充 default。
+    const noDefaultEnumModel: CanvasFunctionDefinitionDTO = {
+      name: 'model-no-default-enum',
+      outputs: [],
+      argsSchema: {
+        type: 'object',
+        properties: {
+          style: { type: 'string', enum: ['REALISTIC', 'ANIME'] },
+        },
+      },
+      available: true,
+      unavailableReason: null,
+    }
+    const defs = extractParametersFromDefinition(noDefaultEnumModel)
+    expect(defs[0]?.defaultValue).toBeNull()
+    const defaultCfg = createDefaultFunctionConfig(noDefaultEnumModel)
+    expect(defaultCfg.parameters.style).toBe('REALISTIC')
+    const parsedNoDefault = parseFunctionConfig({}, noDefaultEnumModel)
+    expect(parsedNoDefault.parameters.style).toBeUndefined()
+
+    // 3. references 合法但在不支持引用的模型上，不能剥离进 references 造成保存丢失，应 raw 保留
+    const reportWithRefs = {
+      prompt: 'report',
+      references: [{ type: 'resource', nodeId: NODE_SINGLE, index: 0 }],
+    }
+    const parsedUnsupportedRefs = parseFunctionConfig(reportWithRefs, reportModelNoRef)
+    expect(parsedUnsupportedRefs.rawArgs).toEqual(reportWithRefs)
+    expect(parsedUnsupportedRefs.rawError).toContain('不支持参考资源')
+
+    // 4. absent prompt 保留 optional 缺失，不强加空字符串
+    const absentPromptArgs = { ratio: '16:9' }
+    const parsedAbsent = parseFunctionConfig(absentPromptArgs, imageModel)
+    expect(parsedAbsent.prompt).toBeUndefined()
+    const wireAbsent = configToFunctionArgs(parsedAbsent, imageModel)
+    expect(wireAbsent).not.toHaveProperty('prompt')
+    expect(wireAbsent.ratio).toBe('16:9')
   })
 
   it('derives referenceCandidates from all non-self resource nodes without requiring prior links', () => {
