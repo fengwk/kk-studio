@@ -129,7 +129,10 @@ class GeminiModelProviderUnitTest {
     }
   }
 
-  /** 验证带有凭据时设置 x-goog-api-key header，并且空凭据时以匿名方式请求（不添加 header）。 */
+  /**
+   * 验证带有凭据时设置 x-goog-api-key header，并且空凭据时以匿名方式请求（不添加 header）；请求 URL 完全由 descriptor endpoint 与
+   * model id 解析，构造参数不再携带 URL。
+   */
   @Test
   void passesApiKeyHeaderWhenCredentialProvided() {
     AtomicReference<HttpRequest> capturedReq = new AtomicReference<>();
@@ -158,7 +161,7 @@ class GeminiModelProviderUnitTest {
         URI.create(
             "https://generativelanguage.googleapis.com/models/gemini-2.5-flash:streamGenerateContent?alt=sse");
     GeminiModelProvider providerWithKey =
-        new GeminiModelProvider(mockTransport, descriptor, "test-api-key-123", targetUri);
+        new GeminiModelProvider(mockTransport, descriptor, "test-api-key-123");
 
     providerWithKey.stream(
         request,
@@ -181,7 +184,7 @@ class GeminiModelProviderUnitTest {
     // 匿名调用
     capturedReq.set(null);
     GeminiModelProvider anonymousProvider =
-        new GeminiModelProvider(mockTransport, descriptor, null, targetUri);
+        new GeminiModelProvider(mockTransport, descriptor, null);
     anonymousProvider.stream(
         request,
         new ProviderStreamHandler() {
@@ -224,9 +227,7 @@ class GeminiModelProviderUnitTest {
           }
         };
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(mockTransport, descriptor, "k");
 
     AtomicReference<ProviderException> caught = new AtomicReference<>();
     provider.stream(
@@ -278,9 +279,7 @@ class GeminiModelProviderUnitTest {
           }
         };
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(mockTransport, descriptor, "k");
 
     AtomicReference<ProviderCompletion> completed = new AtomicReference<>();
     provider.stream(
@@ -315,8 +314,7 @@ class GeminiModelProviderUnitTest {
   @Test
   void verifiesDescriptorAndToString() {
     JdkHttpSseTransport transport = new JdkHttpSseTransport(client, exec, sched);
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider = new GeminiModelProvider(transport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(transport, descriptor, "k");
 
     assertEquals(descriptor, provider.descriptor());
     assertEquals("GeminiModelProvider[]", provider.toString());
@@ -326,9 +324,7 @@ class GeminiModelProviderUnitTest {
   @Test
   void handlesInvalidHeaderValue() {
     JdkHttpSseTransport transport = new JdkHttpSseTransport(client, exec, sched);
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(transport, descriptor, "bad\nkey", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(transport, descriptor, "bad\nkey");
 
     AtomicReference<ProviderException> errorRef = new AtomicReference<>();
     provider.stream(
@@ -365,9 +361,7 @@ class GeminiModelProviderUnitTest {
           }
         };
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(mockTransport, descriptor, "k");
 
     RuntimeException failure =
         assertThrows(
@@ -404,8 +398,7 @@ class GeminiModelProviderUnitTest {
             throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
           }
         };
-    GeminiModelProvider provider =
-        new GeminiModelProvider(rejected, descriptor, "k", URI.create("https://example.com"));
+    GeminiModelProvider provider = new GeminiModelProvider(rejected, descriptor, "k");
     AtomicReference<Integer> errors = new AtomicReference<>(0);
     AtomicReference<ProviderException> caught = new AtomicReference<>();
     ProviderStream stream =
@@ -454,8 +447,7 @@ class GeminiModelProviderUnitTest {
             };
           }
         };
-    GeminiModelProvider provider =
-        new GeminiModelProvider(transport, descriptor, "k", URI.create("https://example.com"));
+    GeminiModelProvider provider = new GeminiModelProvider(transport, descriptor, "k");
     AtomicReference<Integer> errors = new AtomicReference<>(0);
     provider.stream(
         request,
@@ -507,8 +499,7 @@ class GeminiModelProviderUnitTest {
               }
             },
             descriptor,
-            "k",
-            URI.create("https://example.com"));
+            "k");
     AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
     providerExceptionProvider.stream(
         request,
@@ -569,9 +560,7 @@ class GeminiModelProviderUnitTest {
           }
         };
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(mockTransport, descriptor, "k");
 
     // 1. onEvent 抛出异常（非法的 JSON）
     AtomicReference<ProviderException> eventErrorRef = new AtomicReference<>();
@@ -628,9 +617,7 @@ class GeminiModelProviderUnitTest {
             new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
             UUID.randomUUID());
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(transport, badEndpointDesc, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(transport, badEndpointDesc, "k");
 
     AtomicReference<ProviderException> errorRef = new AtomicReference<>();
     provider.stream(
@@ -679,9 +666,7 @@ class GeminiModelProviderUnitTest {
             };
           }
         };
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(countingTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(countingTransport, descriptor, "k");
 
     for (String source :
         List.of("data:image/png,abc", "data:image/png;base64,%%%", "data:image/png;base64,")) {
@@ -751,9 +736,7 @@ class GeminiModelProviderUnitTest {
           }
         };
 
-    URI targetUri = URI.create("https://example.com/stream");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+    GeminiModelProvider provider = new GeminiModelProvider(mockTransport, descriptor, "k");
 
     List<String> protocolEventTypes = new ArrayList<>();
     List<String> protocolEventData = new ArrayList<>();

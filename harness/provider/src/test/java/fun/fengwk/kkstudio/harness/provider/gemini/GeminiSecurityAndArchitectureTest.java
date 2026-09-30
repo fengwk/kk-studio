@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
@@ -107,6 +108,40 @@ class GeminiSecurityAndArchitectureTest {
             UUID.randomUUID());
 
     assertThrows(IllegalArgumentException.class, () -> adapter.create(anthropicDescriptor));
+  }
+
+  /**
+   * 意图：畸形 endpoint（携带 query、非 http/https 协议）在 ModelProvider 创建期即确定性失败，与其它协议 adapter
+   * 同契约；失败信息固定脱敏，不回显 endpoint 原始内容。合法 endpoint 正常创建，Provider 只持有 descriptor。
+   */
+  @Test
+  void rejectsMalformedEndpointAtModelProviderCreation() {
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    workerExecutor = Executors.newSingleThreadExecutor();
+    scheduler = Executors.newSingleThreadScheduledExecutor();
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
+
+    assertNotNull(adapter.create(descriptor("https://generativelanguage.googleapis.com/v1beta")));
+
+    String sensitiveEndpoint = "https://secret-host.example/v1?key=SECRET_QUERY_VALUE";
+    IllegalArgumentException queryFailure =
+        assertThrows(
+            IllegalArgumentException.class, () -> adapter.create(descriptor(sensitiveEndpoint)));
+    assertEquals("endpoint must not contain query", queryFailure.getMessage());
+    assertFalse(queryFailure.getMessage().contains("SECRET_QUERY_VALUE"));
+
+    assertThrows(
+        IllegalArgumentException.class, () -> adapter.create(descriptor("ftp://example.com")));
+  }
+
+  private static ProviderDescriptor descriptor(String endpoint) {
+    return new ProviderDescriptor(
+        "p1",
+        ProviderType.GOOGLE,
+        endpoint,
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)),
+        UUID.randomUUID());
   }
 
   @Test

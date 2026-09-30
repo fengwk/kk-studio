@@ -132,10 +132,11 @@ class OpenAiChatConfigurationTest {
   @Test
   @DisplayName("openAiChatThinkingFormat 解析与默认值测试")
   void parseThinkingFormat() {
+    // wire 字段名不得改变，配置只暴露唯一常量与唯一访问器。
+    assertEquals("openAiChatThinkingFormat", OpenAiChatConfiguration.FIELD_THINKING_FORMAT);
+
     OpenAiChatConfiguration configDefault = OpenAiChatConfiguration.defaults();
     assertEquals(OpenAiChatConfiguration.ThinkingFormat.STANDARD, configDefault.thinkingFormat());
-    assertEquals(
-        OpenAiChatConfiguration.ThinkingFormat.STANDARD, configDefault.openAiChatThinkingFormat());
 
     OpenAiChatConfiguration configDeepseek =
         OpenAiChatConfiguration.parse("{\"openAiChatThinkingFormat\": \"DEEPSEEK\"}");
