@@ -309,13 +309,13 @@
   },
   {
     "provider": "deepseek",
-    "name": "deepseek-v4-flash",
-    "modelId": "deepseek-v4-flash",
-    "description": "DeepSeek V4 Flash",
+    "name": "deepseek-v4.1-flash",
+    "modelId": "deepseek-v4.1-flash",
+    "description": "DeepSeek V4.1 Flash",
     "config": {
       "limit": {
         "context": 1000000,
-        "output": 384000
+        "output": 200000
       },
       "abilities": {
         "tools": true,

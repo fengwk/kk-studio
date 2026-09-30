@@ -59,7 +59,7 @@ test('四指定模型声明式定义与 MINIMAX_ANTHROPIC_M3 契约值严格对�
       idSuffix: 'deepseek_chat',
       title: 'DeepSeek Chat',
       providerName: 'deepseek',
-      modelName: 'deepseek-v4-flash',
+      modelName: 'deepseek-v4.1-flash',
       variant: 'off',
       variants: ['off', 'low', 'high', 'max'],
       providerType: 'openai',

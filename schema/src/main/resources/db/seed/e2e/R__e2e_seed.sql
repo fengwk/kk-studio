@@ -55,7 +55,7 @@ insert into agent_provider (
 
 -- Effective Pi 0.82.1 model snapshot, with four target paid-real models reconciled
 -- to Pi 0.85.1 built-in catalog/implementation (gemini-3.8-flash, gpt-5.6-luna,
--- MiniMax-M3, deepseek-v4-flash).
+-- MiniMax-M3, deepseek-v4.1-flash).
 -- `minimax-responses` is mapped to provider `minimax`; all other provider names match.
 -- `model_id` is the real upstream wire model identity (independent from the logical
 -- `name`); only minimax-anthropic/MiniMax-M3 differs from its logical name.
@@ -76,7 +76,7 @@ with model_seed (
     ('openai', 'gpt-5.6-sol', 'gpt-5.6-sol', 'GPT-5.6 Sol', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 5, 30, 0.5, 6.25, 30),
     ('openai', 'gpt-5.6-terra', 'gpt-5.6-terra', 'GPT-5.6 Terra', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 2.5, 15, 0.25, 3.125, 15),
     ('xai', 'grok-4.5', 'grok-4.5', 'Grok 4.5', 500000, 500000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 2, 6, 0.3, 0, 6),
-    ('deepseek', 'deepseek-v4-flash', 'deepseek-v4-flash', 'DeepSeek V4 Flash', 1000000, 384000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 0.14, 0.28, 0.0028, 0, 0.28),
+    ('deepseek', 'deepseek-v4.1-flash', 'deepseek-v4.1-flash', 'DeepSeek V4.1 Flash', 1000000, 200000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 0.14, 0.28, 0.0028, 0, 0.28),
     ('deepseek', 'deepseek-v4-pro', 'deepseek-v4-pro', 'DeepSeek V4 Pro', 272000, 128000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 0.435, 0.87, 0.003625, 0, 0.87),
     ('google', 'gemini-3.5-flash', 'gemini-3.5-flash', 'Gemini 3.5 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 9, 0.15, 0, 9),
     ('google', 'gemini-3.6-flash', 'gemini-3.6-flash', 'Gemini 3.6 Flash', 1048576, 65536, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 1.5, 7.5, 0.15, 0, 7.5),
@@ -117,7 +117,7 @@ select
                 case when (provider_name = 'google' and name = 'gemini-3.8-flash')
                        or (provider_name = 'openai' and name = 'gpt-5.6-luna')
                        or (provider_name = 'minimax-anthropic' and name = 'MiniMax-M3')
-                       or (provider_name = 'deepseek' and name = 'deepseek-v4-flash')
+                       or (provider_name = 'deepseek' and name = 'deepseek-v4.1-flash')
                      then 'pi-0.85.1'
                      else 'pi-0.82.1'
                 end,
