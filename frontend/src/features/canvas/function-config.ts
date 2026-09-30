@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
-import type { PendingFunctionConfig } from '@/features/canvas/types'
+import type { CanvasFunctionConfig, PendingFunctionConfig } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
-  CanvasFunctionConfigDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -11,15 +10,15 @@ import type {
 export interface FunctionConfigSyncOptions {
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>
   getSnapshot?: () => CanvasSnapshotDTO | undefined
-  onImmediateDraft?: (nodeId: UUIDString, modelKey: string, config: CanvasFunctionConfigDTO) => number
+  onImmediateDraft?: (nodeId: UUIDString, functionName: string, config: CanvasFunctionConfig) => number
   getDraftGeneration?: (nodeId: UUIDString) => number | undefined
 }
 
 export interface FunctionConfigSync {
   scheduleFunctionConfig: (
     nodeId: UUIDString,
-    modelKey: string,
-    config: CanvasFunctionConfigDTO,
+    functionName: string,
+    config: CanvasFunctionConfig,
   ) => void
   flushFunctionConfig: (nodeId: UUIDString) => Promise<void>
   /** 离开/切换画布时清空未提交草稿与定时器（不中断进行中的 flush 循环）。 */
@@ -93,7 +92,7 @@ export function useFunctionConfigSync(
           nodeId: pending.nodeId,
           expectedFunction,
           function: {
-            name: pending.modelKey,
+            name: pending.functionName,
             args: {
               prompt: pending.config.prompt,
               parameters: pending.config.parameters,
@@ -119,17 +118,17 @@ export function useFunctionConfigSync(
 
   const scheduleFunctionConfig = useCallback((
     nodeId: UUIDString,
-    modelKey: string,
-    config: CanvasFunctionConfigDTO,
+    functionName: string,
+    config: CanvasFunctionConfig,
   ) => {
     // 每次编辑立即进持久草稿层，获取新递增的世代号
-    const generation = onImmediateDraftRef.current?.(nodeId, modelKey, config)
+    const generation = onImmediateDraftRef.current?.(nodeId, functionName, config)
       ?? getDraftGenerationRef.current?.(nodeId)
       ?? 0
 
     pendingFunctionConfigsRef.current.set(nodeId, {
       nodeId,
-      modelKey,
+      functionName,
       config,
       generation,
     })

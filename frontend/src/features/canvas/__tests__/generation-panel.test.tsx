@@ -11,8 +11,8 @@ import type {
   CanvasGenerationPanelAnchor,
 } from '@/features/canvas/CanvasGenerationPanel'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
+import type { CanvasFunctionConfig } from '@/features/canvas/types'
 import type {
-  CanvasFunctionConfigDTO,
   CanvasFunctionDefinitionDTO,
 } from '@/shared/api/contracts/studio'
 
@@ -118,8 +118,8 @@ function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b
     groupId: null,
     resources: [resourceNode('2', 'old-output', 'IMAGE').resources[0]!],
     function: {
-      modelKey,
-      configJson: JSON.stringify(modelKey === 'image-a'
+      name: modelKey,
+      args: modelKey === 'image-a'
         ? {
           prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
           parameters: { ratio: '1:1' },
@@ -127,7 +127,7 @@ function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b
         : {
           prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
           parameters: { duration: 5 },
-        }),
+        },
     },
     run,
   }
@@ -146,10 +146,10 @@ function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b
       target,
     ],
     groups: [],
-    links: [
-      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9' },
-      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9' },
-      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9' },
+    references: [
+      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9', index: 0 },
+      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9', index: 0 },
+      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9', index: 0 },
     ],
   }
   return { snapshot, target }
@@ -228,7 +228,7 @@ describe('Canvas generic generation panel', () => {
     await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
     await user.click(screen.getByRole('button', { name: '插入参考 @second_0' }))
 
-    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
+    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(latest.prompt.segments.filter((segment) => segment.type === 'REFERENCE')).toEqual([
       { type: 'REFERENCE', nodeId: '2', index: 0 },
       { type: 'REFERENCE', nodeId: '2', index: 0 },
@@ -277,7 +277,7 @@ describe('Canvas generic generation panel', () => {
     fireEvent.keyDown(prefix, { key: 'Delete' })
     expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('比例'), '16:9')
-    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
+    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(latest.parameters.ratio).toBe('16:9')
   })
 
@@ -294,11 +294,11 @@ describe('Canvas generic generation panel', () => {
     view.rerenderPanel(view.snapshot, {
       ...view.target,
       function: {
-        modelKey: 'image-b',
-        configJson: JSON.stringify({
+        name: 'image-b',
+        args: {
           prompt: { segments: [{ type: 'TEXT', text: 'server replacement' }] },
           parameters: { duration: 9 },
-        }),
+        },
       },
     })
     expect(await screen.findByRole('textbox', { name: '提示词片段 1' })).toHaveValue(
@@ -315,15 +315,15 @@ describe('Canvas generic generation panel', () => {
     const input = screen.getByRole('textbox', { name: '提示词片段 1' })
     await user.clear(input)
     await user.type(input, 'first')
-    const acknowledged = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
+    const acknowledged = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     await user.type(input, ' second')
     expect(input).toHaveFocus()
 
     view.rerenderPanel(view.snapshot, {
       ...view.target,
       function: {
-        modelKey: 'image-a',
-        configJson: JSON.stringify(acknowledged),
+        name: 'image-a',
+        args: acknowledged,
       },
     })
     expect(screen.getByRole('textbox', { name: '提示词片段 1' })).toHaveValue('first second')
@@ -336,7 +336,7 @@ describe('Canvas generic generation panel', () => {
     const view = renderPanel()
     await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
     await user.selectOptions(screen.getByLabelText('模型'), 'image-b')
-    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO
+    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(view.scheduleFunctionConfig.mock.calls.at(-1)?.[1]).toBe('image-b')
     expect(latest.parameters).toEqual({ duration: 5 })
     expect(latest.prompt.segments.some((segment) => (
@@ -347,7 +347,7 @@ describe('Canvas generic generation panel', () => {
     fireEvent.change(screen.getByLabelText('时长'), { target: { value: '20' } })
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCount)
     fireEvent.change(screen.getByLabelText('时长'), { target: { value: '8' } })
-    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig)
       .parameters.duration).toBe(8)
   })
 
@@ -683,7 +683,7 @@ describe('Canvas generic generation panel', () => {
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduled)
 
     fireEvent.change(numberInput, { target: { value: '8' } })
-    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig)
       .parameters.duration).toBe(8)
     view.unmount()
   })
@@ -707,7 +707,7 @@ describe('Canvas generic generation panel', () => {
     const scheduledCount = view.scheduleFunctionConfig.mock.calls.length
     fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"\n}' } })
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCount + 1)
-    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+    expect((view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig)
       .parameters.ratio).toBe('1:1')
 
     // 4. 用户输入非法 JSON（语法错误）：提示错误，绝不调用 scheduleFunctionConfig 破坏已有有效值
@@ -749,10 +749,10 @@ describe('Canvas generic generation panel', () => {
       ...view.target,
       function: {
         ...view.target.function!,
-        configJson: JSON.stringify({
+        args: {
           prompt: { segments: [{ type: 'TEXT', text: 'external change' }] },
           parameters: { ratio: '4:3', external: 'yes' },
-        }),
+        },
       },
     }
     view.rerenderPanel(view.snapshot, externalUpdatedTarget)
@@ -767,7 +767,7 @@ describe('Canvas generic generation panel', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCalls + 1)
     expect(
-      (view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfigDTO)
+      (view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig)
         .parameters,
     ).toEqual({ ratio: '16:9', steps: 25 })
 

@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
-import type { CanvasSnapshot, Link } from '@/features/canvas/domain'
+import type { CanvasSnapshot, Reference } from '@/features/canvas/domain'
 import type {
   CanvasFlowNodeData,
   CanvasLinkSelection,
@@ -68,7 +68,7 @@ export function projectNodes(
       data: {
         kind: 'resource',
         node,
-        model: node.function ? modelByKey.get(node.function.name ?? node.function.modelKey) ?? null : null,
+        model: node.function ? modelByKey.get(node.function.name) ?? null : null,
         callbacks,
       },
       zIndex: 1,
@@ -78,24 +78,34 @@ export function projectNodes(
 }
 
 export function projectEdges(
-  links: Link[],
+  references: Reference[],
   selectedLinks: CanvasLinkSelection[] = [],
 ): CanvasFlowEdge[] {
   const selected = new Set(selectedLinks.map((link) => (
     `${link.sourceNodeId}->${link.targetNodeId}`
   )))
-  return links.map((link) => ({
-    id: `${link.sourceNodeId}->${link.targetNodeId}`,
-    source: link.sourceNodeId,
-    target: link.targetNodeId,
-    sourceHandle: 'out',
-    targetHandle: 'in',
-    type: 'default',
-    focusable: true,
-    selectable: true,
-    selected: selected.has(`${link.sourceNodeId}->${link.targetNodeId}`),
-    interactionWidth: 18,
-  }))
+  const seen = new Set<string>()
+  const edges: CanvasFlowEdge[] = []
+  for (const ref of references) {
+    const edgeId = `${ref.sourceNodeId}->${ref.targetNodeId}`
+    if (seen.has(edgeId)) {
+      continue
+    }
+    seen.add(edgeId)
+    edges.push({
+      id: edgeId,
+      source: ref.sourceNodeId,
+      target: ref.targetNodeId,
+      sourceHandle: 'out',
+      targetHandle: 'in',
+      type: 'default',
+      focusable: true,
+      selectable: true,
+      selected: selected.has(edgeId),
+      interactionWidth: 18,
+    })
+  }
+  return edges
 }
 
 export function groupFlowId(groupId: string): string {

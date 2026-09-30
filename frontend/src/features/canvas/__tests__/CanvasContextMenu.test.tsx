@@ -203,7 +203,7 @@ describe('CanvasContextMenu resource target', () => {
       kind: 'resource',
       node: resourceNode({
         resources: [],
-        function: { modelKey: 'fake-image', configJson: '{}' },
+        function: { name: 'fake-image', args: {} },
         run: null,
       }),
       model,
@@ -224,7 +224,7 @@ describe('CanvasContextMenu resource target', () => {
       kind: 'resource',
       node: resourceNode({
         resources: [],
-        function: { modelKey: 'fake-image', configJson: '{}' },
+        function: { name: 'fake-image', args: {} },
         run: {
           nodeId: NODE_ID,
           requestId,
