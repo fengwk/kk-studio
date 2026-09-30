@@ -33,6 +33,11 @@ public class PostgresqlIssueRepository implements IssueRepository {
   }
 
   @Override
+  public Issue getByIdAuthoritative(UUID id) {
+    return toModel(issueMapper.getByIdAuthoritative(id));
+  }
+
+  @Override
   public Issue lockById(UUID id) {
     return toModel(issueMapper.lockById(id));
   }

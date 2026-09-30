@@ -16,6 +16,13 @@ public interface IssueRepository {
 
   Issue getById(UUID id);
 
+  /**
+   * 读取当前已提交的 Issue 行，绕过事务内 MyBatis 一级缓存。
+   *
+   * <p>事务早先读到的旧快照不得遮蔽并发已提交的版本推进：请求键重放必须在观察到 receipt 之后返回这个权威事实。
+   */
+  Issue getByIdAuthoritative(UUID id);
+
   Issue lockById(UUID id);
 
   Issue getByProjectAndNumber(UUID projectId, long number);
