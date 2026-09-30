@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 稳定 Environment Card REST API。
@@ -94,29 +93,6 @@ public class StudioEnvironmentController {
       return EnvironmentId.parse(text);
     } catch (IllegalArgumentException e) {
       throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
-    }
-  }
-
-  private static UUID parseCanonicalUuid(String value, String field) {
-    if (value == null || value.length() != 36) {
-      throw new AiValidationException(field, field + " must be a canonical UUID");
-    }
-    for (int i = 0; i < 36; i++) {
-      char c = value.charAt(i);
-      if (i == 8 || i == 13 || i == 18 || i == 23) {
-        if (c != '-') {
-          throw new AiValidationException(field, field + " must be a canonical UUID");
-        }
-      } else {
-        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
-          throw new AiValidationException(field, field + " must be a canonical UUID");
-        }
-      }
-    }
-    try {
-      return UUID.fromString(value);
-    } catch (IllegalArgumentException e) {
-      throw new AiValidationException(field, field + " must be a canonical UUID");
     }
   }
 

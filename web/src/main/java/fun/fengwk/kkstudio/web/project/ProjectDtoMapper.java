@@ -52,10 +52,6 @@ public class ProjectDtoMapper {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
   }
 
-  public ProjectDtoMapper() {
-    this(new ProjectWorkflowJsonCodec(), new ObjectMapper());
-  }
-
   public static UUID parseUuid(String value, String fieldName) {
     if (value == null || !UUID_PATTERN.matcher(value.trim()).matches()) {
       throw new IllegalArgumentException(fieldName + " must be a valid UUID string");

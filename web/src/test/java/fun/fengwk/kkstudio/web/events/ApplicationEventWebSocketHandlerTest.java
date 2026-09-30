@@ -52,6 +52,12 @@ class ApplicationEventWebSocketHandlerTest {
       new ResourceKey(ResourceKind.CANVAS, new UUID(0L, 2L));
   private static final int DEFAULT_SENDER_CAPACITY = 512;
 
+  // 测试 fixture 显式提供事件软策略：只注入发送队列容量以驱动 backpressure，
+  // 其余维度取仓库默认值（与 SystemSettings.Advanced 默认一致）。
+  private static final long TEST_MAX_BYTES = 2L * 1024 * 1024;
+  private static final long TEST_SEND_TIMEOUT_MILLIS = 10_000L;
+  private static final long TEST_HEARTBEAT_INTERVAL_MILLIS = 20_000L;
+
   private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource canvasVersionSource;
@@ -84,7 +90,11 @@ class ApplicationEventWebSocketHandlerTest {
   private void rebuildHandler(int capacity) {
     handler =
         new ApplicationEventWebSocketHandler(
-            hub, new EventFrameCodec(new RealtimeEventJsonCodec()), capacity);
+            hub,
+            new EventFrameCodec(new RealtimeEventJsonCodec()),
+            new ApplicationEventSettings(
+                capacity, TEST_MAX_BYTES, TEST_SEND_TIMEOUT_MILLIS, TEST_HEARTBEAT_INTERVAL_MILLIS),
+            null);
     recorder = new SentRecorder();
     Session jakartaSession = mock(Session.class);
     Async async = mock(Async.class);
