@@ -20,8 +20,8 @@ import type {
  * Canvas wire codec：纯 primitive/DTO 解码器。
  *
  * 严格 wire 解码：只接受真实 convention4j 输出（long 为 decimal string、
- * required-null 显式输出），nullable 字段只接受显式 null 或合法值，
- * 缺失/undefined 一律拒绝；枚举只接受精确值；非法/超 safe integer
+ * nullable 字段按 DTO 注解区分 required-nullable（显式 null）与 omitted-nullable（省略键））、
+ * 非 nullable 字段缺失一律拒绝；枚举只接受精确值；非法/超 safe integer
  * 一律 fail closed（ApiError），绝不静默降级为 0/null。本模块无传输语义，
  * 只负责把 envelope.data 解码为类型化 DTO；HTTP/信封/错误映射由
  * studio-service 负责。
@@ -94,6 +94,13 @@ function requirePatchOp(value: unknown, path: string): 'REMOVE' | 'UPSERT' {
   return value
 }
 
+function requireBoolean(value: unknown, path: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw invalidPayload(`${path} must be a boolean`)
+  }
+  return value
+}
+
 function decodeNullable(value: unknown, path: string): boolean {
   if (value === undefined) {
     throw invalidPayload(`${path} must be explicitly null`)
@@ -107,6 +114,21 @@ function decodeNullableString(value: unknown, path: string): string | null {
 
 function decodeNullableInt(value: unknown, path: string): number | null {
   return decodeNullable(value, path) ? requireInt(value, path) : null
+}
+
+/**
+ * required-nullable 与 omitted-nullable 是两种真实 convention4j 编码约定，
+ * 必须按 DTO 注解区分，不能混用：
+ * - required-nullable：字段带 `@JsonInclude(ALWAYS)`，键必然存在，null 显式输出；
+ * - omitted-nullable：其余 nullable 字段受全局 NON_NULL 约束，null 时键被省略。
+ * 把 omitted-nullable 当 required-nullable 解析会让整份 payload 解码失败（fail closed）。
+ */
+function decodeOmittedNullableString(value: unknown, path: string): string | null {
+  return value == null ? null : requireString(value, path)
+}
+
+function decodeOmittedNullableInt(value: unknown, path: string): number | null {
+  return value == null ? null : requireInt(value, path)
 }
 
 function requireFiniteNumber(value: unknown, path: string): number {
@@ -333,12 +355,19 @@ export function decodeCanvasConflict(value: unknown): CanvasConflictDTO {
 
 function decodeReferencePolicy(value: unknown): CanvasFunctionReferencePolicyDTO {
   const candidate = requireRecord(value, 'referencePolicy')
+  const maxByKindCandidate = requireRecord(candidate.maxByKind, 'referencePolicy.maxByKind')
+  const maxByKind: Partial<Record<CanvasResourceNodeDTO['resources'][number]['kind'], number>> = {}
+  for (const [kind, limit] of Object.entries(maxByKindCandidate)) {
+    maxByKind[requireResourceKind(kind, `referencePolicy.maxByKind.${kind}`)] =
+      requireInt(limit, `referencePolicy.maxByKind.${kind}`)
+  }
   return {
     allowedKinds: requireArray(candidate.allowedKinds, 'referencePolicy.allowedKinds').map((k, i) =>
       requireResourceKind(k, `referencePolicy.allowedKinds[${i}]`),
     ),
-    maxReferences: decodeNullableInt(candidate.maxReferences, 'referencePolicy.maxReferences'),
-    maxByKind: (candidate.maxByKind ?? {}) as Partial<Record<CanvasResourceNodeDTO['resources'][number]['kind'], number>>,
+    // CanvasFunctionReferencePolicyDTO.maxReferences 是 omitted-nullable Integer。
+    maxReferences: decodeOmittedNullableInt(candidate.maxReferences, 'referencePolicy.maxReferences'),
+    maxByKind,
   }
 }
 
@@ -346,7 +375,8 @@ function decodeFunctionOutput(value: unknown, path: string): CanvasFunctionOutpu
   const candidate = requireRecord(value, path)
   return {
     kind: requireString(candidate.kind, `${path}.kind`),
-    name: decodeNullableString(candidate.name, `${path}.name`),
+    // CanvasFunctionOutputDTO.name 是 omitted-nullable：未命名槽位不输出该键。
+    name: decodeOmittedNullableString(candidate.name, `${path}.name`),
   }
 }
 
@@ -354,13 +384,20 @@ export function decodeCanvasFunctionDefinition(value: unknown): CanvasFunctionDe
   const candidate = requireRecord(value, 'function definition')
   return {
     name: requireString(candidate.name, 'function.name'),
-    description: decodeNullableString(candidate.description, 'function.description'),
-    argsSchema: requireRecord(candidate.argsSchema ?? {}, 'function.argsSchema'),
+    // CanvasFunctionDefinitionDTO.description 是 omitted-nullable String。
+    description: decodeOmittedNullableString(candidate.description, 'function.description'),
+    // argsSchema 有非 null 默认值，必然存在，不允许缺省兜底。
+    argsSchema: requireRecord(candidate.argsSchema, 'function.argsSchema'),
     outputs: requireArray(candidate.outputs, 'function.outputs').map((out, idx) =>
       decodeFunctionOutput(out, `function.outputs[${idx}]`),
     ),
-    referencePolicy: candidate.referencePolicy ? decodeReferencePolicy(candidate.referencePolicy) : null,
-    available: typeof candidate.available === 'boolean' ? candidate.available : true,
+    // referencePolicy 是 omitted-nullable 对象：null 时整个键被省略。
+    referencePolicy: candidate.referencePolicy == null
+      ? null
+      : decodeReferencePolicy(candidate.referencePolicy),
+    // available 是 primitive boolean，必然存在。
+    available: requireBoolean(candidate.available, 'function.available'),
+    // unavailableReason 带 @JsonInclude(ALWAYS)：键必然存在，available 时必须显式 null。
     unavailableReason: decodeNullableString(candidate.unavailableReason, 'function.unavailableReason'),
   }
 }
