@@ -323,6 +323,17 @@ class ToolResultJsonCodecTest {
         NullPointerException.class, () -> ToolResultJsonCodec.exceedsEncodedUtf8Bytes(null, 1024));
   }
 
+  /** emoji（4 字节 UTF-8）内容在流式计数下与 encode 的字节长度精确一致。 */
+  @Test
+  void exceedsEncodedUtf8BytesCountsEmojiBytesExactly() {
+    ToolResult result = new ToolResult("call", List.of(new TextResultContent("😀🚀")), false, "{}");
+    int exact = ToolResultJsonCodec.encode(result).getBytes(StandardCharsets.UTF_8).length;
+
+    assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact));
+    assertTrue(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact - 1));
+    assertFalse(ToolResultJsonCodec.exceedsEncodedUtf8Bytes(result, exact + 1));
+  }
+
   /** 超大文本：bounded 输出在中止点停止（不物化完整编码副本），仍返回正确判定。 */
   @Test
   void exceedsEncodedUtf8BytesStopsAtLimitOnHugeText() {
