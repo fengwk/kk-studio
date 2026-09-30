@@ -107,13 +107,6 @@ export const SHORTCUT_CATALOG: ShortcutDefinition[] = [
     descriptionKey: 'ai.runtime.shortcuts.canvasEscape',
   },
   {
-    id: 'canvas.thread',
-    scope: 'canvas',
-    keys: 'Ctrl/Cmd+K',
-    labelKey: 'ai.runtime.shortcuts.label.canvasThread',
-    descriptionKey: 'ai.runtime.shortcuts.canvasThread',
-  },
-  {
     id: 'canvas.fit',
     scope: 'canvas',
     keys: '0',

@@ -93,7 +93,6 @@ export interface CanvasCommandRecoveryResult {
 interface CanvasPendingPayload {
   idempotencyKey: UUIDString
   commands: CanvasCommandDTO[]
-  baselineRevision: string
   ack: CanvasDraftAck[]
   createdAt: number
 }
@@ -175,7 +174,6 @@ export class CanvasCommandQueue {
     const payload: CanvasPendingPayload = {
       idempotencyKey: this.createCommandId(),
       commands: freezeCommands(commands),
-      baselineRevision: this.snapshot.document.revision,
       ack: Object.freeze([...(options?.ack ?? [])]) as CanvasDraftAck[],
       createdAt: Date.now(),
     }
@@ -227,7 +225,6 @@ export class CanvasCommandQueue {
       editingSessionId: this.editingSessionId,
       idempotencyKey: payload.idempotencyKey,
       commands: payload.commands,
-      baselineRevision: payload.baselineRevision,
       ack: [...payload.ack],
       sequence: this.sequence++,
       createdAt: payload.createdAt,
