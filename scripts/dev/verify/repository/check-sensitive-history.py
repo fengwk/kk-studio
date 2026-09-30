@@ -9,18 +9,28 @@ every ref that is visible in the local repository:
 * reachable blobs (content is read once per unique blob through the git
   ``--batch`` streaming protocol instead of once per commit; binary blobs are
   additionally reduced to printable ASCII/UTF-16 strings before scanning);
-* commit messages and annotated-tag messages;
+* the full content of every annotated tag object, including tag targets that are
+  blobs or trees (which a commit walk alone would never reach);
+* commit messages;
 * file paths and ref names, with the stored location redacted when the path
   itself contains a match;
 * optionally the public pull-request refs (``refs/pull/*``) pulled into an
   isolated temporary bare repository so the audited repository's refs stay
   untouched.
 
+Every read that could not complete is recorded as a degraded-scan item instead
+of being skipped silently: a short ``cat-file`` body, a missing object, a
+malformed header, a non-zero ``cat-file`` exit, an unreadable worktree file, an
+unsupported ref target, or a remote-coverage check that cannot be verified.
+``--fail-on-high`` and ``scan_incomplete`` are never reported as success.
+
 Nothing here is a verdict. Every hit is a *candidate pending human review*: the
 report recommends credential rotation only after a reviewer confirms a real
 credential, and never infers key leakage from a personal absolute path. Values
 never leave the scanner; value-level evidence is stored as a short hash plus
-redacted locations so a reviewer can grade each group by hand.
+redacted locations so a reviewer can grade each group by hand. The remote URL is
+reduced to the opaque label ``origin``, so no query token, userinfo, host or
+local path can reach a report.
 """
 
 from __future__ import annotations
@@ -57,10 +67,10 @@ DEFAULT_STRING_LIMIT = 256 * 1024
 MAX_GROUP_LOCATIONS = 25
 MAX_BINARY_OBJECTS = 50
 
-# Hosts that can never carry a working credential: reserved example domains and
-# loopback/container aliases. Excluding them keeps the broad credential-url rule
-# usable without hiding a real remote secret (a real token in such a URL is still
-# caught by the format rules).
+# Hosts that are *usually* harmless (reserved example domains and loopback
+# aliases). They are only used to label a hit: a password on such a host can
+# still be a real credential, so nothing here removes a finding. The label lets
+# a reviewer grade the group instead of the tool deciding for them.
 RESERVED_HOST_NAMES = frozenset(
     {"localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"}
 )
@@ -86,26 +96,36 @@ CREDENTIAL_URL_PATTERN = re.compile(
     + "@"
     + "(?P<host>[^/\\s:@?#]+)"
 )
+# ``key`` after the name may be quoted (``"apiKey": "..."``) or camelCased
+# (``sensitiveKey``/``clientSecret``/``accessToken``), so the quoted form and the
+# bare ``key``/``token`` tails are both accepted; a missed key is worse than a
+# noisy candidate, because every hit stays pending human review anyway. The
+# separator only spans blanks, never a newline: otherwise a key name at the end
+# of one line would be glued to the next line and reported as a fake "value".
+GENERIC_SECRET_KEYS = (
+    "api[_-]?key",
+    "apikey",
+    "secret",
+    "secret[_-]?key",
+    "client[_-]?secret",
+    "access[_-]?key",
+    "access[_-]?token",
+    "auth[_-]?token",
+    "api[_-]?token",
+    "refresh[_-]?token",
+    "id[_-]?token",
+    "private[_-]?key",
+    "passwd",
+    "password",
+    "bearer",
+    "token",
+    "key",
+)
 GENERIC_SECRET_PATTERN = re.compile(
-    "(?i)(?:"
-    + "|".join(
-        (
-            "api[_-]?key",
-            "apikey",
-            "secret",
-            "secret[_-]?key",
-            "client[_-]?secret",
-            "access[_-]?key",
-            "auth[_-]?token",
-            "api[_-]?token",
-            "private[_-]?key",
-            "passwd",
-            "password",
-            "bearer",
-        )
-    )
+    "(?i)(?P<key>"
+    + "|".join(GENERIC_SECRET_KEYS)
     + ")"
-    + "\\b\\s*[:=]\\s*"
+    + "[ \t]*[\"']?[ \t]*[:=][ \t]*"
     + "(?P<quote>[\"']?)"
     + "(?P<value>[A-Za-z0-9_./+=\\-]{16,})"
     + "(?P=quote)"
@@ -187,14 +207,50 @@ PREFILTERS = {
 ASCII_RUN = re.compile(rb"[\x20-\x7e]{6,}")
 UTF16_RUN = re.compile(rb"(?:[\x20-\x7e]\x00){6,}")
 
+BATCH_EOF = object()
+
+
+class ScanIssues:
+    """Everything the scan could not read completely, as value-free rows.
+
+    A degraded item never contains a matched value, a raw blob body or a remote
+    URL: only the surface, a machine-readable detail and (optionally) an object
+    id / redacted locator. An empty collector means "nothing was skipped"; it is
+    not a statement that the content is clean.
+    """
+
+    MAX_ITEMS = 50
+
+    def __init__(self):
+        self.items = []
+        self.omitted = 0
+
+    def add(self, surface, detail, obj=""):
+        if len(self.items) >= self.MAX_ITEMS:
+            self.omitted += 1
+            return
+        self.items.append({"surface": surface, "detail": detail, "object": obj})
+
+    def extend(self, other):
+        for item in other.items:
+            self.add(item["surface"], item["detail"], item["object"])
+        self.omitted += other.omitted
+
+    def as_dict(self):
+        return {
+            "incomplete": bool(self.items or self.omitted),
+            "items": self.items,
+            "omitted": self.omitted,
+        }
+
 
 def is_high(rule):
     """True when a rule is graded high confidence (still not a verdict)."""
     return CATEGORY_CONFIDENCE.get(rule, ("other", "medium"))[1] == "high"
 
 
-def _is_reserved_host(host):
-    """Return True for hosts that cannot hold a real credential target."""
+def is_reserved_host(host):
+    """True for hosts that are usually fixtures; used as a hint, not a filter."""
     host = host.rsplit(":", 1)[0].strip("[]").lower()
     if host in RESERVED_HOST_NAMES:
         return True
@@ -202,15 +258,17 @@ def _is_reserved_host(host):
 
 
 def _is_allowlisted(rule_name, match):
-    """Rule-specific allowlist; only shapes that cannot be real secrets pass."""
+    """Rule-specific allowlist; only shapes that cannot be real secrets pass.
+
+    ``credential-url`` deliberately has no allowlist: a password on a reserved
+    host is still a candidate, so the host only becomes a group hint.
+    """
     if rule_name == "personal-path":
         return match.group("user") in BASE.ALLOWED_USER_NAMES
-    if rule_name == "credential-url":
-        return _is_reserved_host(match.group("host"))
     return False
 
 
-def classify_value(rule, value):
+def classify_value(rule, value, hint=""):
     """Grade one matched value without ever exposing it (status, hint)."""
     if rule == "personal-path":
         return STATUS_PERSONAL_DATA, ""
@@ -218,15 +276,23 @@ def classify_value(rule, value):
         return STATUS_ENVIRONMENT, ""
     if value in KNOWN_PUBLIC_EXAMPLES:
         return STATUS_PUBLIC_EXAMPLE, "published-vendor-example"
-    hint = PLACEHOLDER_HINT.search(value)
-    return STATUS_PENDING, hint.group(0).lower() if hint else ""
+    hints = [hint] if hint else []
+    placeholder = PLACEHOLDER_HINT.search(value)
+    if placeholder:
+        hints.append(placeholder.group(0).lower())
+    return STATUS_PENDING, ",".join(hints)
 
 
 _LOCATOR_CACHE = {}
 
 
 def redacted_locator(path):
-    """Return the path with every rule match masked by its rule name."""
+    """Return the path with every rule match masked by its rule name.
+
+    Overlapping or touching spans are merged into one union before masking: with
+    a "skip the overlapping span" rule the tail of the dropped span would stay
+    visible in the report.
+    """
     cached = _LOCATOR_CACHE.get(path)
     if cached is not None:
         return cached
@@ -238,14 +304,18 @@ def redacted_locator(path):
     if not spans:
         _LOCATOR_CACHE[path] = path
         return path
-    spans.sort()
+    merged = []
+    for start, end, rule_name in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            previous_start, previous_end, rules = merged[-1]
+            merged[-1] = (previous_start, max(previous_end, end), rules | {rule_name})
+        else:
+            merged.append((start, end, {rule_name}))
     parts = []
     last = 0
-    for start, end, rule_name in spans:
-        if start < last:
-            continue
+    for start, end, rules in merged:
         parts.append(path[last:start])
-        parts.append(f"<redacted:{rule_name}>")
+        parts.append("<redacted:" + "+".join(sorted(rules)) + ">")
         last = end
     parts.append(path[last:])
     locator = "".join(parts)
@@ -259,11 +329,11 @@ class ValueGroups:
     def __init__(self):
         self._groups = {}
 
-    def add(self, rule, value, locator, line):
+    def add(self, rule, value, locator, line, hint=""):
         digest = hashlib.sha256(value.encode("utf-8", "surrogateescape")).hexdigest()[:12]
         group = self._groups.get((rule, digest))
         if group is None:
-            status, hint = classify_value(rule, value)
+            status, hint_text = classify_value(rule, value, hint)
             category, confidence = CATEGORY_CONFIDENCE.get(rule, ("other", "medium"))
             group = {
                 "rule": rule,
@@ -271,7 +341,7 @@ class ValueGroups:
                 "confidence": confidence,
                 "value_sha256_12": digest,
                 "status": status,
-                "hint": hint,
+                "hint": hint_text,
                 "count": 0,
                 "locations": [],
             }
@@ -382,6 +452,19 @@ def _line_starts(text):
     return starts
 
 
+def identifier_before(text, index, limit=32):
+    """The identifier token ending right before ``index`` (used for group hints).
+
+    Hints never remove a candidate; they only tell a reviewer which key name was
+    matched, so ``ariaKey``/``labelKey`` style matches can be triaged instead of
+    being filtered away automatically.
+    """
+    start = index
+    while start > 0 and (text[start - 1].isalnum() or text[start - 1] in "_-"):
+        start -= 1
+    return text[start:index][-limit:]
+
+
 def findings_in_text(text, path, commit="", obj="", groups=None):
     """Return redacted findings for one text; matched values are discarded.
 
@@ -402,7 +485,21 @@ def findings_in_text(text, path, commit="", obj="", groups=None):
                 continue
             line_number = bisect.bisect_right(starts, match.start())
             if groups is not None:
-                groups.add(rule_name, match.group(0), path, line_number)
+                hints = []
+                if rule_name == "credential-url" and is_reserved_host(match.group("host")):
+                    hints.append("reserved-host")
+                if rule_name == "generic-secret":
+                    identifier = (
+                        identifier_before(text, match.start()) + match.group("key")
+                    )
+                    hints.append("key-name:" + identifier.lower())
+                groups.add(
+                    rule_name,
+                    match.group(0),
+                    path,
+                    line_number,
+                    hint=",".join(hint for hint in hints if not hint.endswith(":")),
+                )
             key = (rule_name, line_number)
             if key in reported:
                 continue
@@ -420,14 +517,15 @@ def extract_strings(content, limit):
     return "\n".join(chunks)[:limit]
 
 
-def blob_locations(root, refs):
+def blob_locations(root, revisions):
     """Map every reachable blob to the introducing (commit, path) pairs.
 
     ``git log --raw`` reports each blob once per commit that actually changed
     it, so the union over every commit covers all reachable content without
-    re-reading trees per commit.
+    re-reading trees per commit. Only commit-reachable refs are passed in: a ref
+    that points at a blob or a tree would make ``git log`` fail, and those
+    targets are enumerated separately by :func:`ref_target_blobs`.
     """
-    revisions = [ref.name for ref in refs]
     if not revisions:
         return {}
     completed = _git(
@@ -470,8 +568,63 @@ def blob_locations(root, refs):
     return locations
 
 
-def _read(stream, size, keep=True, chunk=1 << 16):
-    """Read exactly ``size`` bytes; discards them when ``keep`` is False."""
+def peeled_object(root, revision):
+    """Resolve a revision through tag chains to ``(oid, objecttype)``."""
+    completed = _git(root, "rev-parse", "--verify", "--quiet", revision + "^{}", check=False)
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return None, None
+    oid = completed.stdout.decode("ascii", "replace").strip()
+    typed = _git(root, "cat-file", "-t", oid, check=False)
+    if typed.returncode != 0:
+        return oid, None
+    return oid, typed.stdout.decode("utf-8", "replace").strip()
+
+
+def tree_blobs(root, treeish):
+    """Every blob reachable from a tree-ish, as ``(oid, path)`` pairs."""
+    completed = _git(root, "ls-tree", "-r", "-z", treeish)
+    pairs = []
+    for record in completed.stdout.split(b"\0"):
+        if not record.strip():
+            continue
+        meta, _, path = record.partition(b"\t")
+        fields = meta.split()
+        if len(fields) >= 3 and fields[1] == b"blob":
+            pairs.append(
+                (fields[2].decode("ascii", "replace"), path.decode("utf-8", "surrogateescape"))
+            )
+    return pairs
+
+
+def ref_target_blobs(root, refs, issues):
+    """Cover refs whose target is not a commit (tags to blobs or trees).
+
+    A commit walk never reaches these objects, so they would otherwise be
+    counted as covered while nothing was read. Anything that cannot be resolved
+    or enumerated is recorded as a degraded-scan item.
+    """
+    locations = {}
+    for ref in refs:
+        if ref.name.startswith("refs/remotes/") or ref.name == "HEAD":
+            continue
+        if peel_commit(root, ref.name):
+            continue
+        oid, object_type = peeled_object(root, ref.name)
+        if oid is None:
+            issues.add("ref", "unresolvable-ref", ref.name)
+            continue
+        if object_type == "blob":
+            locations.setdefault(oid, set()).add(("", f"<ref:{ref.name}>"))
+        elif object_type == "tree":
+            for blob_oid, path in tree_blobs(root, oid):
+                locations.setdefault(blob_oid, set()).add(("", f"<ref:{ref.name}>/{path}"))
+        elif object_type != "commit":
+            issues.add("ref", f"unsupported-ref-target:{object_type}", ref.name)
+    return locations
+
+
+def _read(stream, size, keep=True, chunk=1 << 16, issues=None, objective=""):
+    """Read exactly ``size`` bytes; a short body is recorded, never ignored."""
     data = bytearray() if keep else None
     remaining = size
     while remaining > 0:
@@ -481,11 +634,48 @@ def _read(stream, size, keep=True, chunk=1 << 16):
         if data is not None:
             data.extend(piece)
         remaining -= len(piece)
+    if remaining > 0 and issues is not None:
+        issues.add("blob", f"short-read missing={remaining} of={size}", objective)
     return bytes(data) if data is not None else b""
 
 
+def read_batch_entry(stream, issues, max_blob_bytes):
+    """Read one ``git cat-file --batch`` record, or ``BATCH_EOF`` at end of stream.
+
+    Returns a dict with ``oid``/``type``/``size``/``content``/``too_large``. Every
+    anomaly (missing object, malformed header, short body, missing record
+    terminator) is recorded on ``issues`` and yields ``content=None`` so the
+    caller cannot mistake it for an empty blob.
+    """
+    header = stream.readline()
+    if not header:
+        return BATCH_EOF
+    parts = header.rstrip(b"\n").split()
+    oid = parts[0].decode("ascii", "replace") if parts else ""
+    if len(parts) == 2 and parts[1] == b"missing":
+        issues.add("object", "missing-object", oid)
+        return {"oid": oid, "type": "missing", "size": 0, "content": None, "too_large": False}
+    if len(parts) < 3 or not parts[2].isdigit():
+        issues.add("object", "malformed-header", oid)
+        return {"oid": oid, "type": "malformed", "size": 0, "content": None, "too_large": False}
+    object_type = parts[1].decode("utf-8", "replace")
+    size = int(parts[2])
+    too_large = object_type == "blob" and size > max_blob_bytes
+    content = _read(stream, size, keep=not too_large, issues=issues, objective=oid)
+    terminator = stream.read(1)
+    if terminator not in (b"", b"\n"):
+        issues.add("object", "missing-record-terminator", oid)
+    return {
+        "oid": oid,
+        "type": object_type,
+        "size": size,
+        "content": content,
+        "too_large": too_large,
+    }
+
+
 def _scan_blob(root, blob_ids, locations, max_blob_bytes, string_limit):
-    """Stream every unique blob once; return findings, groups and counters."""
+    """Stream every unique blob once; return findings, groups, counters, issues."""
     stats = {
         "too_large": 0,
         "binary": 0,
@@ -494,9 +684,14 @@ def _scan_blob(root, blob_ids, locations, max_blob_bytes, string_limit):
         "scanned": 0,
         "binary_bytes": 0,
     }
+    issues = ScanIssues()
     findings = []
     groups = ValueGroups()
     binary_objects = []
+    if not blob_ids:
+        # No reachable blob at all: nothing to stream, and an empty batch input
+        # would otherwise look like a malformed record.
+        return findings, groups, binary_objects, stats, issues
     with tempfile.NamedTemporaryFile("wb", delete=False) as handle:
         handle.write(("\n".join(blob_ids) + "\n").encode("ascii"))
         list_path = Path(handle.name)
@@ -507,27 +702,27 @@ def _scan_blob(root, blob_ids, locations, max_blob_bytes, string_limit):
                 cwd=root,
                 stdin=stdin,
                 stdout=subprocess.PIPE,
+                # stderr is dropped, not captured: a full stderr pipe could block
+                # git, and git's stderr text could carry paths we must not store.
+                stderr=subprocess.DEVNULL,
             )
             try:
                 stream = process.stdout
                 while True:
-                    header = stream.readline()
-                    if not header:
+                    entry = read_batch_entry(stream, issues, max_blob_bytes)
+                    if entry is BATCH_EOF:
                         break
-                    parts = header.rstrip(b"\n").split()
-                    if len(parts) == 2 and parts[1] == b"missing":
+                    if entry["content"] is None:
                         continue
-                    if len(parts) < 3:
+                    if entry["type"] != "blob":
+                        issues.add("object", f"unexpected-object-type:{entry['type']}", entry["oid"])
                         continue
-                    oid, object_type, size = parts[0], parts[1], int(parts[2])
-                    if object_type != b"blob" or size > max_blob_bytes:
-                        stats["too_large"] += object_type == b"blob"
-                        _read(stream, size, keep=False)
-                        stream.read(1)
+                    if entry["too_large"]:
+                        stats["too_large"] += 1
                         continue
-                    content = _read(stream, size)
-                    stream.read(1)
-                    oid_text = oid.decode("ascii", "replace")
+                    content = entry["content"]
+                    size = entry["size"]
+                    oid_text = entry["oid"]
                     if b"\0" in content:
                         stats["binary"] += 1
                         stats["binary_bytes"] += size
@@ -568,37 +763,76 @@ def _scan_blob(root, blob_ids, locations, max_blob_bytes, string_limit):
                                 recorded.add(candidate.key)
                                 findings.append(candidate)
             finally:
-                process.stdout.close()
-                process.wait()
+                stream.close()
+                if process.wait() != 0:
+                    issues.add("object", f"cat-file-exit {process.returncode}")
     finally:
         list_path.unlink(missing_ok=True)
-    return findings, groups, binary_objects, stats
+    return findings, groups, binary_objects, stats, issues
+
+
+def tag_message(root, objectname, issues, refname):
+    """Full message body of an annotated tag object (headers stripped)."""
+    completed = _git(root, "cat-file", "tag", objectname, check=False)
+    if completed.returncode != 0:
+        issues.add("tag", f"cat-file-tag-exit {completed.returncode}", refname)
+        return None
+    _, separator, body = completed.stdout.partition(b"\n\n")
+    return (body if separator else b"").decode("utf-8", "replace").rstrip("\n")
+
+
+def annotated_tags(root, issues):
+    """``(objectname, refname)`` for every annotated tag object."""
+    out = _git(
+        root,
+        "for-each-ref",
+        "--format=%(objecttype)%00%(objectname)%00%(refname)",
+        "refs/tags",
+    ).stdout.decode("utf-8", "replace")
+    tags = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        object_type, _, remainder = line.partition("\0")
+        objectname, _, refname = remainder.partition("\0")
+        if object_type != "tag":
+            continue
+        if not objectname or not refname:
+            issues.add("tag", "malformed-tag-record", refname)
+            continue
+        tags.append((objectname, refname))
+    return tags
 
 
 def scan_history(root, refs, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT):
-    """Scan all reachable content, messages, tag messages, paths and ref names."""
-    locations = blob_locations(root, refs)
-    blob_findings, groups, binary_objects, stats = _scan_blob(
+    """Scan all reachable content, messages, tag objects, paths and ref names."""
+    issues = ScanIssues()
+    commit_refs = [ref.name for ref in refs if peel_commit(root, ref.name)]
+    locations = blob_locations(root, commit_refs)
+    real_paths = set()
+    for pairs in locations.values():
+        real_paths.update(path for _, path in pairs)
+    # Refs whose target is a blob or a tree are unreachable from a commit walk.
+    extra_locations = ref_target_blobs(root, refs, issues)
+    for blob_oid, pairs in extra_locations.items():
+        locations.setdefault(blob_oid, set()).update(pairs)
+
+    blob_findings, groups, binary_objects, stats, blob_issues = _scan_blob(
         root, sorted(locations), locations, max_blob_bytes, string_limit
     )
+    issues.extend(blob_issues)
     findings = list(blob_findings)
 
     # Paths themselves can carry a leaked token or a personal absolute path;
     # the stored locator masks any match so the report never echoes a filename.
-    seen_paths = set()
-    for pairs in locations.values():
-        for _, path in pairs:
-            if path in seen_paths:
-                continue
-            seen_paths.add(path)
-            locator = redacted_locator(path)
-            findings.extend(findings_in_text(path, locator, "", "<path>", groups))
+    for path in sorted(real_paths):
+        locator = redacted_locator(path)
+        findings.extend(findings_in_text(path, locator, "", "<path>", groups))
 
     # Commit messages (explicit revisions so a detached HEAD is covered too).
-    revisions = [ref.name for ref in refs]
     commit_count = 0
-    if revisions:
-        log = _git(root, "log", "--format=%x01%H%x00%B", *revisions).stdout
+    if commit_refs:
+        log = _git(root, "log", "--format=%x01%H%x00%B", *commit_refs).stdout
         for chunk in log.split(b"\x01"):
             if not chunk.strip():
                 continue
@@ -614,24 +848,14 @@ def scan_history(root, refs, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT):
                 )
             )
 
-    # Annotated tag messages.
-    tags = _git(
-        root,
-        "for-each-ref",
-        "--format=%(objecttype)%00%(objectname)%00%(contents)",
-        "refs/tags",
-    ).stdout.decode("utf-8", "replace")
+    # Annotated tag objects: read the whole object, not the first output line.
     tag_message_count = 0
-    for line in tags.splitlines():
-        if not line.strip():
+    for objectname, refname in annotated_tags(root, issues):
+        message = tag_message(root, objectname, issues, refname)
+        if message is None:
             continue
-        object_type, _, remainder = line.partition("\0")
-        objectname, _, contents = remainder.partition("\0")
-        if object_type == "tag" and contents.strip():
-            tag_message_count += 1
-            findings.extend(
-                findings_in_text(contents, "<tag-message>", "", objectname, groups)
-            )
+        tag_message_count += 1
+        findings.extend(findings_in_text(message, "<tag-message>", "", objectname, groups))
 
     # Ref names are reported through an opaque locator, never verbatim.
     for ref in refs:
@@ -640,9 +864,10 @@ def scan_history(root, refs, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT):
     stats["commits"] = len({sha for ref in refs for sha in _rev_list(root, ref)}) if refs else 0
     stats["commit_messages"] = commit_count
     stats["tag_messages"] = tag_message_count
-    stats["paths"] = len(seen_paths)
+    stats["paths"] = len(real_paths)
     stats["unique_blobs"] = len(locations)
-    return findings, groups, binary_objects, stats
+    stats["non_commit_refs"] = len(extra_locations)
+    return findings, groups, binary_objects, stats, issues
 
 
 def _rev_list(root, ref):
@@ -656,6 +881,7 @@ def scan_worktree(root):
     """Reuse the current-tree gate's file discovery with the combined rules."""
     findings = []
     groups = ValueGroups()
+    issues = ScanIssues()
     for relative_path in BASE._git_paths(root):
         file_path = root / relative_path
         display = relative_path.as_posix()
@@ -665,15 +891,16 @@ def scan_worktree(root):
             continue
         try:
             raw = file_path.read_bytes()
-        except OSError:
+        except OSError as error:
+            # An unreadable file is a coverage gap, never a silent skip.
+            issues.add("worktree", f"read-failed:{type(error).__name__}", locator)
             continue
-        text = ""
         if b"\0" in raw:
             text = extract_strings(raw, DEFAULT_STRING_LIMIT)
         else:
             text = raw.decode("utf-8", "replace")
         findings.extend(findings_in_text(text, locator, "", "<worktree>", groups))
-    return findings, groups
+    return findings, groups, issues
 
 
 def dedupe(findings):
@@ -791,6 +1018,8 @@ def render_markdown(report):
     limits = report["limits"]
     history = report["history"]
     worktree = report["worktree"]
+    degraded = report["degraded"]
+    remote_check = coverage["remote"]
     pending = [
         group
         for group in history["value_groups"]
@@ -813,6 +1042,9 @@ def render_markdown(report):
         f"  已证明为公开示例：{_count(history, 'high', STATUS_PUBLIC_EXAMPLE)} 组。",
         f"- 历史中置信度（通用/凭据 URL）待核查值组：{len(pending)} 组，累计 "
         f"{sum(group['count'] for group in pending)} 处（按唯一 blob/消息去重）；未证明为夹具的一律列在“值分级”中。",
+        f"- 扫描完整性：scan_incomplete={degraded['incomplete']}"
+        f"（未读全项 {len(degraded['items'])}，省略 {degraded['omitted']}）；"
+        "incomplete=true 时不得视为“已覆盖全部内容”。",
         "",
         "## 覆盖范围（coverage）",
         "",
@@ -820,7 +1052,10 @@ def render_markdown(report):
         f"- refs 总数：{coverage['refs_total']}"
         f"（heads={coverage['refs_heads']}, remotes={coverage['refs_remotes']},"
         f" tags={coverage['refs_tags']}, other={coverage['refs_other']}）",
-        f"- remote heads 覆盖：{coverage['remote_heads_present']}；本地 tags 存在：{coverage['tags_present']}",
+        f"- 本地 origin 跟踪 refs：{remote_check['tracking_refs']}"
+        f"；远端覆盖核对：{remote_check['status']}"
+        f"（heads={remote_check['heads']}, tags={remote_check['tags']},"
+        f" 本地缺失={remote_check['absent_locally']}, OID 不一致={remote_check['oid_mismatch']}）",
         f"- HEAD commit：`{coverage['head_commit']}`",
         f"- 可达 commit 数：{coverage['commits']}",
         f"- 唯一可达 blob 数：{coverage['unique_blobs']}"
@@ -828,6 +1063,7 @@ def render_markdown(report):
         f"（{coverage['binary_bytes']} bytes，已做 strings 候选扫描 {coverage['binary_strings_scanned']}），"
         f"超大 {coverage['blobs_too_large']}，LFS 指针 {coverage['blobs_lfs']}）",
         f"- 扫描 commit message 数：{coverage['commit_messages']}；annotated tag message 数：{coverage['tag_messages']}",
+        f"- 非 commit 目标的 ref 数：{coverage['non_commit_refs']}（tag 指向 blob/tree 时按可达对象扫描）",
         f"- 扫描路径数：{coverage['paths']}；扫描 ref 名数：{coverage['refnames']}",
         f"- 扫描耗时：{coverage['duration_seconds']:.2f}s",
     ]
@@ -837,6 +1073,23 @@ def render_markdown(report):
             f"- 公开 PR refs：status={remote['status']}，refs={remote.get('refs', 0)}，"
             f"命中={remote.get('findings', '-')}"
         )
+    lines += [
+        "",
+        "## 扫描完整性（degraded）",
+        "",
+        "以下每一项都表示“这块内容没有被完整读取”，因此本次扫描不能宣称覆盖它。",
+        "",
+    ]
+    if degraded["items"]:
+        lines += ["| surface | detail | object |", "| --- | --- | --- |"]
+        for item in degraded["items"]:
+            lines.append(
+                f"| {item['surface']} | {item['detail']} | {item['object'] or '-'} |"
+            )
+        if degraded["omitted"]:
+            lines.append(f"\n_另有 {degraded['omitted']} 项未列出（上限 {ScanIssues.MAX_ITEMS}）。_")
+    else:
+        lines.append("_本次没有未读全项（不代表内容干净）。_")
     lines += [
         "",
         "## 限制（limits）",
@@ -873,13 +1126,19 @@ def render_markdown(report):
     if remote and remote.get("status") == "scanned":
         lines += [
             "",
-            "## 公开 PR refs 值分级（汇总，明细见 JSON）",
+            "## 公开 PR refs 值分级（汇总）",
             "",
             "| rule | status | value groups | occurrences |",
             "| --- | --- | --- | --- |",
         ]
         for rule, status, entry in _status_rollup(remote.get("value_groups", [])):
             lines.append(f"| {rule} | {status} | {entry['groups']} | {entry['occurrences']} |")
+        lines += [
+            "",
+            "## 公开 PR refs findings（明细）",
+            "",
+            _table(remote.get("findings_detail", [])),
+        ]
     lines += [
         "",
         "## 当前树 findings",
@@ -895,6 +1154,7 @@ def render_markdown(report):
         "- 逐项核查“值分级”中 status=pending-review 的组；确认是真实凭据才轮换，并在授权后清理历史；",
         "  确认是夹具则记录理由，不能因为文件在测试目录就默认安全。",
         "- personal-data-exposure / environment-identifier 组不是凭据，但属信息暴露，是否清理历史需授权。",
+        "- 若扫描完整性为 incomplete，先处理 degraded 明细再采信覆盖范围。",
         "- 本工具只读且不上传：不推送代码、不联网校验密钥。",
     ]
     return "\n".join(lines) + "\n"
@@ -909,7 +1169,7 @@ def _count(section, confidence, status):
     )
 
 
-def coverage_stats(root, refs, stats, duration):
+def coverage_stats(root, refs, stats, duration, remote):
     heads = [ref for ref in refs if ref.name.startswith("refs/heads/")]
     remotes = [ref for ref in refs if ref.name.startswith("refs/remotes/")]
     tags = [ref for ref in refs if ref.name.startswith("refs/tags/")]
@@ -918,7 +1178,6 @@ def coverage_stats(root, refs, stats, duration):
         for ref in refs
         if not ref.name.startswith(("refs/heads/", "refs/remotes/", "refs/tags/"))
     ]
-    remote_names = {ref.name for ref in remotes}
     return {
         "shallow": is_shallow(root),
         "refs_total": len(refs),
@@ -926,10 +1185,7 @@ def coverage_stats(root, refs, stats, duration):
         "refs_remotes": len(remotes),
         "refs_tags": len(tags),
         "refs_other": len(other),
-        "remote_heads_present": any(
-            name in remote_names
-            for name in ("refs/remotes/origin/main", "refs/remotes/origin/dev")
-        ),
+        "remote": remote,
         "tags_present": bool(tags),
         "head_commit": peel_commit(root, "HEAD") or "",
         "commits": stats["commits"],
@@ -942,26 +1198,75 @@ def coverage_stats(root, refs, stats, duration):
         "blobs_lfs": stats["lfs"],
         "commit_messages": stats["commit_messages"],
         "tag_messages": stats["tag_messages"],
+        "non_commit_refs": stats["non_commit_refs"],
         "paths": stats["paths"],
         "refnames": len(refs),
         "duration_seconds": duration,
     }
 
 
+def remote_coverage(root, refs):
+    """Compare local tracking refs with the remote's advertised OIDs.
+
+    "some remote-tracking ref exists" is not a coverage claim. The remote is
+    asked for its exact heads/tags and every advertised ref is compared with the
+    local object id; anything the local repository cannot see, or any failure to
+    ask, is reported instead of being presented as full coverage. The URL itself
+    never enters the report: the remote is only ever labelled ``origin``.
+    """
+    result = {
+        "label": "origin",
+        "tracking_refs": sum(
+            1 for ref in refs if ref.name.startswith("refs/remotes/origin/")
+        ),
+        "status": "no-remote",
+        "heads": 0,
+        "tags": 0,
+        "absent_locally": 0,
+        "oid_mismatch": 0,
+    }
+    listed = _git(root, "remote", "get-url", "origin", check=False)
+    if listed.returncode != 0 or not listed.stdout.strip():
+        return result
+    advertised = _git(
+        root, "ls-remote", "--refs", "origin", "refs/heads/*", "refs/tags/*", check=False
+    )
+    if advertised.returncode != 0:
+        result["status"] = "ls-remote-failed"
+        return result
+    local = {}
+    for ref in refs:
+        if ref.name.startswith("refs/remotes/origin/"):
+            local["refs/heads/" + ref.name[len("refs/remotes/origin/") :]] = ref.objectname
+        elif ref.name.startswith("refs/tags/"):
+            local[ref.name] = ref.objectname
+    for line in advertised.stdout.decode("utf-8", "replace").splitlines():
+        fields = line.split("\t")
+        if len(fields) != 2:
+            continue
+        oid, name = fields[0].strip(), fields[1].strip()
+        if not oid or not name:
+            continue
+        result["heads" if name.startswith("refs/heads/") else "tags"] += 1
+        known = local.get(name)
+        if known is None:
+            result["absent_locally"] += 1
+        elif known != oid:
+            result["oid_mismatch"] += 1
+    result["status"] = (
+        "verified" if not (result["absent_locally"] or result["oid_mismatch"]) else "mismatch"
+    )
+    return result
+
+
 BOUNDARIES = (
     "reflog 条目（`git reflog`）与未写入 refs 的悬空对象不在可达 refs 内，本次不扫描。",
     "远端 Pull Request refs 需显式开启 `--remote-pr`；未开启时 `refs/pull/*` 不在本报告的本地 refs 内。",
     "Git submodule 的内容不在父仓对象库里，本次只扫描 gitlink 指针本身。",
-    "已 fetch 的 refs 之外的远端分支不可见；覆盖以本次 refs 清单为准。",
+    "已 fetch 的 refs 之外的远端分支不可见；远端覆盖由 `ls-remote` OID 核对给出，核对失败一律记为 incomplete。",
     "二进制 blob 只做 ASCII/UTF-16 字符串候选扫描，不等价于覆盖其全部内容。",
+    "报告只以 `origin` 标签指代远端，不写入远端 URL（避免 query token 与本机路径进入报告）。",
 )
-
-
-def redact_url(url):
-    """Strip any userinfo (http or scp-like) before a URL can reach a report."""
-    if "://" in url:
-        return re.sub(r"://[^/@\s]*@", "://***@", url)
-    return re.sub(r"^[^@/\s]+@", "***@", url)
 
 
 def scan_remote_pr_refs(root, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT):
@@ -969,25 +1274,27 @@ def scan_remote_pr_refs(root, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT)
 
     Only OIDs are read from the remote; when PR refs exist they are fetched into
     an isolated temporary bare repository under its own ``refs/pull/*``
-    namespace, so the audited repository's refs are never modified.
+    namespace, so the audited repository's refs are never modified. The report
+    carries the per-finding rows, not just group counts, so the caller can gate
+    on the same evidence it would get from the local history.
     """
     listed = _git(root, "remote", "get-url", "origin", check=False)
-    url = listed.stdout.decode("utf-8", "replace").strip() if listed.returncode == 0 else ""
-    if not url:
-        return {"status": "no-origin"}
-    display = redact_url(url)
+    if listed.returncode != 0 or not listed.stdout.strip():
+        return {"status": "no-origin", "remote": "origin"}
+    # The URL is only used to talk to git here; it is never stored or printed.
+    url = listed.stdout.decode("utf-8", "replace").strip()
     remote = _git(
-        root, "ls-remote", "--refs", url, "refs/pull/*/head", "refs/pull/*/merge", check=False
+        root, "ls-remote", "--refs", "origin", "refs/pull/*/head", "refs/pull/*/merge", check=False
     )
     if remote.returncode != 0:
-        return {"status": "ls-remote-failed", "url": display}
+        return {"status": "ls-remote-failed", "remote": "origin"}
     refs = [
         line.split("\t", 1)[1]
         for line in remote.stdout.decode("utf-8", "replace").splitlines()
         if line.strip()
     ]
     if not refs:
-        return {"status": "none", "url": display, "refs": 0}
+        return {"status": "none", "remote": "origin", "refs": 0}
     workspace = Path(tempfile.mkdtemp(prefix="kk-studio-pr-refs-"))
     try:
         bare = workspace / "pr.git"
@@ -1010,17 +1317,20 @@ def scan_remote_pr_refs(root, max_blob_bytes, string_limit=DEFAULT_STRING_LIMIT)
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=root,
         )
         if fetched.returncode != 0:
-            return {"status": "fetch-failed", "url": display, "refs": len(refs)}
+            return {"status": "fetch-failed", "remote": "origin", "refs": len(refs)}
         sub_report = run(bare, max_blob_bytes, include_worktree=False, string_limit=string_limit)
         return {
             "status": "scanned",
-            "url": display,
+            "remote": "origin",
             "refs": len(refs),
             "findings": len(sub_report["history"]["findings"]),
+            "findings_detail": sub_report["history"]["findings"],
             "coverage": sub_report["coverage"],
             "value_groups": sub_report["history"]["value_groups"],
+            "degraded": sub_report["degraded"],
         }
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
@@ -1033,6 +1343,8 @@ def run(
     fetch=False,
     string_limit=DEFAULT_STRING_LIMIT,
 ):
+    if max_blob_bytes < 0 or string_limit < 0:
+        raise ValueError("blob byte and string limits must not be negative")
     root = Path(root).resolve()
     fetch_result = None
     if fetch:
@@ -1042,16 +1354,23 @@ def run(
             sys.stderr.write("git-fetch-failed\n")
     start = time.time()
     refs = list_refs(root)
-    history_findings, history_groups, binary_objects, stats = scan_history(
+    history_findings, history_groups, binary_objects, stats, history_issues = scan_history(
         root, refs, max_blob_bytes, string_limit
     )
     if include_worktree:
-        work_findings, work_groups = scan_worktree(root)
+        work_findings, work_groups, work_issues = scan_worktree(root)
         worktree = (work_findings, work_groups.render())
     else:
         worktree = ([], [])
+        work_issues = ScanIssues()
+    remote = remote_coverage(root, refs)
     duration = time.time() - start
-    coverage = coverage_stats(root, refs, stats, duration)
+    issues = ScanIssues()
+    issues.extend(history_issues)
+    issues.extend(work_issues)
+    if remote["status"] in {"ls-remote-failed", "mismatch"}:
+        issues.add("remote", "remote-coverage:" + remote["status"])
+    coverage = coverage_stats(root, refs, stats, duration, remote)
     if fetch_result is not None:
         coverage["fetch"] = fetch_result
     limits = {
@@ -1064,11 +1383,36 @@ def run(
         "coverage": coverage,
         "limits": limits,
         "boundaries": list(BOUNDARIES),
+        "degraded": issues.as_dict(),
         "worktree": _section(worktree[0], worktree[1]),
         "history": _section(history_findings, history_groups.render()),
         "binary_objects": binary_objects[:MAX_BINARY_OBJECTS],
         "binary_objects_truncated": len(binary_objects) > MAX_BINARY_OBJECTS,
     }
+
+
+def high_confidence_findings(report):
+    """Every high-confidence finding row the report holds, across all surfaces."""
+    rows = list(report["history"]["findings"]) + list(report["worktree"]["findings"])
+    remote = report.get("remote_pr_refs") or {}
+    rows.extend(remote.get("findings_detail") or [])
+    return [row for row in rows if is_high(row["rule"])]
+
+
+def mark_remote_pr_degraded(report):
+    """Record a failed PR audit as a degraded item instead of a silent success."""
+    remote = report.get("remote_pr_refs") or {}
+    if remote.get("status") in {"ls-remote-failed", "fetch-failed"}:
+        report["degraded"]["items"].append(
+            {"surface": "remote-pr", "detail": "status:" + remote["status"], "object": "origin"}
+        )
+        report["degraded"]["incomplete"] = True
+    nested = remote.get("degraded")
+    if nested and nested.get("incomplete"):
+        report["degraded"]["items"].append(
+            {"surface": "remote-pr", "detail": "nested-scan-incomplete", "object": "origin"}
+        )
+        report["degraded"]["incomplete"] = True
 
 
 def main(argv=None):
@@ -1088,6 +1432,10 @@ def main(argv=None):
     parser.add_argument("--fail-on-high", action="store_true", help="exit 1 on high-confidence hits")
     args = parser.parse_args(argv)
 
+    if args.max_blob_bytes < 0 or args.string_limit < 0:
+        sys.stderr.write("invalid-arguments: limits must not be negative\n")
+        return 2
+
     try:
         report = run(
             args.root,
@@ -1100,7 +1448,8 @@ def main(argv=None):
             report["remote_pr_refs"] = scan_remote_pr_refs(
                 args.root, args.max_blob_bytes, args.string_limit
             )
-    except (OSError, subprocess.CalledProcessError) as error:
+            mark_remote_pr_degraded(report)
+    except (OSError, subprocess.CalledProcessError, ValueError) as error:
         sys.stderr.write(f"scan-error {type(error).__name__}\n")
         return 2
 
@@ -1120,10 +1469,18 @@ def main(argv=None):
     )
     if report.get("remote_pr_refs"):
         print("remote_pr_refs=" + json.dumps(report["remote_pr_refs"].get("status")))
-    if args.fail_on_high and any(
-        is_high(finding["rule"]) for finding in report["history"]["findings"]
-    ):
+    high = high_confidence_findings(report)
+    print(f"high_confidence_findings={len(high)}")
+    incomplete = report["degraded"]["incomplete"]
+    if incomplete:
+        sys.stderr.write(
+            f"scan-incomplete items={len(report['degraded']['items'])}"
+            f" omitted={report['degraded']['omitted']}\n"
+        )
+    if args.fail_on_high and high:
         return 1
+    if incomplete:
+        return 3
     return 0
 
 

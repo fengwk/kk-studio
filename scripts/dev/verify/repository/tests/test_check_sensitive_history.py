@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -142,17 +144,87 @@ class TestHistoryScannerRules(unittest.TestCase):
                 self.assertIn(rule, [finding.rule for finding in findings])
                 self.assertNotIn(value, render(findings))
 
-    def test_allowlists_reserved_hosts_and_fixture_users(self):
-        # Intent: only shapes that cannot be a real secret may be skipped.
-        quiet = "\n".join(
-            [
-                "https://user" + ":" + "password" + "@example.com/mcp",
-                "https://user" + ":" + "pw" + "@127.0.0.1:15432/db",
-                "/home/" + "dev",
-                "/Users/" + "kkdaemon",
-            ]
-        )
+    def test_allowlists_only_fixture_personal_path_users(self):
+        # Intent: only the CI gate's fixture user names are skipped, and only for
+        # personal paths; every other shape stays a candidate.
+        quiet = "\n".join(["/home/" + "dev", "/Users/" + "kkdaemon"])
         self.assertEqual([], MODULE.findings_in_text(quiet, "fixture.txt"))
+
+    def test_reserved_host_credentials_are_reported_with_a_hint(self):
+        # Intent: a password on localhost/example is still a candidate; the host
+        # may only downgrade it to a hint, never remove the finding.
+        samples = [
+            "https://user" + ":" + "password" + "@example.com/mcp",
+            "https://user" + ":" + "pw" + "@127.0.0.1:15432/db",
+        ]
+        for sample in samples:
+            with self.subTest(sample=sample.split("@")[1]):
+                groups = MODULE.ValueGroups()
+                findings = MODULE.findings_in_text(sample, "fixture.txt", groups=groups)
+                self.assertIn("credential-url", [finding.rule for finding in findings])
+                rendered = groups.render()
+                self.assertEqual(["credential-url"], [g["rule"] for g in rendered])
+                self.assertEqual([MODULE.STATUS_PENDING], [g["status"] for g in rendered])
+                self.assertIn("reserved-host", rendered[0]["hint"])
+                self.assertNotIn(sample, render(findings))
+
+    def test_quoted_and_camel_case_keys_are_matched(self):
+        # Intent: ``"apiKey": "..."`` (closing quote before the colon) and
+        # camelCase tails (``sensitiveKey``) are exactly the shapes that used to
+        # escape the generic rule, so each one must produce a candidate.
+        samples = [
+            '{"apiKey": ' + '"abcdef0123456789abcdef"}',
+            '{\'apiKey\': ' + '\'abcdef0123456789abcdef\'}',
+            "sensitiveKey = " + '"abcdef0123456789abcdef";',
+            '{"clientSecret":"abcdef0123456789abcdef"}',
+            "accessToken=" + "abcdef0123456789abcdef",
+            "refreshToken: " + "abcdef0123456789abcdef",
+        ]
+        for sample in samples:
+            with self.subTest(sample=sample[:20]):
+                findings = MODULE.findings_in_text(sample, "fixture.txt")
+                self.assertIn("generic-secret", [finding.rule for finding in findings])
+                self.assertNotIn("abcdef0123456789abcdef", render(findings))
+
+    def test_key_separator_never_spans_a_line_break(self):
+        # Intent: a key name that ends a line used to be glued to the next line
+        # and reported as a bogus "value"; the separator must stay on one line so
+        # real assignments are still matched while cross-line noise is dropped.
+        cross_line = "MY_API_KEY=\n  internalSchemaIdentifier9999\n"
+        self.assertEqual([], [f.rule for f in MODULE.findings_in_text(cross_line, "fixture.txt")])
+        assignment = "MY_API_KEY=internalSchemaIdentifier9999\n"
+        self.assertIn("generic-secret", [f.rule for f in MODULE.findings_in_text(assignment, "fixture.txt")])
+
+    def test_generic_secret_group_hint_names_the_key(self):
+        # Intent: a reviewer must be able to triage camelCase matches such as
+        # ``ariaKey`` by the key name recorded in the hint, never by the value.
+        groups = MODULE.ValueGroups()
+        MODULE.findings_in_text(
+            "sensitiveKey = " + '"abcdef0123456789abcdef";', "fixture.txt", groups=groups
+        )
+        rendered = groups.render()
+        self.assertIn("key-name:sensitivekey", rendered[0]["hint"])
+        self.assertNotIn("abcdef0123456789abcdef", json.dumps(rendered))
+
+    def test_overlapping_locator_matches_are_masked_as_union(self):
+        # Intent: when two rules overlap, the tail of the dropped span must not
+        # stay visible in a stored location.
+        path = "aaaa" + "SECRET" + "token" + "9999"
+        original = MODULE.ALL_RULES
+        MODULE._LOCATOR_CACHE.clear()
+        MODULE.ALL_RULES = (
+            ("synthetic-a", re.compile("SECRETtoken")),
+            ("synthetic-b", re.compile("token9999")),
+        )
+        try:
+            locator = MODULE.redacted_locator(path)
+        finally:
+            MODULE.ALL_RULES = original
+            MODULE._LOCATOR_CACHE.clear()
+        self.assertNotIn("SECRETtoken", locator)
+        self.assertNotIn("token9999", locator)
+        self.assertNotIn("9999", locator)
+        self.assertIn("<redacted:synthetic-a+synthetic-b>", locator)
 
     def test_detects_windows_and_wsl_personal_paths(self):
         # Intent: non-Unix personal paths are covered, not only "/home".
@@ -239,6 +311,16 @@ class TestHistoryScanning(unittest.TestCase):
             paths = {f["path"] for f in report["history"]["findings"]}
             self.assertIn("<commit-message>", paths)
             self.assertIn("<tag-message>", paths)
+
+    def test_empty_repository_is_not_reported_as_degraded(self):
+        # Intent: no reachable object is a complete (empty) scan; an empty batch
+        # input must not be mistaken for a malformed record.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+
+            report = self._scan(directory)
+            self.assertEqual([], report["history"]["findings"])
+            self.assertFalse(report["degraded"]["incomplete"])
 
     def test_dedupes_shared_blob_across_paths(self):
         # Intent: identical content committed twice is one object, attributed to
@@ -341,6 +423,60 @@ class TestHistoryScannerCli(unittest.TestCase):
                 json_path.unlink(missing_ok=True)
                 markdown_path.unlink(missing_ok=True)
 
+    def _run_cli(self, root, *extra):
+        return subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--root", str(root), *extra],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_cli_fails_on_high_from_the_worktree_only(self):
+        # Intent: the gate must cover the current tree, not only the history.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init_repository(root)
+            write_and_commit(root, {"clean.txt": "x\n"}, "clean")
+            (root / "untracked.txt").write_text("key=" + sample_token() + "\n", encoding="utf-8")
+
+            completed = self._run_cli(root, "--fail-on-high")
+            self.assertEqual(1, completed.returncode)
+            self.assertNotIn(sample_token(), completed.stdout + completed.stderr)
+
+    def test_cli_fails_on_high_from_remote_pr_refs_only(self):
+        # Intent: a PR-only secret must fail the gate as well; the PR rows are
+        # the evidence, not just a count.
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "key=" + sample_token())
+
+            completed = self._run_cli(consumer, "--remote-pr", "--fail-on-high")
+            self.assertEqual(1, completed.returncode)
+            self.assertIn("remote_pr_refs=", completed.stdout)
+            self.assertNotIn(sample_token(), completed.stdout + completed.stderr)
+
+    def test_cli_reports_incomplete_scan_instead_of_success(self):
+        # Intent: an unverifiable remote must not be reported as a clean exit.
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "clean", pr_ref=None)
+            git(consumer, "remote", "set-url", "origin", str(Path(directory) / "missing.git"))
+
+            completed = self._run_cli(consumer)
+            self.assertEqual(3, completed.returncode)
+            self.assertIn("scan-incomplete", completed.stderr)
+
+    def test_cli_rejects_negative_limits(self):
+        # Intent: a negative limit is a caller error, never a silent full scan.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init_repository(root)
+            write_and_commit(root, {"a.txt": "x\n"}, "a")
+
+            completed = self._run_cli(root, "--max-blob-bytes", "-1")
+            self.assertEqual(2, completed.returncode)
+            self.assertIn("invalid-arguments", completed.stderr)
+            with self.assertRaises(ValueError):
+                MODULE.run(root, -1)
+
 
 class TestRemotePrRefs(unittest.TestCase):
     """Public PR refs must be audited in isolation, or their absence recorded."""
@@ -366,15 +502,257 @@ class TestRemotePrRefs(unittest.TestCase):
             self.assertEqual("none", result["status"])
             self.assertEqual(0, result["refs"])
 
-    def test_remote_url_userinfo_is_redacted(self):
+    def test_report_never_carries_the_remote_url(self):
+        # Intent: a remote URL can embed a query token, userinfo or a local
+        # filesystem path, so the report may only ever say "origin".
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "clean", pr_ref=None)
+            result = MODULE.scan_remote_pr_refs(consumer, MODULE.DEFAULT_MAX_BLOB_BYTES)
+            self.assertEqual("origin", result["remote"])
+            payload = json.dumps(result, ensure_ascii=False)
+            self.assertNotIn(str(Path(directory)), payload)
+            self.assertNotIn("origin.git", payload)
+
+            git(
+                consumer,
+                "remote",
+                "set-url",
+                "origin",
+                "https://user" + ":" + "password"
+                + "@private.invalid/owner/repo.git?token=querytokenvalue",
+            )
+            covered = MODULE.remote_coverage(Path(consumer), MODULE.list_refs(Path(consumer)))
+            payload = json.dumps(covered, ensure_ascii=False)
+            for leaked in ("private.invalid", "password", "querytokenvalue", "user"):
+                self.assertNotIn(leaked, payload)
+            self.assertEqual("ls-remote-failed", covered["status"])
+            self.assertEqual("origin", covered["label"])
+
+
+class TestBatchProtocolAnomalies(unittest.TestCase):
+    """A read that cannot complete must be recorded, never silently accepted."""
+
+    def test_valid_entry_is_parsed(self):
+        # Intent: the happy path still returns the body and no degraded item.
+        stream = io.BytesIO(b"a" * 40 + b" blob 5\nhello\n")
+        issues = MODULE.ScanIssues()
+        entry = MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES)
+        self.assertEqual(b"hello", entry["content"])
+        self.assertEqual([], issues.items)
+        self.assertIs(MODULE.BATCH_EOF, MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES))
+
+    def test_missing_object_is_recorded(self):
+        # Intent: an object the refs point at but the object database lacks is a
+        # coverage gap.
+        stream = io.BytesIO(b"b" * 40 + b" missing\n")
+        issues = MODULE.ScanIssues()
+        entry = MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES)
+        self.assertIsNone(entry["content"])
+        self.assertEqual(["missing-object"], [item["detail"] for item in issues.items])
+
+    def test_malformed_header_is_recorded(self):
+        # Intent: an unparsable header must not be skipped as if it were empty.
+        stream = io.BytesIO(b"not-a-batch-header\n")
+        issues = MODULE.ScanIssues()
+        entry = MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES)
+        self.assertIsNone(entry["content"])
+        self.assertEqual(["malformed-header"], [item["detail"] for item in issues.items])
+
+    def test_short_body_is_recorded(self):
+        # Intent: a truncated body yields partial content plus an explicit
+        # short-read item, so the caller cannot treat it as a complete blob.
+        stream = io.BytesIO(b"c" * 40 + b" blob 20\nshort")
+        issues = MODULE.ScanIssues()
+        entry = MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES)
+        self.assertEqual(b"short", entry["content"])
         self.assertEqual(
-            "***@github.com:owner/repo.git",
-            MODULE.redact_url("git@github.com:owner/repo.git"),
+            ["short-read missing=15 of=20"], [item["detail"] for item in issues.items]
         )
+
+    def test_wrong_record_terminator_is_recorded(self):
+        # Intent: a body that is not followed by the batch record terminator
+        # means the stream is out of sync, so the record must be flagged.
+        stream = io.BytesIO(b"d" * 40 + b" blob 3\nabcX")
+        issues = MODULE.ScanIssues()
+        entry = MODULE.read_batch_entry(stream, issues, MODULE.DEFAULT_MAX_BLOB_BYTES)
+        self.assertEqual(b"abc", entry["content"])
         self.assertEqual(
-            "https://***@host/repo.git",
-            MODULE.redact_url("https://user:password@host/repo.git"),
+            ["missing-record-terminator"], [item["detail"] for item in issues.items]
         )
+
+    def test_unknown_object_id_is_recorded_by_the_scan(self):
+        # Intent: the streaming scan reports a missing object instead of
+        # returning a silently smaller result set.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            findings, _, _, stats, issues = MODULE._scan_blob(
+                Path(directory),
+                ["0" * 39 + "1"],
+                {},
+                MODULE.DEFAULT_MAX_BLOB_BYTES,
+                MODULE.DEFAULT_STRING_LIMIT,
+            )
+            self.assertEqual([], findings)
+            self.assertEqual(["missing-object"], [item["detail"] for item in issues.items])
+            self.assertTrue(issues.as_dict()["incomplete"])
+            self.assertEqual(0, stats["scanned"])
+
+
+class TestTagObjectsAndRefTargets(unittest.TestCase):
+    """Tag objects and non-commit ref targets are part of the audited surface."""
+
+    def _scan(self, directory):
+        return MODULE.run(Path(directory))
+
+    def test_multiline_tag_message_is_fully_scanned(self):
+        # Intent: only the first output line used to be scanned, so a secret on
+        # line 2/3 of an annotated tag message escaped the audit.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            git(
+                directory,
+                "-c",
+                "user.email=audit@example.invalid",
+                "-c",
+                "user.name=audit",
+                "tag",
+                "-a",
+                "v-multiline",
+                "-m",
+                "subject line\n\nthird line " + sample_token(),
+            )
+
+            report = self._scan(directory)
+            rows = [f for f in report["history"]["findings"] if f["path"] == "<tag-message>"]
+            self.assertTrue(rows, "the tag message must be scanned beyond its first line")
+            self.assertEqual(3, rows[0]["line"])
+            self.assertNotIn(sample_token(), json.dumps(report))
+
+    def test_tag_pointing_at_a_blob_is_scanned(self):
+        # Intent: a lightweight tag to a blob is unreachable from any commit, so
+        # a commit walk alone would count it as covered without reading it.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            blob = subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"],
+                cwd=directory,
+                input="key=" + sample_token() + "\n",
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            git(directory, "update-ref", "refs/tags/blob-tag", blob)
+
+            report = self._scan(directory)
+            rows = [f for f in report["history"]["findings"] if f["rule"] == "aws-access-key"]
+            self.assertEqual({"<ref:refs/tags/blob-tag>"}, {f["path"] for f in rows})
+            self.assertGreaterEqual(report["coverage"]["non_commit_refs"], 1)
+            self.assertNotIn(sample_token(), json.dumps(report))
+
+    def test_tag_pointing_at_a_tree_is_scanned(self):
+        # Intent: blobs reachable only through a tree-tag are covered too.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            blob = subprocess.run(
+                ["git", "hash-object", "-w", "--stdin"],
+                cwd=directory,
+                input="key=" + sample_token() + "\n",
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            tree = subprocess.run(
+                ["git", "mktree"],
+                cwd=directory,
+                input=f"100644 blob {blob}\tsecret.txt\n",
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            git(directory, "update-ref", "refs/tags/tree-tag", tree)
+
+            report = self._scan(directory)
+            rows = [f for f in report["history"]["findings"] if f["rule"] == "aws-access-key"]
+            self.assertEqual({"<ref:refs/tags/tree-tag>/secret.txt"}, {f["path"] for f in rows})
+
+    def test_unreadable_worktree_file_is_recorded(self):
+        # Intent: an unreadable file is a coverage gap, not a silent skip.
+        if os.geteuid() == 0:
+            self.skipTest("root ignores mode 000")
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            target = Path(directory) / "a.txt"
+            target.chmod(0)
+            try:
+                _, _, issues = MODULE.scan_worktree(Path(directory))
+            finally:
+                target.chmod(0o644)
+            self.assertEqual(
+                ["read-failed:PermissionError"], [item["detail"] for item in issues.items]
+            )
+
+
+class TestRemoteCoverage(unittest.TestCase):
+    """Remote coverage must be an OID comparison, never a presence heuristic."""
+
+    def test_unfetched_remote_head_is_a_mismatch(self):
+        # Intent: a tracking ref that was never fetched cannot be claimed as
+        # coverage of the remote.
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "clean", pr_ref=None)
+            result = MODULE.remote_coverage(Path(consumer), MODULE.list_refs(Path(consumer)))
+            self.assertEqual("mismatch", result["status"])
+            self.assertGreaterEqual(result["absent_locally"], 1)
+            self.assertNotIn(str(Path(directory)), json.dumps(result))
+
+    def test_fetched_remote_head_verifies_by_oid(self):
+        # Intent: only an OID match may be reported as verified coverage.
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "clean", pr_ref=None)
+            git(consumer, "fetch", "--quiet", "origin")
+            result = MODULE.remote_coverage(Path(consumer), MODULE.list_refs(Path(consumer)))
+            self.assertEqual("verified", result["status"])
+            self.assertEqual(1, result["heads"])
+            self.assertEqual(0, result["oid_mismatch"])
+            self.assertEqual(0, result["absent_locally"])
+
+    def test_absent_remote_is_explicit(self):
+        # Intent: "no origin" is recorded as its own state, not as success.
+        with tempfile.TemporaryDirectory() as directory:
+            init_repository(directory)
+            write_and_commit(directory, {"a.txt": "x\n"}, "a")
+            result = MODULE.remote_coverage(Path(directory), MODULE.list_refs(Path(directory)))
+            self.assertEqual("no-remote", result["status"])
+
+    def test_failed_lookup_marks_the_scan_incomplete(self):
+        # Intent: when the remote cannot be queried, the report must say so.
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "clean", pr_ref=None)
+            git(consumer, "remote", "set-url", "origin", str(Path(directory) / "missing.git"))
+            report = MODULE.run(Path(consumer))
+            self.assertEqual("ls-remote-failed", report["coverage"]["remote"]["status"])
+            self.assertTrue(report["degraded"]["incomplete"])
+
+
+class TestPrFindingsDetail(unittest.TestCase):
+    """The PR audit must expose the same evidence as the local history scan."""
+
+    def test_pr_scan_returns_finding_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            consumer = seed_origin(directory, "key=" + sample_token())
+            result = MODULE.scan_remote_pr_refs(consumer, MODULE.DEFAULT_MAX_BLOB_BYTES)
+            self.assertEqual("scanned", result["status"])
+            self.assertTrue(result["findings_detail"], "detail rows are required for gating")
+            self.assertEqual(
+                {"rule", "category", "object", "commit", "path", "line"},
+                set(result["findings_detail"][0]),
+            )
+            self.assertNotIn(sample_token(), json.dumps(result, ensure_ascii=False))
 
 
 class TestCurrentTreeGateStillPasses(unittest.TestCase):
