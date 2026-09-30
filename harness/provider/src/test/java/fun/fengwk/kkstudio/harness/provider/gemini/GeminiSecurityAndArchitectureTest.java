@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -167,7 +168,6 @@ class GeminiSecurityAndArchitectureTest {
           GeminiEndpoints.class,
           GeminiProviderAdapter.class,
           GeminiModelProvider.class,
-          GeminiStreamBridge.class,
           GeminiRequestEncoder.class,
           GeminiStreamAccumulator.class,
           GeminiPrefixHasher.class,
@@ -256,7 +256,7 @@ class GeminiSecurityAndArchitectureTest {
             req,
             desc,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
 
     ProviderException sseEx =
         assertThrows(

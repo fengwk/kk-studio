@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -55,7 +56,7 @@ class OpenAiChatStreamAccumulatorTest {
   private ModelDescriptor modelDesc;
   private ProviderRequest request;
   private List<ProviderStreamEvent> recordedEvents;
-  private OpenAiChatStreamBridge bridge;
+  private ProviderStreamBridge bridge;
 
   @BeforeEach
   void setUp() {
@@ -108,7 +109,7 @@ class OpenAiChatStreamAccumulatorTest {
           @Override
           public void onError(ProviderException error, ProviderStream stream) {}
         };
-    bridge = new OpenAiChatStreamBridge(handler);
+    bridge = new ProviderStreamBridge(handler);
   }
 
   /** 测试意图：[DONE] 后重复终止帧无操作，非空语义帧必须拒绝且不能改写已累积文本。 */

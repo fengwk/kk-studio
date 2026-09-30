@@ -47,6 +47,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 基于真实本地 HttpServer 与 JdkHttpSseTransport 的端到端离线流式集成测试。 */
@@ -267,5 +268,75 @@ class GeminiModelProviderIntegrationTest {
     assertTrue(latch.await(5, TimeUnit.SECONDS));
     assertNotNull(caught.get());
     assertEquals(ProviderErrorKind.AUTHENTICATION, caught.get().kind());
+  }
+
+  /**
+   * 测试意图：上游 should_cancel_streaming 的协议级等价——客户端在首个事件回调里取消真实 HTTP 流后，取消返回即封口；服务端随后
+   * 到达的帧与结束信号都不得再交付任何增量或终态。
+   */
+  @Test
+  void clientCancellationMidStreamStopsDelivery() throws Exception {
+    CountDownLatch clientCancelled = new CountDownLatch(1);
+    CountDownLatch serverAttemptedLateFrames = new CountDownLatch(1);
+    server.createContext(
+        "/models/gemini-2.5-flash:streamGenerateContent",
+        exchange -> {
+          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(
+                "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"first\"}]}}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+
+            // 等服务端确认客户端已取消，再补发后续帧：这些帧必须被静默丢弃
+            clientCancelled.await(5, TimeUnit.SECONDS);
+            os.write(
+                ("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"second\"}]},"
+                        + "\"finishReason\":\"STOP\"}]}\n\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          } catch (Exception ignored) {
+            // 取消导致连接提前断开属于预期行为
+          } finally {
+            serverAttemptedLateFrames.countDown();
+          }
+        });
+
+    List<ProviderStreamEvent> deltas = new CopyOnWriteArrayList<>();
+    AtomicInteger terminals = new AtomicInteger();
+    GeminiModelProvider provider = new GeminiModelProvider(transport, createDescriptor(), "k");
+    ProviderStream stream =
+        provider.stream(
+            createRequest(),
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event, ProviderStream st) {
+                deltas.add(event);
+                st.cancel();
+                clientCancelled.countDown();
+              }
+
+              @Override
+              public void onError(ProviderException error, ProviderStream st) {
+                terminals.incrementAndGet();
+              }
+
+              @Override
+              public void onComplete(ProviderCompletion completion, ProviderStream st) {
+                terminals.incrementAndGet();
+              }
+            });
+
+    assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
+    assertTrue(stream.isCancelled());
+    assertTrue(
+        serverAttemptedLateFrames.await(5, TimeUnit.SECONDS),
+        "server must have attempted to deliver frames after cancel");
+    assertEquals(1, deltas.size());
+    assertEquals("first", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
+    assertEquals(0, terminals.get());
   }
 }

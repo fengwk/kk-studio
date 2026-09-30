@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -95,7 +96,7 @@ class GeminiStreamingDecoderTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
 
     String c1 =
         """
@@ -147,7 +148,7 @@ class GeminiStreamingDecoderTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
 
     String chunk =
         """

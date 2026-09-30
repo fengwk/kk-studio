@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -119,7 +120,7 @@ class GeminiWireTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -153,7 +154,7 @@ class GeminiWireTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -186,7 +187,7 @@ class GeminiWireTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -221,7 +222,7 @@ class GeminiWireTest {
             request(),
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(handler));
+            new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();

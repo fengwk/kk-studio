@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.annotation.Annotation;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,6 +43,34 @@ class ProviderModuleArchitectureTest {
           "com.fasterxml.jackson.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.provider.");
+
+  /** provider 根包内被各协议子包复用的共享组件：不得携带任何被禁止的框架注解或接口。 */
+  private static final List<Class<?>> SHARED_COMPONENT_CLASSES =
+      List.of(
+          ProviderStreamBridge.class,
+          ProviderErrorHelper.class,
+          ProviderProtocolOptionsJson.class,
+          RequestBodySizeGuard.class);
+
+  @Test
+  void sharedComponentsStayFreeOfForbiddenFrameworkTypes() {
+    for (Class<?> clazz : SHARED_COMPONENT_CLASSES) {
+      for (Annotation annotation : clazz.getAnnotations()) {
+        String annotationName = annotation.annotationType().getName();
+        assertNoForbiddenFrameworkType(clazz, "annotation", annotationName);
+      }
+      for (Class<?> iface : clazz.getInterfaces()) {
+        assertNoForbiddenFrameworkType(clazz, "interface", iface.getName());
+      }
+    }
+  }
+
+  private static void assertNoForbiddenFrameworkType(Class<?> clazz, String kind, String typeName) {
+    boolean forbidden =
+        FORBIDDEN_IMPORT_PREFIXES.stream().anyMatch(prefix -> typeName.startsWith(prefix));
+    assertTrue(
+        !forbidden, clazz.getSimpleName() + " must not expose forbidden " + kind + ": " + typeName);
+  }
 
   @Test
   void providerMainSourcesStayWithinAllowedBoundaries() throws IOException {

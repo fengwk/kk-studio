@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -220,7 +221,7 @@ class AnthropicCitationsReplayTest {
   private AnthropicStreamAccumulator accumulator(
       ProviderRequest request, String frozenSourcePrefixHash) {
     return new AnthropicStreamAccumulator(
-        request, descriptor, frozenSourcePrefixHash, new AnthropicStreamBridge(new NoopHandler()));
+        request, descriptor, frozenSourcePrefixHash, new ProviderStreamBridge(new NoopHandler()));
   }
 
   private static JsonNode wire(AnthropicEncodedRequest encoded) throws IOException {

@@ -15790,7 +15790,7 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"GOOGLE_AI_GEMINI_API_KEY\", matches = \".+\")",
           "capability": "Gemini GenerateContent",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamBridgeTest#cancelBeforeBindCancelsUnderlyingImmediatelyUponBind",
+          "targetTest": "fun.fengwk.kkstudio.harness.provider.gemini.GeminiModelProviderIntegrationTest#clientCancellationMidStreamStopsDelivery",
           "fixture": "gemini/fixtures/stream-incremental.sse",
           "validationLayer": "integration",
           "mappingStatus": "PORTED",

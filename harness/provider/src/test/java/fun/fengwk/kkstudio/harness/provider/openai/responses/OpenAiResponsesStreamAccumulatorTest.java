@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -228,8 +229,8 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void rejectsKnownSemanticEventAfterTerminal() throws Exception {
     List<ProviderProtocolEvent> protocolEvents = new ArrayList<>();
-    OpenAiResponsesStreamBridge bridge =
-        new OpenAiResponsesStreamBridge(
+    ProviderStreamBridge bridge =
+        new ProviderStreamBridge(
             new ProviderStreamHandler() {
               @Override
               public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -60,7 +61,7 @@ final class OpenAiChatStreamAccumulator {
   private final ProviderDescriptor descriptor;
   private final OpenAiChatConfiguration config;
   private final String frozenSourcePrefixHash;
-  private final OpenAiChatStreamBridge bridge;
+  private final ProviderStreamBridge bridge;
 
   private String messageId = null;
   private String serviceTier = null;
@@ -99,7 +100,7 @@ final class OpenAiChatStreamAccumulator {
       ProviderDescriptor descriptor,
       OpenAiChatConfiguration config,
       String frozenSourcePrefixHash,
-      OpenAiChatStreamBridge bridge) {
+      ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.config = Objects.requireNonNull(config, "config");

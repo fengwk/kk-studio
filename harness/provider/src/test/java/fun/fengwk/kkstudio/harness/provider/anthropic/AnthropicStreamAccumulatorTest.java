@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -58,7 +59,7 @@ class AnthropicStreamAccumulatorTest {
         public void onError(ProviderException error, ProviderStream stream) {}
       };
 
-  private AnthropicStreamBridge bridge;
+  private ProviderStreamBridge bridge;
   private ProviderDescriptor descriptor;
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -67,7 +68,7 @@ class AnthropicStreamAccumulatorTest {
   @BeforeEach
   void setUp() {
     emittedEvents.clear();
-    bridge = new AnthropicStreamBridge(recordingHandler);
+    bridge = new ProviderStreamBridge(recordingHandler);
     descriptor =
         new ProviderDescriptor(
             "test-anthropic",

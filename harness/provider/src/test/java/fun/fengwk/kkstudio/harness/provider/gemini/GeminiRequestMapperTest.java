@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -224,7 +225,7 @@ class GeminiRequestMapperTest {
             req,
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
     accStop.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}]}");
@@ -236,7 +237,7 @@ class GeminiRequestMapperTest {
             req,
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
     accLength.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"MAX_TOKENS\"}]}");
@@ -248,7 +249,7 @@ class GeminiRequestMapperTest {
             req,
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
     accSafety.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"SAFETY\"}]}");
@@ -260,7 +261,7 @@ class GeminiRequestMapperTest {
             req,
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
     accRecitation.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"RECITATION\"}]}");
@@ -272,7 +273,7 @@ class GeminiRequestMapperTest {
             req,
             descriptor(),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new GeminiStreamBridge(noop));
+            new ProviderStreamBridge(noop));
     accImageRecitation.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"IMAGE_RECITATION\"}]}");
