@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import org.junit.jupiter.api.Test;
 
@@ -27,11 +29,13 @@ import fun.fengwk.kkstudio.project.model.Project;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 目标 Project/Issue 编辑、活动流与请求键幂等契约的集成测试（真实 PostgreSQL Testcontainers）。
@@ -813,6 +817,69 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     } catch (ProjectDuplicateException conflict) {
       return conflict;
     }
+  }
+
+  /**
+   * 同键重放必须在观察到 receipt 之后返回权威当前事实：并发首次提交落在「锁前已读到旧快照」与「锁前 receipt 检查」之间时，重放绝不能把本事务早先读到的旧 Issue
+   * 当作当前版本返回（MyBatis 一级缓存会遮蔽并发已提交的版本推进）。
+   *
+   * <p>本用例用 spy 把第二个请求精确停在锁前 receipt 检查上，等第一个请求完整提交后再放行，因此是与 {@link
+   * #concurrentSameCommentKeyAndPayloadReplaysAfterOwnerLock()} 同一交错窗口的确定性复现，而不是概率竞争。
+   */
+  @Test
+  void concurrentSameCommentKeyReplaysCommittedVersionWhenReceiptArrivesAfterFirstRead()
+      throws Exception {
+    UUID projectId = createProject();
+    Issue issue = createIssue(projectId);
+    String commentKey = key("cmt");
+    ThreadLocal<Boolean> gated = new ThreadLocal<>();
+    CountDownLatch awaitingReceipt = new CountDownLatch(1);
+    CountDownLatch firstCommitted = new CountDownLatch(1);
+    doAnswer(
+            invocation -> {
+              if (Boolean.TRUE.equals(gated.get())) {
+                awaitingReceipt.countDown();
+                assertTrue(firstCommitted.await(10, TimeUnit.SECONDS));
+              }
+              return invocation.callRealMethod();
+            })
+        .when(issueActivityRepository)
+        .findByIdempotencyKey(any(), any());
+    AtomicReference<Issue> replayed = new AtomicReference<>();
+    AtomicReference<Throwable> replayedError = new AtomicReference<>();
+    Thread replayer =
+        new Thread(
+            () -> {
+              gated.set(true);
+              try {
+                replayed.set(issueService.appendComment(issue.getId(), 0L, commentKey, "同一条评论"));
+              } catch (Throwable error) {
+                replayedError.set(error);
+              }
+            });
+    replayer.start();
+    try {
+      assertTrue(awaitingReceipt.await(10, TimeUnit.SECONDS), "第二个请求应停在锁前 receipt 检查");
+      // 第一个请求在读走旧快照之后完整提交：数据库版本与 receipt 一起推进。
+      Issue first = issueService.appendComment(issue.getId(), 0L, commentKey, "同一条评论");
+      assertEquals(1L, first.getVersion());
+      firstCommitted.countDown();
+      replayer.join(15_000);
+    } finally {
+      firstCommitted.countDown();
+      replayer.join(15_000);
+      gated.remove();
+    }
+    assertFalse(replayer.isAlive(), "重放请求不应悬挂");
+    assertNull(replayedError.get());
+    assertEquals(issue.getId(), replayed.get().getId());
+    assertEquals(1L, replayed.get().getVersion(), "重放必须返回已提交的权威版本");
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+            issue.getId(),
+            "comment:" + commentKey));
   }
 
   /** deleteProject 深删除项目及其下属 Issue；过期版本 CAS 冲突。 */

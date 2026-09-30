@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
@@ -79,6 +81,14 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   @Autowired protected ProjectService projectService;
   @Autowired protected IssueService issueService;
   @Autowired protected IssueRunService issueRunService;
+
+  /**
+   * 用于把并发重放用例的第二个请求精确停在锁前 receipt 检查，构造确定性的「旧快照 → 并发提交 → receipt 命中」交错。
+   *
+   * <p>声明在共享基座而不是单个用例类：平台测试的 Spring context 连同其连接池按上下文缓存，只有让本包全部用例继续共用同一上下文，才不会额外占用共享 PostgreSQL
+   * 容器的连接额度。
+   */
+  @MockitoSpyBean protected IssueActivityRepository issueActivityRepository;
 
   /** 插入一个最小合法的 AgentDefinition（含 provider/model）并返回 Agent 自然名称。 */
   protected String createAgent() {
