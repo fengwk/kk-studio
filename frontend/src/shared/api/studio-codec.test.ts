@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import {
+  decodeCanvasConflict,
   decodeCanvasDocument,
   decodeCanvasDocumentList,
+  decodeCanvasFunctionDefinition,
   decodeCanvasPatch,
   decodeCanvasSnapshot,
 } from '@/shared/api/studio-codec'
@@ -51,7 +53,7 @@ function nodePayload() {
     transform: { x: 1, y: 2, width: 100, height: 80 },
     groupId: GROUP_ID,
     resources: [resourcePayload()],
-    function: { modelKey: 'image', configJson: '{}' },
+    function: { name: 'image', args: { prompt: 'hello' } },
     run: {
       nodeId: NODE_ID,
       requestId: REQUEST_ID,
@@ -116,6 +118,7 @@ describe('studio codec', () => {
     expect(snapshot.references[0]).toEqual(referencePayload())
     expect(snapshot.nodes[0]?.resources[0]?.kind).toBe('TEXT')
     expect(snapshot.nodes[0]?.run?.status).toBe('SUCCEEDED')
+    expect(snapshot.nodes[0]?.function).toEqual({ name: 'image', args: { prompt: 'hello' } })
   })
 
   it('decodes a document list and a patch with both REMOVE and UPSERT forms', () => {
@@ -336,5 +339,180 @@ describe('studio codec', () => {
       nodes: [{ op: 'REMOVE' }],
     }
     expect(() => decodeCanvasPatch(payload)).toThrow('node patch.nodeId')
+  })
+
+  describe('canonical acceptance and strict rejection of legacy payloads', () => {
+    it('accepts canonical function definition with full fields', () => {
+      const canonical = {
+        name: 'test-fn',
+        description: 'Test Function',
+        argsSchema: { type: 'object', properties: { count: { type: 'number' } } },
+        outputs: [
+          { kind: 'IMAGE', name: 'main' },
+          { kind: 'VIDEO', name: null },
+        ],
+        referencePolicy: {
+          allowedKinds: ['IMAGE', 'VIDEO'],
+          maxReferences: 2,
+          maxByKind: { IMAGE: 1, VIDEO: 1 },
+        },
+        available: true,
+        unavailableReason: null,
+      }
+      const decoded = decodeCanvasFunctionDefinition(canonical)
+      expect(decoded.name).toBe('test-fn')
+      expect(decoded.description).toBe('Test Function')
+      expect(decoded.argsSchema).toEqual(canonical.argsSchema)
+      expect(decoded.outputs).toEqual([
+        { kind: 'IMAGE', name: 'main' },
+        { kind: 'VIDEO', name: null },
+      ])
+      expect(decoded.referencePolicy).toEqual({
+        allowedKinds: ['IMAGE', 'VIDEO'],
+        maxReferences: 2,
+        maxByKind: { IMAGE: 1, VIDEO: 1 },
+      })
+      expect(decoded.available).toBe(true)
+      expect(decoded.unavailableReason).toBeNull()
+    })
+
+    it('accepts canonical function definition with omitted optional fields using contract defaults', () => {
+      const minimal = {
+        name: 'minimal-fn',
+        description: null,
+        outputs: [],
+        unavailableReason: 'maintenance',
+      }
+      const decoded = decodeCanvasFunctionDefinition(minimal)
+      expect(decoded.name).toBe('minimal-fn')
+      expect(decoded.description).toBeNull()
+      expect(decoded.argsSchema).toEqual({})
+      expect(decoded.outputs).toEqual([])
+      expect(decoded.referencePolicy).toBeNull()
+      expect(decoded.available).toBe(true)
+      expect(decoded.unavailableReason).toBe('maintenance')
+    })
+
+    it('strictly rejects legacy document payload without revision (only version)', () => {
+      const legacyDocument = {
+        id: CANVAS_ID,
+        title: 'Legacy',
+        version: '3',
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      }
+      expect(() => decodeCanvasDocument(legacyDocument)).toThrow('document.revision must be a canonical')
+    })
+
+    it('strictly rejects legacy patch payload without revision (only version)', () => {
+      const legacyPatch = {
+        version: '4',
+        groups: [],
+        nodes: [],
+      }
+      expect(() => decodeCanvasPatch(legacyPatch)).toThrow('patch.revision must be a canonical')
+    })
+
+    it('strictly rejects legacy function definition using outputKind instead of outputs', () => {
+      const legacyFn = {
+        name: 'legacy-fn',
+        description: null,
+        outputKind: 'IMAGE',
+        unavailableReason: null,
+      }
+      expect(() => decodeCanvasFunctionDefinition(legacyFn)).toThrow('function.outputs must be an array')
+    })
+
+    it('strictly rejects legacy node function payload with modelKey/configJson', () => {
+      const legacyNodeFunction = {
+        ...snapshotPayload(),
+        nodes: [{
+          ...nodePayload(),
+          function: { modelKey: 'image', configJson: '{}' },
+        }],
+      }
+      expect(() => decodeCanvasSnapshot(legacyNodeFunction)).toThrow('node.function.name must be a string')
+    })
+
+    it('strictly rejects node function missing args object', () => {
+      const missingArgs = {
+        ...snapshotPayload(),
+        nodes: [{
+          ...nodePayload(),
+          function: { name: 'image' },
+        }],
+      }
+      expect(() => decodeCanvasSnapshot(missingArgs)).toThrow('node.function.args must be an object')
+    })
+  })
+
+  describe('canvas conflict decoding', () => {
+    it('decodes TARGET_MISSING and TARGET_PRESENT conflicts', () => {
+      const missing = decodeCanvasConflict({
+        kind: 'TARGET_MISSING',
+        targetId: NODE_ID,
+        target: 'NODE',
+      })
+      expect(missing).toEqual({ kind: 'TARGET_MISSING', targetId: NODE_ID, target: 'NODE' })
+
+      const present = decodeCanvasConflict({
+        kind: 'TARGET_PRESENT',
+        targetId: GROUP_ID,
+        target: 'GROUP',
+      })
+      expect(present).toEqual({ kind: 'TARGET_PRESENT', targetId: GROUP_ID, target: 'GROUP' })
+    })
+
+    it('decodes STALE_NODE and STALE_GROUP conflicts with current state', () => {
+      const staleNode = decodeCanvasConflict({
+        kind: 'STALE_NODE',
+        nodeId: NODE_ID,
+        group: GROUP_ID,
+        current: nodePayload(),
+      })
+      expect(staleNode.kind).toBe('STALE_NODE')
+      if (staleNode.kind === 'STALE_NODE') {
+        expect(staleNode.nodeId).toBe(NODE_ID)
+        expect(staleNode.current.name).toBe('Node')
+      }
+
+      const staleGroup = decodeCanvasConflict({
+        kind: 'STALE_GROUP',
+        groupId: GROUP_ID,
+        current: groupPayload(),
+      })
+      expect(staleGroup.kind).toBe('STALE_GROUP')
+      if (staleGroup.kind === 'STALE_GROUP') {
+        expect(staleGroup.groupId).toBe(GROUP_ID)
+        expect(staleGroup.current.title).toBe('Group')
+      }
+    })
+
+    it('decodes NODE_RUNNING and NODE_REFERENCED conflicts', () => {
+      const running = decodeCanvasConflict({
+        kind: 'NODE_RUNNING',
+        nodeId: NODE_ID,
+        run: nodePayload().run,
+      })
+      expect(running.kind).toBe('NODE_RUNNING')
+      if (running.kind === 'NODE_RUNNING') {
+        expect(running.run.status).toBe('SUCCEEDED')
+      }
+
+      const referenced = decodeCanvasConflict({
+        kind: 'NODE_REFERENCED',
+        nodeId: NODE_ID,
+        referencingNodeIds: [ID],
+      })
+      expect(referenced).toEqual({
+        kind: 'NODE_REFERENCED',
+        nodeId: NODE_ID,
+        referencingNodeIds: [ID],
+      })
+    })
+
+    it('fails closed for unknown conflict kind', () => {
+      expect(() => decodeCanvasConflict({ kind: 'NON_EXISTENT' })).toThrow('unknown conflict kind: NON_EXISTENT')
+    })
   })
 })

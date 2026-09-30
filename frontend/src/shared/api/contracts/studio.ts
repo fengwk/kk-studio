@@ -8,7 +8,6 @@ import type { CanvasRevision } from '@/shared/api/contracts/base'
 export type UUIDString = `${string}-${string}-${string}-${string}-${string}`
 
 export type CanvasResourceKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT'
-export type CanvasFunctionOutputKind = 'IMAGE' | 'VIDEO'
 export type CanvasFunctionRunStatus = 'READY' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN'
 
 /**

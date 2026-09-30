@@ -52,8 +52,6 @@ export interface CanvasPendingOperation {
   idempotencyKey: UUIDString
   /** 冻结的命令批次（含顺序），重放时原样提交 */
   commands: CanvasCommandDTO[]
-  /** 冻结时的权威快照 revision，作为该操作的编辑基线 */
-  baselineRevision: string
   /** ACK 时需按 operation/generation 精准清除的草稿范围 */
   ack: CanvasDraftAck[]
   /** 单调递增序号：保证重载后严格按原提交顺序重放 */
@@ -283,14 +281,13 @@ export function createCanvasOperationStore(
   }
 }
 
-/** 构造一个尚未落盘的新操作记录；id / 顺序 / 基线由队列在入队瞬间确定。 */
+/** 构造一个尚未落盘的新操作记录；id / 顺序由队列在入队瞬间确定。 */
 export function buildPendingOperation(input: {
   canvasId: UUIDString
   userId: string
   editingSessionId: string
   idempotencyKey: UUIDString
   commands: CanvasCommandDTO[]
-  baselineRevision: string
   ack?: CanvasDraftAck[]
   sequence: number
   createdAt: number
@@ -304,7 +301,6 @@ export function buildPendingOperation(input: {
     sessionKey,
     idempotencyKey: input.idempotencyKey,
     commands: input.commands,
-    baselineRevision: input.baselineRevision,
     ack: input.ack ?? [],
     sequence: input.sequence,
     createdAt: input.createdAt,

@@ -38,7 +38,6 @@ function operation(
     editingSessionId,
     idempotencyKey,
     commands: [renameCommand(name)],
-    baselineRevision: '7',
     ack: [{ nodeId: NODE_ID, field: 'text', generation: sequence }],
     sequence,
     createdAt: 1_700_000_000_000 + sequence,
@@ -68,7 +67,6 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     // 与写入顺序无关，严格按 sequence 升序恢复，保证重放顺序确定。
     expect(loaded.map((item) => item.idempotencyKey)).toEqual(['key-1', 'key-2'])
     expect(loaded[0]?.commands).toEqual([renameCommand('first')])
-    expect(loaded[0]?.baselineRevision).toBe('7')
     expect(loaded[0]?.ack).toEqual([{ nodeId: NODE_ID, field: 'text', generation: 1 }])
   })
 
@@ -218,7 +216,6 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       editingSessionId: 'tab-1',
       idempotencyKey: 'key-later',
       commands: [renameCommand('later')],
-      baselineRevision: '7',
       sequence: 1,
       createdAt: 300,
     })
@@ -228,7 +225,6 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
       editingSessionId: 'tab-1',
       idempotencyKey: 'key-earlier',
       commands: [renameCommand('earlier')],
-      baselineRevision: '7',
       sequence: 1,
       createdAt: 100,
     })
@@ -239,6 +235,34 @@ describe('Canvas 待确认操作持久化 (operation store)', () => {
     const loaded = await loadCanvasOperations(CANVAS_ID, scoped)
     expect(loaded.map((item) => item.createdAt)).toEqual([100, 300])
     expect(loaded[0]?.ack).toEqual([])
+  })
+
+  it('reload 现存带有多余旧字段（如 baselineRevision）的持久记录仍可取回命令并保留身份', async () => {
+    const idbFactory = createMockIDBFactory()
+    const scoped = { idbFactory, userId: 'user-1', editingSessionId: 'tab-1' }
+    // 模拟既有数据库中存储了带有旧多余字段的历史记录
+    const legacyRecord = {
+      id: `user-1:${CANVAS_ID}:tab-1:legacy-key`,
+      userId: 'user-1',
+      canvasId: CANVAS_ID,
+      editingSessionId: 'tab-1',
+      sessionKey: `user-1:${CANVAS_ID}:tab-1`,
+      idempotencyKey: 'legacy-key',
+      commands: [renameCommand('legacy-node')],
+      baselineRevision: '42', // 历史多余字段
+      unknownExtraField: 'ignored-value',
+      ack: [{ nodeId: NODE_ID, field: 'name', generation: 1 }],
+      sequence: 1,
+      createdAt: 1_700_000_000_000,
+    } as unknown as CanvasPendingOperation
+    await saveCanvasOperation(legacyRecord, scoped)
+
+    const loaded = await loadCanvasOperations(CANVAS_ID, scoped)
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0]?.idempotencyKey).toBe('legacy-key')
+    expect(loaded[0]?.commands).toEqual([renameCommand('legacy-node')])
+    expect(loaded[0]?.ack).toEqual([{ nodeId: NODE_ID, field: 'name', generation: 1 }])
+    expect(loaded[0]?.sequence).toBe(1)
   })
 
   it('I10: sessionReloading 期间 operation store 各入口（save/remove/list）全部 fail-closed 拒写，且不污染已持久化的旧 session 记录', async () => {

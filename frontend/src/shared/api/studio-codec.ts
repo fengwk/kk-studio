@@ -151,7 +151,7 @@ export function decodeCanvasDocument(value: unknown): CanvasDocumentDTO {
   return {
     id: requireUuid(candidate.id, 'document.id'),
     title: requireString(candidate.title, 'document.title'),
-    revision: requireCanvasRevision(candidate.revision ?? candidate.version, 'document.revision'),
+    revision: requireCanvasRevision(candidate.revision, 'document.revision'),
     createdAt: requireString(candidate.createdAt, 'document.createdAt'),
     updatedAt: requireString(candidate.updatedAt, 'document.updatedAt'),
   }
@@ -213,16 +213,9 @@ function decodeTransform(value: unknown, path: string): CanvasResourceNodeDTO['t
 
 function decodeFunction(value: unknown): NonNullable<CanvasResourceNodeDTO['function']> {
   const candidate = requireRecord(value, 'node.function')
-  if ('name' in candidate && 'args' in candidate) {
-    return {
-      name: requireString(candidate.name, 'node.function.name'),
-      args: requireRecord(candidate.args, 'node.function.args'),
-    }
-  }
-  // 向后兼容旧模型格式
   return {
-    name: requireString(candidate.modelKey ?? '', 'node.function.name'),
-    args: { configJson: candidate.configJson },
+    name: requireString(candidate.name, 'node.function.name'),
+    args: requireRecord(candidate.args, 'node.function.args'),
   }
 }
 
@@ -289,7 +282,7 @@ function decodeCanvasNodePatch(value: unknown): CanvasNodePatchDTO {
 export function decodeCanvasPatch(value: unknown): CanvasPatchDTO {
   const candidate = requireRecord(value, 'patch')
   return {
-    revision: requireCanvasRevision(candidate.revision ?? candidate.version, 'patch.revision'),
+    revision: requireCanvasRevision(candidate.revision, 'patch.revision'),
     groups: requireArray(candidate.groups, 'patch.groups').map(decodeCanvasGroupPatch),
     nodes: requireArray(candidate.nodes, 'patch.nodes').map(decodeCanvasNodePatch),
   }
@@ -359,14 +352,13 @@ function decodeFunctionOutput(value: unknown, path: string): CanvasFunctionOutpu
 
 export function decodeCanvasFunctionDefinition(value: unknown): CanvasFunctionDefinitionDTO {
   const candidate = requireRecord(value, 'function definition')
-  const outputs = Array.isArray(candidate.outputs)
-    ? candidate.outputs.map((out, idx) => decodeFunctionOutput(out, `function.outputs[${idx}]`))
-    : (candidate.outputKind ? [{ kind: String(candidate.outputKind), name: null }] : [])
   return {
     name: requireString(candidate.name, 'function.name'),
     description: decodeNullableString(candidate.description, 'function.description'),
     argsSchema: requireRecord(candidate.argsSchema ?? {}, 'function.argsSchema'),
-    outputs,
+    outputs: requireArray(candidate.outputs, 'function.outputs').map((out, idx) =>
+      decodeFunctionOutput(out, `function.outputs[${idx}]`),
+    ),
     referencePolicy: candidate.referencePolicy ? decodeReferencePolicy(candidate.referencePolicy) : null,
     available: typeof candidate.available === 'boolean' ? candidate.available : true,
     unavailableReason: decodeNullableString(candidate.unavailableReason, 'function.unavailableReason'),
