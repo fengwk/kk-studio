@@ -28,5 +28,6 @@
   "requestId": null,
   "serviceTier": null,
   "rawUsageJson": "{\n  \"completion_tokens\":20,\n  \"prompt_tokens\":100\n}",
-  "toolCallDiagnostics": []
+  "toolCallDiagnostics": [],
+  "decodeDurationMillis": null
 }
