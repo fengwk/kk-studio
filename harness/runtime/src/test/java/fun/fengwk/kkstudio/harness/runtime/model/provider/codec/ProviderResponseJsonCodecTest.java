@@ -69,11 +69,11 @@ class ProviderResponseJsonCodecTest {
   }
 
   /**
-   * Harness 观测计时是可选严格字段：带计时精确往返（canonical 字段序），旧 durable 行缺失该字段解码为 null 且重编码 与旧 JSON
-   * 逐字一致（不引入版本别名）；负值、非整数与非数字类型在 boundary 拒绝。
+   * Harness 观测计时是 canonical 可空严格字段：字段必须存在，显式 null（不可观测）与带值都精确往返；缺失不被当作旧 durable
+   * 兼容形态接受，负值、非整数与非数字类型在 boundary 拒绝。
    */
   @Test
-  void roundTripsOptionalDecodeDurationAndAcceptsLegacyRows() {
+  void roundTripsNullableDecodeDurationAndRejectsMissingField() {
     ProviderResponse timed = canonicalResponse().withDecodeDurationMillis(1500L);
     ObjectNode expected = canonicalNode();
     expected.put("decodeDurationMillis", 1500);
@@ -83,12 +83,14 @@ class ProviderResponseJsonCodecTest {
     assertEquals(timed, codec.decode(encoded));
     assertEquals(1500L, codec.decode(encoded).decodeDurationMillis());
 
-    // 旧行（无该字段）必须可解码且重编码逐字一致：缺失与 null 同义。
-    String legacy = canonicalNode().toString();
-    ProviderResponse decodedLegacy = codec.decode(legacy);
-    assertNull(decodedLegacy.decodeDurationMillis());
-    assertEquals(legacy, codec.encode(decodedLegacy));
-    assertEquals(legacy, codec.encode(decodedLegacy.withDecodeDurationMillis(null)));
+    // 不可观测计时仍显式占据 canonical 字段位：encode 输出 null，decode 与 null 同义。
+    String untimed = codec.encode(canonicalResponse());
+    assertEquals(canonicalNode().toString(), untimed);
+    assertNull(codec.decode(untimed).decodeDurationMillis());
+    assertNull(codec.decodeNode(canonicalNode()).decodeDurationMillis());
+
+    // 缺失该字段即拒绝：canonical JSON 不再接受旧 durable 行形态。
+    assertRejected(root -> root.remove("decodeDurationMillis"));
 
     assertRejected(root -> root.put("decodeDurationMillis", -1));
     assertRejected(root -> root.put("decodeDurationMillis", 1.5));
@@ -100,11 +102,6 @@ class ProviderResponseJsonCodecTest {
             root.set(
                 "decodeDurationMillis",
                 NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE))));
-
-    // 显式 null 与缺失同义：契约允许旧行与规范化空值并存。
-    ObjectNode explicitNull = canonicalNode();
-    explicitNull.putNull("decodeDurationMillis");
-    assertNull(codec.decodeNode(explicitNull).decodeDurationMillis());
   }
 
   /** nullable metadata 同时支持显式 string 形态，raw usage 也可以是 ordered array。 */

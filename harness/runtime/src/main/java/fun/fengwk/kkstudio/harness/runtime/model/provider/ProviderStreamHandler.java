@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
-import java.util.Objects;
-
 /** Provider 流事件接收器。完成和失败互斥且至多发生一次。 */
 public interface ProviderStreamHandler {
 
@@ -18,16 +16,12 @@ public interface ProviderStreamHandler {
     // 安全默认：只需规范化增量的实现者无需改动。
   }
 
-  /** 接收完整终止响应与可选的 native replay 状态。迁移新主路径。 */
-  default void onComplete(ProviderCompletion completion, ProviderStream stream) {
-    Objects.requireNonNull(completion, "completion");
-    onComplete(completion.response(), stream);
-  }
-
-  /** 接收完整终止响应。旧兼容路径安全默认。 */
-  default void onComplete(ProviderResponse response, ProviderStream stream) {
-    // 安全默认：单向适配终点，未覆盖时不产生循环调用与栈溢出。
-  }
+  /**
+   * 接收完整终止响应与可选的 native replay 状态。
+   *
+   * <p>唯一的成功终态入口：完成事实整体交付，调用方无需也不应再从 response 重建 replay 状态。
+   */
+  void onComplete(ProviderCompletion completion, ProviderStream stream);
 
   /** 接收分类后的不可恢复终止错误。 */
   void onError(ProviderException error, ProviderStream stream);

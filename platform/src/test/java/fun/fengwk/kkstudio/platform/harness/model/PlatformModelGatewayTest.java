@@ -404,15 +404,6 @@ class PlatformModelGatewayTest {
       fixture.startAndActivate();
       fixture.provider.awaitStarted();
 
-      fixture.provider.handler.get().onComplete((ProviderResponse) null, fixture.provider.stream);
-      fixture.listener.awaitTerminal();
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, fixture.listener.failed.get().kind());
-    }
-
-    try (Fixture fixture = new Fixture()) {
-      fixture.startAndActivate();
-      fixture.provider.awaitStarted();
-
       fixture.provider.handler.get().onComplete((ProviderCompletion) null, fixture.provider.stream);
       fixture.listener.awaitTerminal();
       assertEquals(ProviderErrorKind.INVALID_REQUEST, fixture.listener.failed.get().kind());
@@ -1293,7 +1284,7 @@ class PlatformModelGatewayTest {
         throw startFailure;
       }
       if (syncCompleteOnStart) {
-        handler.onComplete(response, stream);
+        handler.onComplete(new ProviderCompletion(response, null), stream);
       }
       return returnNullStream ? null : stream;
     }
@@ -1307,7 +1298,7 @@ class PlatformModelGatewayTest {
     }
 
     private void complete() {
-      handler.get().onComplete(response, stream);
+      complete(new ProviderCompletion(response, null));
     }
 
     private void complete(ProviderCompletion completion) {

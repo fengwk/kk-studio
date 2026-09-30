@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -129,6 +130,10 @@ class ProviderContractTest {
           public void onEvent(ProviderStreamEvent ignoredEvent, ProviderStream ignoredStream) {}
 
           @Override
+          public void onComplete(
+              ProviderCompletion ignoredCompletion, ProviderStream ignoredStream) {}
+
+          @Override
           public void onError(ProviderException error, ProviderStream ignoredStream) {}
         };
     ignoring.onProtocolEvent(event, stream);
@@ -143,6 +148,10 @@ class ProviderContractTest {
           public void onProtocolEvent(ProviderProtocolEvent protocolEvent, ProviderStream ignored) {
             received.add(protocolEvent);
           }
+
+          @Override
+          public void onComplete(
+              ProviderCompletion ignoredCompletion, ProviderStream ignoredStream) {}
 
           @Override
           public void onError(ProviderException error, ProviderStream ignoredStream) {}

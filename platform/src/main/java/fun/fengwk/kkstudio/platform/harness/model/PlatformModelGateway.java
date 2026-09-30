@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -493,15 +492,6 @@ public final class PlatformModelGateway implements ModelGateway {
         return;
       }
       enqueue(new Signal.Complete(completion, stream));
-    }
-
-    @Override
-    public void onComplete(ProviderResponse response, ProviderStream stream) {
-      if (response == null) {
-        enqueue(new Signal.Invalid("provider returned a null response"));
-        return;
-      }
-      onComplete(new ProviderCompletion(response, null), stream);
     }
 
     @Override

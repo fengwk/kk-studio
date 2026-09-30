@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -11,9 +11,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 验证 ProviderStreamHandler 两个 onComplete default 方法的单向适配、安全默认与递归切断。 */
+/**
+ * 验证 ProviderStreamHandler 的唯一成功终态入口 onComplete 完整交付 ProviderCompletion，以及 onProtocolEvent 的默认忽略。
+ */
 class ProviderStreamHandlerTest {
 
   private static final ProviderStream DUMMY_STREAM =
@@ -27,90 +30,57 @@ class ProviderStreamHandlerTest {
         }
       };
 
-  /** 意图：验证未覆盖任何 onComplete 的 handler 在接收 completion 或 response 时绝不发生递归或 StackOverflowError。 */
+  /** 意图：成功终态只有一个入口，必须原样交付 ProviderCompletion（含 native replay），不丢信息也不做二次适配。 */
   @Test
-  void unoverriddenHandlerDoesNotThrowStackOverflowOnEitherOnComplete() {
-    ProviderStreamHandler noopHandler =
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
-        };
-
-    ProviderResponse response = sampleResponse();
-    ProviderCompletion completion = new ProviderCompletion(response, null);
-
-    assertDoesNotThrow(() -> noopHandler.onComplete(completion, DUMMY_STREAM));
-    assertDoesNotThrow(() -> noopHandler.onComplete(response, DUMMY_STREAM));
-  }
-
-  /** 意图：验证旧 handler 仅重写 onComplete(ProviderResponse) 时，新主路径 onComplete(completion) 能正确单向适配。 */
-  @Test
-  void legacyHandlerOverridingResponseReceivesAdaptedCompletion() {
-    AtomicReference<ProviderResponse> captured = new AtomicReference<>();
-    ProviderStreamHandler legacyHandler =
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderResponse response, ProviderStream stream) {
-            captured.set(response);
-          }
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
-        };
-
-    ProviderResponse response = sampleResponse();
-    ProviderCompletion completion = new ProviderCompletion(response, null);
-
-    legacyHandler.onComplete(completion, DUMMY_STREAM);
-    assertEquals(response, captured.get());
-  }
-
-  /** 意图：验证新 handler 重写 onComplete(ProviderCompletion) 时能直接接收完整 completion。 */
-  @Test
-  void modernHandlerOverridingCompletionReceivesFullCompletion() {
+  void completionHandlerReceivesFullCompletionIncludingReplayState() {
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            new ProviderReplayAffinity(ProviderType.OPENAI, "openai", UUID.randomUUID(), "gpt-5"),
+            "0".repeat(64),
+            new ObjectMapper().createObjectNode());
+    ProviderCompletion completion = new ProviderCompletion(sampleResponse(), replayState);
     AtomicReference<ProviderCompletion> captured = new AtomicReference<>();
-    ProviderStreamHandler modernHandler =
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
-            captured.set(completion);
-          }
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
-        };
-
-    ProviderResponse response = sampleResponse();
-    ProviderCompletion completion = new ProviderCompletion(response, null);
-
-    modernHandler.onComplete(completion, DUMMY_STREAM);
-    assertEquals(completion, captured.get());
-  }
-
-  /** 意图：验证 onComplete(null, stream) 抛出显式 NPE，防止静默空指针穿透。 */
-  @Test
-  void requiresNonNullCompletion() {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
           public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
 
           @Override
+          public void onComplete(ProviderCompletion value, ProviderStream stream) {
+            captured.set(value);
+          }
+
+          @Override
           public void onError(ProviderException error, ProviderStream stream) {}
         };
 
-    assertThrows(
-        NullPointerException.class,
-        () -> handler.onComplete((ProviderCompletion) null, DUMMY_STREAM));
+    handler.onComplete(completion, DUMMY_STREAM);
+
+    assertSame(completion, captured.get());
+    assertSame(replayState, captured.get().replayState());
+    assertSame(completion.response(), captured.get().response());
+  }
+
+  /** 意图：只需规范化增量的实现者不覆盖 onProtocolEvent 也能编译并安全忽略原生事件（默认实现无副作用）。 */
+  @Test
+  void defaultProtocolEventIsSafelyIgnored() {
+    ProviderStreamHandler handler =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {}
+        };
+
+    assertDoesNotThrow(
+        () ->
+            handler.onProtocolEvent(
+                new ProviderProtocolEvent("message_delta", "{\"delta\":{}}"), DUMMY_STREAM));
   }
 
   private static ProviderResponse sampleResponse() {
