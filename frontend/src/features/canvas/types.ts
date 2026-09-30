@@ -50,15 +50,18 @@ export interface CanvasNodeCallbacks {
   editTextNode: (node: ResourceNode) => void
 }
 
-export type PromptSegment =
-  | { type: 'TEXT'; text: string }
-  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
+export interface CanvasResourceReference {
+  type: 'resource'
+  nodeId: UUIDString
+  index: number
+}
 
 export interface CanvasFunctionConfig {
-  prompt: {
-    segments: PromptSegment[]
-  }
-  parameters: Record<string, string | number>
+  prompt?: string
+  references: CanvasResourceReference[]
+  parameters: Record<string, unknown>
+  rawArgs?: Record<string, unknown>
+  rawError?: string
 }
 
 export interface PendingFunctionConfig {

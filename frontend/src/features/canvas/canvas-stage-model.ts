@@ -1,5 +1,6 @@
 import type { CanvasSnapshot, Group, ResourceNode } from '@/features/canvas/domain'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
+import { functionSupportsReferences } from '@/features/canvas/generation'
 import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 export type ContextMenuTarget =
@@ -61,13 +62,23 @@ export function isValidResourceConnection(
   snapshot: CanvasSnapshot | null,
   source: string | null | undefined,
   target: string | null | undefined,
+  models?: readonly CanvasFunctionDefinitionDTO[] | null,
 ): boolean {
   if (!snapshot || !source || !target || source === target) {
     return false
   }
   const sourceNode = snapshot.resourceNodes.find((node) => node.id === source)
   const targetNode = snapshot.resourceNodes.find((node) => node.id === target)
-  return Boolean(sourceNode && sourceNode.resources.length > 0 && targetNode?.function)
+  if (!sourceNode || sourceNode.resources.length === 0 || !targetNode?.function) {
+    return false
+  }
+  if (models) {
+    const model = models.find((m) => m.name === targetNode.function?.name)
+    if (model && !functionSupportsReferences(model)) {
+      return false
+    }
+  }
+  return true
 }
 
 /** 右键菜单 overlay 的稳定 key：按 target 类型编码，避免同目标重复挂载。 */

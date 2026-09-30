@@ -10,28 +10,25 @@ import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
 import { generationPanelPosition } from '@/features/canvas/generation-panel-position'
 import {
-  canInsertReference,
+  canAddReference,
   createDefaultFunctionConfig,
+  extractParametersFromDefinition,
   filterConfigReferences,
-  insertReferenceAtCursor,
   parseFunctionConfig,
   referenceCandidates,
   referenceKey,
-  removePromptSegment,
-  updateTextSegment,
-  type PromptCursor,
   type ReferenceCandidate,
 } from '@/features/canvas/generation'
 import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
-import type { CanvasFunctionConfig, PromptSegment, StageMetrics } from '@/features/canvas/types'
+import type { CanvasFunctionConfig, StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { inspectLocalPendingRun } from '@/features/canvas/function-run'
 import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
-import { extractParametersFromDefinition } from '@/features/canvas/generation'
 
 export interface CanvasGenerationPanelAnchor {
   node: CanvasTransformDTO
@@ -60,13 +57,12 @@ export function CanvasGenerationPanel({
       ? parseFunctionConfig(node.function.args, sourceModel)
       : sourceModel
         ? createDefaultFunctionConfig(sourceModel)
-        : { prompt: { segments: [{ type: 'TEXT', text: '' }] }, parameters: {} }
+        : { prompt: '', references: [], parameters: {} }
   ))
-  const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
   const [unknownResolution, setUnknownResolution] = useState<'RESUME' | 'FAILED' | 'CANCELLED'>('RESUME')
   const [verificationText, setVerificationText] = useState('')
   const [showJsonArgs, setShowJsonArgs] = useState(false)
-  const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.parameters, null, 2))
+  const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.rawArgs ?? config.parameters, null, 2))
   const [jsonDirty, setJsonDirty] = useState(false)
   const [jsonError, setJsonError] = useState<string | null>(null)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
@@ -87,17 +83,17 @@ export function CanvasGenerationPanel({
       }
     }
   }, [node.id, snapshot.document.id, runtime.localPendingErrors])
+
   const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
   const panelRef = useRef<HTMLElement | null>(null)
-  const inputRefs = useRef(new Map<number, HTMLInputElement>())
-  const cursorRef = useRef<PromptCursor>({ segmentIndex: 0, offset: 0 })
-  const pendingFocusRef = useRef<PromptCursor | null>(null)
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
+
   // Every local edit gets a monotonic version and semantic source identity.
-  // Matching snapshots acknowledge that version; only genuinely external sources may replace a newer draft.
   const draftVersionRef = useRef(0)
   const dirtyRef = useRef(false)
   const sourceRef = useRef<{ identity: string; modelSignature: string } | null>(null)
   const localSourceVersionsRef = useRef(new Map<string, number>())
+
   const candidates = useMemo(
     () => model ? referenceCandidates(snapshot, node.id, model) : [],
     [model, node.id, snapshot],
@@ -109,11 +105,11 @@ export function CanvasGenerationPanel({
     ])),
     [candidates],
   )
-  const referencedKeys = useMemo(() => new Set(config.prompt.segments
-    .filter((segment): segment is Extract<PromptSegment, { type: 'REFERENCE' }> => (
-      segment.type === 'REFERENCE'
-    ))
-    .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
+  const referencedKeys = useMemo(
+    () => new Set(config.references.map((ref) => referenceKey(ref.nodeId, ref.index))),
+    [config.references],
+  )
+
   const panelPosition = useMemo(() => (
     anchor
       ? (() => {
@@ -129,6 +125,7 @@ export function CanvasGenerationPanel({
       })()
       : null
   ), [anchor, panelSize])
+
   const panelStyle: CSSProperties | undefined = panelPosition ? {
     bottom: 'auto',
     left: panelPosition.left,
@@ -164,30 +161,17 @@ export function CanvasGenerationPanel({
     return () => observer.disconnect()
   }, [])
 
-  useLayoutEffect(() => {
-    const pending = pendingFocusRef.current
-    if (!pending) {
-      return
-    }
-    const input = inputRefs.current.get(pending.segmentIndex)
-    if (!input) {
-      return
-    }
-    input.focus()
-    input.setSelectionRange(pending.offset, pending.offset)
-    cursorRef.current = pending
-    pendingFocusRef.current = null
-  }, [config.prompt.segments])
-
   const sourceConfig = useMemo(() => (
     node.function && sourceModel
       ? parseFunctionConfig(node.function.args, sourceModel)
       : null
   ), [node.function, sourceModel])
+
   const sourceIdentity = node.function && sourceConfig
     ? functionSourceIdentity(node.function.name, sourceConfig)
     : ''
   const sourceModelSignature = sourceModel ? JSON.stringify(sourceModel) : ''
+
   useEffect(() => {
     if (!node.function || !sourceModel || !sourceConfig) {
       return
@@ -217,12 +201,22 @@ export function CanvasGenerationPanel({
       localSourceVersionsRef.current.clear()
     }
     setModelKey(node.function.name)
-    setConfig(sourceConfig)
-    cursorRef.current = { segmentIndex: 0, offset: 0 }
-    dirtyRef.current = false
-    if (!jsonDirty) {
-      setJsonArgsText(JSON.stringify(sourceConfig.parameters, null, 2))
-      setJsonError(null)
+    if (dirtyRef.current) {
+      // 保留正在键入的 prompt，同步更新外部 references/parameters 变更
+      setConfig((current) => ({
+        ...current,
+        rawArgs: current.rawArgs ? (jsonDirty ? current.rawArgs : sourceConfig.rawArgs) : undefined,
+        rawError: sourceConfig.rawError,
+        references: sourceConfig.references,
+        parameters: jsonDirty ? current.parameters : sourceConfig.parameters,
+      }))
+    } else {
+      setConfig(sourceConfig)
+      dirtyRef.current = false
+      if (!jsonDirty) {
+        setJsonArgsText(JSON.stringify(sourceConfig.rawArgs ?? sourceConfig.parameters, null, 2))
+        setJsonError(null)
+      }
     }
   }, [
     jsonDirty,
@@ -238,7 +232,7 @@ export function CanvasGenerationPanel({
       return
     }
     const filtered = filterConfigReferences(config, candidates, model)
-    if (JSON.stringify(filtered.prompt.segments) !== JSON.stringify(config.prompt.segments)) {
+    if (JSON.stringify(filtered.references) !== JSON.stringify(config.references)) {
       updateConfig(filtered)
     }
     // Candidate changes are the only reason for this reconciliation.
@@ -267,44 +261,41 @@ export function CanvasGenerationPanel({
       version,
     )
     if (!jsonDirty) {
-      setJsonArgsText(JSON.stringify(next.parameters, null, 2))
+      setJsonArgsText(JSON.stringify(next.rawArgs ?? next.parameters, null, 2))
       setJsonError(null)
     }
     runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
   }
 
-  function updatePrompt(segments: PromptSegment[]) {
+  function updatePrompt(promptText: string) {
     updateConfig({
       ...config,
-      prompt: { segments },
+      prompt: promptText,
     })
   }
 
-  function insertCandidate(candidate: ReferenceCandidate) {
-    if (!canInsertReference(config.prompt.segments, candidate, candidates, activeModel)) {
-      runtime.setToast(t('canvas.generation.referenceLimit'))
-      return
+  function toggleCandidate(candidate: ReferenceCandidate) {
+    const key = referenceKey(candidate.nodeId, candidate.index)
+    if (referencedKeys.has(key)) {
+      const nextRefs = config.references.filter((ref) => referenceKey(ref.nodeId, ref.index) !== key)
+      updateConfig({ ...config, references: nextRefs })
+    } else {
+      if (!canAddReference(config.references, candidate, candidates, activeModel)) {
+        runtime.setToast(t('canvas.generation.referenceLimit'))
+        return
+      }
+      const nextRefs = [
+        ...config.references,
+        { type: 'resource' as const, nodeId: candidate.nodeId, index: candidate.index },
+      ]
+      updateConfig({ ...config, references: nextRefs })
     }
-    const next = insertReferenceAtCursor(config.prompt.segments, cursorRef.current, candidate)
-    const nextCursor = {
-      segmentIndex: Math.min(cursorRef.current.segmentIndex + 2, next.length - 1),
-      offset: 0,
-    }
-    cursorRef.current = nextCursor
-    pendingFocusRef.current = nextCursor
-    updatePrompt(next)
-    setMentionMenuOpen(false)
   }
 
-  function removeReferenceAt(
-    segmentIndex: number,
-    focus: PromptCursor | null = null,
-  ) {
-    if (focus) {
-      cursorRef.current = focus
-      pendingFocusRef.current = focus
-    }
-    updatePrompt(removePromptSegment(config.prompt.segments, segmentIndex))
+  function removeReference(nodeId: UUIDString, index: number) {
+    const key = referenceKey(nodeId, index)
+    const nextRefs = config.references.filter((ref) => referenceKey(ref.nodeId, ref.index) !== key)
+    updateConfig({ ...config, references: nextRefs })
   }
 
   return (
@@ -347,138 +338,108 @@ export function CanvasGenerationPanel({
         </div>
       </div>
 
-      {candidates.length > 0 ? (
-        <div className="generation-reference-row" aria-label={t('canvas.generation.references')}>
-          {candidates.map((candidate) => (
-            <button
-              key={referenceKey(candidate.nodeId, candidate.index)}
-              type="button"
-              className={`generation-reference ${
-                referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
-                  ? 'referenced'
-                  : ''
-              }`}
-              onClick={() => insertCandidate(candidate)}
-              title={candidate.label}
-              aria-label={t('canvas.generation.referenceInsert', { label: candidate.label })}
-              aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
-            >
-              <CanvasResourceThumbnail resource={candidate.resource} />
-              <span>{candidate.label}</span>
-            </button>
-          ))}
+      {config.rawArgs ? (
+        <div className="generation-raw-editor" style={{ padding: '8px 12px' }}>
+          {config.rawError ? (
+            <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 12, marginBottom: 8 }}>
+              {config.rawError}
+            </div>
+          ) : null}
+          <span className="generation-prompt-label" style={{ marginBottom: 4, display: 'block' }}>完整 JSON 配置</span>
+          <textarea
+            aria-label="参数 JSON"
+            className="generation-json-textarea"
+            style={{ width: '100%', minHeight: 180, fontFamily: 'monospace', fontSize: 12, padding: 8 }}
+            value={jsonArgsText}
+            onChange={(e) => {
+              const text = e.target.value
+              setJsonArgsText(text)
+              setJsonDirty(true)
+              try {
+                const parsed = JSON.parse(text)
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  setJsonError(null)
+                  updateConfig({
+                    ...config,
+                    rawArgs: parsed,
+                    rawError: undefined,
+                  })
+                } else {
+                  setJsonError('参数必须为 JSON 对象')
+                }
+              } catch {
+                setJsonError('JSON 语法错误')
+              }
+            }}
+          />
+          {jsonError ? (
+            <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 4 }}>
+              {jsonError}
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      ) : (
+        <>
+          {candidates.length > 0 ? (
+            <div className="generation-reference-row" aria-label={t('canvas.generation.references')}>
+              {candidates.map((candidate) => (
+                <button
+                  key={referenceKey(candidate.nodeId, candidate.index)}
+                  type="button"
+                  className={`generation-reference ${
+                    referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
+                      ? 'referenced'
+                      : ''
+                  }`}
+                  onClick={() => toggleCandidate(candidate)}
+                  title={candidate.label}
+                  aria-label={t('canvas.generation.referenceInsert', { label: candidate.label })}
+                  aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
+                >
+                  <CanvasResourceThumbnail resource={candidate.resource} />
+                  <span>{candidate.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
 
-      <span className="generation-prompt-label">{t('canvas.generation.promptLabel')}</span>
-      <div className="prompt-segment-composer" aria-label={t('canvas.generation.composerAria')}>
-        {config.prompt.segments.map((segment, index) => (
-          segment.type === 'TEXT' ? (
-            <input
-              key={`text:${index}`}
-              type="text"
-              ref={(element) => {
-                if (element) {
-                  inputRefs.current.set(index, element)
-                } else {
-                  inputRefs.current.delete(index)
-                }
-              }}
-              value={segment.text}
-              aria-label={t('canvas.generation.segmentAria', { index: index + 1 })}
-              placeholder={config.prompt.segments.length === 1 ? t('canvas.generation.placeholder') : ''}
-              style={{ flexGrow: Math.max(2, Math.min(20, segment.text.length || 2)) }}
-              onFocus={(event) => {
-                cursorRef.current = {
-                  segmentIndex: index,
-                  offset: event.currentTarget.selectionStart ?? segment.text.length,
-                }
-              }}
-              onSelect={(event) => {
-                cursorRef.current = {
-                  segmentIndex: index,
-                  offset: event.currentTarget.selectionStart ?? segment.text.length,
-                }
-              }}
-              onChange={(event) => {
-                const caret = event.currentTarget.selectionStart ?? event.currentTarget.value.length
-                let text = event.currentTarget.value
-                if (caret > 0 && text[caret - 1] === '@') {
-                  text = `${text.slice(0, caret - 1)}${text.slice(caret)}`
-                  cursorRef.current = { segmentIndex: index, offset: caret - 1 }
-                  setMentionMenuOpen(true)
-                } else {
-                  cursorRef.current = { segmentIndex: index, offset: caret }
-                }
-                updatePrompt(updateTextSegment(config.prompt.segments, index, text))
-              }}
-              onKeyDown={(event) => {
-                const start = event.currentTarget.selectionStart ?? 0
-                const end = event.currentTarget.selectionEnd ?? start
-                if (
-                  event.key === 'Backspace'
-                  && start === 0
-                  && end === 0
-                  && config.prompt.segments[index - 1]?.type === 'REFERENCE'
-                ) {
-                  event.preventDefault()
-                  const previousText = config.prompt.segments[index - 2]
-                  removeReferenceAt(index - 1, {
-                    segmentIndex: Math.max(0, index - 2),
-                    offset: previousText?.type === 'TEXT' ? previousText.text.length : 0,
-                  })
-                } else if (
-                  event.key === 'Delete'
-                  && start === segment.text.length
-                  && end === start
-                  && config.prompt.segments[index + 1]?.type === 'REFERENCE'
-                ) {
-                  event.preventDefault()
-                  removeReferenceAt(index + 1, {
-                    segmentIndex: index,
-                    offset: segment.text.length,
-                  })
-                }
-              }}
+          {config.references.length > 0 ? (
+            <div className="generation-attached-references" aria-label="已添加参考">
+              {config.references.map((ref) => {
+                const candidate = candidateByKey.get(referenceKey(ref.nodeId, ref.index))
+                const label = candidate?.label ?? `@${ref.nodeId}_${ref.index}`
+                return (
+                  <span key={referenceKey(ref.nodeId, ref.index)} className="generation-attached-chip">
+                    {candidate ? <CanvasResourceThumbnail resource={candidate.resource} /> : null}
+                    <span>{label}</span>
+                    <button
+                      type="button"
+                      aria-label={t('canvas.generation.referenceRemove', { label })}
+                      onClick={() => removeReference(ref.nodeId, ref.index)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+          ) : null}
+
+          <span className="generation-prompt-label">{t('canvas.generation.promptLabel')}</span>
+          <div className="prompt-segment-composer" aria-label={t('canvas.generation.composerAria')}>
+            <textarea
+              ref={promptInputRef}
+              className="generation-prompt-input"
+              aria-label={t('canvas.generation.promptLabel')}
+              value={config.prompt ?? ''}
+              placeholder={t('canvas.generation.placeholder')}
+              disabled={active}
+              onChange={(event) => updatePrompt(event.target.value)}
+              rows={2}
             />
-          ) : (
-            <button
-              key={`reference:${index}:${segment.nodeId}:${segment.index}`}
-              type="button"
-              className="prompt-mention"
-              aria-label={t('canvas.generation.referenceRemove', { label: candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label ?? `@${segment.nodeId}_${segment.index}` })}
-              onClick={() => removeReferenceAt(index)}
-              onKeyDown={(event) => {
-                if (event.key === 'Delete' || event.key === 'Backspace') {
-                  event.preventDefault()
-                  removeReferenceAt(index)
-                }
-              }}
-            >
-              {candidateByKey.get(referenceKey(segment.nodeId, segment.index))?.label
-                ?? `@${segment.nodeId}_${segment.index}`}
-              <span aria-hidden="true">×</span>
-            </button>
-          )
-        ))}
-        {mentionMenuOpen ? (
-          <div className="mention-candidates" role="listbox" aria-label={t('canvas.generation.referenceCandidates')}>
-            {candidates.map((candidate) => (
-              <button
-                key={referenceKey(candidate.nodeId, candidate.index)}
-                type="button"
-                role="option"
-                aria-selected="false"
-                onClick={() => insertCandidate(candidate)}
-              >
-                <CanvasResourceThumbnail resource={candidate.resource} />
-                <span>{candidate.label}</span>
-              </button>
-            ))}
-            {candidates.length === 0 ? <span>{t('canvas.generation.referenceNone')}</span> : null}
           </div>
-        ) : null}
-      </div>
+        </>
+      )}
 
       <div className="generation-footer">
         {activeModel.outputs && activeModel.outputs.length > 0 ? (
@@ -505,9 +466,8 @@ export function CanvasGenerationPanel({
                 const defaults = createDefaultFunctionConfig(nextModel)
                 const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
                 const nextConfig = filterConfigReferences({
-                  prompt: {
-                    segments: config.prompt.segments.map((segment) => ({ ...segment })),
-                  },
+                  prompt: config.prompt,
+                  references: config.references,
                   parameters: defaults.parameters,
                 }, nextCandidates, nextModel)
                 setModelKey(nextModel.name)
@@ -526,24 +486,28 @@ export function CanvasGenerationPanel({
               ))}
             </select>
           </label>
-        {extractParametersFromDefinition(activeModel).map((parameter) => (
+        {!config.rawArgs ? extractParametersFromDefinition(activeModel).map((parameter) => (
           <label key={parameter.key}>
             <span>{parameter.label}</span>
             {parameter.type === 'ENUM' ? (
               <select
                 aria-label={parameter.label}
-                value={String(config.parameters[parameter.key] ?? '')}
+                value={String(config.parameters[parameter.key] ?? parameter.defaultValue ?? '')}
                 disabled={active}
-                onChange={(event) => updateConfig({
-                  ...config,
-                  parameters: {
-                    ...config.parameters,
-                    [parameter.key]: event.target.value,
-                  },
-                })}
+                onChange={(event) => {
+                  const matched = parameter.options.find((opt) => String(opt) === event.target.value)
+                  const nextVal = matched !== undefined ? matched : event.target.value
+                  updateConfig({
+                    ...config,
+                    parameters: {
+                      ...config.parameters,
+                      [parameter.key]: nextVal,
+                    },
+                  })
+                }}
               >
                 {parameter.options.map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                  <option key={String(option)} value={String(option)}>{String(option)}</option>
                 ))}
               </select>
             ) : (
@@ -552,13 +516,14 @@ export function CanvasGenerationPanel({
                 aria-label={parameter.label}
                 min={parameter.min ?? undefined}
                 max={parameter.max ?? undefined}
-                step={1}
-                value={Number(config.parameters[parameter.key] ?? parameter.min ?? 0)}
+                step={parameter.isInteger ? 1 : 'any'}
+                value={Number(config.parameters[parameter.key] ?? parameter.defaultValue ?? parameter.min ?? 0)}
                 disabled={active}
                 onChange={(event) => {
                   const value = Number(event.target.value)
                   if (
-                    !Number.isInteger(value)
+                    Number.isNaN(value)
+                    || (parameter.isInteger && !Number.isInteger(value))
                     || (parameter.min !== null && value < parameter.min)
                     || (parameter.max !== null && value > parameter.max)
                   ) {
@@ -575,64 +540,66 @@ export function CanvasGenerationPanel({
               />
             )}
           </label>
-        ))}
-        <div className="generation-json-toggle" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="generation-subtle-btn"
-            style={{ fontSize: 12, padding: '2px 6px', cursor: 'pointer' }}
-            onClick={() => {
-              if (!showJsonArgs) {
-                // 切换打开时从当前 config.parameters 生成，确保展示表单已改最新值
-                setJsonArgsText(JSON.stringify(config.parameters, null, 2))
-                setJsonDirty(false)
-                setJsonError(null)
-                setShowJsonArgs(true)
-              } else {
-                setShowJsonArgs(false)
-                setJsonDirty(false)
-                setJsonError(null)
-              }
-            }}
-          >
-            {showJsonArgs ? '收起参数 JSON' : '编辑参数 JSON'}
-          </button>
-          {showJsonArgs ? (
-            <>
-              <textarea
-                aria-label="参数 JSON"
-                className="generation-json-textarea"
-                style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
-                value={jsonArgsText}
-                onChange={(e) => {
-                  const text = e.target.value
-                  setJsonArgsText(text)
-                  setJsonDirty(true)
-                  try {
-                    const parsed = JSON.parse(text)
-                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                      setJsonError(null)
-                      updateConfig({
-                        ...config,
-                        parameters: parsed,
-                      })
-                    } else {
-                      setJsonError('参数必须为 JSON 对象')
+        )) : null}
+        {!config.rawArgs ? (
+          <div className="generation-json-toggle" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="generation-subtle-btn"
+              style={{ fontSize: 12, padding: '2px 6px', cursor: 'pointer' }}
+              onClick={() => {
+                if (!showJsonArgs) {
+                  // 切换打开时从当前 config.parameters 生成，确保展示表单已改最新值
+                  setJsonArgsText(JSON.stringify(config.parameters, null, 2))
+                  setJsonDirty(false)
+                  setJsonError(null)
+                  setShowJsonArgs(true)
+                } else {
+                  setShowJsonArgs(false)
+                  setJsonDirty(false)
+                  setJsonError(null)
+                }
+              }}
+            >
+              {showJsonArgs ? '收起参数 JSON' : '编辑参数 JSON'}
+            </button>
+            {showJsonArgs ? (
+              <>
+                <textarea
+                  aria-label="参数 JSON"
+                  className="generation-json-textarea"
+                  style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
+                  value={jsonArgsText}
+                  onChange={(e) => {
+                    const text = e.target.value
+                    setJsonArgsText(text)
+                    setJsonDirty(true)
+                    try {
+                      const parsed = JSON.parse(text)
+                      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        setJsonError(null)
+                        updateConfig({
+                          ...config,
+                          parameters: parsed,
+                        })
+                      } else {
+                        setJsonError('参数必须为 JSON 对象')
+                      }
+                    } catch {
+                      // 非法 JSON draft 保留在 textarea 中供用户继续修改，但绝不调用 updateConfig 覆盖有效表单值
+                      setJsonError('JSON 语法错误')
                     }
-                  } catch {
-                    // 非法 JSON draft 保留在 textarea 中供用户继续修改，但绝不调用 updateConfig 覆盖有效表单值
-                    setJsonError('JSON 语法错误')
-                  }
-                }}
-              />
-              {jsonError ? (
-                <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 2 }}>
-                  {jsonError}
-                </div>
-              ) : null}
-            </>
-          ) : null}
-        </div>
+                  }}
+                />
+                {jsonError ? (
+                  <div role="alert" className="generation-json-error" style={{ color: 'var(--color-danger, #ef4444)', fontSize: 11, marginTop: 2 }}>
+                    {jsonError}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : null}
         {node.run?.status === 'UNKNOWN' ? (
           <div className="generation-unknown-resolution" role="region" aria-label="待核查确认" style={{ marginTop: 10, padding: 8, border: '1px solid var(--orange, #fa8c16)', borderRadius: 4 }}>
             <div style={{ fontWeight: 600, color: 'var(--orange, #fa8c16)', marginBottom: 6 }}>
@@ -752,12 +719,12 @@ function modelForNode(
 }
 
 function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfig): string {
-  return `${modelKey}\u0000${JSON.stringify({
-    prompt: config.prompt,
-    parameters: Object.fromEntries(Object.entries(config.parameters).sort(([left], [right]) => (
-      left.localeCompare(right)
-    ))),
-  })}`
+  if (config.rawArgs) {
+    return `${modelKey}\u0000raw\u0000${JSON.stringify(config.rawArgs)}`
+  }
+  return `${modelKey}\u0000${config.prompt ?? ''}\u0000${JSON.stringify(config.references)}\u0000${JSON.stringify(
+    Object.fromEntries(Object.entries(config.parameters).sort(([left], [right]) => left.localeCompare(right))),
+  )}`
 }
 
 function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): string {

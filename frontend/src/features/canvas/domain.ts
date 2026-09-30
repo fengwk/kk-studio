@@ -8,6 +8,7 @@ import type {
   UUIDString,
 } from '@/shared/api/contracts/studio'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 export interface CanvasDocument {
@@ -92,9 +93,10 @@ export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, inde
     return
   }
   const rec = obj as Record<string, unknown>
-  if (rec.type === 'resource' && typeof rec.nodeId === 'string') {
-    const index = typeof rec.index === 'number' ? rec.index : 0
+  if (rec.type === 'resource' && typeof rec.nodeId === 'string' && isCanonicalUuid(rec.nodeId)) {
+    const index = typeof rec.index === 'number' && Number.isInteger(rec.index) && rec.index >= 0 ? rec.index : 0
     onRef(rec.nodeId, index)
+    return
   }
   for (const val of Object.values(rec)) {
     scanArgsForReferences(val, onRef)
