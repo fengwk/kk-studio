@@ -144,9 +144,10 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon test -Dtest='Lsp*Test'
 | `lsp.java-decompile` 的 `target` 推荐 `jdt://` URI 或绝对 class 路径；相对 class 路径只在显式 `workdir` 下解析，缺失即拒绝，且客户端绝不回退到守护进程 cwd | `LspCapabilitiesTest.absolutePathsNeedNoWorkdir`、`LspClientProtocolTest.relativeClassTargetWithoutWorkdirIsRejected`、`LspClientTest.javaDecompileLocalClassUsesExecuteCommand` |
 | 服务器进程目录始终是自动发现的项目根，与调用是否给出 `workdir` 无关 | `LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot`、`LspDaemonWiringTest.cliConfiguredExtensionsDriveTheRegisteredCapabilities` |
 
-三个能力的 arguments schema 已把 `workdir` 从 `required` 移出，`fs.*`/`process.exec` 的 schema 不变。服务端与
-`EnvironmentCapabilityCatalog.requiresWorkdir` 一侧的放宽由主 Agent 收口：在它更新之前，经服务端转发且未带
-`workdir` 的 LSP 调用仍会被拒绝。
+三个能力与 `fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 的 arguments schema 都把 `workdir` 声明为
+“仅在 `path` 为相对路径时必填”，只有 `process.exec` 在 `required` 中恒要求 `workdir`。是否必填完全由
+schema 的 `required` 决定（`EnvironmentCapabilityCatalog.requiresWorkdir`），没有额外的服务端收口：
+带绝对 `path` 的调用可以省略 `workdir` 直达能力层。
 
 ## bridge 时代的用例迁移
 
@@ -160,7 +161,7 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon test -Dtest='Lsp*Test'
 | `lspBridgeClassTargetResolutionAndJavap` | class 反编译回退到 `javap` | `LspClientTest.javaDecompileUsesJdtClassFileContentsForJdtUris`、`javaDecompileLocalClassUsesExecuteCommand`、`javaDecompileRejectsJdtUriOnNonJdtlsServer`、`LspClientProtocolTest.localClassTargetVariantsAndEmptySource` | `javap` 路径整体删除：不再用字节码冒充源码，`jdt://` 与本地 class 分别覆盖 |
 | `lspBridgeInvocationAndCapabilityExecution` | 三个能力经 bridge 执行 | `LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot`、`workspaceSymbolsAndDecompileShareOneClient`、`LspDaemonWiringTest` | 改为真实 stdio 假服务器加真实 capability 链路 |
 | `lspRelativizesLocalPathsAndFileUrisRelativeToWorkdir` | 结果路径相对化改写 | `LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot`、`LspClientTest.definitionSyncsDocumentAndFormatsLocations` | 反转：结果与源码正文都不得被路径改写 |
-| read 状态的 `lsp: supported` | bridge 存在即可用 | `LspCapabilitiesTest.readReportsConfiguredLspStatus`、`LspDaemonWiringTest.configuredExtensionsAreCaseInsensitiveAndReportNotInstalled` | 改为配置驱动：可用性只看配置命中的服务器是否已安装，扩展名大小写不敏感。展示约定是**只在可用时给出 `lsp:` 行**，未配置或未安装都不输出该行；三态本身（`unsupported` / `supported (<server>)` / `file type supported, but server not installed (<server>)`）保留在 `LspSupport`。当前 `ReadCapability` 仍会输出 `lsp: unsupported`，`readReportsConfiguredLspStatus` 按现状断言 |
+| read 状态的 `lsp: supported` | bridge 存在即可用 | `LspCapabilitiesTest.readReportsConfiguredLspStatus`、`LspDaemonWiringTest.configuredExtensionsAreCaseInsensitiveAndReportNotInstalled` | 改为配置驱动：可用性只看配置命中的服务器是否已安装，扩展名大小写不敏感。展示约定是**只在可用时给出 `lsp:` 行**，未配置或未安装都不输出该行；三态本身（`unsupported` / `supported (<server>)` / `file type supported, but server not installed (<server>)`）保留在 `LspSupport`。当前 `ReadCapability` 只在服务器可用时输出 `lsp: supported (<server>)`，未配置或未安装时整行省略，`readReportsConfiguredLspStatus` 按现状断言 |
 
 ## 有意保留的行为差异
 

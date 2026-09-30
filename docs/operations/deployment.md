@@ -102,7 +102,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 ### 已执行旧 V1 的数据库
 
-本次 Project/Issue、Harness Goal 和证据重构直接重写了 Flyway V1；**旧库不能直接运行新镜像**。
+Flyway V1 已随 Project/Issue、Harness Goal 与证据模型整体重写；在重写前初始化的**旧库不能直接运行新镜像**。
 Flyway 校验失败不是可跳过的升级步骤：不得修改 `flyway_schema_history`、使用 `repair` 伪造
 checksum，或直接在有数据的旧库上重放 V1。源码合入 `dev` 也不等于批准生产数据库重建。
 
