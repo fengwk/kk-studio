@@ -9,8 +9,11 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 [`project/`](../../project/pom.xml) 是不依赖宿主的 Maven 模块：领域规则、Issue 用例、
 PostgreSQL 持久化与 REST 调度都在模块内，经
 [`ProjectAutoConfiguration`](../../project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
-装配进宿主应用。模块不认识 HTTP DTO、Environment 校验、Session 深删除与全局 Blob 存储：
-这些跨宿主能力只经下面 4 个端口调用，由 [platform](platform.md) 实现，依赖方向永不反转。
+装配进宿主应用。模块不实现 HTTP DTO、Environment 校验、Session 深删除与全局 Blob 存储：
+这些跨宿主能力只经下面的端口调用，由 [platform](platform.md) 实现，依赖方向永不反转。模块内唯一的宿主无关
+生产依赖是 `harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`），
+[`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
+同时锁定「生产依赖集合精确相等」与 import 白名单。
 
 ## 模块结构
 
@@ -26,26 +29,26 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 
 ## 跨宿主端口
 
-[`port`](../../project/src/main/java/fun/fengwk/kkstudio/project/port) 是模块唯一的对外依赖面；
+[`port`](../../project/src/main/java/fun/fengwk/kkstudio/project/port) 是模块唯一的对外能力面；
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
-守卫「主源码不 import platform/web、pom 不声明 host 模块」这条边界。
+守卫「主源码不 import platform/web/canvas、pom 不声明宿主模块」这条边界。
 
 | 端口 | 宿主必须提供的语义 | 事务要求 |
 | --- | --- | --- |
 | [`EvidenceBlobPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/EvidenceBlobPort.java) | 锁定并消费一次已 READY 上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用 | 必须加入调用方已有事务；失败不得吞成「不可用」 |
 | [`HarnessCommandAcceptancePort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/HarnessCommandAcceptancePort.java) | 以 `Issue + Agent` owner 接受 Harness 命令并返回 root entry | 与调用方写入同一事务 |
 | [`AgentBranchSettingsPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/AgentBranchSettingsPort.java) | 按宿主 Agent/Model catalog 物化分支设置 | 只读 |
-| [`DelegatedWorkActivityPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/DelegatedWorkActivityPort.java) | 查询 Thread 委派子树是否仍有未交付工作；OPEN 或 SETTLED 时禁止 Run 提前收尾 | 加入协调器已有事务读取 |
+| [`DelegatedWorkActivityPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/DelegatedWorkActivityPort.java) | 查询 Thread 委派子树是否仍有未交付工作：宿主按 Thread 持久 `status` 非 `IDLE` 判定，为真时禁止 Run 提前收尾 | 加入协调器已有事务读取 |
 | [`IssueAgentSessionDeletionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueAgentSessionDeletionPort.java) | 深删除该 `Issue + Agent` 名下的 Harness Session 与 Blob 引用 | 在调用方锁序内，逐 owner 调用 |
 
-端口只表达契约，不表达平台类型：宿主把平台异常收敛为 Project 错误（例如「上传不存在」译为
+端口只声明语义，不引入持久化与 Spring 类型：宿主把平台异常收敛为 Project 错误（例如「上传不存在」译为
 not found、「未 READY/已 cleanup」译为 validation），模块内不做第二套翻译。
 
 ## 工作流配置
 
 [`ProjectWorkflowJsonCodec`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)
 严格解析 `{"states":[...]}`：拒绝重复字段、未知字段、尾随内容和非法类型；编码为确定性 JSON，
-可用于请求指纹。每个 state 使用项目内唯一的大写自然编码，不另建状态 ID。
+可用于请求指纹。每个 state 使用项目内唯一的大写自然编码。
 `INIT`、`BLOCKED`、`DONE` 必须存在；正常边只指向已声明阶段，不通往 `BLOCKED`。
 启用工作阶段须从 `INIT` 可达，且存在到 `DONE` 的正常路径。
 
@@ -71,13 +74,17 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 
 [`ProjectServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/ProjectServiceImpl.java)、
 [`IssueServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueServiceImpl.java)、
-[`IssueRunServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)
-是写用例的事务边界，`repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
-成功写入 Project、Issue、Run、Activity、阶段预算、公开证据或 Agent Thread 绑定时，仓库在同一事务内
+[`IssueRunServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)、
+[`IssueEvidenceServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java) 与
+[`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
+是写用例的事务边界，`IssueReconciler.reconcile` 在 controller 内以单事务推进一个有界动作；
+`repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
+写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
-写入也会覆盖。Work 租约/唤醒只影响内部调度，不产生项目快照失效信号。
-幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放，正文 `body = btrim(body)`）；
+写入也会覆盖。Work 租约/唤醒只影响内部调度，走独立通道 `project_issue_work_due`，不产生项目快照失效信号。
+幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放；`body` 的非空性按 `kind` 固定：
+COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STATE_CHANGE、CONTROL 必须为空）；
 Stage 预算、Work 邮箱与 Evidence 分别落在 `project_issue_stage_budget`、
 `project_issue_work`、`project_issue_evidence`。
 
@@ -87,9 +94,10 @@ Stage 预算、Work 邮箱与 Evidence 分别落在 `project_issue_stage_budget`
 deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不再
 retain，重复交付不双计。深删除 Session 只释放该 Session 自己的引用。
 
-Project 深删除先锁 Project 与 Issues、拒绝仍活动的 Run，再按 work -> Agent Session 深删除 ->
-Evidence（先于 Run 行，因为 `project_issue_evidence.run_id` 是 RESTRICT 外键）->
-Runs -> Activities/Issues -> Project 的顺序清理，每次 CAS 删除都检查受影响行数。
+Project 深删除在一个事务内锁住 Project 行（`FOR UPDATE`），拒绝仍活动的 Run 与未解除的 `UNKNOWN` 暂停，
+再按 Evidence（先于 Run 行，因为 `project_issue_evidence.run_id` 是 RESTRICT 外键）->
+Activities -> Work -> Runs -> Stage 预算 -> Agent Session 深删除 -> Issue -> Project 的顺序清理；
+Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 
 ## REST 调度
 
@@ -104,9 +112,9 @@ claim、bounded handoff 与 poll 生命周期，
 
 模块内的 `ProjectValidationException`、`ProjectNotFoundException`、
 `ProjectVersionConflictException`、`ProjectDuplicateException` 在 Web 边界由
-`StudioProjectErrorAdvice` 统一译成 400/404/409 与稳定的 `PROJECT_*` 错误码，
-在 Agent 工具边界由 platform 的 `platform.project.tool` 译成平台错误类型，
-因此模块迁移不改变对外 HTTP 契约。
+`StudioProjectErrorAdvice` 统一映射：validation 400、not found 404、version/duplicate/runtime conflict 409、
+`IllegalStateException` 500，并输出稳定的 `PROJECT_*` 错误码。在 Agent 工具边界由 platform 的
+`platform.project.tool` 译成 `AiValidationException` / `AiVersionConflictException` 等平台错误类型。
 
 ## 测试与验证
 

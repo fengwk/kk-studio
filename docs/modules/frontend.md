@@ -86,13 +86,15 @@ contract 按 HTTP 边界分组，全部是严格 wire 类型：
 
 | 文件 | 内容 |
 | --- | --- |
-| [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
+| [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasRevision`（= canonical decimal） |
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command batch、stop/approval、model/tool invocation、Snapshot |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool、Git Skill Package catalog 与 structured config |
 | [ai-chat.ts](../../frontend/src/shared/api/contracts/ai-chat.ts) | Chat 资源 |
 | [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card 与 live capability 投影 |
 | [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置与显式 HTTP 创建/更新请求 |
-| [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、Snapshot、Patch、version event、typed command |
+| [ai-interaction.ts](../../frontend/src/shared/api/contracts/ai-interaction.ts) | 问卷等待与审批等待合并的待处理列表、交互 owner 与人工输入提交回执 |
+| [ai-plugin.ts](../../frontend/src/shared/api/contracts/ai-plugin.ts) | 已安装 Plugin 的安全状态投影与封闭的 `DEEP_LINK` 认证交互 |
+| [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group、Snapshot、Patch、`revision` 事件、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [system-settings.ts](../../frontend/src/shared/api/contracts/system-settings.ts) | schema sections/field types、permission、model selection、apply timing |
 
@@ -100,7 +102,9 @@ service 只做路由映射与严格解码：
 
 | service | 路由范围 |
 | --- | --- |
-| [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools`，删除使用 `expectedVersion` CAS |
+| [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` 与 `/ai/catalog/skill-packages`，删除使用 `expectedVersion` CAS |
+| [interaction-service.ts](../../frontend/src/shared/api/interaction-service.ts) | `/interactions` 待处理列表与人工输入提交 |
+| [plugins-service.ts](../../frontend/src/shared/api/plugins-service.ts) | `/plugins` 安全状态与 deep-link 认证 prepare/complete/refresh |
 | [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` 与 owner Session 查询 |
 | [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` name-keyed CRUD、显式配置查询与 discover |
 | [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments` Card 与 token |
@@ -140,8 +144,8 @@ sequenceDiagram
   UI->>O: terminal fence and overlay retirement
 ```
 
-- `subscribed`（首次与每次重连）、`version`、`resync` 和资源级 `error` 都触发
-  Snapshot 对账；`heartbeat` 只做连接保活。version/resync 触发的快照刷新不会丢弃
+- `subscribed`（首次与每次重连）、`version`（Thread）或 `revision`（Canvas）、`resync` 和资源级 `error`
+  都触发 Snapshot 对账；`heartbeat` 只做连接保活。version/resync 触发的快照刷新不会丢弃
   已在 refs 中累积的未决 delta。
 - Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag：Model
   checkpoint 可在同一 version 内推进，因此同 version 的权威回读仍参与对账。
@@ -271,16 +275,18 @@ BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending 
 Bound Thread 发送前按 `threadId` 将冻结的 `CommandBatchPlan.request` 与 `localDraft` 持久化写入 `kk-studio.agent-thread-pending.<threadId>`（写入失败 fail-closed 中止发送并提示错误）。发生网络断开、超时或 408/429 等未知失败时锁定输入框原请求身份，界面提供逐字节相同重试与显式放弃控件；组件刷新重新挂载自动恢复 unknown pending 状态，清理时通过 `sameBatchRequestIdentity` 比对命令 keys 保护多 Pane 并发，放弃仅清理本地存储并明确提示不撤销服务端可能已接受的命令。图片类 CommandContent 的 `imageTier` 严格枚举校验为 `'720P' | '1080P' | 'ORIGINAL'`，拒绝非法未知键。
 
 Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-queue.ts)
-串行化浏览器操作，每批以当前 Snapshot 的 `expectedVersion` 和 UUID `idempotencyKey`
-提交，响应是 graph patch：
+串行化浏览器操作：每批只提交 UUID `idempotencyKey` 与命令体（`ApplyCanvasCommandsRequestDTO` 不含整图
+`expectedVersion`，冲突由每条命令自己的前置条件判定），入队瞬间冻结该批的 `idempotencyKey`、命令体与草稿 ACK，
+响应是 graph patch：
 
-- `applyEntityPatch` 先要求 `patch.version > snapshot.version` 且
-  `patch.baseVersion === snapshot.version`，再分别 upsert/remove nodes、groups、links；
-- `version <= current` 是重复/过期 patch，直接忽略；baseVersion 不连续是 gap，读取
-  全量 Snapshot；
-- HTTP `409` 先读取最新 Snapshot，再抛出 `CanvasCommandConflictError`，queue 不自动
-  重放；`replaceSnapshot` 拒绝同一 Canvas 的 version 回退，Canvas version 全程使用
-  canonical decimal string；409 终端失败时不清除草稿（`clearAcks: false`），保留草稿供救援；
+- `applyEntityPatch` 只接受 `patch.revision > snapshot.document.revision`，随后 upsert/remove nodes 与 groups，
+  并从新 nodes 重新派生只读 `references`；
+- 权威收敛在 `ingestPatch`：空 patch 直接重取 Snapshot；`revision <= current` 是重复/过期 patch，直接忽略；
+  只有本地 revision 已到 `patch.revision` 的前驱时才算连续，否则视为缺口并重取全量 Snapshot；
+- 语义冲突（HTTP `409`）是终态：先把该操作以 `clearAcks: false` 结算，再重取最新 Snapshot 并抛
+  `CanvasCommandConflictError`，queue 不自动重放；`replaceSnapshot` 拒绝同一 Canvas 的 revision 回退，
+  Canvas revision 全程使用 canonical decimal string，草稿保留供救援；
+- 网络或服务端瞬时失败保留冻结操作并阻塞队列，等待恢复后按原 key/body 幂等重放；
 - 命令队列与持久草稿严格执行“物理 ACK 先于 Operation 删除”时序：`settle` 阶段必须先等待 `onDraftAcks`
   完成 IndexedDB 事务物理落盘，才允许从持久化 store 移除 operation；若草稿 ACK 事务异常，operation 完整保留在 store 中供后续幂等重放；
 - 草稿持久化与 ACK 清理共用同一个 Promise 序列化链（`draftPersistChainRef`），杜绝在途保存落盘晚于 ACK 清除导致草稿复活；同时设立组件卸载安全边界（`isMountedRef`），卸载后排队任务绝不越界覆写或删除底层存储；
@@ -289,11 +295,11 @@ Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-qu
   以 `180ms` debounce 聚合，每次移动递增草稿世代（generation），批次命令冻结并携带世代 ACK，落盘 ACK 仅按世代精准清除，杜绝在途请求返回冲掉追加的用户移动；
 - Function Config 编辑立即写入本地草稿并分配世代，320ms 防抖仅控制网络调度，输入在防抖窗口期内即使崩溃也安全落盘；
 - Function Run 提交前在 localStorage 持久化冻结当前 `requestDTO`（包含 `{ requestId }`）；403 / 409 及其他 4xx 终态客户端错误立即清理持久化记录；408（超时）、429（限流）、5xx 与网络中断属于非终态可重试，保留原 attempt，重试时严格传给 start 接口原样 requestDTO 并复用原 `requestId`，绝不重新生成 key 或采用新 revision 替换；
-- bfcache 恢复保护：监听 `pageshow`，若休眠期间 session 已被同源其他活页面持有，执行安全 reload 重新分配隔离会话，绝不强夺活所有权造成多标签 scope 污染；未冲突时安全重新 claim 租约并恢复心跳；
+- bfcache 恢复保护：监听 `pageshow`，仅在 `event.persisted === true`（真正的 bfcache 恢复）时处置；若休眠期间 session 已被同源其他活页面持有，执行安全 reload 重新分配隔离会话，绝不强夺活所有权造成多标签 scope 污染；未冲突时安全重新 claim 租约并恢复心跳；
 - 参数 JSON 编辑器展开时从当前 `parameters` 衍生文本；非脏态下表单控件修改实时同步更新 JSON 文本；用户编辑非法 JSON（语法错误或非对象）时展示错误 alert，绝不反向调用更新覆盖有效表单；
 - [canvas-version-events.ts](../../frontend/src/features/canvas/canvas-version-events.ts)
   订阅 `{kind: "canvas", id}`，首次 `subscribed`、重连、`resync` 和 `error` 都读取
-  权威 Snapshot，`version` 只有严格大于本地版本时才触发读取。
+  权威 Snapshot，`revision` 事件只有严格大于本地 revision 时才触发读取。
 
 上传走分阶段协议，任何中途切换都作废整批：
 
@@ -312,7 +318,7 @@ sequenceDiagram
     API-->>API: content already exists, skip upload
   end
   API-->>API: complete(uploadId)
-  API-->>C: CREATE_RESOURCE_NODE(uploadId)
+  API-->>C: CREATE_NODE + resources[{kind: BLOB, blobId}]
 ```
 
 [canvas-upload.ts](../../frontend/src/features/canvas/canvas-upload.ts) 与 Composer
@@ -330,7 +336,7 @@ upload handle 只能按 upload id 删除，blob original/preview URL 只在资�
 ### AI
 
 [`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
-mcp、plugins、runtime、skills 八个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
+extensions、mcp、plugins、runtime、skills 与 thread 十个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
 Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见
 name），`skills` 用 `(packageName, name)` 引用候选，选择器显示 `package / name`。
 System Prompt 仍只展示 Skill 自身的 name、description 与 path，相同 name 可以由路径与
@@ -342,7 +348,7 @@ System Prompt 仍只展示 Skill 自身的 name、description 与 path，相同 
 
 Environment 卡片只展示 capability 的 canonical `id`，管理弹窗只投影宿主事实
 （`EnvironmentHostSection`：OS、时区、Daemon 进程用户、HOME、可选备注与最后活跃
-时间）和最近一条 WARN/ERROR。管理弹窗按需轮询最近 200 条连接/Skill 同步运维事件，
+时间）和最近一条 WARN/ERROR。管理弹窗打开期间每 10 秒轮询 `/{id}/events` 的连接/Skill 同步运维事件窗口，
 不展示原始 stdout、凭据或签名 URL。MCP 卡片只消费不含连接细节的安全投影（name、enabled、
 timeout、发现状态与工具数），完整配置（URL 与 headers）仅在打开编辑弹窗时经 `no-store`
 端点读取，并用递增 generation fence 防止关闭/重开时的迟到响应覆盖当前弹窗；更新或发现
@@ -362,8 +368,8 @@ Plugin 管理入口是 `/settings` 的静态 **Plugins** 页签。
 
 Plugin 配置是统一的静态 UI，不加载 Plugin 提供的脚本、HTML 或任意表单 schema。页面从
 `GET /api/plugins` 只渲染当前 Fat JAR 实际安装的 `StudioPlugin` descriptor；删除 `web`
-runtime dependency 并重新构建后，对应卡片自然消失。每张卡片只显示名称、版本、连接状态、
-region、token 到期时间、下一次刷新时间和去敏错误，不展示密文、token 或 client identity。
+runtime dependency 并重新构建后，对应卡片自然消失。每张卡片只显示名称、pluginId、版本、连接状态、
+region、token 到期时间、下一次刷新时间、最近刷新时间与去敏错误，不展示密文、token 或 client identity。
 只提供 `HarnessContributor`、不提供 `StudioPlugin` 的 Tool-only Plugin 不会出现在这里。
 
 前端认证 contract 是
@@ -375,11 +381,10 @@ Platform 管理协议、TypeScript contract、静态组件、双语 i18n 和测�
 注入前端代码。后端 `authKind: null` 表示不提供交互认证，但当前卡片尚未定义无认证 Plugin
 的只读状态语义；引入这种 `StudioPlugin` 前必须先补齐并测试该前端行为。
 
-MiniMax Mavis 卡片的 Connect 流程是：
+MiniMax Mavis 卡片是这套交互的一个实例，Connect 流程为：
 
-1. 选择 CN 或 EN，调用 `auth/prepare` 取得固定官方登录链接并在新窗口打开；
-2. 用户登录后复制 `minimax-cn://auth-callback?...` 或
-   `minimax://auth-callback?...` deep link；
+1. 从后端投影的 `authKind.regionCandidates` 选择 region（前端在候选缺失时回退 `['CN']`），调用 `auth/prepare` 取得固定官方登录链接并在新窗口打开；
+2. 用户登录后把 deep link 粘回弹窗；
 3. password 型输入禁用 autocomplete，不写 local/session storage；提交
    `auth/complete` 后无论成功失败都立即清空；
 4. 前端重新读取安全状态，成功显示 Connected；`REAUTH_REQUIRED` 只提供重新连接，
@@ -410,15 +415,16 @@ module-global listeners。
 
 [CanvasPage](../../frontend/src/features/canvas/CanvasPage.tsx) 只接受 canonical UUID
 深链，其他 `canvasId` replace 回 `/canvas`；[CanvasRuntimeContext](../../frontend/src/features/canvas/CanvasRuntimeContext.tsx)
-管理 query、Snapshot、controller、viewport、selection、upload 与 Thread dock。
+只是 controller 的 React 注入点（Provider 与 `useCanvasRuntime`），query、Snapshot、viewport、
+selection 与 upload 状态由 `useCanvasController` 持有。
 [CanvasStage](../../frontend/src/features/canvas/CanvasStage.tsx) 承载 React Flow 与图
 投影，[CanvasToolRail](../../frontend/src/features/canvas/CanvasToolRail.tsx) 与
 [CanvasContextMenu](../../frontend/src/features/canvas/CanvasContextMenu.tsx) 负责
-node、link、group、Function 编辑，
+node、引用连线、group、Function 编辑，
 [CanvasGenerationPanel](../../frontend/src/features/canvas/CanvasGenerationPanel.tsx) 负责
 Function 参数与 run/cancel，[nodes/](../../frontend/src/features/canvas/nodes/) 渲染
-Text/Image/Video/Audio Resource node。Agent dock 复用 Bound Thread Pane 语义，不把
-Thread 写进 Canvas graph。
+Text/Image/Video/Audio Resource node。Canvas 不承载会话面板：Thread 不写进 Canvas graph，
+画布也没有对话 dock 或对应的快捷键。
 
 ### Settings
 
@@ -452,8 +458,8 @@ shared UI 传入数据与 callback；[shared/ui/console](../../frontend/src/shar
 - [ConflictPresenter](../../frontend/src/shared/conflict/ConflictPresenter.tsx) 统一
   展示 `409` 的 `errors.reason`/`code` 与 detail；controller 成功后 invalidate 目标
   query，冲突时保留 refresh/retry/close。
-- [shortcuts](../../frontend/src/shared/shortcuts/shortcut-catalog.ts) 只列出已实现
-  的 Application、Thread、Debug、Canvas 快捷键；modal、alertdialog 和 lightbox 通过
+- [shortcuts](../../frontend/src/shared/shortcuts/shortcut-catalog.ts) 是帮助与快捷键面板的声明式目录，
+  覆盖 Application、Thread、Debug 与 Canvas 分区；modal、alertdialog 和 lightbox 通过
   [blocking-overlay.ts](../../frontend/src/shared/ui/blocking-overlay.ts) 优先消费
   Escape 与全局快捷键。
 
