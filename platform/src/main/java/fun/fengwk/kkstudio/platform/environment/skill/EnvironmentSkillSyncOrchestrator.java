@@ -40,7 +40,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
@@ -56,8 +55,9 @@ import java.util.regex.Pattern;
  * 增量同步，通知重连时全量对账）。编排器不缓存连接事实：每个 Package 同步前都重新读取 {@code environment_connection} 行，因此 owner + lease
  * token + 未过期 READY 三者共同围栏每一次状态与事件写回， 迟到的回调一律 fail-closed。
  *
- * <p>同一 Environment 的同步在进程内串行，不同 Environment 互不阻塞。单个 Package 失败只记录该 Package 的失败投影与事件， 既不影响其它
- * Package，也绝不覆盖上一次成功安装的事实。
+ * <p>同一 Environment 的同步在进程内串行：Environment 按固定 stripe 数分锁，同一 Environment 恒定落在同一把锁上， 不同 stripe 的
+ * Environment 互不阻塞；锁数量与见过的 Environment 数量无关，历史 key 不会无界增长。单个 Package 失败只记录该 Package 的失败投影与事件，
+ * 既不影响其它 Package，也绝不覆盖上一次成功安装的事实。
  *
  * <p>调用完全复用 Environment server core 的 capability 传输契约：每次调用使用新的 UUID，结果不确定（send-uncertain） 绝不重放。
  */
@@ -82,12 +82,15 @@ public class EnvironmentSkillSyncOrchestrator {
   private static final String SEND_FAILURE = "skill package sync could not be sent";
   private static final String RESULT_FAILURE = "skill package sync failed";
 
+  /** 固定 stripe 数：锁数量与见过的 Environment 数量解耦，历史 key 不会无界增长。 */
+  static final int LOCK_STRIPES = 64;
+
   private final EnvironmentRegistry environmentRegistry;
   private final SkillCatalogQueryService skillCatalogQueryService;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final ExecutorService executor;
   private final Clock clock;
-  private final Map<EnvironmentId, ReentrantLock> environmentLocks = new ConcurrentHashMap<>();
+  private final ReentrantLock[] environmentLocks = new ReentrantLock[LOCK_STRIPES];
 
   public EnvironmentSkillSyncOrchestrator(
       EnvironmentRegistry environmentRegistry,
@@ -101,6 +104,14 @@ public class EnvironmentSkillSyncOrchestrator {
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.clock = Objects.requireNonNull(clock, "clock");
+    for (int i = 0; i < environmentLocks.length; i++) {
+      environmentLocks[i] = new ReentrantLock();
+    }
+  }
+
+  /** 以 EnvironmentId 的稳定 hash 选出 stripe：同一 Environment 恒落同一把锁，不同 stripe 互不阻塞。 */
+  static int stripeIndexOf(EnvironmentId environmentId) {
+    return Math.floorMod(environmentId.hashCode(), LOCK_STRIPES);
   }
 
   /**
@@ -142,8 +153,7 @@ public class EnvironmentSkillSyncOrchestrator {
     try {
       executor.execute(
           () -> {
-            ReentrantLock lock =
-                environmentLocks.computeIfAbsent(environmentId, key -> new ReentrantLock());
+            ReentrantLock lock = environmentLocks[stripeIndexOf(environmentId)];
             lock.lock();
             try {
               task.run();

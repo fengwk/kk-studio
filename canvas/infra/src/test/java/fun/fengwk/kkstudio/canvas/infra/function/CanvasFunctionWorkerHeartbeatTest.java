@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,7 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /** worker heartbeat 续租、两阶段提交流程、SUBMITTING 崩溃恢复与 UNKNOWN 收敛验证。 */
@@ -238,6 +239,33 @@ class CanvasFunctionWorkerHeartbeatTest {
               fixture.claim.leaseToken(),
               "Function execution failed");
       verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
+      verify(fixture.transactions, never()).markUnknown(any(), any(), any(), any());
+    } finally {
+      fixture.close();
+    }
+  }
+
+  /**
+   * Error（进程级故障）不属于「业务失败」：它必须原样向调用方传播，绝不写 FAILED/UNKNOWN/SUCCESS 任何业务终态， 且 finally 一定取消
+   * heartbeat，故障进程不能继续续租。
+   */
+  @Test
+  void errorFromAdapterPropagatesWithoutAnyBusinessTerminalWrite() throws Exception {
+    Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
+    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    OutOfMemoryError fatal = new OutOfMemoryError("simulated fatal error");
+    doThrow(fatal).when(fixture.adapter).execute(any(), any());
+
+    try {
+      OutOfMemoryError propagated =
+          assertThrows(OutOfMemoryError.class, () -> fixture.worker.run(fixture.claim));
+      assertSame(fatal, propagated);
+      verify(fixture.transactions, never()).failIfRunning(any(), any(), any(), any());
+      verify(fixture.transactions, never()).markUnknown(any(), any(), any(), any());
+      verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
+      // cancel 之后 heartbeat 不再被调度：清掉已取消的任务后调度队列必须为空。
+      fixture.scheduler.purge();
+      assertTrue(fixture.scheduler.getQueue().isEmpty());
     } finally {
       fixture.close();
     }
@@ -261,7 +289,7 @@ class CanvasFunctionWorkerHeartbeatTest {
     private final CanvasFunctionFrozenRun frozenSubmitted;
     private final CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
     private final CanvasFunctionDefinition definition;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
     private final ClaimedRun claim;
     private final CanvasFunctionCatalog catalog;
     private final CanvasFunctionWorker worker;
