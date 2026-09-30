@@ -2,7 +2,7 @@
 
 Environment Daemon 是运行在目标宿主上的独立 JVM 进程。它把 Platform 下发的原子能力调用落到真实文件系统、真实进程与本地工具链上，并把执行事实保留在自身进程内：网络连接只是消息管道，连接中断与重建不会改变已经开始的执行。整个环境链路的契约在 [Harness Environment](harness-environment.md)，Platform 侧的会话与租约协调在 [Harness Environment Server](harness-environment-server.md)，安装、systemd 常驻与升级流程见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)。
 
-模块依赖只有 `harness-common` 与 `harness-environment`，第三方依赖是 Jackson、OkHttp、JGit 与 RE2/J；它不依赖 `harness-mcp`、`harness-tool`、`harness-runtime`、`harness-infra`、`platform` 或 `web`。调用侧传下来的每个调用都自带完整参数，Daemon 不从模型、会话或历史中推断任何执行事实。
+模块依赖只有 `harness-common` 与 `harness-environment`，第三方依赖是 Jackson、OkHttp、JGit、RE2/J、LSP4J 与 JNA；它不依赖 `harness-mcp`、`harness-tool`、`harness-runtime`、`harness-infra`、`platform` 或 `web`。调用侧传下来的每个调用都自带完整参数，Daemon 不从模型、会话或历史中推断任何执行事实。
 
 ## 启动、CLI 与本地数据目录
 
@@ -26,15 +26,16 @@ CLI -> DaemonConfig
 `--data-dir` 决定 owner-only 本地状态位置。READY 的进程用户与 HOME 由 Daemon
 直接探测。
 
-注册凭证只以 owner-only 普通文件存在：CLI 只接收路径，配置对象不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密，凭证在每次 HELLO 前按需读取。[`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 要求绝对路径、现存普通文件（拒绝符号链接与目录）与 owner-only 权限，并忽略两端空白。未知选项（包括历史遗留的 `--registration-token`、`--skill-dir`）一律启动失败，没有兼容回退。
+注册凭证只以 owner-only 普通文件存在：CLI 只接收路径，配置对象不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密，凭证在每次 HELLO 前按需读取。[`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 要求绝对路径、现存普通文件（拒绝符号链接与目录）与 owner-only 权限，并忽略两端空白。未知选项（例如 `--registration-token`、`--skill-dir`）一律启动失败，没有兼容回退。
 
 [`DaemonDataDirectory`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java)
 以 owner-only 权限创建固定布局（POSIX 目录 0700、文件 0600），持有 `daemon.lock` 的
 进程独占锁，因此同一目录上的第二个 Daemon 立即失败而不是并发写同一份本地数据。目录
 包含 `resources/{text,staging}`、`skills/<package>` 与技能工作目录
-`skill-work/{cache,staging,backup}`；启动清理未发布的 staging 残留
-（`resources/staging` 与 `skill-work/staging`），已安装 Package 与可读的大文本由各自
-生命周期管理。HOME 只作为 READY 宿主事实，不参与资源目录、调用 cwd 或路径边界。
+`skill-work/{cache,staging,backup}`。启动期只由数据目录本身清理 `resources/staging` 下崩溃残留的 `*.part`
+中转文件；`skill-work` 的 staging 残留与残留备份由 `SkillPackageInstaller` 构造时的自愈恢复处理
+（见 [本地存储与文本输出](#本地存储与文本输出)）。已发布的 `resources/text` 全文与已安装 Package 永不
+隐式删除。HOME 只作为 READY 宿主事实，不参与资源目录、调用 cwd 或路径边界。
 
 ## 能力注册表
 
@@ -55,10 +56,11 @@ Daemon 不注册任何 MCP 能力：MCP 是 Platform 在 Backend 进程内的能
 
 | 资源 | 用途 |
 | --- | --- |
-| 单线程 `ScheduledThreadPoolExecutor` | 心跳定时、重连调度、能力调用超时 |
+| 单线程 `ScheduledThreadPoolExecutor` | 心跳定时、重连调度、能力调用超时与 LSP 定时任务 |
 | virtual-thread-per-task executor | 编码能力的阻塞任务执行 |
+| 平台线程缓存池 `lspExecutor` | LSP 客户端 stdio 的阻塞 I/O（线程数跟随客户端数，空闲自行回收） |
 
-初始化顺序为调度器、执行器、传输、能力注册表、运行时实例；任一步失败都会释放已创建的资源。`start()` 幂等，启动后立即尝试连接并周期发送心跳。关闭或致命失败时按固定顺序收敛：关闭当前连接与传输接入，然后把每个在途 invocation 取消并以 `CANCELLED` 终态写入 journal，最后对两个线程池执行 `shutdownNow`（每个最多等待 5 秒）；单步失败不会跳过后续清理，也不会悬挂 shutdown。
+初始化顺序为调度器、任务执行器、LSP 执行器、传输、能力注册表、运行时实例；任一步失败都会释放已创建的资源。`start()` 幂等，启动后立即尝试连接并周期发送心跳。关闭或致命失败时按固定顺序收敛：关闭当前连接与传输接入，然后把每个在途 invocation 取消并以 `CANCELLED` 终态写入 journal，接着关闭与运行时同生命周期的 capability 资源（当前是 LSP 客户端池），最后对任务、LSP 与调度三类执行资源依次 `shutdownNow`（每个最多等待 5 秒）；单步失败不会跳过后续清理，也不会悬挂 shutdown。
 
 重连使用指数退避：断开后按当前退避值调度下一次连接，退避倍增并以 `--reconnect-max` 封顶，连接成功后退避重置为初值。每次连接尝试递增代际，过期连接的回调与事件被静默丢弃。
 
@@ -97,11 +99,12 @@ journal 的 `start` 原子去重、`complete` 只允许 `RUNNING` 到终态的�
 Daemon 不维护本地内容寻址资源库，也不持久化 MCP 目录；本地状态只有命令输出全文与
 当前安装的 Skill Packages。
 
-Skill Package 安装目录稳定为 `<data-dir>/skills/<package>/`。包内
+Skill Package 安装目录稳定为 `<data-dir>/skills/<package>/`。安装时在包内写入
 `.kkstudio-commit` marker 记录该目录对应的 exact commit，模型可见路径始终是
-`<data-dir>/skills/<package>/<skill>/SKILL.md`，不包含 commit。`skill.sync` 只在 marker
-与 Platform 目标 commit 不同且完整 staging 校验成功后替换 Package；失败保留旧目录，
-Branch HEAD 永远不能替代调用参数中的 exact commit。
+`<data-dir>/skills/<package>/<skill>/SKILL.md`，不包含 commit。`skill.sync` 每次都把目标 commit
+重新物化进 staging 并对整棵 tree 做安全校验（拒绝符号链接、submodule、路径穿越与非普通文件），
+校验通过才原子替换 Package，不因 marker 已相同而跳过；任一步失败都保留旧目录并回滚。Branch HEAD
+永远不能替代调用参数中的 exact commit。
 
 `process.exec`/`grep`/`find` 的超阈值文本经 [`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 写入 `<data-dir>/resources/staging/*.part`（0600）后原子发布为 `<data-dir>/resources/text/*.log`（durable，永不隐式删除）。终态无论大小都只返回一个 `TextResultContent`：小输出完整内联，大输出为有界 head/tail 预览加绝对路径、总字节/行数与 read/grep 指引，同一事实写入 `detailsJson.textOutput`（`totalBytes`、`totalLines`、`capturedBytes`、`captureTruncated`、`captureFailed`，可发布时另有 `path` 与 `readHint`）。
 
@@ -198,9 +201,9 @@ session 时，它就不在这条收敛边界内；本能力不承诺阻止命令
 
 `fs.grep` 与 `fs.find` 使用 Java NIO 原生遍历，全部在 JVM 内完成，不依赖外部检索二进制。忽略规则按检索目标自身解析：从目标向上取祖先 `.gitignore`（从外到内、last-match-wins，单条 pattern 由 JGit 的 gitignore 语义匹配）、仓库根的 `.git/info/exclude`（优先级低于同目录 `.gitignore`，`.git` 文件形式的 worktree 经 `gitdir`/`commondir` 解析），与调用 `workdir` 无关，`.git` 元数据始终硬排除。单行模式流式扫描，不受单文件大小上界限制，但单行超过 1 MiB 时无法宣称结果完整，降级为显式失败（目录扫描记为「未搜索路径」，绝不静默返回无匹配）；需要整文件视图的 `multiline` 保留 64 MiB 上界。文本编码与 `fs.read` 共享 `TextStreams`：UTF-8 或缺 BOM 时按 UTF-8、UTF-16LE/BE 由 BOM 判定，其余编码（如 GBK）严格解码失败并按二进制显式报错，不做替换字符降级。
 
-LSP 能力由 Daemon 直连外部语言服务器：CLI 的 `--lsp-config` 指向一个绝对路径的 JSON 文件，声明预先安装的服务器命令、扩展名与项目根标记；缺省即禁用 LSP，服务器不会被自动安装。客户端按项目根与配置复用一条常驻 stdio 连接，查询前同步文件，位置编码按服务器声明协商。客户端的协议流与 stderr 各自持续排空：协议流完整解析，stderr 只保留有界诊断尾部，用于在服务器崩溃时报告退出码与诊断。单次请求超时或取消只发送 `$/cancelRequest`，不终止共享客户端；进程收尾才收敛整个执行范围——先 `shutdown` 再 `exit`，宽限期后整组（含服务器自己派生的后代）被收敛，退出码与诊断取服务器命令自己发布的那一份。
+LSP 能力由 Daemon 直连外部语言服务器：CLI 的 `--lsp-config` 指向一个绝对路径的 JSON 文件，声明预先安装的服务器命令、扩展名与项目根标记；缺省即禁用 LSP，服务器不会被自动安装。客户端按项目根与配置复用一条常驻 stdio 连接（没有在途请求且闲置 5 分钟后回收，关闭宽限 1 秒），查询前同步文件，位置编码按服务器声明协商。客户端的协议流与 stderr 各自持续排空：协议流完整解析，stderr 只保留有界诊断尾部，用于在服务器崩溃时报告退出码与诊断。单次请求超时或取消只发送 `$/cancelRequest`，不终止共享客户端；进程收尾才收敛整个执行范围——先 `shutdown` 再 `exit`，宽限期后整组（含服务器自己派生的后代）被收敛，退出码与诊断取服务器命令自己发布的那一份。
 
-编码能力的参数只有一个配置来源：[`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java) 由 `DaemonMain` 用 CLI 取值与数据目录资源根构建，不再读取任何 `kkstudio.daemon.*` 系统属性。其中 `previewMaxLines = 2000` 与 `previewMaxBytes = 51200` 是固定常量，`bashExecutable` 与可选的 `lspConfig`（解析为发现表）由对应 CLI 选项覆盖。
+编码能力的参数只有一个配置来源：[`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java) 由 `DaemonMain` 用 CLI 取值与数据目录资源根构建，不读取任何 `kkstudio.daemon.*` 系统属性。其中 `previewMaxLines = 2000` 与 `previewMaxBytes = 51200` 是固定常量，`bashExecutable` 与可选的 `lspConfig`（解析为发现表）由对应 CLI 选项覆盖。
 
 ## 二进制结果直传
 
@@ -225,10 +228,10 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有双线程池资源、驱动握手与重连状态机、按 wire 有效超时裁决能力调用 deadline 并按 message type 校验入站报文。 |
+| `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有任务、LSP 与调度三类执行资源、驱动握手与重连状态机、按 wire 有效超时裁决能力调用 deadline 并按 message type 校验入站报文。 |
 | `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只用显式 `workdir` 解析相对路径，绝不把 HOME 当作文件系统沙箱或会话默认目录；`ProcessScope`/`ProcessScopeHelper` 在命令启动前建立 POSIX 进程组或 Windows Job Object 作为收敛边界；大文本经 `TextOutputStore` 落盘为本地日志，二进制结果由终态编码阶段直传对象存储；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 invocation 的 `RUNNING` 与终态，以原子操作保证单次执行并记录终态结果；重连后的重复 `INVOKE` 幂等重放 `STARTED` 或终态报文。日志在进程整个生命周期内有效，连接断开不改变执行状态。 |
-| `fun.fengwk.kkstudio.harness.daemon.skill` | Skill Package 安装面。`SkillPackageInstaller` 把 Platform 指定的 exact commit 拉取进 `skill-work/cache` 的 bare cache（origin URL 与请求不一致时整份丢弃重建，绝不复用其它仓库的对象）、在 `skill-work/staging` 物化校验后原子替换 `<data-dir>/skills/<package>/`，失败保留旧目录并回滚，重启时清理 staging 残留与残留备份；物化拒绝绝对路径、`..` 逃逸、符号链接与 gitlink。capability 协议本身在 `coding` 包实现。 |
+| `fun.fengwk.kkstudio.harness.daemon.skill` | Skill Package 安装面。`SkillPackageInstaller` 把 Platform 指定的 exact commit 拉取进 `skill-work/cache` 的 bare cache（origin URL 与请求不一致时整份丢弃重建，绝不复用其它仓库的对象）、在 `skill-work/staging` 物化校验后原子替换 `<data-dir>/skills/<package>/`，失败保留旧目录并回滚；构造时自愈清理 staging 残留与残留备份；物化拒绝绝对路径、`..` 逃逸、符号链接与 gitlink。capability 协议本身在 `coding` 包实现。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、文本帧收发与传输监听，强制协商 `permessage-deflate`，并对单消息累积体积与二进制帧执行策略违规关闭。 |
 
 ## 源码与测试
