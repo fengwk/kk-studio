@@ -21,6 +21,7 @@ import {
 } from 'node:fs'
 import path from 'node:path'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
+import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import {
@@ -57,6 +58,7 @@ function parseArgs(argv) {
     headed: false,
     real: false,
     withTools: false,
+    withCanvasFunction: false,
     only: [],
   }
   for (let i = 0; i < argv.length; i++) {
@@ -68,6 +70,7 @@ function parseArgs(argv) {
     else if (a === '--headed') args.headed = true
     else if (a === '--real') args.real = true
     else if (a === '--with-tools') args.withTools = true
+    else if (a === '--with-canvas-function') args.withCanvasFunction = true
     else if (a === '--only') args.only.push(argv[++i])
     else if (a === '-h' || a === '--help') args.help = true
     else throw new Error(`unknown arg: ${a}`)
@@ -279,7 +282,7 @@ async function main(argv) {
   if (args.help) {
     console.log(
       'Usage: node scripts/dev/verify/e2e/ui-smoke.mjs --base-url URL --report-dir DIR'
-        + ' [--headed] [--real] [--with-tools] [--daemon-env NAME] [--only CASE_ID]...',
+        + ' [--headed] [--real] [--with-tools] [--with-canvas-function] [--daemon-env NAME] [--only CASE_ID]...',
     )
     return 0
   }
@@ -362,11 +365,11 @@ async function main(argv) {
   }
 
   async function run(id, title, fn, options = {}) {
-    const { requiresTools = false } = options
     registeredCaseIds.add(id)
-    if (requiresTools && !args.withTools) {
+    const missingCapabilities = missingUiCapabilities(options, args)
+    if (missingCapabilities.length > 0) {
       if (selectedCaseIds.has(id)) {
-        throw new Error(`UI case ${id} requires --with-tools`)
+        throw new Error(`UI case ${id} requires ${missingCapabilities.join(' and ')}`)
       }
       return
     }
@@ -833,6 +836,234 @@ async function main(argv) {
     await shot(caseArt, 'canvas-editor')
     expectNoFatal(pageErrors, consoleErrors)
   })
+
+  await run(
+    'ui.canvas.function_fake_flow',
+    'Canvas：编辑保存 Function 参数→重开读回→fake 运行产出资源→第二节点引用→重开校验引用与参数→再次运行',
+    async (caseArt) => {
+      // 付费边界：本 case 只允许绑定 fake-image，提交任何运行前都必须按真实快照断言函数身份，
+      // 绝不触碰 gpt-image-2 / seedance2.0* 等付费 Function。
+      const catalog = await apiJson(args.backendUrl, 'GET', '/api/canvas-functions')
+      const fakeImage = (catalog.json?.data || []).find((item) => item.name === 'fake-image')
+      assert(
+        fakeImage?.available === true,
+        `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.data?.map((f) => [f.name, f.available]))}`,
+      )
+
+      let canvasId = null
+      const flowStamp = Date.now().toString(36)
+      const snapshot = async () => {
+        const { status, json } = await apiJson(args.backendUrl, 'GET', `/api/canvases/${canvasId}`)
+        assert(status === 200, `canvas snapshot failed: ${status}`)
+        return json.data
+      }
+      const nodeById = (snap, nodeId) => snap.nodes.find((node) => node.id === nodeId)
+      const nodeElement = (nodeId) => page.locator(`.react-flow__node[data-id="${nodeId}"]`)
+      const panel = page.locator('.generation-panel')
+      const promptInput = panel.locator('textarea.generation-prompt-input')
+      const modelSelect = panel.locator('select[aria-label="模型"], select[aria-label="Model"]')
+      const ratioSelect = panel.locator('select[aria-label="ratio"]')
+
+      const addImageFunctionNode = async (expectedNodes) => {
+        await page.locator('.canvas-tool-rail .dock-add').click()
+        const menu = page.getByRole('menu')
+        await menu.locator('[data-add-action="image-function"]').click()
+        await page.waitForFunction(
+          (count) => document.querySelectorAll('.react-flow__node').length === count,
+          expectedNodes,
+          { timeout: 15_000 },
+        )
+      }
+      const selectNode = async (nodeId) => {
+        await nodeElement(nodeId).click()
+        await panel.waitFor({ state: 'visible', timeout: 10_000 })
+      }
+      // 运行入口只有真实右键菜单；提交前断言绑定的是 fake-image。
+      const runNode = async (nodeId) => {
+        const bound = nodeById(await snapshot(), nodeId)
+        assert(
+          bound?.function?.name === 'fake-image',
+          `refusing to run non-fake Canvas Function: ${JSON.stringify(bound?.function)}`,
+        )
+        await nodeElement(nodeId).click({ button: 'right' })
+        const menu = page.locator('.canvas-context-menu')
+        await menu.waitFor({ state: 'visible', timeout: 10_000 })
+        await menu.getByRole('menuitem', { name: /^(Run|运行)$/ }).click()
+      }
+      const awaitRunTerminal = async (nodeId) => {
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          const run = nodeById(await snapshot(), nodeId)?.run
+          if (run && ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) {
+            return run
+          }
+          await page.waitForTimeout(500)
+        }
+        throw new Error(`Canvas Function run did not settle for node ${nodeId}`)
+      }
+      // 资源槽位由成功发布后的快照驱动渲染，等待 DOM 出现即证明 UI 收敛链路可用。
+      const awaitResourceSlot = async (nodeId, alias) => {
+        await nodeElement(nodeId)
+          .locator(`.canvas-resource-slot[data-resource-kind="IMAGE"][aria-label="${alias}"]`)
+          .waitFor({ state: 'visible', timeout: 30_000 })
+      }
+
+      try {
+        await goto('/canvas')
+        await page.getByRole('button', { name: /^(Create a new canvas|Create new canvas|创建新画布)$/ }).click()
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        canvasId = new URL(page.url()).pathname.split('/').pop()
+        assert(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(canvasId),
+          `canvas id is not canonical: ${canvasId}`,
+        )
+
+        // 1. 创建图片生成节点：必须绑定 fake-image，UI 与真实快照一致。
+        await addImageFunctionNode(1)
+        let snap = await snapshot()
+        const nodeAId = snap.nodes[0].id
+        const nodeAName = snap.nodes[0].name
+        await selectNode(nodeAId)
+        assert(await modelSelect.inputValue() === 'fake-image', 'Canvas image node must bind fake-image')
+        assert(nodeById(snap, nodeAId).function.name === 'fake-image', JSON.stringify(nodeById(snap, nodeAId).function))
+
+        // 2. 编辑 prompt/ratio 并等待自动保存落库。
+        const promptText = `e2e-canvas-prompt-${flowStamp}`
+        await promptInput.fill(promptText)
+        await ratioSelect.selectOption('16:9')
+        await page.waitForFunction(
+          (text) => document.querySelector('#saveState')?.textContent?.trim() !== '保存中…',
+          promptText,
+          { timeout: 15_000 },
+        )
+        let saved = null
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          saved = nodeById(await snapshot(), nodeAId)
+          if (saved?.function?.args?.prompt === promptText && saved.function.args.ratio === '16:9') {
+            break
+          }
+          await page.waitForTimeout(250)
+        }
+        assert(
+          saved?.function?.args?.prompt === promptText && saved.function.args.ratio === '16:9',
+          `Canvas Function args were not persisted: ${JSON.stringify(saved?.function)}`,
+        )
+        assert(
+          /^v[1-9]\d*$/.test((await page.locator('.version-pill').textContent())?.trim() ?? ''),
+          'Canvas revision did not advance after editing',
+        )
+
+        // 3. 重开画布读回参数。
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        await selectNode(nodeAId)
+        assert(await promptInput.inputValue() === promptText, 'prompt did not survive reload')
+        assert(await ratioSelect.inputValue() === '16:9', 'ratio did not survive reload')
+
+        // 4. 运行首个节点并验证成功资源。
+        await runNode(nodeAId)
+        const runA = await awaitRunTerminal(nodeAId)
+        assert(runA.status === 'SUCCEEDED', `first Canvas run failed: ${JSON.stringify(runA)}`)
+        const resourceAliasA = `@${nodeAName}_0`
+        await awaitResourceSlot(nodeAId, resourceAliasA)
+        saved = nodeById(await snapshot(), nodeAId)
+        assert(
+          saved.resources.length === 1
+            && saved.resources[0].kind === 'IMAGE'
+            && typeof saved.resources[0].blobId === 'string',
+          `first run did not publish an IMAGE resource: ${JSON.stringify(saved.resources)}`,
+        )
+        await shot(caseArt, 'canvas-first-run')
+
+        // 5. 重开后新增第二节点，引用首个节点的资源。
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        await addImageFunctionNode(2)
+        snap = await snapshot()
+        assert(snap.nodes.length === 2, `expected two nodes after adding the second: ${snap.nodes.length}`)
+        const nodeB = snap.nodes.find((node) => node.id !== nodeAId)
+        await selectNode(nodeB.id)
+        await page.getByRole('button', { name: `插入参考 ${resourceAliasA}` }).click()
+        assert(
+          await page.locator('.generation-attached-chip').count() === 1,
+          'reference chip was not rendered after inserting the reference',
+        )
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          const current = nodeById(await snapshot(), nodeB.id)
+          const refs = current?.function?.args?.references
+          if (Array.isArray(refs) && refs.length === 1) {
+            break
+          }
+          await page.waitForTimeout(250)
+        }
+        const referenced = nodeById(await snapshot(), nodeB.id)
+        assert(
+          referenced.function.args.references?.length === 1
+            && referenced.function.args.references[0].type === 'resource'
+            && referenced.function.args.references[0].nodeId === nodeAId
+            && referenced.function.args.references[0].index === 0,
+          `reference was not persisted as a canonical resource reference: ${JSON.stringify(referenced.function.args)}`,
+        )
+
+        // 6. 重开画布校验引用 UUID 与参数，并确认引用边仍存在。
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        snap = await snapshot()
+        const reference = snap.references.find((item) => item.targetNodeId === nodeB.id)
+        assert(
+          snap.references.length === 1
+            && reference?.sourceNodeId === nodeAId
+            && reference?.targetNodeId === nodeB.id
+            && reference?.index === 0
+            && reference?.canvasId === canvasId,
+          `canonical reference projection is wrong after reload: ${JSON.stringify(snap.references)}`,
+        )
+        const reloadedB = nodeById(snap, nodeB.id)
+        assert(
+          reloadedB.function.name === 'fake-image'
+            && reloadedB.function.args.ratio === 'AUTO'
+            && reloadedB.function.args.references?.[0]?.nodeId === nodeAId,
+          `second node args did not survive reload: ${JSON.stringify(reloadedB.function.args)}`,
+        )
+        await selectNode(nodeB.id)
+        assert(
+          (await page.locator('.generation-attached-chip').allInnerTexts()).some((text) => text.includes(resourceAliasA)),
+          'reference chip is missing after reload',
+        )
+        await page.locator(`.react-flow__edge[data-id="${nodeAId}->${nodeB.id}"]`).waitFor({
+          state: 'visible',
+          timeout: 10_000,
+        })
+        await shot(caseArt, 'canvas-reference-reload')
+
+        // 7. 运行第二节点，验证带引用的 fake 运行成功产出资源。
+        await runNode(nodeB.id)
+        const runB = await awaitRunTerminal(nodeB.id)
+        assert(runB.status === 'SUCCEEDED', `referenced Canvas run failed: ${JSON.stringify(runB)}`)
+        await awaitResourceSlot(nodeB.id, `@${nodeB.name}_0`)
+        await page.reload({ waitUntil: 'networkidle' })
+        await page.locator('#canvasStage').waitFor({ state: 'visible', timeout: 15_000 })
+        snap = await snapshot()
+        const finalA = nodeById(snap, nodeAId)
+        const finalB = nodeById(snap, nodeB.id)
+        assert(
+          finalA.resources.length === 1 && finalB.resources.length === 1,
+          `both nodes must keep exactly one published resource: ${JSON.stringify(snap.nodes.map((n) => [n.name, n.resources.length]))}`,
+        )
+        assert(
+          finalB.function.args.references?.[0]?.nodeId === nodeAId
+            && finalB.function.args.prompt === '描述要生成的图片',
+          `second node parameters changed after the referenced run: ${JSON.stringify(finalB.function.args)}`,
+        )
+        await shot(caseArt, 'canvas-reference-run')
+        expectNoFatal(pageErrors, consoleErrors)
+      } finally {
+        if (canvasId) {
+          await apiJson(args.backendUrl, 'DELETE', `/api/canvases/${canvasId}`)
+        }
+      }
+    },
+    { requiresCanvasFunction: true },
+  )
 
   await run('ui.nav.roundtrip', '主导航往返无崩溃', async (caseArt) => {
     for (const p of ['/chats', '/canvas', '/agents', '/models', '/providers', '/environments', '/mcp-servers', '/chats']) {

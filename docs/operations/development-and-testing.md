@@ -281,7 +281,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--with-tools` | 启用 Daemon/Tool case |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
-| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` |
+| `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用 Canvas 真实链路 UI 用例（编辑保存、重开读回、fake 运行产出资源、跨节点引用后再运行），该用例只绑定 `fake-image`，不会提交付费 Function |
 | `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行 Playwright UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
