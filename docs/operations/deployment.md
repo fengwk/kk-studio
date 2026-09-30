@@ -70,8 +70,10 @@ runtime image。构建时从 Fat JAR 提取同版本 `convention4j-agent`，保�
 `Boot-Class-Path` 要求的版本化文件名并通过稳定别名启动 JVM；它负责线程池中的 TTL/MDC
 上下文透传，不替代跨服务的 Trace 传播。runtime image 不含 Maven、Node 和源码。
 
-App 依赖 PostgreSQL、MinIO 与 `minio-init` healthy 后才启动，启动期严格验证 S3 连接属性并
-探测 bucket 可访问性。Storage 与 Canvas 是常驻服务，没有 disabled 503 状态。用生产 profile
+App 依赖 PostgreSQL 与 MinIO `healthy`，并等待一次性的 `minio-init` 成功退出
+（`service_completed_successfully`）后才启动；启动期严格验证 S3 连接属性并探测 bucket 可访问性。
+`minio-init` 创建私有 bucket 后立即以 0 退出，没有 `healthcheck`，因此它不能作为 `service_healthy`
+的目标。Storage 与 Canvas 是常驻服务，没有 disabled 503 状态。用生产 profile
 运行时必须提供外部 durable 服务：
 
 ```bash
@@ -151,7 +153,9 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 ### [`deploy/test`](../../deploy/test/README.md)：Canvas/Storage 离线栈
 
 `kk-studio-canvas-test` project 提供 PostgreSQL、MinIO、HTTP mock 与可选的 App，用于 Canvas
-Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
+Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。bucket 由一次性的
+`minio-init` 容器创建，App 以 `service_completed_successfully` 等它成功退出；不启用 App 时没有
+这个依赖条件，smoke 只等待常驻服务 `healthy`，再显式 `compose run --rm` 执行同一份初始化：
 
 ```bash
 ./scripts/dev/verify/smoke/offline-chat.sh
@@ -258,7 +262,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
-| local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
+| local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*`（subagent 并发上限不经环境变量配置，只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有） |
 | production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
 | test | ports/build/mock | `CANVAS_TEST_*` |

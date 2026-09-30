@@ -1,7 +1,8 @@
 # builtin-read 测试迁移映射
 
-本文记录 pi-base 的 `read` 行为用例在 KK 中的逐项落点：源用例、适用性判断、KK 对应用例和执行结果。契约事实源是
-[内置工具与异步委派](../modules/builtin-tools-design.md#文件读取)，本文不重复契约内容，只回答“某个源用例现在由谁守、为什么守得住、哪些不再适用”。
+本文记录 pi-base 的 `read` 行为用例在 KK 中的逐项落点：源用例、适用性判断与 KK 对应用例。契约事实源是
+[内置工具与异步委派](../modules/builtin-tools-design.md#文件读取)，本文不重复契约内容，只回答“某个源用例现在由谁承接、
+哪些不再适用”。本文只维护映射关系，每一行的实际通过与覆盖率以本文「覆盖落点与运行方式」中的命令输出为准。
 
 ## 覆盖落点与运行方式
 
@@ -24,9 +25,10 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl platform -am test \
 ./scripts/dev/verify/e2e/run.sh --real --with-tools --with-canvas-storage --only tool.read_turn
 ```
 
-执行结果（2026-09-27，JDK 21）：common 84 通过（`verify` 的 JaCoCo 门禁通过）、平台 58 通过、本地读取用例 30 通过，全部 0 失败。
-JaCoCo 行覆盖率：共享核心 `common.text.TextReadWindow` 86/86 = 100%，本地适配器 `LocalTextReadWindow` 8/8 = 100%，
-受管适配器 `ReadTextWindow` 31/31 = 100%，`ReadCapability` 89/98 = 90.8%（仅读取用例口径）。
+运行结果不在这里固定：上表各层测试的通过与失败以对应模块 `target/surefire-reports` 为准，覆盖率以
+`target/site/jacoco` 为准；覆盖率是否作为门禁取决于模块自身——[`harness/common`](../../harness/common) 与
+[`platform`](../../platform) 绑定 JaCoCo `check`，`harness/daemon` 只产出报告。真实 E2E 的结论与产物在
+`reports/e2e/latest/`。本文不记录某一次运行的用例数或覆盖率数字，这些数字会随实现漂移。
 
 ## `read.test.ts` 逐项映射
 

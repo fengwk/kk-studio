@@ -1,7 +1,7 @@
 # 内置文件变更能力测试映射
 
 本文面向维护 `fs.write`、`fs.edit` 与文本编解码、原子提交的开发者：说明这些能力当前生效的行为契约、
-`pi-base` 迁移用例落到了哪条测试、哪些用例被改写或未迁移，以及覆盖率基线与仍然未覆盖的守卫分支。
+`pi-base` 用例落到了哪条测试、哪些用例被改写或未迁移，以及覆盖率报告的位置与仍然未覆盖的守卫分支。
 契约本身见[内置工具设计](../modules/builtin-tools-design.md)，跨模块边界见[系统设计](../system-design.md)。
 
 ## 契约与证据
@@ -43,7 +43,7 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -B -ntp -pl harness/daemon -am test
 | calls onSuccessfulWrite hook and reports overwrites | `reportsCreateAndOverwriteWithSimpleSuccessMessage` | 改写：kk 没有成功回调，用 “Created/Overwrote … successfully.” 结果文本观测 |
 | reports success once the file write has committed even if cancellation arrives at completion | `keepsCommittedWriteSuccessfulWhenCancelArrivesAfterCompletion` | 迁移 |
 | keeps a committed write successful when its observer throws | — | 不迁移：kk 提交后没有可抛错的用户回调 |
-| formatWriteCall collapsed preview（11 条：7 行上限、单复数提示、尾换行、缺失 path 等） | — | 不迁移：同预览渲染层 |
+| formatWriteCall collapsed preview（7 行上限、单复数提示、尾换行、缺失 path 等） | — | 不迁移：同预览渲染层 |
 | — | `overwritesReadOnlyFileWhenDirectoryIsWritable`、`rejectsWhollyUnreadableTargetWithoutModifyingIt` | 新增：0444 只读目标在目录可写时可合法原子覆盖并保留权限；0000 目标因原内容不可读而拒绝 |
 
 ### edit-write-index
@@ -133,21 +133,12 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -B -ntp -pl harness/daemon -am test
 | line-endings / defaults to LF when a file has no separators | `usesLfForAmbiguousInsertedNewlines` | 改写：同上 |
 | line-endings / preserves an empty trailing line when the file ends with a newline | `canAddAndRemoveFinalNewline` | 改写：同上 |
 
-## 覆盖率基线
+## 覆盖率的位置与口径
 
-以 `env JAVA_HOME=$JAVA_HOME_21 mvn -B -ntp -pl harness/daemon -am test` 执行整个 daemon 模块后读取
-`harness/daemon/target/site/jacoco/jacoco.csv`：
-
-| 类 | 行覆盖 | 分支覆盖 |
-| --- | --- | --- |
-| `WriteCapability` | 35/35 = 100% | 100% |
-| `EditCapability` | 316/326 = 96.9% | 173/192 = 90.1% |
-| `TextFileCommit` | 27/27 = 100% | 100% |
-| `TextFileCodec` | 58/59 = 98.3% | 36/38 = 94.7% |
-| `EnvironmentPaths` | 56/61 = 91.8% | 40/44 = 90.9% |
-
-统计口径：`WriteCapability.detectLineEnding` 已作为死代码删除——它既无生产调用者，也与 write「按调用内容原样写入」的新契约冲突，
-因此连同共享用例中的旧断言一起移除；这是删除死代码，不是为了覆盖率而删分支。其余未覆盖行见下节。
+以 `env JAVA_HOME=$JAVA_HOME_21 mvn -B -ntp -pl harness/daemon -am test` 执行整个 daemon 模块，覆盖率报告写在
+`harness/daemon/target/site/jacoco`。写入与编辑路径的相关类是 `WriteCapability`、`EditCapability`、`TextFileCommit`、
+`TextFileCodec`、`EnvironmentPaths`；逐类百分比随实现漂移，本文不固定数字，只说明口径：
+`harness/daemon` 不绑定 JaCoCo `check`，因此覆盖率是参考基线而不是构建门禁；未覆盖行见下节。
 
 ## 未覆盖的守卫分支
 
@@ -163,6 +154,6 @@ POSIX 缺失或原子改名不可用的平台行为已被测试覆盖；实现�
 
 ## 与共享用例的边界
 
-`ReadWriteEditCapabilitiesTest` 是 read/write/edit 共享的历史用例集合。与本文 write 契约冲突的 write 行尾保留断言
-（按调用内容原样写入）以及 `WriteCapability.detectLineEnding` 死方法断言已在当前实现中直接同步；该用例集合其余部分仍由共享用例
-承担责任，迁移后的 write/edit 语义由本文所列用例独立保证。
+`ReadWriteEditCapabilitiesTest` 是 read/write/edit 共享的用例集合。它对 write 只断言现行契约（按调用内容原样写入），
+不保留旧的行尾保留断言；该集合其余部分继续由共享用例承担，write/edit 的差异语义（含 edit 侧的行尾继承）由本文所列
+用例独立保证。
