@@ -14,8 +14,6 @@ export interface IssueBoardProps {
   onRecoverIssue: (issueId: string, expectedVersion: string) => void
   onReopenIssue: (issueId: string, expectedVersion: string) => void
   onResolveUnknownIssue: (issueId: string, expectedVersion: string) => void
-  onArchiveIssue?: (issueId: string, expectedVersion: string) => void
-  onUnarchiveIssue?: (issueId: string, expectedVersion: string) => void
 }
 
 export function IssueBoard({
@@ -28,8 +26,6 @@ export function IssueBoard({
   onRecoverIssue,
   onReopenIssue,
   onResolveUnknownIssue,
-  onArchiveIssue,
-  onUnarchiveIssue,
 }: IssueBoardProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [includeArchived, setIncludeArchived] = useState(false)
@@ -159,16 +155,6 @@ export function IssueBoard({
                       onReopen={() => onReopenIssue(item.issue.id, item.issue.version)}
                       onResolveUnknown={() =>
                         onResolveUnknownIssue(item.issue.id, item.issue.version)
-                      }
-                      onArchive={
-                        onArchiveIssue
-                          ? () => onArchiveIssue(item.issue.id, item.issue.version)
-                          : undefined
-                      }
-                      onUnarchive={
-                        onUnarchiveIssue
-                          ? () => onUnarchiveIssue(item.issue.id, item.issue.version)
-                          : undefined
                       }
                     />
                   ))

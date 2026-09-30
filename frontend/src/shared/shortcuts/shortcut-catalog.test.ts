@@ -77,7 +77,6 @@ describe('SHORTCUT_CATALOG', () => {
     // Canvas：useCanvasKeyboard 实际绑定的快捷键。
     expect(keysByScope('canvas')).toEqual([
       'Esc',
-      'Ctrl/Cmd+K',
       '0',
       '1',
       'F',

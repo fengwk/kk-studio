@@ -10,8 +10,6 @@ export interface IssueCardProps {
   onRecover?: () => void
   onReopen?: () => void
   onResolveUnknown?: () => void
-  onArchive?: () => void
-  onUnarchive?: () => void
 }
 
 export function IssueCard({

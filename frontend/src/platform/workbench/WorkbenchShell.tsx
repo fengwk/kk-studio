@@ -23,11 +23,7 @@ function UnknownContributionFallback() {
 
 function RegisteredPage({ page }: { page: PageContribution }) {
   const Page = page.component
-  return (
-    <Page>
-      <OverlayHost />
-    </Page>
-  )
+  return <Page />
 }
 
 function StudioRoutes() {
@@ -58,6 +54,7 @@ export function WorkbenchShell({
   return (
     <AppShell navItems={navItems}>
       {children ?? <StudioRoutes />}
+      <OverlayHost />
     </AppShell>
   )
 }
