@@ -13,7 +13,7 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](harness-runtime.md)
 与 Contributor 目录承担；环境能力的网络传输与子进程执行由
 [`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md)
-承担。Skill 不再拥有专用加载工具，而是由 System Prompt 提供稳定路径并统一交给
+Skill 没有专用加载工具：System Prompt 提供稳定路径，读取统一交给
 `read`。生产依赖见 [`pom.xml`](../../harness/builtin/pom.xml)，由
 [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)
 守卫。
@@ -26,7 +26,6 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具适配与 prompt 模板加载 | `read` 按地址选择 Platform 或可选 `BoundEnvironment`，其余宿主工具要求 Environment；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | 只读 Goal 工具（`get_goal`、`update_goal`）、进度声明 `GoalProgress` 与确定性编解码器 `GoalProgressCodec` | 目标正文由 branch settings 拥有（用户经 typed `GOAL` 命令设置/清除），本包只读取它并声明进度；进度依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
 | `fun.fengwk.kkstudio.harness.builtin.input` | 人工输入工具 `AskUserTool` 及其问卷提示词 | 只声明 `ask_user` 的模型可见契约；等待冻结与答案校验由 [harness-runtime](harness-runtime.md) 的 `runtime.input` 承接 |
-| `fun.fengwk.kkstudio.harness.builtin.skill` | Skill 稳定地址读取所需的窄端口和值契约 | 不注册专用模型工具；Git cache、Package Catalog 与本地安装由 Platform/Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部委派工具 `TaskTool`、任务请求 `SubagentTaskRequest`、接受结果 `SubagentTaskAcceptance`、即时回执 `SubagentTaskMessages`、执行端口 `SubagentRunner` 与配置接入 `SubagentConfig`/`SubagentConfigProvider` | 只做参数解析、端口转发与即时回执文本；join 匹配、交付、递归 Idle 收敛与并发额度由 Runtime 与 Platform 负责 |
 
 ## 注册清单
@@ -45,10 +44,10 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 | `environment.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | `lsp.goto-definition`，READ_ONLY |
 | `environment.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | `lsp.workspace-symbols`，READ_ONLY |
 | `environment.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | `lsp.java-decompile`，READ_ONLY |
-| `runtime.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务 |
-| `ask-user` | `ask_user` | 无 | SELECTABLE | 向人提出冻结问卷；Runtime 在 dispatch 前按 contributor `builtin` + name `ask_user` 冻结为 `WAITING_INPUT` |
-| `goal.get` | `get_goal` | READ(`goal.progress`) | SELECTABLE | 读取当前用户 Goal 与其进度声明 |
-| `goal.update` | `update_goal` | WRITE(`goal.progress`) | SELECTABLE | 声明当前 Goal 的终态进度 |
+| `runtime.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务，`NON_IDEMPOTENT` |
+| `ask-user` | `ask_user` | 无 | SELECTABLE | 向人提出冻结问卷，`READ_ONLY`；Runtime 在 dispatch 前按 contributor `builtin` + name `ask_user` 冻结为 `WAITING_INPUT` |
+| `goal.get` | `get_goal` | READ(`goal.progress`) | SELECTABLE | 读取当前用户 Goal 与其进度声明，`READ_ONLY` |
+| `goal.update` | `update_goal` | WRITE(`goal.progress`) | SELECTABLE | 声明当前 Goal 的终态进度，`IDEMPOTENT` |
 
 `localName` 是 contributor 内的 scoped 贡献标识；Agent 侧的唯一身份是模型可见 name，配置、权限键与 catalog 条目都只用它。name 的字面值由 [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定。此外注册 Custom Entry Type `goal.progress-type`（customType 为 `goal.progress`），priority 为 0。Goal 没有创建工具、也没有任何 Context Projector：目标正文由用户维护，绝不注入 `systemInstruction`。
 
@@ -90,7 +89,7 @@ reportedAt: 毫秒截断
 做 schema 校验与强类型解析，并通过限定在 `builtin` 作用域的 `BranchView.goal()` 读取当前
 分支的用户 Goal。它们都要求 durable `ToolExecutionContext`，缺失时直接返回错误结果而不是抛出：
 
-- [`GetGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GetGoalTool.java) 无入参、READ_ONLY，只读返回当前目标正文与其 `goalId`，以及绑定该 `goalId` 的进度声明；未设置或已清除时返回明确的提示文本。旧 `goalId` 的声明不会被当成当前目标进度。
+- [`GetGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GetGoalTool.java) 无入参、READ_ONLY，只读返回当前目标正文与其 `goalId`，以及绑定该 `goalId` 的进度声明；未设置或已清除时返回明确的提示文本。过期 `goalId` 的声明不会被当成当前目标进度。
 - [`UpdateGoalTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/UpdateGoalTool.java) 要求终态 `status`（`complete` | `blocked`）与非空 `reason`，不接受显式 `goalId`：它按执行时当前生效的 `goalId` 绑定声明。没有用户 Goal，或当前 Goal 已有终态声明时直接拒绝，避免迟到/重复报告被当成当前目标的进度。
 
 声明成功后携带且仅携带一个 `AppendCustomEntry("goal.progress", 1, …)`，查询与所有错误结果
@@ -123,9 +122,9 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 
 [`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。全局额度跨所有执行树按非空闲子 Thread 计数，根 Thread 不计入，同一忙碌子上的多个 join 不重复占额；判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
-## pi-base 委派测试迁移映射
+## 委派的接受与交付
 
-委派能力的设计入口是 [内置工具与异步委派](builtin-tools-design.md)：`pi-base` 在同步阻塞的 `task` 调用里用本次 `tool_result` 交付最终结果；本仓库把接受与交付拆开——`TaskTool` 只回执 `accepted`，子结果由 Runtime 在子执行首次 Idle 匹配 join 后作为父 Thread 的一条独立消息交付。逐用例的 pi-base → 本仓库测试映射见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
+委派能力的设计契约见 [内置工具与异步委派](builtin-tools-design.md)：`TaskTool` 只回执 `accepted`，子结果不经过工具返回，而由 Runtime 在子执行首次 Idle 匹配 join 后作为父 Thread 的一条独立消息交付；逐用例的来源行为对照见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
 
 ## 源码与测试
 
@@ -136,9 +135,9 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 - Subagent：[`TaskTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)、[`SubagentRunner.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)、[`SubagentTaskRequest.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java)、[`SubagentTaskAcceptance.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskAcceptance.java)、[`SubagentTaskMessages.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)、[`SubagentConfig.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java)、[`SubagentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentPrompts.java)
 - Subagent Prompt：[`task.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task.md)、[`task-system.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task-system.md)、[`task.schema.json`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task.schema.json)；maxTurns 软预算到期的提醒文本不属于本模块，由 Runtime 的 `SystemReminder` 统一给出
 - [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)
-  锁定完整的 12 工具清单、环境支持级别、capability 映射与 descriptor
+  锁定完整的 13 工具清单（12 个 SELECTABLE 与 1 个 INTERNAL `task`）、环境支持级别、capability 映射与 descriptor
   schema/defaultTimeout；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)
-  覆盖 catalog 无创建工具、只读目标读取、旧 `goalId` 进度陈旧、声明绑定当前 `goalId`、
+  覆盖 catalog 无创建工具、只读目标读取、过期 `goalId` 进度陈旧、声明绑定当前 `goalId`、
   重复终态声明被拒与缺失上下文安全失败；[`BuiltinHistoryRenderersTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderersTest.java)、
   [`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java)、
   [`SubagentTaskMessagesTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessagesTest.java)
