@@ -21,9 +21,20 @@ function UnknownContributionFallback() {
   )
 }
 
+/**
+ * Registered Page 必须在自己的 runtime provider 内部渲染 OverlayHost：
+ * AI 的 create-chat / resource-editor / delete-resource dialog contribution 通过
+ * `useOptionalChatRuntime` / `useOptionalCatalogRuntime` 读取页面级控制器，
+ * 只有位于页面 Provider 子树内才能拿到值；挂到 WorkbenchShell 根部会永远读到 null，
+ * 模态因此永不挂载。页面组件（AiConsoleFrame 等）负责把 children 渲染在自身子树内。
+ */
 function RegisteredPage({ page }: { page: PageContribution }) {
   const Page = page.component
-  return <Page />
+  return (
+    <Page>
+      <OverlayHost />
+    </Page>
+  )
 }
 
 function StudioRoutes() {
@@ -44,6 +55,11 @@ function StudioRoutes() {
   )
 }
 
+/**
+ * 显式传入 children 的自定义页面（如 `/interactions`）不在 registered page 组合链上，
+ * 由 shell 在根部提供唯一 OverlayHost；registered page 路径已由页面自身挂载，
+ * 两条路径各自只挂载一次，不重复渲染。
+ */
 export function WorkbenchShell({
   navItems,
   children,
@@ -54,7 +70,7 @@ export function WorkbenchShell({
   return (
     <AppShell navItems={navItems}>
       {children ?? <StudioRoutes />}
-      <OverlayHost />
+      {children ? <OverlayHost /> : null}
     </AppShell>
   )
 }

@@ -2,8 +2,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { CatalogRuntimeContext, useOptionalCatalogRuntime } from '@/features/ai/catalog/CatalogRuntimeContext'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider, useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 
 describe('WorkbenchShell', () => {
@@ -63,23 +65,41 @@ describe('WorkbenchShell', () => {
     }
   })
 
-  it('I5: mounts OverlayHost at WorkbenchShell root so registered pages and explicit children share the same overlay host', async () => {
+  it('I5: registered page 在自身 runtime provider 内挂载 OverlayHost，页面级上下文对 dialog 可见', async () => {
+    const host = new ExtensionHost()
+    host.register({
+      id: 'test-page-scoped-overlay',
+      // 与真实 AI dialog contribution 相同：不 mock OptionalRuntime，直接消费真实 context。
+      dialogs: [{ id: 'page.dialog', component: PageScopedDialog }],
+      overlays: [{ id: 'page.overlay', component: PageScopedDialog }],
+      pages: [{
+        id: 'test.page',
+        path: 'test-page',
+        component: PageScopedPage,
+      }],
+    })
+
+    renderWorkbench(host, '/test-page')
+
+    // 页面自身的 runtime provider 必须能被子树内的 OverlayHost 读到；若 OverlayHost
+    // 被挂到 shell 根部（页面 Provider 之外），这里只会渲染出空内容。
+    expect(await screen.findByRole('heading', { name: 'Test Registered Page' })).toBeInTheDocument()
+    expect(screen.getAllByTestId('page-scoped-dialog')).toHaveLength(2)
+    for (const node of screen.getAllByTestId('page-scoped-dialog')) {
+      expect(node).toHaveTextContent('page-scoped-controller')
+    }
+    // 页面路径不再在根部重复挂载宿主。
+    expect(screen.getAllByTestId('page-scoped-dialog')).toHaveLength(host.dialogs.list().length + host.overlays.list().length)
+  })
+
+  it('I5: 显式 children 路由在 WorkbenchShell 根部挂载唯一 OverlayHost', async () => {
     const host = new ExtensionHost()
     host.register({
       id: 'test-overlays',
       dialogs: [{ id: 'global.dialog', component: () => <div data-testid="global-dialog">Global Dialog</div> }],
       overlays: [{ id: 'global.overlay', component: () => <div data-testid="global-overlay">Global Overlay</div> }],
-      pages: [{ id: 'test.page', path: 'test-page', component: () => <h1>Test Registered Page</h1> }],
     })
 
-    // 1. 验证 Registered Page 路由下，根部的 OverlayHost 能够正常渲染全局 dialogs 与 overlays
-    const { unmount } = renderWorkbench(host, '/test-page')
-    expect(await screen.findByRole('heading', { name: 'Test Registered Page' })).toBeInTheDocument()
-    expect(screen.getByTestId('global-dialog')).toBeInTheDocument()
-    expect(screen.getByTestId('global-overlay')).toBeInTheDocument()
-    unmount()
-
-    // 2. 验证显式传入 children（如 /interactions 自定义页面）时，全局宿主 OverlayHost 同样挂载生效
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(
       <QueryClientProvider client={queryClient}>
@@ -105,6 +125,28 @@ describe('WorkbenchShell', () => {
 function MissingProviderProbe() {
   useExtensionHostSnapshot()
   return null
+}
+
+/** 真实页面级 runtime provider 的桩值；测试只验证 context 是否可被子树内的 dialog 读到。 */
+const PAGE_SCOPED_CONTROLLER = { resourceEditorModal: { modal: null } } as never
+
+/** 模拟真实 registered page：在自己的 runtime provider 内部渲染 children。 */
+function PageScopedPage({ children }: ExtensionComponentProps) {
+  return (
+    <CatalogRuntimeContext.Provider value={PAGE_SCOPED_CONTROLLER}>
+      <h1>Test Registered Page</h1>
+      {children}
+    </CatalogRuntimeContext.Provider>
+  )
+}
+
+/** 模拟真实 AI dialog contribution：消费真实 OptionalRuntime hook，读到控制器才渲染。 */
+function PageScopedDialog() {
+  const controller = useOptionalCatalogRuntime()
+  if (!controller) {
+    return null
+  }
+  return <div data-testid="page-scoped-dialog">page-scoped-controller</div>
 }
 
 function extension(id: string, label: string, priority: number) {
