@@ -61,10 +61,6 @@ export const shortcutsCatalog = {
     'en-US': 'Clear the selection and focus the stage',
     'zh-CN': '清空选择并聚焦画布',
   },
-  'ai.runtime.shortcuts.canvasThread': {
-    'en-US': 'Focus the bound conversation',
-    'zh-CN': '聚焦绑定对话',
-  },
   'ai.runtime.shortcuts.canvasFit': {
     'en-US': 'Fit the canvas view',
     'zh-CN': '缩放适应画布',
@@ -124,10 +120,6 @@ export const shortcutsCatalog = {
   'ai.runtime.shortcuts.label.canvasEscape': {
     'en-US': 'Clear & focus',
     'zh-CN': '清空并聚焦',
-  },
-  'ai.runtime.shortcuts.label.canvasThread': {
-    'en-US': 'Focus thread',
-    'zh-CN': '聚焦对话',
   },
   'ai.runtime.shortcuts.label.canvasFit': {
     'en-US': 'Fit view',
