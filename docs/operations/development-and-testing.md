@@ -9,7 +9,7 @@
 | 工具 | 用途与约束 |
 | --- | --- |
 | JDK 21 | 所有 Maven 命令显式使用 `JAVA_HOME_21`；根 POM 的 `maven.compiler.release` 是 `21` |
-| Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 都会校验 JDK 21 |
+| Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 都要求 JDK 21：`JAVA_HOME_21` 或 `JAVA_HOME` 必须指向 21，缺失或不可执行时在启动任何服务前失败 |
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 启动前后检查端口与健康状态 |
@@ -136,10 +136,12 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 [`harness/runtime`](../../harness/runtime/pom.xml)、
 [`harness/contributor-api`](../../harness/contributor-api/pom.xml)、
 [`harness/builtin`](../../harness/builtin/pom.xml)、
-[`harness/provider`](../../harness/provider/pom.xml)、[`platform`](../../platform/pom.xml) 和
-[`web`](../../web/pom.xml)
-在各自 POM 中把 JaCoCo `check` 绑定到
-`verify`，按 `CLASS` include 只检查当前关键类，line coverage 下限为 `0.90`，个别类要求 `1.00`：
+[`harness/provider`](../../harness/provider/pom.xml)、[`platform`](../../platform/pom.xml)、
+[`project`](../../project/pom.xml)、[`plugins/minimax-mavis`](../../plugins/minimax-mavis/pom.xml)、
+[`plugins/canvas-media`](../../plugins/canvas-media/pom.xml) 和 [`web`](../../web/pom.xml)
+在各自 POM 中把 JaCoCo `check` 绑定到 `verify`，line coverage 下限为 `0.90`，个别类要求 `1.00`。
+多数模块按 `CLASS` include 只检查当前关键类，[`harness/mcp`](../../harness/mcp/pom.xml) 与
+[`project`](../../project/pom.xml) 则按 `BUNDLE` include 检查子包：
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
@@ -153,7 +155,8 @@ branch coverage 作为参考指标，具体数字以对应模块的 `target/site
 ### Fat JAR
 
 根 POM 的 reactor 当前是 [`share`](../../share)、[`schema`](../../schema)、[`canvas`](../../canvas)、
-[`harness`](../../harness)、[`platform`](../../platform)、[`web`](../../web)。需要可运行产物时：
+[`project`](../../project)、[`harness`](../../harness)、[`platform`](../../platform)、
+[`plugins`](../../plugins)、[`web`](../../web)。需要可运行产物时：
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean package
@@ -229,8 +232,9 @@ docker compose -f deploy/reliability/compose.yaml config --quiet
 ```
 
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
-[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、依赖 health、非 root runtime、PostgreSQL、MinIO
-bucket 与 HTTP mock smoke 组合成一个可清理入口，`--with-app` 再覆盖全局 Blob、Canvas Resource、
+[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
+`minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
+`compose run --rm` 执行初始化。`--with-app` 另外覆盖全局 Blob、Canvas Resource、
 signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
@@ -416,7 +420,7 @@ node scripts/dev/verify/reliability/reassess-agent-run.mjs <runId>
 | `--base-url URL` | `http://127.0.0.1:18091` |
 | `--daemon-env NAME` | `docker-reliability` |
 | `--report-root DIR` | `reports/reliability` |
-| `--max-cost-usd N` | `0..5`，硬上限为 USD 5 |
+| `--max-cost-usd N` | 默认 `5`，取值 `0..5`，硬上限为 USD 5 |
 
 case 集合、模型/变体组合与 tool policy 由 [scripts/dev/verify/reliability/matrix.mjs](../../scripts/dev/verify/reliability/matrix.mjs)
 和 [policy.mjs](../../scripts/dev/verify/reliability/policy.mjs) 定义。真实执行前 runner 要求 provider、

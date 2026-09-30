@@ -169,9 +169,9 @@ pi-base 的这份用例不启动 shell，只断言命令文本的静态分析结
 pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurfaceAnalyzerTest`，`Coverage` 即
 `BashSurfaceAnalyzerCoverageTest`），标注「补」的断言是按同一语义补上的漏测。
 
-最近一次 `mvn -o -pl harness/runtime -am test`（1574 个用例，0 失败）下 `BashSurfaceAnalyzer` 的 JaCoCo 行覆盖为
-454/464 = 97.8%，分支覆盖 209/270 = 77.4%；未覆盖的 10 行集中在无法由命令文本稳定触发的防御性分支（空段提前返回、
-若干转义回退与注释内的 heredoc 消费）。
+覆盖率随 `mvn -o -pl harness/runtime -am test` 产出到 `harness/runtime/target/site/jacoco`；它不在门禁内——
+[`harness/runtime`](../../harness/runtime) 的 JaCoCo `check` 只覆盖固定的核心类清单，`BashSurfaceAnalyzer` 不在其中。
+未覆盖的行是无法由命令文本稳定触发的防御性分支（空段提前返回、若干转义回退与注释内的 heredoc 消费），具体行号以报告为准。
 
 | pi-base 用例 | kk-studio 承接 | 说明 |
 | --- | --- | --- |
@@ -326,9 +326,9 @@ pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurf
   这条裁剪一致；Windows 腿另外点名要求 `BashCapabilityTest` 的「命令的 stdin 是确定性 EOF」与「超时预算溢出不退化成立即超时」
   两条必须真跑且不得跳过，这样「Windows 的命令执行由真正的 Git Bash 承担」是被锁住的实证而不是默认假设。
   单平台与合并后的数字必须分开看，因为它们测的不是同一件事：本地（Linux 完整套件，同一套 helper 覆盖收集）可复现的是单平台
-  合计 **86.9% (873/1005)**，与门禁要求之间的差额正是只有对应平台才会执行的分支——Windows 的 Job 路径（helper 的
+  合计覆盖率，与门禁要求之间的差额正是只有对应平台才会执行的分支——Windows 的 Job 路径（helper 的
   `runWindows` 与 Windows 分派、`ProcessScope` 的 Job 分支、`WindowsJobScope` 的句柄路径）与 macOS 上的非 Linux 判定；
-  合并后的合计数字由门禁在同一次矩阵的三份产物上算出并要求达到 90%。剩下的未覆盖行是「信号被内核拒绝、调用线程被中断、
+  具体数字每次由矩阵在同一次的三份产物上重新算出，本文不固定它们。剩下的未覆盖行是「信号被内核拒绝、调用线程被中断、
   helper 拒绝退出」这类只在异常时序到达的失败关闭分支，门禁不去掩盖它们，也不通过放宽阈值换绿色。
 - **保活与身份核验是两件事。** 「keeper 先死、后代还在」时不能照着快照直接发信号：快照与强杀之间存在时间差，pid 可能已被复用。
   `ProcessScope` 因此对每个成员重新核验「仍然存活、启动时刻与快照一致、此刻仍属于本次进程组」之后才强杀，任一不成立就只报告未收敛。

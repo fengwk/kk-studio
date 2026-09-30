@@ -1,7 +1,8 @@
 # builtin-read 测试迁移映射
 
-本文记录 pi-base 的 `read` 行为用例在 KK 中的逐项落点：源用例、适用性判断、KK 对应用例和执行结果。契约事实源是
-[内置工具与异步委派](../modules/builtin-tools-design.md#文件读取)，本文不重复契约内容，只回答“某个源用例现在由谁守、为什么守得住、哪些不再适用”。
+本文记录 pi-base 的 `read` 行为用例在 KK 中的逐项落点：源用例、适用性判断与 KK 对应用例。契约事实源是
+[内置工具与异步委派](../modules/builtin-tools-design.md#文件读取)，本文不重复契约内容，只回答“某个源用例现在由谁承接、
+哪些不再适用”。本文只维护映射关系，每一行的实际通过与覆盖率以本文「覆盖落点与运行方式」中的命令输出为准。
 
 ## 覆盖落点与运行方式
 
@@ -24,9 +25,10 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl platform -am test \
 ./scripts/dev/verify/e2e/run.sh --real --with-tools --with-canvas-storage --only tool.read_turn
 ```
 
-执行结果（2026-09-27，JDK 21）：common 84 通过（`verify` 的 JaCoCo 门禁通过）、平台 58 通过、本地读取用例 30 通过，全部 0 失败。
-JaCoCo 行覆盖率：共享核心 `common.text.TextReadWindow` 86/86 = 100%，本地适配器 `LocalTextReadWindow` 8/8 = 100%，
-受管适配器 `ReadTextWindow` 31/31 = 100%，`ReadCapability` 89/98 = 90.8%（仅读取用例口径）。
+运行结果不在这里固定：上表各层测试的通过与失败以对应模块 `target/surefire-reports` 为准，覆盖率以
+`target/site/jacoco` 为准；覆盖率是否作为门禁取决于模块自身——[`harness/common`](../../harness/common) 与
+[`platform`](../../platform) 绑定 JaCoCo `check`，`harness/daemon` 只产出报告。真实 E2E 的结论与产物在
+`reports/e2e/latest/`。本文不记录某一次运行的用例数或覆盖率数字，这些数字会随实现漂移。
 
 ## `read.test.ts` 逐项映射
 
@@ -42,7 +44,7 @@ JaCoCo 行覆盖率：共享核心 `common.text.TextReadWindow` 86/86 = 100%，�
 | waits for in-flight file mutations before reading file contents | 不适用：pi-base 的进程内 per-file 队列不存在；KK 侧同一进程的并发修改由原子替换与调用超时约束 | 失败模式证据：`common.text.TextReadWindowTest.checkpointRunsAroundEveryBlockAndAbortsTheScan`（检查点中止）、`LocalTextReadWindowTest.interruptedScanFailsInsteadOfReturningPartialWindow`（中断映射）、`ReadTextWindowTest.interruptedScanFailsInsteadOfReturningPartialWindow`（受管中断） |
 | treats an empty file as having zero body lines | 适用（observer 部分除外） | `ReadCapabilityTest.emptyFileAndOffsetBeyondEofReportEmptyRange`、`ReadTextWindowTest.emptyInputReportsEmptyRange` |
 | keeps a successful read result when its observer throws | 不适用：KK 没有 `onSuccessfulRead` 观测回调，不存在回调失败覆盖成功结果的路径 | — |
-| uses the target file directory when building the LSP resolver for absolute paths outside cwd | 部分适用：解析基目录与服务器可用性判定归 LSP 生命周期，read 侧只守“仅可用时输出 `lsp` 行” | `common.text.TextReadWindowTest.lspHeaderIsLastAndOmittedWhenUnavailable`（核心：可用时输出且为最后一行）、`ReadCapabilityTest.lspHeaderIsOmittedUntilAvailabilityIsWired`（当前不猜测可用性）、`ReadTextWindowTest.lspStatusIsLastHeaderLineAndOmittedWhenUnsupported` |
+| uses the target file directory when building the LSP resolver for absolute paths outside cwd | 部分适用：解析基目录与服务器可用性判定归 LSP 生命周期，read 侧只守“仅可用时输出 `lsp` 行” | `common.text.TextReadWindowTest.lspHeaderIsLastAndOmittedWhenUnavailable`（核心：可用时输出且为最后一行）、`ReadCapabilityTest.lspHeaderReflectsAvailableServerAndIsLast`（当前不猜测可用性）、`ReadTextWindowTest.lspStatusIsLastHeaderLineAndOmittedWhenUnsupported` |
 | reads directories | 适用：目录保持独立返回语义（`kind: directory` 与 48 KiB 展示上界不变），分页上限提升到 2000 | `ReadCapabilityTest.directoryPaginationDefaultsToTwoThousandAndRejectsColumnOffset`、`directoryListingKeepsByteCeilingAndContinuesFromReportedOffset` |
 | treats only an empty argument object as a current-directory read | 不适用（有意偏离）：`path` 是必填参数，schema 与提示词都不把 `{}` 解释为当前目录 | `EnvironmentCapabilityCatalogTest`（schema 结构）与 `ReadCapabilityTest.relativePathRequiresExplicitWorkdir` |
 | preserves non-ASCII spaces inside file names | 适用 | `ReadCapabilityTest.nonAsciiSpacesInFileNamesArePreserved` |

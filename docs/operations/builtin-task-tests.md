@@ -3,8 +3,9 @@
 这份文档回答两个问题：异步 `task` 委派（thread join）在 kk-studio 里由哪些自动化测试承接，以及
 `pi-base` 的 subagent 测试用例逐条对应到哪里、哪一条有意不迁移。
 
-事实源是仓库里的测试代码本身；本文只记录映射关系与已验证的边界，不重复测试断言内容，也不复制测试
-数量。部分 `pi-base` 语义在本仓库被整体替换（见各表「映射关系」列），映射表因此只列仍然成立的不变量。
+事实源是仓库里的测试代码本身；本文只记录映射关系与边界，不复制测试数量，也不声明某一次运行的结果。可执行入口是
+「运行方式」里的命令，通过与失败以各模块 `target/surefire-reports` 为准。部分 `pi-base` 语义在本仓库被整体替换（见各表
+「映射关系」列），映射表因此只列仍然成立的不变量。
 
 ## 心智模型：从同步阻塞到持久接受 + 首次 Idle 交付
 
@@ -146,7 +147,7 @@ Testcontainers 用例需要可用的隔离数据库，不得指向部署数据�
 | `subagent-task-tool.test.ts`: "rejects missing required args"、"reports a missing subagent_type with the currently available agents"、"rejects a non-positive task max_turns override" | `TaskToolTest#rejectsSchemaViolationsOnRequestCreation`、`TaskToolTest#rejectsSemanticViolationsWithDescriptiveErrors`、`SubagentTaskRequestTest#rejectsInvalidDelegationFacts` | **等价**：必填字段、非法 JSON、非正整轮数与格式错误严格拒绝且给出可读原因。 |
 | `subagent-task-tool.test.ts`: "advertises the configured default max_turns in the parameter schema" | `TaskToolTest#handlesOptionalMaxTurnsAndThreadId`、`SubagentTaskRequestTest#preservesExplicitFactsAndOptionalDefaults` | **等价**：缺省即 null，走 policy 默认预算并新建子线程。 |
 | `subagent-task-tool.test.ts`: "marks the definition with the owning pi-base module instance" | `TaskToolTest#requiresDurableExecutionContext`、`BuiltinHarnessContributorTest#catalogFreezesExactInventoryOf12ToolsAndAssociatedCapabilities` | **语义收窄**：工具归属由 Contributor 目录表达，执行必须携带 durable 上下文。 |
-| `subagent-foundation.test.ts` 权限 host 2 条 | `SubagentTaskRunnerTest#rejectsUnauthorizedSubagentTypeWithAvailableNames` | **不迁移 + 等价覆盖**：委派授权来自 Agent 的 subagent allowlist，而非终端权限宿主。 |
+| `subagent-foundation.test.ts` 权限宿主部分 | `SubagentTaskRunnerTest#rejectsUnauthorizedSubagentTypeWithAvailableNames` | **不迁移 + 等价覆盖**：委派授权来自 Agent 的 subagent allowlist，而非终端权限宿主。 |
 | （本仓库新增不变量：join 接纳边界） | `HarnessRuntimeJoinAcceptanceTest#joinAcceptanceBoundaryRejections`、`HarnessRuntimeJoinAcceptanceTest#replayPrecedingNonDeliveryRejectionAndNonContiguousRejection`、`HarnessRuntimeJoinAcceptanceTest#replayInitialAndAcceptNewThreadValidation`、`HarnessRuntimeJoinAcceptanceTest#goalAndCustomMessageInputRecognition`、`ThreadJoinRequestTest#rejectsInconsistentParentAndHead`、`ThreadJoinRequestTest#rejectsInvalidAdmissionLimits` | **本仓库新增不变量**：创建子必须附带 join、父标识与 expected head 必须一致、父停在 `STOPPED` 边界拒绝新委派、重放命令缺失 join 或凭据被改用不同事实时拒绝。 |
 | （本仓库新增不变量：join 记录不变量） | `ThreadJoinTest#rejectsInconsistentMatchedReceipt`、`ThreadJoinTest#rejectsInvalidDeliveryCommandSequence`、`ThreadJoinTest#validateTransitionRejectsFrozenReceiptMutation`、`ThreadJoinTest#validateTransitionRejectsIdentityMutation`、`ThreadJoinTest#validateTransitionRejectsTimeAndReminderRegressions`、`ThreadJoinReceiptTest#rejectsInvalidConstructorArguments`、`ThreadJoinOutcomeTest#outcomeValuesMatchWireNames` | **本仓库新增不变量**：匹配与交付同空/同非空、只写一次、晚于接受版本；身份、时间与 reminder 进度不得回退。 |
 
@@ -178,39 +179,40 @@ Testcontainers 用例需要可用的隔离数据库，不得指向部署数据�
 ## 有意不迁移的 pi-base 语义
 
 以下用例属于 `pi-base` 作为终端交互式 CLI/TUI 特有的机制，在 kk-studio 的服务端/平台化架构中刻意不
-实现；本节只记录不迁移的原因与替代路径，避免用 Java 断言伪造覆盖。
+实现；本节只记录不迁移的原因与替代路径，不用 Java 断言伪造覆盖。这些 `pi-base` 侧用例在本地没有对应断言，
+替代路径由「分组映射表」的用例承接，运行入口见「运行方式」。
 
-### 终端 UI 状态栏与计数器（`subagent-widget.test.ts`，共 6 条）
+### 终端 UI 状态栏与计数器（`subagent-widget.test.ts`）
 
 - **涉及用例**：`returns undefined when nothing is running`、`lists only running subagents as a true parent/child tree`、`shows zero live counters before a running subagent reports progress`、`truncates the latest activity to keep every tree node on one physical line`、`wires the registry to the root session widget and isolates foreign roots`、`clears the widget and cancels queued renders on session shutdown`。
 - **不迁移原因**：终端单行状态栏的 ANSI 截断与即时计数器；kk-studio 的活动状态由递归生命周期投影经 Web API 暴露给前端 React 组件渲染。
 
-### TUI 命令行与全屏覆盖层（`subagent-command.test.ts`，共 10 条）
+### TUI 命令行与全屏覆盖层（`subagent-command.test.ts`）
 
 - **涉及用例**：`always selects before opening a running session`、`routes fullscreen PageUp through TuiAltScreen to the focused session panel`、`does not rewrite fullscreen bindings in regular TUI mode`、`restores fullscreen bindings if session panel construction fails`、`restores bindings when an explicit live target disappears before the overlay mounts`、`rejects unsupported contexts and reports empty or missing selections without opening an overlay`、`reports ambiguous persisted session prefixes`、`opens the persisted transcript when a selected running session finishes`、`prevents concurrent viewer overlays and allows reopening after close`、`opens a completed persisted session directly by explicit id`。
 - **不迁移原因**：`pi-base` 专有的 `/subagents` TUI 命令与全屏视图切换；kk-studio 的子会话就是标准 durable Thread，前端经 `/threads/:threadId` 独立面板查看。
 
-### TUI 会话详情面板（`subagent-session-panel.test.ts`，共 8 条）
+### TUI 会话详情面板（`subagent-session-panel.test.ts`）
 
 - **涉及用例**：`renders live assistant text and tool execution with the main Pi components`、`replays completed parallel tools when opened while a sibling is still running`、`settles a pending tool from its persisted result when the execution-end event was missed`、`rebuilds persisted and active tool state, then handles live error and navigation events`、`stops following the tail while scrolling and cleans up on close`、`uses configured fullscreen viewport keys for page and edge navigation`、`keeps following new output when top is pressed before scrolling is possible`、`preserves regular-mode Home behavior on a short transcript`。
 - **不迁移原因**：终端面板的滚动跟踪与按键绑定；kk-studio 的 Thread 面板基于 Entry 历史投影与 WebSocket 实时流。
 
-### 终端交互式权限审批中继（`subagent-permission-relay.test.ts` 除停止外 3 条 + `subagent-foundation.test.ts` 权限 host 2 条）
+### 终端交互式权限审批中继（`subagent-permission-relay.test.ts` 与 `subagent-foundation.test.ts` 的权限宿主部分）
 
 - **涉及用例**：`uses the same Yes/No actions as the normal permission prompt`、`replaces the previous root host on repeated session starts`、`discards an old root decision that resolves after the host is replaced`、`returns null when no host is registered`、`forwards to the registered root host and clears by identity`。
 - **不迁移原因**：kk-studio 的工具审批由 Thread 上的 durable 审批记录与 YOLO 策略管理，不把子 Agent 请求冒泡到终端弹窗。
 
-### 终端 Tool Call 展开/折叠渲染（`subagent-task-tool.test.ts`，共 6 条）
+### 终端 Tool Call 展开/折叠渲染（`subagent-task-tool.test.ts`）
 
 - **涉及用例**：`renders only the task command and prompt while running regardless of expansion`、`uses configured collapsed task result budgets until expanded`、`keeps task errors visible when successful result previews are disabled`、`does not offer expansion when a disabled task preview shows the complete error`、`renders partial failed output after the error from a raw task envelope`、`keeps child progress out of task partial updates while updating the registry`。
 - **不迁移原因**：终端渲染专有的展开/折叠预算截断；kk-studio 的完成消息由 `ThreadJoinCompletionRenderer` 生成完整 XML，展示与截断由前端渲染层统一处理。
 
-### Node.js 扩展绑定与 symlink 隔离（`subagent-real-factory.test.ts`，共 6 条）
+### Node.js 扩展绑定与 symlink 隔离（`subagent-real-factory.test.ts`）
 
 - **涉及用例**：`rejects a symlinked path that would load a second pi-base module instance`、`fails fast and disposes when the child loader contains %s`、`does not mutate a persisted session when resume fails the extension identity check`、`applies a child-only model retry override through an isolated settings manager`、`inherits Pi retry settings when no child retry override is configured`、`disposes a child session when extension binding fails`。
 - **不迁移原因**：`pi-base` 特有的 Node CJS/ESM 模块实例混用防范与 SettingsManager 分层；kk-studio 基于 Spring Boot 进程级依赖管理与 Session 隔离。模型重试策略由 Provider/Processor 配置统一给出，不按子会话分层。
 
-### CLI 启动参数与向后兼容（`subagent-integration.test.ts` & `subagent-runner.test.ts`，共 4 条）
+### CLI 启动参数与向后兼容（`subagent-integration.test.ts` & `subagent-runner.test.ts`）
 
 - **涉及用例**：`uses --agent startup selection to drive a delegating agent and execute task`、`keeps backward compatibility with legacy tool-use block aliases`、`emits live progress, updates widget counters, and ignores registration hook failures`。
 - **不迁移原因**：kk-studio 没有 CLI `--agent` 启动入口（Agent 由 Platform API / Issue 驱动），不保留旧 `tool_use` 别名，也没有终端进度计数器。
