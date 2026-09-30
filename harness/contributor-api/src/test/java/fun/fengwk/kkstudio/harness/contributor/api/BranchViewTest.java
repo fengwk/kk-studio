@@ -106,6 +106,36 @@ class BranchViewTest {
     assertEquals(entry.hashCode(), same.hashCode());
   }
 
+  /**
+   * dataJson 按「单一严格 JSON 值」校验：允许 null / scalar（契约不强制 object）；拒绝空白、畸形、重复字段与尾随内容； 通过时保留原文，不改写空白与数字精度。
+   */
+  @Test
+  void customDataJsonRequiresStrictSingleJsonValueAndPreservesRawText() {
+    // null / scalar 均为合法单值。
+    assertEquals("null", new CustomStateSnapshot(1, "null").dataJson());
+    assertEquals("42", new AppendCustomEntry("goal.state", 1, "42").dataJson());
+
+    // 空白、畸形、重复字段、尾随内容全部 fail closed。
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "   "));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{oops}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{\"a\":1,\"a\":2}"));
+    assertThrows(IllegalArgumentException.class, () -> new CustomStateSnapshot(1, "{} {}"));
+    assertThrows(IllegalArgumentException.class, () -> new AppendCustomEntry("goal.state", 1, " "));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AppendCustomEntry("goal.state", 1, "{\"a\":1,\"a\":2}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AppendCustomEntry("goal.state", 1, "{\"a\":1} trailing"));
+
+    // 保留原文：空白与超长小数都不被规范化。
+    String spaced = " { \"a\" : 1e999 } ";
+    assertEquals(spaced, new CustomStateSnapshot(1, spaced).dataJson());
+    String precise = "{\"n\":0.123456789012345678901234567890}";
+    assertEquals(precise, new AppendCustomEntry("goal.state", 1, precise).dataJson());
+  }
+
   /** 验证 ContextFragment 文本非空校验与值对象语义。 */
   @Test
   void contextFragmentValidatesText() {
@@ -132,12 +162,12 @@ class BranchViewTest {
         new BranchView() {
           @Override
           public List<CustomStateSnapshot> customEntries(String customType) {
-            return List.of(new CustomStateSnapshot(1, "state-data"));
+            return List.of(new CustomStateSnapshot(1, "{\"state\":\"data\"}"));
           }
 
           @Override
           public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
-            return Optional.of(new CustomStateSnapshot(1, "state-data"));
+            return Optional.of(new CustomStateSnapshot(1, "{\"state\":\"data\"}"));
           }
 
           @Override
@@ -148,6 +178,6 @@ class BranchViewTest {
 
     List<ContextFragment> fragments = projector.project(viewWithState);
     assertEquals(1, fragments.size());
-    assertEquals("state-data", fragments.get(0).text());
+    assertEquals("{\"state\":\"data\"}", fragments.get(0).text());
   }
 }
