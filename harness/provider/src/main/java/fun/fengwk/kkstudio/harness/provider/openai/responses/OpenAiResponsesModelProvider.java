@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
@@ -54,7 +55,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(handler, "handler");
 
-    OpenAiResponsesStreamBridge bridge = new OpenAiResponsesStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
 
     OpenAiResponsesEncodedRequest encoded;
     try {

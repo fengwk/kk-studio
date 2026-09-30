@@ -18,6 +18,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -2098,8 +2099,8 @@ class OpenAiChatRequestEncoderTest {
         encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults());
     String sourcePrefixHash = encodedTurn1.sourcePrefixHash();
 
-    OpenAiChatStreamBridge bridge =
-        new OpenAiChatStreamBridge(
+    ProviderStreamBridge bridge =
+        new ProviderStreamBridge(
             new ProviderStreamHandler() {
               @Override
               public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}

@@ -65,9 +65,7 @@ public final class GeminiProviderAdapter implements ProviderAdapter {
       throw new IllegalArgumentException(
           "descriptor type mismatch: expected GOOGLE but was " + descriptor.type());
     }
-    // 构造期与请求期的职责边界：这里只做 endpoint 合法性校验（与其它协议 adapter 同契约，畸形配置在
-    // ModelProvider 创建时即确定性失败，不推迟到 transport），校验结果不保留——请求 URL 的唯一权威解析点是
-    // 请求期的 GeminiEndpoints.resolveStreamUri。
+    // 只校验 endpoint 合法性（与其它协议 adapter 同契约），不保留解析结果：请求 URL 由请求期 resolveStreamUri 解析。
     GeminiEndpoints.resolveBaseUri(descriptor.endpoint());
     return new GeminiModelProvider(transport, descriptor, apiKey);
   }

@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -48,7 +49,7 @@ class GeminiStreamAccumulatorTest {
   private ProviderDescriptor descriptor;
   private ProviderRequest request;
   private List<ProviderStreamEvent> emittedEvents;
-  private GeminiStreamBridge bridge;
+  private ProviderStreamBridge bridge;
 
   private final ProviderStreamHandler handler =
       new ProviderStreamHandler() {
@@ -110,7 +111,7 @@ class GeminiStreamAccumulatorTest {
             ProviderCacheControl.none());
 
     emittedEvents = new ArrayList<>();
-    bridge = new GeminiStreamBridge(handler);
+    bridge = new ProviderStreamBridge(handler);
   }
 
   /** 验证纯增量流中多次分片 text 正确合并，不丢失、不双计。 */

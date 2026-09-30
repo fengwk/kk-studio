@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -41,7 +42,7 @@ import java.util.function.Consumer;
  * <p>按协议规范解析文本增量、推理增量与工具调用增量，处理 completed/incomplete/failed 事件， 进行细粒度用量归一化与 native replay 组装：已知
  * message/reasoning/function_call 归一化，其余官方 output item 作为不透明事实保留。
  *
- * <p>每条 transport 帧在进入状态机之前先经 {@link OpenAiResponsesStreamBridge#emitProtocolEvent} exactly-once
+ * <p>每条 transport 帧在进入状态机之前先经 {@link ProviderStreamBridge#emitProtocolEvent} exactly-once
  * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
 final class OpenAiResponsesStreamAccumulator {
@@ -78,7 +79,7 @@ final class OpenAiResponsesStreamAccumulator {
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
   private final String frozenSourcePrefixHash;
-  private final OpenAiResponsesStreamBridge bridge;
+  private final ProviderStreamBridge bridge;
 
   private boolean terminalReceived = false;
   private String requestId = null;
@@ -138,7 +139,7 @@ final class OpenAiResponsesStreamAccumulator {
       ProviderRequest request,
       ProviderDescriptor descriptor,
       String frozenSourcePrefixHash,
-      OpenAiResponsesStreamBridge bridge) {
+      ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.frozenSourcePrefixHash =
@@ -154,9 +155,8 @@ final class OpenAiResponsesStreamAccumulator {
     this(request, descriptor, frozenSourcePrefixHash, createBridge(eventConsumer));
   }
 
-  private static OpenAiResponsesStreamBridge createBridge(
-      Consumer<ProviderStreamEvent> eventConsumer) {
-    return new OpenAiResponsesStreamBridge(
+  private static ProviderStreamBridge createBridge(Consumer<ProviderStreamEvent> eventConsumer) {
+    return new ProviderStreamBridge(
         new ProviderStreamHandler() {
           @Override
           public void onEvent(ProviderStreamEvent event, ProviderStream stream) {

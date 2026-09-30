@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -49,7 +50,7 @@ class GeminiThinkingTest {
   private ProviderDescriptor descriptor;
   private ProviderRequest request;
   private List<ProviderStreamEvent> emittedEvents;
-  private GeminiStreamBridge bridge;
+  private ProviderStreamBridge bridge;
 
   private final ProviderStreamHandler handler =
       new ProviderStreamHandler() {
@@ -111,7 +112,7 @@ class GeminiThinkingTest {
             ProviderCacheControl.none());
 
     emittedEvents = new ArrayList<>();
-    bridge = new GeminiStreamBridge(handler);
+    bridge = new ProviderStreamBridge(handler);
   }
 
   /** 验证空文本 thought 但带有 thoughtSignature 时，签名能正确记录在 ReplayState 中。 */

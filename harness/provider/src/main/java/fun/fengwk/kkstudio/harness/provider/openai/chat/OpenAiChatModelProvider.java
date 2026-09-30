@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
@@ -71,7 +72,7 @@ final class OpenAiChatModelProvider implements ModelProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(handler, "handler");
 
-    OpenAiChatStreamBridge bridge = new OpenAiChatStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
 
     OpenAiChatEncodedRequest encoded;
     try {

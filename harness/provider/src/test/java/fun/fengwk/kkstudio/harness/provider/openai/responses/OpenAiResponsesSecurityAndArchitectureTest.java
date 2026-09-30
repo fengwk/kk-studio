@@ -62,8 +62,7 @@ class OpenAiResponsesSecurityAndArchitectureTest {
       OpenAiResponsesPrefixHasher.class,
       OpenAiResponsesProviderAdapter.class,
       OpenAiResponsesRequestEncoder.class,
-      OpenAiResponsesStreamAccumulator.class,
-      OpenAiResponsesStreamBridge.class
+      OpenAiResponsesStreamAccumulator.class
     };
 
     for (Class<?> clazz : classes) {

@@ -477,6 +477,75 @@ class OpenAiChatModelProviderIntegrationTest {
     assertNull(caught.get().getCause());
   }
 
+  /**
+   * 测试意图：上游 should_cancel_streaming 与 cancelling-subscription-mid-stream 的协议级等价——客户端在首个事件回调里取消真实
+   * HTTP 流后，取消返回即封口；服务端随后到达的帧与结束信号都不得再交付任何增量或终态。
+   */
+  @Test
+  void clientCancellationMidStreamStopsDelivery() throws Exception {
+    CountDownLatch clientCancelled = new CountDownLatch(1);
+    CountDownLatch serverAttemptedLateFrames = new CountDownLatch(1);
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"first\"}}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+
+            // 等服务端确认客户端已取消，再补发后续帧：这些帧必须被静默丢弃
+            clientCancelled.await(5, TimeUnit.SECONDS);
+            os.write(
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"second\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+            os.flush();
+          } catch (Exception ignored) {
+            // 取消导致连接提前断开属于预期行为
+          } finally {
+            serverAttemptedLateFrames.countDown();
+          }
+        });
+
+    List<ProviderStreamEvent> deltas = new ArrayList<>();
+    AtomicInteger terminals = new AtomicInteger();
+    ProviderStream stream =
+        new OpenAiChatProviderAdapter(transport, "sk-test")
+            .create(descriptor).stream(
+                simpleRequest(),
+                new ProviderStreamHandler() {
+                  @Override
+                  public void onEvent(ProviderStreamEvent event, ProviderStream st) {
+                    deltas.add(event);
+                    st.cancel();
+                    clientCancelled.countDown();
+                  }
+
+                  @Override
+                  public void onComplete(ProviderCompletion completion, ProviderStream st) {
+                    terminals.incrementAndGet();
+                  }
+
+                  @Override
+                  public void onError(ProviderException error, ProviderStream st) {
+                    terminals.incrementAndGet();
+                  }
+                });
+
+    assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
+    assertTrue(stream.isCancelled());
+    assertTrue(
+        serverAttemptedLateFrames.await(5, TimeUnit.SECONDS),
+        "server must have attempted to deliver frames after cancel");
+    assertEquals(1, deltas.size());
+    assertEquals("first", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
+    assertEquals(0, terminals.get());
+  }
+
   private ProviderRequest simpleRequest() {
     return new ProviderRequest(
         modelDesc,

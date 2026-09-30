@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
@@ -54,7 +55,7 @@ final class GeminiModelProvider implements ModelProvider {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(handler, "handler");
 
-    GeminiStreamBridge bridge = new GeminiStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
 
     GeminiEncodedRequest encoded;
     try {

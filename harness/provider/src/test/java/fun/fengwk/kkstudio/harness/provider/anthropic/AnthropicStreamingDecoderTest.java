@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -127,7 +128,7 @@ class AnthropicStreamingDecoderTest {
   @Test
   void should_deserialize_content_with_unknown_type() {
     List<ProviderStreamEvent> events = new ArrayList<>();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+    ProviderStreamBridge bridge = new ProviderStreamBridge(new RecordingHandler(events));
 
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
@@ -197,7 +198,7 @@ class AnthropicStreamingDecoderTest {
   @Test
   void should_reject_unassemblable_delta_for_unknown_block_instead_of_merging() {
     List<ProviderStreamEvent> events = new ArrayList<>();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+    ProviderStreamBridge bridge = new ProviderStreamBridge(new RecordingHandler(events));
 
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
@@ -229,7 +230,7 @@ class AnthropicStreamingDecoderTest {
   @Test
   void shouldStreamCreateMessageResponse() {
     List<ProviderStreamEvent> events = new ArrayList<>();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+    ProviderStreamBridge bridge = new ProviderStreamBridge(new RecordingHandler(events));
 
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
@@ -398,7 +399,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -440,7 +441,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -474,7 +475,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
 
     accumulator.handleEvent(
         "message_start",
@@ -504,7 +505,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator validAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
 
     validAccumulator.handleEvent(
         "message_start",
@@ -553,7 +554,7 @@ class AnthropicStreamingDecoderTest {
 
     AnthropicStreamAccumulator invalidAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
 
     invalidAccumulator.handleEvent(
         "message_start",
@@ -589,7 +590,7 @@ class AnthropicStreamingDecoderTest {
     // 1. 未知 reason 不进入 rawUsageJson
     AnthropicStreamAccumulator unknownReasonAccumulator =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
     unknownReasonAccumulator.handleEvent(
         "message_start",
         """
@@ -616,7 +617,7 @@ class AnthropicStreamingDecoderTest {
     // 2. diagnostics 节点不是 object -> INVALID_RESPONSE
     AnthropicStreamAccumulator nonObjDiag =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
     assertThrows(
         ProviderException.class,
         () ->
@@ -627,7 +628,7 @@ class AnthropicStreamingDecoderTest {
     // 3. cache_missed_input_tokens 为负数 -> INVALID_RESPONSE
     AnthropicStreamAccumulator negTokens =
         new AnthropicStreamAccumulator(
-            request, descriptor, VALID_PREFIX_HASH, new AnthropicStreamBridge(new NoopHandler()));
+            request, descriptor, VALID_PREFIX_HASH, new ProviderStreamBridge(new NoopHandler()));
     assertThrows(
         ProviderException.class,
         () ->
@@ -786,7 +787,7 @@ class AnthropicStreamingDecoderTest {
   @Test
   void shouldIgnoreDoneSentinelAndUnknownEventFrames() {
     List<ProviderStreamEvent> events = new ArrayList<>();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+    ProviderStreamBridge bridge = new ProviderStreamBridge(new RecordingHandler(events));
 
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
@@ -833,7 +834,7 @@ class AnthropicStreamingDecoderTest {
   @Test
   void shouldHandleInterleavedParallelToolCalls() {
     List<ProviderStreamEvent> events = new CopyOnWriteArrayList<>();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+    ProviderStreamBridge bridge = new ProviderStreamBridge(new RecordingHandler(events));
 
     ProviderRequest request = sampleRequest();
     ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);

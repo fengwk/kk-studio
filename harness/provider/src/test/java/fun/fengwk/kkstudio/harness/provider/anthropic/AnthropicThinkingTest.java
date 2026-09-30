@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -158,7 +159,7 @@ class AnthropicThinkingTest {
 
     // 2. 流式累积与事件顺序断言
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
 
@@ -298,7 +299,7 @@ class AnthropicThinkingTest {
     String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
 
@@ -454,7 +455,7 @@ class AnthropicThinkingTest {
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
 
@@ -537,7 +538,7 @@ class AnthropicThinkingTest {
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
 
@@ -939,7 +940,7 @@ class AnthropicThinkingTest {
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
 
@@ -997,7 +998,7 @@ class AnthropicThinkingTest {
     assertNotNull(frozenPrefixHash);
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    AnthropicStreamBridge bridge = new AnthropicStreamBridge(handler);
+    ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
 

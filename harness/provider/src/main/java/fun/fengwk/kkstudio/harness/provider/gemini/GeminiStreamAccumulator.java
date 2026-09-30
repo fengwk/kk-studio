@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -87,7 +88,7 @@ final class GeminiStreamAccumulator {
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
   private final String frozenSourcePrefixHash;
-  private final GeminiStreamBridge bridge;
+  private final ProviderStreamBridge bridge;
 
   private final List<TrackedPart> trackedParts = new ArrayList<>();
   private final List<ProviderToolCall> collectedToolCalls = new ArrayList<>();
@@ -108,7 +109,7 @@ final class GeminiStreamAccumulator {
       ProviderRequest request,
       ProviderDescriptor descriptor,
       String frozenSourcePrefixHash,
-      GeminiStreamBridge bridge) {
+      ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.frozenSourcePrefixHash =

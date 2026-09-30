@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -58,7 +59,7 @@ class OpenAiChatNativeReplayTest {
   private ProviderDescriptor descriptor;
   private ModelDescriptor modelDesc;
   private ModelVariant defaultVariant;
-  private OpenAiChatStreamBridge bridge;
+  private ProviderStreamBridge bridge;
 
   @BeforeEach
   void setUp() {
@@ -93,7 +94,7 @@ class OpenAiChatNativeReplayTest {
             pricing);
     defaultVariant = new ModelVariant("default");
     bridge =
-        new OpenAiChatStreamBridge(
+        new ProviderStreamBridge(
             new ProviderStreamHandler() {
               @Override
               public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
