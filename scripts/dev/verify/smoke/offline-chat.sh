@@ -142,9 +142,13 @@ docker build \
 
 step "Starting isolated dependencies and waiting for health checks"
 if [[ "$WITH_APP" == "true" ]]; then
+  # app 以 service_completed_successfully 等待一次性的 minio-init，因此 --wait 能收敛。
   "${COMPOSE[@]}" --profile app up -d --wait --no-build
 else
-  "${COMPOSE[@]}" up -d --wait
+  # 未启用 app 时没有任何服务以 service_completed_successfully 依赖 minio-init，
+  # compose up --wait 会把已成功退出的一次性容器当作失败；这里只等待常驻依赖健康，
+  # bucket 初始化改由下面显式的一次性运行承担。
+  "${COMPOSE[@]}" up -d --wait postgres minio http-mock
 fi
 
 step "Checking ffmpeg, ffprobe, and the non-root runtime user"
@@ -163,9 +167,9 @@ postgres_result=$(
 )
 [[ "$postgres_result" == "1" ]] || die "PostgreSQL SELECT 1 returned '$postgres_result'"
 
-step "Checking MinIO and initialized bucket"
-"${COMPOSE[@]}" exec -T minio-init \
-  /bin/sh -ec 'mc ready local >/dev/null && mc stat "local/$MINIO_BUCKET" >/dev/null'
+step "Initializing and checking the MinIO bucket"
+# 一次性、幂等：每次都以全新容器运行完整 bucket 初始化，失败（非 0 退出）即失败。
+"${COMPOSE[@]}" run --rm --no-deps minio-init
 
 step "Checking HTTP mock"
 "${COMPOSE[@]}" exec -T http-mock python -c '

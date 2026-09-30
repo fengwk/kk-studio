@@ -35,6 +35,8 @@ services:
     networks:
       - reliability
 
+  # 一次性 bucket 初始化：创建私有 bucket 后成功退出。没有 healthcheck；app 用
+  # `service_completed_successfully` 等待它，也只有该条件能让 `up --wait` 接受已退出容器。
   minio-init:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     restart: "no"
@@ -52,12 +54,6 @@ services:
         mc mb --ignore-existing "local/$${MINIO_BUCKET}"
         mc anonymous set none "local/$${MINIO_BUCKET}"
         mc stat "local/$${MINIO_BUCKET}"
-        exec tail -f /dev/null
-    healthcheck:
-      test: ["CMD-SHELL", "mc stat \"local/$${MINIO_BUCKET}\" >/dev/null"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
     networks:
       - reliability
 
@@ -86,7 +82,7 @@ services:
       minio:
         condition: service_healthy
       minio-init:
-        condition: service_healthy
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]
       interval: 5s

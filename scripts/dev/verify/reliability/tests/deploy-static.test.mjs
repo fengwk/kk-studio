@@ -56,10 +56,11 @@ const REQUIRED_S3_APP_ENVIRONMENTS = [
   'KK_STUDIO_STORAGE_S3_SECRET_KEY',
 ]
 
-test('local and reliability compose files declare minio and minio-init services with healthy dependencies', () => {
+test('local and reliability compose files declare minio and minio-init with a one-shot init dependency', () => {
   // Test intent: guard mandatory S3 infrastructure topology in local and reliability stacks.
   // Both stacks must declare minio and minio-init, where minio-init waits for healthy minio,
-  // and the app container waits for postgres, minio, and minio-init to be healthy.
+  // is a one-shot job with no healthcheck, and the app waits for postgres, minio, and the
+  // successful completion of minio-init.
   for (const relativePath of S3_INFRASTRUCTURE_COMPOSE_FILES) {
     const source = readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
     const minioSection = extractServiceSection(source, 'minio')
@@ -71,6 +72,17 @@ test('local and reliability compose files declare minio and minio-init services 
       minioInitSection,
       /minio:\s*\n\s+condition:\s*service_healthy/,
       `${relativePath}: minio-init must depend on healthy minio`,
+    )
+    // 一次性作业：没有 healthcheck，命令执行完即成功退出。
+    assert.doesNotMatch(
+      minioInitSection,
+      /healthcheck:/,
+      `${relativePath}: minio-init must stay a one-shot job without a healthcheck`,
+    )
+    assert.doesNotMatch(
+      minioInitSection,
+      /tail -f \/dev\/null/,
+      `${relativePath}: minio-init must exit after initializing the bucket`,
     )
 
     const appSection = extractServiceSection(source, 'app')
@@ -87,8 +99,8 @@ test('local and reliability compose files declare minio and minio-init services 
     )
     assert.match(
       appSection,
-      /minio-init:\s*\n\s+condition:\s*service_healthy/,
-      `${relativePath}: app must depend on healthy minio-init`,
+      /minio-init:\s*\n\s+condition:\s*service_completed_successfully/,
+      `${relativePath}: app must depend on the successful completion of minio-init`,
     )
   }
 })
