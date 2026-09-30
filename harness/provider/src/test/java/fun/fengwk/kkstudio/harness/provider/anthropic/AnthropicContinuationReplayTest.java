@@ -353,6 +353,9 @@ class AnthropicContinuationReplayTest {
     public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
 
     @Override
+    public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+    @Override
     public void onError(ProviderException error, ProviderStream stream) {}
   }
 }
