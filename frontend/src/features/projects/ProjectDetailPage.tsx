@@ -382,26 +382,6 @@ export function ProjectDetailPage({
     handleSelectIssue(issueId)
   }
 
-  const handleArchiveIssue = async (issueId: string, expectedVersion: string) => {
-    try {
-      setActionError(null)
-      await api.archiveIssue(issueId, { expectedVersion })
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '归档 Issue 失败')
-    }
-  }
-
-  const handleUnarchiveIssue = async (issueId: string, expectedVersion: string) => {
-    try {
-      setActionError(null)
-      await api.unarchiveIssue(issueId, { expectedVersion })
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '取消归档 Issue 失败')
-    }
-  }
-
   // 项目归档 / 取消归档
   const handleProjectArchiveToggle = async () => {
     if (!snapshot) {
@@ -580,8 +560,6 @@ export function ProjectDetailPage({
           onRecoverIssue={handleRecoverIssue}
           onReopenIssue={handleReopenIssue}
           onResolveUnknownIssue={handleResolveUnknownIssue}
-          onArchiveIssue={handleArchiveIssue}
-          onUnarchiveIssue={handleUnarchiveIssue}
         />
 
         {queryThreadId && (

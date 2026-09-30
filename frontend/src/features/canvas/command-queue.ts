@@ -106,7 +106,6 @@ export class CanvasCommandQueue {
   private activeRecovery: Promise<CanvasCommandRecoveryResult> | null = null
   private blocked = false
   private blockedError: Error | null = null
-  private readonly operations = new Map<string, CanvasPendingOperation>()
   private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
   private readonly createCommandId: () => UUIDString
@@ -188,7 +187,6 @@ export class CanvasCommandQueue {
       }
       // 执行落盘前分配序列号：若前序存在 recovery，此时已预先从 list 全部 pending 取 max 推进
       const operation = this.freezeOperation(payload)
-      this.operations.set(operation.id, operation)
       return this.persistAndSend(operation, options?.signal)
     })
 
@@ -240,13 +238,8 @@ export class CanvasCommandQueue {
     operation: CanvasPendingOperation,
     signal?: AbortSignal,
   ): Promise<CanvasSnapshotDTO> {
-    try {
-      // 发送前必须完成落盘：无法完成事务时绝不发送，避免产生无法恢复的在途请求。
-      await this.store.save(operation)
-    } catch (error) {
-      this.operations.delete(operation.id)
-      throw error
-    }
+    // 发送前必须完成落盘：无法完成事务时绝不发送，避免产生无法恢复的在途请求。
+    await this.store.save(operation)
 
     if (this.blocked) {
       // 前序操作已出现未知结果导致队列阻塞：
@@ -325,7 +318,6 @@ export class CanvasCommandQueue {
 
     let hadUnknownFailure = false
     for (const operation of sorted) {
-      this.operations.set(operation.id, operation)
       try {
         await this.send(operation)
         result.replayed += 1
@@ -371,7 +363,6 @@ export class CanvasCommandQueue {
       // 若草稿清理 abort / 失败，不得提前删除 operation，保留操作以便后续幂等重放消除崩溃窗口。
       await this.onDraftAcks(operation.ack)
     }
-    this.operations.delete(operation.id)
     try {
       await this.store.remove(operation.id)
     } catch {
