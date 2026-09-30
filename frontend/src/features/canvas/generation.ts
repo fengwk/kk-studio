@@ -3,7 +3,8 @@ import type {
   CanvasResourceKind,
   UUIDString,
 } from '@/shared/api/contracts/studio'
-import type { CanvasFunctionConfig, PromptSegment } from '@/features/canvas/types'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import type { CanvasFunctionConfig, CanvasResourceReference } from '@/features/canvas/types'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'
 
 export interface ReferenceCandidate {
@@ -14,20 +15,46 @@ export interface ReferenceCandidate {
   label: string
 }
 
-export interface PromptCursor {
-  segmentIndex: number
-  offset: number
-}
-
 export interface CanvasFunctionParameterDefinition {
   key: string
   label: string
-  type: 'ENUM' | 'INTEGER'
+  type: 'ENUM' | 'NUMBER'
   required: boolean
-  defaultValue: string | number | null
-  options: string[]
+  defaultValue: unknown
+  options: unknown[]
+  isInteger: boolean
   min: number | null
   max: number | null
+}
+
+export function functionSupportsReferences(model: CanvasFunctionDefinitionDTO | null | undefined): boolean {
+  if (!model?.argsSchema || typeof model.argsSchema !== 'object') return false
+  const props = (model.argsSchema as Record<string, unknown>).properties
+  if (!props || typeof props !== 'object') return false
+  const refsProp = (props as Record<string, unknown>).references
+  if (!refsProp || typeof refsProp !== 'object') return false
+  const r = refsProp as Record<string, unknown>
+  if (r.type !== 'array') return false
+  if (r.items && typeof r.items === 'object') {
+    const items = r.items as Record<string, unknown>
+    if (items.type !== 'resourceReference') {
+      return false
+    }
+  }
+  return true
+}
+
+export function isCanonicalResourceReference(item: unknown): item is CanvasResourceReference {
+  if (!item || typeof item !== 'object') return false
+  const rec = item as Record<string, unknown>
+  return (
+    rec.type === 'resource'
+    && typeof rec.nodeId === 'string'
+    && isCanonicalUuid(rec.nodeId)
+    && typeof rec.index === 'number'
+    && Number.isInteger(rec.index)
+    && rec.index >= 0
+  )
 }
 
 export function extractParametersFromDefinition(model: CanvasFunctionDefinitionDTO): CanvasFunctionParameterDefinition[] {
@@ -38,6 +65,7 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
   const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set<string>()
   const params: CanvasFunctionParameterDefinition[] = []
   for (const [key, prop] of Object.entries(schema.properties as Record<string, unknown>)) {
+    if (key === 'prompt' || key === 'references') continue
     if (!prop || typeof prop !== 'object') continue
     const p = prop as Record<string, unknown>
     if (Array.isArray(p.enum)) {
@@ -46,8 +74,9 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
         label: typeof p.title === 'string' ? p.title : key,
         type: 'ENUM',
         required: required.has(key),
-        defaultValue: typeof p.default === 'string' || typeof p.default === 'number' ? p.default : (p.enum[0] ?? null),
-        options: p.enum.map(String),
+        defaultValue: p.default !== undefined ? p.default : (p.enum[0] ?? null),
+        options: p.enum,
+        isInteger: false,
         min: null,
         max: null,
       })
@@ -55,10 +84,11 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
       params.push({
         key,
         label: typeof p.title === 'string' ? p.title : key,
-        type: 'INTEGER',
+        type: 'NUMBER',
         required: required.has(key),
         defaultValue: typeof p.default === 'number' ? p.default : null,
         options: [],
+        isInteger: p.type === 'integer',
         min: typeof p.minimum === 'number' ? p.minimum : null,
         max: typeof p.maximum === 'number' ? p.maximum : null,
       })
@@ -68,57 +98,151 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
 }
 
 export function createDefaultFunctionConfig(model: CanvasFunctionDefinitionDTO): CanvasFunctionConfig {
-  const parameters: Record<string, string | number> = {}
+  const parameters: Record<string, unknown> = {}
   const paramDefs = extractParametersFromDefinition(model)
   for (const parameter of paramDefs) {
-    if (parameter.defaultValue !== null) {
+    if (parameter.defaultValue !== null && parameter.defaultValue !== undefined) {
       parameters[parameter.key] = parameter.defaultValue
     } else if (parameter.type === 'ENUM' && parameter.options[0] !== undefined) {
       parameters[parameter.key] = parameter.options[0]
-    } else if (parameter.type === 'INTEGER' && parameter.min !== null) {
+    } else if (parameter.type === 'NUMBER' && parameter.min !== null) {
       parameters[parameter.key] = parameter.min
     }
   }
   return {
-    prompt: { segments: [{ type: 'TEXT', text: '' }] },
+    prompt: '',
+    references: [],
     parameters,
   }
+}
+
+function hasUnsupportedPromptSchema(model?: CanvasFunctionDefinitionDTO | null): boolean {
+  if (!model?.argsSchema || typeof model.argsSchema !== 'object') return false
+  const props = (model.argsSchema as Record<string, unknown>).properties
+  if (!props || typeof props !== 'object') return false
+  const promptProp = (props as Record<string, unknown>).prompt
+  if (!promptProp || typeof promptProp !== 'object') return false
+  return (promptProp as Record<string, unknown>).type !== 'string'
 }
 
 export function parseFunctionConfig(
   args: Record<string, unknown> | null | undefined,
   model: CanvasFunctionDefinitionDTO,
 ): CanvasFunctionConfig {
-  if (!isConfig(args)) {
+  if (!args || typeof args !== 'object') {
     return createDefaultFunctionConfig(model)
   }
-  const defaults = createDefaultFunctionConfig(model)
-  const parameters: Record<string, string | number> = { ...defaults.parameters }
-  const paramDefs = extractParametersFromDefinition(model)
-  for (const definition of paramDefs) {
-    const value = args.parameters[definition.key]
-    if (
-      definition.type === 'ENUM'
-      && typeof value === 'string'
-      && definition.options.includes(value)
-    ) {
-      parameters[definition.key] = value
-    } else if (
-      definition.type === 'INTEGER'
-      && typeof value === 'number'
-      && Number.isInteger(value)
-      && (definition.min === null || value >= definition.min)
-      && (definition.max === null || value <= definition.max)
-    ) {
-      parameters[definition.key] = value
+
+  // 1. 若 schema 声明的 prompt 并非字符串类型，不能默认为简单字符串表单，切换至完整 JSON 通道
+  if (hasUnsupportedPromptSchema(model)) {
+    return {
+      references: [],
+      parameters: {},
+      rawArgs: args,
+      rawError: '模型定义的提示词并非字符串类型，已进入完整 JSON 模式。',
     }
   }
+
+  // 2. 若入参 prompt 包含非字符串结构（如对象、数组），绝不能静默覆盖为 ''，必须完整保留原始数据
+  if ('prompt' in args && typeof args.prompt !== 'string') {
+    return {
+      references: [],
+      parameters: {},
+      rawArgs: args,
+      rawError: '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。',
+    }
+  }
+
+  // 3. 若入参 references 并非数组或包含非规范引用项，绝不能静默过滤删除，必须完整保留原始数据
+  if ('references' in args) {
+    if (!Array.isArray(args.references)) {
+      return {
+        references: [],
+        parameters: {},
+        rawArgs: args,
+        rawError: '入参 references 并非数组，已进入完整 JSON 模式以防止数据丢失。',
+      }
+    }
+    for (const item of args.references) {
+      if (!isCanonicalResourceReference(item)) {
+        return {
+          references: [],
+          parameters: {},
+          rawArgs: args,
+          rawError: '入参 references 包含非规范项，已进入完整 JSON 模式以防止数据丢失。',
+        }
+      }
+    }
+  }
+
+  const prompt = typeof args.prompt === 'string' ? args.prompt : ''
+
+  const references: CanvasResourceReference[] = Array.isArray(args.references)
+    ? args.references.map((item) => ({
+        type: 'resource' as const,
+        nodeId: (item as CanvasResourceReference).nodeId,
+        index: (item as CanvasResourceReference).index,
+      }))
+    : []
+
+  // 保留所有业务参数（包括未来嵌套对象、自定义字段等），绝不丢弃
+  const parameters: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(args)) {
+    if (key !== 'prompt' && key !== 'references') {
+      parameters[key] = value
+    }
+  }
+
+  // 仅对缺失的字段补齐显式 schema default；对已有值（无论是否匹配 enum 或范围）绝不擅自重置校正
+  const paramDefs = extractParametersFromDefinition(model)
+  for (const definition of paramDefs) {
+    if (parameters[definition.key] === undefined && definition.defaultValue !== null && definition.defaultValue !== undefined) {
+      parameters[definition.key] = definition.defaultValue
+    }
+  }
+
   return {
-    prompt: {
-      segments: args.prompt.segments.map((segment) => ({ ...segment })),
-    },
+    prompt,
+    references,
     parameters,
   }
+}
+
+export function configToFunctionArgs(
+  config: CanvasFunctionConfig,
+  model?: CanvasFunctionDefinitionDTO | null,
+): Record<string, unknown> {
+  // 完整 rawArgs 模式无损回传
+  if (config.rawArgs) {
+    return config.rawArgs
+  }
+
+  const args: Record<string, unknown> = {
+    ...config.parameters,
+  }
+  if (config.prompt !== undefined && config.prompt !== '') {
+    args.prompt = config.prompt
+  } else if (config.prompt !== undefined) {
+    const hasPromptProp = Boolean(
+      model?.argsSchema
+      && typeof model.argsSchema === 'object'
+      && (model.argsSchema as Record<string, unknown>).properties
+      && typeof (model.argsSchema as Record<string, unknown>).properties === 'object'
+      && 'prompt' in ((model.argsSchema as Record<string, unknown>).properties as Record<string, unknown>),
+    )
+    if (hasPromptProp || !model) {
+      args.prompt = config.prompt
+    }
+  }
+  // 仅当 model 显式声明 properties.references 为 resourceReference 数组时注入 references
+  if (functionSupportsReferences(model)) {
+    args.references = config.references.map((ref) => ({
+      type: 'resource' as const,
+      nodeId: ref.nodeId,
+      index: ref.index,
+    }))
+  }
+  return args
 }
 
 export function referenceCandidates(
@@ -126,12 +250,12 @@ export function referenceCandidates(
   targetNodeId: UUIDString,
   model: CanvasFunctionDefinitionDTO,
 ): ReferenceCandidate[] {
-  const linkedIds = new Set(snapshot.references
-    .filter((ref) => ref.targetNodeId === targetNodeId)
-    .map((ref) => ref.sourceNodeId))
+  if (!functionSupportsReferences(model)) {
+    return []
+  }
   const candidates: ReferenceCandidate[] = []
   for (const node of snapshot.resourceNodes) {
-    if (!linkedIds.has(node.id)) {
+    if (node.id === targetNodeId) {
       continue
     }
     node.resources.forEach((resource, index) => {
@@ -153,47 +277,45 @@ export function referenceAlias(node: ResourceNode, index: number): string {
   return `@${node.name}_${index}`
 }
 
-export function insertReferenceAtCursor(
-  segments: PromptSegment[],
-  cursor: PromptCursor,
-  candidate: Pick<ReferenceCandidate, 'nodeId' | 'index'>,
-): PromptSegment[] {
-  const reference: PromptSegment = {
-    type: 'REFERENCE',
-    nodeId: candidate.nodeId,
-    index: candidate.index,
-  }
-  const target = segments[cursor.segmentIndex]
-  if (target?.type !== 'TEXT') {
-    return normalizePromptSegments([...segments, reference, { type: 'TEXT', text: '' }])
-  }
-  const offset = Math.max(0, Math.min(cursor.offset, target.text.length))
-  return normalizePromptSegments([
-    ...segments.slice(0, cursor.segmentIndex),
-    { type: 'TEXT', text: target.text.slice(0, offset) },
-    reference,
-    { type: 'TEXT', text: target.text.slice(offset) },
-    ...segments.slice(cursor.segmentIndex + 1),
-  ])
+export function referenceKey(nodeId: UUIDString, index: number): string {
+  return `${nodeId}:${index}`
 }
 
-export function updateTextSegment(
-  segments: PromptSegment[],
-  segmentIndex: number,
-  text: string,
-): PromptSegment[] {
-  return segments.map((segment, index) => (
-    index === segmentIndex && segment.type === 'TEXT'
-      ? { type: 'TEXT', text }
-      : segment
-  ))
-}
-
-export function removePromptSegment(
-  segments: PromptSegment[],
-  segmentIndex: number,
-): PromptSegment[] {
-  return normalizePromptSegments(segments.filter((_segment, index) => index !== segmentIndex))
+export function canAddReference(
+  currentReferences: CanvasResourceReference[],
+  candidate: ReferenceCandidate,
+  candidates: ReferenceCandidate[],
+  model: CanvasFunctionDefinitionDTO,
+): boolean {
+  if (!functionSupportsReferences(model)) {
+    return false
+  }
+  const key = referenceKey(candidate.nodeId, candidate.index)
+  if (currentReferences.some((ref) => referenceKey(ref.nodeId, ref.index) === key)) {
+    return false
+  }
+  const maxRefs = model.referencePolicy?.maxReferences ?? Infinity
+  if (currentReferences.length >= maxRefs) {
+    return false
+  }
+  const kindLimit = model.referencePolicy?.maxByKind?.[candidate.resource.kind]
+  if (kindLimit !== undefined) {
+    const candidateByKey = new Map(candidates.map((item) => [
+      referenceKey(item.nodeId, item.index),
+      item,
+    ]))
+    let currentKindCount = 0
+    for (const ref of currentReferences) {
+      const existing = candidateByKey.get(referenceKey(ref.nodeId, ref.index))
+      if (existing && existing.resource.kind === candidate.resource.kind) {
+        currentKindCount += 1
+      }
+    }
+    if (currentKindCount >= kindLimit) {
+      return false
+    }
+  }
+  return true
 }
 
 export function filterConfigReferences(
@@ -201,139 +323,45 @@ export function filterConfigReferences(
   candidates: ReferenceCandidate[],
   model: CanvasFunctionDefinitionDTO,
 ): CanvasFunctionConfig {
+  if (!functionSupportsReferences(model)) {
+    return {
+      ...config,
+      references: [],
+    }
+  }
   const byKey = new Map(candidates.map((candidate) => [
     referenceKey(candidate.nodeId, candidate.index),
     candidate,
   ]))
-  const accepted = new Set<string>()
-  const rejected = new Set<string>()
+  const accepted: CanvasResourceReference[] = []
+  const seenKeys = new Set<string>()
   const kindCounts = new Map<CanvasResourceKind, number>()
-  const segments = config.prompt.segments.filter((segment) => {
-    if (segment.type === 'TEXT') {
-      return true
-    }
-    const key = referenceKey(segment.nodeId, segment.index)
-    if (accepted.has(key)) {
-      return true
-    }
-    if (rejected.has(key)) {
-      return false
+  const maxRefs = model.referencePolicy?.maxReferences ?? Infinity
+
+  for (const ref of config.references) {
+    const key = referenceKey(ref.nodeId, ref.index)
+    if (seenKeys.has(key)) {
+      continue
     }
     const candidate = byKey.get(key)
     if (!candidate) {
-      rejected.add(key)
-      return false
+      continue
     }
     const currentKindCount = kindCounts.get(candidate.resource.kind) ?? 0
     const kindLimit = model.referencePolicy?.maxByKind?.[candidate.resource.kind]
-    const maxRefs = model.referencePolicy?.maxReferences ?? Infinity
     if (
-      accepted.size >= maxRefs
+      accepted.length >= maxRefs
       || (kindLimit !== undefined && currentKindCount >= kindLimit)
     ) {
-      rejected.add(key)
-      return false
+      continue
     }
-    accepted.add(key)
+    accepted.push(ref)
+    seenKeys.add(key)
     kindCounts.set(candidate.resource.kind, currentKindCount + 1)
-    return true
-  })
+  }
+
   return {
-    prompt: { segments: normalizePromptSegments(segments) },
-    parameters: { ...config.parameters },
+    ...config,
+    references: accepted,
   }
-}
-
-export function canInsertReference(
-  segments: PromptSegment[],
-  candidate: ReferenceCandidate,
-  candidates: ReferenceCandidate[],
-  model: CanvasFunctionDefinitionDTO,
-): boolean {
-  const key = referenceKey(candidate.nodeId, candidate.index)
-  const candidateByKey = new Map(candidates.map((item) => [
-    referenceKey(item.nodeId, item.index),
-    item,
-  ]))
-  const unique = new Map<string, CanvasResourceKind>()
-  for (const segment of segments) {
-    if (segment.type === 'REFERENCE') {
-      const segmentKey = referenceKey(segment.nodeId, segment.index)
-      if (segmentKey === key) {
-        return true
-      }
-      const existing = candidateByKey.get(segmentKey)
-      if (existing) {
-        unique.set(segmentKey, existing.resource.kind)
-      }
-    }
-  }
-  if (model.referencePolicy?.maxReferences != null && unique.size >= model.referencePolicy.maxReferences) {
-    return false
-  }
-  const kindLimit = model.referencePolicy?.maxByKind?.[candidate.resource.kind]
-  if (kindLimit === undefined) {
-    return true
-  }
-  let count = 0
-  for (const kind of unique.values()) {
-    if (kind === candidate.resource.kind) {
-      count += 1
-    }
-  }
-  return count < kindLimit
-}
-
-export function promptVisibleText(segments: PromptSegment[]): string {
-  return segments
-    .filter((segment): segment is Extract<PromptSegment, { type: 'TEXT' }> => segment.type === 'TEXT')
-    .map((segment) => segment.text)
-    .join('')
-}
-
-export function referenceKey(nodeId: UUIDString, index: number): string {
-  return `${nodeId}:${index}`
-}
-
-function normalizePromptSegments(segments: PromptSegment[]): PromptSegment[] {
-  const normalized: PromptSegment[] = []
-  for (const segment of segments) {
-    const previous = normalized.at(-1)
-    if (segment.type === 'TEXT' && previous?.type === 'TEXT') {
-      previous.text += segment.text
-    } else {
-      normalized.push({ ...segment })
-    }
-  }
-  if (normalized.length === 0 || normalized[0]?.type !== 'TEXT') {
-    normalized.unshift({ type: 'TEXT', text: '' })
-  }
-  if (normalized.at(-1)?.type !== 'TEXT') {
-    normalized.push({ type: 'TEXT', text: '' })
-  }
-  return normalized
-}
-
-function isConfig(value: unknown): value is CanvasFunctionConfig {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-  const prompt = (value as { prompt?: unknown }).prompt
-  const parameters = (value as { parameters?: unknown }).parameters
-  if (!prompt || typeof prompt !== 'object' || !parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
-    return false
-  }
-  const segments = (prompt as { segments?: unknown }).segments
-  return Array.isArray(segments) && segments.every((segment) => {
-    if (!segment || typeof segment !== 'object') {
-      return false
-    }
-    const type = (segment as { type?: unknown }).type
-    return type === 'TEXT'
-      ? typeof (segment as { text?: unknown }).text === 'string'
-      : type === 'REFERENCE'
-        && /^[1-9][0-9]*$/.test(String((segment as { nodeId?: unknown }).nodeId))
-        && Number.isInteger((segment as { index?: unknown }).index)
-        && Number((segment as { index?: number }).index) >= 0
-  })
 }

@@ -422,9 +422,16 @@ selection 与 upload 状态由 `useCanvasController` 持有。
 [CanvasContextMenu](../../frontend/src/features/canvas/CanvasContextMenu.tsx) 负责
 node、引用连线、group、Function 编辑，
 [CanvasGenerationPanel](../../frontend/src/features/canvas/CanvasGenerationPanel.tsx) 负责
-Function 参数与 run/cancel，[nodes/](../../frontend/src/features/canvas/nodes/) 渲染
-Text/Image/Video/Audio Resource node。Canvas 不承载会话面板：Thread 不写进 Canvas graph，
-画布也没有对话 dock 或对应的快捷键。
+Function 参数配置，[nodes/](../../frontend/src/features/canvas/nodes/) 渲染
+Text/Image/Video/Audio Resource node。
+
+Function 入参契约采用扁平规范结构：
+- **Wire 契约**：`function.args` 为扁平 JSON 对象，提示词以纯文本 `prompt?: string` 逐字符保留；业务参数直接平铺于根级（支持枚举、整数、浮点小数及合法嵌套字段）；结构化引用以独立数组 `references?: Array<{ type: 'resource', nodeId: UUIDString, index: number }>` 表达。
+- **引用支持判定**：仅当模型在其 `argsSchema.properties.references` 声明为 `type: "array"` 且 items 为 `resourceReference` 时判定为支持引用；未声明引用的模型在生成参数中不注入 `references` 字段。
+- **非简单结构防御**：当入参包含非字符串 prompt、非规范 references 或模型 prompt 声明为复杂结构时，面板直接进入完整 JSON 编辑模式并给出提示，编辑与保存无损回传原始结构，绝不静默覆盖。
+- **连线与并发同步**：`createLink` 与 `deleteLink` 在更新目标节点的 `args.references` 前必须先 `flushFunctionConfig(targetNodeId)`，杜绝连线操作覆盖在途防抖键入的提示词与参数；连线创建时严格校验目标模型引用声明、允许类型及数量上限。
+
+Canvas 不承载会话面板：Thread 不写进 Canvas graph，画布也没有对话 dock 或对应的快捷键。
 
 ### Settings
 

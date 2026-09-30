@@ -45,8 +45,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
     function: {
       name: 'fake-image',
       args: {
-        prompt: { segments: [{ type: 'TEXT', text: 'x' }] },
-        parameters: {},
+        prompt: 'x',
       },
     },
     run: {

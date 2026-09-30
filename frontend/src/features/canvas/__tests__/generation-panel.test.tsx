@@ -3,17 +3,14 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
-import {
-  CanvasRuntimeContext,
-} from '@/features/canvas/CanvasRuntimeContext'
+import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
-import type {
-  CanvasGenerationPanelAnchor,
-} from '@/features/canvas/CanvasGenerationPanel'
+import type { CanvasGenerationPanelAnchor } from '@/features/canvas/CanvasGenerationPanel'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasFunctionConfig } from '@/features/canvas/types'
 import type {
   CanvasFunctionDefinitionDTO,
+  UUIDString,
 } from '@/shared/api/contracts/studio'
 
 vi.mock('@/shared/api/studio-service', () => ({
@@ -26,6 +23,12 @@ vi.mock('@/shared/api/studio-service', () => ({
   })),
 }))
 
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const NODE_SINGLE = '00000000-0000-4000-8000-000000000002' as UUIDString
+const NODE_VIDEO = '00000000-0000-4000-8000-000000000003' as UUIDString
+const NODE_SECOND = '00000000-0000-4000-8000-000000000004' as UUIDString
+const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
+
 const models: CanvasFunctionDefinitionDTO[] = [{
   name: 'image-a',
   description: 'Image A',
@@ -34,11 +37,16 @@ const models: CanvasFunctionDefinitionDTO[] = [{
     type: 'object',
     required: ['ratio'],
     properties: {
+      prompt: { type: 'string', description: 'Prompt' },
       ratio: {
         type: 'string',
         title: '比例',
         default: '1:1',
         enum: ['1:1', '16:9'],
+      },
+      references: {
+        type: 'array',
+        items: { type: 'resourceReference' },
       },
     },
   },
@@ -57,12 +65,17 @@ const models: CanvasFunctionDefinitionDTO[] = [{
     type: 'object',
     required: ['duration'],
     properties: {
+      prompt: { type: 'string', description: 'Prompt' },
       duration: {
         type: 'integer',
         title: '时长',
         default: 5,
         minimum: 4,
         maximum: 15,
+      },
+      references: {
+        type: 'array',
+        items: { type: 'resourceReference' },
       },
     },
   },
@@ -75,10 +88,8 @@ const models: CanvasFunctionDefinitionDTO[] = [{
   unavailableReason: null,
 }]
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
-
 function resourceNode(
-  id: string,
+  id: UUIDString,
   name: string,
   kind: 'IMAGE' | 'VIDEO',
 ): ResourceNode {
@@ -89,7 +100,7 @@ function resourceNode(
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: `${id}-r0`,
+      id: `${id}-r0` as UUIDString,
       canvasId: CANVAS_ID,
       ownerNodeId: id,
       resourceIndex: 0,
@@ -111,46 +122,44 @@ function resourceNode(
 
 function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b' = 'image-a') {
   const target: ResourceNode = {
-    id: '9',
+    id: NODE_TARGET,
     canvasId: CANVAS_ID,
     name: 'Generator',
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
-    resources: [resourceNode('2', 'old-output', 'IMAGE').resources[0]!],
+    resources: [resourceNode(NODE_SINGLE, 'old-output', 'IMAGE').resources[0]!],
     function: {
       name: modelKey,
       args: modelKey === 'image-a'
         ? {
-          prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
-          parameters: { ratio: '1:1' },
+          prompt: 'frontback',
+          ratio: '1:1',
+          references: [],
         }
         : {
-          prompt: { segments: [{ type: 'TEXT', text: 'frontback' }] },
-          parameters: { duration: 5 },
+          prompt: 'frontback',
+          duration: 5,
+          references: [],
         },
     },
     run,
   }
   const snapshot: CanvasSnapshot = {
     document: {
-      id: '1',
+      id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
     resourceNodes: [
-      resourceNode('2', 'single', 'IMAGE'),
-      resourceNode('3', 'video', 'VIDEO'),
-      resourceNode('4', 'second', 'IMAGE'),
+      resourceNode(NODE_SINGLE, 'single', 'IMAGE'),
+      resourceNode(NODE_VIDEO, 'video', 'VIDEO'),
+      resourceNode(NODE_SECOND, 'second', 'IMAGE'),
       target,
     ],
     groups: [],
-    references: [
-      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9', index: 0 },
-      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9', index: 0 },
-      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9', index: 0 },
-    ],
+    references: [],
   }
   return { snapshot, target }
 }
@@ -215,67 +224,52 @@ function renderPanel(
 }
 
 describe('Canvas generic generation panel', () => {
-  it('inserts structured references at the caret and permits duplicate mention chips', async () => {
-    // Sequential clicks prove the cursor advances after each chip while duplicate refs remain legal.
+  it('toggles independent references and displays attached chips', async () => {
+    // 验证 UI 简化：引用作为附件芯片，点击 candidate 切换挂载，删除按钮移除指定引用
     const user = userEvent.setup()
     const view = renderPanel()
-    const input = screen.getByRole('textbox', { name: '提示词片段 1' })
-    input.focus()
-    input.setSelectionRange(5, 5)
-    fireEvent.select(input)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
-    expect(screen.getByRole('textbox', { name: '提示词片段 3' })).toHaveFocus()
-    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
-    await user.click(screen.getByRole('button', { name: '插入参考 @second_0' }))
+    const input = screen.getByRole('textbox', { name: '提示词' })
+    expect(input).toHaveValue('frontback')
 
-    const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
-    expect(latest.prompt.segments.filter((segment) => segment.type === 'REFERENCE')).toEqual([
-      { type: 'REFERENCE', nodeId: '2', index: 0 },
-      { type: 'REFERENCE', nodeId: '2', index: 0 },
-      { type: 'REFERENCE', nodeId: '4', index: 0 },
+    // 点击 candidate 插入引用
+    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
+    const latest1 = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
+    expect(latest1.references).toEqual([
+      { type: 'resource', nodeId: NODE_SINGLE, index: 0 },
     ])
-    expect(screen.getAllByRole('button', { name: '删除 @single_0' })).toHaveLength(2)
+    expect(screen.getByRole('button', { name: '删除 @single_0' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '插入参考 @single_0' })).toHaveAttribute(
       'aria-pressed',
       'true',
     )
-    expect(screen.getByRole('button', { name: '插入参考 @second_0' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
+
+    // 点击另一个 candidate
+    await user.click(screen.getByRole('button', { name: '插入参考 @second_0' }))
+    const latest2 = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
+    expect(latest2.references).toEqual([
+      { type: 'resource', nodeId: NODE_SINGLE, index: 0 },
+      { type: 'resource', nodeId: NODE_SECOND, index: 0 },
+    ])
+
+    // 点击删除按钮移除指定引用
+    await user.click(screen.getByRole('button', { name: '删除 @single_0' }))
+    const latest3 = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
+    expect(latest3.references).toEqual([
+      { type: 'resource', nodeId: NODE_SECOND, index: 0 },
+    ])
+    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
   })
 
-  it('opens @ candidates, removes adjacent or focused chips by keyboard, and updates parameters', async () => {
-    // Boundary keys provide text-editor semantics without serializing aliases into prompt data.
+  it('types verbatim prompt and updates parameters without cursor splicing', async () => {
+    // 验证用户原始文本逐字符保留（包括已有 @ 和 HTML 类似标签），参数表单扁平更新
     const user = userEvent.setup()
     const view = renderPanel()
-    const input = screen.getByRole('textbox', { name: '提示词片段 1' })
-    await user.click(input)
-    await user.type(input, '@')
-    expect(screen.getByRole('listbox', { name: '@ 引用候选' })).toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: '@single_0' }))
-    const suffix = screen.getByRole('textbox', { name: '提示词片段 3' })
-    suffix.focus()
-    suffix.setSelectionRange(0, 0)
-    fireEvent.keyDown(suffix, { key: 'Backspace' })
-    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
+    const input = screen.getByRole('textbox', { name: '提示词' })
+    await user.clear(input)
+    await user.type(input, 'raw prompt with @user and <tag>')
+    const latestPrompt = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
+    expect(latestPrompt.prompt).toBe('raw prompt with @user and <tag>')
 
-    const prefix = screen.getByRole('textbox', { name: '提示词片段 1' })
-    prefix.focus()
-    prefix.setSelectionRange(prefix.value.length, prefix.value.length)
-    fireEvent.select(prefix)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
-    fireEvent.keyDown(screen.getByRole('button', { name: '删除 @single_0' }), { key: 'Backspace' })
-    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
-
-    prefix.focus()
-    prefix.setSelectionRange(prefix.value.length, prefix.value.length)
-    fireEvent.select(prefix)
-    await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
-    prefix.focus()
-    prefix.setSelectionRange(prefix.value.length, prefix.value.length)
-    fireEvent.keyDown(prefix, { key: 'Delete' })
-    expect(screen.queryByRole('button', { name: '删除 @single_0' })).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('比例'), '16:9')
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(latest.parameters.ratio).toBe('16:9')
@@ -288,7 +282,7 @@ describe('Canvas generic generation panel', () => {
 
     view.runtime.models = models
     view.rerenderPanel(view.snapshot, view.target)
-    expect(await screen.findByRole('textbox', { name: '提示词片段 1' })).toHaveValue('frontback')
+    expect(await screen.findByRole('textbox', { name: '提示词' })).toHaveValue('frontback')
     expect(screen.getByLabelText('比例')).toHaveValue('1:1')
 
     view.rerenderPanel(view.snapshot, {
@@ -296,12 +290,13 @@ describe('Canvas generic generation panel', () => {
       function: {
         name: 'image-b',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'server replacement' }] },
-          parameters: { duration: 9 },
+          prompt: 'server replacement',
+          duration: 9,
+          references: [],
         },
       },
     })
-    expect(await screen.findByRole('textbox', { name: '提示词片段 1' })).toHaveValue(
+    expect(await screen.findByRole('textbox', { name: '提示词' })).toHaveValue(
       'server replacement',
     )
     expect(screen.getByLabelText('模型')).toHaveValue('image-b')
@@ -312,7 +307,7 @@ describe('Canvas generic generation panel', () => {
     // The first server echo is a source version acknowledgement, not permission to overwrite later typing.
     const user = userEvent.setup()
     const view = renderPanel()
-    const input = screen.getByRole('textbox', { name: '提示词片段 1' })
+    const input = screen.getByRole('textbox', { name: '提示词' })
     await user.clear(input)
     await user.type(input, 'first')
     const acknowledged = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
@@ -323,11 +318,15 @@ describe('Canvas generic generation panel', () => {
       ...view.target,
       function: {
         name: 'image-a',
-        args: acknowledged,
+        args: {
+          prompt: acknowledged.prompt,
+          ratio: acknowledged.parameters.ratio,
+          references: acknowledged.references,
+        },
       },
     })
-    expect(screen.getByRole('textbox', { name: '提示词片段 1' })).toHaveValue('first second')
-    expect(screen.getByRole('textbox', { name: '提示词片段 1' })).toHaveFocus()
+    expect(screen.getByRole('textbox', { name: '提示词' })).toHaveValue('first second')
+    expect(screen.getByRole('textbox', { name: '提示词' })).toHaveFocus()
   })
 
   it('switches models with fresh defaults and filters references by the new policy', async () => {
@@ -339,9 +338,7 @@ describe('Canvas generic generation panel', () => {
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(view.scheduleFunctionConfig.mock.calls.at(-1)?.[1]).toBe('image-b')
     expect(latest.parameters).toEqual({ duration: 5 })
-    expect(latest.prompt.segments.some((segment) => (
-      segment.type === 'REFERENCE' && segment.nodeId === '2'
-    ))).toBe(false)
+    expect(latest.references.some((ref) => ref.nodeId === NODE_SINGLE)).toBe(false)
     expect(screen.getByLabelText('时长')).toHaveValue(5)
     const scheduledCount = view.scheduleFunctionConfig.mock.calls.length
     fireEvent.change(screen.getByLabelText('时长'), { target: { value: '20' } })
@@ -357,11 +354,11 @@ describe('Canvas generic generation panel', () => {
     expect(screen.queryByRole('button', { name: '开始生成' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
     ready.unmount()
-    expect(ready.flushFunctionConfig).toHaveBeenCalledWith('9')
+    expect(ready.flushFunctionConfig).toHaveBeenCalledWith(NODE_TARGET)
 
     const running = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -372,8 +369,8 @@ describe('Canvas generic generation panel', () => {
     running.unmount()
 
     renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992' as UUIDString,
       status: 'FAILED',
       stage: 'FAILED',
       error: 'provider failed',
@@ -383,7 +380,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('shows the generation header with the real model label and the true run status', () => {
-    // Header 同时展示 registry label、kicker 与真实运行状态。
     const view = renderPanel()
     const header = view.container.querySelector('.generation-panel-head')
     expect(header).not.toBeNull()
@@ -393,8 +389,8 @@ describe('Canvas generic generation panel', () => {
     view.unmount()
 
     const ready = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999990',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999990' as UUIDString,
       status: 'READY',
       stage: 'QUEUED',
       error: null,
@@ -406,8 +402,8 @@ describe('Canvas generic generation panel', () => {
     ready.unmount()
 
     const running = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -418,8 +414,8 @@ describe('Canvas generic generation panel', () => {
     running.unmount()
 
     const failed = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992' as UUIDString,
       status: 'FAILED',
       stage: 'FAILED',
       error: 'boom',
@@ -430,8 +426,8 @@ describe('Canvas generic generation panel', () => {
     failed.unmount()
 
     const cancelled = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999993',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999993' as UUIDString,
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,
@@ -459,18 +455,15 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('closes the panel by clearing the selection while the unmount flush still runs', async () => {
-    // Close is the documented escape hatch: it clears selection (unmounting the panel)
-    // and the unmount effect still flushes the latest draft config.
     const user = userEvent.setup()
     const view = renderPanel()
     await user.click(screen.getByRole('button', { name: '关闭面板' }))
     expect(view.setSelection).toHaveBeenCalledWith([])
     view.unmount()
-    expect(view.flushFunctionConfig).toHaveBeenCalledWith('9')
+    expect(view.flushFunctionConfig).toHaveBeenCalledWith(NODE_TARGET)
   })
 
   it('anchors the panel below the node with compact desktop geometry', () => {
-    // Compact 桌面（<=1600 宽）使用 gap 8/padding 4；节点在视口内时面板贴节点下方。
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 560,
       height: 190,
@@ -497,7 +490,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('anchors the panel with wide-desktop spacing when the stage exceeds 1600px', () => {
-    // 宽屏走默认 gap 12/padding 12；顶部位置仍从节点下方投影。
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 560,
       height: 190,
@@ -524,7 +516,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('renders without an anchor while the measuring effect tolerates a missing ResizeObserver', () => {
-    // 无 anchor 时面板不写定位样式；ResizeObserver 缺失时测量 effect 直接早退。
     const original = globalThis.ResizeObserver
     // @ts-expect-error 删除全局观察者以覆盖生产代码的 undefined 早退分支。
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver
@@ -539,7 +530,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('skips the panel-size publish when the measured rect is zero-sized', () => {
-    // 初始测量为零尺寸时 publish 早退，面板仍正常渲染且不因 setState 崩溃。
     const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       width: 0,
       height: 0,
@@ -555,7 +545,7 @@ describe('Canvas generic generation panel', () => {
       const view = renderPanel()
       const panel = view.container.querySelector('.generation-panel') as HTMLElement
       expect(panel).toBeInTheDocument()
-      expect(screen.getByLabelText('提示词片段 1')).toHaveValue('frontback')
+      expect(screen.getByLabelText('提示词')).toHaveValue('frontback')
       expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
     } finally {
       rectSpy.mockRestore()
@@ -563,10 +553,9 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('disables model, enum, and number controls while a run is in progress', async () => {
-    // 运行中编辑全部冻结：模型下拉、枚举下拉、数字输入都不可改。
     const view = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -576,14 +565,13 @@ describe('Canvas generic generation panel', () => {
     expect(screen.getByLabelText('比例')).toBeDisabled()
     expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
     view.unmount()
-    expect(view.flushFunctionConfig).toHaveBeenCalledWith('9')
+    expect(view.flushFunctionConfig).toHaveBeenCalledWith(NODE_TARGET)
   })
 
   it('shows the succeeded status and prefers a distinct stage label in the footer', () => {
-    // status=SUCCEEDED 时 header 用成功文案；stage 与 status 不同则 footer 展示 stage。
     const view = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
       status: 'SUCCEEDED',
       stage: 'GENERATING',
       error: null,
@@ -596,10 +584,9 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('falls back to the status label when the run stage equals the status', () => {
-    // stage 与 status 相同时 footer 回退到翻译后的状态文案。
     const view = renderPanel({
-      nodeId: '9',
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,
@@ -612,7 +599,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('toasts the reference limit when another distinct reference exceeds the model limit', async () => {
-    // maxReferences=1 时第二个不同参考触发上限提示，且不产生新草稿。
     const user = userEvent.setup()
     const limited: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
@@ -630,9 +616,8 @@ describe('Canvas generic generation panel', () => {
     view.unmount()
   })
 
-  it('shows an empty candidate menu when no reference candidates exist', async () => {
-    // 模型只接受 AUDIO 而本节点只链接 IMAGE/VIDEO 时，@ 菜单显示空态文案。
-    const user = userEvent.setup()
+  it('shows no reference row when no reference candidates exist', () => {
+    // 模型只接受 AUDIO 而快照中只有 IMAGE/VIDEO 时，candidates 为空，不渲染候选栏
     const emptyModels: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       referencePolicy: {
@@ -642,18 +627,10 @@ describe('Canvas generic generation panel', () => {
       },
     }]
     renderPanel(null, emptyModels)
-    const input = screen.getByRole('textbox', { name: '提示词片段 1' })
-    await user.click(input)
-    await user.type(input, '@')
-    expect(screen.getByRole('listbox', { name: '@ 引用候选' })).toBeInTheDocument()
-    expect(screen.getByText('没有可用引用')).toBeInTheDocument()
-    expect(screen.queryAllByRole('option').filter((element) => (
-      element.closest('.mention-candidates')
-    ))).toHaveLength(0)
+    expect(screen.queryByLabelText('可用参考资源')).not.toBeInTheDocument()
   })
 
   it('disables an unavailable model option and ignores an unknown model selection', async () => {
-    // 不可用模型以「label（reason）」展示并禁用；select 收到非法值时静默忽略。
     const unavailable: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       available: false,
@@ -669,7 +646,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('rejects non-integer and below-min number edits for INTEGER parameters', async () => {
-    // 非整数与低于 min 的值不进入草稿；合法值正常调度。
     const view = renderPanel(null, models)
     const select = screen.getByLabelText('模型')
     fireEvent.change(select, { target: { value: 'image-b' } })
@@ -712,7 +688,7 @@ describe('Canvas generic generation panel', () => {
 
     // 4. 用户输入非法 JSON（语法错误）：提示错误，绝不调用 scheduleFunctionConfig 破坏已有有效值
     const beforeInvalidCalls = view.scheduleFunctionConfig.mock.calls.length
-    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"' } }) // 缺少右大括号
+    fireEvent.change(textarea, { target: { value: '{\n  "ratio": "1:1"' } })
     expect(screen.getByRole('alert')).toHaveTextContent('JSON 语法错误')
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(beforeInvalidCalls)
 
@@ -725,7 +701,6 @@ describe('Canvas generic generation panel', () => {
   })
 
   it('I11: 合法到非法部分输入保留草稿、外部 config 更新不覆盖 dirty、收起重开重置权威/修正输入有效', async () => {
-    // 测试意图：验证当用户在 JSON 编辑器中输入未闭合的非法部分内容时，草稿保留在文本框中供继续修改；组件外部属性或重渲染不覆盖用户的 dirty 草稿；收起重开时重置为权威配置，修正为合法 JSON 后成功提交
     const view = renderPanel(null, models)
 
     // 1. 展开参数 JSON
@@ -735,11 +710,10 @@ describe('Canvas generic generation panel', () => {
     const textarea = screen.getByRole('textbox', { name: '参数 JSON' }) as HTMLTextAreaElement
     expect(JSON.parse(textarea.value)).toEqual({ ratio: '1:1' })
 
-    // 2. 从合法输入修改为非法部分输入（如输了一半的属性）
+    // 2. 从合法输入修改为非法部分输入
     const partialInput = '{\n  "ratio": "16:9",\n  "incomplete": '
     fireEvent.change(textarea, { target: { value: partialInput } })
 
-    // 验证文本框草稿仍完整保留该部分输入，并提示语法错误，不向底层 schedule
     expect(textarea.value).toBe(partialInput)
     expect(screen.getByRole('alert')).toHaveTextContent('JSON 语法错误')
     const scheduledCalls = view.scheduleFunctionConfig.mock.calls.length
@@ -750,14 +724,15 @@ describe('Canvas generic generation panel', () => {
       function: {
         ...view.target.function!,
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'external change' }] },
-          parameters: { ratio: '4:3', external: 'yes' },
+          prompt: 'external change',
+          ratio: '4:3',
+          external: 'yes',
+          references: [],
         },
       },
     }
     view.rerenderPanel(view.snapshot, externalUpdatedTarget)
 
-    // dirty 草稿必须依然保留，不被 external config 覆盖
     expect(textarea.value).toBe(partialInput)
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCalls)
 
@@ -775,11 +750,9 @@ describe('Canvas generic generation panel', () => {
     fireEvent.change(textarea, { target: { value: 'invalid-json' } })
     expect(screen.getByRole('alert')).toBeInTheDocument()
 
-    // 点击收起
     fireEvent.click(screen.getByRole('button', { name: '收起参数 JSON' }))
     expect(screen.queryByRole('textbox', { name: '参数 JSON' })).not.toBeInTheDocument()
 
-    // 再次点击展开：从当前权威 parameters 重置初始化，无错误提示
     fireEvent.click(screen.getByRole('button', { name: '编辑参数 JSON' }))
     const reopenedTextarea = screen.getByRole('textbox', { name: '参数 JSON' }) as HTMLTextAreaElement
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
@@ -788,32 +761,71 @@ describe('Canvas generic generation panel', () => {
     view.unmount()
   })
 
+  it('enters raw JSON mode with error alert when prompt or references shape is unsupported, and edits full args losslessly', async () => {
+    // 测试意图：当节点 args 中 prompt 为非字符串（如旧版 prompt.segments 或复杂对象）时，
+    // 面板绝不能静默覆盖为 ''，必须切换至完整 JSON 编辑模式并显示提示，保证编辑保存无损。
+    const rawTarget: ResourceNode = {
+      ...fixture().target,
+      function: {
+        name: 'image-a',
+        args: {
+          prompt: { segments: [{ type: 'TEXT', text: 'custom object prompt' }] },
+          ratio: '1:1',
+          references: [],
+        },
+      },
+    }
+    const view = renderPanel()
+    view.rerenderPanel(view.snapshot, rawTarget)
+
+    // 验证：显示错误提示，提示已进入完整 JSON 模式
+    expect(screen.getByRole('alert')).toHaveTextContent('入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。')
+    // 文本域展示完整原始 JSON，未被清空
+    const textarea = screen.getByRole('textbox', { name: '参数 JSON' }) as HTMLTextAreaElement
+    expect(JSON.parse(textarea.value)).toEqual(rawTarget.function!.args)
+
+    // 用户在完整 JSON 文本域中修改入参并保存
+    const scheduledCalls = view.scheduleFunctionConfig.mock.calls.length
+    fireEvent.change(textarea, {
+      target: {
+        value: JSON.stringify({
+          prompt: 'back to text',
+          ratio: '16:9',
+          references: [],
+        }),
+      },
+    })
+    expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCalls + 1)
+    const submitted = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
+    expect(submitted.rawArgs).toEqual({
+      prompt: 'back to text',
+      ratio: '16:9',
+      references: [],
+    })
+    view.unmount()
+  })
+
   it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
-    // 1. 设置坏记录到 localStorage，打开面板
     const corruptRaw = 'corrupt-raw-json-data'
-    const targetId = '9'
-    const storageKey = `kkstudio.canvas.pending-run:1:${targetId}`
+    const targetId = NODE_TARGET
+    const storageKey = `kkstudio.canvas.pending-run:${CANVAS_ID}:${targetId}`
     window.localStorage.setItem(storageKey, corruptRaw)
 
     const view = renderPanel()
 
-    // 2. 验证出现 local-pending-error 提示条及“放弃本地未决记录”按钮
     const errorBanner = await screen.findByTestId('local-pending-error')
     expect(errorBanner).toHaveTextContent('未决运行记录异常')
     const discardBtn = screen.getByTestId('discard-pending-btn')
     expect(discardBtn).toBeInTheDocument()
 
-    // 3. 点击“放弃本地未决记录”，展示确认警告对话框
     fireEvent.click(discardBtn)
     expect(screen.getByRole('alertdialog', { name: '确认放弃未决记录' })).toBeInTheDocument()
     expect(screen.getByText('这不会撤销服务端运行，核实后再继续')).toBeInTheDocument()
 
-    // 4. 点击取消：关闭确认框，恢复放弃按钮
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(screen.getByTestId('discard-pending-btn')).toBeInTheDocument()
 
-    // 5. 再次点击放弃并确认，调用 discardPendingRun 并成功清理
     fireEvent.click(screen.getByTestId('discard-pending-btn'))
     const confirmBtn = screen.getByTestId('confirm-discard-btn')
     fireEvent.click(confirmBtn)

@@ -320,8 +320,8 @@ function StageInner() {
   }, [commitTransforms, moveNodes, snapshot])
 
   const validConnection = useCallback((connection: Connection | Edge) => (
-    isValidResourceConnection(snapshot, connection.source, connection.target)
-  ), [snapshot])
+    isValidResourceConnection(snapshot, connection.source, connection.target, models)
+  ), [snapshot, models])
 
   const emitViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
     const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }

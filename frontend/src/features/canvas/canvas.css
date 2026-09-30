@@ -996,6 +996,55 @@
   white-space: nowrap;
 }
 
+.canvas-feature .generation-attached-references {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.canvas-feature .generation-attached-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--green-border);
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  font-size: 11px;
+}
+
+.canvas-feature .generation-attached-chip .canvas-resource-thumbnail {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+
+.canvas-feature .generation-attached-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.canvas-feature .generation-prompt-input {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
 .canvas-feature .generation-prompt-label {
   color: var(--fg-muted);
   font-size: 9px;

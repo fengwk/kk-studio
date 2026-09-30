@@ -203,8 +203,9 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
       function: {
         name: 'fake-image',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
-          parameters: { ratio: 'AUTO' },
+          prompt: 'old prompt',
+          ratio: 'AUTO',
+          references: [],
         },
       },
       run: null,
@@ -386,7 +387,12 @@ describe('useCanvasController real snapshot runtime', () => {
       argsSchema: {
         type: 'object',
         properties: {
+          prompt: { type: 'string' },
           ratio: { type: 'string', enum: ['AUTO'] },
+          references: {
+            type: 'array',
+            items: { type: 'resourceReference' },
+          },
         },
       },
       referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
@@ -804,7 +810,8 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
-        prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
+        prompt: 'new prompt',
+        references: [],
         parameters: { ratio: 'AUTO' },
       })
     })
@@ -818,15 +825,17 @@ describe('useCanvasController real snapshot runtime', () => {
       expectedFunction: {
         name: 'fake-image',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
-          parameters: { ratio: 'AUTO' },
+          prompt: 'old prompt',
+          ratio: 'AUTO',
+          references: [],
         },
       },
       function: {
         name: 'fake-image',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'new prompt' }] },
-          parameters: { ratio: 'AUTO' },
+          prompt: 'new prompt',
+          ratio: 'AUTO',
+          references: [],
         },
       },
     }])
@@ -1115,7 +1124,8 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
-        prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
+        prompt: 'retry prompt',
+        references: [],
         parameters: { ratio: 'AUTO' },
       })
     })
@@ -1135,15 +1145,17 @@ describe('useCanvasController real snapshot runtime', () => {
       expectedFunction: {
         name: 'fake-image',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
-          parameters: { ratio: 'AUTO' },
+          prompt: 'old prompt',
+          ratio: 'AUTO',
+          references: [],
         },
       },
       function: {
         name: 'fake-image',
         args: {
-          prompt: { segments: [{ type: 'TEXT', text: 'retry prompt' }] },
-          parameters: { ratio: 'AUTO' },
+          prompt: 'retry prompt',
+          ratio: 'AUTO',
+          references: [],
         },
       },
     }])
@@ -1170,7 +1182,8 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
-        prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
+        prompt: 'first prompt',
+        references: [],
         parameters: { ratio: 'AUTO' },
       })
     })
@@ -1182,7 +1195,8 @@ describe('useCanvasController real snapshot runtime', () => {
       firstFlush = result.current.flushFunctionConfig(NODE_FN)
       duplicateFlush = result.current.flushFunctionConfig(NODE_FN)
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
-        prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
+        prompt: 'latest prompt',
+        references: [],
         parameters: { ratio: 'AUTO' },
       })
       start = result.current.startFunctionRun(NODE_FN)
@@ -1203,15 +1217,17 @@ describe('useCanvasController real snapshot runtime', () => {
         expectedFunction: {
           name: 'fake-image',
           args: {
-            prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
-            parameters: { ratio: 'AUTO' },
+            prompt: 'old prompt',
+            ratio: 'AUTO',
+            references: [],
           },
         },
         function: {
           name: 'fake-image',
           args: {
-            prompt: { segments: [{ type: 'TEXT', text: 'first prompt' }] },
-            parameters: { ratio: 'AUTO' },
+            prompt: 'first prompt',
+            ratio: 'AUTO',
+            references: [],
           },
         },
       }],
@@ -1221,15 +1237,17 @@ describe('useCanvasController real snapshot runtime', () => {
         expectedFunction: {
           name: 'fake-image',
           args: {
-            prompt: { segments: [{ type: 'TEXT', text: 'old prompt' }] },
-            parameters: { ratio: 'AUTO' },
+            prompt: 'old prompt',
+            ratio: 'AUTO',
+            references: [],
           },
         },
         function: {
           name: 'fake-image',
           args: {
-            prompt: { segments: [{ type: 'TEXT', text: 'latest prompt' }] },
-            parameters: { ratio: 'AUTO' },
+            prompt: 'latest prompt',
+            ratio: 'AUTO',
+            references: [],
           },
         },
       }],
@@ -1546,7 +1564,8 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     const newConfig = {
-      prompt: { segments: [{ type: 'TEXT' as const, text: 'sunset' }] },
+      prompt: 'sunset',
+      references: [],
       parameters: { ratio: '16:9' },
     }
 
@@ -1555,9 +1574,13 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', newConfig)
     })
 
-    // 立即断言内存草稿已就绪并分配了世代
+    // 立即断言内存草稿已就绪并分配了世代，草稿存储的是规范的扁平 wire args
     expect(result.current.state.drafts[NODE_FN]?.function?.name).toBe('fake-image')
-    expect(result.current.state.drafts[NODE_FN]?.function?.args).toEqual(newConfig)
+    expect(result.current.state.drafts[NODE_FN]?.function?.args).toEqual({
+      prompt: 'sunset',
+      ratio: '16:9',
+      references: [],
+    })
     expect(result.current.state.drafts[NODE_FN]?.generation).toBeGreaterThanOrEqual(1)
 
     // 等待持久化落盘
@@ -1591,13 +1614,13 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
     act(() => {
-      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '1' }] } })
-      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '2' }] } })
-      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: '3' }] } })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: '1', references: [], parameters: {} })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: '2', references: [], parameters: {} })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: '3', references: [], parameters: {} })
     })
 
     expect(result.current.state.drafts[NODE_FN]?.generation).toBe(3)
-    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt.segments[0].text).toBe('3')
+    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('3')
   })
 
   it('canvas 切换 queued writes 隔离：画布切换时排队的持久化任务严格被 scope/epoch 拦截，绝不跨画布写入', async () => {
@@ -1663,12 +1686,12 @@ describe('useCanvasController real snapshot runtime', () => {
 
     // 3. 紧接着在同一组件实例中触发另一次草稿持久化（编辑另一节点）
     act(() => {
-      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: { segments: [{ type: 'TEXT', text: 'another' }] } })
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { prompt: 'another', references: [], parameters: {} })
     })
 
     await waitFor(async () => {
       const stored = await loadCanvasDrafts(CANVAS_ID)
-      expect(stored[NODE_FN]?.function?.args.prompt.segments[0].text).toBe('another')
+      expect(stored[NODE_FN]?.function?.args.prompt).toBe('another')
       // 关键断言：NODE_NOTE 的 position 绝不被复活写回 IDB！
       expect(stored[NODE_NOTE]?.position).toBeUndefined()
     })
@@ -1868,5 +1891,59 @@ describe('useCanvasController real snapshot runtime', () => {
     })
 
     ackSpy.mockRestore()
+  })
+
+  it('createLink and deleteLink maintain canonical references in function args with flush synchronization', async () => {
+    // 测试意图：验证连线操作通过 SET_NODE_FUNCTION 将规范引用写入 target 节点的 args.references，
+    // 并在连线修改前先 flush 目标节点排队的配置修改，防止并发覆盖。
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 先调度一次待冲刷的 prompt 修改
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'debounced typing',
+        references: [],
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+
+    // 2. 触发 createLink：从 NODE_IMG 连线到 NODE_FN
+    await act(async () => {
+      await result.current.createLink(NODE_IMG, NODE_FN)
+    })
+
+    // 验证：flush 先将 'debounced typing' 提交，紧接着 createLink 提交追加引用的 SET_NODE_FUNCTION
+    const setNodeFnCommands = commands.flatMap((req) => req.commands).filter((cmd) => cmd.type === 'SET_NODE_FUNCTION')
+    expect(setNodeFnCommands.length).toBeGreaterThanOrEqual(2)
+
+    const latestSetFn = setNodeFnCommands.at(-1) as {
+      type: 'SET_NODE_FUNCTION'
+      function: { name: string; args: Record<string, unknown> }
+    }
+    expect(latestSetFn.function.name).toBe('fake-image')
+    expect(latestSetFn.function.args.prompt).toBe('debounced typing')
+    expect(latestSetFn.function.args.references).toEqual([
+      { type: 'resource', nodeId: NODE_IMG, index: 0 },
+    ])
+
+    // 3. 重复连线被幂等拒绝，不产生重复命令
+    const commandsCountBeforeDup = commands.length
+    await act(async () => {
+      await result.current.createLink(NODE_IMG, NODE_FN)
+    })
+    expect(commands.length).toBe(commandsCountBeforeDup)
+
+    // 4. 触发 deleteLink：删除从 NODE_IMG 到 NODE_FN 的引用
+    await act(async () => {
+      await result.current.deleteLink(NODE_IMG, NODE_FN)
+    })
+
+    const finalSetFn = commands.flatMap((req) => req.commands).filter((cmd) => cmd.type === 'SET_NODE_FUNCTION').at(-1) as {
+      type: 'SET_NODE_FUNCTION'
+      function: { name: string; args: Record<string, unknown> }
+    }
+    expect(finalSetFn.function.args.references).toEqual([])
+    expect(finalSetFn.function.args.prompt).toBe('debounced typing')
   })
 })

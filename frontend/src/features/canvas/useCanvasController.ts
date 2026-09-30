@@ -31,6 +31,13 @@ import {
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
 import { useCanvasFunctionRun } from '@/features/canvas/function-run'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import type { CanvasResourceReference } from '@/features/canvas/types'
+import {
+  configToFunctionArgs,
+  createDefaultFunctionConfig,
+  functionSupportsReferences,
+} from '@/features/canvas/generation'
 import {
   normalizeNodeAlias,
   uniqueNodeAlias,
@@ -690,19 +697,19 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     useFunctionConfigSync({
       executeCommands,
       getSnapshot: () => queueRef.current?.currentSnapshot() ?? snapshotQuery.data,
+      getModel: (name) => modelsQuery.data?.find((m) => m.name === name),
       onImmediateDraft: (nodeId, functionName, config) => {
         const existing = draftsRef.current[nodeId] ?? { generation: 0, updatedAt: Date.now() }
         const nextGen = (existing.generation ?? 0) + 1
+        const model = modelsQuery.data?.find((m) => m.name === functionName)
+        const args = configToFunctionArgs(config, model)
         const nextDraft: CanvasNodeDraft = {
           ...existing,
           generation: nextGen,
           updatedAt: Date.now(),
           function: {
             name: functionName,
-            args: {
-              prompt: config.prompt,
-              parameters: config.parameters,
-            },
+            args,
           },
         }
         draftsRef.current = {
@@ -1228,6 +1235,9 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
     const alias = reserveNodeAlias(outputKind === 'IMAGE' ? '图片生成' : '视频生成')
     const nodeId = crypto.randomUUID() as UUIDString
+    const defaultConfig = createDefaultFunctionConfig(fnDef)
+    defaultConfig.prompt = outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频'
+    const args = configToFunctionArgs(defaultConfig, fnDef)
     void executeCommands([
       {
         type: 'CREATE_NODE',
@@ -1242,7 +1252,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
         expectedFunction: null,
         function: {
           name: fnDef.name,
-          args: { prompt: outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频' },
+          args,
         },
       },
     ]).catch(() => undefined).finally(() => releaseNodeAlias(alias))
@@ -1400,40 +1410,180 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }).catch(() => undefined)
   }, [executeCommands, snapshotQuery.data, state.selectedIds])
 
-  // 派生引用维护：在目标节点的 function.args 中注入或移除引用
-  const createLink = useCallback((sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
-    const snapshot = snapshotQuery.data
-    const target = snapshot?.nodes.find((n) => n.id === targetNodeId)
-    if (!target || !target.function) {
-      return
-    }
-    const newArgs = {
-      ...target.function.args,
-      reference: { type: 'resource', nodeId: sourceNodeId, index: 0 },
-    }
-    void executeCommands([{
-      type: 'SET_NODE_FUNCTION',
-      nodeId: targetNodeId,
-      expectedFunction: target.function,
-      function: { name: target.function.name, args: newArgs },
-    }]).catch(() => undefined)
-  }, [executeCommands, snapshotQuery.data])
+  // 派生引用维护：在目标节点的 function.args 中注入或移除引用（遵循 canonical references 数组）
+  const createLink = useCallback(async (sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
+    // 1. 先冲刷目标节点的 pending config，防止并发覆盖键入的 prompt/参数
+    await flushFunctionConfig(targetNodeId).catch(() => undefined)
 
-  const deleteLink = useCallback((_sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
-    const snapshot = snapshotQuery.data
+    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
     const target = snapshot?.nodes.find((n) => n.id === targetNodeId)
     if (!target || !target.function) {
       return
     }
-    const newArgs = { ...target.function.args }
-    delete newArgs.reference
-    void executeCommands([{
+    const currentFunction = draftsRef.current[targetNodeId]?.function ?? target.function
+    if (!currentFunction) {
+      return
+    }
+    const targetModel = modelsQuery.data?.find((m) => m.name === currentFunction.name)
+    if (!functionSupportsReferences(targetModel)) {
+      return
+    }
+
+    const source = snapshot?.nodes.find((n) => n.id === sourceNodeId)
+    if (!source || source.resources.length === 0) {
+      return
+    }
+
+    const sourceResource = source.resources[0]
+    if (
+      targetModel?.referencePolicy?.allowedKinds
+      && sourceResource
+      && !targetModel.referencePolicy.allowedKinds.includes(sourceResource.kind)
+    ) {
+      return
+    }
+
+    const existingReferences: CanvasResourceReference[] = Array.isArray(currentFunction.args?.references)
+      ? (currentFunction.args.references as unknown[]).filter(
+          (item): item is CanvasResourceReference =>
+            Boolean(
+              item
+              && typeof item === 'object'
+              && (item as CanvasResourceReference).type === 'resource'
+              && isCanonicalUuid((item as CanvasResourceReference).nodeId)
+              && Number.isInteger((item as CanvasResourceReference).index)
+              && (item as CanvasResourceReference).index >= 0,
+            ),
+        )
+      : []
+
+    if (existingReferences.some((ref) => ref.nodeId === sourceNodeId && ref.index === 0)) {
+      return
+    }
+
+    const maxRefs = targetModel?.referencePolicy?.maxReferences ?? Infinity
+    if (existingReferences.length >= maxRefs) {
+      setToast('当前模型的参考资源数量已达到上限。')
+      return
+    }
+    if (sourceResource && targetModel?.referencePolicy?.maxByKind?.[sourceResource.kind] !== undefined) {
+      const kindLimit = targetModel.referencePolicy.maxByKind[sourceResource.kind]!
+      let kindCount = 0
+      for (const ref of existingReferences) {
+        const refNode = snapshot?.nodes.find((n) => n.id === ref.nodeId)
+        const refRes = refNode?.resources[ref.index]
+        if (refRes?.kind === sourceResource.kind) {
+          kindCount += 1
+        }
+      }
+      if (kindCount >= kindLimit) {
+        setToast('当前模型的该类参考资源数量已达到上限。')
+        return
+      }
+    }
+
+    const newReferences: CanvasResourceReference[] = [
+      ...existingReferences,
+      { type: 'resource', nodeId: sourceNodeId, index: 0 },
+    ]
+
+    const newArgs = {
+      ...currentFunction.args,
+      references: newReferences,
+    }
+
+    if (draftsRef.current[targetNodeId]?.function) {
+      const existingDraft = draftsRef.current[targetNodeId]!
+      draftsRef.current = {
+        ...draftsRef.current,
+        [targetNodeId]: {
+          ...existingDraft,
+          updatedAt: Date.now(),
+          function: {
+            ...existingDraft.function!,
+            args: {
+              ...existingDraft.function!.args,
+              references: newReferences,
+            },
+          },
+        },
+      }
+      targetDraftsRef.current = draftsRef.current
+      setState((current) => ({ ...current, drafts: draftsRef.current }))
+    }
+
+    await executeCommands([{
       type: 'SET_NODE_FUNCTION',
       nodeId: targetNodeId,
       expectedFunction: target.function,
       function: { name: target.function.name, args: newArgs },
     }]).catch(() => undefined)
-  }, [executeCommands, snapshotQuery.data])
+  }, [executeCommands, flushFunctionConfig, modelsQuery.data, setToast, snapshotQuery.data])
+
+  const deleteLink = useCallback(async (sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
+    // 1. 先冲刷目标节点的 pending config
+    await flushFunctionConfig(targetNodeId).catch(() => undefined)
+
+    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
+    const target = snapshot?.nodes.find((n) => n.id === targetNodeId)
+    if (!target || !target.function) {
+      return
+    }
+
+    const currentFunction = draftsRef.current[targetNodeId]?.function ?? target.function
+    if (!currentFunction) {
+      return
+    }
+
+    const existingReferences: CanvasResourceReference[] = Array.isArray(currentFunction.args?.references)
+      ? (currentFunction.args.references as unknown[]).filter(
+          (item): item is CanvasResourceReference =>
+            Boolean(
+              item
+              && typeof item === 'object'
+              && (item as CanvasResourceReference).type === 'resource'
+              && isCanonicalUuid((item as CanvasResourceReference).nodeId)
+              && Number.isInteger((item as CanvasResourceReference).index)
+              && (item as CanvasResourceReference).index >= 0,
+            ),
+        )
+      : []
+
+    // 删除边仅删匹配 source，保留其余索引及其他 source
+    const remainingReferences = existingReferences.filter((ref) => ref.nodeId !== sourceNodeId)
+
+    const newArgs = {
+      ...currentFunction.args,
+      references: remainingReferences,
+    }
+
+    if (draftsRef.current[targetNodeId]?.function) {
+      const existingDraft = draftsRef.current[targetNodeId]!
+      draftsRef.current = {
+        ...draftsRef.current,
+        [targetNodeId]: {
+          ...existingDraft,
+          updatedAt: Date.now(),
+          function: {
+            ...existingDraft.function!,
+            args: {
+              ...existingDraft.function!.args,
+              references: remainingReferences,
+            },
+          },
+        },
+      }
+      targetDraftsRef.current = draftsRef.current
+      setState((current) => ({ ...current, drafts: draftsRef.current }))
+    }
+
+    await executeCommands([{
+      type: 'SET_NODE_FUNCTION',
+      nodeId: targetNodeId,
+      expectedFunction: target.function,
+      function: { name: target.function.name, args: newArgs },
+    }]).catch(() => undefined)
+  }, [executeCommands, flushFunctionConfig, snapshotQuery.data])
 
   const deleteNode = useCallback((nodeId: UUIDString) => {
     const snapshot = snapshotQuery.data

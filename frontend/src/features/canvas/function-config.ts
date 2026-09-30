@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { CanvasFunctionConfig, PendingFunctionConfig } from '@/features/canvas/types'
+import { configToFunctionArgs } from '@/features/canvas/generation'
 import type {
   CanvasCommandDTO,
+  CanvasFunctionDefinitionDTO,
   CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -10,6 +12,7 @@ import type {
 export interface FunctionConfigSyncOptions {
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>
   getSnapshot?: () => CanvasSnapshotDTO | undefined
+  getModel?: (functionName: string) => CanvasFunctionDefinitionDTO | undefined
   onImmediateDraft?: (nodeId: UUIDString, functionName: string, config: CanvasFunctionConfig) => number
   getDraftGeneration?: (nodeId: UUIDString) => number | undefined
 }
@@ -50,19 +53,21 @@ export function useFunctionConfigSync(
     }
     : executeCommandsOrOptions
 
-  const { executeCommands, getSnapshot, onImmediateDraft, getDraftGeneration } = options
+  const { executeCommands, getSnapshot, getModel, onImmediateDraft, getDraftGeneration } = options
 
   const executeCommandsRef = useRef(executeCommands)
   const getSnapshotRef = useRef(getSnapshot)
+  const getModelRef = useRef(getModel)
   const onImmediateDraftRef = useRef(onImmediateDraft)
   const getDraftGenerationRef = useRef(getDraftGeneration)
 
   useEffect(() => {
     executeCommandsRef.current = executeCommands
     getSnapshotRef.current = getSnapshot
+    getModelRef.current = getModel
     onImmediateDraftRef.current = onImmediateDraft
     getDraftGenerationRef.current = getDraftGeneration
-  }, [executeCommands, getSnapshot, onImmediateDraft, getDraftGeneration])
+  }, [executeCommands, getSnapshot, getModel, onImmediateDraft, getDraftGeneration])
 
   const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingItem>())
   const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
@@ -87,16 +92,15 @@ export function useFunctionConfigSync(
         const snapshot = getSnapshotRef.current?.()
         const node = snapshot?.nodes.find((item) => item.id === nodeId)
         const expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
+        const model = getModelRef.current?.(pending.functionName)
+        const args = configToFunctionArgs(pending.config, model)
         await executeCommandsRef.current([{
           type: 'SET_NODE_FUNCTION',
           nodeId: pending.nodeId,
           expectedFunction,
           function: {
             name: pending.functionName,
-            args: {
-              prompt: pending.config.prompt,
-              parameters: pending.config.parameters,
-            },
+            args,
           },
         }], [{
           nodeId: pending.nodeId,
