@@ -83,7 +83,7 @@ function StageInner() {
     [models, nodeCallbacks, snapshot, state.positionDrafts, state.selectedIds],
   )
   const edges = useMemo(
-    () => snapshot ? projectEdges(snapshot.links, state.selectedLinks) : [],
+    () => snapshot ? projectEdges(snapshot.references, state.selectedLinks) : [],
     [snapshot, state.selectedLinks],
   )
   const selectedFunctionNode = useMemo(() => {
@@ -405,11 +405,11 @@ function StageInner() {
             }}
             onEdgesDelete={(deleted) => {
               for (const edge of deleted) {
-                const link = snapshot?.links.find((item) => (
+                const hasRef = snapshot?.references.some((item) => (
                   item.sourceNodeId === edge.source && item.targetNodeId === edge.target
                 ))
-                if (link) {
-                  deleteLink(link.sourceNodeId, link.targetNodeId)
+                if (hasRef) {
+                  deleteLink(edge.source as UUIDString, edge.target as UUIDString)
                 }
               }
             }}

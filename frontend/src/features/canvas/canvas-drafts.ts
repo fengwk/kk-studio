@@ -120,11 +120,7 @@ export function overlayNodeWithDraft(node: ResourceNode, draft?: CanvasNodeDraft
       ...transformedNode,
       function: draft.function ? {
         name: draft.function.name,
-        args: draft.function.args,
-        modelKey: draft.function.name,
-        configJson: typeof draft.function.args?.configJson === 'string'
-          ? (draft.function.args.configJson as string)
-          : JSON.stringify(draft.function.args ?? {}),
+        args: draft.function.args ?? {},
       } : null,
     }
   }

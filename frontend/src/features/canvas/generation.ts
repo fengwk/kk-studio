@@ -1,10 +1,9 @@
 import type {
-  CanvasFunctionConfigDTO,
   CanvasFunctionDefinitionDTO,
   CanvasResourceKind,
   UUIDString,
-  PromptSegmentDTO,
 } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionConfig, PromptSegment } from '@/features/canvas/types'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'
 
 export interface ReferenceCandidate {
@@ -68,7 +67,7 @@ export function extractParametersFromDefinition(model: CanvasFunctionDefinitionD
   return params
 }
 
-export function createDefaultFunctionConfig(model: CanvasFunctionDefinitionDTO): CanvasFunctionConfigDTO {
+export function createDefaultFunctionConfig(model: CanvasFunctionDefinitionDTO): CanvasFunctionConfig {
   const parameters: Record<string, string | number> = {}
   const paramDefs = extractParametersFromDefinition(model)
   for (const parameter of paramDefs) {
@@ -87,43 +86,38 @@ export function createDefaultFunctionConfig(model: CanvasFunctionDefinitionDTO):
 }
 
 export function parseFunctionConfig(
-  configJson: string,
+  args: Record<string, unknown> | null | undefined,
   model: CanvasFunctionDefinitionDTO,
-): CanvasFunctionConfigDTO {
-  try {
-    const parsed: unknown = JSON.parse(configJson)
-    if (!isConfig(parsed)) {
-      return createDefaultFunctionConfig(model)
-    }
-    const defaults = createDefaultFunctionConfig(model)
-    const parameters: Record<string, string | number> = { ...defaults.parameters }
-    const paramDefs = extractParametersFromDefinition(model)
-    for (const definition of paramDefs) {
-      const value = parsed.parameters[definition.key]
-      if (
-        definition.type === 'ENUM'
-        && typeof value === 'string'
-        && definition.options.includes(value)
-      ) {
-        parameters[definition.key] = value
-      } else if (
-        definition.type === 'INTEGER'
-        && typeof value === 'number'
-        && Number.isInteger(value)
-        && (definition.min === null || value >= definition.min)
-        && (definition.max === null || value <= definition.max)
-      ) {
-        parameters[definition.key] = value
-      }
-    }
-    return {
-      prompt: {
-        segments: parsed.prompt.segments.map((segment) => ({ ...segment })),
-      },
-      parameters,
-    }
-  } catch {
+): CanvasFunctionConfig {
+  if (!isConfig(args)) {
     return createDefaultFunctionConfig(model)
+  }
+  const defaults = createDefaultFunctionConfig(model)
+  const parameters: Record<string, string | number> = { ...defaults.parameters }
+  const paramDefs = extractParametersFromDefinition(model)
+  for (const definition of paramDefs) {
+    const value = args.parameters[definition.key]
+    if (
+      definition.type === 'ENUM'
+      && typeof value === 'string'
+      && definition.options.includes(value)
+    ) {
+      parameters[definition.key] = value
+    } else if (
+      definition.type === 'INTEGER'
+      && typeof value === 'number'
+      && Number.isInteger(value)
+      && (definition.min === null || value >= definition.min)
+      && (definition.max === null || value <= definition.max)
+    ) {
+      parameters[definition.key] = value
+    }
+  }
+  return {
+    prompt: {
+      segments: args.prompt.segments.map((segment) => ({ ...segment })),
+    },
+    parameters,
   }
 }
 
@@ -132,9 +126,9 @@ export function referenceCandidates(
   targetNodeId: UUIDString,
   model: CanvasFunctionDefinitionDTO,
 ): ReferenceCandidate[] {
-  const linkedIds = new Set(snapshot.links
-    .filter((link) => link.targetNodeId === targetNodeId)
-    .map((link) => link.sourceNodeId))
+  const linkedIds = new Set(snapshot.references
+    .filter((ref) => ref.targetNodeId === targetNodeId)
+    .map((ref) => ref.sourceNodeId))
   const candidates: ReferenceCandidate[] = []
   for (const node of snapshot.resourceNodes) {
     if (!linkedIds.has(node.id)) {
@@ -160,11 +154,11 @@ export function referenceAlias(node: ResourceNode, index: number): string {
 }
 
 export function insertReferenceAtCursor(
-  segments: PromptSegmentDTO[],
+  segments: PromptSegment[],
   cursor: PromptCursor,
   candidate: Pick<ReferenceCandidate, 'nodeId' | 'index'>,
-): PromptSegmentDTO[] {
-  const reference: PromptSegmentDTO = {
+): PromptSegment[] {
+  const reference: PromptSegment = {
     type: 'REFERENCE',
     nodeId: candidate.nodeId,
     index: candidate.index,
@@ -184,10 +178,10 @@ export function insertReferenceAtCursor(
 }
 
 export function updateTextSegment(
-  segments: PromptSegmentDTO[],
+  segments: PromptSegment[],
   segmentIndex: number,
   text: string,
-): PromptSegmentDTO[] {
+): PromptSegment[] {
   return segments.map((segment, index) => (
     index === segmentIndex && segment.type === 'TEXT'
       ? { type: 'TEXT', text }
@@ -196,17 +190,17 @@ export function updateTextSegment(
 }
 
 export function removePromptSegment(
-  segments: PromptSegmentDTO[],
+  segments: PromptSegment[],
   segmentIndex: number,
-): PromptSegmentDTO[] {
+): PromptSegment[] {
   return normalizePromptSegments(segments.filter((_segment, index) => index !== segmentIndex))
 }
 
 export function filterConfigReferences(
-  config: CanvasFunctionConfigDTO,
+  config: CanvasFunctionConfig,
   candidates: ReferenceCandidate[],
   model: CanvasFunctionDefinitionDTO,
-): CanvasFunctionConfigDTO {
+): CanvasFunctionConfig {
   const byKey = new Map(candidates.map((candidate) => [
     referenceKey(candidate.nodeId, candidate.index),
     candidate,
@@ -251,7 +245,7 @@ export function filterConfigReferences(
 }
 
 export function canInsertReference(
-  segments: PromptSegmentDTO[],
+  segments: PromptSegment[],
   candidate: ReferenceCandidate,
   candidates: ReferenceCandidate[],
   model: CanvasFunctionDefinitionDTO,
@@ -290,9 +284,9 @@ export function canInsertReference(
   return count < kindLimit
 }
 
-export function promptVisibleText(segments: PromptSegmentDTO[]): string {
+export function promptVisibleText(segments: PromptSegment[]): string {
   return segments
-    .filter((segment): segment is Extract<PromptSegmentDTO, { type: 'TEXT' }> => segment.type === 'TEXT')
+    .filter((segment): segment is Extract<PromptSegment, { type: 'TEXT' }> => segment.type === 'TEXT')
     .map((segment) => segment.text)
     .join('')
 }
@@ -301,8 +295,8 @@ export function referenceKey(nodeId: UUIDString, index: number): string {
   return `${nodeId}:${index}`
 }
 
-function normalizePromptSegments(segments: PromptSegmentDTO[]): PromptSegmentDTO[] {
-  const normalized: PromptSegmentDTO[] = []
+function normalizePromptSegments(segments: PromptSegment[]): PromptSegment[] {
+  const normalized: PromptSegment[] = []
   for (const segment of segments) {
     const previous = normalized.at(-1)
     if (segment.type === 'TEXT' && previous?.type === 'TEXT') {
@@ -320,7 +314,7 @@ function normalizePromptSegments(segments: PromptSegmentDTO[]): PromptSegmentDTO
   return normalized
 }
 
-function isConfig(value: unknown): value is CanvasFunctionConfigDTO {
+function isConfig(value: unknown): value is CanvasFunctionConfig {
   if (!value || typeof value !== 'object') {
     return false
   }

@@ -135,11 +135,6 @@ describe('Canvas snapshot projection', () => {
     expect(snapshot.resourceNodes[1]?.resources[0]?.width).toBeNull()
     expect(snapshot.resourceNodes[1]?.resources[1]?.height).toBeNull()
     expect(snapshot.groups[0]).toMatchObject({ id: GROUP_A, title: 'group' })
-    expect(snapshot.links[0]).toEqual({
-      canvasId: CANVAS_ID,
-      sourceNodeId: NODE_NOTE,
-      targetNodeId: NODE_IMAGE,
-    })
     expect(snapshot.references[0]).toEqual({
       canvasId: CANVAS_ID,
       sourceNodeId: NODE_NOTE,
@@ -216,9 +211,9 @@ describe('Canvas snapshot projection', () => {
     expect(outside?.position).toEqual({ x: 600, y: 30 })
   })
 
-  it('uses link endpoints as edge identity and keeps edges operable', () => {
+  it('uses reference endpoints as edge identity and keeps edges operable', () => {
     const snapshot = projectCanvasSnapshot(snapshotDTO)
-    expect(projectEdges(snapshot.links)[0]).toMatchObject({
+    expect(projectEdges(snapshot.references)[0]).toMatchObject({
       id: `${NODE_NOTE}->${NODE_IMAGE}`,
       source: NODE_NOTE,
       target: NODE_IMAGE,
@@ -227,7 +222,7 @@ describe('Canvas snapshot projection', () => {
       selectable: true,
       focusable: true,
     })
-    expect(projectEdges(snapshot.links, [{
+    expect(projectEdges(snapshot.references, [{
       sourceNodeId: NODE_NOTE,
       targetNodeId: NODE_IMAGE,
     }])[0]?.selected).toBe(true)
@@ -237,5 +232,28 @@ describe('Canvas snapshot projection', () => {
     expect(groupIdFromFlowId('group:invalid-group-id')).toBeNull()
     expect(groupIdFromFlowId('group:')).toBeNull()
     expect(groupIdFromFlowId(NODE_IMAGE)).toBeNull()
+  })
+
+  it('deduplicates edge display by endpoint pair while retaining multiple references with distinct port indices', () => {
+    const multiRefSnapshot = projectCanvasSnapshot({
+      ...snapshotDTO,
+      references: [
+        { canvasId: CANVAS_ID, sourceNodeId: NODE_NOTE, targetNodeId: NODE_IMAGE, index: 0 },
+        { canvasId: CANVAS_ID, sourceNodeId: NODE_NOTE, targetNodeId: NODE_IMAGE, index: 1 },
+      ],
+    })
+    // 1. 验证 snapshot.references 完整保留两个引用及其各自独立的 index（不丢端口 index）
+    expect(multiRefSnapshot.references).toHaveLength(2)
+    expect(multiRefSnapshot.references[0]?.index).toBe(0)
+    expect(multiRefSnapshot.references[1]?.index).toBe(1)
+    expect(multiRefSnapshot.references[0]?.sourceNodeId).toBe(NODE_NOTE)
+    expect(multiRefSnapshot.references[1]?.sourceNodeId).toBe(NODE_NOTE)
+
+    // 2. 验证 projectEdges 渲染时对同一对端点执行去重，仅生成一条 edge，避免 React Flow 渲染重复边或 ID 冲突
+    const edges = projectEdges(multiRefSnapshot.references)
+    expect(edges).toHaveLength(1)
+    expect(edges[0]?.id).toBe(`${NODE_NOTE}->${NODE_IMAGE}`)
+    expect(edges[0]?.source).toBe(NODE_NOTE)
+    expect(edges[0]?.target).toBe(NODE_IMAGE)
   })
 })

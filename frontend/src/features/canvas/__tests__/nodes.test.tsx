@@ -73,7 +73,7 @@ function renderResourceNode(node: ResourceNode, callbacks = { editTextNode: vi.f
     kind: 'resource',
     node,
     model: node.function ? {
-      name: node.function.name ?? node.function.modelKey,
+      name: node.function.name,
       description: 'Model label',
       outputs: [{ kind: 'IMAGE', name: null }],
       argsSchema: { type: 'object' },
@@ -191,7 +191,7 @@ describe('Canvas resource/group node renderers', () => {
     const view = renderResourceNode(resourceNode({
       name: 'Generator',
       resources: [],
-      function: { modelKey: 'fake-image', configJson: '{}' },
+      function: { name: 'fake-image', args: {} },
       run: {
         nodeId: '2',
         requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
@@ -217,7 +217,7 @@ describe('Canvas resource/group node renderers', () => {
     renderResourceNode(resourceNode({
       name: 'Clip maker',
       resources: [],
-      function: { modelKey: 'fake-image', configJson: '{}' },
+      function: { name: 'fake-image', args: {} },
       run: null,
     }))
     expect(screen.getByRole('banner', { name: '图片生成 | Clip maker' })).toBeInTheDocument()
@@ -348,7 +348,7 @@ describe('Canvas resource/group node renderers', () => {
     const functionView = renderResourceNode(resourceNode({
       name: 'Generator',
       resources: [],
-      function: { modelKey: 'fake-image', configJson: '{}' },
+      function: { name: 'fake-image', args: {} },
       run: null,
     }))
     expect(screen.getByRole('banner', { name: 'Image generation | Generator' })).toBeInTheDocument()
