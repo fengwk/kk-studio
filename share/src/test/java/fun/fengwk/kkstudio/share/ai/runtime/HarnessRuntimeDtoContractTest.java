@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,14 @@ import java.util.Map;
 class HarnessRuntimeDtoContractTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  /**
+   * 显式宽松的 Jackson2 mapper：关闭 {@code FAIL_ON_UNKNOWN_PROPERTIES}，复现 wire 上真实 mapper（Jackson3 HTTP
+   * mapper 与 convention4j 共享 Jackson2 bean）默认忽略未知字段的语义，用来证明请求体的 fail-closed 来自 DTO 注解而非 mapper
+   * 默认严格性。
+   */
+  private static final ObjectMapper LENIENT_MAPPER =
+      new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
   @Test
   void commandBatchDtoExposesOwnerTargetAndImmutableCommandDefaults() {
@@ -142,6 +151,86 @@ class HarnessRuntimeDtoContractTest {
                 {"expectedVersion":"0","unknown":true}
                 """,
                 HarnessThreadCompactDTO.class));
+  }
+
+  /**
+   * 测试意图：wire 上的真实 mapper（Spring Boot 的 Jackson3 HTTP mapper 与 convention4j 的共享 Jackson2
+   * bean）默认都忽略未知 字段，因此请求体的 fail-closed 只能来自 DTO 自己的 {@code @JsonAnySetter}。这里用显式关闭 {@code
+   * FAIL_ON_UNKNOWN_PROPERTIES} 的 Jackson2 mapper 复现同样的宽松语义：无注解的对照类型确实静默忽略未知字段，而 {@link
+   * HarnessToolApprovalDTO} 仍然拒绝，且拒绝原因就是 DTO 自己抛出的 {@link HarnessRequestFormatException}（而非 mapper
+   * 的默认严格性）。
+   */
+  @Test
+  void lenientMapperStillRejectsUnknownToolApprovalFieldViaDtoAnnotation() throws Exception {
+    String body =
+        """
+        {"decision":"ALLOW","decisionId":"00000000-0000-0000-0000-000000000001","operator":"admin"}
+        """;
+
+    // 对照：同一个宽松 mapper 对没有 @JsonAnySetter 的类型静默忽略未知字段。
+    assertEquals("ALLOW", LENIENT_MAPPER.readValue(body, UnknownFieldTolerantDto.class).decision);
+
+    Exception error =
+        assertThrows(
+            Exception.class, () -> LENIENT_MAPPER.readValue(body, HarnessToolApprovalDTO.class));
+    assertTrue(
+        hasCause(error, HarnessRequestFormatException.class),
+        "unknown field rejection must originate from the DTO any-setter");
+  }
+
+  /**
+   * 测试意图：如实固定 decision/decisionId 当前的两层边界。无法强转为 String 的 JSON token（对象/数组）在 DTO 边界即被拒绝； 标量
+   * token（数字）仍被 Jackson 强转为 String，没有 {@code requireJsonString} 守卫，其 fail-closed 由 HTTP 解析层保证
+   * （{@code HarnessRuntimeRequestMapper} 的 decision 白名单与 canonical UUID 校验，见 web 审批端点测试）。
+   */
+  @Test
+  void toolApprovalDecisionAndDecisionIdPinMalformedTokenBoundary() throws Exception {
+    assertThrows(
+        Exception.class,
+        () ->
+            LENIENT_MAPPER.readValue(
+                """
+                {"decision":{"nested":1},"decisionId":"00000000-0000-0000-0000-000000000001"}
+                """,
+                HarnessToolApprovalDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            LENIENT_MAPPER.readValue(
+                """
+                {"decision":"ALLOW","decisionId":[1]}
+                """,
+                HarnessToolApprovalDTO.class));
+
+    HarnessToolApprovalDTO coerced =
+        LENIENT_MAPPER.readValue(
+            "{\"decision\":42,\"decisionId\":1}", HarnessToolApprovalDTO.class);
+    assertEquals("42", coerced.getDecision());
+    assertEquals("1", coerced.getDecisionId());
+  }
+
+  /** 沿 cause 链判定异常来源，用于区分 DTO 的 @JsonAnySetter 拒绝与 mapper 自身失败。 */
+  private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (type.isInstance(cause)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 对照类型：不声明 @JsonAnySetter 的普通数据对象，用于证明宽松 mapper 本身并不拒绝未知字段。 */
+  static class UnknownFieldTolerantDto {
+
+    private String decision;
+
+    public String getDecision() {
+      return decision;
+    }
+
+    public void setDecision(String decision) {
+      this.decision = decision;
+    }
   }
 
   @Test
