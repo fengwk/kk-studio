@@ -2,12 +2,12 @@
 
 Daemon 的内置 LSP 能力是一条跨进程、跨协议的链路：CLI 的 `--lsp-config` → 项目根与语言服务器发现 → stdio JSON-RPC 客户端 → `lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile` 三个 capability。这份文档回答两个问题：
 
-- 这条链路的哪些行为已被自动化测试固定下来，最近一次执行结果是什么；
+- 这条链路的哪些行为已被自动化测试固定下来；
 - 上游 [pi-base](https://github.com/fengwk/pi-base) 的 LSP 测试逐项落在本仓的哪个用例，哪些行为被有意改成不同语义。
 
 行为本身的定义见 [Harness Daemon](../modules/harness-daemon.md)；安装与 CLI 取值见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
-## 运行入口与最近结果
+## 运行入口与报告位置
 
 全部 LSP 用例都是快速测试：使用自带的假 stdio 语言服务器（真实子进程、真实分帧、真实 JSON-RPC），不依赖 Docker、真实 jdtls 或网络。
 
@@ -16,31 +16,22 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon -am test
 env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon test -Dtest='Lsp*Test'
 ```
 
-最近一次全模块执行（[`harness/daemon`](../../harness/daemon) 321 个用例，0 失败 0 错误）：
+用例清单、通过与失败以 [`harness/daemon`](../../harness/daemon) 的 `target/surefire-reports` 为准，覆盖率报告在
+`target/site/jacoco`。`harness/daemon` 不绑定 JaCoCo `check`，覆盖率只是参考指标。下表只维护「测试类 → 覆盖的链路环节」，
+不记录用例数与覆盖率数字。
 
-| 测试类 | 用例数 | 覆盖的链路环节 |
-| --- | --- | --- |
-| `LspDiscoveryTest` | 11 | 服务器选择、`--lsp-config` JSON 解析与校验、项目根发现、命令解析、支持状态 |
-| `LspClientTest` | 19 | 初始化、文档同步、位置编码、三种请求、服务端请求、崩溃、超时、关闭与进程树终止 |
-| `LspClientProtocolTest` | 16 | 结果形态（Location、LocationLink、符号）、错误应答、启动失败、诊断尾部、能力判定、位置边界 |
-| `LspServiceTest` | 8 | 客户端复用、并发去重、空闲回收、关闭、`fileChanged`、多项目隔离 |
-| `LspServiceLifecycleTest` | 6 | 启动中关闭、崩溃后重建、非法生命周期取值、服务器缺失、失败共享 |
-| `LspCapabilitiesTest` | 8 | 三个 capability 的参数校验、绝对路径结果、共享客户端、调用方超时与取消、read header 状态 |
-| `LspDaemonWiringTest` | 2 | Daemon CLI 与注册表装配：CLI JSON 配置驱动已注册能力 |
+| 测试类 | 覆盖的链路环节 |
+| --- | --- |
+| `LspDiscoveryTest` | 服务器选择、`--lsp-config` JSON 解析与校验、项目根发现、命令解析、支持状态 |
+| `LspClientTest` | 初始化、文档同步、位置编码、三种请求、服务端请求、崩溃、超时、关闭与进程树终止 |
+| `LspClientProtocolTest` | 结果形态（Location、LocationLink、符号）、错误应答、启动失败、诊断尾部、能力判定、位置边界 |
+| `LspServiceTest` | 客户端复用、并发去重、空闲回收、关闭、`fileChanged`、多项目隔离 |
+| `LspServiceLifecycleTest` | 启动中关闭、崩溃后重建、非法生命周期取值、服务器缺失、失败共享 |
+| `LspCapabilitiesTest` | 三个 capability 的参数校验、绝对路径结果、共享客户端、调用方超时与取消、read header 状态 |
+| `LspDaemonWiringTest` | Daemon CLI 与注册表装配：CLI JSON 配置驱动已注册能力 |
 
-核心 LSP 类的 JaCoCo 覆盖率（`harness/daemon/target/site/jacoco/jacoco.csv`）：
-
-| 类 | 行覆盖 | 分支覆盖 |
-| --- | --- | --- |
-| `LspDiscovery` | 93.4% | 80.0% |
-| `LspClient` | 93.2% | 82.4% |
-| `LspClientPool` | 94.1% | 77.5% |
-| `LspService` | 96.4% | 100.0% |
-| `LspServerConfig` | 97.7% | 68.4% |
-| `LspSupport` | 100.0% | 50.0% |
-| 合计 | 93.9% | 79.4% |
-
-未覆盖的行集中在不可确定复现的竞态：`exit` 通知自身写失败、`ExecutionException` 无 cause、进程管道排空的 IO 异常。
+已知未被固定的是不可确定复现的竞态：`exit` 通知自身写失败、`ExecutionException` 无 cause、进程管道排空的 IO 异常。
+它们不构成门禁差异，因为 `harness/daemon` 没有覆盖率门禁。
 
 ## 上游 pi-base 逐项映射
 
@@ -146,28 +137,13 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon test -Dtest='Lsp*Test'
 
 三个能力与 `fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 的 arguments schema 都把 `workdir` 声明为
 “仅在 `path` 为相对路径时必填”，只有 `process.exec` 在 `required` 中恒要求 `workdir`。是否必填完全由
-schema 的 `required` 决定（`EnvironmentCapabilityCatalog.requiresWorkdir`），没有额外的服务端收口：
-带绝对 `path` 的调用可以省略 `workdir` 直达能力层。
-
-## bridge 时代的用例迁移
-
-旧实现把每次 LSP 查询交给一个外部 bridge 子进程；现在客户端常驻 Daemon、按项目根复用。原 `LspBridge` 相关用例已删除，行为按下表落到新用例：
-
-| 旧用例 | 旧断言的行为 | 现在由谁断言 | 迁移方式 |
-| --- | --- | --- | --- |
-| `lspBridgeRunsInExplicitWorkdir` | 子进程使用调用方 workdir | `LspDaemonWiringTest.cliConfiguredExtensionsDriveTheRegisteredCapabilities`、`LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot` | 反转并强化：服务器进程目录是自动发现的项目根；`workdir` 只用于解析相对路径 |
-| `lspBridgeHonoursTheEffectiveTimeoutInsteadOfAHiddenDefault` | 调用方超时生效 | `LspCapabilitiesTest.timeoutFailsAtTheCallerDeadlineWithoutClosingTheSharedClient`、`LspClientTest.slowRequestIsCancelledAtTheCallerDeadline` | 同一 deadline 语义，并新增「超时不得丢弃共享客户端」 |
-| `lspBridgeCancellationTerminatesTheProcessTree` | 取消终止整棵进程树 | `LspClientTest.slowRequestIsCancelledAtTheCallerDeadline`、`stubbornServerIsForceKilledWithItsDescendants`、`launchFailureReapsTheServersStubbornChildren` | 拆成两件事：取消只结束本次请求；终止整个执行范围移到关闭与启动失败路径，并覆盖忽略 `SIGTERM` 的后代 |
-| `lspBridgeClassTargetResolutionAndJavap` | class 反编译回退到 `javap` | `LspClientTest.javaDecompileUsesJdtClassFileContentsForJdtUris`、`javaDecompileLocalClassUsesExecuteCommand`、`javaDecompileRejectsJdtUriOnNonJdtlsServer`、`LspClientProtocolTest.localClassTargetVariantsAndEmptySource` | `javap` 路径整体删除：不再用字节码冒充源码，`jdt://` 与本地 class 分别覆盖 |
-| `lspBridgeInvocationAndCapabilityExecution` | 三个能力经 bridge 执行 | `LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot`、`workspaceSymbolsAndDecompileShareOneClient`、`LspDaemonWiringTest` | 改为真实 stdio 假服务器加真实 capability 链路 |
-| `lspRelativizesLocalPathsAndFileUrisRelativeToWorkdir` | 结果路径相对化改写 | `LspCapabilitiesTest.gotoDefinitionReturnsAbsoluteLocationsFromDiscoveredRoot`、`LspClientTest.definitionSyncsDocumentAndFormatsLocations` | 反转：结果与源码正文都不得被路径改写 |
-| read 状态的 `lsp: supported` | bridge 存在即可用 | `LspCapabilitiesTest.readReportsConfiguredLspStatus`、`LspDaemonWiringTest.configuredExtensionsAreCaseInsensitiveAndReportNotInstalled` | 改为配置驱动：可用性只看配置命中的服务器是否已安装，扩展名大小写不敏感。展示约定是**只在可用时给出 `lsp:` 行**，未配置或未安装都不输出该行；三态本身（`unsupported` / `supported (<server>)` / `file type supported, but server not installed (<server>)`）保留在 `LspSupport`。当前 `ReadCapability` 只在服务器可用时输出 `lsp: supported (<server>)`，未配置或未安装时整行省略，`readReportsConfiguredLspStatus` 按现状断言 |
+schema 的 `required` 决定，没有额外的服务端校验：带绝对 `path` 的调用可以省略 `workdir` 直达能力层。
 
 ## 有意保留的行为差异
 
 这些差异是当前契约的一部分，测试按现状固定：
 
-- **无 bridge、无 `javap`**：语言服务器必须预先安装在目标主机并由 `--lsp-config` 声明；Daemon 不启动中间桥接进程，也不合成反编译源码。
+- **服务器直连、无 `javap` 回退**：语言服务器必须预先安装在目标主机并由 `--lsp-config` 声明；Daemon 直接以 stdio 连接已安装的服务器，不插入中间进程，也不合成反编译源码。
 - **服务器命令不被改写**：不注入 `-data`，不自动发现 JDK，不自动安装服务器；命令与项目根标记完全由配置决定。
 - **失败即关闭**：初始化失败不重试，终止整棵进程树后把同一个失败交给所有等待者；崩溃的客户端在下一次调用时重建。
 - **取消与关闭分离**：取消只结束当前请求（发送 `$/cancelRequest`），客户端保持可复用；进程树终止只发生在关闭与回收路径。

@@ -232,8 +232,9 @@ docker compose -f deploy/reliability/compose.yaml config --quiet
 ```
 
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
-[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、依赖 health、非 root runtime、PostgreSQL、MinIO
-bucket 与 HTTP mock smoke 组合成一个可清理入口，`--with-app` 再覆盖全局 Blob、Canvas Resource、
+[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
+`minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
+`compose run --rm` 执行初始化。`--with-app` 另外覆盖全局 Blob、Canvas Resource、
 signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
