@@ -725,21 +725,6 @@ def _section(findings, groups):
     }
 
 
-def build_report(coverage, limits, boundaries, worktree, history, binary_objects, truncated):
-    """Assemble the redacted JSON payload (never contains a matched value)."""
-    return {
-        "repository": "kk-studio",
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "coverage": coverage,
-        "limits": limits,
-        "boundaries": list(boundaries),
-        "worktree": _section(worktree[0], worktree[1]),
-        "history": _section(history[0], history[1]),
-        "binary_objects": binary_objects,
-        "binary_objects_truncated": truncated,
-    }
-
-
 def _table(findings):
     """Redacted markdown table over report dicts (rule/object/commit/path/line)."""
     rows = []
@@ -1073,15 +1058,17 @@ def run(
         "max_blob_bytes": max_blob_bytes,
         "binary_string_limit": string_limit,
     }
-    return build_report(
-        coverage,
-        limits,
-        BOUNDARIES,
-        worktree,
-        (history_findings, history_groups.render()),
-        binary_objects[:MAX_BINARY_OBJECTS],
-        len(binary_objects) > MAX_BINARY_OBJECTS,
-    )
+    return {
+        "repository": "kk-studio",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "coverage": coverage,
+        "limits": limits,
+        "boundaries": list(BOUNDARIES),
+        "worktree": _section(worktree[0], worktree[1]),
+        "history": _section(history_findings, history_groups.render()),
+        "binary_objects": binary_objects[:MAX_BINARY_OBJECTS],
+        "binary_objects_truncated": len(binary_objects) > MAX_BINARY_OBJECTS,
+    }
 
 
 def main(argv=None):
