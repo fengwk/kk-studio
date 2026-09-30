@@ -62,13 +62,6 @@ public class StudioProjectController {
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
   }
 
-  public StudioProjectController(
-      ProjectService projectService,
-      ProjectSnapshotAssembler projectSnapshotAssembler,
-      ProjectDtoMapper mapper) {
-    this(projectService, projectSnapshotAssembler, mapper, new ProjectWorkflowJsonCodec());
-  }
-
   @GetMapping
   public Result<List<ProjectDTO>> listProjects(
       @RequestParam(value = "includeArchived", required = false, defaultValue = "false")
