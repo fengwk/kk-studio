@@ -21,9 +21,9 @@ fallback；`postgres` 保存全部 durable 数据；`minio` 提供 S3 兼容对�
 docker compose -f deploy/local/compose.yaml up -d --build --wait
 ```
 
-`--wait` 会等到四个服务 healthcheck 全部 `healthy`：PostgreSQL 用 `pg_isready`，
-MinIO 用 `/minio/health/live`，`minio-init` 用 `mc stat`，`app` 用
-`curl http://127.0.0.1:8080/actuator/health`。构建在容器内执行
+`--wait` 会等到 PostgreSQL 与 MinIO 的 `healthcheck` 变为 `healthy`、一次性的
+`minio-init` 成功退出（`app` 以 `service_completed_successfully` 等待它），以及 `app` 的
+`curl http://127.0.0.1:8080/actuator/health` 通过。构建在容器内执行
 `mvn -Pdistribution -pl web -am -DskipTests clean package`，React 产物嵌入
 `BOOT-INF/classes/static`，因此本机不需要安装 JDK、Maven 或 npm。
 
@@ -77,11 +77,12 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 | `KK_STUDIO_S3_REGION` | `us-east-1` | S3 region |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传给 `SPRING_PROFILES_ACTIVE` |
 
-[compose.yaml](compose.yaml) 还接受进程级的容量与调度参数，本地启动通常不需要覆盖：dispatcher、
-admission 与 subagent 上限的默认值和语义由
+[compose.yaml](compose.yaml) 还接受进程级的容量与调度参数，本地启动通常不需要覆盖：dispatcher
+与 admission 上限的默认值和语义由
 [Platform 配置](../../docs/modules/platform.md#部署级-configurationproperties)持有，
 `KK_STUDIO_ENVIRONMENT_GATEWAY_*` 的 Daemon WebSocket 边界由
-[Web 配置](../../docs/modules/web.md#生命周期与配置)持有。
+[Web 配置](../../docs/modules/web.md#生命周期与配置)持有；subagent 并发上限不经环境变量配置，
+只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有。
 
 把宿主绑定改成 `0.0.0.0` 等非 loopback 地址时，必须同时覆盖上面所有 PostgreSQL 与 MinIO
 凭据，并把 `KK_STUDIO_S3_PUBLIC_HOST` 设为浏览器实际可访问的主机名或 IP：预签名 URL 不会

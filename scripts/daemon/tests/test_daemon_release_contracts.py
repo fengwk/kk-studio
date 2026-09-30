@@ -34,6 +34,11 @@ def repository_root():
 REPOSITORY_ROOT = repository_root()
 RELEASE_SCRIPT = REPOSITORY_ROOT / "scripts" / "daemon" / "prepare-release.sh"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "daemon-release.yml"
+# 第三方 action 固定到各自 major tag 当前解析出的 commit SHA，并保留 `# vN` 说明。
+# SHA 由 `git ls-remote https://github.com/<owner>/<repo> refs/tags/vN` 逐项验证后写入。
+CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
+SETUP_JAVA_SHA = "cf277c60eb25467037889841efdb72551f06f6c3"
+SETUP_NODE_SHA = "49933ea5288caeca8642d1e84afbd3f7d6820020"
 LICENSE_FILE = REPOSITORY_ROOT / "LICENSE"
 THIRD_PARTY_NOTICES = REPOSITORY_ROOT / "harness" / "daemon" / "THIRD_PARTY_NOTICES"
 
@@ -558,7 +563,10 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", self.workflow)
 
     def test_checkout_keeps_full_history_and_toolchain_is_temurin_21_with_maven_cache(self):
-        self.assertRegex(self.workflow, r"uses: actions/checkout@v4\n(\s+with:\n\s+fetch-depth: 0)")
+        self.assertRegex(
+            self.workflow,
+            rf"uses: actions/checkout@{CHECKOUT_SHA} # v4\n(\s+with:\n\s+fetch-depth: 0)",
+        )
         self.assertIn("distribution: temurin", self.workflow)
         self.assertIn("java-version: ${{ env.JAVA_VERSION }}", self.workflow)
         self.assertRegex(self.workflow, r"(?m)^  JAVA_VERSION: '21'$")
@@ -601,14 +609,16 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
             self.assertLess(self.workflow.index(gate), publish_at, gate)
 
     def test_only_official_setup_actions_and_the_workflow_token_are_used(self):
-        used = re.findall(r"(?m)^\s+(?:-\s+)?uses: (\S+)$", self.workflow)
+        # 第三方 action 必须锁定到已验证的完整 commit SHA，并保留 `# vN` 说明；任何可变
+        # tag 或缺失说明都会被这里的精确比对拒绝。
+        used = re.findall(r"(?m)^\s+(?:-\s+)?uses: (\S+)(?:\s+#\s*(\S+))?\s*$", self.workflow)
         self.assertEqual(
             [
-                "actions/checkout@v4",
-                "actions/setup-java@v4",
-                "actions/checkout@v4",
-                "actions/setup-java@v4",
-                "actions/setup-node@v4",
+                (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
+                (f"actions/setup-java@{SETUP_JAVA_SHA}", "v4"),
+                (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
+                (f"actions/setup-java@{SETUP_JAVA_SHA}", "v4"),
+                (f"actions/setup-node@{SETUP_NODE_SHA}", "v4"),
             ],
             used,
         )
