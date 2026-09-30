@@ -50,6 +50,9 @@ class StudioProjectControllerTest {
   private final UUID projectId = UUID.randomUUID();
   private final Instant now = Instant.now();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
+  // 依赖显式提供：ObjectMapperHolder.getInstance() 即生产 ObjectMapper bean 的同一实例。
+  private final ProjectDtoMapper mapper =
+      new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance());
 
   @BeforeEach
   void setUp() {
@@ -57,8 +60,7 @@ class StudioProjectControllerTest {
     snapshotAssembler = mock(ProjectSnapshotAssembler.class);
 
     StudioProjectController controller =
-        new StudioProjectController(
-            projectService, snapshotAssembler, new ProjectDtoMapper(), codec);
+        new StudioProjectController(projectService, snapshotAssembler, mapper, codec);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -298,8 +300,7 @@ class StudioProjectControllerTest {
   void testGetSnapshot() throws Exception {
     ProjectSnapshotDTO snapshot =
         ProjectSnapshotDTO.builder()
-            .project(
-                new ProjectDtoMapper().toDto(Project.builder().id(projectId).version(0L).build()))
+            .project(mapper.toDto(Project.builder().id(projectId).version(0L).build()))
             .issues(List.of())
             .build();
     when(snapshotAssembler.assemble(projectId)).thenReturn(snapshot);

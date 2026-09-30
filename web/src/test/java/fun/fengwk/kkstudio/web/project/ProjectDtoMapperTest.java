@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
@@ -41,8 +42,10 @@ import java.util.UUID;
 /** 验证 ProjectDtoMapper 的严格双向映射与格式校验。 */
 class ProjectDtoMapperTest {
 
-  private final ProjectDtoMapper mapper = new ProjectDtoMapper();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
+  // 依赖显式提供：ObjectMapperHolder.getInstance() 即生产 ObjectMapper bean 的同一实例。
+  private final ProjectDtoMapper mapper =
+      new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance());
 
   @Test
   void testParseUuidValidAndInvalid() {
