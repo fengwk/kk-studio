@@ -2,12 +2,14 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,6 +36,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** dispatcher 只按本地容量 claim，startup/poll 恢复通知丢失，拒绝时 ownership-fenced 归还。 */
 class CanvasFunctionDispatcherTest {
@@ -82,6 +85,47 @@ class CanvasFunctionDispatcherTest {
           verify(worker).run(second);
           return true;
         });
+    dispatcher.stop();
+  }
+
+  /**
+   * worker 抛出的 Error 必须原样传播（不能被 dispatcher 吞掉或转成业务终态），且 dispatch permit 一定归还： maxDispatchTasks=1
+   * 时，只有 permit 归还后 drain 才可能 claim 并派遣下一个 run。
+   */
+  @Test
+  void workerErrorPropagatesAndStillReleasesTheDispatchPermit() throws Exception {
+    CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
+    CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
+    ClaimedRun first = claim("fatal");
+    ClaimedRun second = claim("after-fatal");
+    when(store.claimNext(any(), any(), anyString()))
+        .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
+    OutOfMemoryError fatal = new OutOfMemoryError("simulated fatal error");
+    doThrow(fatal).when(worker).run(first);
+    CountDownLatch secondDispatched = new CountDownLatch(1);
+    doAnswer(
+            ignored -> {
+              secondDispatched.countDown();
+              return null;
+            })
+        .when(worker)
+        .run(second);
+    // 内联执行 worker 任务并把逃逸的 Throwable 记下来：Error 只可能在 executor 边界被观察到。
+    AtomicReference<Throwable> escaped = new AtomicReference<>();
+    Executor workers =
+        task -> {
+          try {
+            task.run();
+          } catch (Throwable thrown) {
+            escaped.set(thrown);
+          }
+        };
+    CanvasFunctionDispatcher dispatcher = dispatcher(store, worker, workers, properties(1_000));
+
+    dispatcher.start();
+    assertTrue(secondDispatched.await(5, TimeUnit.SECONDS));
+    assertSame(fatal, escaped.get());
+    verify(worker).run(first);
     dispatcher.stop();
   }
 

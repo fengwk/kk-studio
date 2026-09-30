@@ -127,7 +127,9 @@ public class CanvasFunctionWorker {
           "Canvas Function worker stopped after CAS cancellation nodeId={} requestId={}",
           claim.nodeId(),
           claim.requestId());
-    } catch (Throwable error) {
+    } catch (Exception error) {
+      // 只把可恢复的 Exception 收敛为有界公开失败；Error（如 OOM）必须原样向调用方传播，
+      // 绝不能伪装成业务 FAILED 掩盖进程级故障。
       log.warn(
           "Canvas Function worker failed nodeId={} requestId={} type={}",
           claim.nodeId(),
