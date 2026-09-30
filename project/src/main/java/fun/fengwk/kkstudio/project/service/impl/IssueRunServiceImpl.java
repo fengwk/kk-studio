@@ -70,7 +70,8 @@ import java.util.UUID;
  * <p>幂等（设计 §4.6）：每个写操作都要求调用方请求键，活动身份为 {@code kind:requestKey}，指纹含动作与规范化请求字段。锁前检查只是快速路径； owner
  * 锁（Project SHARE → Issue UPDATE → Run）之后、版本/状态/额度校验与 Harness 派发之前必须再查一次 receipt。同键同指纹按原活动精确重放并返回当前
  * Run，不新建 Session/Thread/命令、不重新扣额度、不重复推进状态；同键异指纹确定性冲突。无交接的完成使用 CONTROL/COMPLETE_RUN 活动作为同一事务
- * receipt。 行级"已在目标状态"的重试（WAITING/RUNNING）是无写操作的空重放。
+ * receipt。 行级"已在目标状态"的重试（WAITING/RUNNING）是无写操作的空重放。重放返回的事实必须是已提交的行：锁前重放在观察到 receipt 之后重新读取权威 Run（见
+ * {@link #currentRun(UUID)}），锁内重放使用 owner 锁读到的行；两者都不复用本事务早先的一级缓存快照。
  *
  * <p>收尾额外复验 Run 身份/版本/合法边/门禁与历史区间：区间按 Entry 父链解释（设计 §4.5），仅靠外键只能保证 Entry 属于同一 Session，不能保证 {@code
  * (start,end]} 落在该 Thread 的历史路径上。
@@ -373,7 +374,7 @@ public class IssueRunServiceImpl implements IssueRunService {
                 endEntryId,
                 finalAnswerEntryId);
     if (replayed(runId, identity)) {
-      return requireRun(runId);
+      return currentRun(runId);
     }
     RunLock locked = lockRun(runId);
     if (replayedUnderLock(locked, identity)) {
@@ -429,7 +430,7 @@ public class IssueRunServiceImpl implements IssueRunService {
             endEntryId,
             PauseReason.USER.name());
     if (replayed(runId, identity)) {
-      return requireRun(runId);
+      return currentRun(runId);
     }
     RunLock locked = lockRun(runId);
     if (replayedUnderLock(locked, identity)) {
@@ -459,7 +460,7 @@ public class IssueRunServiceImpl implements IssueRunService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "FAIL_RUN", key, runId, endEntryId, validError);
     if (replayed(runId, identity)) {
-      return requireRun(runId);
+      return currentRun(runId);
     }
     RunLock locked = lockRun(runId);
     if (replayedUnderLock(locked, identity)) {
@@ -489,7 +490,7 @@ public class IssueRunServiceImpl implements IssueRunService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "MARK_UNKNOWN", key, runId, endEntryId, validError);
     if (replayed(runId, identity)) {
-      return requireRun(runId);
+      return currentRun(runId);
     }
     RunLock locked = lockRun(runId);
     if (replayedUnderLock(locked, identity)) {
@@ -634,6 +635,19 @@ public class IssueRunServiceImpl implements IssueRunService {
       throw new ProjectNotFoundException("issue_run");
     }
     return new RunLock(run, issue, issue.getVersion(), project);
+  }
+
+  /**
+   * 锁前重放返回的权威当前 Run：在观察到 receipt 之后重新读取已提交的行，绕过事务内 MyBatis 一级缓存。
+   *
+   * <p>本事务早先读到的旧 Run 只是历史快照，不得作为重放结果返回：并发首次收尾完全可能落在那次读取与本事务的 receipt 检查之间。
+   */
+  private IssueRun currentRun(UUID runId) {
+    IssueRun run = issueRunRepository.getByIdAuthoritative(runId);
+    if (run == null) {
+      throw new ProjectNotFoundException("issue_run");
+    }
+    return run;
   }
 
   private IssueRun requireRun(UUID runId) {

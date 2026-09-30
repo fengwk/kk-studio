@@ -1,10 +1,13 @@
 package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -23,12 +26,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 原子 Run 接受与收尾：同事务提交 Harness 事实与业务行，任一步失败整体回滚；请求键幂等以原 RUN 活动精确重放。
@@ -422,6 +427,78 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
     assertEquals(1L, count("select count(*) from harness_thread_command"));
+  }
+
+  /**
+   * 同键收尾重放必须在观察到 receipt 之后返回权威当前 Run：并发首次收尾落在「锁前已读到旧 Run」与「锁前 receipt 检查」之间时， 重放绝不能把本事务早先读到的旧
+   * Run（仍是 RUNNING、版本滞后）当作当前事实返回。
+   *
+   * <p>本用例用 spy 把第二个请求精确停在锁前 receipt 检查上，等第一个请求完整提交后再放行，因此是确定性复现，而不是概率竞争。
+   */
+  @Test
+  void concurrentSameCompleteKeyReplaysCommittedRunWhenReceiptArrivesAfterFirstRead()
+      throws Exception {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("并发收尾重放", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID endEntryId = appendHistoryEntry(run.getThreadId());
+    String completeKey = key("complete");
+    ThreadLocal<Boolean> gated = new ThreadLocal<>();
+    CountDownLatch awaitingReceipt = new CountDownLatch(1);
+    CountDownLatch firstCommitted = new CountDownLatch(1);
+    doAnswer(
+            invocation -> {
+              if (Boolean.TRUE.equals(gated.get())) {
+                awaitingReceipt.countDown();
+                assertTrue(firstCommitted.await(10, TimeUnit.SECONDS));
+              }
+              return invocation.callRealMethod();
+            })
+        .when(issueActivityRepository)
+        .findByIdempotencyKey(any(), any());
+    AtomicReference<IssueRun> replayed = new AtomicReference<>();
+    AtomicReference<Throwable> replayedError = new AtomicReference<>();
+    Thread replayer =
+        new Thread(
+            () -> {
+              gated.set(true);
+              try {
+                replayed.set(
+                    issueRunService.completeRun(
+                        run.getId(), run.getVersion(), completeKey, endEntryId, null, null));
+              } catch (Throwable error) {
+                replayedError.set(error);
+              }
+            });
+    IssueRun first;
+    replayer.start();
+    try {
+      assertTrue(awaitingReceipt.await(10, TimeUnit.SECONDS), "第二个请求应停在锁前 receipt 检查");
+      // 第一个请求在读走旧快照之后完整收尾：Run 行与 receipt 一起提交。
+      first =
+          issueRunService.completeRun(
+              run.getId(), run.getVersion(), completeKey, endEntryId, null, null);
+      assertEquals(IssueRunStatus.COMPLETED, first.getStatus());
+      firstCommitted.countDown();
+      replayer.join(15_000);
+    } finally {
+      firstCommitted.countDown();
+      replayer.join(15_000);
+      gated.remove();
+    }
+    assertFalse(replayer.isAlive(), "重放请求不应悬挂");
+    assertNull(replayedError.get());
+    assertEquals(first.getId(), replayed.get().getId());
+    assertEquals(IssueRunStatus.COMPLETED, replayed.get().getStatus(), "重放必须返回已提交的权威事实");
+    assertEquals(endEntryId, replayed.get().getEndEntryId());
+    assertEquals(first.getVersion(), replayed.get().getVersion());
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where idempotency_key = ?",
+            "control:" + completeKey));
   }
 
   /** 同键但收尾区间不同是稳定冲突：不完成 Run，也不留下半截活动。 */

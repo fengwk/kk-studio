@@ -34,6 +34,11 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
   }
 
   @Override
+  public IssueRun getByIdAuthoritative(UUID id) {
+    return toModel(mapper.getByIdAuthoritative(id));
+  }
+
+  @Override
   public IssueRun lockById(UUID id) {
     return toModel(mapper.lockById(id));
   }

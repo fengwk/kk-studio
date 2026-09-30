@@ -60,6 +60,9 @@ import java.util.UUID;
  * SHARE → Issue UPDATE）之后、版本与状态校验之前必须再查一次 receipt。同键同指纹是丢响应后的精确重试， 返回当前 Issue
  * 或当前额度而不重复应用；同键异指纹确定性冲突。因此并发重复请求不会在版本校验处误报冲突，也不会重复改变状态、门禁或额度。阶段额度直接复用领域 {@link IssueStageBudget}
  * 的授权/重置语义，不在 platform 复制一份额度规则。
+ *
+ * <p>重放返回的事实必须是已提交的行：锁前重放在观察到 receipt 之后重新读取权威 Issue（见 {@link #currentIssue(UUID)}），锁内重放使用 owner
+ * 锁读到的行；两者都不复用本事务早先的一级缓存快照。
  */
 @Service
 @AllArgsConstructor
@@ -206,7 +209,7 @@ public class IssueServiceImpl implements IssueService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.COMMENT, "COMMENT", key, validBody);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -240,7 +243,7 @@ public class IssueServiceImpl implements IssueService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.INSTRUCTION, "INSTRUCTION", key, validBody);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -304,7 +307,7 @@ public class IssueServiceImpl implements IssueService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "BLOCK", key, validReason);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -340,7 +343,7 @@ public class IssueServiceImpl implements IssueService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RECOVER", key);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -386,7 +389,7 @@ public class IssueServiceImpl implements IssueService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "PAUSE", key, reason.name(), validDetail);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -410,7 +413,7 @@ public class IssueServiceImpl implements IssueService {
     String key = requireRequestKey(requestKey);
     Identity identity = IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESUME", key);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -448,7 +451,7 @@ public class IssueServiceImpl implements IssueService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "STOP", key, validDetail);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -498,7 +501,7 @@ public class IssueServiceImpl implements IssueService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "RESOLVE_UNKNOWN", key, validVerification);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -558,7 +561,7 @@ public class IssueServiceImpl implements IssueService {
         IssueActivityIdempotency.identity(
             IssueActivityKind.STATE_CHANGE, "TRANSITION", key, toState);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -600,7 +603,7 @@ public class IssueServiceImpl implements IssueService {
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.STATE_CHANGE, "REOPEN", key);
     if (replayed(issueId, identity)) {
-      return getIssue(issueId);
+      return currentIssue(issueId);
     }
     Locked locked = lockOwner(issueId);
     if (replayedUnderLock(issueId, identity)) {
@@ -805,6 +808,19 @@ public class IssueServiceImpl implements IssueService {
   private boolean replayedUnderLock(UUID issueId, Identity identity) {
     return IssueActivityIdempotency.findAppliedUnderLock(issueActivityRepository, issueId, identity)
         != null;
+  }
+
+  /**
+   * 锁前重放返回的权威当前事实：在观察到 receipt 之后重新读取已提交的行，绕过事务内 MyBatis 一级缓存。
+   *
+   * <p>本事务早先读到的旧 Issue 只是历史快照，不得作为重放结果返回：并发首次提交完全可能落在那次读取与本事务的 receipt 检查之间。
+   */
+  private Issue currentIssue(UUID issueId) {
+    Issue issue = issueRepository.getByIdAuthoritative(issueId);
+    if (issue == null) {
+      throw new ProjectNotFoundException("issue");
+    }
+    return issue;
   }
 
   private void appendStateChange(
