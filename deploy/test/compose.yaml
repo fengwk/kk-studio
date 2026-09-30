@@ -41,6 +41,9 @@ services:
     networks:
       - canvas-test
 
+  # One-shot bucket bootstrap: create the private bucket, then exit 0. Consumers
+  # gate on `service_completed_successfully`; without that condition `up --wait`
+  # would reject the container the moment it exits.
   minio-init:
     image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     restart: "no"
@@ -58,12 +61,6 @@ services:
         mc mb --ignore-existing "local/$${MINIO_BUCKET}"
         mc anonymous set none "local/$${MINIO_BUCKET}"
         mc stat "local/$${MINIO_BUCKET}"
-        exec tail -f /dev/null
-    healthcheck:
-      test: ["CMD-SHELL", "mc stat \"local/$${MINIO_BUCKET}\" >/dev/null"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
     networks:
       - canvas-test
 
@@ -136,7 +133,7 @@ services:
       minio:
         condition: service_healthy
       minio-init:
-        condition: service_healthy
+        condition: service_completed_successfully
       http-mock:
         condition: service_healthy
     networks:

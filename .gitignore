@@ -24,6 +24,7 @@ test-results/
 # Local runtime, reports, and workspaces
 /runtime/
 reports/
+/extracted/
 .workspace/
 /.kkstudio/
 
