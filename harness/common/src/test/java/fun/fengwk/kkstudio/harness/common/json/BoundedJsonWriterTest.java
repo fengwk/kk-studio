@@ -43,6 +43,20 @@ class BoundedJsonWriterTest {
     assertNull(BoundedJsonWriter.write(node, exactBytes - 1));
   }
 
+  /** emoji（代理对，4 字节 UTF-8）同样按字节边界判定，write 与 fits 在临界点一致。 */
+  @Test
+  void countsEmojiBytesAtExactBoundary() {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    node.put("emoji", "😀🚀");
+    String written = BoundedJsonWriter.write(node, Integer.MAX_VALUE);
+    int exactBytes = written.getBytes(StandardCharsets.UTF_8).length;
+
+    assertEquals(written, BoundedJsonWriter.write(node, exactBytes));
+    assertNull(BoundedJsonWriter.write(node, exactBytes - 1));
+    assertTrue(BoundedJsonWriter.fits(node, exactBytes));
+    assertFalse(BoundedJsonWriter.fits(node, exactBytes - 1));
+  }
+
   /** 无保留判定与 write 使用完全相同的 UTF-8 边界，但不需要物化最终字符串。 */
   @Test
   void fitsUsesTheSameUtf8BoundaryWithoutRetainingOutput() {
