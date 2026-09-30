@@ -376,21 +376,52 @@ describe('studio codec', () => {
       expect(decoded.unavailableReason).toBeNull()
     })
 
-    it('accepts canonical function definition with omitted optional fields using contract defaults', () => {
-      const minimal = {
-        name: 'minimal-fn',
-        description: null,
-        outputs: [],
-        unavailableReason: 'maintenance',
+    it('accepts real NON_NULL wire that omits nullable function fields entirely', () => {
+      // 测试意图：全局 NON_NULL 会省略 nullable 键（未命名输出槽位的 name、null 的
+      // description/maxReferences/referencePolicy），只有 @JsonInclude(ALWAYS) 的
+      // unavailableReason 显式输出 null；误按 required-nullable 解析会让整份目录解码失败。
+      const canonical = {
+        name: 'fake-image',
+        argsSchema: { type: 'object', properties: {} },
+        outputs: [{ kind: 'IMAGE' }],
+        referencePolicy: { allowedKinds: ['IMAGE'], maxByKind: {} },
+        available: true,
+        unavailableReason: null,
       }
-      const decoded = decodeCanvasFunctionDefinition(minimal)
-      expect(decoded.name).toBe('minimal-fn')
+      const decoded = decodeCanvasFunctionDefinition(canonical)
       expect(decoded.description).toBeNull()
-      expect(decoded.argsSchema).toEqual({})
-      expect(decoded.outputs).toEqual([])
-      expect(decoded.referencePolicy).toBeNull()
+      expect(decoded.outputs).toEqual([{ kind: 'IMAGE', name: null }])
+      expect(decoded.referencePolicy).toEqual({
+        allowedKinds: ['IMAGE'],
+        maxReferences: null,
+        maxByKind: {},
+      })
       expect(decoded.available).toBe(true)
-      expect(decoded.unavailableReason).toBe('maintenance')
+      expect(decoded.unavailableReason).toBeNull()
+
+      const withoutPolicy = {
+        name: 'image.crop',
+        argsSchema: {},
+        outputs: [{ kind: 'IMAGE', name: 'crop.png' }],
+        available: false,
+        unavailableReason: 'disabled',
+      }
+      const decodedWithoutPolicy = decodeCanvasFunctionDefinition(withoutPolicy)
+      expect(decodedWithoutPolicy.referencePolicy).toBeNull()
+      expect(decodedWithoutPolicy.outputs).toEqual([{ kind: 'IMAGE', name: 'crop.png' }])
+      expect(decodedWithoutPolicy.available).toBe(false)
+    })
+
+    it('fails closed when canonical non-nullable function fields are missing', () => {
+      const base = { name: 'minimal-fn', argsSchema: {}, outputs: [], available: true, unavailableReason: null }
+      expect(() => decodeCanvasFunctionDefinition({ ...base, argsSchema: undefined }))
+        .toThrow('function.argsSchema must be an object')
+      expect(() => decodeCanvasFunctionDefinition({ ...base, available: undefined }))
+        .toThrow('function.available must be a boolean')
+      expect(() => decodeCanvasFunctionDefinition({ ...base, unavailableReason: undefined }))
+        .toThrow('function.unavailableReason must be explicitly null')
+      expect(() => decodeCanvasFunctionDefinition({ ...base, outputs: [{ kind: 'IMAGE' }], referencePolicy: { allowedKinds: [] } }))
+        .toThrow('referencePolicy.maxByKind must be an object')
     })
 
     it('strictly rejects legacy document payload without revision (only version)', () => {
@@ -417,7 +448,9 @@ describe('studio codec', () => {
       const legacyFn = {
         name: 'legacy-fn',
         description: null,
+        argsSchema: {},
         outputKind: 'IMAGE',
+        available: true,
         unavailableReason: null,
       }
       expect(() => decodeCanvasFunctionDefinition(legacyFn)).toThrow('function.outputs must be an array')
