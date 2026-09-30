@@ -114,5 +114,6 @@ env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon -am validate   # Checkstyle +
 
 JaCoCo 报告由 `test` 阶段生成到 `harness/daemon/target/site/jacoco/index.html`，核心检索路径
 （`GrepCapability`、`FindCapability`、`SearchFiles`、`SearchControl`、`GitIgnoreRules`、`GlobPattern`、
-`TextStreams`）以行覆盖率 90% 为下限，分支覆盖率作为参考。检索行为属于本机平台能力：需要在真实文件系统
+`TextStreams`）以行覆盖率 90% 为目标（仓库对核心路径的约定），分支覆盖率作为参考；daemon 模块没有
+绑定 `jacoco:check`，这里的数字是基线而不是构建门禁。检索行为属于本机平台能力：需要在真实文件系统
 权限、符号链接与稀疏文件上执行，因此没有独立于 JVM 的等价验证入口。

@@ -301,8 +301,8 @@ flowchart LR
 | Canvas | [Canvas Core](modules/canvas-core.md)、[Canvas Infra](modules/canvas-infra.md) | 纯领域命令、Graph 版本、持久化与 Function runtime |
 | 数据库 | [Schema](modules/schema.md) | 唯一 Flyway baseline、约束与 profile seed |
 
-根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`harness`、`platform`、
-`plugins` 和 `web`；`canvas`、`harness` 与 `plugins` 再聚合各自子模块。`frontend`
+根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`project`、`harness`、
+`platform`、`plugins` 和 `web`；`canvas`、`harness` 与 `plugins` 再聚合各自子模块。`frontend`
 是独立的 Node/Vite 工程。核心依赖方向可以简化为：
 
 ```text
@@ -464,7 +464,7 @@ Environment 把主机能力接入 Agent，但不同数据采用不同路径：
 | 路径 | 承载内容 | 恢复与容量语义 |
 | --- | --- | --- |
 | WebSocket 控制面 | `INVOKE`、`CANCEL`、heartbeat、上传票据和有界 progress | 强制 `permessage-deflate`；invocation journal 处理同实例重连 |
-| Daemon 本地文本 | `process.exec` 的 stdout/stderr 与大文本结果 | 完整文本写入 `~/.kk-studio/resources/text/`，UI 只接收有界 tail；模型通过 `fs.read` / `fs.grep` 分页读取 |
+| Daemon 本地文本 | `process.exec` 的 stdout/stderr 与大文本结果 | 完整文本写入 `~/.kk-studio/resources/text/`，UI 只接收有界 tail；模型通过 `read` / `grep` 分页读取 |
 | Daemon Skill 包 | 人工确认 commit 的 `SKILL.md`、references、scripts 与 assets | READY 与 Package 发布后异步同步；本地 commit 落后时 Prompt 自动使用 Platform URI |
 | Blob 数据面 | 用户附件和 Tool 产生的图片、音频、视频等二进制 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3，二进制不经过 WebSocket |
 
