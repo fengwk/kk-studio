@@ -39,7 +39,7 @@ export function buildContextMenuTarget(
       kind: 'resource',
       node,
       model: node.function
-        ? models.find((def) => def.name === (node.function?.name ?? node.function?.modelKey)) ?? null
+        ? models.find((def) => def.name === node.function?.name) ?? null
         : null,
     }
   }

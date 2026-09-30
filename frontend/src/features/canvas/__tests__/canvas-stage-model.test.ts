@@ -86,7 +86,7 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
     },
     resourceNodes: [resourceNode()],
     groups: [group()],
-    links: [],
+    references: [],
     ...overrides,
   }
 }
@@ -96,7 +96,7 @@ describe('buildContextMenuTarget', () => {
     const target = buildContextMenuTarget(snapshot({
       resourceNodes: [resourceNode({
         id: FUNCTION_NODE_ID,
-        function: { modelKey: 'fake-image', configJson: '{}' },
+        function: { name: 'fake-image', args: {} },
       })],
     }), [FUNCTION_NODE_ID], [model])
 
@@ -111,7 +111,7 @@ describe('buildContextMenuTarget', () => {
     const target = buildContextMenuTarget(snapshot({
       resourceNodes: [resourceNode({
         id: FUNCTION_NODE_ID,
-        function: { modelKey: 'missing-model', configJson: '{}' },
+        function: { name: 'missing-model', args: {} },
       })],
     }), [FUNCTION_NODE_ID], [])
 
@@ -175,7 +175,7 @@ describe('isValidResourceConnection', () => {
         resourceNode({
           id: FUNCTION_NODE_ID,
           resources: [],
-          function: { modelKey: 'fake-image', configJson: '{}' },
+          function: { name: 'fake-image', args: {} },
         }),
       ],
     })
@@ -190,7 +190,7 @@ describe('isValidResourceConnection', () => {
         resourceNode({
           id: FUNCTION_NODE_ID,
           resources: [],
-          function: { modelKey: 'fake-image', configJson: '{}' },
+          function: { name: 'fake-image', args: {} },
         }),
       ],
     })

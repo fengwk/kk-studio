@@ -76,7 +76,7 @@ function node(
       durationMs: null,
       createdAt: '2026-08-10T00:00:00Z',
     })),
-    function: functionNode ? { modelKey: 'fake-image', configJson: '{}' } : null,
+    function: functionNode ? { name: 'fake-image', args: {} } : null,
     run: null,
   }
 }
@@ -98,11 +98,11 @@ function snapshot(): CanvasSnapshot {
       node('9', 'target', [], true),
     ],
     groups: [],
-    links: [
-      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9' },
-      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9' },
-      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9' },
-      { canvasId: CANVAS_ID, sourceNodeId: '5', targetNodeId: '9' },
+    references: [
+      { canvasId: CANVAS_ID, sourceNodeId: '2', targetNodeId: '9', index: 0 },
+      { canvasId: CANVAS_ID, sourceNodeId: '3', targetNodeId: '9', index: 0 },
+      { canvasId: CANVAS_ID, sourceNodeId: '4', targetNodeId: '9', index: 0 },
+      { canvasId: CANVAS_ID, sourceNodeId: '5', targetNodeId: '9', index: 0 },
     ],
   }
 }
@@ -124,43 +124,43 @@ describe('Canvas structured generation config', () => {
         },
       },
     }).parameters).toEqual({ ratio: 'AUTO' })
-    expect(parseFunctionConfig('{bad', imageModel).parameters).toEqual({
+    expect(parseFunctionConfig({ invalid: 'bad' }, imageModel).parameters).toEqual({
       ratio: 'AUTO',
       count: 1,
     })
-    expect(parseFunctionConfig(JSON.stringify({
+    expect(parseFunctionConfig({
       prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
       parameters: { ratio: '16:9' },
-    }), imageModel)).toEqual({
+    }, imageModel)).toEqual({
       prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
       parameters: { ratio: '16:9', count: 1 },
     })
-    expect(parseFunctionConfig(JSON.stringify({
+    expect(parseFunctionConfig({
       prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
       parameters: {
         ratio: 'unsupported',
         count: 9,
         unknown: 'must be removed',
       },
-    }), imageModel).parameters).toEqual({
+    }, imageModel).parameters).toEqual({
       ratio: 'AUTO',
       count: 1,
     })
-    expect(parseFunctionConfig(JSON.stringify({
+    expect(parseFunctionConfig({
       prompt: { segments: [{ type: 'TEXT', text: 'valid' }] },
       parameters: { ratio: 1, count: 2.5 },
-    }), imageModel).parameters).toEqual({
+    }, imageModel).parameters).toEqual({
       ratio: 'AUTO',
       count: 1,
     })
-    expect(parseFunctionConfig('null', imageModel)).toEqual(createDefaultFunctionConfig(imageModel))
-    expect(parseFunctionConfig('{"prompt":[],"parameters":{}}', imageModel)).toEqual(
+    expect(parseFunctionConfig(null, imageModel)).toEqual(createDefaultFunctionConfig(imageModel))
+    expect(parseFunctionConfig({ prompt: [], parameters: {} } as unknown as Record<string, unknown>, imageModel)).toEqual(
       createDefaultFunctionConfig(imageModel),
     )
-    expect(parseFunctionConfig(JSON.stringify({
+    expect(parseFunctionConfig({
       prompt: { segments: [null] },
       parameters: {},
-    }), imageModel)).toEqual(createDefaultFunctionConfig(imageModel))
+    } as unknown as Record<string, unknown>, imageModel)).toEqual(createDefaultFunctionConfig(imageModel))
   })
 
   it('filters incoming Link candidates by model kind and derives stable aliases', () => {

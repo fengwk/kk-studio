@@ -44,13 +44,13 @@ function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
       groupId: null,
       resources: [],
       function: {
-        modelKey: 'fake-image',
-        configJson: '{}',
+        name: 'fake-image',
+        args: {},
       },
       run,
     }],
     groups: [],
-    links: [],
+    references: [],
   }
 }
 

@@ -1,5 +1,4 @@
 import type {
-  CanvasFunctionConfigDTO,
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
   UUIDString,
@@ -51,10 +50,21 @@ export interface CanvasNodeCallbacks {
   editTextNode: (node: ResourceNode) => void
 }
 
+export type PromptSegment =
+  | { type: 'TEXT'; text: string }
+  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
+
+export interface CanvasFunctionConfig {
+  prompt: {
+    segments: PromptSegment[]
+  }
+  parameters: Record<string, string | number>
+}
+
 export interface PendingFunctionConfig {
   nodeId: UUIDString
-  modelKey: string
-  config: CanvasFunctionConfigDTO
+  functionName: string
+  config: CanvasFunctionConfig
 }
 
 export interface ResourceFlowNodeData extends Record<string, unknown> {
