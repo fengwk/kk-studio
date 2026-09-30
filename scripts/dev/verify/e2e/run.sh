@@ -239,6 +239,9 @@ if [ "$WITH_UI" = "true" ]; then
   if [ "$WITH_TOOLS" = "true" ]; then
     UI_ARGS+=(--with-tools --daemon-env "$DAEMON_ENV_NAME")
   fi
+  if [ "$WITH_CANVAS_FUNCTION" = "true" ]; then
+    UI_ARGS+=(--with-canvas-function)
+  fi
   node "$SCRIPT_DIR/ui-smoke.mjs" "${UI_ARGS[@]}"
   UI_RC=$?
   set -e
