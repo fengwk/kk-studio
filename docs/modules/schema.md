@@ -13,8 +13,8 @@ schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 
 `V1__schema.sql` 是唯一的 versioned migration；`db/seed/**` 下只有三份受控 repeatable migration。Web 以 runtime scope 依赖 `kk-studio-schema`，Platform、Harness Infra 与 Canvas Infra 只在 test scope 使用它；schema 不反向依赖任何模块。Flyway 的装配位置：
 [`application-prod.yml`](../../web/src/main/resources/application-prod.yml) 只加载
-`classpath:db/migration`，dev/e2e/canvas-test profile 在此基础上追加各自的 seed
-（见 [Web](web.md) 的配置表）。
+`classpath:db/migration`，dev 与 e2e 各追加一个 seed 目录，canvas-test 同时追加 dev 与 canvas-test 两个
+seed 目录（见 [Web](web.md) 的配置表）。
 
 ## 一张图看表之间怎么连
 
@@ -68,7 +68,7 @@ erDiagram
 | Chat | `chat`、`chat_session` |
 | Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
 | Project / Issue | `project`、`project_issue`、`project_issue_agent_thread`、`project_issue_stage_budget`、`project_issue_run`、`project_issue_activity`、`project_issue_work`、`project_issue_evidence` |
-| Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work`、`harness_subagent_task` |
+| Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work`（执行协议七表）与 `harness_thread_join`（异步委派） |
 | Global Storage | `storage_blob`、`storage_upload`、`storage_object_cleanup`、`session_blob_ref` |
 | Settings | 单行 `system_setting(id = 1)` |
 
@@ -84,7 +84,7 @@ erDiagram
 package_name          PK，不可变
 description           nullable text
 repository_url        text，不可变且禁止内嵌 userinfo
-branch                text，只用于检查候选更新
+branch                varchar(255)，非空白无环绕空白无控制字符，只用于检查候选更新
 current_commit        当前人工确认的 40/64 位小写 Git object id
 observed_head_commit  最近检查到的 branch HEAD，可空
 head_checked_at       最近检查时间，可空
@@ -192,14 +192,14 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 | e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、default-assistant；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
 | canvas-test | [`R__canvas_test_seed.sql`](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) | 只覆盖 Docker Canvas test stack 需要缩短或启用的设置：上传有效期（900s）、OpenCLI Hub、GPT Image 2、Seedance |
 
-三份都是 `R__` repeatable migration，可重复执行：seed 拥有的行按定义同步（`on conflict ... do update` 或先删后插），用户可能改过的行用 `do nothing` 保护。e2e seed **不含**任何真实凭据，密钥在运行时由环境注入；Provider 只有一个 `'stub'` 之类完全公开的占位值。`V1__schema.sql` 自身插入一行安全的 `system_setting` 默认聚合（`tool.permission` 默认只对 `write`/`edit`/`bash` 要求审批，`read` 不受限），[`E2eToolPermissionProfileTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/E2eToolPermissionProfileTest.java) 断言源码内默认值与代码中的 `SystemSettings` 默认完全一致。
+三份都是 `R__` repeatable migration，可重复执行：seed 拥有的行按定义同步并显式处理冲突（先删后插；e2e 对 `environment` 用 `on conflict (id) do update`），因此重复执行结果确定。e2e seed **不含**任何真实凭据，密钥在运行时由环境注入；Provider 只有一个 `'stub'` 之类完全公开的占位值。`V1__schema.sql` 自身插入一行安全的 `system_setting` 默认聚合（`tool.permission` 默认只对 `write`/`edit`/`bash` 要求审批，`read` 不受限），[`E2eToolPermissionProfileTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/E2eToolPermissionProfileTest.java) 断言源码内默认值与代码中的 `SystemSettings` 默认完全一致。
 
 ## 修改 V1 的代价
 
 `V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库可能有多个客户端，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。`dev` 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 `main` 集成。
-- 重建只能在 Human 明确批准的维护窗口内执行。维护脚本不管理任何服务生命周期：reset 在存在其他数据库会话时只读拒绝，import 用事务锁、空表复查和指纹校验防止并发提交。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable Agent catalog 搬回去」：只有 `agent_provider`、`agent_model` 和 `agent_definition` 三张表会迁移回灌；`environment`、`skill_package` 与 `plugin_credential` 不再由维护脚本迁移（`environment` 行连同注册令牌一起丢失，因此已有 Daemon token 文件无法再认证：必须重新创建 Environment Card 并把新令牌写回各主机，Daemon 才能重连并重建 `environment_connection` 运行投影；`skill_package` 与 `plugin_credential` 在重建后需重新创建）；Platform MCP 配置（`mcp_server`/`mcp_tool`）在重建后按需重新创建或发现；`system_setting` 取 V1 默认聚合；全部运行时数据（会话/Harness/Canvas/Project/Issue/Storage）都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 重建只能在 Human 明确批准的维护窗口内执行。维护脚本不管理任何服务生命周期：reset 在存在其他数据库会话时只读拒绝，import 用事务锁、空表复查和指纹校验防止并发提交。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable Agent catalog 搬回去」：只有 `agent_provider`、`agent_model` 和 `agent_definition` 三张表会迁移回灌；`environment`、`skill_package` 与 `plugin_credential` 不在迁移域内（`environment` 行连同注册令牌一起丢失，因此已有 Daemon token 文件无法再认证：必须重新创建 Environment Card 并把新令牌写回各主机，Daemon 才能重连并重建 `environment_connection` 运行投影；`skill_package` 与 `plugin_credential` 在重建后需重新创建）；Platform MCP 配置（`mcp_server`/`mcp_tool`）在重建后按需重新创建或发现；`system_setting` 取 V1 默认聚合；全部运行时数据（会话/Harness/Canvas/Project/Issue/Storage）都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 导出与回灌只承认和当前 V1 完全一致的三张 catalog 表列集合。额外列、缺失列和任何旧结构都在写产物或回灌前直接失败；常驻维护入口不判别旧 baseline，不投影旧 `environment_id` / `toolIds`，也不读取 `mcp_tool` 等非迁移域来补齐数据。历史迁移实现由 Git 保存，不作为当前数据库维护契约。
 - 导出的 catalog 包与全库冻结快照/备份含 Provider credential 等敏感数据，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储；维护完成且验证通过后，按部署侧备份策略安全清理或留存。
 
@@ -216,8 +216,8 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 测试入口：
 
 - [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 39 张业务及基础设施表、快照一致性、旧对象清除与 SQL 探针。
-- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 表集合精确相等、Harness 执行协议八表（含 `harness_thread_join`）限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
-- [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat、Environment 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
+- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 表集合精确相等、Harness 执行协议七表与 `harness_` 前缀允许集（含 `harness_thread_join`）限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
+- [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
 - [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联、对象清理记录的主键与非空约束。
 - [`PostgresqlSchemaSeedTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaSeedTest.java)：三份 seed 的幂等性、V1 默认 settings 解码、e2e seed 无凭据。
 - [`ProjectWorkflowServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectWorkflowServiceIntegrationTest.java)、[`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueRunAcceptanceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueRunAcceptanceIntegrationTest.java)、[`IssueStageBudgetIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueStageBudgetIntegrationTest.java)、[`IssueWorkStoreIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueWorkStoreIntegrationTest.java)：Project/Issue 工作流、生命周期、Run 接受、阶段预算与 Work 调度。
