@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.tool.codec;
 
+import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.common.json.BoundedOutputStream;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
@@ -18,9 +20,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -35,6 +35,17 @@ public final class ToolResultJsonCodec {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
+
+  /**
+   * 计数用字节生成器工厂：打开 {@link JsonGenerator.Feature#COMBINE_UNICODE_SURROGATES_IN_UTF8}，让补充平面字符（emoji）与
+   * {@link #encode} 的 {@code writeValueAsString} 一样按 4 字节 UTF-8 原样输出，保证字节计数精确、不因 Jackson 默认的
+   * unicode 转义而多算。
+   */
+  private static final JsonFactory COUNTING_FACTORY =
+      OBJECT_MAPPER
+          .getFactory()
+          .copy()
+          .enable(JsonGenerator.Feature.COMBINE_UNICODE_SURROGATES_IN_UTF8);
 
   private ToolResultJsonCodec() {}
 
@@ -74,10 +85,10 @@ public final class ToolResultJsonCodec {
     if (maxBytes <= 0) {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
-    BoundedUtf8OutputStream out = new BoundedUtf8OutputStream(maxBytes);
-    try (JsonGenerator generator = OBJECT_MAPPER.getFactory().createGenerator(out)) {
+    BoundedOutputStream out = new BoundedOutputStream(maxBytes);
+    try (JsonGenerator generator = COUNTING_FACTORY.createGenerator(out)) {
       writeResult(generator, result);
-    } catch (Utf8LimitExceededException error) {
+    } catch (BoundedOutputStream.LimitExceededException error) {
       return true;
     } catch (IOException exception) {
       throw new IllegalArgumentException("cannot encode tool result", exception);
@@ -386,41 +397,6 @@ public final class ToolResultJsonCodec {
       if (!node.has(name)) {
         throw new IllegalArgumentException("missing tool result field: " + name);
       }
-    }
-  }
-
-  /** 编码超过上限时由 bounded 输出流抛出（IOException 使 Jackson 不做二次包装）。 */
-  private static final class Utf8LimitExceededException extends IOException {
-    private Utf8LimitExceededException() {}
-  }
-
-  /** 有界 UTF-8 输出流：累计超过 maxBytes 即抛出中止异常，不物化完整内容；正常完成时按 UTF-8 还原文本。 */
-  private static final class BoundedUtf8OutputStream extends OutputStream {
-    private final int maxBytes;
-    private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-    private int count;
-
-    private BoundedUtf8OutputStream(int maxBytes) {
-      this.maxBytes = maxBytes;
-    }
-
-    @Override
-    public void write(int b) throws IOException {
-      check(1);
-      bytes.write(b);
-    }
-
-    @Override
-    public void write(byte[] buffer, int offset, int length) throws IOException {
-      check(length);
-      bytes.write(buffer, offset, length);
-    }
-
-    private void check(int length) throws IOException {
-      if (length > maxBytes - count) {
-        throw new Utf8LimitExceededException();
-      }
-      count += length;
     }
   }
 }

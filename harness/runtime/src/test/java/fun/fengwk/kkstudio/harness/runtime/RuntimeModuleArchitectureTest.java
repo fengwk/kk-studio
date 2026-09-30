@@ -122,6 +122,7 @@ class RuntimeModuleArchitectureTest {
     assertDirectProductionDependencies(
         harnessRoot.resolve("contributor-api/pom.xml"),
         Set.of(
+            "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment"));
     assertDirectProductionDependencies(
