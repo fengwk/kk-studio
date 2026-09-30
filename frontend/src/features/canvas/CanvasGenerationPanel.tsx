@@ -23,15 +23,13 @@ import {
   type ReferenceCandidate,
 } from '@/features/canvas/generation'
 import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
-import type { StageMetrics } from '@/features/canvas/types'
+import type { CanvasFunctionConfig, PromptSegment, StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { inspectLocalPendingRun } from '@/features/canvas/function-run'
 import { useI18n } from '@/shared/i18n'
 import type {
-  CanvasFunctionConfigDTO,
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
-  PromptSegmentDTO,
 } from '@/shared/api/contracts/studio'
 import { extractParametersFromDefinition } from '@/features/canvas/generation'
 
@@ -54,12 +52,12 @@ export function CanvasGenerationPanel({
   const { t } = useI18n()
   const { flushFunctionConfig } = runtime
   const sourceModel = modelForNode(runtime.models, node)
-  const [modelKey, setModelKey] = useState(sourceModel?.name ?? node.function?.name ?? node.function?.modelKey ?? '')
+  const [modelKey, setModelKey] = useState(sourceModel?.name ?? node.function?.name ?? '')
   const model = runtime.models.find((item) => item.name === modelKey) ?? sourceModel
   const [expanded, setExpanded] = useState(false)
-  const [config, setConfig] = useState<CanvasFunctionConfigDTO>(() => (
+  const [config, setConfig] = useState<CanvasFunctionConfig>(() => (
     sourceModel && node.function
-      ? parseFunctionConfig(node.function.configJson ?? '', sourceModel)
+      ? parseFunctionConfig(node.function.args, sourceModel)
       : sourceModel
         ? createDefaultFunctionConfig(sourceModel)
         : { prompt: { segments: [{ type: 'TEXT', text: '' }] }, parameters: {} }
@@ -112,7 +110,7 @@ export function CanvasGenerationPanel({
     [candidates],
   )
   const referencedKeys = useMemo(() => new Set(config.prompt.segments
-    .filter((segment): segment is Extract<PromptSegmentDTO, { type: 'REFERENCE' }> => (
+    .filter((segment): segment is Extract<PromptSegment, { type: 'REFERENCE' }> => (
       segment.type === 'REFERENCE'
     ))
     .map((segment) => referenceKey(segment.nodeId, segment.index))), [config.prompt.segments])
@@ -183,11 +181,11 @@ export function CanvasGenerationPanel({
 
   const sourceConfig = useMemo(() => (
     node.function && sourceModel
-      ? parseFunctionConfig(node.function.configJson ?? '', sourceModel)
+      ? parseFunctionConfig(node.function.args, sourceModel)
       : null
   ), [node.function, sourceModel])
   const sourceIdentity = node.function && sourceConfig
-    ? functionSourceIdentity(node.function.modelKey ?? node.function.name, sourceConfig)
+    ? functionSourceIdentity(node.function.name, sourceConfig)
     : ''
   const sourceModelSignature = sourceModel ? JSON.stringify(sourceModel) : ''
   useEffect(() => {
@@ -218,7 +216,7 @@ export function CanvasGenerationPanel({
     } else {
       localSourceVersionsRef.current.clear()
     }
-    setModelKey(node.function.modelKey ?? node.function.name)
+    setModelKey(node.function.name)
     setConfig(sourceConfig)
     cursorRef.current = { segmentIndex: 0, offset: 0 }
     dirtyRef.current = false
@@ -259,7 +257,7 @@ export function CanvasGenerationPanel({
   )
   const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
 
-  function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
+  function updateConfig(next: CanvasFunctionConfig, nextModelKey = modelKey) {
     setConfig(next)
     const version = draftVersionRef.current + 1
     draftVersionRef.current = version
@@ -275,7 +273,7 @@ export function CanvasGenerationPanel({
     runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
   }
 
-  function updatePrompt(segments: PromptSegmentDTO[]) {
+  function updatePrompt(segments: PromptSegment[]) {
     updateConfig({
       ...config,
       prompt: { segments },
@@ -750,10 +748,10 @@ function modelForNode(
   models: CanvasFunctionDefinitionDTO[],
   node: ResourceNode,
 ): CanvasFunctionDefinitionDTO | null {
-  return models.find((model) => model.name === (node.function?.name ?? node.function?.modelKey)) ?? null
+  return models.find((model) => model.name === node.function?.name) ?? null
 }
 
-function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfigDTO): string {
+function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfig): string {
   return `${modelKey}\u0000${JSON.stringify({
     prompt: config.prompt,
     parameters: Object.fromEntries(Object.entries(config.parameters).sort(([left], [right]) => (

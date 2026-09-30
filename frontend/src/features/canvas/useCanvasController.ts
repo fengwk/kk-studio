@@ -690,7 +690,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     useFunctionConfigSync({
       executeCommands,
       getSnapshot: () => queueRef.current?.currentSnapshot() ?? snapshotQuery.data,
-      onImmediateDraft: (nodeId, modelKey, config) => {
+      onImmediateDraft: (nodeId, functionName, config) => {
         const existing = draftsRef.current[nodeId] ?? { generation: 0, updatedAt: Date.now() }
         const nextGen = (existing.generation ?? 0) + 1
         const nextDraft: CanvasNodeDraft = {
@@ -698,7 +698,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
           generation: nextGen,
           updatedAt: Date.now(),
           function: {
-            name: modelKey,
+            name: functionName,
             args: {
               prompt: config.prompt,
               parameters: config.parameters,

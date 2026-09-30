@@ -285,16 +285,4 @@ export interface CreateCanvasRequestDTO {
   title?: string
 }
 
-// 辅助旧配置（向后兼容）
-export type PromptSegmentDTO =
-  | { type: 'TEXT'; text: string }
-  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
-
-export interface CanvasFunctionConfigDTO {
-  prompt: {
-    segments: PromptSegmentDTO[]
-  }
-  parameters: Record<string, string | number>
-}
-
 

@@ -38,9 +38,6 @@ export interface Resource {
 export interface Function {
   name: string
   args: Record<string, unknown>
-  /** 兼容旧代码访问 */
-  modelKey?: string
-  configJson?: string
 }
 
 export interface Run {
@@ -77,20 +74,11 @@ export interface Reference {
   index: number
 }
 
-/** 兼容旧的 Link 接口 */
-export interface Link {
-  canvasId: UUIDString
-  sourceNodeId: UUIDString
-  targetNodeId: UUIDString
-}
-
 export interface CanvasSnapshot {
   document: CanvasDocument
   resourceNodes: ResourceNode[]
   groups: Group[]
   references: Reference[]
-  /** 兼容现有渲染代码 */
-  links: Link[]
 }
 
 export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, index: number) => void): void {
@@ -139,11 +127,7 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
       resources: node.resources.map(projectCanvasResource),
       function: node.function ? {
         name: node.function.name,
-        args: node.function.args,
-        modelKey: node.function.name,
-        configJson: typeof node.function.args?.configJson === 'string'
-          ? (node.function.args.configJson as string)
-          : JSON.stringify(node.function.args ?? {}),
+        args: node.function.args ?? {},
       } : null,
       run: node.run ? { ...node.run } : null,
     }
@@ -164,12 +148,6 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
     index: ref.index,
   }))
 
-  const links: Link[] = references.map((ref) => ({
-    canvasId: ref.canvasId,
-    sourceNodeId: ref.sourceNodeId,
-    targetNodeId: ref.targetNodeId,
-  }))
-
   return {
     document: {
       ...snapshot.document,
@@ -181,7 +159,6 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
       transform: { ...group.transform },
     })),
     references,
-    links,
   }
 }
 
