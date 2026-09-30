@@ -34,7 +34,6 @@ public final class OpenAiChatConfiguration {
   public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
   public static final String FIELD_PROMPT_CACHE_MODE = "openAiPromptCacheMode";
   public static final String FIELD_THINKING_FORMAT = "openAiChatThinkingFormat";
-  public static final String FIELD_OPENAI_CHAT_THINKING_FORMAT = FIELD_THINKING_FORMAT;
 
   public enum PromptCacheMode {
     AUTOMATIC,
@@ -163,10 +162,6 @@ public final class OpenAiChatConfiguration {
   }
 
   public ThinkingFormat thinkingFormat() {
-    return thinkingFormat;
-  }
-
-  public ThinkingFormat openAiChatThinkingFormat() {
     return thinkingFormat;
   }
 

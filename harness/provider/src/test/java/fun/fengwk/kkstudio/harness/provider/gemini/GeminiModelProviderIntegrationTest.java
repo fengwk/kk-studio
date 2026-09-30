@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -137,7 +136,10 @@ class GeminiModelProviderIntegrationTest {
         ProviderCacheControl.none());
   }
 
-  /** 验证端到端真实 SSE 流式传输，请求头携带 x-goog-api-key，事件逐步送达，最终成功交付。 */
+  /**
+   * 验证端到端真实 SSE 流式传输，请求头携带 x-goog-api-key，事件逐步送达，最终成功交付；同时经 adapter 真实入口验证请求 URL 完全由 descriptor
+   * endpoint 与 model id 解析而来（构造参数不再携带 URL）。
+   */
   @Test
   void streamsRealSseResponseOverLocalHttpServer() throws Exception {
     AtomicReference<String> capturedApiKey = new AtomicReference<>();
@@ -171,9 +173,9 @@ class GeminiModelProviderIntegrationTest {
         });
 
     ProviderDescriptor descriptor = createDescriptor();
-    URI streamUri = GeminiEndpoints.resolveStreamUri(descriptor.endpoint(), "gemini-2.5-flash");
     GeminiModelProvider provider =
-        new GeminiModelProvider(transport, descriptor, "secret-api-key-999", streamUri);
+        (GeminiModelProvider)
+            new GeminiProviderAdapter(transport, "secret-api-key-999").create(descriptor);
 
     List<ProviderStreamEvent> receivedEvents = new CopyOnWriteArrayList<>();
     AtomicReference<ProviderCompletion> completionRef = new AtomicReference<>();
@@ -201,9 +203,9 @@ class GeminiModelProviderIntegrationTest {
 
     assertTrue(latch.await(5, TimeUnit.SECONDS), "streaming call timed out");
 
-    // 验证发出的请求参数
+    // 验证发出的请求参数：URL 由 descriptor endpoint 与 model id 唯一解析，未携带凭据
     assertEquals("secret-api-key-999", capturedApiKey.get());
-    assertTrue(capturedPath.get().contains("alt=sse"));
+    assertEquals("/models/gemini-2.5-flash:streamGenerateContent?alt=sse", capturedPath.get());
 
     // 验证接收的响应
     assertNotNull(completionRef.get());
@@ -239,9 +241,7 @@ class GeminiModelProviderIntegrationTest {
         });
 
     ProviderDescriptor descriptor = createDescriptor();
-    URI streamUri = GeminiEndpoints.resolveStreamUri(descriptor.endpoint(), "gemini-2.5-flash");
-    GeminiModelProvider provider =
-        new GeminiModelProvider(transport, descriptor, "bad-key", streamUri);
+    GeminiModelProvider provider = new GeminiModelProvider(transport, descriptor, "bad-key");
 
     AtomicReference<ProviderException> caught = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);

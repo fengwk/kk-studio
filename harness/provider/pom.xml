@@ -86,6 +86,7 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStrictSchema</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStreamAccumulator</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStreamBridge</include>

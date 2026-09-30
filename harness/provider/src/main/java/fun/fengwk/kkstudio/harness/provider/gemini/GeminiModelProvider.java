@@ -36,15 +36,12 @@ final class GeminiModelProvider implements ModelProvider {
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
   private final String apiKey;
-  private final URI baseUri;
   private final GeminiRequestEncoder encoder;
 
-  GeminiModelProvider(
-      JdkHttpSseTransport transport, ProviderDescriptor descriptor, String apiKey, URI baseUri) {
+  GeminiModelProvider(JdkHttpSseTransport transport, ProviderDescriptor descriptor, String apiKey) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.apiKey = apiKey;
-    this.baseUri = Objects.requireNonNull(baseUri, "baseUri");
     this.encoder = new GeminiRequestEncoder();
   }
 
