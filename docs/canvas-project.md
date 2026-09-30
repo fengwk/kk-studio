@@ -22,8 +22,8 @@ Issue + state -> 阶段预算        # 执行次数授权
 Run           -> 一次执行记录    # 冻结身份与历史区间
 ```
 
-Project 的界面与工具面向 Thread；Session 是 Harness 的历史和资源容器，Branch 只是
-Entry Tree 中的历史路径，不是 Project 实体。下文先说明产品行为，再给出数据与事务边界。
+Project 的界面与工具面向 Thread；Session 是 Harness 的历史和资源容器，Entry Tree 分支
+只是历史路径，不是 Project 实体。下文先说明产品行为，再给出数据与事务边界。
 
 ## 1. 职责与模块
 
@@ -42,6 +42,7 @@ Entry Tree 中的历史路径，不是 Project 实体。下文先说明产品行
 canvas/core       领域值、typed commands、Function SPI、宿主端口
 canvas/infra      Canvas 持久化、应用服务、Function Runtime
 project           独立 Maven 模块，内部按领域/服务/持久化分包
+share             对外 wire DTO 与系统设置契约
 plugins           构建期可选的具体能力
 platform          Chat、Storage、Catalog、宿主集成适配
 web               HTTP/WebSocket 与应用装配
@@ -179,7 +180,7 @@ Runtime 统一负责请求接受、pin、租约、恢复调度、输出发布和
 也不再各建任务表、队列和资源计数。checkpoint 是有界、可序列化状态，不存进程句柄、
 临时下载 URL 或连接凭据。
 
-具体能力按实际依赖组织，例如 `canvas-media`、`canvas-comfyui`、`canvas-opencli`。
+具体能力按实际依赖组织，例如 `canvas-media`、`canvas-comfyui`。
 JAR 通过现有 Spring 自动装配注册，函数名全局唯一，启动检查重复。配置/凭据沿用宿主
 配置和凭据能力，节点参数只表达业务输入。常规输入复用基础编辑控件；专用编辑器也是
 构建期组件，不做表单脚本或热加载。
@@ -351,7 +352,7 @@ INIT 与人工阶段通过显式合法转移进入下一阶段。进入有 Agent
 并重新检查额度。用尽额度只展示待人工授权，不继续调用模型，也不把阶段标成 DONE。
 Run 接受前要求该 Thread 没有遗留调用或未归属命令，不能把上次输入带进新历史区间。
 
-当前 Agent 使用 `issue.transition(toState)` 请求交接，先将目标保存到 Run.next_state，
+当前 Agent 通过 `issue_transition` 工具请求交接（参数 `to_state`），先将目标保存到 Run.next_state，
 返回“已接受，收尾后生效”。此后不接受新的业务写调用，已派发调用收尾，模型输出报告。
 用户干预仍进入受控队列；新输入未处理完不能提交交接。
 
@@ -393,9 +394,9 @@ Evidence 独立保留 Blob，`(issue_id,blob_id)` 唯一，首次发布才 retai
 发布者从执行身份取得，来源 Run 可空；最终报告中的合法受管资源在收尾时发布，
 也支持显式发布和人工上传。文本文件交付需显式物化，不增加第二种证据存储。
 
-不同 Agent 获得最新 Issue、必要指令、前序报告和已发布证据，不复制全部对话。
-`read_memory(threadId,startEntryId,endEntryId)` 从 Thread 解析 Session，在授权并校验
-目标区间属于该 Thread 历史路径后读取；本 Issue 的 Agent 可按需读取其他 Agent
+每个 Agent 只获得本 turn 的权威目标事实：稳定归属、Issue 标题与描述、当前阶段及其职责指令、
+可选的下一个合法阶段与当前 Environment，不复制历史对话、其他 Agent 的报告或旧 Run 的角色快照。
+需要前序结论时按 Activity/证据显式读取；本 Issue 的 Agent 可按需读取其他 Agent
 历史，不允许任意枚举别的 Chat/Issue。
 读取文本不自动授予其中全部附件；使用证据时显式建立当前 Session 的 Blob 引用。
 默认内联有界摘要，大输出复用 `kkstudio:/resources/<blobId>` 和现有窗口读取协议。
@@ -493,15 +494,15 @@ Runtime 的真实 ToolResult 元数据保存原 `invocationId`，与现有 `assi
 安全的结果物化可以完成，新的外部调用必须等门禁解除。恢复操作登记持久 Work。
 输入等待恢复仍属于原 Run，不因刚好用尽最后一次额度而死锁。
 
-事务提交后发布小型 `InteractionChanged` 通知，包含类型、变化、原调用和 Thread 坐标。
-通知只提示 Pane/待处理查询更新，漏消息由重连及列表查询恢复。原始参数和答案不广播给
+事务提交后由 Pane/待处理查询的重连与轮询恢复，不广播中间事件。
+待处理列表由前端定期读取，漏消息由重连及列表查询恢复。原始参数和答案不广播给
 所有订阅者，读取仍校验权限。执行恢复由同事务写入的 Work 保证，不依赖事件监听器。
 当前只提供站内待处理；外部消息适配与可靠投递策略属于独立能力，不预建通知流水和 Outbox。
 
 ## 6. 数据关系与字段字典
 
 目标领域/关联表共 16 张：Canvas 7、Project 8、Chat 关联 1。Chat 本身修改，
-Harness 七表、Catalog、Environment、Storage 继续复用。PK/UK/FK 用于关系完整性，
+Harness 执行协议七表与异步委派表（`harness_thread_join`）共八张、Catalog、Environment、Storage 继续复用。PK/UK/FK 用于关系完整性，
 JSON Schema、权限与状态转换由应用实现。所有时间使用 `timestamptz(3)`，UUID 由受控
 创建路径产生，所有业务删除使用 RESTRICT 与显式清理。
 
@@ -688,7 +689,7 @@ UNKNOWN 未核查不能作为普通失败清理。归档不删除历史和资源
 已有 `postgres:17.10`，在它自己拥有的无网络、无宿主端口临时容器里加载唯一生产基线
 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，不读取部署数据库
 连接变量，也不构建镜像。验证器校验 39 张业务及基础设施表与 16 张目标表的列、外键和索引，并运行与 Java
-契约测试共用的至少 135 条正负 SQL 探针；负例在目标表上制造缺外键、缺索引、缺字段和多余
+契约测试共用的至少 135 条正负 SQL 探针（Java 契约测试当前实际断言 154 条）；负例在目标表上制造缺外键、缺索引、缺字段和多余
 对象，要求验证器精确报出该对象，证明门禁不会静默放过结构漂移。SQL 断言只验证
 FK/UK/CHECK/索引与数据形状，关键拒绝校验具体约束名；不证明应用状态机、权限或浏览器行为已
 实现，应用级校验必须沉淀为独立自动化测试。
