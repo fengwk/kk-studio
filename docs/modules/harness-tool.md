@@ -13,13 +13,13 @@
 
 ## 唯一身份：模型可见 name
 
-[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是工具的唯一 Agent 侧身份：模型调用、Agent 配置、权限规则键、catalog 条目与 durable binding 全部使用同一个名字。`ToolDescriptor.isValidName` 要求它字母开头、只含字母数字与 `_`、`-`，且不超过 64 字符（`NAME_MAX_LENGTH`）；该规则在所有持久化与配置边界共享，因此不存在第二套内部 ID 或工具版本。`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`defaultTimeout` 不得为负，`0` 表示该工具没有执行 deadline。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
+[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是工具的唯一 Agent 侧身份：模型调用、Agent 配置、权限规则键、catalog 条目与 durable binding 全部使用同一个名字。`ToolDescriptor.isValidName` 要求它字母开头、只含字母数字与 `_`、`-`，且不超过 64 字符（`NAME_MAX_LENGTH`）；该规则在所有持久化与配置边界共享，因此不存在第二套内部 ID 或工具版本。`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`defaultTimeout` 不得为负、必须是整毫秒且不溢出 long（wire 字段为 `defaultTimeoutMillis`），`0` 表示该工具没有执行 deadline。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
 
 [`AgentToolDefinition`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java) 把 `ToolDescriptor` 与 [`ToolVisibility`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolVisibility.java)（`SELECTABLE` / `INTERNAL`）组合为模型契约，但不含任何环境或实现字段：具体 `Tool` 实例与环境需求由 Contributor 目录解析并在冻结时绑定。Contributor 侧的 scoped `ContributionId`（`(contributorId, localName)`）只用于定位贡献归属，不是 Agent 可见身份。
 
 ## 从模型输出到可执行参数
 
-[`ToolCall`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java) 保存 `id`、`toolName` 与参数 JSON。构造时只要求它是合法 JSON object（空白规范化为 `{}`），不改写内容——模型给什么就存什么；所有转换都放在显式的 `validateFor(descriptor)`：
+[`ToolCall`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java) 保存 `id`、`toolName` 与参数 JSON。构造时要求 `id` 与 `toolName` 非空白、`argumentsJson` 是合法 JSON object（空白规范化为 `{}`），不改写内容——模型给什么就存什么；所有转换都放在显式的 `validateFor(descriptor)`：
 
 ```java
 ToolCall normalized = call.validateFor(descriptor);
@@ -27,7 +27,7 @@ ToolCall normalized = call.validateFor(descriptor);
 
 该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 `inputSchema` 做数字字符串与可缺省 `null` 的通用容错改写，最后由 `InputValidator` 严格校验。参数名及其 required、类型、附加属性规则只由 descriptor schema 决定，不因 `read`、`write` 等工具名获得隐式别名或字段搬运；schema 声明 `file` 时 `file` 就是有效字段，schema 只声明 `path` 时 `file`、`filePath`、`file_path` 都不会替代它。已有 canonical 参数不会被重命名。参数被改动时返回新的 `ToolCall`，执行路径只能使用这个返回值，不得回头读原始 JSON。
 
-同一入口在三个边界各调用一次，因为三者看到的参数必须一致：Planner 校验 Provider wire 上那条 raw call 可按 schema 归一化，durable `ToolInvocation` 入库时校验一次，transient `ToolInvocationRequest` 在权限 preflight、审批预览与执行之前固化归一化副本。原始 function call 仍原样保存在模型结果与 assistant history 中，供审计与 wire replay。
+同一入口在主源码的五个边界各调用一次，因为各处看到的参数必须一致：Planner 校验 Provider wire 上那条 raw call 可按 schema 归一化，历史动作渲染按同一份归一化参数生成语义动作，durable `ToolInvocation` 入库时校验一次，transient `ToolInvocationRequest` 在权限 preflight、审批预览与执行之前固化归一化副本，Contributor SPI 的 `ToolExecutionRequest` 构造时再校验一次。原始 function call 仍原样保存在模型结果与 assistant history 中，供审计与 wire replay。
 
 ## 结果容器
 
@@ -36,17 +36,17 @@ ToolCall normalized = call.validateFor(descriptor);
 - `toolCallId` 非空白，把结果关联回请求；
 - `contents` 是 `harness-common` 的 `List<ResultContent>`，最多 64 项；
 - `detailsJson` 必须是有效 JSON object，且在树解析前先按 UTF-8 字节数限制在 1 MiB 内；
-- `ToolResult.error(callId, message)` 生成携带单条文本内容的标准错误结果，使失败也能作为语义结果传递。
+- `error` 标识该结果是否为失败终态，`ToolResult.error(callId, message)` 生成携带单条文本内容与 `error=true` 的标准错误结果，使失败也能作为语义结果传递。
 
-值模型允许 `BinaryResultContent`，但可持久化的 [`ToolResultJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolResultJsonCodec.java) 在编码与解码两个方向都拒绝 Binary：内存中的二进制必须在执行边界先外部化为 managed Resource。字节预算同样不在本模块决定——[`harness-runtime`](harness-runtime.md) 的 [`ToolResultSizeLimits`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolResultSizeLimits.java) 以 canonical JSON 字节数计，终态 1 MiB、partial 256 KiB；本模块只提供做这件事所需的精确编码器。
+值模型允许 `BinaryResultContent`，但可持久化的 [`ToolResultJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolResultJsonCodec.java) 在编码与解码两个方向都拒绝 Binary：内存中的二进制必须在执行边界先外部化为 managed Resource。字节预算同样不在本模块决定——[`harness-runtime`](harness-runtime.md) 的 [`ToolResultSizeLimits`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolResultSizeLimits.java) 以 canonical JSON 字节数计，终态 1 MiB、partial 256 KiB，超限的 partial 不会被发布为实时事件；本模块只提供做这件事所需的精确编码器。
 
 ## JSON 编解码器
 
-[`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/) 包是这三类值模型与 wire 之间唯一的转换层，三者都启用 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，遇到未知字段、类型错误或领域不变量违反即抛异常：
+[`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/) 包是这三类值模型在 durable 存储与实时事件边界上唯一的转换层（模型 wire 与会话历史使用各自的会话值模型与 codec），三者都启用 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，遇到未知字段、类型错误或领域不变量违反即抛异常：
 
-- [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `descriptor` / `visibility` 两个顶层字段，用于 durable 工具定义；任何旧 wire 的 `id` 字段都按未知字段拒绝，没有兼容读取路径；
+- [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `descriptor` / `visibility` 两个顶层字段，用于 durable 工具定义；wire 中没有独立的 `id` 字段，出现即按未知字段拒绝，也不存在兼容读取路径；
 - [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`description`、`rendererKey`、`sideEffect`、`defaultTimeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
-- `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。Resource 的可选 `textMetadata`（`totalBytes` / `totalLines`）同时进入树编码、流式计数与解码；缺省时字段省略，解码结果仍为 null。Daemon 结果协议仍然拒绝该元数据，不因 durable codec 保留它而放宽。空白 descriptor JSON 与空白 input schema JSON 都抛 `IllegalArgumentException`，`null` 入参沿用原有的 `IllegalArgumentException` 契约。
+- `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。Resource 的可选 `textMetadata`（`totalBytes` / `totalLines`）同时进入树编码、流式计数与解码；缺省时字段省略，解码结果仍为 null。Daemon 结果协议仍然拒绝该元数据，不因 durable codec 保留它而放宽。空白 descriptor JSON 与空白 input schema JSON 都抛 `IllegalArgumentException`；`ToolDescriptorJsonCodec.decode` 与 `SchemaJsonCodec.decode` 的 `null` 入参同样抛 `IllegalArgumentException`，`AgentToolDefinitionJsonCodec` 与 `ToolResultJsonCodec` 的 `null` 入参是 NPE。
 
 ## 源码与测试
 

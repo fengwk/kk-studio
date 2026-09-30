@@ -23,7 +23,7 @@ truncation_reason: character_limit
 next: 83:1241
 lsp: supported (typescript)
 
-1|...
+ 1|...
 83|...
 
 [TRUNCATED: More file content remains. Next position: line 83, column 1241.]
@@ -31,11 +31,11 @@ lsp: supported (typescript)
 
 未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 描述整个文件；不得将片段结束当作文件结尾。元数据所需扫描保持有界内存并支持取消。
 
-本地文本与受管文本保持同一分页契约，下游不能再按旧 48 KiB 上限静默截断。图片、目录维持独立返回语义，目录分页默认和最大 2000。
+本地文本与受管文本保持同一分页契约，下游没有独立的固定字节上限；48 KiB 只是目录清单的展示上界。图片、目录维持独立返回语义，目录分页默认和最大 2000。
 
 ## 文件变更与搜索
 
-write 用于新建或完整覆盖，edit 用于精确替换。现有文件原子替换须保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 的完整内容按其明确写入契约处理，不做意外内容变换。无法无损编码则拒绝。成功提交后的通知或展示失败不得误报为未修改。diff 展示真实完整行变化。设备、FIFO 等非普通文件必须在 I/O 前拒绝。
+write 用于新建或完整覆盖，edit 用于精确替换。现有文件原子替换须保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 的完整内容按其明确写入契约处理，不做意外内容变换。无法无损编码则拒绝。成功提交后的通知或展示失败不得误报为未修改。diff 只展示真实行变化（含文件末尾换行有无），内联 diff 超过 30 KiB 字符即截断并显式标注；行级对齐超过 2,000,000 个单元格时退化为整段删除加整段新增，仍是真实行。设备、FIFO 等非普通文件必须在 I/O 前拒绝。
 
 grep 对完整搜索内容匹配，展示缩略与搜索完整性分开。超时、资源限制和读失败不可报告为无匹配；任意正则不承诺无限输入和固定内存同时成立。Java 实现需明确限制并中断，不能以线程取消假装已经终止不可中断的计算。
 
@@ -55,7 +55,7 @@ Java 客户端按项目根、server ID 和配置指纹复用，去重并发初�
 
 ## 异步 task
 
-task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 表示在原历史上继续，允许切换 Agent，使用目标配置和权限。只允许当前父继续自己的已结清子 Thread。max_turns 是阶段汇报软预算，不伪装成强制执行上限。
+task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 表示在原历史上继续，允许切换 Agent，使用目标配置和权限。继续只允许子 Thread 的持久父发起：父身份取自不可变的父子关系而不是调用参数，且父必须仍然接受本次调用（head 未被推进、未停留在停止边界）。子是否已结清不影响继续——向仍在执行的子追加输入即排队，等它真正的下一次空闲。max_turns 是阶段汇报软预算，不伪装成强制执行上限。
 
 持久接受后返回唯一 JSON `{"thread_id":"...","status":"accepted"}`，不等待结果。不保留 session_id/maxTurns 别名，不提供同步开关或查询等待工具，也不提供 XML 或其它别名形状。即时回执不重复 prompt；tool_result 的 details 带 `kind=task.accepted` 供 UI 识别，其 thread_id / status 与回执一致，另附会话与幂等元数据。
 
@@ -65,7 +65,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 ### 持久义务与空闲
 
-Thread 整体空闲要求本地执行、待处理命令、continuation 和未结清子任务都为空。未结清包含排队、运行、审批、恢复、停止确认，以及终态结果尚未交付。父当前模型轮次结束不等于整体任务完成；等待时不轮询、不 sleep、不空转模型。嵌套任务按直接父子逐层结清。
+Thread 整体空闲要求本地执行、待处理命令、continuation 和未结清子任务都为空。未结清覆盖排队、运行、审批、恢复与停止确认，但不含「结果尚未投递给父」：是否存在未交付的 join 回执不影响判定，等待子结果不是本地工作。父当前模型轮次结束不等于整体任务完成；等待时不轮询、不 sleep、不空转模型。嵌套任务按直接父子逐层结清。
 
 内部用工具 invocation ID 唯一标识本次委派，记录父子 Thread、本次执行边界、结果和投递状态；固定归属与每次执行身份分开。复用 Session/Thread/Entry/Command/Work，不建立第二执行引擎。
 
@@ -75,7 +75,7 @@ Thread 整体空闲要求本地执行、待处理命令、continuation 和未结
 
 ## 验收
 
-迁移 pi-base 所有适用行为测试，逐用例记录源用例、适用性、kk 对应用例和执行结果。与新契约冲突者改写而非照搬；Node 私有 API、TUI 展示和 apply_patch 协议可排除，但必须说明理由，不能按文件名排除搜索、转义、编码、特殊文件或生命周期行为。
+行为由自动化测试承接，逐用例记录源用例、适用性判断与 kk 对应用例，映射维护在 [内置 Read 测试映射](../operations/builtin-read-tests.md)、[内置 Bash 测试映射](../operations/builtin-bash-tests.md)、[内置检索测试映射](../operations/builtin-search-tests.md)、[内置 LSP 测试映射](../operations/builtin-lsp-tests.md)、[内置 Task 测试映射](../operations/builtin-task-tests.md) 与 [内置文件变更测试映射](../operations/builtin-mutation-tests.md)。与当前契约冲突的源行为改写而不是照搬；Node 私有 API、TUI 展示与 apply_patch 协议不适用，但搜索、转义、编码、特殊文件与生命周期行为必须逐项落点，不能按文件名排除。
 
 回归覆盖 Unicode/换行/EOF/长行无损续读、权限与提交边界、忽略规则、完整搜索、失败日志、LSP 协议和回收、异步接受/换 Agent/权限/幂等/重启/停止/嵌套/无空闲交接窗口。新测试注明意图；结构化数据放测试资源。核心路径 JaCoCo 行覆盖率目标至少 90%，分支作为参考，平台专属检查不得用跳过宣称通过。
 

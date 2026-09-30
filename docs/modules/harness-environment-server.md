@@ -1,7 +1,7 @@
 # Harness Environment Server
 
 `harness-environment-server` 是 Environment 链路中 Platform 一侧的会话核心：它把
-protocol v1 的消息流推进为可观察状态，独占连接代际、`environment_connection`
+daemon wire 协议的消息流推进为可观察状态，独占连接代际、`environment_connection`
 路由租约围栏与按 `invocationId` 的在途调用生命周期，并向上层暴露传输、持久化与票据
 三类窄端口。协议形状、字段语义与大小约束由
 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
@@ -31,7 +31,7 @@ close(connectionId)
   -> leaseStore.disconnect                               # 幂等，保留重连宽限
 ```
 
-[`DaemonLeaseStore`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
+[`DaemonLeaseStore`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
 
 `Rejected` 与 `RetryLater` 是仅有的两个会写入冻结错误码的路径（`REGISTRATION_REJECTED` 与 `RETRY_LATER`）；存储抛出运行时异常时同样 fail-closed 关闭连接，但错误帧只带说明文本，不冒充这两个码。[`DaemonRegistrationDirectory`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 只做 token 到 `environmentId` 的解析，token 明文不回显。
 
@@ -40,10 +40,10 @@ close(connectionId)
 调用只按 `(environmentId, invocationId)` 关联。同一 Environment 的多个 invocation 立即发送并并发持有，不存在 per-Environment 并发槽位、队列或容量配置。`invoke` 的前置条件按固定顺序执行：
 
 1. 校验 capability descriptor 与 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 完全一致，并要求 `call.id` 是 canonical UUID；
-2. arguments 携带 `workdir` 时，按该连接 READY 时冻结的目标 OS 做词法校验；是否必填由各能力 input schema 决定；
-3. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
+2. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
+3. arguments 携带 `workdir` 时，按该连接 READY 时冻结的目标 OS 做词法校验；是否必填由各能力 input schema 决定；
 4. 在核心锁外调用 `leaseStore.holdsReadyLease` 复核归属，存储不可用同样判定环境不可用；
-5. 登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java) 的三态映射为调用结果。
+5. 在连接状态锁内二次复核 READY 与围栏代次，登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java) 的三态映射为调用结果。
 
 | 递交结果 | 映射 | 确定性 |
 | --- | --- | --- |
@@ -108,7 +108,7 @@ COMPLETED
 | 每个连接代际的 `gate` | 该连接的入站协议处理序列与该连接待执行回调批次的排队 |
 | `ConnectionState` 自身 | 该连接的协议字段（绑定、`leaseToken`、`ready`、清理标记、目标 OS） |
 | 核心 `inventory` | 环境目录、连接目录、`invocationId` 目录与 tombstone |
-| 每个 `ActiveInvocation` | 其 transfer 集合与取消、终态标记 |
+| 每个 `ActiveInvocation` | 其 transfer 集合与取消意图（终态标记是无锁 `AtomicBoolean`） |
 | 每个 `TransferBinding` | 该 transfer 的请求事实、已签发 uploadId、票据缓存与释放标记 |
 
 租约存储访问发生在连接 `gate` 内，但不持有 `state`、`inventory`、`ActiveInvocation` 或 `TransferBinding`；`invoke` 的围栏复核、票据服务 I/O、上传释放、连接关闭与全部 listener/session 回调都在上述锁之外执行，因此回调中重入核心 API 不会死锁。
@@ -120,7 +120,7 @@ COMPLETED
 构造器只接收五个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentSessionListener`、`DaemonResourceTicketService` 与 `Supplier<EnvironmentServerSettings>`。
 
 [`EnvironmentServerSettings`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)
-携带心跳超时与资源字节上限，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
+携带心跳超时（同时用作租约期限）与资源字节上限，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
 生效，核心不缓存配置。[`EnvironmentSessionListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
 在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
 异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。
@@ -131,7 +131,7 @@ COMPLETED
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.environment.server` | protocol v1 的服务端会话核心。`EnvironmentDaemonServer` 独占 HELLO/WELCOME/READY/HEARTBEAT/INVOKE/CANCEL、资源 transfer、租约围栏与按 `invocationId` 维度的在途调用状态；`DaemonEndpoint`/`DaemonChannel` 是 transport 窄端口，`DaemonLeaseStore`/`DaemonRegistrationDirectory` 是持久化窄端口，`DaemonResourceTicketService` 承载 Blob 上传生命周期，`EnvironmentSessionListener`/`EnvironmentServerSettings` 承载宿主回调与现读设置。本包只依赖 JDK、Jackson、`harness-common` 与 `harness-environment`，不感知 Spring、持久化实现与产品 DTO。 |
+| `fun.fengwk.kkstudio.harness.environment.server` | daemon wire 协议的服务端会话核心。`EnvironmentDaemonServer` 独占 HELLO/WELCOME/READY/HEARTBEAT/INVOKE/CANCEL、资源 transfer、租约围栏与按 `invocationId` 维度的在途调用状态；`DaemonEndpoint`/`DaemonChannel` 是 transport 窄端口，`DaemonLeaseStore`/`DaemonRegistrationDirectory` 是持久化窄端口，`DaemonResourceTicketService` 承载 Blob 上传生命周期，`EnvironmentSessionListener`/`EnvironmentServerSettings` 承载宿主回调与现读设置。本包只依赖 JDK、Jackson、`harness-common` 与 `harness-environment`，不感知 Spring、持久化实现与产品 DTO。 |
 
 ## 源码与测试
 

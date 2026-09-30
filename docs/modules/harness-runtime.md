@@ -2,7 +2,7 @@
 
 Harness 要回答的是：用户这一句话说完之后，系统究竟记住了什么、还欠什么、正在做什么、接下来该谁做。这四个问题分别由四份持久化事实回答——Session 与 append-only Entry Tree 记录「说过什么」，命令邮箱记录「还欠什么」，Invocation 记录「正在做什么」，[`Work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java) 记录「该由谁在哪台机器上做」。`harness-runtime` 就是把用户输入、模型流式输出、工具副作用、停止与审批全部折叠进这四份事实、并在进程崩溃或消息丢失后沿同一条路径重新推进的地方。
 
-本模块是纯 Java：生产依赖只有 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化实现与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，外部执行装配在 [Platform](platform.md) 与 [Web](web.md)。
+本模块是纯 Java：生产依赖只有 `harness-common`、`harness-tool`、`harness-environment`、`harness-contributor-api`（Tool SPI 与目录类型）、Jackson、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化实现与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，外部执行装配在 [Platform](platform.md) 与 [Web](web.md)。
 
 ## 同步入口与事务边界
 
@@ -10,14 +10,14 @@ Harness 要回答的是：用户这一句话说完之后，系统究竟记住了
 
 ```text
 acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
-stop / decideToolApproval / setThreadYolo / renameThread / renameSession
+stop / decideToolApproval / submitToolInput / listPendingInteractions / setThreadYolo / renameThread / renameSession
 manualCompactionAvailability / compactThread / getThreadSnapshot
 findJoin / projectJoinReceipt / findAncestorChain
 ```
 
-除 `manualCompactionAvailability`、`findThreadCommand`、`findJoin`、`projectJoinReceipt`、`findAncestorChain`、`getSession*`、`listThreadsBySession` 这类只读查询外，每个方法都在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。唯一跨越事务边界的是 Stop 的本地取消——`stop` 把取消登记在 [`HarnessStore#afterCommit`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 上：无外层事务时在该事务提交后执行，加入调用方外层事务时只在该物理事务真正提交后执行，**外层回滚即不取消**；取消失败不回滚已提交的事实。对称地，必须在事务外工作的入口（手动压缩的 `resolve`）先调用 `assertNoAmbientTransaction` 拒绝带环境事务的调用。
+除 `manualCompactionAvailability`、`findThreadCommand`、`listPendingInteractions`、`findJoin`、`projectJoinReceipt`、`findAncestorChain`、`getSession*`、`listThreadsBySession` 这类只读查询外，每个方法都在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。唯一跨越事务边界的是 Stop 的本地取消——`stop` 把取消登记在 [`HarnessStore#afterCommit`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 上：无外层事务时在该事务提交后执行，加入调用方外层事务时只在该物理事务真正提交后执行，**外层回滚即不取消**；取消失败不回滚已提交的事实。对称地，必须在事务外工作的入口（手动压缩的 `resolve`）先调用 `assertNoAmbientTransaction` 拒绝带环境事务的调用。
 
-所有业务拒绝都是类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java)（`STALE_VERSION`、`STALE_COMMAND_CURSOR`、`IDEMPOTENCY_KEY_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_ID_REUSED`、`TERMINAL_APPLY_PENDING`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`、`MANUAL_COMPACTION_UNAVAILABLE`）或 `HarnessRuntimeNotFoundException`；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）一律以 `IllegalStateException` fail closed，绝不降级成业务错误。
+所有业务拒绝都是类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java)（`STALE_VERSION`、`STALE_COMMAND_CURSOR`、`IDEMPOTENCY_KEY_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_ID_REUSED`、`TERMINAL_APPLY_PENDING`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`、`INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE`、`INPUT_SUBMISSION_MISMATCH`、`MANUAL_COMPACTION_UNAVAILABLE`）或 `HarnessRuntimeNotFoundException`；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）一律以 `IllegalStateException` fail closed，绝不降级成业务错误。
 
 跨实体的多行事务必须按同一层级取锁，实现层负责在真正取锁前拒绝逆序：
 
@@ -42,7 +42,7 @@ ROOT                  TURN_START   MESSAGE      CUSTOM                MODEL_ATTE
 CUSTOM_MESSAGE        ASSISTANT_ERROR           ASSISTANT_ABORTED     COMPACTION           TURN_END
 ```
 
-`ROOT` 是唯一根，只保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName`、`ModelSelection` 与可空 `environmentName`）；执行父子关系不物化进历史，而是 Thread 行上不可变的 `parent_thread_id`，因此历史始终是对话历史而不是运行树；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
+`ROOT` 是唯一根，只保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName`、`ModelSelection` 与可空 `environmentName`，以及可空的用户 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java)）；执行父子关系不物化进历史，而是 Thread 行上不可变的 `parent_thread_id`，因此历史始终是对话历史而不是运行树；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
 
 分支冻结用户可见的 agent、model 与可空 Environment name：Environment 以全局唯一且不可变的 name 进入历史，每回合再解析为内部路由身份，目录只由每次工具调用自己的 arguments 提供，因此 Entry 里没有目录状态。
 
@@ -69,7 +69,7 @@ yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入 Thread + Commands + Work；不复制任何 Entry，新 Thread 的 head 直接指向该 Entry。STOP Turn 作为原子控制屏障，NEW_THREAD 绝不能 fork 到其未闭合 prefix（拒绝创建），但完整闭合的 `STOPPED` `TURN_END` 边界可正常 fork。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
 
-命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；所有 target 的命令批次都要求**恰有一条末尾 USER 消息**（`USER_MESSAGE` 或 `CUSTOM_MESSAGE`，`CUSTOM_MESSAGE` 角色限定为 `USER`）；非法批次是请求校验错误（`IllegalArgumentException`）。`TurnPlanBuilder` 只在 `TURN_START.settings` 冻结已生效的配置，不向模型注入配置提醒；UI 对比 ROOT 与非压缩 TURN_START 的完整设置快照投影配置变化。需要模型执行的独立提醒仍可作为显式 `CUSTOM_MESSAGE` 输入。运行时注入的提醒（`SystemReminder`）同样是一条 USER `CUSTOM_MESSAGE`，因此也计入 user-like；其识别要求完整开闭定界符（`<system-reminder>` + 非空正文 + `</system-reminder>`，闭标签后无尾随内容），普通消息只要伪造开标签前缀不会被当作 steering。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
+命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`GOAL`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。与前两类一样，typed `GOAL` 计入 user-like 输入：它在本回合 `TURN_START.settings` 内写入新的 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java)（每次设置都由运行时分配新的 `id`，因此基于旧 `id` 的进度报告不会命中新目标），并追加一条冻结的 USER 输入消息；payload 的 `text` 为 null 表示用户显式清除 Goal（空字符串不是清除），清除同样产生一条冻结 USER 消息。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；所有 target 的命令批次都要求**恰有一条末尾 USER 消息**（`USER_MESSAGE`、`CUSTOM_MESSAGE` 或 `GOAL`，typed `GOAL` 不可与普通消息同批，`CUSTOM_MESSAGE` 角色限定为 `USER`）；非法批次是请求校验错误（`IllegalArgumentException`）。`TurnPlanBuilder` 只在 `TURN_START.settings` 冻结已生效的配置，不向模型注入配置提醒；UI 对比 ROOT 与非压缩 TURN_START 的完整设置快照投影配置变化。需要模型执行的独立提醒仍可作为显式 `CUSTOM_MESSAGE` 输入。运行时注入的提醒（`SystemReminder`）同样是一条 USER `CUSTOM_MESSAGE`，因此也计入 user-like；其识别要求完整开闭定界符（`<system-reminder>` + 非空正文 + `</system-reminder>`，闭标签后无尾随内容），普通消息只要伪造开标签前缀不会被当作 steering。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
 
 状态由标记字段派生：无标记即 `QUEUED`；有 `appliedTurnStartEntryId` 即 `APPLIED`；`stopRequestId` 与 `cancelledAt` 成对存在且无 `appliedTurnStartEntryId` 即 `CANCELLED`。
 
@@ -119,11 +119,14 @@ durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
 
 ```text
-READY -> WAITING_APPROVAL（Ask）/ DISPATCHING（Allow）/ FAILED（Deny）/ CANCELLED
+READY -> WAITING_INPUT（ask_user 冻结问卷）/ WAITING_APPROVAL（Ask）/ DISPATCHING（Allow）/ FAILED（Deny）/ CANCELLED
 WAITING_APPROVAL -> READY（Allowed）/ FAILED（Denied）/ CANCELLED
+WAITING_INPUT -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
 DISPATCHING -> RUNNING / READY（RetryLater）/ FAILED / UNKNOWN
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 ```
+
+`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答；两者都只占 durable 行，不占用 Worker 或外部执行。
 
 `ToolBinding` 把工具定义、Contributor 归属、`EnvironmentSupport` 与冻结的
 `environmentId` / `environmentName` 绑在一起。`NONE` 不得携带环境，`OPTIONAL` 可以携带
@@ -179,6 +182,8 @@ TURN_START(COMPACTION) -> ModelInvocation（summarization systemInstruction + US
 Stop 在 Thread 锁内校验归属、version 与客户端 `stopRequestId`：活跃回合闭合后把该幂等键写入 `STOPPED` `TURN_END` 的 `closeRequestId`，因此重放返回同一 `StopResult`。检测到活跃 Model/Tool 调用时写入 ASSISTANT_ABORTED / ASSISTANT_ERROR 屏障、闭合回合、清理关联 Work 并物理删除未完成的 Invocation 行。**空闲（无 live Invocation）Stop 留下 durable 事实**：path 无 open Turn 时写入完整的 `STOP` barrier Turn（`TURN_START(STOP)` → `ASSISTANT_ERROR(CANCELLED)` → `STOPPED` `TURN_END`）；path 上本线程的 open Turn 已不可能再被模型推进时，若它已有完整 assistant 结果就直接用于 `STOPPED` `TURN_END`（不重复 assistant 结果），尚无 assistant 结果且允许屏障则在 Turn 内部追加取消屏障；两者都不成立（尚无输入的空 `INPUT` Turn，或 assistant 结果仍缺 Tool 结果）时先按 history normalization 补齐 synthetic `UNKNOWN`/`HISTORY_CUT` ToolResult 并以 `CANCELLED`/`HISTORY_CUT` 收尾，再写 `STOP` barrier Turn——绝不嵌套第二个 `TURN_START`、不伪造模型完成，也不留模糊错误。STOP Turn 是原子控制屏障：新分支（`NEW_THREAD`）绝不能 fork 到其未闭合 prefix，但完整闭合的 `STOPPED` `TURN_END` 边界可正常 fork。所有分支都在同一事务把 head 推进到该 `TURN_END` 并恰好递增一次 version；open Turn 属于其它线程的共享历史时，该 Turn 与其停止边界的所有权都归其 owner 线程，本线程只取消排队 Command 而不写停止边界（`stoppedTurnEndEntryId` 为 null）。在物理提交之后（`afterCommit`）才在当前 JVM 内 best-effort 本地取消，本地取消成败不影响已持久化的终态；重放与并发由 `StopResult` 与所有权围栏收敛。
 
 审批由 `decideToolApproval` 驱动，只在 Thread 处于 `ToolActive` 且目标工具处于 `WAITING_APPROVAL` 时接受：`ALLOWED` 转 `READY` 并安排 TOOL Work，`DENIED` 标记 `FAILED` 并唤醒 THREAD Work，两者都推进一次 Thread version；相同决策幂等重放，不同决策抛 `APPROVAL_DECISION_MISMATCH`。
+
+内部人工输入工具 `ask_user` 的等待走独立状态：`ToolProcessor` 在锁内把 `READY` 冻结为 `WAITING_INPUT`（version +1、complete TOOL Work、不唤醒 THREAD，也不进入 preflight 或 Gateway），问卷由 Assistant ToolCall 的 arguments 冻结。`submitToolInput` 在单事务内锁定当前真实调用，校验它仍处于当前 `TOOL_ACTIVE` 上下文且为 `WAITING_INPUT`，按冻结问卷校验并规范化答案，答案与 submissionId / actor / acceptedAt 回执同事务落盘（答复或明确拒答都收敛为 `SUCCEEDED` 加 inputReceipt，且该回执引入后不可变），随后请求 THREAD Work 物化 ToolResult。答案非法、目标不适用、另一提交身份或不同答案分别抛 `INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE` 与 `INPUT_SUBMISSION_MISMATCH`；本入口绝不接受 approval，provenance 由触发 `WAITING_INPUT` 时冻结的 binding 决定。`listPendingInteractions` 是只读投影：按 `(createdAt, id)` 稳定升序的 keyset 游标分页读取 `WAITING_INPUT` / `WAITING_APPROVAL` 两态，不新增持久化事实，产品 owner 与跳转由上层按 Session/Thread 解析。
 
 [`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java)
 按有序规则产出 Allow / Ask / Deny 候选：规则键是全局 `*` 或合法模型可见 tool name，
@@ -248,7 +253,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 | `runtime.admission` | `ConcurrencyAdmission` 进程内非阻塞并发槽位 | 纯内存，不持久化、不跨进程协调 |
 | `runtime.cache` | `PromptCacheAffinityKeyFactory` 与 `PromptCacheRequestFinalizer` | 纯内存派生稳定亲和键，只在请求终结阶段生成缓存控制指令 |
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |
-| `runtime.entry` | `BranchSettings`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；环境与目录不进入分支历史 |
+| `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；环境与目录不进入分支历史 |
 | `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
 | `runtime.input` | `ask_user` 冻结问卷的值契约（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 纯值对象与校验：不访问 Store、不做 I/O；等待冻结与派发门禁归 `runtime.processor` |
 | `runtime.interaction` | `PendingInteraction` 与 `PendingInteractionPage`：WAITING_INPUT / WAITING_APPROVAL 的只读投影与稳定分页 | 不新增持久化事实，也不持有产品归属；owner 与 Pane 跳转由上层按 Session/Thread 解析 |
@@ -260,17 +265,17 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 | `runtime.model.cache` | `PromptCachePolicy`、`PromptCacheCapability`、`PromptCacheMode`、`PromptCacheRetention`、`ProviderCacheControl` | 静态策略与指令契约，不维护缓存存储或命中事实 |
 | `runtime.model.codec` | `ModelDescriptor` 与 `ModelVariant` 的权威 JSON 编解码 | 拒绝未知字段，不允许数据库 resource id 或密钥进入该边界 |
 | `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体 SDK 解耦；SDK 类型只在 Platform 适配层出现 |
-| `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码 | 只依赖 Jackson 与纯 model 类型 |
+| `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码；顶层精确字段集合，观测计时 `decodeDurationMillis` 必填但可为 null | 只依赖 Jackson 与纯 model 类型 |
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
-| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
+| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink`、`WorkDispatchAdmission` 与 `WorkDispatchRequest` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
 | `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码；Tool partial 携带逐条生成、重投递复用的 canonical `eventId` identity | 有损 live overlay，不持久化、不承担恢复或审计 |
 | `runtime.resource` | `ResourceStore` 内容寻址资源存取端口 | 基础设施能力，不参与 Agent Loop 正确性判定 |
 | `runtime.retry` | `InvocationRetryPolicy`、`InvocationRetryPolicyProvider`、退避策略 | 只计算重试可行性与延迟，不读时钟、不写状态 |
 | `runtime.session` | `Session` 实体与不可变消息内容块（Text、Image、Audio、Video、Resource、Thinking、ToolCall 等） | 与 `harness_session` 对齐；Entry 节点与 payload 在 `runtime.history` |
 | `runtime.store` | `HarnessStore` 根与 `HarnessStore.Transaction` 原语、`HarnessStoreTime`、`UuidOrder` | 领域模型与物理持久化的唯一边界，守卫锁序与毫秒精度 |
-| `runtime.thread` | `ThreadState`、`ThreadLifecycleStatus`、`ThreadRuntimeStatus`、`ThreadContextClassifier`、`ThreadContext`、`ThreadContextProbe`、`SystemReminder`、`ResolvedRequestValidator`、`ProviderMessageProjector` | 只保存 Thread 自身状态；环境、open turn 与 lease 由 Entry/Invocation/Work 投影 |
-| `runtime.thread.command` | 命令邮箱实体、`ThreadCommandState` 派生与 `CommandHarvestReducer` | 只做 typed 字段归约；持久化与 CAS 由调度路径负责 |
+| `runtime.thread` | `ThreadState`、`ThreadLifecycleStatus`、`ThreadRuntimeStatus`、`ThreadContextClassifier`、`ThreadContext`、`ThreadContextProbe`、`SystemReminder`、`GoalMessages`、`ResolvedRequestValidator`、`ProviderMessageProjector` | 只保存 Thread 自身状态；环境、open turn 与 lease 由 Entry/Invocation/Work 投影；`GoalMessages` 只装配用户 Goal 的模型可见 USER 消息，不拥有状态 |
+| `runtime.thread.command` | 命令邮箱实体（含 typed `GOAL` 的 `GoalCommandPayload`）、`ThreadCommandState` 派生与 `CommandHarvestReducer` | 只做 typed 字段归约；持久化与 CAS 由调度路径负责 |
 | `runtime.tool` | `ToolInvocationError` 与严格 JSON 编解码 | 只含错误值类型，不定义执行状态机 |
 | `runtime.work` | `Work`、`ClaimedWork`、`WorkTarget`、`WorkTargetType` 与环境亲和性标记 | 独占 lease 与所有权围栏；不存放业务状态、attempt 或审批 |
 
