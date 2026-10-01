@@ -695,6 +695,11 @@ textarea::placeholder {
   padding-top: 1px;
 }
 
+.skill-package-card .meta-row .lbl {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .meta-row .val {
   min-width: 0;
   color: var(--fg-muted);
@@ -6085,6 +6090,7 @@ select.settings-input option {
   }
 
   .editor-grid,
+  .editor-grid-2,
   .editor-row,
   .metadata-grid-two,
   .metadata-grid-three {

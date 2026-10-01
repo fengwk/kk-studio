@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
@@ -6,6 +6,7 @@ import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/ai/catalo
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
+import { setLocale } from '@/shared/i18n'
 
 async function selectFormOption(
   user: ReturnType<typeof userEvent.setup>,
@@ -131,7 +132,7 @@ describe('AiResourceForms', () => {
     },
   )
 
-  it('keeps default variant aligned and hides reasoning effort when reasoning is disabled', async () => {
+  it('keeps default variant aligned and disables reasoning effort when reasoning is disabled', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
 
@@ -148,8 +149,9 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Default Variant')).toHaveAttribute('data-value', 'medium')
 
     await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
-    expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
+    expect(screen.getByText(/Reasoning 当前已关闭/)).toBeInTheDocument()
+    expect(screen.getByText(/勾选开启上方 Reasoning/)).toBeInTheDocument()
   })
 
   it('keeps at least one input modality and toggles IMAGE alongside TEXT', async () => {
@@ -183,11 +185,14 @@ describe('AiResourceForms', () => {
     expect(screen.getByText(/留空保持 Provider 协议默认/)).toBeInTheDocument()
 
     await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
-    expect(screen.getByText(/请先勾选上方 Reasoning/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
+    expect(screen.getByLabelText('Reasoning Effort 2')).toBeDisabled()
+    expect(screen.getByText(/Reasoning 当前已关闭/)).toBeInTheDocument()
 
     // 重新开启后仍然是空值，不得被 variant id / medium 补全
     await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.getByLabelText('Reasoning Effort 1')).toBeEnabled()
+    expect(screen.getByLabelText('Reasoning Effort 2')).toBeEnabled()
     expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
     expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
   })
@@ -205,7 +210,7 @@ describe('AiResourceForms', () => {
 
     // 禁用 Reasoning
     await user.click(screen.getByLabelText('Reasoning'))
-    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Reasoning Effort 1')).toBeDisabled()
 
     // protocolOptions 依然可用且保留已编辑的值
     expect(screen.getByLabelText('Protocol Options 1')).toBeInTheDocument()
@@ -218,6 +223,133 @@ describe('AiResourceForms', () => {
     expect(protocolInput2).toHaveValue('')
     fireEvent.change(protocolInput2, { target: { value: '{\n  "top_p": 0.9\n}' } })
     expect(protocolInput2).toHaveValue('{\n  "top_p": 0.9\n}')
+  })
+
+  it('defaults reasoning to false on new model creation and marks new variant effort as disabled', async () => {
+    const user = userEvent.setup()
+    function DefaultNewModelHarness() {
+      const [draft, setDraft] = useState<ModelDraft>(emptyModelDraft({ name: 'minimax' }))
+      return (
+        <ModelForm
+          draft={draft}
+          mode="create"
+          providers={[
+            {
+              name: 'minimax',
+              description: null,
+              providerType: 'openai',
+              baseUrl: null,
+              configured: true,
+              modelCallTimeoutMillis: 1800000,
+              modelCallIdleTimeoutMillis: 120000,
+              createTime: '2026-06-20T02:00:00',
+              updateTime: '2026-06-20T02:00:00',
+            },
+          ]}
+          onChange={setDraft}
+        />
+      )
+    }
+    render(<DefaultNewModelHarness />)
+
+    // 新建时默认 reasoning 为 false
+    expect(screen.getByLabelText('Reasoning')).not.toBeChecked()
+    const effort1 = screen.getByLabelText('Reasoning Effort 1')
+    expect(effort1).toBeInTheDocument()
+    expect(effort1).toBeDisabled()
+
+    // 新增 variant 同样始终渲染且为 disabled
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    const effort2 = screen.getByLabelText('Reasoning Effort 2')
+    expect(effort2).toBeInTheDocument()
+    expect(effort2).toBeDisabled()
+  })
+
+  it('preserves pre-filled reasoningEffort when toggled off and restores when toggled on', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    const effort1 = screen.getByLabelText('Reasoning Effort 1')
+    await user.type(effort1, 'high')
+    expect(effort1).toHaveValue('high')
+
+    // 关闭 Reasoning：输入框置灰，但草稿值依然保留
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.getByLabelText('Reasoning')).not.toBeChecked()
+    expect(effort1).toBeDisabled()
+    expect(effort1).toHaveValue('high')
+
+    // 重新开启 Reasoning：输入框激活，草稿值完整恢复
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.getByLabelText('Reasoning')).toBeChecked()
+    expect(effort1).toBeEnabled()
+    expect(effort1).toHaveValue('high')
+  })
+
+  it('binds aria-describedby to the disabled reason in both zh-CN and en-US', async () => {
+    const user = userEvent.setup()
+
+    // 1. 中文测试
+    act(() => setLocale('zh-CN'))
+    const { unmount } = render(<ModelFormHarness />)
+    const reasoningCheckbox = screen.getByLabelText('Reasoning')
+    await user.click(reasoningCheckbox) // 关闭 Reasoning
+
+    const zhEffort = screen.getByLabelText('Reasoning Effort 1')
+    expect(zhEffort).toBeDisabled()
+    const hintId = zhEffort.getAttribute('aria-describedby')
+    expect(hintId).toBeTruthy()
+    const hintElement = document.getElementById(hintId!)
+    expect(hintElement).not.toBeNull()
+    expect(hintElement?.textContent).toContain('Reasoning 当前已关闭')
+    expect(hintElement?.textContent).toContain('勾选开启上方 Reasoning')
+
+    // 重新开启后，不再设置 aria-describedby 到关闭提示
+    await user.click(reasoningCheckbox)
+    expect(zhEffort).toBeEnabled()
+    expect(zhEffort).not.toHaveAttribute('aria-describedby')
+    unmount()
+
+    // 2. 英文测试
+    act(() => setLocale('en-US'))
+    render(<ModelFormHarness />)
+    const enReasoningCheckbox = screen.getByLabelText('Reasoning')
+    await user.click(enReasoningCheckbox) // 关闭 Reasoning
+
+    const enEffort = screen.getByLabelText('Reasoning Effort 1')
+    expect(enEffort).toBeDisabled()
+    const enHintId = enEffort.getAttribute('aria-describedby')
+    expect(enHintId).toBeTruthy()
+    const enHintElement = document.getElementById(enHintId!)
+    expect(enHintElement).not.toBeNull()
+    expect(enHintElement?.textContent).toContain('Reasoning is disabled')
+    expect(enHintElement?.textContent).toContain('check Reasoning above to enable')
+
+    act(() => setLocale('zh-CN'))
+  })
+
+  /** 同屏表单必须分别关联自己的提示，不能复用固定 DOM id。 */
+  it('uses separate disabled-reason hint ids when two model forms are mounted', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <ModelFormHarness />
+        <ModelFormHarness />
+      </>,
+    )
+
+    for (const checkbox of screen.getAllByLabelText('Reasoning')) {
+      await user.click(checkbox)
+    }
+    const efforts = screen.getAllByLabelText('Reasoning Effort 1')
+    const hintIds = efforts.map((effort) => effort.getAttribute('aria-describedby'))
+    expect(new Set(hintIds).size).toBe(2)
+    for (const effort of efforts) {
+      expect(effort).toBeDisabled()
+      const hintId = effort.getAttribute('aria-describedby')
+      expect(hintId).toBeTruthy()
+      expect(document.getElementById(hintId!)?.textContent).toContain('Reasoning 当前已关闭')
+    }
   })
 
   it('sanitizes integer limits and decimal pricing while editing', async () => {
