@@ -56,7 +56,7 @@ describe('ChatPanel', () => {
     )
     expect(screen.getByText('hello')).toBeInTheDocument()
     expect(screen.getByText('env:local')).toBeInTheDocument()
-    expect(screen.getByText('↑10 · ↓2 · $0.125')).toBeInTheDocument()
+    expect(screen.getByText('↑10 · ↓2 · $0.125 · cache 0% · — tok/s')).toBeInTheDocument()
     expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })

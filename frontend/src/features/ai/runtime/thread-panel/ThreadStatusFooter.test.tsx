@@ -20,10 +20,10 @@ describe('ThreadStatusFooter', () => {
   it('renders zero usage facts when no closed-turn usage exists', () => {
     render(<ThreadStatusFooter />)
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('none env')
-    expect(footer).toHaveTextContent('↑0 · ↓0 · $0.000')
-    expect(footer).toHaveTextContent('cache —')
-    expect(footer).toHaveTextContent('— tok/s')
+    const lines = [...footer.querySelectorAll('.thread-status-line')]
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toBe('none env')
+    expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -66,8 +66,8 @@ describe('ThreadStatusFooter', () => {
     expect(footer).toHaveTextContent('env:dev (unavailable)')
   })
 
-  // 验证环境、上下文、累计用量、缓存率、速率按全左对齐稳定顺序渲染
-  it('renders usage, context estimate, cache hit rate, and tok/s in stable readonly order', () => {
+  // 验证闭合回合存在完整数据时，两行分别渲染环境/上下文与包含中点/cache/speed的统一用量摘要
+  it('renders environment and context on first line, and unified usage summary on second line', () => {
     render(
       <ThreadStatusFooter
         environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
@@ -88,15 +88,20 @@ describe('ThreadStatusFooter', () => {
       />,
     )
 
-    const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
-    expect(segments.map((segment) => segment.textContent)).toEqual([
-      'env:local',
-      'ctx 61/128k',
-      '↑30 · ↓9 · R14 · W17 · $0.500',
-      'cache 23%',
-      '18 tok/s',
-    ])
-    expect(screen.getByLabelText('会话状态').querySelector('button')).toBeNull()
+    const footer = screen.getByLabelText('会话状态')
+    const lines = [...footer.querySelectorAll('.thread-status-line')]
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toBe('env:local · ctx 61/128k')
+    expect(lines[1].textContent).toBe('↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s')
+    expect(lines[0]).toHaveAttribute(
+      'title',
+      'env:local · 最新模型调用已知上下文输入估计：61 / 128000 tokens（非待发请求精确值）',
+    )
+    expect(lines[1]).toHaveAttribute(
+      'title',
+      '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s',
+    )
+    expect(footer.querySelector('button')).toBeNull()
   })
 
   // 验证闭合回合为空时，零用量与无样本空态规范渲染（分母为0显示cache —，无样本显示— tok/s）
@@ -118,13 +123,17 @@ describe('ThreadStatusFooter', () => {
         contextWindow={128_000}
       />,
     )
-    const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
-    expect(segments.map((segment) => segment.textContent)).toEqual([
-      'none env',
-      'ctx 0/128k',
-      '↑0 · ↓0 · $0.000',
-      'cache —',
-      '— tok/s',
-    ])
+    const lines = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-line')]
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toBe('none env · ctx 0/128k')
+    expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
+    expect(lines[0]).toHaveAttribute(
+      'title',
+      'none env · 最新模型调用已知上下文输入估计：0 / 128000 tokens（非待发请求精确值）',
+    )
+    expect(lines[1]).toHaveAttribute(
+      'title',
+      '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：↑0 · ↓0 · $0.000 · cache — · — tok/s',
+    )
   })
 })

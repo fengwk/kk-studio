@@ -9,19 +9,22 @@ export function ThreadStatusFooter(input: ThreadStatusModelInput) {
   const { t } = useI18n()
   const model = buildThreadStatusModel(input)
 
-  if (model.segments.length === 0) {
-    return null
-  }
+  const envSegment = model.segments.find((segment) => segment.key === 'environment')
+  const contextSegment = model.segments.find((segment) => segment.key === 'context')
+  const usageSegment = model.segments.find((segment) => segment.key === 'usage')
+
+  const metaText = [envSegment?.text, contextSegment?.text].filter(Boolean).join(' · ')
+  const metaTitle = [envSegment?.title, contextSegment?.title].filter(Boolean).join(' · ')
+  const usageText = usageSegment?.text ?? ''
+  const usageTitle = usageSegment?.title ?? ''
+
   return (
     <footer className="thread-status-footer" aria-label={t('ai.runtime.thread.status')}>
-      <div className="thread-status-line">
-        {model.segments.map((segment) => (
-          <span key={segment.key} className={`thread-status-unit ${segment.className}`}>
-            <span className="thread-status-seg" title={segment.title}>
-              {segment.text}
-            </span>
-          </span>
-        ))}
+      <div className="thread-status-line thread-status-line-meta" title={metaTitle}>
+        {metaText}
+      </div>
+      <div className="thread-status-line thread-status-line-usage" title={usageTitle}>
+        {usageText}
       </div>
     </footer>
   )

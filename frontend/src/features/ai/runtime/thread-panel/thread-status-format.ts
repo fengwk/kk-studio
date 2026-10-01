@@ -1,4 +1,4 @@
-import { calculateDecodeTokensPerSecond } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
@@ -11,8 +11,7 @@ export interface EnvironmentStatusIdentity {
 }
 
 export interface ThreadStatusSegment {
-  key: 'environment' | 'context' | 'usage' | 'cache' | 'speed'
-  className: string
+  key: 'environment' | 'context' | 'usage'
   text: string
   title: string
 }
@@ -55,7 +54,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       })
     segments.push({
       key: 'environment',
-      className: 'thread-status-environment',
       text,
       title: text,
     })
@@ -63,7 +61,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     const noneText = translate('ai.runtime.status.environmentNoneText')
     segments.push({
       key: 'environment',
-      className: 'thread-status-environment',
       text: noneText,
       title: noneText,
     })
@@ -82,7 +79,6 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     })
     segments.push({
       key: 'context',
-      className: 'thread-status-context',
       text,
       title: translate('ai.runtime.status.contextTitle', {
         used: hasContext ? String(usedContext) : '—',
@@ -91,51 +87,13 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     })
   }
 
-  // 3. 累计 usage
-  const usageText = formatBranchUsage(usage)
+  // 累计用量与回合摘要共用格式，避免缓存率和速率口径漂移。
+  const usageText = formatTurnUsageText(usage)
   segments.push({
     key: 'usage',
-    className: 'thread-status-usage',
     text: usageText,
     title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
   })
-
-  // 4. cache N%：分母为 0 显示 cache —
-  const cacheDenominator = usage.input + usage.cacheRead + usage.cacheWrite
-  if (cacheDenominator > 0) {
-    const percent = Math.round((usage.cacheRead / cacheDenominator) * 100)
-    segments.push({
-      key: 'cache',
-      className: 'thread-status-cache',
-      text: translate('ai.runtime.status.cacheHitText', { percent }),
-      title: translate('ai.runtime.status.cacheHitTitle', { percent }),
-    })
-  } else {
-    segments.push({
-      key: 'cache',
-      className: 'thread-status-cache',
-      text: translate('ai.runtime.status.cacheHitNoneText'),
-      title: translate('ai.runtime.status.cacheHitNoneTitle'),
-    })
-  }
-
-  // 5. tok/s：复用统一速率计算，无样本显示 — tok/s
-  const speed = calculateDecodeTokensPerSecond(usage)
-  if (speed != null) {
-    segments.push({
-      key: 'speed',
-      className: 'thread-status-speed',
-      text: translate('ai.runtime.status.speedText', { speed }),
-      title: translate('ai.runtime.status.speedTitle', { speed }),
-    })
-  } else {
-    segments.push({
-      key: 'speed',
-      className: 'thread-status-speed',
-      text: translate('ai.runtime.status.speedNoneText'),
-      title: translate('ai.runtime.status.speedNoneTitle'),
-    })
-  }
 
   return { segments }
 }
@@ -148,21 +106,6 @@ const EMPTY_USAGE: TurnUsage = {
   reasoning: 0,
   providerTotal: 0,
   cost: 0,
-}
-
-function formatBranchUsage(usage: TurnUsage): string {
-  const parts = [
-    `↑${formatCompactNumber(usage.input)}`,
-    `↓${formatCompactNumber(usage.output)}`,
-  ]
-  if (usage.cacheRead > 0) {
-    parts.push(`R${formatCompactNumber(usage.cacheRead)}`)
-  }
-  if (usage.cacheWrite > 0) {
-    parts.push(`W${formatCompactNumber(usage.cacheWrite)}`)
-  }
-  parts.push(`$${usage.cost.toFixed(3)}`)
-  return parts.join(' · ')
 }
 
 function formatCompactNumber(value: number): string {

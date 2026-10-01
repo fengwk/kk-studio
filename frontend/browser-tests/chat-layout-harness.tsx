@@ -11,7 +11,13 @@ import {
 } from '@/features/ai/chat/chat-pane-state'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
-import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
+import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
+import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import type {
+  MetaDialogueMessage,
+  TextDialogueMessage,
+  TurnUsage,
+} from '@/features/ai/runtime/thread-timeline-types'
 
 setLocale('zh-CN')
 
@@ -51,6 +57,22 @@ const SAMPLE_USER_MESSAGE: TextDialogueMessage = {
   ],
 }
 
+const SAMPLE_TURN_USAGE_MESSAGE: MetaDialogueMessage = {
+  id: 'msg-turn-usage-1',
+  role: 'meta',
+  kind: 'turn_usage',
+  text: formatTurnUsageText({
+    input: 12400,
+    output: 1800,
+    cacheRead: 4100,
+    cacheWrite: 2300,
+    cost: 0.045,
+    decodeTokens: 1800,
+    decodeDurationMillis: 2000,
+  }),
+  createdAt: 1001,
+}
+
 const SAMPLE_BRANCH_USAGE: TurnUsage = {
   input: 12000,
   output: 800,
@@ -62,6 +84,19 @@ const SAMPLE_BRANCH_USAGE: TurnUsage = {
   decodeTokens: 950,
   decodeDurationMillis: 2000,
   contextInputTokens: 16000,
+}
+
+const SAMPLE_LONG_BRANCH_USAGE: TurnUsage = {
+  input: 123456,
+  output: 654321,
+  cacheRead: 234567,
+  cacheWrite: 345678,
+  reasoning: 42000,
+  providerTotal: 1357900,
+  cost: 123456.789,
+  decodeTokens: 987654321,
+  decodeDurationMillis: 10000,
+  contextInputTokens: 890123,
 }
 
 export function ChatLayoutHarnessApp() {
@@ -111,16 +146,42 @@ export function ChatLayoutHarnessApp() {
                   <div data-testid="pane-1-messages" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {/* 测试用户消息图片与文字的 6px 间距 */}
                     <UserMessageBlock message={SAMPLE_USER_MESSAGE} />
+                    {/* 测试真实 MetaMessageBlock 用量统计单行截断与完整 title */}
+                    <MetaMessageBlock message={SAMPLE_TURN_USAGE_MESSAGE} />
+                    {/* 隔离验证基础 meta 样式，不构造类型契约外的消息。 */}
+                    <div className="thread-block-meta" data-testid="base-meta-style">
+                      <div className="thread-block-body thread-meta-text">
+                        这是一段包含较多字符的辅助提示信息，在窄屏视口下保持自然折行与完整文本展示。
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
-              {/* 测试 ThreadStatusFooter 左对齐与各单元顺序 */}
+              {/* 测试 ThreadStatusFooter 稳定两行单行截断与省略 */}
               <footer data-testid={`pane-${index + 1}-footer`} style={{ marginTop: 'auto' }}>
-                <ThreadStatusFooter
-                  environment={{ environmentName: 'production' }}
-                  contextWindow={128000}
-                  branchUsage={SAMPLE_BRANCH_USAGE}
-                />
+                {index === 0 && (
+                  <ThreadStatusFooter
+                    environment={{ environmentId: 'env-prod-1', environmentName: 'production' }}
+                    contextWindow={128000}
+                    branchUsage={SAMPLE_BRANCH_USAGE}
+                  />
+                )}
+                {index === 1 && (
+                  <ThreadStatusFooter
+                    environment={{
+                      environmentId: 'env-cluster-primary-us-east-999',
+                      environmentName: 'production-us-east-long-cluster-primary-node',
+                    }}
+                    contextWindow={256000}
+                    branchUsage={SAMPLE_LONG_BRANCH_USAGE}
+                  />
+                )}
+                {index >= 2 && (
+                  <ThreadStatusFooter
+                    environment={null}
+                    branchUsage={null}
+                  />
+                )}
               </footer>
             </section>
           ))}
