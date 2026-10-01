@@ -19,6 +19,14 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影。 */
+export interface BoundThreadPreviewOptions {
+  onPreview?: () => void
+  previewLoading?: boolean
+  previewDisabled?: boolean
+  previewDisabledReason?: string | null
+  previewError?: string | null
+}
+
 export function useBoundThreadPanelViews(
   threadId: string,
   controller: {
@@ -26,6 +34,7 @@ export function useBoundThreadPanelViews(
     events: ThreadEventRecord[]
     working: boolean
   },
+  previewOptions?: BoundThreadPreviewOptions,
 ) {
   const {
     mode,
@@ -78,6 +87,11 @@ export function useBoundThreadPanelViews(
             }
             setDebugSelection(selection)
           }}
+          onPreview={previewOptions?.onPreview}
+          previewLoading={previewOptions?.previewLoading}
+          previewDisabled={previewOptions?.previewDisabled}
+          previewDisabledReason={previewOptions?.previewDisabledReason}
+          previewError={previewOptions?.previewError}
         />
       ) : undefined,
   }

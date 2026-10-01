@@ -214,12 +214,21 @@ ProviderRequest（空态防御留在 Inspector 内部不再常显无效按钮）
 `GET /api/harness/threads/{threadId}/model-request-debug`，进入 Debug 拉取一次，并在
 Turn 开始/结束时刷新。
 
-已绑定 Thread 的 Composer 在发送旁提供“预览请求”：沿用发送的批次构建（包括草稿设置与就绪
-附件的 uploadId），调用 `POST /api/harness/threads/{threadId}/provider-request-preview`，
-不清空草稿，也不提交命令。结果直接打开 Debug 第三列的独立“请求预览”检查器；窄屏自动进入
+已绑定 CHAT Thread 的 Debug 标题“下一次请求预览”是原生按钮，Composer 不再提供预览入口。
+空草稿、slash/goal 命令、附件未就绪、运行中、排队、只读或请求加载中会禁用按钮，并以
+title 说明原因；未绑定 Thread 与非 CHAT 场景不扩大支持。Composer 持有上传状态，通过
+`preparePreview()` 同时提供服务端 uploadId 载荷与保留 localId 的本地草稿，不消费、释放或分离附件。
+
+点击后冻结草稿设置、effective base 与消息载荷，先读取最新 Thread Snapshot；
+服务端设置相对冻结 base 发生变化时直接拒绝，缓存刷新不覆盖本地草稿。最新 Snapshot
+有运行、排队或活动 model/tool invocation 时也拒绝。否则用最新 head 与 next command sequence
+构建预览批次，调用 `POST /api/harness/threads/{threadId}/provider-request-preview`，
+不清空草稿、不提交命令，也不重试模型调用。GET/POST 等待期间草稿或目标改变、组件卸载，
+迟到结果与错误均被丢弃；同一请求单飞。结果直接打开 Debug 第三列既有“请求预览”检查器；窄屏自动进入
 “详情”页签。此处展示的是**点击时**真实 Provider 协议 JSON body，可能包含历史与附件的
 Base64 内联媒体；与上述不包含 Base64 的结构化诊断、活动请求快照互不混淆，且不展示
-认证 Header。新建 Session/Thread 无此按钮；409 等失败只提示原因并保留草稿。请求和发送
+认证 Header。409 只按九种 `PREVIEW_*` reason 白名单输出中英文文案，未知 reason 使用预览专属
+安全提示，不回显服务端 detail、原始错误或 URL；其他错误同样使用本地安全提示。请求和发送
 之间的历史或配置可能变化，预览不是对后续发送字节的保证。
 
 运行控制面同样以 Snapshot 为对账依据：

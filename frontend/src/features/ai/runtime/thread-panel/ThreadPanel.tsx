@@ -1,5 +1,9 @@
-import { useMemo, type ReactNode, type RefObject } from 'react'
-import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { useMemo, type ReactNode, type Ref, type RefObject } from 'react'
+import {
+  ThreadComposer,
+  type ComposerPreviewReadiness,
+  type ThreadComposerHandle,
+} from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
 import { ThreadErrorPanel } from '@/features/ai/runtime/thread-panel/ThreadErrorPanel'
 import { ThreadWidgetStack } from '@/features/ai/runtime/thread-panel/ThreadWidgetStack'
@@ -66,10 +70,9 @@ export interface ThreadPanelComposerInput {
   interactionPanel?: ReactNode
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
-  onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  previewLoading?: boolean
-  previewDisabled?: boolean
   scope?: string
+  composerRef?: Ref<ThreadComposerHandle>
+  onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
 }
 
 /**
@@ -109,6 +112,7 @@ interface ThreadPanelProps {
  * Conversation/Debug 互斥主滚动区 -> 装饰性 widget/队列 -> slash 命令输入 -> footer
  */
 export function ThreadPanel({ transcript, mainView, composer, activity, slots, heading }: ThreadPanelProps) {
+  const { composerRef } = composer
   const interactionOpen = composer.interactionPanel != null
   const historicalUserMessages = useMemo(
     () => transcript.messages.flatMap((message) =>
@@ -151,6 +155,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
         ) : null}
         <ThreadComposer
+          ref={composerRef}
           parts={composer.parts}
           pending={composer.pending}
           disabled={composer.disabled}
@@ -165,10 +170,8 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
           historicalUserMessages={historicalUserMessages}
           queuedUserMessages={queuedUserMessages}
           settings={composer.settings}
-          onPreview={composer.onPreview}
-          previewLoading={composer.previewLoading}
-          previewDisabled={composer.previewDisabled}
           scope={composer.scope}
+          onPreviewReadinessChange={composer.onPreviewReadinessChange}
         />
         {composer.interactionPanel}
         {slots?.footer}

@@ -953,4 +953,101 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.queryByText(/api-key/i)).not.toBeInTheDocument()
     })
   })
+
+  describe('next request preview title button', () => {
+    it('disables the title without onPreview and surfaces the disabled reason', () => {
+      // 测试意图：预览入口是 Debug 标题的原生 button；无 onPreview 时禁用，
+      // 携带 previewDisabledReason 时 title/aria-label 暴露不可预览原因。
+      const { rerender } = render(
+        <ThreadModelRequestDebug debug={sampleDebug()} onSelectInspector={vi.fn()} />,
+      )
+      const idleTitle = screen.getByRole('button', { name: '下一次请求预览' })
+      expect(idleTitle).toBeDisabled()
+      expect(idleTitle).toHaveAttribute('title', '下一次请求预览')
+
+      rerender(
+        <ThreadModelRequestDebug
+          debug={sampleDebug()}
+          onSelectInspector={vi.fn()}
+          onPreview={vi.fn()}
+          previewDisabled
+          previewDisabledReason="草稿为空"
+        />,
+      )
+      const blockedTitle = screen.getByRole('button', { name: '下一次请求预览 (草稿为空)' })
+      expect(blockedTitle).toBeDisabled()
+      expect(blockedTitle).toHaveAttribute('title', '下一次请求预览 (草稿为空)')
+    })
+
+    it('swaps the title to the loading label with a spinner while a preview is in flight', () => {
+      // 测试意图：previewLoading 时按钮禁用，title/aria-label 变为生成中文案并渲染 spinner 图标。
+      render(
+        <ThreadModelRequestDebug
+          debug={sampleDebug()}
+          onSelectInspector={vi.fn()}
+          onPreview={vi.fn()}
+          previewLoading
+        />,
+      )
+      const loadingTitle = screen.getByRole('button', { name: '正在生成请求预览…' })
+      expect(loadingTitle).toBeDisabled()
+      expect(loadingTitle).toHaveAttribute('title', '正在生成请求预览…')
+      expect(loadingTitle.querySelector('.spin')).not.toBeNull()
+    })
+
+    it('runs onPreview on title click and renders the localized preview error', async () => {
+      // 测试意图：可用时点击标题触发预览请求；预览失败以 role=alert 展示本地化错误，且不破坏其余面板内容。
+      const user = userEvent.setup()
+      const onPreview = vi.fn()
+      const { rerender } = render(
+        <ThreadModelRequestDebug
+          debug={sampleDebug()}
+          onSelectInspector={vi.fn()}
+          onPreview={onPreview}
+        />,
+      )
+      const titleButton = screen.getByRole('button', { name: '下一次请求预览' })
+      expect(titleButton).toBeEnabled()
+      await user.click(titleButton)
+      expect(onPreview).toHaveBeenCalledTimes(1)
+
+      rerender(
+        <ThreadModelRequestDebug
+          debug={sampleDebug()}
+          onSelectInspector={vi.fn()}
+          onPreview={onPreview}
+          previewError="会话游标已过期，请刷新状态后重试"
+        />,
+      )
+      expect(screen.getByRole('alert')).toHaveTextContent('会话游标已过期，请刷新状态后重试')
+      expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
+    })
+
+    it('keeps the frozen request snapshot entry next to the preview title', async () => {
+      // 测试意图：标题按钮化不得挤掉 frozen invocation 的请求快照入口；
+      // 无冻结调用时快照入口消失，但预览标题按钮始终存在。
+      const user = userEvent.setup()
+      const onSelectInspector = vi.fn()
+      const { rerender } = render(
+        <ThreadModelRequestDebug
+          debug={sampleDebug()}
+          onSelectInspector={onSelectInspector}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '下一次请求预览' })).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: '查看当前调用规范化请求快照' }))
+      expect(onSelectInspector).toHaveBeenCalledWith({ type: 'request' })
+
+      rerender(
+        <ThreadModelRequestDebug
+          debug={sampleDebug({ frozenInvocation: null })}
+          onSelectInspector={onSelectInspector}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: '查看当前调用规范化请求快照' })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '下一次请求预览' })).toBeInTheDocument()
+    })
+  })
 })
