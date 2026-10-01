@@ -83,7 +83,7 @@ final class AnthropicRequestEncoder {
   private static final List<String> RUNTIME_OWNED_OPTION_FIELDS =
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
-  private static final int MAX_CACHE_BREAKPOINTS = 3;
+  private static final int MAX_CACHE_BREAKPOINTS = 4;
   private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
 
   private final AnthropicConfiguration configuration;
@@ -139,8 +139,12 @@ final class AnthropicRequestEncoder {
 
     // 从左到右构建 wire messages 并维护 prefix hash
     ArrayNode wireMessagesArray = NODES.arrayNode();
+    List<ObjectNode> cacheEndpoints = new ArrayList<>();
+    ObjectNode lastEligible = null;
     for (ProviderMessage msg : request.messages()) {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
+        // assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。
+        addCacheEndpoint(cacheEndpoints, lastEligible);
         String currentPrefixHash =
             AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
         EncodedAssistantMessage assistant =
@@ -149,6 +153,8 @@ final class AnthropicRequestEncoder {
         // 校验通过后再清空已编码消息，使 compaction assistant message 成为首条消息、被摘要历史整体省略。
         if (assistant.resetsHistory()) {
           wireMessagesArray.removeAll();
+          cacheEndpoints.clear();
+          lastEligible = null;
         }
         wireMessagesArray.add(assistant.node());
       } else if (msg.role() == ProviderMessageRole.USER) {
@@ -159,14 +165,20 @@ final class AnthropicRequestEncoder {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
       }
+      ObjectNode messageEndpoint =
+          latestEligibleBlock(wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
+      if (messageEndpoint != null) {
+        lastEligible = messageEndpoint;
+      }
     }
+    addCacheEndpoint(cacheEndpoints, lastEligible);
 
     // 冻结当前请求新 assistant 生成前的 sourcePrefixHash
     String frozenSourcePrefixHash =
         AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
 
     // 注入 cache marker（排它于 prefix hash）
-    applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, wireMessagesArray);
+    applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
 
     if (!toolsArray.isEmpty()) {
       root.set("tools", toolsArray);
@@ -331,6 +343,11 @@ final class AnthropicRequestEncoder {
       Set<String> names = new HashSet<>();
       for (int i = 0; i < nativeTools.size(); i++) {
         JsonNode nativeTool = nativeTools.get(i);
+        if (nativeTool.has("cache_control")) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "protocolOptions must not override runtime field: tools[" + i + "].cache_control");
+        }
         JsonNode type = nativeTool.path("type");
         JsonNode name = nativeTool.path("name");
         if (!nativeTool.isObject()
@@ -816,10 +833,8 @@ final class AnthropicRequestEncoder {
       ProviderCacheControl cacheControl,
       ArrayNode toolsArray,
       ArrayNode systemArray,
-      ArrayNode wireMessagesArray) {
-    if (cacheControl == null
-        || cacheControl.retention() == PromptCacheRetention.NONE
-        || cacheControl.breakpoints().isEmpty()) {
+      List<ObjectNode> cacheEndpoints) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
 
@@ -832,59 +847,58 @@ final class AnthropicRequestEncoder {
     int markersPlaced = 0;
 
     // 1. TOOLS: 最后一个合格 tool
-    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.TOOLS)
-        && toolsArray != null
-        && !toolsArray.isEmpty()) {
-      JsonNode lastTool = toolsArray.get(toolsArray.size() - 1);
-      if (lastTool.isObject()) {
-        ((ObjectNode) lastTool).set("cache_control", marker);
-        markersPlaced++;
-      }
+    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.TOOLS) && !toolsArray.isEmpty()) {
+      ((ObjectNode) toolsArray.get(toolsArray.size() - 1)).set("cache_control", marker);
+      markersPlaced++;
     }
 
     // 2. SYSTEM: 最后一个合格 system block
-    if (markersPlaced < MAX_CACHE_BREAKPOINTS
-        && cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)
-        && systemArray != null
-        && !systemArray.isEmpty()) {
-      JsonNode lastSystemBlock = systemArray.get(systemArray.size() - 1);
-      if (lastSystemBlock.isObject()) {
-        ((ObjectNode) lastSystemBlock).set("cache_control", marker);
+    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)) {
+      ObjectNode lastSystemBlock = latestEligibleBlock(systemArray);
+      if (lastSystemBlock != null) {
+        lastSystemBlock.set("cache_control", marker);
         markersPlaced++;
       }
     }
 
-    // 3. CONVERSATION: 最新合格 conversation block（排除 thinking / redacted_thinking）
-    if (markersPlaced < MAX_CACHE_BREAKPOINTS
-        && cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)
-        && wireMessagesArray != null
-        && !wireMessagesArray.isEmpty()) {
-      markLatestEligibleConversationBlock(wireMessagesArray, marker);
+    // 3. CONVERSATION: 剩余预算用于最近历史请求端点与当前尾部；仅在全部 hash 验证/冻结后写 marker。
+    if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
+      for (int i = cacheEndpoints.size() - 1;
+          i >= 0 && markersPlaced < MAX_CACHE_BREAKPOINTS;
+          i--) {
+        cacheEndpoints.get(i).set("cache_control", marker);
+        markersPlaced++;
+      }
     }
   }
 
-  private static void markLatestEligibleConversationBlock(
-      ArrayNode wireMessagesArray, ObjectNode marker) {
-    for (int m = wireMessagesArray.size() - 1; m >= 0; m--) {
-      JsonNode msgNode = wireMessagesArray.get(m);
-      if (!msgNode.isObject() || !msgNode.has("content")) {
-        continue;
-      }
-      JsonNode contentNode = msgNode.get("content");
-      if (contentNode.isArray()) {
-        ArrayNode contents = (ArrayNode) contentNode;
-        for (int c = contents.size() - 1; c >= 0; c--) {
-          JsonNode block = contents.get(c);
-          if (block.isObject()) {
-            String type = block.path("type").asText();
-            if (!"thinking".equals(type) && !"redacted_thinking".equals(type)) {
-              ((ObjectNode) block).set("cache_control", marker);
-              return;
-            }
-          }
-        }
+  /** 候选必须引用最终 wire 中的同一对象；相同文本不是相同端点，连续空/opaque 消息则不重复占预算。 */
+  private static void addCacheEndpoint(List<ObjectNode> endpoints, ObjectNode endpoint) {
+    if (endpoint != null
+        && (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != endpoint)) {
+      endpoints.add(endpoint);
+      if (endpoints.size() > MAX_CACHE_BREAKPOINTS) {
+        endpoints.removeFirst();
       }
     }
+  }
+
+  /** 保守选择本地支持的官方可缓存块，不猜测未知块或签名块的格式，也不清洗空 text。 */
+  private static ObjectNode latestEligibleBlock(JsonNode contents) {
+    for (int i = contents.size() - 1; i >= 0; i--) {
+      JsonNode block = contents.get(i);
+      boolean eligible =
+          switch (block.path("type").asText()) {
+            case "text" -> block.path("text").isTextual()
+                && !block.path("text").textValue().isEmpty();
+            case "image", "document", "tool_use", "tool_result" -> true;
+            default -> false;
+          };
+      if (eligible) {
+        return (ObjectNode) block;
+      }
+    }
+    return null;
   }
 
   private static boolean isValidHttpUrl(String source) {
