@@ -2589,6 +2589,14 @@ div.is-error {
   color: var(--fg-muted);
 }
 
+.thread-block-meta.kind-turn_usage .thread-meta-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  font-variant-numeric: tabular-nums;
+}
+
 .thread-block-entry {
   padding: 8px 12px;
   border-left: 2px solid var(--line-strong);
@@ -5398,59 +5406,24 @@ select.settings-input option {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--bg);
-  padding: 7px 16px 9px;
+  padding: 6px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .thread-status-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px 10px;
-  min-width: 0;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-  text-align: left;
-}
-
-.thread-status-unit {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.thread-status-unit:not(:last-child)::after {
-  content: '';
-  display: inline-block;
-  width: 1px;
-  height: 11px;
-  margin-left: 10px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-
-.thread-status-seg {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.thread-status-usage {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
   font-variant-numeric: tabular-nums;
-}
-
-.thread-status-environment,
-.thread-status-git,
-.thread-status-context,
-.thread-status-cache,
-.thread-status-speed {
-  flex: 0 0 auto;
+  text-align: left;
 }
 
 .run-status {

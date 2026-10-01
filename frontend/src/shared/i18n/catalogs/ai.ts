@@ -1620,8 +1620,8 @@ export const aiCatalog = {
     'zh-CN': 'none env',
   },
   'ai.runtime.status.branchUsageTitle': {
-    'en-US': 'Branch usage: {{usage}}',
-    'zh-CN': '分支用量：{{usage}}',
+    'en-US': 'Cumulative branch usage (including the first request; cache is the cumulative input cache hit rate): {{usage}}',
+    'zh-CN': '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：{{usage}}',
   },
   'ai.runtime.status.contextText': {
     'en-US': 'ctx {{used}}/{{total}}',
@@ -1630,38 +1630,6 @@ export const aiCatalog = {
   'ai.runtime.status.contextTitle': {
     'en-US': 'Estimated context tokens from latest model invocation: {{used}} / {{total}} (not exact for next pending request)',
     'zh-CN': '最新模型调用已知上下文输入估计：{{used}} / {{total}} tokens（非待发请求精确值）',
-  },
-  'ai.runtime.status.cacheHitText': {
-    'en-US': 'cache {{percent}}%',
-    'zh-CN': 'cache {{percent}}%',
-  },
-  'ai.runtime.status.cacheHitTitle': {
-    'en-US': 'Estimated cache hit rate: {{percent}}%',
-    'zh-CN': '估算缓存命中率：{{percent}}%',
-  },
-  'ai.runtime.status.cacheHitNoneText': {
-    'en-US': 'cache —',
-    'zh-CN': 'cache —',
-  },
-  'ai.runtime.status.cacheHitNoneTitle': {
-    'en-US': 'Estimated cache hit rate: no input tokens',
-    'zh-CN': '估算缓存命中率：无输入 tokens',
-  },
-  'ai.runtime.status.speedText': {
-    'en-US': '{{speed}} tok/s',
-    'zh-CN': '{{speed}} tok/s',
-  },
-  'ai.runtime.status.speedNoneText': {
-    'en-US': '— tok/s',
-    'zh-CN': '— tok/s',
-  },
-  'ai.runtime.status.speedTitle': {
-    'en-US': 'Branch decode speed: {{speed}} tokens/sec (excludes TTFT and tool duration)',
-    'zh-CN': '分支模型解码速率：{{speed}} tokens/秒（排除首字等待与工具耗时）',
-  },
-  'ai.runtime.status.speedNoneTitle': {
-    'en-US': 'Branch decode speed: no measured samples',
-    'zh-CN': '分支模型解码速率：暂无测速样本',
   },
   'ai.runtime.usage.metaTooltip': {
     'en-US': '↑Uncached prompt · ↓Completion · R Cache read (not reasoning) · W Cache write · $ Total cost (reasoning included) · cache hit rate · tok/s decode speed. Note: R is prompt cache read, not reasoning tokens.',

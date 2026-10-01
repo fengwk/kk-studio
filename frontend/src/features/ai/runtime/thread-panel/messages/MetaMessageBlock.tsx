@@ -7,7 +7,9 @@ import { useI18n } from '@/shared/i18n'
  */
 export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) {
   const { t } = useI18n()
-  const title = message.kind === 'turn_usage' ? t('ai.runtime.usage.metaTooltip') : undefined
+  const title = message.kind === 'turn_usage'
+    ? (message.text ? `${message.text}\n${t('ai.runtime.usage.metaTooltip')}` : t('ai.runtime.usage.metaTooltip'))
+    : undefined
   return (
     <section
       className={`thread-block thread-block-meta kind-${message.kind}`}

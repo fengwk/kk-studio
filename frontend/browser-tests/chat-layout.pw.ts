@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -309,42 +310,171 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
   })
 
-  test('ThreadStatusFooter aligns left, orders units correctly with CSS vertical dividers and natural wrapping', async ({
+  test('ThreadStatusFooter and MetaMessageBlock maintain single-line ellipsis without wrapping or horizontal page overflow', async ({
     page,
   }) => {
+    // 确保 reports/layout 目录存在
+    fs.mkdirSync(REPORTS_DIR, { recursive: true })
+
+    // 1. 桌面视口 1280x800（验证 split-2 与分屏 split-3 下单行省略截断）
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/browser-tests/chat-layout-harness.html')
 
-    const footer = page.locator('[data-testid="pane-1-footer"]')
-    await expect(footer).toBeVisible()
+    const pane1Footer = page.locator('[data-testid="pane-1-footer"]')
+    await expect(pane1Footer).toBeVisible()
 
-    // 验证状态栏中的 5 个单元与文本内容
-    const units = footer.locator('.thread-status-unit')
-    await expect(units).toHaveCount(5)
+    // 验证 Footer 两行结构及文本
+    const pane1Lines = pane1Footer.locator('.thread-status-line')
+    await expect(pane1Lines).toHaveCount(2)
+    await expect(pane1Lines.nth(0)).toHaveText('env:production · ctx 16k/128k')
+    await expect(pane1Lines.nth(1)).toHaveText('↑12k · ↓800 · R4.0k · $0.042 · cache 25% · 475 tok/s')
 
-    // 顺序必须严格为: 环境 | 上下文 | 累计usage | cache N% | tok/s
-    await expect(units.nth(0)).toContainText('production')
-    await expect(units.nth(1)).toContainText('16k/128k')
-    await expect(units.nth(2)).toContainText('↑12k · ↓800 · R4.0k · $0.042')
-    await expect(units.nth(3)).toContainText('cache 25%')
-    await expect(units.nth(4)).toContainText('475 tok/s')
+    // 切换到 3 分屏，使每列宽度约束至 ~400px，验证桌面分屏场景下的真实截断
+    await selectLayoutOption(page, 'split-3', '3')
+    const pane2Footer = page.locator('[data-testid="pane-2-footer"]')
+    await expect(pane2Footer).toBeVisible()
+    const pane2Lines = pane2Footer.locator('.thread-status-line')
+    await expect(pane2Lines).toHaveCount(2)
 
-    // 验证各单元左对齐布局（flex justify-content 不是 flex-end 或 space-between）
-    const lineJustify = await footer.locator('.thread-status-line').evaluate((el) => {
-      return window.getComputedStyle(el).justifyContent
+    // Pane 2 摘要在 split-3 宽度下内容超出，验证真实 overflow：scrollWidth > clientWidth 且单行 ellipsis
+    const pane2UsageOverflow = await pane2Lines.nth(1).evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return {
+        whiteSpace: style.whiteSpace,
+        textOverflow: style.textOverflow,
+        overflow: style.overflow,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        clientHeight: el.clientHeight,
+      }
     })
-    expect(['flex-start', 'start', 'normal']).toContain(lineJustify)
+    expect(pane2UsageOverflow.whiteSpace).toBe('nowrap')
+    expect(pane2UsageOverflow.textOverflow).toBe('ellipsis')
+    expect(pane2UsageOverflow.overflow).toBe('hidden')
+    expect(pane2UsageOverflow.scrollWidth).toBeGreaterThan(pane2UsageOverflow.clientWidth)
+    expect(pane2UsageOverflow.clientHeight).toBeLessThanOrEqual(24)
 
-    // 验证超窄屏 (320px) 下换行无横向溢出
+    // 桌面分屏截图
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-usage-layout-desktop-split.png'),
+      fullPage: false,
+    })
+
+    // 切回 split-2 并截图
+    await selectLayoutOption(page, 'split-2', '2')
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-usage-layout-desktop-1280.png'),
+      fullPage: false,
+    })
+
+    // 2. 移动端 375px 视口
+    await page.setViewportSize({ width: 375, height: 812 })
+    await page.waitForTimeout(100)
+
+    // 验证 MetaMessageBlock turn_usage 单行截断
+    const metaUsage = page.locator('.kind-turn_usage .thread-meta-text').first()
+    await expect(metaUsage).toBeVisible()
+    const metaUsageStyle = await metaUsage.evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return {
+        whiteSpace: style.whiteSpace,
+        textOverflow: style.textOverflow,
+        overflow: style.overflow,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        clientHeight: el.clientHeight,
+        title: el.getAttribute('title') || '',
+      }
+    })
+    expect(metaUsageStyle.whiteSpace).toBe('nowrap')
+    expect(metaUsageStyle.textOverflow).toBe('ellipsis')
+    expect(metaUsageStyle.overflow).toBe('hidden')
+    expect(metaUsageStyle.scrollWidth).toBeGreaterThan(metaUsageStyle.clientWidth)
+    expect(metaUsageStyle.clientHeight).toBeLessThanOrEqual(24)
+    expect(metaUsageStyle.title).toContain('↑12k')
+    expect(metaUsageStyle.title).toContain('注：R表示缓存读取不是推理')
+
+    // 基础 meta 样式保留换行；省略规则只作用于回合用量。
+    const metaInfo = page.locator('[data-testid="base-meta-style"] .thread-meta-text')
+    await expect(metaInfo).toBeVisible()
+    const metaInfoStyle = await metaInfo.evaluate((el) => ({
+      whiteSpace: window.getComputedStyle(el).whiteSpace,
+      clientHeight: el.clientHeight,
+    }))
+    expect(metaInfoStyle.whiteSpace).toBe('pre-wrap')
+    expect(metaInfoStyle.clientHeight).toBeGreaterThan(24)
+
+    // 普通摘要在 375px 下可完整容纳；长摘要必须真实触发截断。
+    const pane1Usage375 = await pane1Lines.nth(1).evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return {
+        whiteSpace: style.whiteSpace,
+        textOverflow: style.textOverflow,
+        overflow: style.overflow,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        clientHeight: el.clientHeight,
+      }
+    })
+    expect(pane1Usage375.whiteSpace).toBe('nowrap')
+    expect(pane1Usage375.textOverflow).toBe('ellipsis')
+    expect(pane1Usage375.overflow).toBe('hidden')
+    expect(pane1Usage375.clientHeight).toBeLessThanOrEqual(24)
+    const pane2Usage375 = await pane2Lines.nth(1).evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+    }))
+    expect(pane2Usage375.scrollWidth).toBeGreaterThan(pane2Usage375.clientWidth)
+    expect(pane2Usage375.clientHeight).toBeLessThanOrEqual(24)
+
+    // 验证页面与容器无横向滚动溢出
+    const overflow375 = await page.evaluate(() => ({
+      pageScrollWidth: document.documentElement.scrollWidth,
+      pageClientWidth: document.documentElement.clientWidth,
+      bodyScrollWidth: document.body.scrollWidth,
+      bodyClientWidth: document.body.clientWidth,
+    }))
+    expect(overflow375.pageScrollWidth).toBeLessThanOrEqual(overflow375.pageClientWidth + 1)
+    expect(overflow375.bodyScrollWidth).toBeLessThanOrEqual(overflow375.bodyClientWidth + 1)
+
+    // 移动端 375px 截图
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-usage-layout-mobile-375.png'),
+      fullPage: false,
+    })
+
+    // 3. 超窄屏 320px 视口
     await page.setViewportSize({ width: 320, height: 600 })
     await page.waitForTimeout(100)
 
-    const statusLine = footer.locator('.thread-status-line')
-    const overflowInfo = await statusLine.evaluate((el) => ({
+    const metaUsage320 = await metaUsage.evaluate((el) => ({
+      clientHeight: el.clientHeight,
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
     }))
-    expect(overflowInfo.scrollWidth).toBeLessThanOrEqual(overflowInfo.clientWidth + 2)
+    expect(metaUsage320.clientHeight).toBeLessThanOrEqual(24)
+    expect(metaUsage320.scrollWidth).toBeGreaterThan(metaUsage320.clientWidth)
+
+    const pane1Usage320 = await pane1Lines.nth(1).evaluate((el) => ({
+      clientHeight: el.clientHeight,
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }))
+    expect(pane1Usage320.clientHeight).toBeLessThanOrEqual(24)
+    expect(pane1Usage320.scrollWidth).toBeGreaterThan(pane1Usage320.clientWidth)
+
+    const overflow320 = await page.evaluate(() => ({
+      pageScrollWidth: document.documentElement.scrollWidth,
+      pageClientWidth: document.documentElement.clientWidth,
+    }))
+    expect(overflow320.pageScrollWidth).toBeLessThanOrEqual(overflow320.pageClientWidth + 1)
+
+    // 超窄屏 320px 截图
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-usage-layout-mobile-320.png'),
+      fullPage: false,
+    })
   })
 
   test('User message attachments use unified 6px gap without asymmetric margin', async ({

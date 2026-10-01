@@ -244,7 +244,19 @@ Composer 区域包含编辑器、命令菜单、底栏 controls 与附件栏，�
 关闭 slash 提示时主动 blur 避免立即再开。菜单可见时 Enter 执行可见选项；收起状态下不执行隐藏命令，
 且 `canSend` 阻止 slash 发送普通消息。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
 
-Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；分屏下拉菜单采用高特异性 `.ui-select.chat-layout-selector.is-compact .ui-select-menu` 约束 `80px` 紧凑定宽与 `28px` option 最小高度，全部 9 项在视口高度 ≥ 350px 时自适应容纳且无纵向滚动条，超短视口（< 300px）保留滚动能力，在 320px 窄屏下靠右对齐且不横向溢出，同时不影响全仓其他通用 Select；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。底部 ThreadStatusFooter 严格左对齐并以细竖线分隔各只读单元（`环境 | 上下文 | 累计usage | cache N% | tok/s`），在小屏下自然折行；上下文输入 token 采用最新模型调用估算，同回合内多个 Assistant 调用的 usage 和 cost 予以累计聚合，有效流式时长与解码 token 共同计算 `tok/s` 速率。target 三态是：
+Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；分屏下拉菜单采用高特异性 `.ui-select.chat-layout-selector.is-compact .ui-select-menu` 约束 `80px` 紧凑定宽与 `28px` option 最小高度，全部 9 项在视口高度 ≥ 350px 时自适应容纳且无纵向滚动条，超短视口（< 300px）保留滚动能力，在 320px 窄屏下靠右对齐且不横向溢出，同时不影响全仓其他通用 Select；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。
+
+底部 ThreadStatusFooter 左对齐并固定为两条只读信息行：第一行以中点连接环境与上下文，
+第二行展示与回合摘要同格式的用量统计：
+`↑input · ↓output · Rcache · Wcache · $cost · cache N% · X tok/s`。
+每条统计在超宽时单行省略，不折行；`title` 保留完整摘要。上下文输入采用最新模型调用估算，
+同回合内多个 Assistant 调用的 usage 和 cost 累计聚合，有效流式时长与解码 token 共同计算速率。
+
+回合摘要统计该回合的调用，Footer 用量统计当前分支所有已关闭回合（含首次请求）。两处缓存率均为
+`cacheRead / (input + cacheRead + cacheWrite)`；`input` 是未缓存输入，输出与推理 token 不进入
+分母。累计缓存率包含冷启动，因此不能直接与最新调用的缓存率比较。
+
+target 三态是：
 
 | Pane target | 入口 | 本地事实 | 发送结果 |
 | --- | --- | --- | --- |

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
+import { calculateCacheHitRate } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type {
   DialogueMessage,
   MetaDialogueMessage,
@@ -137,6 +138,32 @@ describe('aggregateBranchUsage', () => {
     })
     // 0.01 + 0.02 + 0.005 的浮点原值不应被 round 篡改
     expect(aggregated?.cost).toBeCloseTo(0.035, 10)
+  })
+
+  // 累计缓存率包含冷启动，不能偷换成最新调用的比率，也不能平均各回合百分比。
+  it('includes cold-start input in cumulative cache hit rate', () => {
+    const usage = (input: number, cacheRead: number): TurnUsage => ({
+      input,
+      cacheRead,
+      output: 0,
+      cacheWrite: 0,
+      reasoning: 0,
+      providerTotal: input + cacheRead,
+      cost: 0,
+    })
+    const turns = [
+      usage(4347, 0),
+      usage(161, 4224),
+      usage(260, 4352),
+      usage(322, 4608),
+    ]
+    const aggregated = aggregateBranchUsage(
+      turns.map((turn, index) => usageMessage(`usage-${index}`, turn)),
+    )
+    expect(calculateCacheHitRate(turns[2])).toBe(94)
+    expect(calculateCacheHitRate(turns[3])).toBe(93)
+    expect(aggregated).toMatchObject({ input: 5090, cacheRead: 13184 })
+    expect(calculateCacheHitRate(aggregated!)).toBe(72)
   })
 
   it('returns null when the branch has no TURN_END usage summary', () => {
