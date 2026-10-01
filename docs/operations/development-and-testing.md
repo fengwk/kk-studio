@@ -349,6 +349,29 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
 database 中的 `minimax` Responses Provider。
 
+四种协议的文本缓存验收已注册为 `real.text_cache.*`，可由矩阵自动执行，不需要另加手工探针。
+取得付费授权、提供上述四组凭据后，必须使用隔离的新 DB、S3 与后端，不复用开发或生产环境。
+两个指定模型可分别执行：
+
+```bash
+./scripts/dev/verify/e2e/run.sh --real --only real.text_cache.deepseek_chat
+./scripts/dev/verify/e2e/run.sh --real --only real.text_cache.google_gemini
+```
+
+Google 固定首轮加 1 个 follow-up（最多 2 次），其他协议首轮加最多 3 个 follow-up（最多 4 次，
+命中即停）；case 不自动加重试。每轮验证 marker、usage 七字段及厂商代数，同时要求 IDLE、
+无 active `modelInvocation`、无 `queuedCommands`，对应 `TURN_END` 为 COMPLETED 且
+`continueModel=false`。非 Google 必须至少一个 follow-up 的 `cacheReadTokens>0`。
+Gemini implicit cache 是机会性能力，零缓存不会导致失败：**Gemini PASS 只代表协议执行与 usage
+通过，不代表缓存命中**。
+
+报告中的 `real-text-cache-*.json` 使用统一 `rounds`，每轮 `ordinal` 从首轮 1 开始，记录 usage
+七字段及单请求 `cacheReadRatio=cacheReadTokens/(inputTokens+cacheReadTokens+cacheWriteTokens+cacheWriteLongTokens)`。
+`modelRequestCount` 是已完成观测数，不是底层 transport retries 计数；`cachePolicy` 为 Google
+`observed`、其他 `required`，`cacheOutcome` 按 follow-up 观测记录 `HIT` / `NOT_OBSERVED`，
+尚无后续观测时为 `NOT_EVALUATED`。它与 case PASS/FAIL 独立。每轮成功观测立即写入白名单 artifact，
+强缓存断言前已落盘；失败也保留此前完成轮次的数值，不输出原始 provider 配置、URL、错误或模型回复。
+
 独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
 用于测量历史断点，而非仅验证 system 前缀命中。它直接调用 Provider，不启动应用或数据库；默认只执行免费 wire 形状检查。
 已授权付费、且 `TEST_ANTHROPIC_BASE_URL` / `TEST_ANTHROPIC_API_KEY` 完整时，可显式运行：

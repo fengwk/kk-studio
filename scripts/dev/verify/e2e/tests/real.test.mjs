@@ -148,6 +148,13 @@ test('真实文本缓存 case 文案契约：Google 明确只观测 cache hit �
       `${suffix} text cache docs must retain cacheReadTokens > 0 assertion: ${c.docs}`,
     )
   }
+  // 测试意图：每个 case 仅声明自身调用预算与缓存策略，Google 观测、其他强制命中。
+  for (const def of REAL_MODEL_DEFINITIONS) {
+    const docs = ALL_CASES.find((c) => c.id === `real.text_cache.${def.idSuffix}`).docs
+    const google = def.providerType === 'google'
+    assert.ok(docs.includes(`最多 ${google ? 2 : 4} 次请求，不自动加重试`))
+    assert.ok(docs.includes(`cachePolicy=${google ? 'observed' : 'required'}`))
+  }
 })
 
 test('四指定模型声明式定义与 seed/credential 公共契约完全一致', () => {

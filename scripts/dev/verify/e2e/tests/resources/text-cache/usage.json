@@ -1,0 +1,38 @@
+{
+  "miss": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "cacheWriteLongTokens": 0,
+    "reasoningTokens": 0,
+    "providerTotalTokens": 120
+  },
+  "hit": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "cacheReadTokens": 50,
+    "cacheWriteTokens": 0,
+    "cacheWriteLongTokens": 0,
+    "reasoningTokens": 0,
+    "providerTotalTokens": 170
+  },
+  "anthropicMiss": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 25,
+    "cacheWriteLongTokens": 75,
+    "reasoningTokens": 0,
+    "providerTotalTokens": 0
+  },
+  "anthropicHit": {
+    "inputTokens": 100,
+    "outputTokens": 20,
+    "cacheReadTokens": 50,
+    "cacheWriteTokens": 25,
+    "cacheWriteLongTokens": 75,
+    "reasoningTokens": 0,
+    "providerTotalTokens": 0
+  }
+}

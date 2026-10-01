@@ -656,16 +656,34 @@ async function cleanupAgent(ctx, agent) {
 // ---------------------------------------------------------------------------
 // 1. 四指定模型文本+缓存 case 注册 (L2, requires: ['real'])
 // ---------------------------------------------------------------------------
+// 每轮同时验证查询快照与对应 assistant 之后的 TURN_END，避免旧轮次完成掩盖新轮次失败。
+function assertTextCacheRoundCompleted(snapshot, entries, assistant) {
+  assert(snapshot.thread.status === 'IDLE', 'text cache snapshot thread must be IDLE')
+  assert(snapshot.modelInvocation === null, 'IDLE snapshot must expose no active model invocation')
+  assert(!('modelInvocations' in snapshot), 'snapshot DTO has no modelInvocations[]')
+  assert((snapshot.queuedCommands || []).length === 0, 'queued commands must be empty')
+  const assistantIndex = entries.findIndex((entry) => entry.entryId === assistant.entryId)
+  const turnEnd = entries.slice(assistantIndex + 1).find((entry) => entryType(entry) === 'TURN_END')
+  const payload = parseEntryPayload(turnEnd)
+  assert(
+    payload.outcome === 'COMPLETED' && payload.continueModel === false,
+    'expected corresponding COMPLETED TURN_END with continueModel false',
+  )
+}
+
 for (const def of REAL_MODEL_DEFINITIONS) {
   registerCase({
     id: `real.text_cache.${def.idSuffix}`,
     level: 'L2',
     title: `${def.title} 真实文本与缓存轮次`,
     requires: ['real'],
-    docs:
+    docs: (
       def.providerType === 'google'
         ? `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1 个短 follow-up，断言非空/marker 回复与 usage 并观测 cache hit（Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖），写脱敏 artifact`
-        : `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`,
+        : `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`
+    ) + '；每轮校验 IDLE、无 active modelInvocation/queuedCommands、对应 TURN_END COMPLETED 且 continueModel false，逐轮写统一 rounds artifact；'
+      + `须显式 --real，最多 ${def.providerType === 'google' ? 2 : 4} 次请求，不自动加重试，cachePolicy=${def.providerType === 'google' ? 'observed' : 'required'}。`,
+    // 所有协议使用相同的逐轮证据结构；case PASS 与缓存观测结果分别表达。
     async run(ctx) {
       const resolved = await resolveRealModel(ctx, def)
       const suffix = cid().slice(0, 8)
@@ -690,6 +708,41 @@ for (const def of REAL_MODEL_DEFINITIONS) {
 
         const sessionId = cid()
         const threadId = cid()
+        const evidence = {
+          modelDef: {
+            providerName: def.providerName,
+            modelName: def.modelName,
+            variant: def.variant,
+            providerType: def.providerType,
+          },
+          threadId,
+          cachePolicy: def.providerType === 'google' ? 'observed' : 'required',
+          cacheOutcome: 'NOT_EVALUATED',
+          // 已完成的单请求观测数，不是底层 transport retries 计数。
+          modelRequestCount: 0,
+          rounds: [],
+        }
+        const recordRound = (usage) => {
+          // 显式 allowlist：不输出回复、raw provider config/URL/error 或额外 usage 属性。
+          const {
+            inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
+            cacheWriteLongTokens, reasoningTokens, providerTotalTokens,
+          } = usage
+          const inputTotal = inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens
+          evidence.rounds.push({
+            ordinal: evidence.rounds.length + 1,
+            usage: {
+              inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
+              cacheWriteLongTokens, reasoningTokens, providerTotalTokens,
+            },
+            cacheReadRatio: inputTotal > 0 ? cacheReadTokens / inputTotal : 0,
+          })
+          evidence.modelRequestCount = evidence.rounds.length
+          const followUps = evidence.rounds.slice(1)
+          evidence.cacheOutcome = followUps.some((round) => round.usage.cacheReadTokens > 0)
+            ? 'HIT' : followUps.length > 0 ? 'NOT_OBSERVED' : 'NOT_EVALUATED'
+          ctx.writeArtifact(`real-text-cache-${def.idSuffix}.json`, JSON.stringify(evidence, null, 2))
+        }
         const firstMarker = `MARKER-FIRST-${cid().slice(0, 8)}`
         const firstUserPrompt = `Echo exactly this marker: ${firstMarker}`
         const accepted = await createNewSession(ctx, {
@@ -716,18 +769,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         assert(firstQuiescent.status === 'IDLE', `thread not IDLE: ${safeDiagnosticJson(firstQuiescent)}`)
 
         const firstSnapshot = await getThreadSnapshot(ctx, threadId)
-        assert(
-          firstSnapshot.modelInvocation === null,
-          `IDLE snapshot must expose no active model invocation: ${safeDiagnosticJson(firstSnapshot.modelInvocation)}`,
-        )
-        assert(
-          !('modelInvocations' in firstSnapshot),
-          `snapshot DTO has no modelInvocations[]: ${safeDiagnosticJson(Object.keys(firstSnapshot))}`,
-        )
-        assert(
-          (firstSnapshot.queuedCommands || []).length === 0,
-          `queued commands must be empty: ${safeDiagnosticJson(firstSnapshot.queuedCommands)}`,
-        )
 
         const firstEntries = firstSnapshot.entries || []
         const firstUserIndex = findUserEntryIndex(firstEntries, firstMarker)
@@ -749,11 +790,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           `expected TURN_START -> USER -> normal ASSISTANT MESSAGE -> TURN_END(COMPLETED): ${safeDiagnosticJson(firstEntries)}`,
         )
 
-        const firstTurnEndPayload = parseEntryPayload(firstEntries[firstTurnEndIndex])
-        assert(
-          firstTurnEndPayload.outcome === 'COMPLETED' && firstTurnEndPayload.continueModel === false,
-          `expected COMPLETED TURN_END: ${safeDiagnosticJson(firstTurnEndPayload)}`,
-        )
+        assertTextCacheRoundCompleted(firstSnapshot, firstEntries, firstAssistantEntry)
 
         const firstText = messageText(firstAssistantEntry)
         assert(
@@ -785,9 +822,9 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           )
         }
 
+        recordRound(firstUsage)
         let cacheHit = false
         const maxFollowUpRounds = def.providerType === 'google' ? 1 : 3
-        const followUpRecords = []
         for (let round = 1; round <= maxFollowUpRounds; round++) {
           const currentThread = await getThread(ctx, threadId)
           const followUpMarker = `MARKER-FOLLOWUP-${round}-${cid().slice(0, 8)}`
@@ -823,6 +860,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           const roundAssistants = normalAssistantEntries(entriesAfterUser)
           assert(roundAssistants.length > 0, `no assistant entry after user in round ${round}`)
           const roundAssistant = roundAssistants.at(-1)
+          assertTextCacheRoundCompleted(roundSnapshot, entriesAfterUser, roundAssistant)
           const roundText = messageText(roundAssistant)
           assert(
             roundText.trim().length > 0 && roundText.includes(followUpMarker),
@@ -837,11 +875,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             modelName: def.modelName,
           })
 
-          followUpRecords.push({
-            round,
-            usage,
-            replySnippet: roundText.slice(0, 80),
-          })
+          recordRound(usage)
 
           if (usage.cacheReadTokens > 0) {
             cacheHit = true
@@ -852,32 +886,9 @@ for (const def of REAL_MODEL_DEFINITIONS) {
         if (def.providerType !== 'google') {
           assert(
             cacheHit,
-            `expected at least one follow-up turn to have cacheReadTokens > 0 for ${def.title}. Usages: ${safeDiagnosticJson(followUpRecords)}`,
+            `expected at least one follow-up turn to have cacheReadTokens > 0 for ${def.title}. Usages: ${safeDiagnosticJson(evidence.rounds)}`,
           )
         }
-
-        ctx.writeArtifact(
-          `real-text-cache-${def.idSuffix}.json`,
-          JSON.stringify(
-            sanitizeArtifact({
-              modelDef: {
-                providerName: def.providerName,
-                modelName: def.modelName,
-                variant: def.variant,
-                providerType: def.providerType,
-              },
-              threadId,
-              cacheHitObserved: cacheHit,
-              firstRound: {
-                usage: firstUsage,
-                replySnippet: firstText.slice(0, 80),
-              },
-              followUpRecords,
-            }),
-            null,
-            2,
-          ),
-        )
       } finally {
         await cleanupChat(ctx, chat)
         await cleanupAgent(ctx, agent)
