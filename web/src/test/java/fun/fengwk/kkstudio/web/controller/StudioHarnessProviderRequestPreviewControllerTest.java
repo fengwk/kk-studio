@@ -17,6 +17,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -35,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
@@ -193,6 +196,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
         .thenThrow(
             new ProviderRequestPreviewUnavailableException(
+                Reason.PREVIEW_THREAD_BUSY,
                 "thread is not idle; the next step is not an input turn"));
 
     mockMvc
@@ -201,9 +205,36 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.errors.reason").value("PREVIEW_THREAD_BUSY"))
         .andExpect(
             jsonPath("$.errors.detail")
                 .value("thread is not idle; the next step is not an input turn"));
+  }
+
+  /** 测试意图：九类拒绝在实际 MVC 序列化后保留 reason，但内部 cause/connection 详情不得成为响应字段。 */
+  @ParameterizedTest
+  @EnumSource(Reason.class)
+  void previewPublishesTypedReasonWithoutCauseDetails(Reason reason) throws Exception {
+    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+        .thenThrow(
+            new ProviderRequestPreviewUnavailableException(
+                reason,
+                "safe preview detail",
+                new IllegalStateException("private connection detail")));
+    String response =
+        mockMvc
+            .perform(
+                post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(batch(draftCommands())))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.errors.reason").value(reason.name()))
+            .andExpect(jsonPath("$.errors.detail").value("safe preview detail"))
+            .andExpect(jsonPath("$.errors.cause").doesNotExist())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    assertFalse(response.contains("private connection detail"));
   }
 
   /** 缺失 Thread 与其它运行时查询一致是 404（不因为「预览」而变成 409 或 200）。 */

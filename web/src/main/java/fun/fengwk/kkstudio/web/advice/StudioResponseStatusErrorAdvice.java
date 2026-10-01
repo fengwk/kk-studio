@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
@@ -57,10 +58,12 @@ public class StudioResponseStatusErrorAdvice {
   public ResponseEntity<Result<Void>> handle(
       ResponseStatusException error, HttpServletRequest request) {
     int status = error.getStatusCode().value();
-    String reason =
-        error.getCause() instanceof HarnessRuntimeConflictException conflict
-            ? conflict.reason().name()
-            : null;
+    String reason = null;
+    if (error.getCause() instanceof HarnessRuntimeConflictException conflict) {
+      reason = conflict.reason().name();
+    } else if (error.getCause() instanceof ProviderRequestPreviewUnavailableException preview) {
+      reason = preview.reason().name();
+    }
     return buildResponse(status, error.getReason(), reason);
   }
 

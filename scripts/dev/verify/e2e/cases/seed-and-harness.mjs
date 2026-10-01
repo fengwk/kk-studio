@@ -310,11 +310,13 @@ registerCase({
       }),
       commands: [userMessageCommand('preview only', cid())],
     }
-    await expectHttpError(() => ctx.call('POST', endpoint, {
+    const stale = await expectHttpError(() => ctx.call('POST', endpoint, {
       ...draft,
       target: { ...draft.target, expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n) },
     }), { status: 409 })
-    await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
+    assert(JSON.parse(stale.body).errors?.reason === 'PREVIEW_STALE_CURSOR', 'preview stale cursor reason missing or mismatched')
+    const planning = await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
+    assert(JSON.parse(planning.body).errors?.reason === 'PREVIEW_PLANNING_FAILED', 'preview planning reason missing or mismatched')
     const after = await getThreadSnapshot(ctx, threadId)
     assert(after.thread.headEntryId === thread.headEntryId, 'preview advanced thread head')
     assert(after.thread.nextCommandSequence === thread.nextCommandSequence, 'preview reserved command sequence')

@@ -16,6 +16,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -102,6 +104,58 @@ class StudioResponseStatusErrorAdviceTest {
             "reason",
             "STALE_COMMAND_CURSOR"),
         response.getBody().getErrors());
+  }
+
+  @Test
+  void exposesEveryPreviewReasonWithoutLeakingCauseDetails() {
+    // 测试意图：九个 wire name 逐一保留，内部原因链不进入 errors；locale 不改变机器码。
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    for (Reason reason : Reason.values()) {
+      var preview =
+          new ProviderRequestPreviewUnavailableException(
+              reason,
+              "safe preview detail",
+              new IllegalStateException("private connection detail"));
+      var response =
+          advice.handle(
+              new ResponseStatusException(HttpStatus.CONFLICT, preview.getMessage(), preview),
+              null);
+      assertEquals(409, response.getStatusCode().value());
+      assertEquals(
+          Map.of(
+              "type",
+              "about:blank",
+              "title",
+              "冲突",
+              "detail",
+              "safe preview detail",
+              "reason",
+              reason.name()),
+          response.getBody().getErrors());
+    }
+  }
+
+  @Test
+  void doesNotInferPreviewReasonFromTextOrNestedCause() {
+    // 测试意图：只识别直接 typed cause，不以英文描述匹配，也不遍历内部原因链。
+    var preview =
+        new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_STALE_CURSOR, "safe detail");
+    for (Throwable cause : new Throwable[] {null, new RuntimeException("wrapper", preview)}) {
+      var response =
+          advice.handle(
+              new ResponseStatusException(
+                  HttpStatus.CONFLICT, "thread head/next command sequence", cause),
+              null);
+      assertEquals(
+          Map.of(
+              "type",
+              "about:blank",
+              "title",
+              "Conflict",
+              "detail",
+              "thread head/next command sequence"),
+          response.getBody().getErrors());
+    }
   }
 
   @Test

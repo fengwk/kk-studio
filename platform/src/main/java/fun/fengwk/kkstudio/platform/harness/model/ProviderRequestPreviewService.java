@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
@@ -135,10 +136,10 @@ public final class ProviderRequestPreviewService {
             clock.instant());
 
     LiveTurnPlan plan = turnResolver.planLive(threadId, candidatePath);
-    if (plan instanceof LiveTurnPlan.Rejected rejected) {
-      // 只回显稳定错误码：规划的自由文本详情绝不外泄。
+    if (plan instanceof LiveTurnPlan.Rejected) {
+      // 规划的错误码与自由文本详情都不属于公开预览协议。
       throw new ProviderRequestPreviewUnavailableException(
-          "request cannot be previewed: " + rejected.errorCode());
+          Reason.PREVIEW_PLANNING_FAILED, "request cannot be planned for preview");
     }
     ModelRequestSpec spec = ((LiveTurnPlan.Planned) plan).spec();
     ProviderRequest request = materializer.materialize(candidatePath, spec);
@@ -208,10 +209,12 @@ public final class ProviderRequestPreviewService {
     if (!thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_STALE_CURSOR,
           "thread head/next command sequence does not match the preview expectation");
     }
     if (!snapshot.queuedCommands().isEmpty()) {
       throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_QUEUED_COMMANDS,
           "thread still has queued commands; the preview would not reflect them");
     }
     ThreadContext context =
@@ -219,12 +222,13 @@ public final class ProviderRequestPreviewService {
             thread, snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
     if (!(context instanceof ThreadContext.IdleOrHistorical)) {
       throw new ProviderRequestPreviewUnavailableException(
-          "thread is not idle; the next step is not an input turn");
+          Reason.PREVIEW_THREAD_BUSY, "thread is not idle; the next step is not an input turn");
     }
     if (compactionPlanner.plan(
             thread, snapshot.entryPath(), compactionConfigProvider.compactionConfig(), true)
         != null) {
       throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_COMPACTION_REQUIRED,
           "the next step for this thread is automatic compaction; the request cannot be previewed "
               + "precisely");
     }
@@ -240,7 +244,7 @@ public final class ProviderRequestPreviewService {
       ready = uploadService.peekReady(uploadId);
     } catch (StorageResourceNotFoundException | StorageVerificationException error) {
       throw new ProviderRequestPreviewUnavailableException(
-          "attachment upload is not READY for preview");
+          Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview");
     }
     return new UserMessageContentPreparer.ReadyAttachment(ready.blobId(), ready.filename());
   }
@@ -254,17 +258,18 @@ public final class ProviderRequestPreviewService {
           providerResolution.resolve(providerType, spec.providerConnectionGenerationId(), request);
     } catch (IllegalArgumentException | IllegalStateException error) {
       throw new ProviderRequestPreviewUnavailableException(
-          "cannot resolve the current provider for preview");
+          Reason.PREVIEW_PROVIDER_UNAVAILABLE, "cannot resolve the current provider for preview");
     }
     try {
       return resolved.encodeRequestBody();
     } catch (UnsupportedOperationException error) {
       throw new ProviderRequestPreviewUnavailableException(
+          Reason.PREVIEW_UNSUPPORTED,
           providerType + " adapter does not support request body preview");
     } catch (ProviderException error) {
       // 编码失败的原因文本可能携带请求细节，这里只保留稳定的失败类别。
       throw new ProviderRequestPreviewUnavailableException(
-          "request body cannot be encoded for preview: " + error.kind(), error);
+          Reason.PREVIEW_ENCODING_FAILED, "request body cannot be encoded for preview", error);
     }
   }
 }

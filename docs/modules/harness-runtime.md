@@ -77,6 +77,26 @@ yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 
 `getThreadSnapshot` 在单事务内锁 Thread、读取待处理命令与 `EntryPath`，再用分类器投影出最小适用状态：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
 
+### 发送前请求预览
+
+Platform 的请求预览经 `POST /api/harness/threads/{threadId}/provider-request-preview` 暴露，使用与发送相同的 owner-aware command batch：仅支持 CHAT owner、既有 THREAD target 与 SET_* 前缀加末尾 USER_MESSAGE。调用前读取最新 Thread 快照，把 `headEntryId` 和 `nextCommandSequence` 原样作为期望游标。预览不入队、不推进游标、不消费附件、不调用 Provider transport；成功结果仅代表点击时快照，不保证随后发送的请求相同。
+
+当前事实不允许精确预览时返回 HTTP 409，`errors.reason` 是稳定的机器码，`errors.detail` 仅为安全描述，客户端不应解析描述文本：
+
+| `errors.reason` | 拒绝事实 |
+| --- | --- |
+| `PREVIEW_STALE_CURSOR` | head 或命令序号与当前快照不一致 |
+| `PREVIEW_QUEUED_COMMANDS` | 尚有排队命令 |
+| `PREVIEW_THREAD_BUSY` | 当前上下文不是空闲输入边界 |
+| `PREVIEW_COMPACTION_REQUIRED` | 下一步必定为自动压缩 |
+| `PREVIEW_ATTACHMENT_NOT_READY` | 附件上传未就绪或不可用 |
+| `PREVIEW_PLANNING_FAILED` | 草稿无法规划 |
+| `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
+| `PREVIEW_UNSUPPORTED` | adapter 不支持预览编码 |
+| `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |
+
+收到 `PREVIEW_STALE_CURSOR` 后应重新读取快照，再用新游标请求预览；这不会绕过 queued、空闲、压缩、附件与归属校验。规划详情、连接凭据与异常原因链不进入错误响应。请求形状或归属错误仍为 400，缺失 Thread 仍为 404。
+
 ## Invocation 与 Work
 
 [`ModelInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation.java) 是 `harness_model_invocation` 行的当前状态：`id`、`threadId`、`turnStartEntryId`、`requestHeadEntryId`、冻结的 [`ModelRequestSpec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec.java)、状态、`attempt`、流式 checkpoint、终态 `result`/`error`、`resultEntryId` 与重试失败审计列表。

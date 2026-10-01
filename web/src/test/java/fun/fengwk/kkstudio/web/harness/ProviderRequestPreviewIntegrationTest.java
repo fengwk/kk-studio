@@ -5,15 +5,25 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
@@ -50,6 +60,7 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -122,6 +133,8 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
   @Autowired private Clock clock;
+  @Autowired private WebApplicationContext webContext;
+  @Autowired private ObjectMapper objectMapper;
 
   private ChatIntegrationSupport storage;
   private HttpServer providerServer;
@@ -263,10 +276,78 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
                         new AttachmentMessageContent(UUID.fromString(pending.getId()))))));
 
     Map<String, Object> before = durableState(fixture, pending.getId());
-    assertThrows(
-        ProviderRequestPreviewUnavailableException.class,
-        () -> previewService.preview(fixture.threadId(), fixture.owner(), draft));
+    ProviderRequestPreviewUnavailableException error =
+        assertThrows(
+            ProviderRequestPreviewUnavailableException.class,
+            () -> previewService.preview(fixture.threadId(), fixture.owner(), draft));
+    assertEquals(Reason.PREVIEW_ATTACHMENT_NOT_READY, error.reason());
     assertEquals(before, durableState(fixture, pending.getId()), "拒绝路径同样不得产生副作用");
+  }
+
+  /** 测试意图：真实 HTTP/DB 下旧 head 或 sequence 拒绝，重读快照后预览成功，全程零写入、零 transport。 */
+  @Test
+  void httpPreviewRecoversFromStaleCursorByReadingFreshSnapshot() throws Exception {
+    Fixture fixture = fixtureWithCompletedTurn();
+    MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
+    String snapshotPath = "/api/harness/threads/" + fixture.threadId();
+    String previewPath = snapshotPath + "/provider-request-preview";
+    Map<String, Object> before = durableState(fixture, null);
+    int requestsBefore = providerRequests.get();
+    JsonNode fresh = readHttpSnapshot(mvc, snapshotPath);
+    String head = fresh.path("thread").path("headEntryId").asText();
+    String sequence = fresh.path("thread").path("nextCommandSequence").asText();
+    mvc.perform(
+            post(previewPath)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(httpDraft(fixture, head, sequence)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.sourceHeadEntryId").value(head));
+    UUID oldHead =
+        jdbc.queryForObject(
+            "select id from harness_entry where session_id = ? and entry_type = 'ROOT'",
+            UUID.class,
+            fixture.sessionId());
+    for (String body :
+        List.of(
+            httpDraft(fixture, oldHead.toString(), sequence),
+            httpDraft(fixture, head, Long.toString(Long.parseLong(sequence) - 1)))) {
+      mvc.perform(post(previewPath).contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isConflict())
+          .andExpect(jsonPath("$.errors.reason").value("PREVIEW_STALE_CURSOR"));
+      assertEquals(before, durableState(fixture, null));
+      assertEquals(requestsBefore, providerRequests.get());
+    }
+    JsonNode retry = readHttpSnapshot(mvc, snapshotPath);
+    mvc.perform(
+            post(previewPath)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    httpDraft(
+                        fixture,
+                        retry.path("thread").path("headEntryId").asText(),
+                        retry.path("thread").path("nextCommandSequence").asText())))
+        .andExpect(status().isOk());
+    assertEquals(before, durableState(fixture, null));
+    assertEquals(requestsBefore, providerRequests.get());
+  }
+
+  private JsonNode readHttpSnapshot(MockMvc mvc, String path) throws Exception {
+    return objectMapper
+        .readTree(
+            mvc.perform(get(path))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString())
+        .path("data");
+  }
+
+  private String httpDraft(Fixture fixture, String head, String sequence) throws IOException {
+    try (var input = getClass().getResourceAsStream("preview-draft.json")) {
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8)
+          .formatted(
+              ((OwnerRef.Chat) fixture.owner()).chatId(), fixture.threadId(), head, sequence);
+    }
   }
 
   /** 游标漂移与 queued 命令都必须 409 拒绝：预览绝不猜测「用户此刻看到的」历史。 */
@@ -289,6 +370,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             ProviderRequestPreviewUnavailableException.class,
             () -> previewService.preview(fixture.threadId(), fixture.owner(), drifted));
     assertTrue(cursorRejection.getMessage().contains("head/next command sequence"));
+    assertEquals(Reason.PREVIEW_STALE_CURSOR, cursorRejection.reason());
 
     // 先把同一草稿 durable 接受（队列非空、尚未被 worker 处理），随后按当前 cursor 预览仍必须拒绝。
     acceptanceService.accept(
@@ -305,11 +387,16 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
                 queued.thread().headEntryId(),
                 queued.thread().nextCommandSequence()),
             draftCommands(userMessage(List.of(new TextMessageContent("another draft")))));
+    Map<String, Object> before = durableState(fixture, null);
+    int requestsBefore = providerRequests.get();
     ProviderRequestPreviewUnavailableException queuedRejection =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
             () -> previewService.preview(fixture.threadId(), fixture.owner(), whileQueued));
     assertTrue(queuedRejection.getMessage().contains("queued commands"));
+    assertEquals(Reason.PREVIEW_QUEUED_COMMANDS, queuedRejection.reason());
+    assertEquals(before, durableState(fixture, null));
+    assertEquals(requestsBefore, providerRequests.get());
   }
 
   /** 跨 owner 与跨 Session 资源都是请求错误（400），且绝不产生任何写入。 */
@@ -586,6 +673,9 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     state.put("session_blob_ref", count("session_blob_ref", "session_id", fixture.sessionId()));
     state.put("storage_blob", count("storage_blob"));
     state.put("storage_upload", count("storage_upload"));
+    state.put(
+        "thread_row",
+        jdbc.queryForMap("select * from harness_thread where id = ?", fixture.threadId()));
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(fixture.threadId());
     state.put("head_entry_id", snapshot.entryPath().head().id());
     state.put("next_command_sequence", snapshot.thread().nextCommandSequence());
