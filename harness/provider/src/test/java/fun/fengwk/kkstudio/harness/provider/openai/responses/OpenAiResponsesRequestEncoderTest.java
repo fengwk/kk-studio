@@ -2278,6 +2278,261 @@ class OpenAiResponsesRequestEncoderTest {
     }
   }
 
+  /** 三轮以上保留请求边界；相同文本的不同历史位置不去重，连续 assistant 不重复消耗断点。 */
+  @Test
+  void explicitCacheRetainsUserRequestEndpointsByIdentity() throws Exception {
+    List<ProviderMessage> history = new ArrayList<>();
+    for (int round = 0; round < 6; round++) {
+      history.add(user("same"));
+      JsonNode input = explicitRoot(history).path("input");
+      assertEquals(Math.min(4, round + 1), input.findValues("prompt_cache_breakpoint").size());
+      for (int prior = 0; prior <= round; prior++) {
+        assertEquals(
+            prior >= Math.max(0, round - 3),
+            input.get(prior * 3).path("content").get(0).has("prompt_cache_breakpoint"));
+      }
+      history.add(assistant("answer"));
+      history.add(assistant("another answer"));
+    }
+  }
+
+  /** 多 queued USER 只在 assistant 之前最后一项打标；多块输入只标末块，不标 output_text/summary。 */
+  @Test
+  void explicitCacheUsesLastQueuedInputAndSupportedMultimodalBlock() throws Exception {
+    List<ProviderMessage> history =
+        List.of(
+            user("queued"),
+            new ProviderMessage(
+                ProviderMessageRole.USER,
+                List.of(
+                    new ProviderTextBlock("last queued"),
+                    new ProviderImageBlock("image/png", "https://example.com/image.png"))),
+            new ProviderMessage(
+                ProviderMessageRole.ASSISTANT,
+                List.of(new ProviderThinkingBlock("thought"), new ProviderTextBlock("answer"))),
+            user("current"));
+    JsonNode input = explicitRoot(history).path("input");
+    assertEquals(2, input.findValues("prompt_cache_breakpoint").size());
+    assertFalse(input.get(0).path("content").get(0).has("prompt_cache_breakpoint"));
+    assertFalse(input.get(1).path("content").get(0).has("prompt_cache_breakpoint"));
+    assertTrue(input.get(1).path("content").get(1).has("prompt_cache_breakpoint"));
+    assertFalse(input.get(2).toString().contains("prompt_cache"));
+    assertFalse(input.get(3).toString().contains("prompt_cache"));
+    assertTrue(input.get(4).path("content").get(0).has("prompt_cache_breakpoint"));
+  }
+
+  /** 断点超过四个后滑动，但所有历史字符串 output 均转换，移除 cache 字段后历史 wire 前缀逐字稳定。 */
+  @Test
+  void explicitToolOutputShapeRemainsStableAfterBreakpointSlides() throws Exception {
+    List<ProviderMessage> history = new ArrayList<>(List.of(user("start")));
+    JsonNode previous = explicitRoot(history).path("input");
+    for (int round = 0; round < 6; round++) {
+      history.add(
+          new ProviderMessage(
+              ProviderMessageRole.ASSISTANT,
+              List.of(new ProviderToolCallBlock(new ProviderToolCall("c" + round, "tool", "{}")))));
+      history.add(tool("c" + round, List.of(new ProviderTextBlock(" whole\nresult " + round))));
+      JsonNode current = explicitRoot(history).path("input");
+      assertEquals(Math.min(4, round + 2), current.findValues("prompt_cache_breakpoint").size());
+      for (int i = 0; i < previous.size(); i++) {
+        assertEquals(
+            withoutCache(previous.get(i)).toString(), withoutCache(current.get(i)).toString());
+      }
+      for (int prior = 0; prior <= round; prior++) {
+        JsonNode output = current.get(2 + prior * 2).path("output");
+        assertTrue(output.isArray());
+        assertEquals(" whole\nresult " + prior, output.get(0).path("text").asText());
+        assertEquals(prior >= Math.max(0, round - 3), output.get(0).has("prompt_cache_breakpoint"));
+      }
+      OpenAiResponsesEncodedRequest automatic =
+          encoder.encode(
+              request(history), createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+      assertEquals(
+          automatic.sourcePrefixHash(),
+          encoder
+              .encode(request(history, explicitCache()), createDescriptor(), explicitConfig())
+              .sourcePrefixHash());
+      previous = current;
+    }
+  }
+
+  /** 已有多模态工具数组保留顺序与内容，只标末块；空工具字符串合法转换，空历史/空 assistant 文本不造输入块。 */
+  @Test
+  void explicitCacheHandlesMultimodalAndEmptyInputsWithoutInventingBlocks() throws Exception {
+    JsonNode output =
+        explicitRoot(
+                List.of(
+                    tool(
+                        "media",
+                        List.of(
+                            new ProviderTextBlock("image"),
+                            new ProviderImageBlock("image/png", "https://example.com/image.png"),
+                            new ProviderDocumentBlock(
+                                "application/pdf", "https://example.com/file.pdf")))))
+            .path("input")
+            .get(0)
+            .path("output");
+    assertEquals(3, output.size());
+    assertFalse(output.get(0).has("prompt_cache_breakpoint"));
+    assertFalse(output.get(1).has("prompt_cache_breakpoint"));
+    assertTrue(output.get(2).has("prompt_cache_breakpoint"));
+    assertEquals("input_file", output.get(2).path("type").asText());
+    JsonNode emptyTool = explicitRoot(List.of(tool("empty", List.of()))).path("input").get(0);
+    assertEquals("", emptyTool.path("output").get(0).path("text").asText());
+    assertEquals(1, emptyTool.path("output").size());
+    assertTrue(explicitRoot(List.of()).path("input").isEmpty());
+    JsonNode empty = explicitRoot(List.of(assistant("")));
+    assertTrue(empty.path("input").isEmpty());
+    assertEquals(0, empty.findValues("prompt_cache_breakpoint").size());
+  }
+
+  /** 显式工具转换不放宽 native signed replay 的 affinity/hash 验证，也不改写 opaque native 输出。 */
+  @Test
+  void explicitCacheKeepsStrictNativeReplayValidation() throws Exception {
+    ProviderMessage toolInput = tool("c", List.of(new ProviderTextBlock("original")));
+    String hash =
+        encoder
+            .encode(
+                request(List.of(toolInput)),
+                createDescriptor(),
+                OpenAiResponsesConfig.defaultConfig())
+            .sourcePrefixHash();
+    ObjectNode payload = MAPPER.createObjectNode();
+    ArrayNode output = payload.putArray("output");
+    output.addObject().put("type", "reasoning").put("encrypted_content", "signed-test-value");
+    ObjectNode opaque = output.addObject().put("type", "future_native_item");
+    opaque.putArray("output").addObject().put("type", "unsupported_input");
+    ObjectNode nativeMessage =
+        output.addObject().put("type", "message").put("role", "assistant").put("id", "msg-native");
+    nativeMessage.putArray("content").addObject().put("type", "output_text").put("text", "answer");
+    JsonNode frozenPayload = payload.deepCopy();
+    ProviderReplayState replay =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            createDescriptor().affinity(createModel().modelId()),
+            hash,
+            payload);
+    ProviderMessage nativeAssistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderThinkingBlock(""), new ProviderTextBlock("answer")),
+            replay);
+    JsonNode input = explicitRoot(List.of(toolInput, nativeAssistant)).path("input");
+    assertEquals(output.get(0), input.get(1));
+    assertEquals(output.get(1), input.get(2));
+    assertEquals(output.get(2), input.get(3));
+    assertEquals(1, input.findValues("prompt_cache_breakpoint").size());
+    ProviderException changedPrefix =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                explicitRoot(
+                    List.of(
+                        tool("c", List.of(new ProviderTextBlock("changed"))), nativeAssistant)));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, changedPrefix.kind());
+    ProviderReplayState wrongAffinity =
+        new ProviderReplayState(
+            replay.format(), createDescriptor().affinity("other-model"), hash, payload);
+    ProviderException changedAffinity =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                explicitRoot(
+                    List.of(
+                        toolInput,
+                        new ProviderMessage(
+                            ProviderMessageRole.ASSISTANT,
+                            nativeAssistant.contents(),
+                            wrongAffinity))));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, changedAffinity.kind());
+    assertEquals(frozenPayload, payload);
+    assertFalse(payload.toString().contains("prompt_cache"));
+  }
+
+  /** NONE、automatic、legacy 不转换工具字符串；无 CONVERSATION 的显式启用仍统一转换但不打标。 */
+  @Test
+  void otherCacheModesPreserveToolStrings() throws Exception {
+    List<ProviderMessage> history =
+        List.of(tool("json", List.of(new ProviderJsonBlock("{\"x\":1}"))));
+    for (OpenAiPromptCacheMode mode : OpenAiPromptCacheMode.values()) {
+      JsonNode none =
+          MAPPER.readTree(
+              encoder
+                  .encode(request(history), createDescriptor(), new OpenAiResponsesConfig(mode))
+                  .bodyUtf8Bytes());
+      assertTrue(none.path("input").get(0).path("output").isTextual());
+      assertEquals(0, none.findValues("prompt_cache_breakpoint").size());
+      if (mode != OpenAiPromptCacheMode.GPT_5_6_EXPLICIT) {
+        JsonNode enabled =
+            MAPPER.readTree(
+                encoder
+                    .encode(
+                        request(history, explicitCache()),
+                        createDescriptor(),
+                        new OpenAiResponsesConfig(mode))
+                    .bodyUtf8Bytes());
+        assertTrue(enabled.path("input").get(0).path("output").isTextual());
+        assertEquals(0, enabled.findValues("prompt_cache_breakpoint").size());
+      }
+    }
+    JsonNode noConversation =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        history, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "key")),
+                    createDescriptor(),
+                    explicitConfig())
+                .bodyUtf8Bytes());
+    assertTrue(noConversation.path("input").get(0).path("output").isArray());
+    assertEquals(0, noConversation.findValues("prompt_cache_breakpoint").size());
+  }
+
+  private static ProviderMessage user(String text) {
+    return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock(text)));
+  }
+
+  private static ProviderMessage assistant(String text) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock(text)));
+  }
+
+  private static ProviderMessage tool(String id, List<ProviderContentBlock> contents) {
+    return new ProviderMessage(
+        ProviderMessageRole.TOOL,
+        List.of(new ProviderToolResultBlock(id, "tool", contents, false, null)));
+  }
+
+  private static ProviderCacheControl explicitCache() {
+    return ProviderCacheControl.breakpoints(
+        PromptCacheRetention.SHORT, "key", Set.of(PromptCacheBreakpoint.CONVERSATION));
+  }
+
+  private static OpenAiResponsesConfig explicitConfig() {
+    return new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT);
+  }
+
+  private JsonNode explicitRoot(List<ProviderMessage> messages) throws Exception {
+    return MAPPER.readTree(
+        encoder
+            .encode(request(messages, explicitCache()), createDescriptor(), explicitConfig())
+            .bodyUtf8Bytes());
+  }
+
+  private static JsonNode withoutCache(JsonNode node) {
+    JsonNode copy = node.deepCopy();
+    removeCache(copy);
+    return copy;
+  }
+
+  private static void removeCache(JsonNode node) {
+    if (node instanceof ObjectNode object) {
+      object.remove("prompt_cache_breakpoint");
+    }
+    for (JsonNode child : node) {
+      removeCache(child);
+    }
+  }
+
   @Test
   void finalBodySizeGuardEnforcedAtCallSite() throws Exception {
     // 测试意图：证明 OpenAiResponsesRequestEncoder.encode 在序列化完成后确实调用应用上限守卫。

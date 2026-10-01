@@ -1,0 +1,32 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_turn1","model":"gpt-5.6","status":"in_progress"}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"Round 1 reasoning summary"}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_round1_1","call_id":"call_round1_1","name":"lookup_user"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_round1_1","delta":"{\"user_id\":\"u1001\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_round1_1","arguments":"{\"user_id\":\"u1001\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_round1_1","call_id":"call_round1_1","name":"lookup_user","arguments":"{\"user_id\":\"u1001\"}"}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_round1_2","call_id":"call_round1_2","name":"fetch_orders"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_round1_2","delta":"{\"user_id\":\"u1001\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_round1_2","arguments":"{\"user_id\":\"u1001\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","id":"fc_round1_2","call_id":"call_round1_2","name":"fetch_orders","arguments":"{\"user_id\":\"u1001\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_turn1","model":"gpt-5.6","status":"completed","service_tier":"default","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150},"output":[{"id":"rs_round1","type":"reasoning","encrypted_content":"signed_enc_blob_round1","summary":[{"type":"summary_text","text":"Round 1 reasoning summary"}]},{"id":"fc_round1_1","type":"function_call","call_id":"call_round1_1","name":"lookup_user","arguments":"{\"user_id\":\"u1001\"}"},{"id":"fc_round1_2","type":"function_call","call_id":"call_round1_2","name":"fetch_orders","arguments":"{\"user_id\":\"u1001\"}"}]}}
