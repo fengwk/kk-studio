@@ -310,6 +310,45 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("needs: validate_windows_daemon", release)
 
+    def test_native_capture_keeps_streams_separate_and_drains_both_before_waiting(self):
+        """Guard PS 5.1 compatibility and deadlock ordering; real outcomes are tested in PowerShell."""
+        body = function_body("Invoke-NativeProcess")
+        self.assertIn("ConvertTo-WindowsCommandLine -Arguments $Arguments", body)
+        self.assertIn("$startInfo.UseShellExecute = $false", body)
+        assert_in_order(
+            self, body,
+            "$process.StandardOutput.ReadToEndAsync()",
+            "$process.StandardError.ReadToEndAsync()",
+            "$process.WaitForExit()",
+            "$stdout.GetAwaiter().GetResult()",
+            "$stderr.GetAwaiter().GetResult()",
+            "$process.ExitCode",
+            "$process.Dispose()",
+        )
+        self.assertNotIn("ArgumentList", body, "ProcessStartInfo.ArgumentList requires newer .NET")
+        for name in ("Assert-Jdk21", "Assert-BuiltJar"):
+            probe = function_body(name)
+            self.assertIn("Invoke-WithoutJavaOptionEnvironment", probe)
+            self.assertIn("Invoke-NativeProcess", probe)
+            self.assertNotIn("2>&1", probe)
+            self.assertNotIn("$LASTEXITCODE", probe)
+
+    @unittest.skipUnless(shutil.which("pwsh"), "portable process contracts require pwsh on PATH")
+    def test_portable_process_contracts(self):
+        """Real subprocess behavior is portable evidence, not a Windows ScheduledTasks acceptance."""
+        result = subprocess.run(
+            [
+                shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-File", str(NATIVE_TEST), "-ProcessOnly",
+            ],
+            cwd=REPOSITORY_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     @unittest.skipUnless(os.name == "nt", "native ScheduledTasks contracts require Windows")
     def test_native_powershell_contracts(self):
         """The companion suite validates real cmdlet objects and Java argv round-tripping."""
@@ -330,6 +369,7 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            timeout=120,
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 

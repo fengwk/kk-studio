@@ -7,7 +7,10 @@ registering it, and sends serialized arguments through CreateProcess -> JDK 21 -
 #>
 
 [CmdletBinding()]
-param()
+param(
+    # Portable evidence only: this does not substitute for either Windows CI host.
+    [switch] $ProcessOnly
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -98,17 +101,25 @@ function Test-QuotingGoldenCases {
     }
 }
 
-function Test-JavaArgumentRoundTrip {
-    # ProcessStartInfo.Arguments becomes the one CreateProcess command line consumed by java.exe.
-    $java = Get-Command "java.exe" -CommandType Application `
+function Test-JavaProcessCapture {
+    # Use production capture even for the preflight: PS 5.1 must not reinterpret stderr.
+    $javaName = if ($env:OS -eq "Windows_NT") { "java.exe" } else { "java" }
+    $java = Get-Command $javaName -CommandType Application `
         -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $java) {
-        throw "native argv test requires JDK 21 java.exe on PATH"
+        throw "native process tests require JDK 21 on PATH"
     }
-    $version = & $java.Source -version 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0 -or
-        $version -notmatch 'version\s+"21(?:[.\-+][^"]*)?"') {
-        throw "native argv test requires JDK 21 java.exe"
+    $version = Invoke-WithoutJavaOptionEnvironment {
+        Invoke-NativeProcess -Executable $java.Source -Arguments @("-version")
+    }
+    Assert-Equal -Expected 0 -Actual $version.ExitCode -Message "java -version succeeds"
+    Assert-Equal -Expected "" -Actual $version.Stdout -Message "java version stdout is empty"
+    Assert-True -Condition ($version.Stderr -match 'version\s+"21(?:[.\-+][^"]*)?"') `
+        -Message "successful Java 21 version is captured on stderr"
+    if ($env:OS -eq "Windows_NT") {
+        $javaHome = Split-Path -Parent (Split-Path -Parent $java.Source)
+        Assert-Equal -Expected $javaHome -Actual (Assert-Jdk21 -Candidate $javaHome) `
+            -Message "production JDK gate accepts stderr version output"
     }
 
     $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) (
@@ -116,57 +127,29 @@ function Test-JavaArgumentRoundTrip {
     )
     New-Item -ItemType Directory -Path $tempDirectory | Out-Null
     try {
-        $source = Join-Path $tempDirectory "ArgumentEcho.java"
-        $sourceText = @'
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
-class ArgumentEcho {
-  public static void main(String[] args) {
-    for (String arg : args) {
-      System.out.println(
-          Base64.getEncoder().encodeToString(arg.getBytes(StandardCharsets.UTF_8)));
-    }
-  }
-}
-'@
-        [IO.File]::WriteAllText(
-            $source,
-            $sourceText,
-            [Text.UTF8Encoding]::new($false)
-        )
+        $source = Join-Path $tempDirectory "ProcessProbe.java"
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot "resources/ProcessProbe.java") `
+            -Destination $source
 
         $expected = @(
             "",
             "plain",
             "two words",
-            "中文参数",
+            # Code points preserve genuine Chinese even with PS 5.1's BOM-less script decoding.
+            [string]::new([char[]] @(0x4E2D, 0x6587, 0x53C2, 0x6570)),
             'embedded"quote',
             'C:\Program Files\Java\',
             'two\\slashes',
             'slashes\\"before-quote',
             "ampersand&pipe|percent%caret^"
         )
-        $commandLine = ConvertTo-WindowsCommandLine -Arguments (@($source) + $expected)
-        $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = $java.Source
-        $startInfo.Arguments = $commandLine
-        $startInfo.WorkingDirectory = $tempDirectory
-        $startInfo.UseShellExecute = $false
-        $startInfo.CreateNoWindow = $true
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError = $true
-
-        $process = [Diagnostics.Process]::new()
-        $process.StartInfo = $startInfo
-        Assert-True -Condition $process.Start() -Message "java argv probe starts"
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
-        Assert-Equal -Expected 0 -Actual $process.ExitCode `
-            -Message "java argv probe exits successfully: $stderr"
-
-        $withoutFinalNewline = $stdout.TrimEnd([char[]] @("`r", "`n"))
+        $result = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java.Source `
+                -Arguments (@($source, "echo") + $expected)
+        }
+        Assert-Equal -Expected 0 -Actual $result.ExitCode -Message "java argv probe succeeds"
+        Assert-Equal -Expected "" -Actual $result.Stderr -Message "argv probe stderr is separate"
+        $withoutFinalNewline = $result.Stdout.TrimEnd([char[]] @("`r", "`n"))
         $encoded = [regex]::Split($withoutFinalNewline, "\r?\n")
         $actual = @(
             foreach ($line in $encoded) {
@@ -175,10 +158,130 @@ class ArgumentEcho {
         )
         Assert-SequenceEqual -Expected $expected -Actual $actual `
             -Message "CreateProcess to JDK argv round-trip"
+
+        $failed = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java.Source -Arguments @($source, "fail")
+        }
+        Assert-Equal -Expected 23 -Actual $failed.ExitCode -Message "native nonzero exit is observable"
+        Assert-Equal -Expected "stdout before failure" -Actual $failed.Stdout `
+            -Message "failure retains stdout"
+        Assert-Equal -Expected "stderr before failure" -Actual $failed.Stderr `
+            -Message "failure retains stderr without a PowerShell exception"
+
+        $flood = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java.Source -Arguments @($source, "flood")
+        }
+        Assert-Equal -Expected 0 -Actual $flood.ExitCode -Message "both full pipes complete"
+        Assert-Equal -Expected ("o" * (256 * 8192)) -Actual $flood.Stdout `
+            -Message "large stdout is complete"
+        Assert-Equal -Expected ("e" * (256 * 8192)) -Actual $flood.Stderr `
+            -Message "large stderr is complete"
+
+        Test-JarVersionGate -Java $java.Source -Source $source -Directory $tempDirectory
     }
     finally {
         Remove-Item -LiteralPath $tempDirectory -Recurse -Force `
             -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-JarVersionGate {
+    param([string] $Java, [string] $Source, [string] $Directory)
+    # Real JARs prove stderr cannot satisfy the stdout identity check or hide a nonzero exit.
+    $bin = Split-Path -Parent $Java
+    $suffix = if ($env:OS -eq "Windows_NT") { ".exe" } else { "" }
+    $compiled = Invoke-WithoutJavaOptionEnvironment {
+        Invoke-NativeProcess -Executable (Join-Path $bin "javac$suffix") `
+            -Arguments @("-d", $Directory, $Source)
+    }
+    Assert-Equal -Expected 0 -Actual $compiled.ExitCode -Message "compile process fixture"
+    $savedJava = $script:SelectedJava
+    $savedJar = $script:BuiltJar
+    $names = @("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")
+    $savedOptions = @{}
+    try {
+        $script:SelectedJava = $Java
+        foreach ($name in $names) {
+            $savedOptions[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+            [Environment]::SetEnvironmentVariable($name, "-not-a-valid-java-option", "Process")
+        }
+        foreach ($mode in @("success", "fail", "stderr-only", "wrong-stdout")) {
+            [IO.File]::WriteAllText((Join-Path $Directory "version-mode.txt"), $mode)
+            $script:BuiltJar = Join-Path $Directory "$mode.jar"
+            $packed = Invoke-WithoutJavaOptionEnvironment {
+                Invoke-NativeProcess -Executable (Join-Path $bin "jar$suffix") -Arguments @(
+                    "--create", "--file", $script:BuiltJar, "--main-class", "ProcessProbe",
+                    "-C", $Directory, "ProcessProbe.class", "-C", $Directory, "version-mode.txt"
+                )
+            }
+            Assert-Equal -Expected 0 -Actual $packed.ExitCode -Message "package $mode fixture"
+            if ($mode -eq "success") {
+                Assert-BuiltJar
+            }
+            elseif ($mode -eq "fail") {
+                Assert-Throws -Action { Assert-BuiltJar } -ExpectedMessage "exit code 23" `
+                    -Message "valid stdout cannot hide a failing JAR"
+            }
+            else {
+                Assert-Throws -Action { Assert-BuiltJar } -ExpectedMessage "unexpected daemon" `
+                    -Message "$mode cannot satisfy the stdout identity gate"
+            }
+            foreach ($name in $names) {
+                Assert-Equal -Expected "-not-a-valid-java-option" `
+                    -Actual ([Environment]::GetEnvironmentVariable($name, "Process")) `
+                    -Message "$name restored after $mode check"
+            }
+        }
+    }
+    finally {
+        $script:SelectedJava = $savedJava
+        $script:BuiltJar = $savedJar
+        foreach ($name in $savedOptions.Keys) {
+            $value = if ($null -eq $savedOptions[$name]) {
+                [NullString]::Value
+            } else {
+                $savedOptions[$name]
+            }
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
+        }
+    }
+}
+
+function Test-JdkVersionGate {
+    # Isolate process outcomes from host/path lookup; real Windows JDK execution is tested above.
+    function Assert-AbsoluteWindowsPath { param($Value, $Name) }
+    function Invoke-NativeProcess {
+        param($Executable, $Arguments)
+        Assert-SequenceEqual -Expected @("-version") -Actual $Arguments `
+            -Message "JDK gate requests the native version probe"
+        return $probeResult
+    }
+    $directory = Join-Path ([IO.Path]::GetTempPath()) (
+        "kk-studio-jdk-gate-$([Guid]::NewGuid().ToString('N'))"
+    )
+    New-Item -ItemType Directory -Path (Join-Path $directory "bin") | Out-Null
+    try {
+        foreach ($name in @("java.exe", "javac.exe")) {
+            [IO.File]::WriteAllText((Join-Path $directory "bin/$name"), "fixture")
+        }
+        $probeResult = [pscustomobject] @{
+            Stdout = ""
+            Stderr = 'openjdk version "21.0.12.1"'
+            ExitCode = 0
+        }
+        Assert-Equal -Expected $directory -Actual (Assert-Jdk21 -Candidate $directory) `
+            -Message "JDK gate accepts stderr with a successful exit"
+        $probeResult.Stderr = 'openjdk version "17.0.1"'
+        Assert-Throws -Action { Assert-Jdk21 -Candidate $directory } `
+            -ExpectedMessage "JDK 21 is required" -Message "other major versions are rejected"
+        $probeResult.Stdout = 'openjdk version "21.0.12.1"'
+        $probeResult.Stderr = "native failure"
+        $probeResult.ExitCode = 23
+        Assert-Throws -Action { Assert-Jdk21 -Candidate $directory } `
+            -ExpectedMessage "exit code 23" -Message "a valid version cannot hide native failure"
+    }
+    finally {
+        Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -414,12 +517,16 @@ function Test-ScheduledTaskDefinition {
 
 try {
     Test-QuotingGoldenCases
-    Test-JavaArgumentRoundTrip
-    Test-RegistrationTokenAcl
-    Test-MissingScheduledTaskLookup
-    Test-PureValidation
-    Test-ScheduledTaskDefinition
-    Write-Host "Windows daemon installer native contracts passed ($script:Assertions assertions)."
+    Test-JavaProcessCapture
+    Test-JdkVersionGate
+    if (-not $ProcessOnly) {
+        Test-RegistrationTokenAcl
+        Test-MissingScheduledTaskLookup
+        Test-PureValidation
+        Test-ScheduledTaskDefinition
+    }
+    $scope = if ($ProcessOnly) { "Portable process" } else { "Windows daemon installer native" }
+    Write-Host "$scope contracts passed ($script:Assertions assertions)."
     exit 0
 }
 catch {

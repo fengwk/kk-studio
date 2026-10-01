@@ -387,15 +387,58 @@ function Invoke-WithoutJavaOptionEnvironment {
     $saved = @{}
     foreach ($name in $names) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-        [Environment]::SetEnvironmentVariable($name, $null, "Process")
+        # Preserve an actual .NET null instead of PowerShell converting it to an empty string.
+        [Environment]::SetEnvironmentVariable($name, [NullString]::Value, "Process")
     }
     try {
         & $Action
     }
     finally {
         foreach ($name in $names) {
-            [Environment]::SetEnvironmentVariable($name, $saved[$name], "Process")
+            $value = if ($null -eq $saved[$name]) {
+                [NullString]::Value
+            } else {
+                $saved[$name]
+            }
+            [Environment]::SetEnvironmentVariable($name, $value, "Process")
         }
+    }
+}
+
+function Invoke-NativeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string] $Executable,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [string[]] $Arguments
+    )
+    # Native stderr is data, not a PowerShell error record (notably on PS 5.1).
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $Executable
+    $startInfo.Arguments = ConvertTo-WindowsCommandLine -Arguments $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            Throw-Failure "cannot start $Executable"
+        }
+        # Drain both pipes concurrently before waiting, including output larger than a pipe buffer.
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        return [pscustomobject] @{
+            Stdout = $stdout.GetAwaiter().GetResult()
+            Stderr = $stderr.GetAwaiter().GetResult()
+            ExitCode = $process.ExitCode
+        }
+    }
+    finally {
+        $process.Dispose()
     }
 }
 
@@ -412,13 +455,13 @@ function Assert-Jdk21 {
         Throw-Failure "JDK 21 home must contain bin\javac.exe: $resolved"
     }
 
-    $output = Invoke-WithoutJavaOptionEnvironment {
-        $text = & $java -version 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Throw-Failure "cannot execute $java"
-        }
-        return $text
+    $result = Invoke-WithoutJavaOptionEnvironment {
+        Invoke-NativeProcess -Executable $java -Arguments @("-version")
     }
+    if ($result.ExitCode -ne 0) {
+        Throw-Failure "cannot execute $java (exit code $($result.ExitCode))"
+    }
+    $output = $result.Stdout + $result.Stderr
     if ($output -notmatch 'version\s+"21(?:[.\-+][^"]*)?"') {
         $firstLine = ($output -split "\r?\n", 2)[0]
         Throw-Failure "JDK 21 is required (found: $firstLine)"
@@ -545,14 +588,14 @@ function Assert-BuiltJar {
         (Get-Item -LiteralPath $script:BuiltJar).Length -le 0) {
         Throw-Failure "built daemon JAR not found or empty: $($script:BuiltJar)"
     }
-    $output = Invoke-WithoutJavaOptionEnvironment {
-        $text = & $script:SelectedJava -jar $script:BuiltJar --version 2>&1 |
-            Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Throw-Failure "built daemon JAR failed its --version check"
-        }
-        return $text
+    $result = Invoke-WithoutJavaOptionEnvironment {
+        Invoke-NativeProcess -Executable $script:SelectedJava `
+            -Arguments @("-jar", $script:BuiltJar, "--version")
     }
+    if ($result.ExitCode -ne 0) {
+        Throw-Failure "built daemon JAR failed its --version check (exit code $($result.ExitCode))"
+    }
+    $output = $result.Stdout
     if (-not $output.Trim().StartsWith(
         "kk-studio-daemon ",
         [StringComparison]::Ordinal
@@ -627,6 +670,7 @@ function ConvertTo-WindowsCommandLine {
     param(
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
+        [AllowEmptyString()]
         [string[]] $Arguments
     )
     $serialized = foreach ($argument in $Arguments) {

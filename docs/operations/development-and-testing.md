@@ -101,6 +101,26 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
+### Daemon 安装脚本回归
+
+在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。
+Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
+
+```powershell
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
+pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
+```
+
+该套件不注册任务，检查真实 ScheduledTasks 定义、ACL、Java argv 和生产进程捕获。Java 探测独立
+捕获 stdout/stderr，以真实退出码判断执行成功；`java -version` 在 stderr 上输出是正常行为，
+JAR 的身份校验仍只接受 stdout。回归包含非零退出、双流大输出和 Java 选项环境变量恢复。
+
+只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
+`pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
+Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
+进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
+保留两个 Windows host 的完整门禁。
+
 ## Java 质量检查
 
 ### Spotless
