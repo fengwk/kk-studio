@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -37,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
@@ -44,6 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.InetSocketAddress;
@@ -52,6 +58,8 @@ import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -64,6 +72,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** 测试意图：端到端集成测试，验证本地 HTTP 服务下连续多步工具循环、HTTP 异常分类映射、流终态封闭与回调崩溃的单次终态。 */
 class OpenAiChatModelProviderIntegrationTest {
+
+  private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private HttpServer server;
   private int port;
@@ -556,5 +566,267 @@ class OpenAiChatModelProviderIntegrationTest {
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
         List.of(),
         ProviderCacheControl.none());
+  }
+
+  /**
+   * 测试意图：捕获三轮本地 HTTP 工具续跑请求，验证显式缓存端点保留、并行工具批末端及文本 parts。 原生 reasoning_content
+   * 与未知字段必须回放，tool-call-only assistant 不制造 content。
+   */
+  @Test
+  @DisplayName("离线 HTTP：显式缓存三轮工具续跑")
+  void testOfflineHttpExplicitPromptCacheMultiTurnCycle() throws Exception {
+    List<JsonNode> capturedRequests = Collections.synchronizedList(new ArrayList<>());
+    AtomicReference<Exception> serverError = new AtomicReference<>();
+    CountDownLatch serverFinished = new CountDownLatch(3);
+    List<byte[]> responses =
+        List.of(
+            loadFixtureBytes("explicit-cache-multiturn-turn1.sse"),
+            loadFixtureBytes("explicit-cache-multiturn-turn2.sse"),
+            loadFixtureBytes("explicit-cache-multiturn-turn3.sse"));
+    server.createContext(
+        "/chat/completions",
+        exchange -> {
+          try (exchange) {
+            capturedRequests.add(MAPPER.readTree(exchange.getRequestBody().readAllBytes()));
+            byte[] response = responses.get(capturedRequests.size() - 1);
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream os = exchange.getResponseBody()) {
+              os.write(response);
+              os.flush();
+            }
+          } catch (Exception e) {
+            serverError.compareAndSet(null, e);
+          } finally {
+            serverFinished.countDown();
+          }
+        });
+
+    OpenAiChatConfiguration explicitConfig =
+        new OpenAiChatConfiguration(
+            true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
+    ModelProvider provider =
+        new OpenAiChatProviderAdapter(transport, "sk-test", explicitConfig).create(descriptor);
+
+    List<ProviderToolDefinition> tools =
+        List.of(
+            new ProviderToolDefinition("file_search", "Search files", "{\"type\":\"object\"}"),
+            new ProviderToolDefinition("get_weather", "Get weather", "{\"type\":\"object\"}"),
+            new ProviderToolDefinition("read_file", "Read file", "{\"type\":\"object\"}"));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.breakpoints(
+            PromptCacheRetention.SHORT,
+            "test-explicit-key",
+            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+
+    // Turn 1: 初始用户提问
+    ProviderMessage userMsg =
+        new ProviderMessage(
+            ProviderMessageRole.USER,
+            List.of(new ProviderTextBlock("Find files and get weather in Tokyo")));
+    ProviderRequest req1 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            tools,
+            cacheControl);
+    ProviderCompletion comp1 = executeStream(provider, req1);
+    assertEquals(2, comp1.response().toolCalls().size());
+    assertEquals(
+        "Thinking: file_search and get_weather concurrently.", comp1.response().thinking());
+    assertEquals("", comp1.response().text());
+    ProviderToolCall callSearch = comp1.response().toolCalls().get(0);
+    ProviderToolCall callWeather = comp1.response().toolCalls().get(1);
+
+    // Turn 2: 并行两工具结果续跑
+    ProviderMessage asst1 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("Thinking: file_search and get_weather concurrently."),
+                new ProviderToolCallBlock(callSearch),
+                new ProviderToolCallBlock(callWeather)),
+            comp1.replayState());
+    ProviderMessage tool1 =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    callSearch.id(),
+                    callSearch.name(),
+                    List.of(new ProviderTextBlock("file report.txt found")),
+                    false,
+                    "{}")));
+    ProviderMessage tool2 =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    callWeather.id(),
+                    callWeather.name(),
+                    List.of(new ProviderTextBlock("Tokyo 22C Sunny")),
+                    false,
+                    "{}")));
+    ProviderRequest req2 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg, asst1, tool1, tool2),
+            tools,
+            cacheControl);
+    ProviderCompletion comp2 = executeStream(provider, req2);
+    assertEquals(1, comp2.response().toolCalls().size());
+    assertEquals("Thinking: read report content.", comp2.response().thinking());
+    ProviderToolCall callRead = comp2.response().toolCalls().get(0);
+
+    // Turn 3: 再次单工具结果续跑至文本输出
+    ProviderMessage asst2 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("Thinking: read report content."),
+                new ProviderToolCallBlock(callRead)),
+            comp2.replayState());
+    ProviderMessage tool3 =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    callRead.id(),
+                    callRead.name(),
+                    List.of(new ProviderTextBlock("Report: System OK")),
+                    false,
+                    "{}")));
+    ProviderRequest req3 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg, asst1, tool1, tool2, asst2, tool3),
+            tools,
+            cacheControl);
+    ProviderCompletion comp3 = executeStream(provider, req3);
+    assertEquals("Tokyo is sunny and the report is all clear.", comp3.response().text());
+    assertEquals(
+        "Thinking: all info gathered, synthesizing final answer.", comp3.response().thinking());
+    assertEquals(GenerationStopReason.COMPLETE, comp3.response().stopReason());
+
+    // 捕获请求 Wire JSON 校验
+    assertTrue(serverFinished.await(5, TimeUnit.SECONDS), "server handlers must finish");
+    assertNull(serverError.get(), "server handlers must not fail");
+    assertEquals(3, capturedRequests.size());
+    JsonNode wireReq1 = capturedRequests.get(0);
+    assertExplicitRootOptions(wireReq1, "test-explicit-key");
+    assertEquals(2, wireReq1.path("messages").size());
+    assertTextContent(wireReq1.path("messages").get(0), "Test system instruction.", true);
+    assertTextContent(
+        wireReq1.path("messages").get(1), "Find files and get weather in Tokyo", true);
+
+    JsonNode wireReq2 = capturedRequests.get(1);
+    assertExplicitRootOptions(wireReq2, "test-explicit-key");
+    assertEquals(5, wireReq2.path("messages").size());
+    assertTextContent(wireReq2.path("messages").get(0), "Test system instruction.", true);
+    assertTextContent(
+        wireReq2.path("messages").get(1), "Find files and get weather in Tokyo", true);
+    assertWireAssistant(
+        wireReq2.path("messages").get(2),
+        "Thinking: file_search and get_weather concurrently.",
+        "custom_v1",
+        2);
+    assertTextContent(wireReq2.path("messages").get(3), "file report.txt found", false);
+    assertTextContent(wireReq2.path("messages").get(4), "Tokyo 22C Sunny", true);
+
+    JsonNode wireReq3 = capturedRequests.get(2);
+    assertExplicitRootOptions(wireReq3, "test-explicit-key");
+    assertEquals(7, wireReq3.path("messages").size());
+    assertTextContent(wireReq3.path("messages").get(0), "Test system instruction.", true);
+    assertTextContent(
+        wireReq3.path("messages").get(1), "Find files and get weather in Tokyo", true);
+    assertWireAssistant(
+        wireReq3.path("messages").get(2),
+        "Thinking: file_search and get_weather concurrently.",
+        "custom_v1",
+        2);
+    assertTextContent(wireReq3.path("messages").get(3), "file report.txt found", false);
+    assertTextContent(wireReq3.path("messages").get(4), "Tokyo 22C Sunny", true);
+    assertWireAssistant(
+        wireReq3.path("messages").get(5), "Thinking: read report content.", "custom_v2", 1);
+    assertTextContent(wireReq3.path("messages").get(6), "Report: System OK", true);
+  }
+
+  private static void assertExplicitRootOptions(JsonNode req, String expectedKey) {
+    assertEquals("explicit", req.path("prompt_cache_options").path("mode").asText());
+    assertEquals("30m", req.path("prompt_cache_options").path("ttl").asText());
+    assertEquals(expectedKey, req.path("prompt_cache_key").asText());
+  }
+
+  private static void assertTextContent(JsonNode message, String expectedText, boolean breakpoint) {
+    assertTrue(message.path("content").isArray(), "content must be parts array");
+    JsonNode part = message.path("content").get(0);
+    assertEquals("text", part.path("type").asText());
+    assertEquals(expectedText, part.path("text").asText());
+    if (breakpoint) {
+      assertEquals(1, part.path("prompt_cache_breakpoint").size());
+      assertEquals("explicit", part.path("prompt_cache_breakpoint").path("mode").asText());
+    } else {
+      assertFalse(part.has("prompt_cache_breakpoint"), "breakpoint must not be present");
+    }
+  }
+
+  private static void assertWireAssistant(
+      JsonNode message, String thinking, String customTag, int toolCallsCount) {
+    assertEquals("assistant", message.path("role").asText());
+    assertFalse(
+        message.has("content"), "assistant without text content must not fabricate content");
+    assertEquals(thinking, message.path("reasoning_content").asText());
+    assertEquals(customTag, message.path("vendor_custom_tag").asText());
+    assertEquals(toolCallsCount, message.path("tool_calls").size());
+  }
+
+  private static byte[] loadFixtureBytes(String name) throws IOException {
+    try (InputStream is =
+        OpenAiChatModelProviderIntegrationTest.class.getResourceAsStream("fixtures/" + name)) {
+      if (is == null) {
+        throw new IllegalArgumentException("resource not found: " + name);
+      }
+      return is.readAllBytes();
+    }
+  }
+
+  private ProviderCompletion executeStream(ModelProvider provider, ProviderRequest request)
+      throws Exception {
+    CountDownLatch latch = new CountDownLatch(1);
+    AtomicReference<ProviderCompletion> comp = new AtomicReference<>();
+    AtomicReference<ProviderException> err = new AtomicReference<>();
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+            comp.set(completion);
+            latch.countDown();
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            err.set(error);
+            latch.countDown();
+          }
+        });
+    assertTrue(latch.await(5, TimeUnit.SECONDS), "stream must complete within timeout");
+    if (err.get() != null) {
+      throw err.get();
+    }
+    assertNotNull(comp.get(), "completion must not be null");
+    return comp.get();
   }
 }

@@ -46,7 +46,7 @@ class OpenAiChatPrefixHasherTest {
     ObjectNode msg2 = messages2.addObject();
     msg2.put("role", "system");
     msg2.put("content", "You are helpful.");
-    msg2.put("prompt_cache_breakpoint", true);
+    msg2.putObject("prompt_cache_breakpoint").put("mode", "explicit");
     msg2.put("prompt_cache_key", "key-123");
 
     String hash1 = OpenAiChatPrefixHasher.calculateHash(tools, messages1);
@@ -98,7 +98,7 @@ class OpenAiChatPrefixHasherTest {
     ObjectNode propsWithCache = paramsWithCache.putObject("properties");
     ObjectNode xNode = propsWithCache.putObject("x");
     xNode.put("type", "number");
-    xNode.put("prompt_cache_breakpoint", true);
+    xNode.putObject("prompt_cache_breakpoint").put("mode", "explicit");
 
     // 2. 在 messages 的不同嵌套层级分别注入四字段
     ArrayNode messagesWithCache = MAPPER.createArrayNode();
@@ -110,7 +110,7 @@ class OpenAiChatPrefixHasherTest {
     ObjectNode partWithCache = contentWithCache.addObject();
     partWithCache.put("type", "text");
     partWithCache.put("text", "hello");
-    partWithCache.put("prompt_cache_breakpoint", true);
+    partWithCache.putObject("prompt_cache_breakpoint").put("mode", "explicit");
     ObjectNode nestedOptions = partWithCache.putObject("prompt_cache_options");
     nestedOptions.put("mode", "explicit");
 

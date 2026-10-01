@@ -56,6 +56,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -870,11 +871,15 @@ class OpenAiChatRequestEncoderTest {
     ArrayNode gptMessages = (ArrayNode) rootGpt.path("messages");
     // SYSTEM breakpoint
     ArrayNode sysContentParts = (ArrayNode) gptMessages.get(0).path("content");
-    assertTrue(sysContentParts.get(0).path("prompt_cache_breakpoint").asBoolean());
+    assertEquals(
+        MAPPER.readTree("{\"mode\":\"explicit\"}"),
+        sysContentParts.get(0).path("prompt_cache_breakpoint"));
 
     // CONVERSATION breakpoint
     ArrayNode userContentParts = (ArrayNode) gptMessages.get(1).path("content");
-    assertTrue(userContentParts.get(0).path("prompt_cache_breakpoint").asBoolean());
+    assertEquals(
+        MAPPER.readTree("{\"mode\":\"explicit\"}"),
+        userContentParts.get(0).path("prompt_cache_breakpoint"));
 
     // 4. GPT_5_6_EXPLICIT with retention NONE: 仍发 explicit options，但不发 key 和 breakpoint 以禁用缓存
     ProviderRequest reqGptNone =
@@ -1323,7 +1328,7 @@ class OpenAiChatRequestEncoderTest {
             .path("file_data")
             .asText());
 
-    // 6. 最后一条消息是纯 tool_calls 的 assistant 消息并在上面打 conversation breakpoint
+    // 6. tool-call-only assistant 不制造 content，仅标此前输入端点。
     OpenAiChatConfiguration configGpt =
         new OpenAiChatConfiguration(
             true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
@@ -1352,7 +1357,10 @@ class OpenAiChatRequestEncoderTest {
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
     // 0 号是合成的系统指令消息，user 消息紧随其后
     JsonNode userNode = messages.get(1);
-    assertTrue(userNode.path("content").get(0).path("prompt_cache_breakpoint").asBoolean());
+    assertEquals(
+        MAPPER.readTree("{\"mode\":\"explicit\"}"),
+        userNode.path("content").get(0).path("prompt_cache_breakpoint"));
+    assertFalse(messages.get(2).has("content"));
   }
 
   @Test
@@ -2343,6 +2351,305 @@ class OpenAiChatRequestEncoderTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("request body exceeds"));
     assertFalse(ex.getMessage().contains("size guard"));
+  }
+
+  /** 三轮之后继续滚动：旧端点按请求而非消息保留，去掉 hint 后历史 wire 前缀完全一致。 */
+  @Test
+  void explicitCacheRetainsRequestEndpointsAndStableWirePrefix() throws Exception {
+    List<ProviderMessage> history = new ArrayList<>();
+    ArrayNode previous = null;
+    for (int turn = 1; turn <= 6; turn++) {
+      history.add(cacheText(ProviderMessageRole.USER, "user-" + turn));
+      ArrayNode wire = cacheWire("system", history, cacheBreakpoints(true));
+      List<Integer> expected = new ArrayList<>(List.of(0));
+      for (int retained = Math.max(1, turn - 2); retained <= turn; retained++) {
+        expected.add(retained * 2 - 1);
+      }
+      assertEquals(expected, markedMessageIndexes(wire));
+      if (previous != null) {
+        for (int i = 0; i < previous.size(); i++) {
+          assertEquals(withoutCacheHints(previous.get(i)), withoutCacheHints(wire.get(i)));
+        }
+      }
+      for (JsonNode message : wire) {
+        assertTrue(message.path("content").isArray());
+        assertEquals(1, message.path("content").size());
+      }
+      previous = wire;
+      history.add(cacheText(ProviderMessageRole.ASSISTANT, "answer-" + turn));
+    }
+  }
+
+  /** 相同文本是不同位置的端点，queued 用户与连续 assistant 不应消耗额外断点。 */
+  @Test
+  void explicitCacheUsesIdentityAndQueuedRequestBoundaries() throws Exception {
+    List<ProviderMessage> history =
+        List.of(
+            cacheText(ProviderMessageRole.USER, "same"),
+            cacheText(ProviderMessageRole.ASSISTANT, "answer"),
+            cacheText(ProviderMessageRole.ASSISTANT, "continued"),
+            cacheText(ProviderMessageRole.USER, "queued-1"),
+            cacheText(ProviderMessageRole.USER, "queued-2"),
+            cacheText(ProviderMessageRole.USER, "same"),
+            cacheText(ProviderMessageRole.ASSISTANT, "answer"),
+            cacheText(ProviderMessageRole.USER, "queued-3"),
+            cacheText(ProviderMessageRole.USER, "queued-4"),
+            cacheText(ProviderMessageRole.USER, "same"));
+    assertEquals(
+        List.of(0, 1, 6, 10),
+        markedMessageIndexes(cacheWire("system", history, cacheBreakpoints(true))));
+  }
+
+  /** SYSTEM 未请求时不占预算；空输入不会制造非法块或 assistant 内容。 */
+  @Test
+  void explicitCacheBudgetWithoutSystemAndEmptyInputs() throws Exception {
+    List<ProviderMessage> history = new ArrayList<>();
+    for (int i = 0; i < 5; i++) {
+      history.add(cacheText(ProviderMessageRole.USER, "input-" + i));
+      history.add(cacheText(ProviderMessageRole.ASSISTANT, "answer"));
+    }
+    history.add(cacheText(ProviderMessageRole.USER, ""));
+    assertEquals(
+        List.of(3, 5, 7, 9),
+        markedMessageIndexes(cacheWire("system", history, cacheBreakpoints(false))));
+    ArrayNode empty =
+        cacheWire(
+            "system", List.of(cacheText(ProviderMessageRole.USER, "")), cacheBreakpoints(false));
+    assertEquals(List.of(), markedMessageIndexes(empty));
+    assertEquals("", empty.get(1).path("content").asText());
+    ArrayNode noMessages = cacheWire("system", List.of(), cacheBreakpoints(true));
+    assertEquals(List.of(0), markedMessageIndexes(noMessages));
+    ArrayNode emptyAssistant =
+        cacheWire(
+            "system",
+            List.of(cacheText(ProviderMessageRole.ASSISTANT, "")),
+            cacheBreakpoints(false));
+    assertEquals("", emptyAssistant.get(1).path("content").asText());
+    assertEquals(List.of(), markedMessageIndexes(emptyAssistant));
+  }
+
+  /** 多媒体现有数组及其字段保持原样，只在最后有效 part 增加对象 hint。 */
+  @Test
+  void explicitCachePreservesExistingContentParts() throws Exception {
+    ProviderMessage media =
+        new ProviderMessage(
+            ProviderMessageRole.USER,
+            List.of(
+                new ProviderTextBlock("look"),
+                new ProviderImageBlock("image/png", "https://example.com/a.png")));
+    ProviderRequest request = cacheRequest("system", List.of(media), cacheBreakpoints(true));
+    ArrayNode original =
+        (ArrayNode)
+            MAPPER
+                .readTree(
+                    encoder
+                        .encode(request, descriptor, OpenAiChatConfiguration.defaults())
+                        .bodyUtf8Bytes())
+                .path("messages");
+    ArrayNode cached = cacheWire("system", List.of(media), cacheBreakpoints(true));
+    assertEquals(original.get(1), withoutCacheHints(cached.get(1)));
+    assertEquals(List.of(0, 1), markedMessageIndexes(cached));
+    assertFalse(cached.get(1).path("content").get(0).has("prompt_cache_breakpoint"));
+  }
+
+  /** 新 hint 与 parts 转换不得进入 source hash；native-only 回放仍严格检查前缀、affinity 和 durable。 */
+  @Test
+  void explicitCacheDoesNotChangeNeutralHashOrRelaxReplay() throws Exception {
+    List<ProviderMessage> history =
+        new ArrayList<>(List.of(cacheText(ProviderMessageRole.USER, "first")));
+    ProviderRequest first = cacheRequest("system", history, cacheBreakpoints(true));
+    OpenAiChatEncodedRequest cached = encoder.encode(first, descriptor, explicitCacheConfig());
+    OpenAiChatEncodedRequest automatic =
+        encoder.encode(first, descriptor, OpenAiChatConfiguration.defaults());
+    assertEquals(automatic.sourcePrefixHash(), cached.sourcePrefixHash());
+    ObjectNode payload =
+        MAPPER
+            .createObjectNode()
+            .put("role", "assistant")
+            .put("content", "answer")
+            .put("reasoning_content", "thought");
+    payload.putObject("vendor_signature").put("opaque", "preserved");
+    ProviderReplayState replay =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity(modelDesc.modelId()),
+            cached.sourcePrefixHash(),
+            payload);
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("thought")),
+            replay);
+    history.add(assistant);
+    history.add(cacheText(ProviderMessageRole.USER, "next"));
+    ProviderRequest next = cacheRequest("system", history, cacheBreakpoints(true));
+    assertEquals(
+        encoder.encode(next, descriptor, OpenAiChatConfiguration.defaults()).sourcePrefixHash(),
+        encoder.encode(next, descriptor, explicitCacheConfig()).sourcePrefixHash());
+    JsonNode wireAssistant = cacheWire("system", history, cacheBreakpoints(true)).get(2);
+    assertEquals(payload.path("vendor_signature"), wireAssistant.path("vendor_signature"));
+    assertEquals("thought", wireAssistant.path("reasoning_content").asText());
+    assertEquals("answer", wireAssistant.path("content").get(0).path("text").asText());
+    assertEquals("answer", replay.payload().path("content").asText());
+    for (ProviderRequest invalid :
+        List.of(
+            cacheRequest("changed", history, cacheBreakpoints(true)),
+            cacheRequest(
+                "system",
+                List.of(cacheText(ProviderMessageRole.USER, "changed"), assistant),
+                cacheBreakpoints(true)),
+            cacheRequest(
+                "system",
+                List.of(
+                    history.get(0),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT,
+                        List.of(new ProviderTextBlock("wrong")),
+                        replay)),
+                cacheBreakpoints(true)))) {
+      assertEquals(
+          ProviderErrorKind.INVALID_REQUEST,
+          assertThrows(
+                  ProviderException.class,
+                  () -> encoder.encode(invalid, descriptor, explicitCacheConfig()))
+              .kind());
+    }
+    ProviderReplayState wrongAffinity =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("other-model"),
+            cached.sourcePrefixHash(),
+            payload);
+    ProviderMessage mismatched =
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, assistant.contents(), wrongAffinity);
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                cacheRequest("system", List.of(history.get(0), mismatched), cacheBreakpoints(true)),
+                descriptor,
+                explicitCacheConfig()));
+    // 即使缓存 wire 使用数组，native replay payload 的 content 仍必须严格遵循原有文本契约。
+    ObjectNode invalidShape = payload.deepCopy();
+    invalidShape.putArray("content").addObject().put("type", "text").put("text", "answer");
+    ProviderReplayState invalidReplay =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity(modelDesc.modelId()),
+            cached.sourcePrefixHash(),
+            invalidShape);
+    ProviderMessage invalidAssistant =
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, assistant.contents(), invalidReplay);
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        assertThrows(
+                ProviderException.class,
+                () ->
+                    encoder.encode(
+                        cacheRequest(
+                            "system",
+                            List.of(history.get(0), invalidAssistant),
+                            cacheBreakpoints(true)),
+                        descriptor,
+                        explicitCacheConfig()))
+            .kind());
+  }
+
+  /** 未开启缓存和其他模式仍使用原 string wire，不发送断点；LEGACY 只增加既有 root hint。 */
+  @Test
+  void explicitNoneAndOtherCacheModesKeepOriginalWire() throws Exception {
+    List<ProviderMessage> history =
+        List.of(
+            cacheText(ProviderMessageRole.USER, "user"),
+            cacheText(ProviderMessageRole.ASSISTANT, "answer"));
+    ProviderRequest none = cacheRequest("system", history, ProviderCacheControl.none());
+    JsonNode original =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(none, descriptor, OpenAiChatConfiguration.defaults())
+                    .bodyUtf8Bytes())
+            .path("messages");
+    for (OpenAiChatConfiguration.PromptCacheMode mode :
+        OpenAiChatConfiguration.PromptCacheMode.values()) {
+      OpenAiChatConfiguration config = new OpenAiChatConfiguration(true, true, mode);
+      JsonNode wire =
+          MAPPER
+              .readTree(encoder.encode(none, descriptor, config).bodyUtf8Bytes())
+              .path("messages");
+      assertEquals(original, wire);
+      if (mode != OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT) {
+        assertEquals(
+            original,
+            MAPPER
+                .readTree(
+                    encoder
+                        .encode(
+                            cacheRequest("system", history, cacheBreakpoints(true)),
+                            descriptor,
+                            config)
+                        .bodyUtf8Bytes())
+                .path("messages"));
+      }
+    }
+  }
+
+  private static ProviderMessage cacheText(ProviderMessageRole role, String text) {
+    return new ProviderMessage(role, List.of(new ProviderTextBlock(text)));
+  }
+
+  private static OpenAiChatConfiguration explicitCacheConfig() {
+    return new OpenAiChatConfiguration(
+        true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
+  }
+
+  private static ProviderCacheControl cacheBreakpoints(boolean system) {
+    return ProviderCacheControl.breakpoints(
+        PromptCacheRetention.SHORT,
+        "cache-key",
+        system
+            ? EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION)
+            : EnumSet.of(PromptCacheBreakpoint.CONVERSATION));
+  }
+
+  private ProviderRequest cacheRequest(
+      String system, List<ProviderMessage> history, ProviderCacheControl control) {
+    return new ProviderRequest(
+        modelDesc, defaultVariant, 1024, system, history, List.of(), control);
+  }
+
+  private ArrayNode cacheWire(
+      String system, List<ProviderMessage> history, ProviderCacheControl control) throws Exception {
+    return (ArrayNode)
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        cacheRequest(system, history, control), descriptor, explicitCacheConfig())
+                    .bodyUtf8Bytes())
+            .path("messages");
+  }
+
+  private static List<Integer> markedMessageIndexes(ArrayNode messages) throws Exception {
+    List<Integer> indexes = new ArrayList<>();
+    for (int i = 0; i < messages.size(); i++) {
+      for (JsonNode part : messages.get(i).path("content")) {
+        if (part.has("prompt_cache_breakpoint")) {
+          assertEquals(
+              MAPPER.readTree("{\"mode\":\"explicit\"}"), part.path("prompt_cache_breakpoint"));
+          indexes.add(i);
+        }
+      }
+    }
+    return indexes;
+  }
+
+  private static JsonNode withoutCacheHints(JsonNode message) {
+    JsonNode copy = message.deepCopy();
+    for (JsonNode part : copy.path("content")) {
+      ((ObjectNode) part).remove("prompt_cache_breakpoint");
+    }
+    return copy;
   }
 
   @Test
