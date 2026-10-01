@@ -329,7 +329,7 @@ Backend 启动还要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 buc
 
 ### 真实 Provider 与付费边界
 
-只有 `--real` 会读取并同步宿主凭据，且必须提供四组完整 pair，缺一或只给一半都会在同步前失败：
+E2E 矩阵只有 `--real` 会读取并同步宿主凭据，且必须提供四组完整 pair，缺一或只给一半都会在同步前失败：
 
 - `TEST_GOOGLE_BASE_URL` + `TEST_GOOGLE_API_KEY`
 - `TEST_OPENAI_BASE_URL` + `TEST_OPENAI_API_KEY`
@@ -348,6 +348,22 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
 database 中的 `minimax` Responses Provider。
+
+独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
+用于测量历史断点，而非仅验证 system 前缀命中。它直接调用 Provider，不启动应用或数据库；默认只执行免费 wire 形状检查。
+已授权付费、且 `TEST_ANTHROPIC_BASE_URL` / `TEST_ANTHROPIC_API_KEY` 完整时，可显式运行：
+
+```bash
+env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
+  mvn -pl harness/provider -am -Dtest=AnthropicHistoryCacheLiveProbeTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+该探针固定使用 `minimax-anthropic/MiniMax-M3` 的 wire model `claude-fable-5-dd-3M-xaMiniM`，
+关闭推理，每次输出上限 128 token，总共最多 4 次请求、不重试。两个独立 nonce 会话各先预热约 7k token
+的用户历史，再增加 24 个文本块；一组保留历史端点，另一组只删除历史标记、保留末端，system 很短且不打标。
+输出只包含标记位置、状态和数值 usage。上游可能自动缓存或不报告缓存写入，因此成功完成测量不等于证明断点带来提升；
+应比较两组读缓存 token，并明确该结果只适用于凭据指向的线路，不等同于 Anthropic 官方服务行为。
 
 两个内建工具 case `real.task_delegation` 与 `tool.read_turn` 默认使用
 `minimax-anthropic/MiniMax-M3`，可用 `E2E_BUILTIN_MODEL` 显式换用另一个**已声明**模型；取值是
