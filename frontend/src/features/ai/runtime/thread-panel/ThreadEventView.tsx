@@ -46,6 +46,11 @@ export interface ThreadEventViewProps {
   debug?: ThreadModelRequestDebugData | null
   debugSelection?: DebugInspectorSelection | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
+  onPreview?: () => void
+  previewLoading?: boolean
+  previewDisabled?: boolean
+  previewDisabledReason?: string | null
+  previewError?: string | null
 }
 
 /**
@@ -65,6 +70,11 @@ export function ThreadEventView({
   debug,
   debugSelection = null,
   onSelectInspector,
+  onPreview,
+  previewLoading = false,
+  previewDisabled = false,
+  previewDisabledReason = null,
+  previewError = null,
 }: ThreadEventViewProps) {
   const { t } = useI18n()
   const baseId = useId()
@@ -353,6 +363,15 @@ export function ThreadEventView({
                 const activeEl = document.activeElement as HTMLElement | null
                 handleSelectInspector(selection, activeEl)
               }}
+              onPreview={onPreview ? () => {
+                lastDetailSourceRef.current = 'preview'
+                lastFocusedTriggerRef.current = document.activeElement as HTMLElement | null
+                onPreview()
+              } : undefined}
+              previewLoading={previewLoading}
+              previewDisabled={previewDisabled}
+              previewDisabledReason={previewDisabledReason}
+              previewError={previewError}
             />
           ) : (
             <div className="thread-debug-placeholder">

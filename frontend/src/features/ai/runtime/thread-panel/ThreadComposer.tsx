@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -9,8 +10,9 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent,
+  type Ref,
 } from 'react'
-import { ArrowUp, Eye, LoaderCircle, Plus, X } from 'lucide-react'
+import { ArrowUp, Plus, X } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
@@ -82,39 +84,23 @@ function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; ob
   }
 }
 
-/**
- * 共享的 ordered Pill Composer（OpenCode 风格）。
- *
- * 原生 contenteditable editor + `contenteditable=false` attachment/resource pill；draft 是
- * ordered {@link ComposerPart}（TEXT/ATTACHMENT/RESOURCE），DOM pill 携带
- * `data-part-id`、`data-part-type` 与对应引用字段。只有文件粘贴/拖放/选择会创建
- * attachment pill，typed '@filename' 始终是文本。
- *
- * 上传注册表（strip）由组件内部持有；通过可注入的 storageService/hashFile
- * 适配（Canvas 后续可复用同一契约，无需依赖本组件之外的 AI 状态）。
- */
-export function ThreadComposer({
-  parts,
-  pending,
-  disabled,
-  onPartsChange,
-  onHistoryPartsChange = onPartsChange,
-  onSubmit,
-  onSubmitGoal,
-  onCommand,
-  commands = THREAD_COMMANDS,
-  historicalUserMessages = EMPTY_USER_MESSAGES,
-  queuedUserMessages = EMPTY_USER_MESSAGES,
-  storageService,
-  hashFile,
-  focusOnEscape = false,
-  active = true,
-  settings,
-  onPreview,
-  previewLoading = false,
-  previewDisabled = false,
-  scope,
-}: {
+export type ComposerPreviewDisabledReason =
+  | 'EMPTY_DRAFT'
+  | 'SLASH_COMMAND'
+  | 'GOAL_COMMAND'
+  | 'UPLOADS_PENDING'
+  | 'COMPOSER_DISABLED'
+
+export interface ComposerPreviewReadiness {
+  canPreview: boolean
+  reason: ComposerPreviewDisabledReason | null
+}
+
+export interface ThreadComposerHandle {
+  preparePreview: () => { payload: ComposerPart[]; localDraft: ComposerPart[] } | null
+}
+
+export interface ThreadComposerProps {
   parts: ComposerPart[]
   pending: boolean
   disabled: boolean
@@ -141,11 +127,43 @@ export function ThreadComposer({
   active?: boolean
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
-  onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  previewLoading?: boolean
-  previewDisabled?: boolean
   scope?: string
-}) {
+  ref?: Ref<ThreadComposerHandle>
+  onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
+}
+
+/**
+ * 共享的 ordered Pill Composer（OpenCode 风格）。
+ *
+ * 原生 contenteditable editor + `contenteditable=false` attachment/resource pill；draft 是
+ * ordered {@link ComposerPart}（TEXT/ATTACHMENT/RESOURCE），DOM pill 携带
+ * `data-part-id`、`data-part-type` 与对应引用字段。只有文件粘贴/拖放/选择会创建
+ * attachment pill，typed '@filename' 始终是文本。
+ *
+ * 上传注册表（strip）由组件内部持有；通过可注入的 storageService/hashFile
+ * 适配（Canvas 后续可复用同一契约，无需依赖本组件之外的 AI 状态）。
+ */
+export function ThreadComposer({
+  ref,
+  parts,
+  pending,
+  disabled,
+  onPartsChange,
+  onHistoryPartsChange = onPartsChange,
+  onSubmit,
+  onSubmitGoal,
+  onCommand,
+  commands = THREAD_COMMANDS,
+  historicalUserMessages = EMPTY_USER_MESSAGES,
+  queuedUserMessages = EMPTY_USER_MESSAGES,
+  storageService,
+  hashFile,
+  focusOnEscape = false,
+  active = true,
+  settings,
+  scope,
+  onPreviewReadinessChange,
+}: ThreadComposerProps) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
@@ -350,19 +368,49 @@ export function ThreadComposer({
     [disabled, isGoalCommand, parts, slashMode, uploads],
   )
 
-  const canPreview = useMemo(() => {
-    if (!onPreview || disabled || previewDisabled || previewLoading) {
-      return false
+  const previewReadiness = useMemo((): ComposerPreviewReadiness => {
+    if (disabled) {
+      return { canPreview: false, reason: 'COMPOSER_DISABLED' }
     }
-    if (slashMode || isGoalCommand) {
-      return false
+    if (slashMode) {
+      return { canPreview: false, reason: 'SLASH_COMMAND' }
     }
-    if (!canSubmitParts(parts, uploads)) {
-      return false
+    if (isGoalCommand) {
+      return { canPreview: false, reason: 'GOAL_COMMAND' }
+    }
+    const hasAttachments = parts.some((part) => part.type === 'attachment')
+    if (hasAttachments && !canSubmitParts(parts, uploads)) {
+      return { canPreview: false, reason: 'UPLOADS_PENDING' }
     }
     const trimmed = trimMessageParts(parts)
-    return hasMessageContent(trimmed)
-  }, [onPreview, disabled, previewDisabled, previewLoading, slashMode, isGoalCommand, parts, uploads])
+    if (!hasMessageContent(trimmed)) {
+      return { canPreview: false, reason: 'EMPTY_DRAFT' }
+    }
+    return { canPreview: true, reason: null }
+  }, [disabled, slashMode, isGoalCommand, parts, uploads])
+
+  useEffect(() => {
+    onPreviewReadinessChange?.(previewReadiness)
+  }, [onPreviewReadinessChange, previewReadiness])
+
+  useImperativeHandle(ref, () => ({
+    preparePreview: () => {
+      syncFromDom(false)
+      if (!previewReadiness.canPreview) {
+        return null
+      }
+      const localDraft = localDraftSnapshot()
+      // DOM 同步会异步更新受控 parts；尚未对齐时不拼接旧 payload 与新草稿。
+      const domParts = editorRef.current ? trimMessageParts(extractPartsFromEditor(editorRef.current)) : null
+      if (domParts == null || partsKey(domParts) !== partsKey(trimMessageParts(parts))) {
+        return null
+      }
+      return {
+        payload: resolveUploadIds(parts),
+        localDraft,
+      }
+    },
+  }))
 
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
   const { commit } = useComposerSubmissionSettle({
@@ -577,15 +625,6 @@ export function ThreadComposer({
     const localDraft = localDraftSnapshot()
     commit(localDraft)
     onSubmit(resolved, localDraft)
-  }
-
-  function handlePreview() {
-    if (!canPreview || !onPreview) {
-      return
-    }
-    setPlusMenuOpen(false)
-    const resolved = resolveUploadIds(parts)
-    onPreview(resolved, localDraftSnapshot())
   }
 
   function handleSelect(command: ThreadCommand) {
@@ -864,25 +903,6 @@ export function ThreadComposer({
               onMenuChange={changeControlMenu}
             />
           ) : <span className="thread-dock-controls-spacer" />}
-          {onPreview ? (
-            <button
-              className="thread-dock-preview"
-              type="button"
-              aria-label={previewLoading ? t('ai.runtime.composer.previewLoading') : t('ai.runtime.composer.preview')}
-              title={previewLoading ? t('ai.runtime.composer.previewLoading') : t('ai.runtime.composer.preview')}
-              disabled={!canPreview}
-              onClick={() => {
-                handlePreview()
-                focusComposer()
-              }}
-            >
-              {previewLoading ? (
-                <LoaderCircle className="preview-icon spin" aria-hidden="true" />
-              ) : (
-                <Eye className="preview-icon" aria-hidden="true" />
-              )}
-            </button>
-          ) : null}
           <button
             className="thread-dock-send"
             type="button"

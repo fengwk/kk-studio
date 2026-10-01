@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadEventView } from '@/features/ai/runtime/thread-panel/ThreadEventView'
@@ -104,7 +104,7 @@ describe('ThreadEventView', () => {
         }}
       />,
     )
-    const preview = screen.getByLabelText(/下一次请求预览|Next Request Preview/)
+    const preview = screen.getByRole('region', { name: /下一次请求预览|Next Request Preview/ })
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
@@ -457,6 +457,69 @@ describe('ThreadEventView', () => {
       // 来源是 preview，故返回 preview tab
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
+    })
+
+    it('waits for an external preview selection and returns to the title entry after closing', async () => {
+      // 测试意图：已挂载 Debug 的标题异步预览记录来源/焦点，但加载或失败不提前切详情；
+      // 上级传入响应 selection 后自动进入详情，关闭回预览并恢复标题焦点。
+      const user = userEvent.setup()
+      const onPreview = vi.fn()
+      const onSelectInspector = vi.fn()
+      const debug = sampleDebugData()
+      const view = (selection: DebugInspectorSelection | null, loading = false, error: string | null = null) => (
+        <ThreadEventView
+          events={[]}
+          selectedEventId={null}
+          onSelectedEventIdChange={vi.fn()}
+          debug={debug}
+          debugSelection={selection}
+          onSelectInspector={onSelectInspector}
+          onPreview={onPreview}
+          previewLoading={loading}
+          previewError={error}
+        />
+      )
+      const { rerender } = render(view(null))
+      triggerResize(800)
+      const previewTab = screen.getByRole('tab', { name: '请求预览' })
+      const detailTab = screen.getByRole('tab', { name: '详情' })
+      await user.click(previewTab)
+      const title = screen.getByRole('button', { name: '下一次请求预览' })
+      await user.click(title)
+      expect(onPreview).toHaveBeenCalledTimes(1)
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+
+      rerender(view(null, true))
+      expect(title).toBeDisabled()
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      rerender(view(null, false, '请求预览失败'))
+      expect(screen.getByRole('alert')).toHaveTextContent('请求预览失败')
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
+
+      // 再次点击并由上级异步更新 selection，模拟 controller 成功响应。
+      await user.click(title)
+      rerender(view({
+        type: 'preview',
+        preview: {
+          kind: 'DRAFT_REQUEST_PREVIEW',
+          providerType: 'OPENAI',
+          modelName: 'MiniMax',
+          bodyByteSize: 19,
+          bodyJson: '{"prompt":"draft"}',
+          sourceHeadEntryId: null,
+          generatedAt: '2026-09-27T06:00:00Z',
+        },
+      }))
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByTestId('preview-request-body')).toHaveTextContent('draft')
+      await user.click(screen.getByRole('button', { name: /关闭检查器|Close inspector/ }))
+      expect(onSelectInspector).toHaveBeenCalledWith(null)
+      rerender(view(null))
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+      await waitFor(() => expect(title).toHaveFocus())
     })
 
     it('automatically activates detail tab on subagent chip click and restores focus on Escape', async () => {

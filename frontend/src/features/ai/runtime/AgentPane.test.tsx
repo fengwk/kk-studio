@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
   branchDraftFromEntry,
@@ -11,17 +11,21 @@ import {
   useAgentPaneController,
 } from '@/features/ai/runtime/useAgentPaneController'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import { createAttachmentPart, createTextPart } from '@/features/ai/composer/composer-parts'
+import { createTextPart } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
+  HarnessModelRequestDebugDTO,
   HarnessSessionDTO,
   HarnessSessionEntryDTO,
+  HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
+  ModelInvocationDTO,
   ProviderRequestPreviewDTO,
+  ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
@@ -35,6 +39,44 @@ const { fakeApplicationEvents } = vi.hoisted(() => {
   const manager = { subscribe: vi.fn(() => vi.fn()) }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
+
+/**
+ * 附件上传默认走真实 storage 单例与真实 Web Worker 哈希；这里整体替换成
+ * 内存实现，保留组件的 reserve → put → complete 调用路径，但禁止任何真实网络。
+ */
+const { fakeStorage } = vi.hoisted(() => {
+  const reserveUpload = vi.fn(async () => ({
+    id: '99999999-8888-4777-8666-555555555555',
+    state: 'PENDING' as const,
+    blobId: null,
+    presignedPut: { method: 'PUT' as const, url: 'https://storage.test/put', headers: {} },
+    expiresAt: null,
+  }))
+  const completeUpload = vi.fn(async (uploadId: string) => ({
+    id: uploadId,
+    state: 'READY' as const,
+    blobId: `blob-${uploadId}`,
+    presignedPut: null,
+    expiresAt: null,
+  }))
+  const deleteUpload = vi.fn(async () => undefined)
+  const uploadFile = vi.fn(async () => undefined)
+  return {
+    fakeStorage: {
+      reserveUpload,
+      completeUpload,
+      deleteUpload,
+      uploadFile,
+      getBlobDownloadUrl: vi.fn(async () => ({ url: 'https://storage.test/blob', expiresAt: null })),
+      getBlobPreviewUrl: vi.fn(async () => null),
+    },
+  }
+})
+
+vi.mock('@/shared/api/storage-service', () => ({
+  storageService: fakeStorage,
+  createStorageService: () => fakeStorage,
+}))
 
 vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
@@ -62,6 +104,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
+    getModelRequestDebug: vi.fn(),
     compactThread: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
@@ -187,6 +230,9 @@ beforeEach(() => {
     results: models,
   })
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
+  // Debug 结构化投影默认不可用：只有显式声明的用例才渲染 Debug 区（含预览入口）。
+  vi.mocked(harnessService.getModelRequestDebug).mockReset()
+  vi.mocked(harnessService.previewProviderRequest).mockReset()
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
@@ -198,6 +244,11 @@ beforeEach(() => {
   vi.mocked(harnessService.renameThread).mockImplementation(async (threadId, data) =>
     thread({ threadId, name: data.name }),
   )
+})
+
+afterEach(() => {
+  // 内存 Worker 只服务附件用例，不污染同文件其它用例
+  vi.unstubAllGlobals()
 })
 
 describe('AgentPane orchestration', () => {
@@ -1774,8 +1825,11 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     })
     expect(result.current.composer.disabled).toBe(true)
-    expect(result.current.composer.onPreview).toBeUndefined()
+    // 新契约：预览只由 Debug 标题按钮触发，受控 Issue 的标题按钮恒为不可用。
+    expect(result.current.previewDisabled).toBe(true)
+    expect(result.current.previewDisabledReason).toBe('当前不支持预览')
     act(() => {
+      void result.current.handlePreview()
       result.current.composer.onSubmit([createTextPart('not a new session')])
       result.current.composer.onCommand(testCommand('new'))
       result.current.composer.onCommand(testCommand('compact'))
@@ -1788,9 +1842,206 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     expect(harnessService.renameThread).not.toHaveBeenCalled()
   })
 
-  describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
-    it('never exposes preview for a controlled Issue even on its bound thread', async () => {
-      // 测试意图：宿主受控 Issue 无法从 Composer 或回调进入 Chat 请求预览端点。
+/** Debug 视图的结构化投影：它就绪时 Debug 区才渲染「下一次请求预览」标题按钮。 */
+function modelRequestDebug(): HarnessModelRequestDebugDTO {
+  return {
+    kind: 'NEXT_REQUEST_PREVIEW',
+    generatedAt: '2026-09-27T05:00:00Z',
+    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    environmentName: null,
+    systemInstruction: 'system prompt',
+    tools: [],
+    skills: [],
+    subagents: [],
+    cacheControl: null,
+    planningError: null,
+    frozenInvocation: null,
+  }
+}
+
+function mockDebugProjection() {
+  vi.mocked(harnessService.getModelRequestDebug).mockResolvedValue(modelRequestDebug())
+}
+
+/** 预览入口只属于绑定 Thread 的 Debug 视图，因此必须先落到 BOUND_THREAD 目标。 */
+function bindPaneTarget() {
+  localStorage.setItem(
+    `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+    JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+  )
+}
+
+/** 用真实的 /debug 斜杠命令切到 Debug 视图，返回仍挂载的 composer。 */
+async function openDebugView(user: ReturnType<typeof userEvent.setup>) {
+  const composer = await screen.findByLabelText('给 AI 发送消息')
+  await user.click(composer)
+  await user.keyboard('/debug{Enter}')
+  await screen.findByRole('listbox', { name: '事件' })
+  return composer
+}
+
+/**
+ * Thread 快照读取闸门：默认持续提供面板已见的旧快照；
+ * serveFresh() 之后的每次读取（含预览前的 fresh GET）改由用例决定，可返回推进后的快照或悬挂的 Promise。
+ */
+function snapshotGate(initial: HarnessThreadSnapshotDTO = snapshot()) {
+  let fresh: (() => Promise<HarnessThreadSnapshotDTO>) | null = null
+  vi.mocked(harnessService.getThreadSnapshot)
+    .mockImplementation(async () => (fresh ? fresh() : initial))
+  return (serve: () => Promise<HarnessThreadSnapshotDTO>) => {
+    fresh = serve
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete
+    reject = fail
+  })
+  return { promise, resolve, reject }
+}
+
+function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): ProviderRequestPreviewDTO {
+  return {
+    kind: 'DRAFT_REQUEST_PREVIEW',
+    providerType: 'OPENAI',
+    modelName: 'MiniMax',
+    bodyByteSize: 120,
+    bodyJson: '{"messages":[{"role":"user","content":"draft"}]}',
+    sourceHeadEntryId: 'head-1',
+    generatedAt: '2026-09-27T05:00:00Z',
+    ...overrides,
+  }
+}
+
+function queuedCommand(): HarnessThreadCommandDTO {
+  return {
+    threadId: THREAD_ID,
+    sequence: '1',
+    type: 'USER_MESSAGE',
+    state: 'QUEUED',
+    idempotencyKey: 'cmd-queued-1',
+    payloadJson: '{}',
+    cancelledAt: null,
+    createTime: '2026-09-27T05:00:00Z',
+  }
+}
+
+function activeModelInvocation(): ModelInvocationDTO {
+  return {
+    id: 'inv-1',
+    threadId: THREAD_ID,
+    turnStartEntryId: 'turn-1',
+    requestHeadEntryId: 'head-1',
+    status: 'STREAMING',
+    attempt: 1,
+    streamCheckpointJson: null,
+    resultJson: null,
+    errorJson: null,
+    resultEntryId: null,
+    createTime: '2026-09-27T05:00:00Z',
+    updateTime: '2026-09-27T05:00:01Z',
+  }
+}
+
+function activeToolInvocation(): ToolInvocationDTO {
+  return {
+    id: 'tool-1',
+    modelInvocationId: 'inv-1',
+    assistantEntryId: 'assistant-1',
+    callIndex: 0,
+    status: 'RUNNING',
+    attempt: 1,
+    toolCallId: 'call-1',
+    toolName: 'read',
+    rendererKey: 'tool',
+    environmentId: null,
+    argumentsJson: '{}',
+    approvalJson: null,
+    resultJson: null,
+    errorJson: null,
+    createTime: '2026-09-27T05:00:00Z',
+    updateTime: '2026-09-27T05:00:01Z',
+  }
+}
+
+/** 预览失败同时投影到 Debug 预览区与活动错误区，按文案断言以免依赖提示条数。 */
+async function expectAlertText(text: string) {
+  await waitFor(() => {
+    expect(screen.getAllByRole('alert').some((node) => node.textContent?.includes(text))).toBe(true)
+  })
+}
+
+/**
+ * 点击 Debug 标题按钮并确认预览前的 fresh GET 真的发出去了。
+ * 之后的“不得 POST”断言因此不会因为流程根本没启动而空转通过。
+ */
+async function clickPreviewAndAwaitFreshGet(
+  user: ReturnType<typeof userEvent.setup>,
+  trigger: HTMLElement,
+) {
+  const before = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
+  await user.click(trigger)
+  await waitFor(() =>
+    expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBeGreaterThan(before))
+}
+
+/** fakeStorage 分配的服务端 upload 句柄；草稿里的客户端 localId 永远不等于它。 */
+const SERVER_UPLOAD_ID = '99999999-8888-4777-8666-555555555555'
+
+/**
+ * 真实组件默认用 Web Worker 算 sha256（jsdom 无 Worker，且会拉真实模块资源）。
+ * 这里用同协议的内存 Worker 顶替，保留 hashFile 的调用路径。
+ */
+function stubHashWorker() {
+  class FakeHashWorker {
+    private listeners: Record<string, ((event: unknown) => void)[]> = {}
+    addEventListener(type: string, listener: (event: unknown) => void) {
+      this.listeners[type] = [...(this.listeners[type] ?? []), listener]
+    }
+    removeEventListener(type: string, listener: (event: unknown) => void) {
+      this.listeners[type] = (this.listeners[type] ?? []).filter((fn) => fn !== listener)
+    }
+    postMessage(data: { requestId: string }) {
+      for (const listener of this.listeners.message ?? []) {
+        listener({ data: { requestId: data.requestId, sha256: 'a'.repeat(64) } })
+      }
+    }
+    terminate() {}
+  }
+  vi.stubGlobal('Worker', FakeHashWorker)
+}
+
+/** 通过 Composer 的隐藏 file input 走真实上传管线（hash → reserve → put → complete）。 */
+async function uploadAttachment(
+  user: ReturnType<typeof userEvent.setup>,
+  file: File,
+): Promise<string> {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+  expect(input).not.toBeNull()
+  await user.upload(input!, file)
+  await waitFor(() => expect(fakeStorage.completeUpload).toHaveBeenCalledWith(SERVER_UPLOAD_ID))
+  const pill = document.querySelector<HTMLElement>('[data-part-type="attachment"]')
+  return pill?.dataset.uploadId ?? ''
+}
+
+/** 用真实的 Composer 权限菜单改变 branch draft 设置，消息草稿一个字都不动。 */
+async function toggleYolo(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: '权限模式' }))
+  await user.click(await screen.findByRole('option', { name: 'YOLO' }))
+  // 权限控件读的就是 activeDraft：文案翻转即证明 branch draft 真的变了
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('YOLO'))
+}
+
+describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
+    it('keeps the Debug preview trigger disabled for a controlled Issue even on its bound thread', async () => {
+      // 测试意图：受控 Issue 宿主既不暴露预览回调也不允许预览，
+      // Debug 标题按钮必须以「当前不支持预览」禁用，且点击不产生任何预览请求。
+      const user = userEvent.setup()
+      mockDebugProjection()
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       render(
         <QueryClientProvider client={client}>
@@ -1804,233 +2055,554 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
           />
         </QueryClientProvider>,
       )
-      await screen.findByLabelText('给 AI 发送消息')
-      expect(screen.queryByRole('button', { name: '预览请求' })).not.toBeInTheDocument()
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.keyboard('/debug{Enter}')
+
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览 (当前不支持预览)' })
+      expect(trigger).toBeDisabled()
+      await user.click(trigger)
       expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
     })
 
-    it('keeps a ready attachment preview when server uploadId differs from the local draft id', async () => {
-      // 预览的发送载荷使用服务端 uploadId，但回包过期检查必须比较未清空的本地草稿 localId。
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce({
-        kind: 'DRAFT_REQUEST_PREVIEW',
-        providerType: 'OPENAI_CHAT',
-        modelName: 'MiniMax',
-        bodyByteSize: 23,
-        bodyJson: '{"content":"image"}',
-        sourceHeadEntryId: 'head-1',
-        generatedAt: '2026-09-27T05:00:00Z',
-      })
-      const { result } = renderController()
-      await waitFor(() => expect(result.current.composer.previewDisabled).toBe(false))
-      const text = createTextPart('look')
-      const local = createAttachmentPart('local-image-id', 'image.png')
-      act(() => result.current.composer.onPartsChange([text, local]))
-      const resolved = { ...local, uploadId: '11111111-2222-4333-8444-555555555556' }
-
-      await act(async () => {
-        await result.current.composer.onPreview?.([text, resolved], [text, local])
-      })
-      expect(vi.mocked(harnessService.previewProviderRequest).mock.calls[0]?.[1].commands.at(-1))
-        .toMatchObject({
-          type: 'USER_MESSAGE',
-          contents: [
-            { type: 'TEXT', text: 'look' },
-            { type: 'ATTACHMENT', uploadId: resolved.uploadId },
-          ],
-        })
-      expect(result.current.boundViews.debugSelection).toMatchObject({ type: 'preview' })
-      expect(result.current.composer.parts).toEqual([text, local])
-    })
-
-    it('hides preview button for new session draft target, shows for bound thread', async () => {
-      // 1. NEW_SESSION_DRAFT target: preview button is not rendered
-      const { unmount } = renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      await screen.findByLabelText('给 AI 发送消息')
-      expect(screen.queryByRole('button', { name: '预览请求' })).not.toBeInTheDocument()
-      unmount()
-
-      // 2. BOUND_THREAD target: preview button is rendered beside send
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-      renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      await screen.findByLabelText('给 AI 发送消息')
-      expect(screen.getByRole('button', { name: '预览请求' })).toBeInTheDocument()
-    })
-
-    it('constructs request matching submit payload, sends to preview endpoint, and switches to debug inspector', async () => {
+    it('hides the Debug preview trigger for a new session draft target', async () => {
+      // 测试意图：新建草稿没有可预览的绑定 Thread，即使切到 Debug 也没有预览入口。
       const user = userEvent.setup()
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce({
-        kind: 'DRAFT_REQUEST_PREVIEW',
-        providerType: 'OPENAI',
-        modelName: 'MiniMax',
-        bodyByteSize: 120,
-        bodyJson: '{"messages":[{"role":"user","content":"preview test message"}]}',
-        sourceHeadEntryId: 'head-1',
-        generatedAt: '2026-09-27T05:00:00Z',
-        snapshotNotice: 'Draft preview snapshot',
-      })
-
+      mockDebugProjection()
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
       const composer = await screen.findByLabelText('给 AI 发送消息')
-      await user.type(composer, 'preview test message')
+      await user.type(composer, 'no bound thread yet')
+      await user.click(composer)
+      await user.keyboard('/debug{Enter}')
 
-      const previewBtn = screen.getByRole('button', { name: '预览请求' })
-      expect(previewBtn).not.toBeDisabled()
-      await user.click(previewBtn)
+      expect(screen.queryByRole('button', { name: /下一次请求预览/ })).not.toBeInTheDocument()
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+    })
+
+    it('enables the Debug preview trigger only once the bound draft is previewable', async () => {
+      // 测试意图：空草稿按「草稿为空」禁用标题按钮；草稿可预览后才允许点击，
+      // 禁用期间既不发 fresh GET 也不发预览 POST。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+
+      expect(await screen.findByRole('button', { name: '下一次请求预览 (草稿为空)' })).toBeDisabled()
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(1)
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+
+      await user.click(composer)
+      await user.type(composer, 'ready draft')
+      expect(await screen.findByRole('button', { name: '下一次请求预览' })).toBeEnabled()
+    })
+
+    it('posts the live draft with the fresh thread cursor and keeps the draft on success', async () => {
+      // 测试意图：预览先读 fresh 快照再用它重建游标，因此 POST 里的
+      // expectedHeadEntryId/expectedNextCommandSequence 只能来自 fresh GET，
+      // 而面板缓存仍停在旧游标；成功后草稿必须原样保留。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce(previewResponse({
+        bodyJson: '{"messages":[{"role":"user","content":"preview test message"}]}',
+        sourceHeadEntryId: 'head-2',
+        snapshotNotice: 'Draft preview snapshot',
+      }))
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'preview test message')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => Promise.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' }))))
+      await user.click(trigger)
 
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
       const [threadId, request] = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]!
       expect(threadId).toBe(THREAD_ID)
-      expect(request.target).toMatchObject({
+      expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
+      expect(request.target).toEqual({
         type: 'THREAD',
         threadId: THREAD_ID,
+        expectedHeadEntryId: 'head-2',
+        expectedNextCommandSequence: '7',
       })
-      expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
       expect(request.commands).toHaveLength(1)
       expect(request.commands[0]).toMatchObject({
         type: 'USER_MESSAGE',
         contents: [{ type: 'TEXT', text: 'preview test message' }],
       })
 
-      // Switched to debug mode with preview inspector displayed
+      // Debug 检查器展示回包
       expect(await screen.findByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
       expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
-      expect(screen.getByText('点击快照')).toBeInTheDocument()
       expect(screen.getByTestId('preview-request-body')).toHaveTextContent('preview test message')
-
-      // Draft in composer is preserved (not blanked)
+      // 成功预览不清空草稿
       expect(composer).toHaveTextContent('preview test message')
     })
 
-    it('handles 409 conflict failure by displaying error banner and keeping draft intact', async () => {
+    it('blocks the preview POST and refreshes the cached snapshot when the fresh branch settings changed', async () => {
+      // 测试意图：fresh 快照的 branch settings 与冻结的 effectiveBase 不一致时，
+      // 本地明确报「会话设置已变化」并把 fresh 快照写回缓存，绝不发出预览 POST。
       const user = userEvent.setup()
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'settings moved')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => Promise.resolve(snapshot(thread({
+        headEntryId: 'head-3',
+        branchSettings: {
+          agentName: 'coder',
+          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          environmentName: null,
+        },
+      }))))
+      await user.click(trigger)
+
+      await expectAlertText('会话设置已变化，请确认后重试')
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      await waitFor(() => expect(
+        view.client.getQueryData(queryKeys.threads.snapshot(THREAD_ID))?.thread.headEntryId,
+      ).toBe('head-3'))
+      expect(composer).toHaveTextContent('settings moved')
+    })
+
+    it.each([
+      [
+        'a busy thread',
+        () => snapshot(thread({ status: 'MODEL_STREAMING', processing: true })),
+        '会话正在运行中，无法预览',
+      ],
+      [
+        'queued commands',
+        () => snapshot(thread(), { queuedCommands: [queuedCommand()] }),
+        '队列中有未处理命令，无法预览',
+      ],
+      [
+        'an active model invocation',
+        () => snapshot(thread(), { modelInvocation: activeModelInvocation() }),
+        '会话正在运行中，无法预览',
+      ],
+      [
+        'active tool invocations',
+        () => snapshot(thread(), { toolInvocations: [activeToolInvocation()] }),
+        '会话正在运行中，无法预览',
+      ],
+    ])('blocks the preview POST when the fresh snapshot has %s', async (_case, serveSnapshot, message) => {
+      // 测试意图：在途执行与排队只出现在 fresh 快照里，本地投影仍显示空闲；
+      // 预览必须以 fresh 判定为准并给出明确原因，绝不发出 POST。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'fresh state moved on')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(serveSnapshot)
+      await user.click(trigger)
+
+      await expectAlertText(message)
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      expect(composer).toHaveTextContent('fresh state moved on')
+    })
+
+    it('drops the fresh GET result when the draft changed while the snapshot was loading', async () => {
+      // 测试意图：fresh GET 在途时草稿被继续编辑，回包不再可信：
+      // 既不发 POST，也不把旧游标的快照投进检查器。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      const gate = deferred<HarnessThreadSnapshotDTO>()
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'initial text')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => gate.promise)
+      await clickPreviewAndAwaitFreshGet(user, trigger)
+
+      await user.type(composer, ' edited')
+      await act(async () => {
+        gate.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' })))
+        await gate.promise
+      })
+
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // 草稿已被继续编辑（插入点落在开头），两段文字都必须保留
+      expect(composer).toHaveTextContent('initial text')
+      expect(composer).toHaveTextContent('edited')
+    })
+
+    it('drops the fresh GET result when the target changed while the snapshot was loading', async () => {
+      // 测试意图：fresh GET 在途时 /new 把目标切离绑定 Thread，
+      // 迟到的快照不得再触发 POST 或渲染任何预览检查器。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      const gate = deferred<HarnessThreadSnapshotDTO>()
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'moving target')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => gate.promise)
+      await clickPreviewAndAwaitFreshGet(user, trigger)
+
+      await user.click(composer)
+      await user.clear(composer)
+      await user.keyboard('/new{Enter}')
+      await act(async () => {
+        gate.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' })))
+        await gate.promise
+      })
+
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('drops the fresh GET result when the pane unmounted while the snapshot was loading', async () => {
+      // 测试意图：fresh GET 在途时面板卸载，迟到的快照不得继续请求或更新已卸载的状态。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      const gate = deferred<HarnessThreadSnapshotDTO>()
+      const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'unmount me')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => gate.promise)
+      await clickPreviewAndAwaitFreshGet(user, trigger)
+
+      view.unmount()
+      await act(async () => {
+        gate.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' })))
+        await gate.promise
+      })
+
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+    })
+
+    it('shows the mapped 409 reason without echoing the raw detail and keeps the draft', async () => {
+      // 测试意图：409 只按白名单 reason 呈现本地文案，绝不回显 detail；
+      // 预览失败也不清空草稿，用户可以直接改后再试。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
       vi.mocked(harnessService.previewProviderRequest).mockRejectedValueOnce(
-        new ApiError('Thread is not idle or ready', 409),
+        new ApiError('thread cursor moved', 409, 'CONFLICT', { reason: 'PREVIEW_STALE_CURSOR' }),
       )
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      const composer = await screen.findByLabelText('给 AI 发送消息')
+      const composer = await openDebugView(user)
+      await user.click(composer)
       await user.type(composer, 'draft to keep')
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
 
-      const previewBtn = screen.getByRole('button', { name: '预览请求' })
-      await user.click(previewBtn)
-
-      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
-      // Error banner is rendered
-      expect(await screen.findByRole('alert')).toHaveTextContent('Thread is not idle or ready')
-      // Draft remains intact
+      await expectAlertText('会话游标已过期，请刷新状态后重试')
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      expect(screen.queryByText(/thread cursor moved/)).not.toBeInTheDocument()
       expect(composer).toHaveTextContent('draft to keep')
     })
 
-    it('guards against stale preview when draft is edited while request is in flight', async () => {
+    it('drops the preview response when the draft changed while the POST was in flight', async () => {
+      // 测试意图：POST 在途时草稿被继续编辑，回包属于旧草稿：
+      // 不得写进 Debug 检查器，也不得把新草稿的输入当成已预览。
       const user = userEvent.setup()
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-
-      let resolvePreview!: (value: ProviderRequestPreviewDTO) => void
-      const previewPromise = new Promise<ProviderRequestPreviewDTO>((resolve) => {
-        resolvePreview = resolve
-      })
-      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(previewPromise)
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      const composer = await screen.findByLabelText('给 AI 发送消息')
+      const composer = await openDebugView(user)
+      await user.click(composer)
       await user.type(composer, 'initial text')
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
 
-      const previewBtn = screen.getByRole('button', { name: '预览请求' })
-      await user.click(previewBtn)
-
-      // In flight: user types more text, changing draft
       await user.type(composer, ' edited')
-
-      // Resolve the in-flight preview
       await act(async () => {
-        resolvePreview({
-          kind: 'DRAFT_REQUEST_PREVIEW',
-          providerType: 'OPENAI',
-          modelName: 'MiniMax',
-          bodyByteSize: 100,
-          bodyJson: '{"messages":[{"role":"user","content":"initial text"}]}',
-          sourceHeadEntryId: 'head-1',
-          generatedAt: '2026-09-27T05:00:00Z',
-        })
+        gate.resolve(previewResponse({ bodyJson: '{"messages":[{"role":"user","content":"initial text"}]}' }))
+        await gate.promise
       })
 
-      // Inspector did NOT display the stale preview
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
       expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
-      expect(composer).toHaveTextContent('initial text edited')
+      // 草稿已被继续编辑（插入点落在开头），两段文字都必须保留
+      expect(composer).toHaveTextContent('initial text')
+      expect(composer).toHaveTextContent('edited')
+    })
+
+    it('drops the preview response when the target changed while the POST was in flight', async () => {
+      // 测试意图：POST 在途时 /new 把目标切离绑定 Thread，
+      // 迟到的回包既不渲染检查器也不写入新目标的错误通道。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'moving target')
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+
+      await user.click(composer)
+      await user.clear(composer)
+      await user.keyboard('/new{Enter}')
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('drops the preview response when the pane unmounted while the POST was in flight', async () => {
+      // 测试意图：POST 在途时面板卸载，迟到的回包既不能触发渲染也不能抛出未处理错误。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
+
+      const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'unmount me')
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+
+      view.unmount()
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      expect(consoleError).not.toHaveBeenCalled()
+      consoleError.mockRestore()
+    })
+
+    it('accepts only one preview request for repeated clicks on the Debug title button', async () => {
+      // 测试意图：请求期间按钮禁用；用 fireEvent 绕过 DOM 禁用语义重复点击，
+      // 验证 in-flight 栅栏（而不是 disabled 属性）挡住了第二、三次预览。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'single flight')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+
+      // 同一个 React batch 内重复触发，尚未渲染 disabled，真正验证 ref 单飞栅栏。
+      act(() => {
+        fireEvent.click(trigger)
+        fireEvent.click(trigger)
+        fireEvent.click(trigger)
+      })
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      expect(trigger).toBeDisabled()
+      fireEvent.click(trigger)
+      fireEvent.click(trigger)
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      expect(await screen.findByTestId('preview-request-body')).toBeInTheDocument()
+    })
+
+    it('previews a ready attachment through the Debug title button with the server upload handle', async () => {
+      // 测试意图：草稿 pill 永远持有客户端 localId，POST 必须换成服务端 upload 句柄；
+      // 预览成功既不提交，也不消费或释放草稿里的附件。
+      const user = userEvent.setup()
+      stubHashWorker()
+      bindPaneTarget()
+      mockDebugProjection()
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce(previewResponse({
+        bodyJson: '{"messages":[{"role":"user","content":"look at this"}]}',
+      }))
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'look at this')
+      const localId = await uploadAttachment(user, new File(['bytes'], 'shot.png', { type: 'image/png' }))
+      expect(localId).toBeTruthy()
+      expect(localId).not.toBe(SERVER_UPLOAD_ID)
+
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      expect(trigger).toBeEnabled()
+      await user.click(trigger)
+
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      const contents = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]![1]
+        .commands.at(-1)?.contents
+      expect(contents?.find((content) => content.type === 'ATTACHMENT'))
+        .toMatchObject({ type: 'ATTACHMENT', uploadId: SERVER_UPLOAD_ID })
+      expect(contents?.find((content) => content.type === 'TEXT'))
+        .toMatchObject({ type: 'TEXT', text: 'look at this' })
+
+      // 成功预览：不提交、不重新上传、不释放
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+      expect(fakeStorage.completeUpload).toHaveBeenCalledTimes(1)
+      expect(fakeStorage.deleteUpload).not.toHaveBeenCalled()
+      expect(await screen.findByTestId('preview-request-body')).toBeInTheDocument()
+      // 草稿与 pill 都原样保留
+      expect(composer).toHaveTextContent('look at this')
+      expect(document.querySelector<HTMLElement>('[data-part-type="attachment"]')?.dataset.uploadId)
+        .toBe(localId)
+    })
+
+    it('accepts only one preview request for repeated clicks with a ready attachment', async () => {
+      // 测试意图：附件就绪后连点标题按钮，in-flight 栅栏必须同时挡住重复预览与重复上传/释放。
+      const user = userEvent.setup()
+      stubHashWorker()
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'single flight attachment')
+      await uploadAttachment(user, new File(['bytes'], 'once.png', { type: 'image/png' }))
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+
+      // 尚未重新渲染按钮的同一 batch 内连点，确保附件预览同样由 ref 单飞。
+      act(() => {
+        fireEvent.click(trigger)
+        fireEvent.click(trigger)
+        fireEvent.click(trigger)
+      })
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      expect(trigger).toBeDisabled()
+      fireEvent.click(trigger)
+      fireEvent.click(trigger)
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      expect(fakeStorage.completeUpload).toHaveBeenCalledTimes(1)
+      expect(fakeStorage.deleteUpload).not.toHaveBeenCalled()
+      expect(composer).toHaveTextContent('single flight attachment')
+    })
+
+    it('drops the fresh GET result when the branch draft settings changed while the snapshot was loading', async () => {
+      // 测试意图：消息草稿一个字都没动，只有 branch draft 的权限设置变了。
+      // 过期判定必须同时比较 branch draft，否则会用旧设置去发预览。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      const gate = deferred<HarnessThreadSnapshotDTO>()
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'settings moved')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      serveFresh(() => gate.promise)
+      await clickPreviewAndAwaitFreshGet(user, trigger)
+
+      await toggleYolo(user)
+      expect(harnessService.setThreadYolo).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        gate.resolve(snapshot(thread({ headEntryId: 'head-2', nextCommandSequence: '7' })))
+        await gate.promise
+      })
+
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // 消息草稿未变，说明拦截来自设置变化而不是输入变化
+      expect(composer).toHaveTextContent('settings moved')
+    })
+
+    it('drops the preview response when the branch draft settings changed while the POST was in flight', async () => {
+      // 测试意图：POST 在途时只改 branch draft 设置（消息草稿不变），
+      // 迟到的回包属于旧设置组合，不得写进检查器或错误通道。
+      const user = userEvent.setup()
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValue(gate.promise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await openDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'settings moved')
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+
+      await toggleYolo(user)
+      expect(harnessService.setThreadYolo).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(composer).toHaveTextContent('settings moved')
     })
 
     it('does not display a stale 409 after the draft changes', async () => {
-      // 草稿变化后的冲突只对应旧请求，不能覆盖当前草稿的错误提示。
+      // 测试意图：POST 在途时草稿变化，随后到达的 409 只属于旧请求，
+      // 不能覆盖当前草稿的错误提示。
       const user = userEvent.setup()
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-      let rejectPreview!: (reason: unknown) => void
-      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(
-        new Promise<ProviderRequestPreviewDTO>((_, reject) => { rejectPreview = reject }),
-      )
+      bindPaneTarget()
+      mockDebugProjection()
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewProviderRequest)
+        .mockReturnValue(gate.promise)
+
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      const composer = await screen.findByLabelText('给 AI 发送消息')
+      const composer = await openDebugView(user)
+      await user.click(composer)
       await user.type(composer, 'before')
-      const preview = screen.getByRole('button', { name: '预览请求' })
-      await user.click(preview)
-      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      await user.click(await screen.findByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+
       await user.type(composer, ' after')
-      await act(async () => rejectPreview(new ApiError('obsolete conflict', 409)))
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-      expect(composer).toHaveTextContent('before after')
-    })
-
-    it('guards against stale error when target changes or unmounts while request is in flight', async () => {
-      // 测试意图：验证当预览请求在传输过程中目标已切换或卸载时，错误回调通过 targetRef 和 isMountedRef
-      // 准确判断过期，不会泄漏旧错误的 alert。
-      const user = userEvent.setup()
-      localStorage.setItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-      )
-
-      let rejectPreview!: (reason: unknown) => void
-      const previewPromise = new Promise<ProviderRequestPreviewDTO>((_, reject) => {
-        rejectPreview = reject
-      })
-      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(previewPromise)
-
-      const { unmount } = renderPane({ type: 'CHAT', chatId: CHAT_ID })
-      const composer = await screen.findByLabelText('给 AI 发送消息')
-      await user.type(composer, 'will error later')
-
-      const previewBtn = screen.getByRole('button', { name: '预览请求' })
-      await user.click(previewBtn)
-
-      // 切换/卸载目标
-      unmount()
-
-      // 请求失败返回
       await act(async () => {
-        rejectPreview(new ApiError('preview failed after target change', 400))
+        gate.reject(new ApiError('obsolete conflict', 409, 'CONFLICT', { reason: 'PREVIEW_STALE_CURSOR' }))
+        await gate.promise.catch(() => undefined)
       })
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // 草稿已被继续编辑（插入点落在开头），两段文字都必须保留
+      expect(composer).toHaveTextContent('before')
+      expect(composer).toHaveTextContent('after')
     })
   })
 
@@ -2057,12 +2629,14 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
 
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
       expect(result.current.composer.disabled).toBe(true)
-      expect(result.current.composer.onPreview).toBeUndefined()
+      expect(result.current.previewDisabled).toBe(true)
+      expect(result.current.previewDisabledReason).toBe('当前不支持预览')
       expect(result.current.composer.settings).toBeUndefined()
     })
 
-    it('enforces read-only controls on null owner: composer disabled, no preview, no settings', () => {
-      // 测试意图：null owner 必须处于只读受控状态，禁用 composer，不可预览，不暴露模型配置。
+    it('enforces read-only controls on null owner: composer disabled, no preview, no settings', async () => {
+      // 测试意图：null owner 必须处于只读受控状态，禁用 composer，
+      // Debug 标题按钮不可预览，且直接调用预览回调也不会发请求。
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const { result } = renderHook(
         () =>
@@ -2081,8 +2655,13 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       )
 
       expect(result.current.composer.disabled).toBe(true)
-      expect(result.current.composer.onPreview).toBeUndefined()
+      expect(result.current.previewDisabled).toBe(true)
+      expect(result.current.previewDisabledReason).toBe('当前不支持预览')
       expect(result.current.composer.settings).toBeUndefined()
+      await act(async () => {
+        await result.current.handlePreview()
+      })
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
     })
 
     it('blocks all write and navigation attempts under null owner: onSubmit, submitGoal, selectAgent, branching and rename', async () => {
@@ -2235,7 +2814,8 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     })
 
     it('distinguishes CHAT, ISSUE_AGENT, and null owner barrier behaviors', async () => {
-      // 测试意图：矩阵级门禁验证——CHAT 开放 preview 与 settings，ISSUE_AGENT 限制通用发送与预览，NULL 完全只读。
+      // 测试意图：矩阵级门禁验证——CHAT 的 Debug 标题按钮只被草稿就绪度限制，
+      // ISSUE_AGENT 与 NULL 完全不开放预览（不支持预览）且不暴露 settings。
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
       // 1. CHAT owner (等待快照加载以就绪 draft)
@@ -2253,7 +2833,8 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
       await waitFor(() => expect(chatResult.current.activeDraft).not.toBeNull())
-      expect(chatResult.current.composer.onPreview).toBeDefined()
+      // 未挂载 composer 时就绪度为「草稿为空」，而不是被宿主屏障拒绝
+      expect(chatResult.current.previewDisabledReason).toBe('草稿为空')
       expect(chatResult.current.composer.settings).toBeDefined()
 
       // 2. ISSUE_AGENT owner
@@ -2270,7 +2851,8 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
           }),
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
-      expect(issueResult.current.composer.onPreview).toBeUndefined()
+      expect(issueResult.current.previewDisabled).toBe(true)
+      expect(issueResult.current.previewDisabledReason).toBe('当前不支持预览')
       expect(issueResult.current.composer.settings).toBeUndefined()
 
       // 3. NULL owner
@@ -2287,7 +2869,8 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
       expect(nullResult.current.composer.disabled).toBe(true)
-      expect(nullResult.current.composer.onPreview).toBeUndefined()
+      expect(nullResult.current.previewDisabled).toBe(true)
+      expect(nullResult.current.previewDisabledReason).toBe('当前不支持预览')
       expect(nullResult.current.composer.settings).toBeUndefined()
     })
   })

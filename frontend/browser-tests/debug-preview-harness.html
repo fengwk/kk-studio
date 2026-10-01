@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Debug Preview Title Browser Harness</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #101412;
+        color: #edf2ed;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .preview-harness-frame {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: stretch;
+        justify-content: flex-start;
+        overflow: hidden;
+      }
+      /* AgentPane 自带 .chat-pane；此处强制撑满基座宽度，容器查询才能命中宽布局。 */
+      .preview-harness-frame > .chat-pane {
+        flex: 1 1 auto;
+        min-width: 0;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./debug-preview-harness.tsx"></script>
+  </body>
+</html>

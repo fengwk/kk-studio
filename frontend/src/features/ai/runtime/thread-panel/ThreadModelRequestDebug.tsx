@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, Copy, Eye } from 'lucide-react'
+import { AlertCircle, Check, Copy, Eye, LoaderCircle } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugTool,
@@ -70,9 +70,19 @@ type CopyStatus = 'idle' | 'copying' | 'copied' | 'error'
 export function ThreadModelRequestDebug({
   debug,
   onSelectInspector,
+  onPreview,
+  previewLoading = false,
+  previewDisabled = false,
+  previewDisabledReason = null,
+  previewError = null,
 }: {
   debug: ThreadModelRequestDebugData
   onSelectInspector: (selection: DebugInspectorSelection | null) => void
+  onPreview?: () => void
+  previewLoading?: boolean
+  previewDisabled?: boolean
+  previewDisabledReason?: string | null
+  previewError?: string | null
 }) {
   const { t } = useI18n()
   const [copyStatus, setCopyStatus] = useState<CopyStatus>('idle')
@@ -158,9 +168,33 @@ export function ThreadModelRequestDebug({
       {/* 头部条：下一次请求预览 与操作按钮 */}
       <header className="thread-debug-preview-header">
         <div className="thread-debug-preview-title-group">
-          <span className="thread-debug-preview-title">
-            {previewTitle}
-          </span>
+          <button
+            type="button"
+            className="thread-debug-preview-title-btn"
+            disabled={previewDisabled || previewLoading || onPreview == null}
+            aria-label={
+              previewLoading
+                ? t('ai.runtime.composer.previewLoading')
+                : previewDisabledReason
+                  ? `${previewTitle} (${previewDisabledReason})`
+                  : previewTitle
+            }
+            title={
+              previewLoading
+                ? t('ai.runtime.composer.previewLoading')
+                : previewDisabledReason
+                  ? `${previewTitle} (${previewDisabledReason})`
+                  : previewTitle
+            }
+            onClick={onPreview}
+          >
+            {previewLoading ? (
+              <LoaderCircle size={12} className="preview-icon spin" aria-hidden="true" />
+            ) : null}
+            <span className="thread-debug-preview-title">
+              {previewTitle}
+            </span>
+          </button>
           {debug.environmentName ? (
             <span className="status-pill is-ready">
               {t('ai.runtime.debug.envPrefix')}{debug.environmentName}
@@ -186,6 +220,14 @@ export function ThreadModelRequestDebug({
           ) : null}
         </div>
       </header>
+
+      {/* PREVIEW ERROR */}
+      {previewError ? (
+        <div role="alert" className="thread-debug-planning-error thread-debug-preview-error">
+          <AlertCircle size={14} aria-hidden="true" />
+          <span>{previewError}</span>
+        </div>
+      ) : null}
 
       {/* PLANNING ERROR */}
       {debug.planningError ? (

@@ -7,6 +7,12 @@ export type {
 } from '@/features/ai/runtime/thread-panel/ThreadPanel'
 export { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 export type {
+  ComposerPreviewDisabledReason,
+  ComposerPreviewReadiness,
+  ThreadComposerHandle,
+  ThreadComposerProps,
+} from '@/features/ai/runtime/thread-panel/ThreadComposer'
+export type {
   ThreadComposerEnvironmentOption,
   ThreadComposerModelOption,
   ThreadComposerModelSelection,

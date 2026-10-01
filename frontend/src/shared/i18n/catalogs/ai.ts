@@ -1043,10 +1043,6 @@ export const aiCatalog = {
     'en-US': 'Send message',
     'zh-CN': '发送消息',
   },
-  'ai.runtime.composer.preview': {
-    'en-US': 'Preview request',
-    'zh-CN': '预览请求',
-  },
   'ai.runtime.composer.previewLoading': {
     'en-US': 'Generating request preview…',
     'zh-CN': '正在生成请求预览…',
@@ -2098,6 +2094,82 @@ export const aiCatalog = {
   'ai.runtime.debug.previewFailed': {
     'en-US': 'Failed to preview request',
     'zh-CN': '请求预览失败',
+  },
+  'ai.runtime.debug.settingsChanged': {
+    'en-US': 'Session settings have changed. Please confirm and try again.',
+    'zh-CN': '会话设置已变化，请确认后重试',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_STALE_CURSOR': {
+    'en-US': 'Thread cursor is stale. Please refresh and try again.',
+    'zh-CN': '会话游标已过期，请刷新状态后重试',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_QUEUED_COMMANDS': {
+    'en-US': 'Queued commands are pending. Unable to preview.',
+    'zh-CN': '队列中有未处理命令，无法预览',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_THREAD_BUSY': {
+    'en-US': 'Thread is currently running. Unable to preview.',
+    'zh-CN': '会话正在运行中，无法预览',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_COMPACTION_REQUIRED': {
+    'en-US': 'Thread compaction required. Please compact and try again.',
+    'zh-CN': '会话需要压缩，请压缩后重试',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_ATTACHMENT_NOT_READY': {
+    'en-US': 'Attachments are not ready. Please wait for uploads to finish.',
+    'zh-CN': '附件尚未就绪，请等待上传完成后重试',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_PLANNING_FAILED': {
+    'en-US': 'Planning failed. Please check context and configuration.',
+    'zh-CN': '规划请求失败，请检查上下文与配置',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_PROVIDER_UNAVAILABLE': {
+    'en-US': 'Model provider is currently unavailable. Please try again later.',
+    'zh-CN': '模型服务不可用，请稍后重试',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_UNSUPPORTED': {
+    'en-US': 'Request preview is not supported for current thread or model.',
+    'zh-CN': '当前会话或模型不支持请求预览',
+  },
+  'ai.runtime.debug.previewError.PREVIEW_ENCODING_FAILED': {
+    'en-US': 'Request payload encoding failed. Please check inputs.',
+    'zh-CN': '请求载荷编码失败，请检查输入内容',
+  },
+  'ai.runtime.debug.previewError.UNKNOWN_409': {
+    'en-US': 'Unable to preview. Please refresh and try again.',
+    'zh-CN': '无法预览，请刷新状态后重试',
+  },
+  'ai.runtime.debug.previewDisabled.emptyDraft': {
+    'en-US': 'Draft is empty',
+    'zh-CN': '草稿为空',
+  },
+  'ai.runtime.debug.previewDisabled.slashCommand': {
+    'en-US': 'Slash command cannot be previewed',
+    'zh-CN': '斜杠命令无法预览',
+  },
+  'ai.runtime.debug.previewDisabled.goalCommand': {
+    'en-US': 'Goal command cannot be previewed',
+    'zh-CN': '目标命令无法预览',
+  },
+  'ai.runtime.debug.previewDisabled.uploading': {
+    'en-US': 'Attachments are uploading',
+    'zh-CN': '附件上传中',
+  },
+  'ai.runtime.debug.previewDisabled.busy': {
+    'en-US': 'Thread is busy',
+    'zh-CN': '会话忙碌',
+  },
+  'ai.runtime.debug.previewDisabled.queued': {
+    'en-US': 'Commands are queued',
+    'zh-CN': '队列中有排队命令',
+  },
+  'ai.runtime.debug.previewDisabled.readOnly': {
+    'en-US': 'Read-only mode',
+    'zh-CN': '只读模式',
+  },
+  'ai.runtime.debug.previewDisabled.unsupported': {
+    'en-US': 'Preview not available',
+    'zh-CN': '当前不支持预览',
   },
   'ai.runtime.debug.inspector.draftPreviewTitle': {
     'en-US': 'Request Preview',

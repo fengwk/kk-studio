@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useEffect, useState } from 'react'
+import { createRef, useEffect, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { ThreadComposer, type ThreadComposerHandle } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
   partsToMessageContents,
@@ -908,13 +908,9 @@ describe('ThreadComposer attachment pills', () => {
   })
 
   it('previews interleaved parts with ready uploads without consuming draft or clearing uploads', async () => {
+    // 测试意图：预览 ref 保持交错 parts 顺序，只解析就绪上传，不提交或消费草稿。
     const { service } = fakeStorage()
-    let previewedPayload: ComposerPart[] = []
-    let localDraft: ComposerPart[] = []
-    const onPreview = vi.fn((payload: ComposerPart[], local: ComposerPart[]) => {
-      previewedPayload = payload
-      localDraft = local
-    })
+    const handleRef = createRef<ThreadComposerHandle>()
     const onSubmit = vi.fn()
 
     function Controlled() {
@@ -922,12 +918,12 @@ describe('ThreadComposer attachment pills', () => {
       return (
         <div>
           <ThreadComposer
+            ref={handleRef}
             parts={parts}
             pending={false}
             disabled={false}
             onPartsChange={setParts}
             onSubmit={onSubmit}
-            onPreview={onPreview}
             onCommand={vi.fn()}
             storageService={service}
             hashFile={hashFile}
@@ -944,11 +940,10 @@ describe('ThreadComposer attachment pills', () => {
     await waitForIdleUploads()
     await typeInEditor(editor, ' second part')
 
-    const previewBtn = screen.getByRole('button', { name: '预览请求' })
-    expect(previewBtn).not.toBeDisabled()
-    fireEvent.click(previewBtn)
-
-    expect(onPreview).toHaveBeenCalledTimes(1)
+    const prepared = handleRef.current?.preparePreview()
+    expect(prepared).not.toBeNull()
+    const previewedPayload = prepared!.payload
+    const localDraft = prepared!.localDraft
     expect(onSubmit).not.toHaveBeenCalled()
     // Server upload handle is resolved in previewed payload
     expect(previewedPayload).toHaveLength(3)
