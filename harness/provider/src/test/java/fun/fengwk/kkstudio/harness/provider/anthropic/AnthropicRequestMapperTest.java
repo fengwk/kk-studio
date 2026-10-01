@@ -772,7 +772,7 @@ class AnthropicRequestMapperTest {
     assertEquals("ephemeral", contents.get(1).path("cache_control").path("type").asText());
   }
 
-  /** 测试意图：当会话结尾为 Assistant 文本消息时，CONVERSATION 断点标记应正确注入至该 Assistant 内容块。 */
+  /** 测试意图：Assistant 结尾保留当前末端，同时保留生成该回复之前的用户请求端点。 */
   @Test
   void should_map_ai_message_text_with_cache_control_metadata() throws IOException {
     ProviderRequest request =
@@ -789,7 +789,7 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode userBlock = root.path("messages").get(0).path("content").get(0);
-    assertFalse(userBlock.has("cache_control"));
+    assertEquals("ephemeral", userBlock.path("cache_control").path("type").asText());
 
     JsonNode asstBlock = root.path("messages").get(1).path("content").get(0);
     assertEquals("Hi", asstBlock.path("text").asText());

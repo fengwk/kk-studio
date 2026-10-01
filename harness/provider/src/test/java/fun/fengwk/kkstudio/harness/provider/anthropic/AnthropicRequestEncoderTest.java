@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -63,6 +64,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -1558,6 +1561,391 @@ class AnthropicRequestEncoderTest {
     assertEquals(diagnostic.name(), decodedDiag.name());
     assertEquals("", decodedDiag.partialArguments());
     assertEquals(diagnostic.message(), decodedDiag.message());
+  }
+
+  /** 意图：从真实 AgentMessage 投影，少量和超过 20 个独立块的增长都必须保留上轮请求端点。 */
+  @ParameterizedTest
+  @MethodSource("cacheGrowthCases")
+  void retainsPreviousRequestEndpointAcrossGrowth(int growth) throws IOException {
+    List<AgentMessage> history = new ArrayList<>();
+    history.add(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("old"))));
+    history.add(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))));
+    List<TextMessageContent> additions = new ArrayList<>();
+    for (int i = 0; i < growth; i++) {
+      additions.add(new TextMessageContent("new-" + i));
+    }
+    history.add(new AgentMessage(AgentMessageRole.USER, new ArrayList<>(additions)));
+    JsonNode wire =
+        cacheWire(
+            ProviderMessageProjector.byNames(Set.of()).project(history),
+            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+    assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
+    assertTrue(cacheBlock(wire, 2, growth - 1).has("cache_control"));
+    assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
+    assertEquals(3, countCacheMarkers(wire));
+  }
+
+  private static Stream<Integer> cacheGrowthCases() {
+    return Stream.of(1, 21, 25);
+  }
+
+  /** 意图：四个名额按 SYSTEM/TOOLS 组合分配给最近请求边界，不是任意最后两条消息；相同文本按 identity 区分。 */
+  @Test
+  void allocatesFourMarkersToMostRecentRequestBoundaries() throws IOException {
+    List<ProviderMessage> messages =
+        List.of(
+            userMsg(new ProviderTextBlock("same")),
+            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            userMsg(new ProviderTextBlock("same")),
+            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            userMsg(new ProviderTextBlock("same")),
+            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            userMsg(new ProviderTextBlock("same")),
+            asstMsg(List.of(new ProviderTextBlock("a")), null),
+            userMsg(new ProviderTextBlock("same")));
+    for (boolean system : List.of(false, true)) {
+      for (boolean tools : List.of(false, true)) {
+        Set<PromptCacheBreakpoint> breakpoints = new HashSet<>();
+        breakpoints.add(PromptCacheBreakpoint.CONVERSATION);
+        if (system) {
+          breakpoints.add(PromptCacheBreakpoint.SYSTEM);
+        }
+        if (tools) {
+          breakpoints.add(PromptCacheBreakpoint.TOOLS);
+        }
+        JsonNode wire = cacheWire(messages, breakpoints);
+        assertEquals(4, countCacheMarkers(wire));
+        int conversationBudget = 4 - (system ? 1 : 0) - (tools ? 1 : 0);
+        for (int i = 0; i < messages.size(); i++) {
+          assertEquals(
+              i % 2 == 0 && i >= 10 - 2 * conversationBudget,
+              cacheBlock(wire, i, 0).has("cache_control"),
+              "message " + i);
+        }
+      }
+    }
+  }
+
+  /** 意图：queued users、并行工具批次只把批末端作为请求边界；连续 assistant 续写仍记录之前的端点。 */
+  @Test
+  void retainsQueuedUserAndParallelToolBatchEndpoints() throws IOException {
+    ProviderMessage calls =
+        asstMsg(
+            List.of(
+                new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")),
+                new ProviderToolCallBlock(new ProviderToolCall("c2", "calc", "{}"))),
+            null);
+    ProviderMessage results =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    "c1", "calc", List.of(new ProviderTextBlock("one")), false, "{}")));
+    ProviderMessage secondResult =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    "c2", "calc", List.of(new ProviderTextBlock("two")), false, "{}")));
+    JsonNode wire =
+        cacheWire(
+            List.of(
+                userMsg(new ProviderTextBlock("queued-1")),
+                userMsg(new ProviderTextBlock("queued-2")),
+                calls,
+                results,
+                secondResult,
+                asstMsg(List.of(new ProviderTextBlock("continue")), null),
+                asstMsg(List.of(new ProviderTextBlock("continued")), null),
+                userMsg(new ProviderTextBlock("third"))),
+            Set.of(PromptCacheBreakpoint.CONVERSATION));
+    assertEquals(4, countCacheMarkers(wire));
+    assertFalse(cacheBlock(wire, 0, 0).has("cache_control"));
+    assertTrue(cacheBlock(wire, 1, 0).has("cache_control"));
+    assertFalse(cacheBlock(wire, 2, 1).has("cache_control"));
+    assertFalse(cacheBlock(wire, 3, 0).has("cache_control"));
+    assertTrue(cacheBlock(wire, 4, 0).has("cache_control"));
+    assertTrue(cacheBlock(wire, 5, 0).has("cache_control"));
+    assertTrue(cacheBlock(wire, 7, 0).has("cache_control"));
+  }
+
+  /** 意图：空 text 只跳过 marker 不清洗 payload，连续重复端点按对象去重；NONE 完全不打标。 */
+  @Test
+  void skipsEmptyTextAndDeduplicatesIdenticalEndpoints() throws IOException {
+    List<ProviderMessage> messages =
+        List.of(
+            userMsg(new ProviderTextBlock("valid")),
+            asstMsg(List.of(new ProviderTextBlock("")), null),
+            asstMsg(List.of(new ProviderTextBlock("")), null),
+            userMsg(new ProviderTextBlock("")));
+    JsonNode wire = cacheWire(messages, Set.of(PromptCacheBreakpoint.CONVERSATION));
+    assertEquals(1, countCacheMarkers(wire));
+    assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
+    for (int i = 1; i < 4; i++) {
+      assertEquals("", cacheBlock(wire, i, 0).path("text").asText());
+      assertFalse(cacheBlock(wire, i, 0).has("cache_control"));
+    }
+    assertEquals(
+        0,
+        countCacheMarkers(
+            MAPPER.readTree(
+                encoder
+                    .encode(
+                        request(defaultVariant(), messages, List.of(), ProviderCacheControl.none()),
+                        descriptor)
+                    .bodyUtf8Bytes())));
+  }
+
+  /** 意图：未知/签名块原样保留且不打标，marker 不影响原生 replay hash 校验或修改持久 payload。 */
+  @Test
+  void skipsOpaqueTailWithoutChangingSignedReplayValidation() throws IOException {
+    ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
+    ProviderRequest prefix =
+        request(
+            defaultVariant(),
+            List.of(user),
+            List.of(),
+            new ProviderCacheControl(
+                PromptCacheRetention.SHORT, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION)));
+    String hash = encoder.encode(prefix, descriptor).sourcePrefixHash();
+    ObjectNode payload = NODES.objectNode().put("role", "assistant");
+    ArrayNode content = payload.putArray("content");
+    content.addObject().put("type", "thinking").put("thinking", "t").put("signature", "sig");
+    content.addObject().put("type", "redacted_thinking").put("data", "opaque");
+    content.addObject().put("type", "future_block").put("value", "kept");
+    ProviderReplayState replay =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            hash,
+            payload);
+    ProviderMessage assistant = asstMsg(List.of(new ProviderThinkingBlock("t")), replay);
+    ProviderRequest next =
+        request(defaultVariant(), List.of(user, assistant), List.of(), prefix.cacheControl());
+    JsonNode wire = MAPPER.readTree(encoder.encode(next, descriptor).bodyUtf8Bytes());
+    assertEquals(1, countCacheMarkers(wire));
+    assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
+    assertEquals(content, wire.path("messages").get(1).path("content"));
+    assertEquals(0, countCacheMarkers(payload));
+    assertEquals(
+        encoder
+            .encode(
+                request(
+                    defaultVariant(),
+                    List.of(user, assistant),
+                    List.of(),
+                    ProviderCacheControl.none()),
+                descriptor)
+            .sourcePrefixHash(),
+        encoder.encode(next, descriptor).sourcePrefixHash());
+    ProviderMessage changedUser = userMsg(new ProviderTextBlock("changed"));
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        assertThrows(
+                ProviderException.class,
+                () ->
+                    encoder.encode(
+                        request(
+                            defaultVariant(),
+                            List.of(changedUser, assistant),
+                            List.of(),
+                            prefix.cacheControl()),
+                        descriptor))
+            .kind());
+  }
+
+  /** 意图：compaction 必须丢弃已裁历史的缓存候选，否则旧引用会浪费四个 marker 名额。 */
+  @Test
+  void resetsCacheEndpointsWhenCompactionResetsHistory() throws IOException {
+    List<ProviderMessage> messages =
+        new ArrayList<>(
+            List.of(
+                userMsg(new ProviderTextBlock("old")),
+                asstMsg(List.of(new ProviderTextBlock("old-answer")), null),
+                userMsg(new ProviderTextBlock("old-next"))));
+    String hash =
+        encoder
+            .encode(
+                request(
+                    defaultVariant(),
+                    messages,
+                    List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
+                    ProviderCacheControl.none()),
+                descriptor)
+            .sourcePrefixHash();
+    ObjectNode payload = NODES.objectNode().put("role", "assistant");
+    payload.putArray("content").addObject().put("type", "compaction").put("content", "summary");
+    messages.add(
+        asstMsg(
+            List.of(new ProviderTextBlock("")),
+            new ProviderReplayState(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                descriptor.affinity("claude-3-5-sonnet"),
+                hash,
+                payload)));
+    messages.add(userMsg(new ProviderTextBlock("new")));
+    JsonNode wire = cacheWire(messages, Set.of(PromptCacheBreakpoint.CONVERSATION));
+    assertEquals(2, wire.path("messages").size());
+    assertEquals(payload.path("content"), wire.path("messages").get(0).path("content"));
+    assertTrue(cacheBlock(wire, 1, 0).has("cache_control"));
+    assertEquals(1, countCacheMarkers(wire));
+  }
+
+  /** 意图：原生工具直接 cache_control（含 null/NONE）侵犯 marker 所有权，错误不回显值。 */
+  @ParameterizedTest
+  @MethodSource("nativeToolCacheCases")
+  void rejectsNativeToolCacheControl(PromptCacheRetention retention, String value) {
+    ModelVariant variant =
+        new ModelVariant(
+            "native",
+            null,
+            new ProviderProtocolOptions(
+                "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"cache_control\":"
+                    + value
+                    + "}]}"));
+    ProviderCacheControl control =
+        retention == PromptCacheRetention.NONE
+            ? ProviderCacheControl.none()
+            : new ProviderCacheControl(
+                retention, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION));
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        variant, List.of(userMsg(new ProviderTextBlock("hi"))), List.of(), control),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "protocolOptions must not override runtime field: tools[0].cache_control",
+        error.getMessage());
+  }
+
+  private static Stream<Arguments> nativeToolCacheCases() {
+    return Stream.of(PromptCacheRetention.values())
+        .flatMap(
+            retention ->
+                Stream.of("null", "{\"type\":\"secret-value\"}")
+                    .map(value -> Arguments.of(retention, value)));
+  }
+
+  /** 意图：只检查工具直属字段，不递归误拒绝 input_schema 业务属性或裁剪合法原生字段。 */
+  @Test
+  void preservesNativeToolFieldsAndBusinessCacheControlProperty() throws IOException {
+    ModelVariant variant =
+        new ModelVariant(
+            "native",
+            null,
+            new ProviderProtocolOptions(
+                "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":3,\"future_field\":{\"cache_control\":null}}]}"));
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition(
+            "calc",
+            "desc",
+            "{\"type\":\"object\",\"properties\":{\"cache_control\":{\"type\":\"string\"}}}");
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        variant,
+                        List.of(userMsg(new ProviderTextBlock("hi"))),
+                        List.of(tool),
+                        ProviderCacheControl.none()),
+                    descriptor)
+                .bodyUtf8Bytes());
+    assertEquals(3, wire.path("tools").get(0).path("max_uses").asInt());
+    assertTrue(wire.path("tools").get(0).path("future_field").has("cache_control"));
+    assertEquals(
+        "string",
+        wire.path("tools")
+            .get(1)
+            .path("input_schema")
+            .path("properties")
+            .path("cache_control")
+            .path("type")
+            .asText());
+  }
+
+  /** 意图：打标移至最终冻结之后，不能放宽已有原生 replay 的形状和 durable 工具一致性校验。 */
+  @ParameterizedTest
+  @MethodSource("invalidCacheReplayCases")
+  void rejectsMalformedReplayBeforeCacheMarkers(JsonNode payload) {
+    ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
+    ProviderRequest prefix =
+        request(
+            defaultVariant(),
+            List.of(user),
+            List.of(),
+            ProviderCacheControl.breakpoints(
+                PromptCacheRetention.SHORT, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION)));
+    String hash = encoder.encode(prefix, descriptor).sourcePrefixHash();
+    ProviderReplayState replay =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            hash,
+            payload);
+    ProviderMessage assistant =
+        asstMsg(
+            List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))), replay);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        defaultVariant(),
+                        List.of(user, assistant),
+                        List.of(),
+                        prefix.cacheControl()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(0, countCacheMarkers(payload));
+  }
+
+  private static Stream<JsonNode> invalidCacheReplayCases() throws IOException {
+    try (var input =
+        AnthropicRequestEncoderTest.class.getResourceAsStream(
+            "fixtures/cache-invalid-replay.json")) {
+      assertNotNull(input);
+      List<JsonNode> cases = new ArrayList<>();
+      MAPPER.readTree(input).forEach(cases::add);
+      return cases.stream();
+    }
+  }
+
+  private JsonNode cacheWire(List<ProviderMessage> messages, Set<PromptCacheBreakpoint> breakpoints)
+      throws IOException {
+    return MAPPER.readTree(
+        encoder
+            .encode(
+                request(
+                    defaultVariant(),
+                    messages,
+                    List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
+                    new ProviderCacheControl(PromptCacheRetention.LONG, "cache", breakpoints)),
+                descriptor)
+            .bodyUtf8Bytes());
+  }
+
+  private static JsonNode cacheBlock(JsonNode wire, int message, int block) {
+    return wire.path("messages").get(message).path("content").get(block);
+  }
+
+  private static int countCacheMarkers(JsonNode node) {
+    int count =
+        node.isObject()
+                && node.has("cache_control")
+                && node.path("cache_control").path("type").asText().equals("ephemeral")
+            ? 1
+            : 0;
+    for (JsonNode child : node) {
+      count += countCacheMarkers(child);
+    }
+    return count;
   }
 
   private static ProviderRequest request(

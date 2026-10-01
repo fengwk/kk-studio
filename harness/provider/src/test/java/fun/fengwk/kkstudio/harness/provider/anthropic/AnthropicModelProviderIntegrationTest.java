@@ -1,10 +1,13 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,10 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -29,7 +35,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
@@ -39,6 +48,7 @@ import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -496,6 +506,161 @@ class AnthropicModelProviderIntegrationTest {
     assertTrue(errorLatch.await(5, TimeUnit.SECONDS));
     assertNotNull(caughtError.get());
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, caughtError.get().kind());
+  }
+
+  /** 意图：本地 HTTP 捕获三轮真实编码，流响应的签名 replay 与工具结果经过编码器，增长超过 lookback 仍保留上轮端点。 */
+  @Test
+  void preservesCacheRequestBoundariesAcrossThreeHttpRounds() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+    List<JsonNode> received = new CopyOnWriteArrayList<>();
+    byte[] toolResponse;
+    byte[] textResponse;
+    try (var tool = getClass().getResourceAsStream("fixtures/cache-boundary-tool.sse");
+        var text = getClass().getResourceAsStream("fixtures/cache-boundary-text.sse")) {
+      assertNotNull(tool);
+      assertNotNull(text);
+      toolResponse = tool.readAllBytes();
+      textResponse = text.readAllBytes();
+    }
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          received.add(mapper.readTree(exchange.getRequestBody()));
+          byte[] response = received.size() == 1 ? toolResponse : textResponse;
+          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(response);
+          }
+        });
+    ProviderDescriptor descriptor =
+        new ProviderDescriptor(
+            "anthropic-cache",
+            ProviderType.ANTHROPIC,
+            "http://127.0.0.1:" + port + "/v1",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
+            UUID.randomUUID());
+    AnthropicModelProvider provider =
+        (AnthropicModelProvider) new AnthropicProviderAdapter(transport, null).create(descriptor);
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "anthropic-cache",
+            "claude-test",
+            "claude-test",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            false,
+            pricing());
+    ProviderCacheControl cache =
+        ProviderCacheControl.breakpoints(
+            PromptCacheRetention.SHORT,
+            "cache",
+            Set.of(
+                PromptCacheBreakpoint.SYSTEM,
+                PromptCacheBreakpoint.TOOLS,
+                PromptCacheBreakpoint.CONVERSATION));
+    List<ProviderMessage> history = new ArrayList<>();
+    history.add(
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("first"))));
+    List<ProviderToolDefinition> tools =
+        List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}"));
+    ProviderCompletion first =
+        complete(
+            provider,
+            new ProviderRequest(
+                model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+    assertNotNull(first.replayState());
+    List<ProviderContentBlock> assistantContents = new ArrayList<>();
+    assistantContents.add(new ProviderThinkingBlock(first.response().thinking()));
+    first
+        .response()
+        .toolCalls()
+        .forEach(call -> assistantContents.add(new ProviderToolCallBlock(call)));
+    history.add(
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, assistantContents, first.replayState()));
+    history.add(
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(
+                new ProviderToolResultBlock(
+                    first.response().toolCalls().getFirst().id(),
+                    "calc",
+                    List.of(new ProviderTextBlock("result")),
+                    false,
+                    "{}"))));
+    List<ProviderContentBlock> growth = new ArrayList<>();
+    for (int i = 0; i < 25; i++) {
+      growth.add(new ProviderTextBlock("growth-" + i));
+    }
+    history.add(new ProviderMessage(ProviderMessageRole.USER, growth));
+    ProviderCompletion second =
+        complete(
+            provider,
+            new ProviderRequest(
+                model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+    history.add(
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock(second.response().text())),
+            second.replayState()));
+    history.add(
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("third"))));
+    complete(
+        provider,
+        new ProviderRequest(
+            model, new ModelVariant("default"), 1024, "system", history, tools, cache));
+    assertEquals(3, received.size());
+    assertEquals(3, markerCount(received.get(0)));
+    assertEquals(4, markerCount(received.get(1)));
+    assertEquals(4, markerCount(received.get(2)));
+    JsonNode roundTwo = received.get(1).path("messages");
+    assertTrue(roundTwo.get(0).path("content").get(0).has("cache_control"));
+    assertTrue(roundTwo.get(3).path("content").get(24).has("cache_control"));
+    assertEquals(
+        "fixture-signature", roundTwo.get(1).path("content").get(0).path("signature").asText());
+    assertFalse(roundTwo.get(1).path("content").get(0).has("cache_control"));
+    JsonNode roundThree = received.get(2).path("messages");
+    assertFalse(roundThree.get(0).path("content").get(0).has("cache_control"));
+    assertTrue(roundThree.get(3).path("content").get(24).has("cache_control"));
+    assertTrue(roundThree.get(5).path("content").get(0).has("cache_control"));
+    assertEquals(first.replayState().payload().path("content"), roundThree.get(1).path("content"));
+  }
+
+  private static ProviderCompletion complete(
+      AnthropicModelProvider provider, ProviderRequest request) throws InterruptedException {
+    CountDownLatch done = new CountDownLatch(1);
+    AtomicReference<ProviderCompletion> completion = new AtomicReference<>();
+    AtomicReference<ProviderException> failure = new AtomicReference<>();
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion value, ProviderStream stream) {
+            completion.set(value);
+            done.countDown();
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            failure.set(error);
+            done.countDown();
+          }
+        });
+    assertTrue(done.await(5, TimeUnit.SECONDS), "local stream must terminate");
+    assertNull(failure.get());
+    assertNotNull(completion.get());
+    return completion.get();
+  }
+
+  private static int markerCount(JsonNode node) {
+    int count = node.has("cache_control") ? 1 : 0;
+    for (JsonNode child : node) {
+      count += markerCount(child);
+    }
+    return count;
   }
 
   private static ModelPricing pricing() {
