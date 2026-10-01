@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 import java.util.EnumSet;
@@ -15,23 +14,22 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * ModelInvocationPlanner 在冻结 {@link ProviderRequest} 时的唯一 cache control 派生点。
+ * 规划阶段根据稳定请求前缀与显式 policy 冻结缓存策略意图，不判断最终 wire 的断点可放置性。
  *
  * <p>行为契约：
  *
  * <ul>
- *   <li>构造时绑定 sessionId 与 providerConnectionGenerationId，永远覆盖请求中已有的 {@link
- *       ProviderCacheControl}；不存在执行时 hook 重写路径。
+ *   <li>构造时绑定 sessionId 与 providerConnectionGenerationId，永远覆盖请求中已有的 {@link ProviderCacheControl}。
  *   <li>{@link PromptCachePolicy} 由调用方显式传入且不随 {@link ProviderRequest} 或 ModelDescriptor 持久化；具体解析与
- *       调用时点由调用方（Core）决定。
+ *       调用时点由调用方决定。
  *   <li>{@link PromptCacheRetention#NONE} 一律输出 {@link ProviderCacheControl#none()}。
  *   <li>policy capability 为 {@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} /
  *       {@link PromptCacheMode#AUTOMATIC} 一律输出 {@code none()}；harness 不向 Provider 传递 cache hint。
  *   <li>{@link PromptCacheMode#AFFINITY} 即使没有 tools 也派生 affinity key，输出 {@link
  *       ProviderCacheControl#affinity}。
- *   <li>{@link PromptCacheMode#BREAKPOINTS} 求 capability 支持 breakpoints 与请求实际内容的交集： tools 非空才允许
- *       TOOLS，会话消息非空才允许 CONVERSATION；system instruction 由 policy capability 自身声明支持时始终参与 SYSTEM
- *       断点，如无有效 breakpoint 则输出 {@code none()}， 否则输出 {@link ProviderCacheControl#breakpoints}。
+ *   <li>{@link PromptCacheMode#BREAKPOINTS} 根据已知静态前缀筛选 TOOLS（tools 非空）与 SYSTEM（始终存在）； capability 支持
+ *       CONVERSATION 就冻结该意图。规划时历史尚未物化，执行期 normalize 再按实际消息筛选断点。 如无有效 breakpoint 则输出 {@code
+ *       none()}，否则输出 {@link ProviderCacheControl#breakpoints}。
  * </ul>
  */
 public final class PromptCacheRequestFinalizer {
@@ -95,7 +93,7 @@ public final class PromptCacheRequestFinalizer {
     if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
       resolved.add(PromptCacheBreakpoint.TOOLS);
     }
-    if (supported.contains(PromptCacheBreakpoint.CONVERSATION) && hasConversationContent(request)) {
+    if (supported.contains(PromptCacheBreakpoint.CONVERSATION)) {
       resolved.add(PromptCacheBreakpoint.CONVERSATION);
     }
     if (resolved.isEmpty()) {
@@ -103,14 +101,5 @@ public final class PromptCacheRequestFinalizer {
     }
     return ProviderCacheControl.breakpoints(
         retention, keyFactory.create(sessionId, providerConnectionGenerationId, request), resolved);
-  }
-
-  private static boolean hasConversationContent(ProviderRequest request) {
-    for (ProviderMessage message : request.messages()) {
-      if (!message.contents().isEmpty()) {
-        return true;
-      }
-    }
-    return false;
   }
 }

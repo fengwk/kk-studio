@@ -10,11 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
@@ -37,6 +41,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
+import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
@@ -106,6 +111,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
@@ -119,6 +125,9 @@ import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
+import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
@@ -129,6 +138,8 @@ import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnFacts;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnRejection;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnResolver;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -1543,6 +1554,138 @@ class DatabaseTurnResolverTest {
         fixture.resolved(fixture.path(settings("default")));
     assertNotEquals(
         first.cacheControl().affinityKey(), otherConnectionGeneration.cacheControl().affinityKey());
+  }
+
+  /** 真实 USER 历史经规划、物化、公开 resolve 到 wire；跨轮 key 稳定，NONE 不被自动开启。 */
+  @Test
+  void responsesExplicitPlanningSurvivesMaterializationAndPublicResolution() throws Exception {
+    String configJson = "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}";
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI_RESPONSES,
+            ProviderType.OPENAI_RESPONSES,
+            OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(configJson),
+            true);
+    fixture.provider.setConfigJson(configJson);
+    fixture.provider.setBaseUrl("https://example.invalid/v1");
+    fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
+    ProviderFactory factory = fixture.resolverProviderFactory();
+    when(factory.promptCacheCapability(any()))
+        .thenAnswer(
+            invocation ->
+                OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(
+                    invocation.getArgument(0)));
+    JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
+    when(factory.create(any(), any()))
+        .thenAnswer(
+            invocation ->
+                new OpenAiResponsesProviderAdapter(
+                    transport, null, (String) invocation.getArgument(1)));
+    Entry root = fixture.path(settings("default")).head();
+    Entry turn = turnEntry(id(997), root.id(), settings("default"));
+    Entry user = userEntry(id(998), turn.id(), "first user");
+    EntryPath path = new EntryPath(List.of(root, turn, user));
+    ModelRequestSpec spec = fixture.resolved(path);
+    assertEquals("gpt-5.6", spec.model().modelId());
+    assertEquals(PromptCacheRetention.SHORT, spec.cacheControl().retention());
+    assertTrue(spec.cacheControl().affinityKey().startsWith("pc2-"));
+    assertEquals(Set.of(PromptCacheBreakpoint.CONVERSATION), spec.cacheControl().breakpoints());
+    ProviderRequest request = new ModelRequestMaterializer().materialize(path, spec);
+    assertEquals(ProviderMessageRole.USER, request.messages().get(0).role());
+    assertEquals(new ProviderTextBlock("first user"), request.messages().get(0).contents().get(0));
+    StorageBlobManager blobs = mock(StorageBlobManager.class);
+    StorageBlobContentService content = mock(StorageBlobContentService.class);
+    DatabaseProviderResolutionService resolution =
+        new DatabaseProviderResolutionService(
+            fixture.providers,
+            new AgentProviderConfigurationCodec(new ObjectMapper()),
+            new ProviderFactories(List.of(factory)),
+            new ProviderResourceMaterializer(blobs, content));
+    ResolvedExecution execution =
+        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
+    assertEquals(spec.cacheControl(), execution.effectiveRequest().cacheControl());
+    ObjectMapper mapper = new ObjectMapper();
+    JsonNode wire = mapper.readTree(execution.encodeRequestBody());
+    assertEquals("gpt-5.6", wire.path("model").asText());
+    assertEquals("explicit", wire.path("prompt_cache_options").path("mode").asText());
+    assertEquals("30m", wire.path("prompt_cache_options").path("ttl").asText());
+    assertEquals(spec.cacheControl().affinityKey(), wire.path("prompt_cache_key").asText());
+    assertFalse(wire.has("prompt_cache_retention"));
+    assertEquals(1, wire.findValues("prompt_cache_breakpoint").size());
+    assertEquals(
+        "explicit",
+        wire.path("input")
+            .get(0)
+            .path("content")
+            .get(0)
+            .path("prompt_cache_breakpoint")
+            .path("mode")
+            .asText());
+    assertEquals(
+        "first user", wire.path("input").get(0).path("content").get(0).path("text").asText());
+
+    Entry reply = assistantEntry(id(999), user.id(), "first reply");
+    Entry end = turnEnd(id(1000), reply.id(), turn.id());
+    Entry nextTurn = turnEntry(id(1001), end.id(), settings("default"));
+    EntryPath nextPath =
+        new EntryPath(
+            List.of(
+                root,
+                turn,
+                user,
+                reply,
+                end,
+                nextTurn,
+                userEntry(id(1002), nextTurn.id(), "second user")));
+    ModelRequestSpec nextSpec = fixture.resolved(nextPath);
+    assertEquals(spec.cacheControl(), nextSpec.cacheControl());
+    JsonNode nextWire =
+        mapper.readTree(
+            resolution
+                .resolve(
+                    nextSpec.providerType(),
+                    nextSpec.providerConnectionGenerationId(),
+                    new ModelRequestMaterializer().materialize(nextPath, nextSpec))
+                .encodeRequestBody());
+    assertEquals(spec.cacheControl().affinityKey(), nextWire.path("prompt_cache_key").asText());
+    assertEquals(2, nextWire.findValues("prompt_cache_breakpoint").size());
+    assertEquals(
+        "explicit",
+        nextWire
+            .path("input")
+            .get(2)
+            .path("content")
+            .get(0)
+            .path("prompt_cache_breakpoint")
+            .path("mode")
+            .asText());
+    assertEquals(
+        "second user", nextWire.path("input").get(2).path("content").get(0).path("text").asText());
+
+    // 持久 NONE 是禁用控制组，不能根据当前显式 capability 恢复。
+    ProviderRequest disabled =
+        new ProviderRequest(
+            request.model(),
+            request.variant(),
+            request.outputTokens(),
+            request.systemInstruction(),
+            request.messages(),
+            request.tools(),
+            ProviderCacheControl.none());
+    ResolvedExecution disabledExecution =
+        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), disabled);
+    assertEquals(ProviderCacheControl.none(), disabledExecution.effectiveRequest().cacheControl());
+    JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
+    assertEquals("explicit", disabledWire.path("prompt_cache_options").path("mode").asText());
+    assertFalse(disabledWire.has("prompt_cache_key"));
+    assertFalse(disabledWire.has("prompt_cache_retention"));
+    assertTrue(disabledWire.findValues("prompt_cache_breakpoint").isEmpty());
+    verifyNoInteractions(transport, blobs, content);
+    verify(factory, atLeast(2)).promptCacheCapability(configJson);
   }
 
   /** 意图：验证 live turn 规划会正确传递当前 provider 的 configJson 解析动态 promptCacheCapability。 */
