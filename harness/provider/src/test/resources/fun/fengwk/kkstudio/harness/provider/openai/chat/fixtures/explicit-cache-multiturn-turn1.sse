@@ -1,0 +1,3 @@
+data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Thinking: file_search and get_weather concurrently.","tool_calls":[{"index":0,"id":"call_search_01","type":"function","function":{"name":"file_search","arguments":"{\"query\":\"report\"}"}},{"index":1,"id":"call_weather_02","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Tokyo\"}"}}],"vendor_custom_tag":"custom_v1"},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":30,"completion_tokens":25,"total_tokens":55}}
+
+data: [DONE]

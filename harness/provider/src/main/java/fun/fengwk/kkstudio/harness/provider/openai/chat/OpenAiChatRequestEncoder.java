@@ -145,23 +145,32 @@ final class OpenAiChatRequestEncoder {
     // 从左到右构建 wire messages 并维护 prefix hash；系统指令合成为唯一的前导 system message。
     ArrayNode wireMessagesArray = NODES.arrayNode();
     wireMessagesArray.add(encodeSystemInstruction(request.systemInstruction()));
+    List<ObjectNode> requestEndpoints = new ArrayList<>();
+    ObjectNode lastInputEndpoint = null;
     for (ProviderMessage message : request.messages()) {
       if (message.role() == ProviderMessageRole.ASSISTANT) {
+        // assistant 划定一次模型请求的输入末端；queued USER / parallel TOOL 批次只取末端。
+        addRequestEndpoint(requestEndpoints, lastInputEndpoint);
         String currentPrefixHash =
             OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
         wireMessagesArray.add(
             encodeAssistantMessage(
                 message, descriptor, request.model().modelId(), currentPrefixHash));
       } else {
-        wireMessagesArray.add(encodeMessage(message));
+        ObjectNode input = encodeMessage(message);
+        wireMessagesArray.add(input);
+        if (cacheableContent(input) != null) {
+          lastInputEndpoint = input;
+        }
       }
     }
+    addRequestEndpoint(requestEndpoints, lastInputEndpoint);
 
     // 冻结当前请求新 assistant 生成前的 sourcePrefixHash
     String sourcePrefixHash = OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
 
     // 应用 Prompt Cache 策略与断点打标
-    applyPromptCache(root, wireMessagesArray, request.cacheControl(), config);
+    applyPromptCache(root, wireMessagesArray, requestEndpoints, request.cacheControl(), config);
 
     root.set("messages", wireMessagesArray);
 
@@ -781,6 +790,7 @@ final class OpenAiChatRequestEncoder {
   private static void applyPromptCache(
       ObjectNode root,
       ArrayNode wireMessagesArray,
+      List<ObjectNode> requestEndpoints,
       ProviderCacheControl cacheControl,
       OpenAiChatConfiguration config) {
     switch (config.promptCacheMode()) {
@@ -806,64 +816,72 @@ final class OpenAiChatRequestEncoder {
         if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
           root.put("prompt_cache_key", cacheControl.affinityKey());
 
-          // 1. SYSTEM breakpoint: 最后一个 system 消息的最后一个 content part
+          // 哈希和 replay 校验完成后才转换 wire 形态；未打标历史也保持相同的 parts 形态。
+          for (JsonNode message : wireMessagesArray) {
+            normalizeTextContent((ObjectNode) message);
+          }
+          int remaining = 4;
           if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)) {
-            markSystemBreakpoint(wireMessagesArray);
+            if (attachBreakpointToMessage((ObjectNode) wireMessagesArray.get(0))) {
+              remaining--;
+            }
           }
 
-          // 2. CONVERSATION breakpoint: 最后一个 conversation 消息的最后一个可标记 content part
           if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
-            markConversationBreakpoint(wireMessagesArray);
+            for (int i = Math.max(0, requestEndpoints.size() - remaining);
+                i < requestEndpoints.size();
+                i++) {
+              attachBreakpointToMessage(requestEndpoints.get(i));
+            }
           }
         }
       }
     }
   }
 
-  private static void markSystemBreakpoint(ArrayNode wireMessagesArray) {
-    for (int i = wireMessagesArray.size() - 1; i >= 0; i--) {
-      JsonNode msgNode = wireMessagesArray.get(i);
-      if (msgNode.isObject() && "system".equals(msgNode.path("role").asText())) {
-        attachBreakpointToMessage((ObjectNode) msgNode);
-        return;
-      }
+  private static void addRequestEndpoint(List<ObjectNode> endpoints, ObjectNode endpoint) {
+    // 相同文本在不同位置是不同端点；只按引用消除连续 assistant / 历史结束产生的重复端点。
+    if (endpoint != null
+        && (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != endpoint)) {
+      endpoints.add(endpoint);
     }
   }
 
-  private static void markConversationBreakpoint(ArrayNode wireMessagesArray) {
-    for (int i = wireMessagesArray.size() - 1; i >= 0; i--) {
-      JsonNode msgNode = wireMessagesArray.get(i);
-      if (msgNode.isObject() && !"system".equals(msgNode.path("role").asText())) {
-        if (attachBreakpointToMessage((ObjectNode) msgNode)) {
-          return;
-        }
-      }
-    }
-  }
-
-  private static boolean attachBreakpointToMessage(ObjectNode msgNode) {
-    if (!msgNode.has("content")) {
-      return false;
-    }
-    JsonNode contentNode = msgNode.get("content");
-    if (contentNode.isTextual()) {
-      String text = contentNode.textValue();
+  private static void normalizeTextContent(ObjectNode message) {
+    JsonNode content = message.get("content");
+    if (content != null && content.isTextual() && !content.textValue().isEmpty()) {
       ArrayNode parts = NODES.arrayNode();
-      ObjectNode part = parts.addObject();
-      part.put("type", "text");
-      part.put("text", text);
-      part.put("prompt_cache_breakpoint", true);
-      msgNode.set("content", parts);
-      return true;
-    } else if (contentNode.isArray()) {
-      ArrayNode parts = (ArrayNode) contentNode;
-      if (!parts.isEmpty()) {
-        JsonNode lastPart = parts.get(parts.size() - 1);
-        if (lastPart.isObject()) {
-          ((ObjectNode) lastPart).put("prompt_cache_breakpoint", true);
-          return true;
-        }
+      parts.addObject().put("type", "text").put("text", content.textValue());
+      message.set("content", parts);
+    }
+  }
+
+  /** 返回可缓存的内容末端，不为 null/空文本或 tool-call-only assistant 制造内容。 */
+  private static JsonNode cacheableContent(ObjectNode message) {
+    JsonNode content = message.get("content");
+    if (content == null) {
+      return null;
+    }
+    if (content.isTextual()) {
+      return content.textValue().isEmpty() ? null : content;
+    }
+    if (content.isArray() && !content.isEmpty()) {
+      JsonNode lastPart = content.get(content.size() - 1);
+      if (lastPart.isObject()
+          && (!"text".equals(lastPart.path("type").asText())
+              || (lastPart.path("text").isTextual()
+                  && !lastPart.path("text").textValue().isEmpty()))) {
+        return lastPart;
       }
+    }
+    return null;
+  }
+
+  private static boolean attachBreakpointToMessage(ObjectNode message) {
+    JsonNode part = cacheableContent(message);
+    if (part instanceof ObjectNode objectPart) {
+      objectPart.putObject("prompt_cache_breakpoint").put("mode", "explicit");
+      return true;
     }
     return false;
   }

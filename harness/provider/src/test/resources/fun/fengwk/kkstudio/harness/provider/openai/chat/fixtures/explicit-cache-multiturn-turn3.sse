@@ -1,0 +1,3 @@
+data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Thinking: all info gathered, synthesizing final answer.","content":"Tokyo is sunny and the report is all clear."},"finish_reason":"stop"}],"usage":{"prompt_tokens":90,"completion_tokens":15,"total_tokens":105}}
+
+data: [DONE]
