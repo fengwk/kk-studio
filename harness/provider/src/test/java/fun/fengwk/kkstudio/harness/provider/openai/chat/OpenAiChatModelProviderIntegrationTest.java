@@ -575,6 +575,15 @@ class OpenAiChatModelProviderIntegrationTest {
   @Test
   @DisplayName("离线 HTTP：显式缓存三轮工具续跑")
   void testOfflineHttpExplicitPromptCacheMultiTurnCycle() throws Exception {
+    ModelDescriptor explicitModel =
+        new ModelDescriptor(
+            "openai",
+            "gpt-5.6",
+            "gpt-5.6",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            modelDesc.pricing());
     List<JsonNode> capturedRequests = Collections.synchronizedList(new ArrayList<>());
     AtomicReference<Exception> serverError = new AtomicReference<>();
     CountDownLatch serverFinished = new CountDownLatch(3);
@@ -626,7 +635,7 @@ class OpenAiChatModelProviderIntegrationTest {
             List.of(new ProviderTextBlock("Find files and get weather in Tokyo")));
     ProviderRequest req1 =
         new ProviderRequest(
-            modelDesc,
+            explicitModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -672,7 +681,7 @@ class OpenAiChatModelProviderIntegrationTest {
                     "{}")));
     ProviderRequest req2 =
         new ProviderRequest(
-            modelDesc,
+            explicitModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -704,7 +713,7 @@ class OpenAiChatModelProviderIntegrationTest {
                     "{}")));
     ProviderRequest req3 =
         new ProviderRequest(
-            modelDesc,
+            explicitModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -761,6 +770,7 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   private static void assertExplicitRootOptions(JsonNode req, String expectedKey) {
+    assertEquals("gpt-5.6", req.path("model").asText());
     assertEquals("explicit", req.path("prompt_cache_options").path("mode").asText());
     assertEquals("30m", req.path("prompt_cache_options").path("ttl").asText());
     assertEquals(expectedKey, req.path("prompt_cache_key").asText());

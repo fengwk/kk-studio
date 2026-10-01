@@ -79,9 +79,9 @@ OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoni
 工具结果媒体有两个容易写反的位置约束：
 
 - **Gemini**：用户内容与工具结果的媒体来源都只接受严格 Base64 data URI（`data:<mime>;base64,<payload>`）且 payload 可解码非空；无 base64 标记的 percent/普通 data、非法 Base64 与空载荷都在编码期以 `INVALID_REQUEST` 失败，绝不把无效载荷发往上游，http(s)/`gs` fileUri 仍按协议透传为 `fileData`。工具结果必须内联在 `functionResponse.parts[].inlineData`，绝不能作为外层 `Content.parts` 的同级 part——同级 part 会被解析为该 role 的独立输入，而不是这次函数调用的返回值。Gemini Developer API 的 v1beta schema 里 `FunctionResponseBlob` 只有 `mimeType` 与 `data`，没有 `displayName`，官方文档描述的 `response` 内 `{"$ref": "<displayName>"}` 引用形态只成立于 Vertex AI 的 `FunctionResponseBlob` / `FunctionResponseFileData`；本编码器因此只把媒体挂到 `parts` 上，不伪造 `displayName` 或 `$ref`。工具结果还额外要求 MIME 落在保守白名单 `image/jpeg`、`image/png`、`image/webp` 与 `application/pdf` 内，音频、视频、其他 MIME 与 http(s)/`gs` URL 来源一律以 `INVALID_REQUEST` 失败。
-- **OpenAI Chat**：tool message 的 `content` 只能是字符串，任何媒体块都以 `INVALID_REQUEST` 失败。
+- **OpenAI Chat**：tool message 仅支持文本与 JSON 结果，按原顺序串联为文本；任何媒体块都以 `INVALID_REQUEST` 失败。显式缓存开启时，文本使用 `text` content part 数组以承载断点。
 
-能力声明只描述本编码器能表达的 schema，不承诺具体上游模型支持该模态，也不替代编码器自己的 MIME / 格式校验。Chat 侧单个纯文本块保持字符串，多块或含媒体时使用数组；Responses 工具结果同理：单个文本或 JSON 保持字符串，含媒体时使用 `output` 数组。
+能力声明只描述本编码器能表达的 schema，不承诺具体上游模型支持该模态，也不替代编码器自己的 MIME / 格式校验。自动与 LEGACY 缓存模式下，Chat 用户消息的单个纯文本块保持字符串，多块或含媒体时使用数组；Responses 工具结果的单个文本或 JSON 保持字符串，含媒体时使用 `output` 数组。显式缓存开启时的稳定数组形态见下文。
 
 请求体的最终 UTF-8 字节上限在序列化完成后统一收口：[`RequestBodySizeGuard`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/RequestBodySizeGuard.java) 的 `MAX_REQUEST_BODY_BYTES` 是 **192 MiB**，Chat、Responses 与 Gemini 都走它；Anthropic 保留更严格的 **32 MiB** 协议级上限。超限一律以 `INVALID_REQUEST` 明确失败，不静默截断、不降级、不改写请求；厂商仍可能有自己的更严格限制。
 
@@ -126,6 +126,19 @@ OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoni
 **OpenAI Responses**（[`OpenAiResponsesProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesProviderAdapter.java)）。[`OpenAiResponsesConfig`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesConfig.java) 解析 `openAiPromptCacheMode`。系统指令编码为顶层 `instructions` 字符串，会话输入项中绝不出现系统或开发者指令；有状态 `previous_response_id` / `conversation` 与无状态 replay 不兼容，明确拒绝。推理字段：运行时关闭时写 `reasoning.effort: "none"` 且不自动添加 `summary` 与 `include`；启用时写 `reasoning.effort`，缺失时补 `summary: "auto"` 与顶层 `include: ["reasoning.encrypted_content"]`，不覆盖兼容的原生附加选项。函数工具一律以 `strict: true` 发送，参数 schema 深拷贝后由 [`OpenAiResponsesStrictSchema`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesStrictSchema.java) 递归归一化：每个 object 节点（含 `items` 与嵌套 object）显式写出全量 `required` 与 `additionalProperties: false`；只有源 schema 确实把某属性排除在 `required` 之外、且它当前不允许 null 时才改写为 `anyOf: [原 schema, {"type": "null"}]`，本来就是必填或已允许 null 的属性保持原样；调用方共享的 `inputSchemaJson` 绝不被修改。`max_output_tokens` 的下限 `16` 只属于本 Provider——**低于 16 直接以 `INVALID_REQUEST` 拒绝，不静默提升也不改写**。提示缓存模式下 `AUTOMATIC` 不发送任何缓存字段，`LEGACY` 发送 `prompt_cache_key` 与 `prompt_cache_retention`，`GPT_5_6_EXPLICIT` 发送 `prompt_cache_options` 与 conversation content block 上的 `prompt_cache_breakpoint`（无 SYSTEM 断点）。
 
 **Google Gemini**（[`GeminiProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiProviderAdapter.java)）。[`GeminiEndpoints.resolveStreamUri`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiEndpoints.java) 保留 raw authority 与 raw base path，去除尾斜杠后按 RFC 3986 path-segment 语义编码 model name 并追加 `/models/{encodedModel}:streamGenerateContent?alt=sse`，绝不把 API Key 拼进 URL。角色映射只有 `user` 与 `model`，相邻同 role 内容合并为一个 content 节点；原生 signed Part 回放时仍保持签名及 Part 边界。Prompt Cache 固定为隐式 `PromptCacheCapability.automatic()`：服务端自行评估并回报 `cachedContentTokenCount`，编码器不发任何 cache hint，且显式非空 `cacheControl` 会被拒绝。
+
+### OpenAI 显式缓存的请求边界
+
+Chat 与 Responses 的 `GPT_5_6_EXPLICIT` 模式发送 `prompt_cache_options: {"mode":"explicit","ttl":"30m"}`；缓存启用时发送稳定的 `prompt_cache_key`，并在支持的输入内容块上添加 `prompt_cache_breakpoint: {"mode":"explicit"}`。该模式需要上游模型支持显式缓存；`AUTOMATIC` 不发缓存字段，`LEGACY` 保持亲和键与 retention 映射，不由模型名称自动切换模式。
+
+显式模式只查询请求中标记的端点，因此每次请求同时保留最近的历史模型请求边界与当前输入边界，而不是只标最后一条消息：
+
+- 历史 assistant 之前的最后一个 USER / TOOL 输入是该次模型请求边界；连续排队的用户消息、并行工具结果分别只取批次末端。
+- 每次最多标记 4 个端点。Chat 的 SYSTEM 断点启用时占 1 个，其余用于最近的会话边界；Responses 的系统指令位于顶层 `instructions`，不占断点。
+- Responses 工具结果的断点落在 `function_call_output.output` 的末个受支持 `input_text` / `input_image` / `input_file` 块上，不写入原生 assistant 输出或推理签名。
+- 显式缓存开启时，Chat 的全部非空字符串 `content` 统一转为 `text` parts 数组，Responses 的全部字符串工具 `output` 统一转为 `input_text` 数组；未标记的历史也采用相同形态，断点窗口滑动不会改变既有内容结构。
+
+这些 wire 转换和断点写入均在 `sourcePrefixHash` 冻结及原生 replay 校验之后执行，不改变缓存中立的哈希口径，也不放宽 affinity、签名与 durable 事实校验。`NONE` 仍发送 explicit options，但不发 key 或断点、不转换历史内容，表示不读取或写入缓存。断点有效不等于必然命中：上游最小 token 长度、TTL、路由与上下文变化仍影响实际命中率。
 
 ## 包架构
 
