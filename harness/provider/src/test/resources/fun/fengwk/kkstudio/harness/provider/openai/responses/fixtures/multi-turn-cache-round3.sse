@@ -1,0 +1,11 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_turn3","model":"gpt-5.6","status":"in_progress"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"The discount is applied successfully."}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_round3","type":"message","role":"assistant","content":[{"type":"output_text","text":"The discount is applied successfully."}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_turn3","model":"gpt-5.6","status":"completed","service_tier":"default","usage":{"input_tokens":250,"output_tokens":30,"total_tokens":280},"output":[{"id":"msg_round3","type":"message","role":"assistant","content":[{"type":"output_text","text":"The discount is applied successfully."}]}]}}

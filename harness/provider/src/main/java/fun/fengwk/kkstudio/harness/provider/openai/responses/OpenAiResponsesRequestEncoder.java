@@ -158,9 +158,14 @@ final class OpenAiResponsesRequestEncoder {
     ArrayNode toolsArray = mergeTools(root, encodeTools(request.tools()));
 
     ArrayNode inputItems = NODES.arrayNode();
-    List<ObjectNode> conversationContentBlocks = new ArrayList<>();
+    List<ObjectNode> cacheInputs = new ArrayList<>();
+    List<ObjectNode> requestEndpoints = new ArrayList<>();
 
     for (ProviderMessage msg : request.messages()) {
+      // assistant 之前的最后输入就是历史模型请求边界；queued USER / 并行工具批只取末端。
+      if (msg.role() == ProviderMessageRole.ASSISTANT) {
+        recordRequestEndpoint(cacheInputs, requestEndpoints);
+      }
       encodeMessage(
           msg,
           descriptor,
@@ -168,8 +173,9 @@ final class OpenAiResponsesRequestEncoder {
           request.systemInstruction(),
           toolsArray,
           inputItems,
-          conversationContentBlocks);
+          cacheInputs);
     }
+    recordRequestEndpoint(cacheInputs, requestEndpoints);
     applyRuntimeOwnedField(root, "input", inputItems);
 
     // 计算冻结前缀哈希（在打 cache breakpoint 之前计算）
@@ -178,7 +184,11 @@ final class OpenAiResponsesRequestEncoder {
             request.systemInstruction(), toolsArray, inputItems);
 
     applyCacheControl(
-        root, config.openAiPromptCacheMode(), request.cacheControl(), conversationContentBlocks);
+        root,
+        config.openAiPromptCacheMode(),
+        request.cacheControl(),
+        cacheInputs,
+        requestEndpoints);
 
     byte[] utf8Bytes;
     try {
@@ -425,7 +435,7 @@ final class OpenAiResponsesRequestEncoder {
       String systemInstruction,
       ArrayNode toolsArray,
       ArrayNode inputItems,
-      List<ObjectNode> conversationContentBlocks) {
+      List<ObjectNode> cacheInputs) {
     Objects.requireNonNull(msg, "msg");
     ProviderMessageRole role = msg.role();
 
@@ -438,8 +448,8 @@ final class OpenAiResponsesRequestEncoder {
         for (ProviderContentBlock block : msg.contents()) {
           ObjectNode blockNode = encodeUserContentBlock(block);
           contents.add(blockNode);
-          conversationContentBlocks.add(blockNode);
         }
+        cacheInputs.add(userMsg);
       }
       case ASSISTANT -> {
         ProviderReplayState replayState = msg.replayState();
@@ -457,7 +467,7 @@ final class OpenAiResponsesRequestEncoder {
         }
 
         // Semantic fallback
-        encodeAssistantSemanticFallback(msg.contents(), inputItems, conversationContentBlocks);
+        encodeAssistantSemanticFallback(msg.contents(), inputItems);
       }
       case TOOL -> {
         for (ProviderContentBlock block : msg.contents()) {
@@ -466,6 +476,7 @@ final class OpenAiResponsesRequestEncoder {
             toolOutput.put("type", "function_call_output");
             toolOutput.put("call_id", resultBlock.toolCallId());
             encodeToolResultContent(resultBlock, toolOutput);
+            cacheInputs.add(toolOutput);
           } else {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
@@ -512,9 +523,7 @@ final class OpenAiResponsesRequestEncoder {
   }
 
   private static void encodeAssistantSemanticFallback(
-      List<ProviderContentBlock> contents,
-      ArrayNode inputItems,
-      List<ObjectNode> conversationContentBlocks) {
+      List<ProviderContentBlock> contents, ArrayNode inputItems) {
     StringBuilder textBuf = new StringBuilder();
     StringBuilder thinkBuf = new StringBuilder();
     List<ProviderToolCallBlock> toolCalls = new ArrayList<>();
@@ -550,7 +559,6 @@ final class OpenAiResponsesRequestEncoder {
       ObjectNode contentBlock = contentArr.addObject();
       contentBlock.put("type", "output_text");
       contentBlock.put("text", textBuf.toString());
-      conversationContentBlocks.add(contentBlock);
     }
 
     for (ProviderToolCallBlock call : toolCalls) {
@@ -988,7 +996,8 @@ final class OpenAiResponsesRequestEncoder {
       ObjectNode root,
       OpenAiPromptCacheMode cacheMode,
       ProviderCacheControl cacheControl,
-      List<ObjectNode> conversationContentBlocks) {
+      List<ObjectNode> cacheInputs,
+      List<ObjectNode> requestEndpoints) {
     if (cacheMode == OpenAiPromptCacheMode.AUTOMATIC) {
       // AUTOMATIC: 不发任何 cache hint（防御性忽略可能传入的非 none cacheControl），匹配 OpenAI Chat 行为
       return;
@@ -1012,18 +1021,55 @@ final class OpenAiResponsesRequestEncoder {
       if (cacheControl.retention() != PromptCacheRetention.NONE) {
         root.put("prompt_cache_key", cacheControl.affinityKey());
 
-        ObjectNode marker = NODES.objectNode();
-        marker.put("mode", "explicit");
+        // 哈希与所有 replay 校验完成后统一转换，避免断点滑动改变历史 wire 形态。
+        for (ObjectNode item : cacheInputs) {
+          JsonNode output = item.get("output");
+          if (output != null && output.isTextual()) {
+            item.putArray("output")
+                .addObject()
+                .put("type", "input_text")
+                .put("text", output.textValue());
+          }
+        }
 
         // 系统指令是顶层 instructions 字符串，input 中没有可打标的内容块，因此本协议不支持 SYSTEM 断点。
-        if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)
-            && !conversationContentBlocks.isEmpty()) {
-          ObjectNode lastConvBlock =
-              conversationContentBlocks.get(conversationContentBlocks.size() - 1);
-          lastConvBlock.set("prompt_cache_breakpoint", marker);
+        if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
+          for (int i = Math.max(0, requestEndpoints.size() - 4); i < requestEndpoints.size(); i++) {
+            ObjectNode block = lastCacheableBlock(requestEndpoints.get(i));
+            if (block != null) {
+              block.putObject("prompt_cache_breakpoint").put("mode", "explicit");
+            }
+          }
         }
       }
     }
+  }
+
+  /** 输入只追加、端点只前进，仅需按引用排除连续重复；相同内容的不同历史位置仍是独立端点。 */
+  private static void recordRequestEndpoint(
+      List<ObjectNode> cacheInputs, List<ObjectNode> endpoints) {
+    if (!cacheInputs.isEmpty()) {
+      ObjectNode last = cacheInputs.get(cacheInputs.size() - 1);
+      if (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != last) {
+        endpoints.add(last);
+      }
+    }
+  }
+
+  /** 只选择 runtime USER/TOOL 输入块，绝不触碰原生 assistant item 或签名。 */
+  private static ObjectNode lastCacheableBlock(ObjectNode item) {
+    JsonNode blocks = item.has("output") ? item.get("output") : item.path("content");
+    if (blocks.isArray()) {
+      for (int i = blocks.size() - 1; i >= 0; i--) {
+        JsonNode block = blocks.get(i);
+        if (block instanceof ObjectNode object
+            && Set.of("input_text", "input_image", "input_file")
+                .contains(block.path("type").asText())) {
+          return object;
+        }
+      }
+    }
+    return null;
   }
 
   private static void validateImageType(String mediaType) {

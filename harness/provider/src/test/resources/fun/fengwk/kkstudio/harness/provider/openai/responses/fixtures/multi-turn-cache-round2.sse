@@ -1,0 +1,20 @@
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_turn2","model":"gpt-5.6","status":"in_progress"}}
+
+event: response.reasoning_summary_text.delta
+data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"Round 2 reasoning summary"}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_round2_1","call_id":"call_round2_1","name":"calculate_discount"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_round2_1","delta":"{\"order_id\":\"ord_999\"}"}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","item_id":"fc_round2_1","arguments":"{\"order_id\":\"ord_999\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_round2_1","call_id":"call_round2_1","name":"calculate_discount","arguments":"{\"order_id\":\"ord_999\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_turn2","model":"gpt-5.6","status":"completed","service_tier":"default","usage":{"input_tokens":180,"output_tokens":60,"total_tokens":240},"output":[{"id":"rs_round2","type":"reasoning","encrypted_content":"signed_enc_blob_round2","summary":[{"type":"summary_text","text":"Round 2 reasoning summary"}]},{"id":"fc_round2_1","type":"function_call","call_id":"call_round2_1","name":"calculate_discount","arguments":"{\"order_id\":\"ord_999\"}"}]}}
