@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import java.util.Objects;
+
 /**
  * 请求预览不可用的确定性拒绝（HTTP 语义 {@code 409 Conflict}）。
  *
@@ -9,11 +11,32 @@ package fun.fengwk.kkstudio.platform.harness.model;
  */
 public class ProviderRequestPreviewUnavailableException extends RuntimeException {
 
-  public ProviderRequestPreviewUnavailableException(String message) {
-    super(message);
+  /** 稳定 HTTP wire 原因；调用方不得根据描述文本推断类别。 */
+  public enum Reason {
+    PREVIEW_STALE_CURSOR,
+    PREVIEW_QUEUED_COMMANDS,
+    PREVIEW_THREAD_BUSY,
+    PREVIEW_COMPACTION_REQUIRED,
+    PREVIEW_ATTACHMENT_NOT_READY,
+    PREVIEW_PLANNING_FAILED,
+    PREVIEW_PROVIDER_UNAVAILABLE,
+    PREVIEW_UNSUPPORTED,
+    PREVIEW_ENCODING_FAILED
   }
 
-  public ProviderRequestPreviewUnavailableException(String message, Throwable cause) {
-    super(message, cause);
+  private final Reason reason;
+
+  public ProviderRequestPreviewUnavailableException(Reason reason, String message) {
+    this(reason, message, null);
+  }
+
+  public ProviderRequestPreviewUnavailableException(
+      Reason reason, String message, Throwable cause) {
+    super(Objects.requireNonNull(message, "message"), cause);
+    this.reason = Objects.requireNonNull(reason, "reason");
+  }
+
+  public Reason reason() {
+    return reason;
   }
 }

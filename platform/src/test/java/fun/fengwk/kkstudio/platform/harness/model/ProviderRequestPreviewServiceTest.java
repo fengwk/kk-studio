@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -16,6 +17,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -64,6 +66,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -172,6 +175,36 @@ class ProviderRequestPreviewServiceTest {
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
+  @AfterEach
+  void verifyReadOnlyBoundaries() {
+    // 测试意图：成功及九类拒绝都只允许读取，不得接受命令、消费附件或改变资源引用。
+    verify(runtime, atLeast(0)).getThreadSnapshot(any());
+    verify(acceptanceOrchestrator, atLeast(0)).authorizeThread(any(), any());
+    verify(uploadService, atLeast(0)).peekReady(any());
+    verify(refManager, atLeast(0)).contains(any(), any());
+    verify(blobManager, atLeast(0)).getBlob(any());
+    verifyNoMoreInteractions(
+        runtime, acceptanceOrchestrator, uploadService, refManager, blobManager);
+  }
+
+  @Test
+  void exceptionRequiresReasonAndSafeMessageAndRetainsOptionalCause() {
+    // 测试意图：禁止无 reason 的拒绝，cause 只用于内部诊断，不改变公开的安全消息。
+    assertThrows(
+        NullPointerException.class,
+        () -> new ProviderRequestPreviewUnavailableException(null, "safe"));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_ENCODING_FAILED, null));
+    RuntimeException cause = new RuntimeException("private detail");
+    ProviderRequestPreviewUnavailableException error =
+        new ProviderRequestPreviewUnavailableException(
+            Reason.PREVIEW_ENCODING_FAILED, "safe", cause);
+    assertEquals(cause, error.getCause());
+    assertEquals("safe", error.getMessage());
+    assertEquals(Reason.PREVIEW_ENCODING_FAILED, error.reason());
+  }
+
   /** 测试意图：preview 只覆盖既有 THREAD（path 与 target 必须一致）且只服务 CHAT，命令形状只允许 SET_* + 末尾 USER_MESSAGE。 */
   @Test
   void rejectsForeignTargetOwnerAndNonUserMessageShape() {
@@ -263,16 +296,19 @@ class ProviderRequestPreviewServiceTest {
                         new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                         userMessage("hi"))));
     assertTrue(staleHead.getMessage().contains("head/next command sequence"));
+    assertEquals(Reason.PREVIEW_STALE_CURSOR, staleHead.reason());
     // sequence 漂移。
-    assertThrows(
-        ProviderRequestPreviewUnavailableException.class,
-        () ->
-            service.preview(
-                THREAD_ID,
-                owner,
-                command(
-                    new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 2L),
-                    userMessage("hi"))));
+    ProviderRequestPreviewUnavailableException staleSequence =
+        assertThrows(
+            ProviderRequestPreviewUnavailableException.class,
+            () ->
+                service.preview(
+                    THREAD_ID,
+                    owner,
+                    command(
+                        new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 2L),
+                        userMessage("hi"))));
+    assertEquals(Reason.PREVIEW_STALE_CURSOR, staleSequence.reason());
 
     // cursor 一致但仍有 queued 命令：预览不会替调用方消费它们。
     when(runtime.getThreadSnapshot(THREAD_ID))
@@ -302,6 +338,9 @@ class ProviderRequestPreviewServiceTest {
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
     assertTrue(queued.getMessage().contains("queued commands"));
+    assertEquals(Reason.PREVIEW_QUEUED_COMMANDS, queued.reason());
+    verify(turnResolver, never()).planLive(any(), any());
+    verify(providerResolution, never()).resolve(any(), any(), any());
     // 预览只调用只读 owner 校验，不触达接受路径的其它任何能力。
     verify(acceptanceOrchestrator, atLeastOnce()).authorizeThread(eq(owner), eq(THREAD_ID));
     verifyNoMoreInteractions(acceptanceOrchestrator);
@@ -328,6 +367,8 @@ class ProviderRequestPreviewServiceTest {
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
     assertTrue(error.getMessage().contains("not idle"));
+    assertEquals(Reason.PREVIEW_THREAD_BUSY, error.reason());
+    verify(turnResolver, never()).planLive(any(), any());
   }
 
   /** 测试意图：下一步必定是自动压缩时明确拒绝（不运行压缩模型）；阈值以下的历史则继续走到真实规划边界。 */
@@ -349,6 +390,7 @@ class ProviderRequestPreviewServiceTest {
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
     assertTrue(compaction.getMessage().contains("compaction"));
+    assertEquals(Reason.PREVIEW_COMPACTION_REQUIRED, compaction.reason());
     verify(turnResolver, never()).planLive(any(), any());
 
     // 阴性对照：同一形状但 usage 远低于阈值时压缩门放行，拒绝只来自真实的规划结果（证明这是一个真实判定而非恒真拒绝）。
@@ -366,7 +408,8 @@ class ProviderRequestPreviewServiceTest {
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
-    assertTrue(planning.getMessage().contains("PLANNING_FAILED"));
+    assertEquals(Reason.PREVIEW_PLANNING_FAILED, planning.reason());
+    assertEquals("request cannot be planned for preview", planning.getMessage());
     assertFalse(planning.getMessage().contains("leaked"));
   }
 
@@ -477,6 +520,7 @@ class ProviderRequestPreviewServiceTest {
                                     List.of(new AttachmentMessageContent(UPLOAD_ID, null)))),
                             id(71L)))));
     assertTrue(pending.getMessage().contains("not READY"));
+    assertEquals(Reason.PREVIEW_ATTACHMENT_NOT_READY, pending.reason());
 
     when(refManager.contains(SESSION_ID, OWNED_BLOB_ID)).thenReturn(false);
     IllegalArgumentException foreign =
@@ -529,6 +573,7 @@ class ProviderRequestPreviewServiceTest {
             ProviderRequestPreviewUnavailableException.class,
             () -> service.preview(THREAD_ID, owner, command));
     assertTrue(unsupported.getMessage().contains("does not support request body preview"));
+    assertEquals(Reason.PREVIEW_UNSUPPORTED, unsupported.reason());
 
     doAnswer(
             invocation ->
@@ -547,7 +592,8 @@ class ProviderRequestPreviewServiceTest {
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
             () -> service.preview(THREAD_ID, owner, command));
-    assertTrue(invalid.getMessage().contains("INVALID_REQUEST"));
+    assertEquals(Reason.PREVIEW_ENCODING_FAILED, invalid.reason());
+    assertEquals("request body cannot be encoded for preview", invalid.getMessage());
     assertFalse(invalid.getMessage().contains("provider.internal.example"));
   }
 
@@ -575,6 +621,7 @@ class ProviderRequestPreviewServiceTest {
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
     assertTrue(drift.getMessage().contains("cannot resolve the current provider"));
+    assertEquals(Reason.PREVIEW_PROVIDER_UNAVAILABLE, drift.reason());
   }
 
   /** 便捷：以固定 scope 构造命令批（idempotencyKey 显式给定，避免随机 UUID 影响断言）。 */
