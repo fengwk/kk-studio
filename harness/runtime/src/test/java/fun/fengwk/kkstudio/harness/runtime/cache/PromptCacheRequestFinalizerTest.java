@@ -33,7 +33,7 @@ import java.util.UUID;
 /**
  * 覆盖：构造期绑定 sessionId 与 provider 连接代际；policy 由调用方显式传入（null 拒绝），
  * disabled/UNKNOWN/UNSUPPORTED/AUTOMATIC/NONE 全部归一为 none()；AFFINITY 即使无 system/tools 也派生 affinity
- * key；BREAKPOINTS 求 capability 支持 breakpoints 与请求实际内容交集；最终 finalizer 始终覆盖伪造 control；返回
+ * key；BREAKPOINTS 按静态前缀筛选 SYSTEM/TOOLS 并冻结 CONVERSATION 意图；finalizer 始终覆盖伪造 control；返回
  * ProviderRequest 其它字段内容不变。
  */
 class PromptCacheRequestFinalizerTest {
@@ -258,7 +258,7 @@ class PromptCacheRequestFinalizerTest {
   }
 
   @Test
-  void breakpointsSupportsConversationBreakpointWhenPresent() {
+  void breakpointsFreezeConversationIntentRegardlessOfMaterializedContents() {
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")));
     // Capability 声明 CONVERSATION（不含 SYSTEM）；请求包含有效会话消息 => 只有 CONVERSATION 进入 breakpoints。
@@ -271,7 +271,7 @@ class PromptCacheRequestFinalizerTest {
             .cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.CONVERSATION), resolved.breakpoints());
 
-    // 会话消息为空时，CONVERSATION 断点不生效，降级 none()。
+    // 规划时会话尚未物化，空消息不影响 CONVERSATION 策略意图或稳定前缀 key。
     ProviderRequest emptyConversation =
         requestWith(ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl emptyResolved =
@@ -280,7 +280,7 @@ class PromptCacheRequestFinalizerTest {
                 emptyConversation,
                 breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.CONVERSATION)))
             .cacheControl();
-    assertEquals(PromptCacheRetention.NONE, emptyResolved.retention());
+    assertEquals(resolved, emptyResolved);
 
     // Capability 声明全部三种断点；请求同时满足 systemInstruction（恒非空）+ tools + conversation => 三者全部进入
     // breakpoints。
@@ -302,6 +302,42 @@ class PromptCacheRequestFinalizerTest {
             PromptCacheBreakpoint.TOOLS,
             PromptCacheBreakpoint.CONVERSATION),
         allResolved.breakpoints());
+  }
+
+  /** 规划时历史尚未物化，CONVERSATION-only 能力必须冻结意图，而不是关闭缓存。 */
+  @Test
+  void freezesConversationIntentBeforeHistoryIsMaterialized() {
+    ProviderRequest prefix = requestWith(ProviderCacheControl.none(), List.of(), List.of());
+    ProviderCacheControl planned =
+        finalizer(SESSION_ID)
+            .apply(prefix, breakpointsPolicy(Set.of(PromptCacheBreakpoint.CONVERSATION)))
+            .cacheControl();
+    assertEquals(PromptCacheRetention.SHORT, planned.retention());
+    assertTrue(planned.affinityKey().startsWith("pc2-"));
+    assertEquals(Set.of(PromptCacheBreakpoint.CONVERSATION), planned.breakpoints());
+  }
+
+  /** UNKNOWN 与显式 NONE 不得因 CONVERSATION 意图冻结而开启缓存。 */
+  @Test
+  void unknownAndDisabledConversationPoliciesRemainNone() {
+    ProviderRequest forged =
+        requestWith(
+            ProviderCacheControl.breakpoints(
+                PromptCacheRetention.SHORT,
+                "forged-key",
+                Set.of(PromptCacheBreakpoint.CONVERSATION)),
+            List.of(),
+            List.of());
+    List<PromptCachePolicy> policies =
+        List.of(
+            PromptCachePolicy.of(PromptCacheCapability.unknown(), PromptCacheRetention.NONE),
+            PromptCachePolicy.of(
+                breakpointsPolicy(Set.of(PromptCacheBreakpoint.CONVERSATION)).capability(),
+                PromptCacheRetention.NONE));
+    for (PromptCachePolicy policy : policies) {
+      assertEquals(
+          ProviderCacheControl.none(), finalizer(SESSION_ID).apply(forged, policy).cacheControl());
+    }
   }
 
   private static ProviderMessage userText(String text) {

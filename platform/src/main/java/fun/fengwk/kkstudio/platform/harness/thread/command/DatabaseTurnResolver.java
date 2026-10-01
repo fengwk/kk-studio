@@ -806,7 +806,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
           new ProviderToolDefinition(
               tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
     }
-    ProviderRequest stub =
+    // 只有稳定 prefix 用于派生缓存策略与 key；durable 历史消息在执行期物化。
+    ProviderRequest prefixRequest =
         new ProviderRequest(
             descriptor,
             variant,
@@ -817,7 +818,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             ProviderCacheControl.none());
     return new PromptCacheRequestFinalizer(
             sessionId, providerConnectionGenerationId, cacheKeyFactory)
-        .apply(stub, cachePolicy)
+        .apply(prefixRequest, cachePolicy)
         .cacheControl();
   }
 
