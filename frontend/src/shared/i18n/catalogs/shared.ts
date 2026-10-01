@@ -21,6 +21,10 @@ export const sharedCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
+  'shared.error': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
+  },
   'shared.confirm': {
     'en-US': 'Confirm',
     'zh-CN': '确认',

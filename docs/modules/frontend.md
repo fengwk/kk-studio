@@ -346,6 +346,10 @@ System Prompt 仍只展示 Skill 自身的 name、description 与 path，相同 
 是可空的分支选择（`BranchSettings.environmentName`），随每个分支的 branchSettings 独立
 保存并逐字段投影。
 
+Model 的 Variant 思考强度字段始终可见；Reasoning 关闭时置灰并关联禁用原因提示，
+重新开启时保留当前表单草稿值。关闭状态下保存不输出 `reasoningEffort`，原生协议选项
+仍可独立编辑，Variant ID 不会自动填充思考强度。
+
 Environment 卡片只展示 capability 的 canonical `id`，管理弹窗只投影宿主事实
 （`EnvironmentHostSection`：OS、时区、Daemon 进程用户、HOME、可选备注与最后活跃
 时间）和最近一条 WARN/ERROR。管理弹窗打开期间每 10 秒轮询 `/{id}/events` 的连接/Skill 同步运维事件窗口，
@@ -355,7 +359,8 @@ timeout、发现状态与工具数），完整配置（URL 与 headers）仅在�
 进行中时所有 mutation 控件禁用。Platform Skill Package 卡片展示 repository、branch、
 current commit、最近观察到的 branch HEAD 与检查状态；Check 只更新候选，用户点击 exact
 commit 的 Update 后才发布并同步。相关 CRUD 与当前 Skill 候选独立在
-[`features/ai/skills`](../../frontend/src/features/ai/skills)。
+[`features/ai/skills`](../../frontend/src/features/ai/skills)。技能包导航、检查状态、
+操作与表单校验文案随中英文切换；仓库信息、技能标识和上游诊断内容保持原样。
 
 #### Plugin 设置
 

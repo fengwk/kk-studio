@@ -29,7 +29,7 @@ describe('AiNavigation', () => {
       '代理',
       '模型',
       '提供商',
-      'Skill Packages',
+      '技能包',
       '环境',
       'MCP 服务',
     ])

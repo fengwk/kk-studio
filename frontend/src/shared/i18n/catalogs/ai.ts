@@ -27,7 +27,7 @@ export const aiCatalog = {
   },
   'ai.nav.skillPackages': {
     'en-US': 'Skill Packages',
-    'zh-CN': 'Skill Packages',
+    'zh-CN': '技能包',
   },
   'ai.catalog.resourceType.agent': {
     'en-US': 'Agent',
@@ -534,8 +534,9 @@ export const aiCatalog = {
       ' 留空保持 Provider 协议默认；off=显式关闭推理；支持厂商自定义值（如 low、medium、high、max 等）。',
   },
   'ai.catalog.form.reasoningDisabledHint': {
-    'en-US': ' To configure reasoning effort, enable Reasoning above first.',
-    'zh-CN': ' 若需配置思考强度，请先勾选上方 Reasoning。',
+    'en-US':
+      ' Reasoning is disabled. To configure reasoning effort, check Reasoning above to enable it.',
+    'zh-CN': ' Reasoning 当前已关闭；若需配置思考强度，请勾选开启上方 Reasoning。',
   },
   'ai.catalog.form.maxOutputLimitHint': {
     'en-US': 'Model-level output budget; each request also narrows it by the remaining context.',
@@ -2580,31 +2581,31 @@ export const aiCatalog = {
   },
   'ai.skillPackages.title': {
     'en-US': 'Skill Packages',
-    'zh-CN': 'Skill Packages',
+    'zh-CN': '技能包',
   },
   'ai.skillPackages.description': {
     'en-US': 'Platform-global Skill Packages and definitions',
-    'zh-CN': '平台全局 Skill Package 及其定义管理',
+    'zh-CN': '平台全局技能包及其定义管理',
   },
   'ai.skillPackages.create': {
     'en-US': 'Create Package',
-    'zh-CN': '创建 Package',
+    'zh-CN': '创建技能包',
   },
   'ai.skillPackages.edit': {
     'en-US': 'Edit Package',
-    'zh-CN': '编辑 Package',
+    'zh-CN': '编辑技能包',
   },
   'ai.skillPackages.delete': {
     'en-US': 'Delete Package',
-    'zh-CN': '删除 Package',
+    'zh-CN': '删除技能包',
   },
   'ai.skillPackages.deleteConfirm': {
-    'en-US': 'Are you sure you want to delete skill package "{name}"?',
-    'zh-CN': '确认删除 Skill Package “{name}”？',
+    'en-US': 'Are you sure you want to delete skill package "{{name}}"?',
+    'zh-CN': '确认删除技能包“{{name}}”？',
   },
   'ai.skillPackages.name': {
     'en-US': 'Package Name',
-    'zh-CN': 'Package 名称',
+    'zh-CN': '技能包名称',
   },
   'ai.skillPackages.version': {
     'en-US': 'Version',
@@ -2620,7 +2621,7 @@ export const aiCatalog = {
   },
   'ai.skillPackages.skillsCount': {
     'en-US': 'Skills Count',
-    'zh-CN': '包含 Skill 数量',
+    'zh-CN': '包含技能数量',
   },
   'ai.skillPackages.updatedAt': {
     'en-US': 'Updated At',
@@ -2628,63 +2629,67 @@ export const aiCatalog = {
   },
   'ai.skillPackages.empty': {
     'en-US': 'No Skill Packages found',
-    'zh-CN': '暂无 Skill Package',
+    'zh-CN': '暂无技能包',
   },
   'ai.skillPackages.loading': {
     'en-US': 'Loading Skill Packages...',
-    'zh-CN': '正在加载 Skill Packages...',
+    'zh-CN': '正在加载技能包...',
   },
   'ai.skillPackages.skillsSection': {
     'en-US': 'Skill Definitions',
-    'zh-CN': 'Skill 定义列表',
+    'zh-CN': '技能定义列表',
   },
   'ai.skillPackages.addSkill': {
     'en-US': 'Add Skill Definition',
-    'zh-CN': '添加 Skill 定义',
+    'zh-CN': '添加技能定义',
   },
   'ai.skillPackages.removeSkill': {
     'en-US': 'Remove Skill',
-    'zh-CN': '移除 Skill',
+    'zh-CN': '移除技能',
   },
   'ai.skillPackages.skillName': {
     'en-US': 'Skill Name',
-    'zh-CN': 'Skill 名称',
+    'zh-CN': '技能名称',
   },
   'ai.skillPackages.skillDescription': {
     'en-US': 'Skill Description',
-    'zh-CN': 'Skill 描述',
+    'zh-CN': '技能描述',
   },
   'ai.skillPackages.skillContent': {
     'en-US': 'Skill Content',
-    'zh-CN': 'Skill 内容 (Markdown / 指令)',
+    'zh-CN': '技能内容 (Markdown / 指令)',
   },
   'ai.skillPackages.nameRequired': {
     'en-US': 'Package name is required',
-    'zh-CN': 'Package 名称不能为空',
+    'zh-CN': '技能包名称不能为空',
+  },
+  'ai.skillPackages.nameInvalidChars': {
+    'en-US': 'Package name cannot contain : / @ \\',
+    'zh-CN': '技能包名称不能包含 : / @ \\',
   },
   'ai.skillPackages.versionRequired': {
     'en-US': 'Package version is required',
-    'zh-CN': 'Package 版本不能为空',
+    'zh-CN': '技能包版本不能为空',
   },
   'ai.skillPackages.atLeastOneSkill': {
     'en-US': 'At least one skill definition is required',
-    'zh-CN': '至少需要一条 Skill 定义',
+    'zh-CN': '至少需要一条技能定义',
   },
   'ai.skillPackages.skillNameRequired': {
     'en-US': 'Skill name cannot be empty',
-    'zh-CN': 'Skill 名称不能为空',
+    'zh-CN': '技能名称不能为空',
   },
   'ai.skillPackages.skillDescriptionRequired': {
     'en-US': 'Skill description cannot be empty',
-    'zh-CN': 'Skill 描述不能为空',
+    'zh-CN': '技能描述不能为空',
   },
   'ai.skillPackages.skillContentRequired': {
     'en-US': 'Skill content cannot be empty',
-    'zh-CN': 'Skill 内容不能为空',
+    'zh-CN': '技能内容不能为空',
   },
   'ai.skillPackages.duplicateSkillName': {
-    'en-US': 'Duplicate skill name: {name}',
-    'zh-CN': '存在重复的 Skill 名称：{name}',
+    'en-US': 'Duplicate skill name: {{name}}',
+    'zh-CN': '存在重复的技能名称：{{name}}',
   },
   'ai.skillPackages.repositoryUrl': {
     'en-US': 'Repository URL',
@@ -2721,6 +2726,26 @@ export const aiCatalog = {
   'ai.skillPackages.branchRequired': {
     'en-US': 'Branch is required',
     'zh-CN': '分支不能为空',
+  },
+  'ai.skillPackages.skills': {
+    'en-US': 'Skills',
+    'zh-CN': '技能',
+  },
+  'ai.skillPackages.status.UNCHECKED': {
+    'en-US': 'Unchecked',
+    'zh-CN': '未检查',
+  },
+  'ai.skillPackages.status.UP_TO_DATE': {
+    'en-US': 'Up to date',
+    'zh-CN': '已是最新',
+  },
+  'ai.skillPackages.status.UPDATE_AVAILABLE': {
+    'en-US': 'Update available',
+    'zh-CN': '有更新可用',
+  },
+  'ai.skillPackages.status.CHECK_FAILED': {
+    'en-US': 'Check failed',
+    'zh-CN': '检查失败',
   },
   'ai.mcp.title': {
     'en-US': 'MCP Servers',

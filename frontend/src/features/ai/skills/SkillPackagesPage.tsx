@@ -161,7 +161,7 @@ export function SkillPackagesPage() {
                 className={checkStatusPillClass(pkg.checkStatus)}
                 data-testid="check-status-pill"
               >
-                {pkg.checkStatus}
+                {t(`ai.skillPackages.status.${pkg.checkStatus}`)}
               </span>
             </div>
 
@@ -191,7 +191,7 @@ export function SkillPackagesPage() {
               {pkg.headCheckError ? (
                 <div className="meta-row" role="alert">
                   <span className="lbl" style={{ color: 'var(--color-danger, #ef4444)' }}>
-                    Error
+                    {t('shared.error')}
                   </span>
                   <span className="val" style={{ color: 'var(--color-danger, #ef4444)' }}>
                     {pkg.headCheckError}
@@ -204,7 +204,7 @@ export function SkillPackagesPage() {
               </div>
               {pkg.skills.length > 0 ? (
                 <div className="meta-row">
-                  <span className="lbl">Skills</span>
+                  <span className="lbl">{t('ai.skillPackages.skills')}</span>
                   <span className="val" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                     {pkg.skills.map((s) => (
                       <code key={s.name} title={s.description}>
@@ -372,7 +372,7 @@ function CreatePackageModal({
       return t('ai.skillPackages.nameRequired')
     }
     if (/[:/@\\]/.test(trimmedName)) {
-      return 'Package name cannot contain : / @ \\'
+      return t('ai.skillPackages.nameInvalidChars')
     }
     if (!repositoryUrl.trim()) {
       return t('ai.skillPackages.repoRequired')
@@ -468,7 +468,7 @@ function CreatePackageModal({
               onClick={onClose}
               disabled={createMutation.isPending}
             >
-              Cancel
+              {t('shared.cancel')}
             </button>
             <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
               {createMutation.isPending ? '...' : t('ai.catalog.action.confirmCreate')}
@@ -583,7 +583,7 @@ function EditPackageModal({
               onClick={onClose}
               disabled={editMutation.isPending}
             >
-              Cancel
+              {t('shared.cancel')}
             </button>
             <button type="submit" className="btn-primary" disabled={editMutation.isPending}>
               {editMutation.isPending ? '...' : t('ai.catalog.action.saveChanges')}

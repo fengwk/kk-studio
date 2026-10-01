@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
@@ -18,6 +19,7 @@ export function VariantListEditor({
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
+  const reasoningHintId = useId()
 
   function updateVariant(index: number, patch: Partial<VariantDraft>) {
     const currentVariant = variants[index]
@@ -57,7 +59,7 @@ export function VariantListEditor({
           </button>
         </div>
       </div>
-      <p className="inline-hint">
+      <p className="inline-hint" id={reasoningHintId}>
         {t('ai.catalog.form.variantHint')}
         {reasoning
           ? t('ai.catalog.form.reasoningHint')
@@ -66,7 +68,7 @@ export function VariantListEditor({
       <div className="variant-stack">
         {variants.map((variant, index) => (
           <div className="variant-editor" key={variant.draftId}>
-            <div className={`editor-grid${reasoning ? ' editor-grid-2' : ''}`}>
+            <div className="editor-grid editor-grid-2">
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.variantId')}</FieldLabel>
                 <input
@@ -77,20 +79,20 @@ export function VariantListEditor({
                   required
                 />
               </label>
-              {reasoning ? (
-                <label className="form-group">
-                  <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
-                  <input
-                    aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
-                    value={variant.reasoningEffort}
-                    maxLength={64}
-                    onChange={(event) =>
-                      updateVariant(index, { reasoningEffort: event.target.value })
-                    }
-                    placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
-                  />
-                </label>
-              ) : null}
+              <label className="form-group">
+                <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
+                <input
+                  aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
+                  aria-describedby={!reasoning ? reasoningHintId : undefined}
+                  disabled={!reasoning}
+                  value={variant.reasoningEffort}
+                  maxLength={64}
+                  onChange={(event) =>
+                    updateVariant(index, { reasoningEffort: event.target.value })
+                  }
+                  placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
+                />
+              </label>
             </div>
 
             <label className="form-group">
