@@ -10,13 +10,13 @@
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
-| 核对内置工具与异步委派的行为迁移 | [文件读取](operations/builtin-read-tests.md)、[文件变更](operations/builtin-mutation-tests.md)、[搜索](operations/builtin-search-tests.md)、[命令](operations/builtin-bash-tests.md)、[LSP](operations/builtin-lsp-tests.md)、[委派](operations/builtin-task-tests.md) |
+| 核对内置工具与异步委派的行为及测试覆盖 | [文件读取](operations/builtin-read-tests.md)、[文件变更](operations/builtin-mutation-tests.md)、[搜索](operations/builtin-search-tests.md)、[命令](operations/builtin-bash-tests.md)、[LSP](operations/builtin-lsp-tests.md)、[委派](operations/builtin-task-tests.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
-| 实施 Canvas / Project 重构并核对目标表结构 | [重构契约](canvas-project.md)与唯一生产基线 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
+| 理解 Canvas / Project 的产品行为与数据约束 | [Canvas、Project 与交互](canvas-project.md)及唯一生产基线 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
 ## 按代码区域理解系统

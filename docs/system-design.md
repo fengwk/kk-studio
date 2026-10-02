@@ -16,13 +16,15 @@ WebSocket 与 `NOTIFY` 只缩短等待时间；进程退出、连接中断或通
        +-- WebSocket / NOTIFY：低延迟提示，可丢失
 ```
 
-系统包含两个并列产品域：
+系统包含三个相互协作、职责独立的领域：
 
 - **Harness / AI** 运行 Agent Thread，管理模型调用、工具调用、审批、压缩和子 Agent。
 - **Studio / Canvas** 管理图形、Resource 与 Function run。
+- **Project / Issue** 管理工作流阶段、阶段预算、稳定 Agent Thread、Run 与公开交付证据。
 
-两者共享 PostgreSQL、Blob Storage、浏览器事件通道和 Web 入口，但各自维护独立的领域
-状态机与版本坐标。
+它们共享 PostgreSQL、Blob Storage、浏览器事件通道和 Web 入口，但各自维护独立的领域
+状态机与版本坐标。Canvas 与 Project 并列存在，不共享领域实体或互指外键；Project 经
+Harness 执行 Agent，不用 Canvas Graph 决定 Issue 调度。
 
 ## 全局心智模型
 
@@ -48,13 +50,15 @@ Agent 是可复用的行为定义：它声明 system prompt、默认 Model、Too
 由统一深度上限终止无限递归。委派图允许自引用和环；`task` 工具面不随当前深度变化，
 到达上限后的实际调用返回明确错误。
 
-一次对话真正执行在哪里，由 Branch 的完整设置决定：
+普通对话的 Agent、Model、Environment 与用户目标由 Branch 的完整设置决定；
+Issue Agent 的阶段 Environment 则由当前 Project workflow 提供：
 
 ```text
 BranchSettings
 ├── agentName
 ├── model = providerName + modelName + variant
-└── environmentName?
+├── environmentName?
+└── goal? = id + text
 ```
 
 Root 保存初始设置，每个普通 TurnStart 冻结该回合设置；`SET_AGENT`、`SET_MODEL` 与
@@ -62,6 +66,18 @@ Root 保存初始设置，每个普通 TurnStart 冻结该回合设置；`SET_AG
 路径重放出当时设置，Compaction Turn 不改变业务设置。Environment 使用全局唯一且不可变
 的 name 进入历史；Platform 在每个 Turn 将其解析为内部 UUID，UUID 只服务 Daemon 认证、
 连接租约和已开始 Tool invocation 的物理路由。
+
+Goal 是用户维护的分支目标：typed `GOAL` 命令在同一个 TurnStart 中冻结 `goal` 快照，
+并追加设置或清除目标的 USER 消息。每次设置分配新 id；Agent 只能通过 `get_goal` 读取和
+`update_goal` 声明 `complete` / `blocked` 进度，不能改写正文。进度以
+`CUSTOM goal.progress` Entry 绑定目标 id，不代表系统验收；读取仅限当前分支路径及共享
+祖先。压缩后仍生效的目标以 USER 级历史背景恢复，不注入 System Prompt。
+
+YOLO 是 Thread 的即时执行策略 `yoloEnabled`，不属于 BranchSettings 或历史回放；
+`PUT /api/harness/threads/{threadId}/yolo` 以 `expectedVersion` CAS 更新它。新建子 Thread
+继承父 Thread 当时的 YOLO，恢复已有子 Thread 不重置该开关。YOLO 开启时跳过普通工具的
+权限 preflight；关闭时按工具权限审批。`ask_user` 始终等待人工回答，不由 YOLO 代答，
+已完成的准入决定也不因后续切换追溯改变。
 
 选择 Environment 后，System Prompt 只加入模型真正需要的宿主事实：
 
@@ -97,30 +113,30 @@ Tool 定义用 `EnvironmentSupport` 明确声明三种环境关系：
 
 `read.path` 是 Agent 唯一的读取地址。绝对本地路径交给当前 Daemon，`kkstudio:` URI
 交给 Platform；相对路径必须同时提供显式绝对 `workdir`，系统不继承 Session cwd、
-HOME、上一次调用目录或任何隐藏根目录。第一阶段只定义两个 Platform 命名空间：
+HOME、上一次调用目录或任何隐藏根目录。Platform 提供两个读取命名空间：
 
 ```text
 kkstudio:/skills/<package>/<skill>/...
 kkstudio:/resources/<blobId>
 ```
 
-路径分发只有四条规则：
+路径分发规则：
 
 | `path` | `workdir` | 结果 |
 | --- | --- | --- |
 | 本地绝对路径 | 可省略 | 要求当前 Environment，委托 Daemon |
-| `kkstudio:` 绝对 URI | 可省略 | Platform 读取 |
+| `kkstudio:` URI | 必须省略非空值 | Platform 读取 |
 | 本地相对路径 | 本地绝对目录 | 要求当前 Environment，以该目录解析 |
-| 相对路径 | `kkstudio:` 绝对目录 URI | Platform 在同一命名空间解析 |
 
-`workdir` 对绝对 `path` 不产生作用，也不因调用方冗余提供而报错。无 Environment 的本地
-路径返回明确的 `LOCAL_PATH_REQUIRES_ENVIRONMENT`，相对路径缺少 `workdir` 返回
-`WORKDIR_REQUIRED`。`resources` 读取还必须校验当前 Session 持有对应 Blob 引用，不能
-凭 UUID 跨会话读取。
+本地路径在没有绑定 Environment 时明确失败；相对本地路径缺少绝对 `workdir` 也会拒绝。
+`resources` 读取通过执行 context 的 `threadId` 解析 Session，再校验该 Session 持有对应
+Blob 引用；仅知道另一 Session 或 Blob 的 UUID 不授予权限。Agent 工具没有跨 Session
+查询历史、Goal 或私有资源的通用读取入口。
 
-`kkstudio:` 使用 path-absolute URI，不含 authority、query 或 fragment；每个 segment
-分别做 UTF-8 百分号编码，拒绝 dot segment、编码后的斜杠/反斜杠和 NUL。解析统一经过
-`java.net.URI`，不以字符串 `split` 猜测结构。
+Prompt 使用 `kkstudio:/...` 地址；当前 `read` 执行器也接受 `kkstudio://skills/...` 与
+`kkstudio://resources/...` 前缀。Skill 地址按 package、skill 与包内相对路径定位，包内读取
+校验路径边界；Resource 地址要求规范 UUID。`read` 不把相对路径解析到 Platform URI 目录，
+也不接受为 Platform URI 指定非空 `workdir`。
 
 任意 HTTP(S) 获取保持为独立网络工具，不能借 `read` 绕过 SSRF、响应预算和凭据边界。
 
@@ -129,6 +145,11 @@ kkstudio:/resources/<blobId>
 父 Model invocation 已冻结的 `environmentName` 作为子 Branch 初始值。该选项只影响
 委派，不限制 Agent 作为普通 Chat 根 Agent 使用；恢复既有子 Session 时同样按该规则把
 Agent、Model 与 Environment 收敛到当前目标设置。
+
+`task` 是持久异步委派：命令接受与 join 凭据在同一事务提交，工具立即返回
+`{"thread_id":"...","status":"accepted"}`，不等待子执行结束。父 Thread 可以继续工作；
+Runtime 在子执行首次 Idle 匹配 join 后，以独立消息交付结果。继续委派使用 `thread_id`，
+并校验它属于当前父 Thread；深度、单父并发与全局并发额度在 Runtime 接受时裁决。
 
 Skill Package 是一个受控安装的 Git 仓库，仓库根目录的每个一级子目录代表一个 Skill：
 
@@ -200,18 +221,21 @@ Fat JAR 最终包含哪些 Plugin：
 
 ```text
 plugins
-└── minimax-mavis -> kk-studio-plugin-minimax-mavis.jar
+├── minimax-mavis
+├── canvas-media
+└── canvas-comfyui
 
-web --runtime dependency--> minimax-mavis  => 安装
-web --no dependency-----------------------> 不安装
+web --runtime dependency--> Plugin JAR  => 装入发行物
 ```
 
-每个 Plugin 通过 Spring Boot auto-configuration 注册两类独立贡献：
+Plugin 通过 Spring Boot auto-configuration 按需注册独立贡献：
 
 - `StudioPlugin` 提供安装元数据、可选的固定 deep-link 认证能力和工具默认权限；Web 用统一
   API 与通用配置界面投影这些能力，不解释 Plugin 自定义 JSON schema。
 - `HarnessContributor` 复用唯一 Tool SPI，把 Plugin 工具并入启动时冻结的
   `HarnessCatalog`。Plugin 不定义第二套 Tool、历史、审批或结果协议。
+- `CanvasFunctionAdapter` 提供 Function 定义与执行；`canvas-media` 和 `canvas-comfyui`
+  使用这条扩展面，由 Canvas Runtime 管理冻结输入、租约与输出发布。
 
 Classpath Plugin 可以依赖 Platform 服务、持久化凭据和启动后台任务；外部 trusted
 Contributor JAR 仍只是由隔离 classloader 加载的纯 `HarnessContributor`，两者不能混为
@@ -238,7 +262,7 @@ mavis_generate_image    mavis_generate_music
 mavis_submit_video      mavis_query_video
 ```
 
-认证、实时 capability catalog、媒体中转和旧同步视频端点属于 Plugin 内部控制面，不作为
+认证、实时 capability catalog、媒体中转和同步视频端点属于 Plugin 内部控制面，不作为
 模型工具。搜索、提取、理解和查询为只读工具；TTS 与生成/提交工具为
 `NON_IDEMPOTENT`，Plugin 默认要求人工审批，单次发送结果不确定时不自动重放。
 
@@ -246,7 +270,8 @@ MiniMax 登录使用其 SSO deep link，而不是标准 authorization-code / ref
 配置页按 CN/EN 返回官方登录链接，用户完成浏览器登录后粘贴
 `minimax-cn://auth-callback?...` 或 `minimax://auth-callback?...`。Backend 严格解析并在线
 验证 token，只把加密 credential 写入 PostgreSQL，响应和日志只返回认证状态。各 App
-节点默认每小时扫描一次到期行，先以数据库 lease 取得唯一刷新权，再用当前 token 调一次
+节点启动后扫描到期行，随后按最早 `next_refresh_at` 调度，默认每小时轮询作为兜底；
+凭据保存提交后也会唤醒扫描。刷新先以数据库 lease 取得唯一刷新权，再用当前 token 调一次
 renewal；刷新成功后原子替换密文。默认实际续期时间是「成功后 7 天」与「token 生命周期
 中点」的较早者；确定性认证拒绝进入 `REAUTH_REQUIRED`。请求发送后的断连或超时进入
 `REFRESH_UNCERTAIN` 并要求重新登录，不能拿结果未知的 renewal 做自动重放；节点崩溃后
@@ -263,6 +288,7 @@ flowchart LR
     Plugins["optional Plugins<br/>auto-configuration / tools"]
     HarnessInfra["Harness Infra<br/>Store / Work / Realtime"]
     Canvas["Canvas<br/>Core / Infra / Function"]
+    Project["Project<br/>Issue / Run / Controller"]
     PG[("PostgreSQL<br/>durable truth")]
     S3[("S3<br/>attachment and media bytes")]
     Provider["Model Provider"]
@@ -276,12 +302,16 @@ flowchart LR
     Plugins --> Harness
     Web --> HarnessInfra
     Web --> Canvas
+    Web --> Project
     Platform --> Harness
     Platform --> Canvas
+    Platform --> Project
+    Project --> Harness
     Platform --> PG
     Platform --> S3
     HarnessInfra --> PG
     Canvas --> PG
+    Project --> PG
     Harness --> Provider
     Web <-->|compressed WebSocket| Daemon
     Daemon -->|presigned PUT| S3
@@ -298,7 +328,8 @@ flowchart LR
 | Agent 契约 | [Harness Common](modules/harness-common.md)、[Tool](modules/harness-tool.md)、[Environment](modules/harness-environment.md)、[Contributor API](modules/harness-contributor-api.md) | 值对象、Tool 与 Environment 边界、扩展契约 |
 | Agent 执行 | [Harness Runtime](modules/harness-runtime.md)、[Provider](modules/harness-provider.md)、[Builtin](modules/harness-builtin.md) | 状态机、Processor、模型协议、内置能力 |
 | Agent 基础设施 | [Harness Infra](modules/harness-infra.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md)、[MCP](modules/harness-mcp.md) | PostgreSQL Work、会话租约、主机执行与 MCP 调用契约 |
-| Canvas | [Canvas Core](modules/canvas-core.md)、[Canvas Infra](modules/canvas-infra.md) | 纯领域命令、Graph 版本、持久化与 Function runtime |
+| Canvas | [Canvas Core](modules/canvas-core.md)、[Canvas Infra](modules/canvas-infra.md) | 纯领域命令、Graph revision、持久化与 Function runtime |
+| Project | [Project](modules/project.md) | workflow、Issue 阶段预算、稳定 Agent Thread 与 Run 调度 |
 | 数据库 | [Schema](modules/schema.md) | 唯一 Flyway baseline、约束与 profile seed |
 
 根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`project`、`harness`、
@@ -307,10 +338,12 @@ flowchart LR
 
 ```text
 frontend -> web -> platform
-web -(runtime)-> selected plugins -> platform / harness-contributor-api
+web -(runtime)-> selected plugins -> platform / harness-contributor-api / canvas-core
 web -> canvas-infra -> canvas-core
+web -> project -> harness-runtime
 web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
 platform -> Canvas / Harness contracts / harness-mcp
+platform -> project（实现宿主端口）
 harness-daemon -> harness-environment
 ```
 
@@ -350,13 +383,18 @@ Thread version 用于结构与控制状态的 CAS，并不是完整 Snapshot 的
 机见 [Harness Runtime](modules/harness-runtime.md)，Provider 请求与回放规则见
 [Harness Provider](modules/harness-provider.md)。
 
+工具审批与用户问卷都是 durable 等待：`ask_user` 在 dispatch 前冻结问卷并进入
+`WAITING_INPUT`，不占用 Worker；用户答案按冻结结构校验后唤醒执行。审批决策与问卷作答
+使用各自身份与版本约束，不把浏览器连接、实时事件或 YOLO 当作回答事实。
+
 ### Canvas Command 与 Function
 
 ```text
 POST /api/canvases/{canvasId}/commands
-  -> typed command + expectedVersion
+  -> typed commands + 语义组前置条件 + idempotencyKey
+  -> 纯领域规划：冲突则整批拒绝
   -> Graph mutation + command dedup
-  -> Patch + canvas_document.version
+  -> Patch + canvas_document.revision
 
 POST .../nodes/{nodeId}/function-run
   -> 冻结配置、引用与目标 Resource
@@ -366,10 +404,30 @@ POST .../nodes/{nodeId}/function-run
   -> GET /api/canvases/{canvasId} 读取权威 Snapshot
 ```
 
-Canvas Graph version 与 Harness Thread version 相互独立。Function 的 start、
-checkpoint 和 terminal 都由 Canvas document version 表达；Harness Command acceptance
-不会推进 Graph version。领域命令见 [Canvas Core](modules/canvas-core.md)，数据库映射和
-Function Worker 见 [Canvas Infra](modules/canvas-infra.md)。
+Canvas revision 与 Harness Thread version 相互独立。revision 用于同步排序，不是普通编辑
+的整图 CAS；名称、资源数组、Function 等各自带编辑起点的前置条件，布局区分在线接受与
+重连积压。客户端保留服务端确认层、待确认操作与本地草稿，快照回读不清除未保存内容。
+Function 的 start、checkpoint 和 terminal 推进 Canvas revision；Harness Command
+acceptance 不推进它。Function 提交意图已持久化但结果不明时进入 `UNKNOWN`，保留资源 pin
+并等待人工核查，不自动重新提交外部任务。领域命令见 [Canvas Core](modules/canvas-core.md)，
+数据库映射和 Function Worker 见 [Canvas Infra](modules/canvas-infra.md)。
+
+### Project Issue 与 Agent Thread
+
+Project 用严格 workflow JSON 定义阶段、Agent、instructions、Environment、maxRuns 与
+合法后继。`Issue + Agent` 唯一绑定一条持久 Thread，`Issue + state` 持有阶段预算；
+失败、取消与 UNKNOWN Run 都消耗一次额度，恢复已接受 Run 不另消耗额度。Run 冻结
+Session/Thread 与历史区间，Issue 同时只能有一个活动 Run。
+
+Issue Controller 从 PostgreSQL Work 认领并以短事务推进有界动作。每个 live turn 都按
+Thread 绑定重查归属、当前阶段、暂停门禁和活动 Run 坐标，注入阶段职责与
+`issue_transition` 工具，并移除普通分支的 Goal 工具。阶段 Environment 来自当前 workflow，
+未配置时本轮不选环境，不用 `SET_ENVIRONMENT` 改写历史 BranchSettings。Project 的 YOLO
+只用于首次创建 Issue Agent Thread，不反向改写既有 Thread。
+
+公开交付证据由 Issue 独立持有 Blob 引用，不随来源 Session 删除而消失；UUID 和 URI
+本身不是授权。具体交接、输入等待、预算与删除边界见
+[Canvas、Project 与交互](canvas-project.md)和 [Project](modules/project.md)。
 
 ### 附件与媒体
 
@@ -378,7 +436,7 @@ Tool 历史只保存 `blobId` 或内联文本；下载时由服务端签发短�
 引用和 cleanup 状态，对象 PUT、copy、HEAD 与 delete 在事务外执行。
 
 Tool 或 Environment 返回的临时 `ResourceRef` 在写入历史前必须物化为全局 Blob；物化
-失败时终止提交，避免把 Daemon 本地路径或短期 URL写入 durable message。完整生命周期见
+失败时终止提交，避免把 Daemon 本地路径或短期 URL 写入 durable message。完整生命周期见
 [Platform 的 Storage、Blob 与 Resource](modules/platform.md#storageblob-与-resource)。
 
 ## 并发与恢复
@@ -398,9 +456,10 @@ Harness 的 `THREAD`、`MODEL`、`TOOL` Work 共享同一池。只有绑定 Envi
 Dispatcher 节点。Canvas Function 使用独立 run/work 协议，但遵循同样的
 claim/lease/fencing 原则。
 
-Model、Tool 与 Subagent 还经过进程内有界 admission。容量不足会在打开 Provider 或发送
+Model 与 Tool 还经过进程内有界 admission。容量不足会在打开 Provider 或发送
 Tool 请求前返回可重试结果，不以无界线程队列积压请求。Admission 控制当前节点容量，
-PostgreSQL Work 才是恢复依据。
+PostgreSQL Work 才是恢复依据。Subagent 的深度和并发限额由持久 Thread/join 事实判定，
+接受在数据库树锁与全局准入锁下完成，不依赖单节点内存计数。
 
 ### 失败如何收敛
 
@@ -429,7 +488,7 @@ subscribe
   -> version / realtime events
 ```
 
-Thread 与 Canvas version event 带 cursor；Model delta、Tool partial 和进程输出属于无
+Thread version 与 Canvas revision event 带 cursor；Model delta、Tool partial 和进程输出属于无
 cursor overlay。事件 gap、畸形 payload、PostgreSQL 通知降级或客户端缓冲溢出都会触发
 完整 Snapshot 回读。terminal 的正确性从不依赖 terminal notification。
 
@@ -511,6 +570,7 @@ Skill 同步产生的最近 200 条结构化运维事件。该有界事件列表
 | 增加 Tool、Contributor、Plugin、Skill 或 MCP 能力 | [Tool](modules/harness-tool.md)、[Contributor API](modules/harness-contributor-api.md)、[Platform](modules/platform.md)、[Builtin](modules/harness-builtin.md)、[MCP](modules/harness-mcp.md) |
 | 修改 Environment protocol 或 Daemon | [Environment](modules/harness-environment.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md) |
 | 修改 Canvas 命令或 Function runtime | [Canvas Core](modules/canvas-core.md) 与 [Canvas Infra](modules/canvas-infra.md) |
+| 修改 Issue 工作流、预算或 Agent 交接 | [Project](modules/project.md) 与 [Canvas、Project 与交互](canvas-project.md) |
 | 修改应用服务、HTTP 或前端交互 | [Platform](modules/platform.md)、[Web](modules/web.md)、[Frontend](modules/frontend.md) |
 | 修改数据库 baseline | [Schema 模块](modules/schema.md) |
 | 运行、测试或部署系统 | [开发与测试](operations/development-and-testing.md)、[部署与运行](operations/deployment.md)、[Environment Daemon 安装](operations/environment-daemon.md) |
