@@ -113,7 +113,9 @@ class TestDeploySmokeContract(unittest.TestCase):
             script,
         )
         self.assertIn("patch_version + expected_checkpoint_count + 2", script)
-        self.assertIn("start、checkpoint 与 terminal", readme)
+        # The runner still uses legacy Canvas commands; documentation must not claim it passes.
+        self.assertIn("契约阻塞", readme)
+        self.assertIn("durable checkpoint", readme)
         self.assertNotIn("checkpoint 不前进", readme)
 
     def test_smoke_script_lives_outside_the_deploy_runtime_assets(self):

@@ -204,7 +204,7 @@ class TestAppImagePublishWorkflow(unittest.TestCase):
         workflow = PUBLISH_WORKFLOW.read_text()
 
         self.assertEqual(
-            2,
+            3,
             workflow.count(
                 "    if: github.ref_name == 'main' || "
                 "(github.event_name == 'workflow_dispatch' && inputs.validate_only)\n"
