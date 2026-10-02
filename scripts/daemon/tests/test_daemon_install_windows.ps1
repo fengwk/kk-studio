@@ -750,6 +750,8 @@ function Test-InstallPrompts {
     $savedJavaHome = $script:SelectedJavaHome
     $savedBash = $script:SelectedBash
     $savedHome = $script:HomePath
+    $savedConfig = $script:ConfigRoot
+    $savedPending = $script:PendingToken
     $prompts = [Collections.Generic.List[string]]::new()
     $expectedToken = "fixture-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587)
     function Read-Host {
@@ -762,32 +764,40 @@ function Test-InstallPrompts {
     }
     function Save-RegistrationToken {
         param([Security.SecureString] $Token)
+        throw "input resolution must not persist a credential"
+    }
+    function Assert-PromptToken {
+        $Token = $script:PendingToken
         $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
         try {
             Assert-Equal -Expected $expectedToken `
                 -Actual ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) `
-                -Message "prompt supplies Unicode SecureString to private persistence"
+                -Message "prompt retains the Unicode SecureString without disk writes"
         }
         finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
-        return "C:\Fixture\private.token"
     }
     function Resolve-JavaHome { param($ExplicitJavaHome) return [IO.Path]::GetTempPath() }
     function Resolve-Executable { param($Value, $DefaultName, $OptionName) return "C:\Fixture\bash.exe" }
     try {
         $script:HomePath = [IO.Path]::GetTempPath()
+        $script:ConfigRoot = [IO.Path]::GetTempPath()
         $script:InvocationParameters = @{}
         Resolve-InstallInputs
         Assert-Equal -Expected 2 -Actual $prompts.Count -Message "omitted URI and token both prompt"
         Assert-Equal -Expected "wss://studio.example.invalid/daemon" -Actual $script:GatewayUri `
             -Message "prompted URI is used by daemon arguments"
-        Assert-Equal -Expected "C:\Fixture\private.token" -Actual $script:ResolvedTokenFile `
-            -Message "only the persisted file path reaches daemon arguments"
+        Assert-PromptToken
+        Assert-Equal -Expected (Join-Path $script:ConfigRoot "daemon.token") `
+            -Actual $script:ResolvedTokenFile -Message "only the future file path reaches daemon arguments"
+        $script:PendingToken.Dispose()
+        $script:PendingToken = $null
         $prompts.Clear()
         $script:RegistrationToken = $expectedToken
         $script:InvocationParameters = @{
             GatewayUri = $script:GatewayUri; RegistrationToken = $expectedToken
         }
         Resolve-InstallInputs
+        Assert-PromptToken
         Assert-Equal -Expected 0 -Actual $prompts.Count -Message "explicit URI and inline token do not prompt"
         Assert-True -Condition (-not $script:InvocationParameters.ContainsKey("RegistrationToken")) `
             -Message "inline secret is removed from retained invocation parameters"
@@ -805,6 +815,9 @@ function Test-InstallPrompts {
         $script:SelectedJavaHome = $savedJavaHome
         $script:SelectedBash = $savedBash
         $script:HomePath = $savedHome
+        $script:ConfigRoot = $savedConfig
+        if ($null -ne $script:PendingToken) { $script:PendingToken.Dispose() }
+        $script:PendingToken = $savedPending
     }
 }
 
