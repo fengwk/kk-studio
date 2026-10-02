@@ -33,6 +33,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NODE_VERSION: '24.14.0'
+  POSTGRES_VERSION: '17'
 
 jobs:
   validate_windows_daemon:
@@ -76,16 +77,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Verify Java sources, tests and coverage
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
-      - name: Install frontend dependencies
-        run: npm --prefix frontend ci
-      - name: Lint frontend
-        run: npm --prefix frontend run lint
-      - name: Test frontend
-        run: npm --prefix frontend run test
-      - name: Build frontend
-        run: npm --prefix frontend run build
+      - name: Set up PostgreSQL client tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+          # Match the real PostgreSQL fixture; runner defaults may point pg_dump at an older major.
+          echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
+      - name: Verify PostgreSQL client selection
+        run: |
+          set -euo pipefail
+          for tool in psql pg_dump pg_restore createdb pg_isready; do
+            test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"
+            "${tool}" --version
+          done
+      # Fail fast on tooling and script contracts before the full Java/frontend builds.
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
       - name: Run repository script tests
@@ -114,6 +120,16 @@ jobs:
           node --test "${node_files[@]}"
       - name: Scan for sensitive data
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
+      - name: Verify Java sources, tests and coverage
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+      - name: Lint frontend
+        run: npm --prefix frontend run lint
+      - name: Test frontend
+        run: npm --prefix frontend run test
+      - name: Build frontend
+        run: npm --prefix frontend run build
 
   publish:
     name: build and push image

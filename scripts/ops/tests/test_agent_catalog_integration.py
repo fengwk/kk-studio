@@ -52,6 +52,8 @@ CURRENT_EDGE_SQL = RESOURCES_DIR / "current_edge_fixture.psql"
 FLYWAY_HISTORY_SQL = RESOURCES_DIR / "flyway_v1_history.psql"
 
 FIXTURE_PASSWORD = "probe-fixture-pg-secret-pass-789"
+POSTGRES_MAJOR = 17
+POSTGRES_CLIENT_TOOLS = ("psql", "pg_dump", "pg_restore", "createdb", "pg_isready")
 #: Fixture values that must never be surfaced by a maintenance script.  Assertions that look at
 #: command output go through `assert_no_fixture_values` first, so a leak fails without echoing it.
 FORBIDDEN_VALUES = (
@@ -89,6 +91,68 @@ def _docker_available() -> bool:
         return False
 
 
+def _require_postgres_clients() -> None:
+    """Fail before starting a database if PATH selects an old or mixed libpq toolchain."""
+    majors = set()
+    for tool in POSTGRES_CLIENT_TOOLS:
+        try:
+            result = subprocess.run(
+                [tool, "--version"], capture_output=True, text=True, check=True, timeout=10
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError(f"PostgreSQL client unavailable: {tool}") from None
+        match = re.search(r"\(PostgreSQL\)\s+(\d+)(?:[.\s]|$)", result.stdout)
+        if not match or int(match.group(1)) < POSTGRES_MAJOR:
+            raise RuntimeError(
+                f"{tool} must be PostgreSQL {POSTGRES_MAJOR} or newer; fix PATH before testing"
+            )
+        majors.add(int(match.group(1)))
+    if len(majors) != 1:
+        raise RuntimeError("PostgreSQL clients must use the same major version; fix PATH before testing")
+
+
+class TestPostgresClientPreflight(unittest.TestCase):
+    """Guard CI image drift without skipping real database tests or starting a container."""
+
+    def test_accepts_complete_current_or_newer_toolchains(self):
+        # A newer pg_dump can read the fixture, provided pg_restore uses the same major.
+        for major in (POSTGRES_MAJOR, POSTGRES_MAJOR + 1):
+            with self.subTest(major=major), mock.patch.object(subprocess, "run") as run:
+                run.return_value.stdout = f"psql (PostgreSQL) {major}.1\n"
+                _require_postgres_clients()
+                self.assertEqual(
+                    [[tool, "--version"] for tool in POSTGRES_CLIENT_TOOLS],
+                    [call.args[0] for call in run.call_args_list],
+                )
+
+    def test_rejects_old_mixed_or_unknown_versions(self):
+        # A new psql must not hide an old pg_dump or an incompatible restore binary.
+        cases = (
+            (["17.1", "16.1", "17.1", "17.1", "17.1"], "pg_dump must"),
+            (["17.1", "17.1", "18.1", "17.1", "17.1"], "same major"),
+            (["unknown"] * 5, "psql must"),
+        )
+        for versions, message in cases:
+            with self.subTest(versions=versions), mock.patch.object(subprocess, "run") as run:
+                run.side_effect = [
+                    subprocess.CompletedProcess([], 0, stdout=f"psql (PostgreSQL) {version}\n")
+                    for version in versions
+                ]
+                with self.assertRaisesRegex(RuntimeError, message):
+                    _require_postgres_clients()
+
+    def test_unavailable_clients_fail_before_container_start(self):
+        # Missing, broken or hung tooling must produce a bounded setup error, not a skip.
+        for error in (FileNotFoundError(), subprocess.CalledProcessError(1, []),
+                      subprocess.TimeoutExpired([], 10)):
+            with self.subTest(error=type(error).__name__), mock.patch.object(
+                subprocess, "run", side_effect=error
+            ) as run:
+                with self.assertRaisesRegex(RuntimeError, "PostgreSQL client unavailable: psql"):
+                    TestAgentCatalogIntegration.setUpClass()
+                self.assertEqual([["psql", "--version"]], [call.args[0] for call in run.call_args_list])
+
+
 @unittest.skipUnless(_docker_available(), "Docker daemon is not reachable")
 class TestAgentCatalogIntegration(unittest.TestCase):
     """Integration test suite exercising production maintenance scripts on a real PostgreSQL container."""
@@ -105,6 +169,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        _require_postgres_clients()
         # Start throwaway PostgreSQL container with standard Alpine image.
         cls.container_name = f"kk-studio-integ-{uuid.uuid4().hex[:10]}"
         run_cmd = [
@@ -117,7 +182,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             "127.0.0.1::5432",
             "--env",
             f"POSTGRES_PASSWORD={FIXTURE_PASSWORD}",
-            "postgres:17-alpine",
+            f"postgres:{POSTGRES_MAJOR}-alpine",
         ]
         try:
             subprocess.run(run_cmd, check=True, capture_output=True, text=True, timeout=60)
