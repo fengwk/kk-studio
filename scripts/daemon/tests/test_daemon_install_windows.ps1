@@ -638,6 +638,58 @@ function Test-MissingScheduledTaskLookup {
     }
 }
 
+function Test-AtomicTokenReplacement {
+    # Exercise the PS -> .NET string binding directly, including the failing bare-null control.
+    # The real Save-RegistrationToken second write then proves production uses the safe binding.
+    if ($null -eq ("WindowsNullStringProbe" -as [type])) {
+        Add-Type -TypeDefinition @'
+public static class WindowsNullStringProbe {
+    public static bool IsNull(string value) { return value == null; }
+}
+'@
+    }
+    Assert-True -Condition ([WindowsNullStringProbe]::IsNull(
+        [System.Management.Automation.Language.NullString]::Value
+    )) -Message "NullString binds to a true null managed string, not an empty path"
+    Assert-True -Condition (-not [WindowsNullStringProbe]::IsNull($null)) `
+        -Message "bare PowerShell null is converted to an empty managed string"
+    Assert-True -Condition (-not [WindowsNullStringProbe]::IsNull("")) `
+        -Message "empty string is distinct from the null backup path"
+
+    # Mock only Windows ACL capabilities; temporary files and File.Replace remain real.
+    function Assert-NoReparseAncestors { param($Path) }
+    function Assert-PrivateDirectory { param($Path) }
+    function New-PrivateAcl { param([switch] $Directory) return "fixture ACL" }
+    function Set-Acl { param($LiteralPath, $AclObject) }
+    function Assert-RegistrationTokenFile {
+        param($Path, $ExpectedOwnerSid)
+        return $Path
+    }
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("kk-null-backup-" + [Guid]::NewGuid().ToString("N"))
+    $savedConfig = $script:ConfigRoot
+    $savedSid = $script:CurrentSid
+    $script:ConfigRoot = Join-Path $root "config"
+    $script:CurrentSid = "fixture SID"
+    $first = ConvertTo-SecureString "first fixture" -AsPlainText -Force
+    $second = ConvertTo-SecureString "second fixture" -AsPlainText -Force
+    try {
+        $path = Save-RegistrationToken -Token $first
+        $null = Save-RegistrationToken -Token $second
+        Assert-Equal -Expected "second fixture" -Actual ([IO.File]::ReadAllText($path)) `
+            -Message "production File.Replace succeeds on the second token write without a backup path"
+        Assert-SequenceEqual -Expected @("daemon.token") `
+            -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot | Select-Object -ExpandProperty Name) `
+            -Message "atomic replacement creates neither a backup secret nor a staging leftover"
+    }
+    finally {
+        $first.Dispose()
+        $second.Dispose()
+        $script:ConfigRoot = $savedConfig
+        $script:CurrentSid = $savedSid
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-RegistrationTokenPersistence {
     # Real NTFS ACLs and Unicode bytes prove inline/prompt persistence remains private,
     # atomic, and fail-closed without ever touching the user's actual configuration.
@@ -996,6 +1048,7 @@ try {
     Test-QuotingGoldenCases
     Test-ReleaseInstallerContracts
     Test-InstallPrompts
+    Test-AtomicTokenReplacement
     Test-JavaVersionCapture
     Test-EncodedDaemonArgumentList
     $fixture = New-ProbeFixture -Java (Get-RequiredJavaExecutable)
