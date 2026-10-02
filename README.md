@@ -8,8 +8,8 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 
 ```text
 启动 Studio -> Provider -> Model -> Agent -> Chat
-                                  |
-                                  +-> Environment Daemon（需要本机工具时）
+                                            |
+                                            +-> Branch 选择 Environment（需要主机工具时）
 ```
 
 > `kk-studio` 当前没有内置登录鉴权。默认本地栈只监听 `127.0.0.1`；部署到局域网或
@@ -21,7 +21,7 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | --- | --- |
 | Chat 与 Agent | 流式对话、思考内容、附件、历史分支、工具调用，以及可恢复的执行状态 |
 | Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant 与价格 |
-| Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills、Subagents 和 Environment |
+| Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境由 Branch 选择 |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
 | MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
 | Projects 与 Canvas | 管理 Project / Issue，并通过 Canvas、Function 和 ComfyUI 组织图形工作流 |
@@ -83,38 +83,36 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
    - 按上游能力填写上下文、最大输出、输入类型、Tools、Reasoning 和 Variant。
 3. 打开 [Agent](http://localhost:8080/agents)，新建 Agent。
    - 选择 Model，填写系统提示词。
-   - 第一次对话可以先不绑定 Environment、Tools、Skills 或 Subagents。
+   - 第一次对话可以先不配置 Tools、Skills 或 Subagents。
 4. 打开 [Chat](http://localhost:8080/chats)，新建 Chat，选择这个 Agent 并发送消息。
 
-如果调用失败，Chat 中会保留错误；会话的调试视图可查看完整 Provider 响应。
+如果调用失败，Chat 中会保留错误；会话的调试视图可查看请求预览、活动调用的冻结请求与执行事件。
 
 ## 让 Agent 使用本机工具
 
 1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment，并复制
    registration token。
-2. 目标主机需要 JDK 21、Maven 与源码 checkout；常驻服务按平台安装：Linux 使用
-   `systemd --user`，macOS 使用当前用户 LaunchAgent，Windows 10/11 使用当前用户计划任务。
-3. 将 token 保存为仅当前用户可读的绝对路径普通文件：
+2. 目标主机准备 JDK 21。Linux 使用 `systemd --user`，macOS 使用当前用户图形登录域的
+   LaunchAgent；Unix 安装还需要 Bash、curl 和 SHA256 工具，不需要 Git、Maven 或源码 checkout。
+3. 在 Linux/macOS 的交互终端执行：
 
    ```bash
-   install -d -m 700 ~/.config/kk-studio
-   (umask 077; cat > ~/.config/kk-studio/daemon.token)
-   chmod 600 ~/.config/kk-studio/daemon.token
+   curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash
    ```
 
-4. clone 源码并安装为常驻服务，下面是 Linux 与 macOS 的 Unix 用法（Windows 的 PowerShell
-   命令与 token 的 ACL 设置见规范文档）：
+   脚本默认下载最新官方 Release 的 Daemon JAR 并校验 SHA256。按提示输入 gateway URI
+   （本地栈为 `ws://localhost:8080/api/harness/environment-daemon/v1`）和 registration token；
+   token 输入不回显，写入仅当前用户可读的文件，不必放进命令参数或 shell 历史。
+   Windows 10/11 的 PowerShell 安装与当前用户计划任务操作见
+   [Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
+4. Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在 Chat 的
+   Branch 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
 
-   ```bash
-   git clone https://github.com/fengwk/kk-studio.git
-   cd kk-studio
-   ./scripts/daemon/install.sh install \
-     --gateway-uri ws://localhost:8080/api/harness/environment-daemon/v1 \
-     --registration-token-file "$HOME/.config/kk-studio/daemon.token"
-   ```
+后续升级复用已安装服务的配置：
 
-5. Environment 页面显示 `READY` 后，编辑 Agent，绑定该 Environment，并选择需要的
-   Tools 或 Skills。
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
+```
 
 Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。Windows 与 macOS 的安装差异、
 升级、状态查询、可选参数、卸载和前台调试见
