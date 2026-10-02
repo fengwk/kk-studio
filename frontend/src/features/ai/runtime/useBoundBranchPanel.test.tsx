@@ -158,7 +158,73 @@ const agents = [
     createTime: null,
     updateTime: null,
   },
+  {
+    name: 'writer',
+    description: null,
+    systemPrompt: null,
+    model: 'anthropic/Claude',
+    variant: 'fast',
+    config: {
+      inheritParentEnvironment: true,
+      tools: [],
+      skills: [],
+      subagents: [],
+    },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'broken-model-agent',
+    description: null,
+    systemPrompt: null,
+    model: 'nonexistent/model',
+    variant: 'default',
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'broken-variant-agent',
+    description: null,
+    systemPrompt: null,
+    model: 'minimax/MiniMax',
+    variant: 'nonexistent-variant',
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
 ]
+
+const claudeModelEntry = {
+  providerName: 'anthropic',
+  name: 'Claude',
+  description: null,
+  config: {
+    limit: { context: 200000, output: 4096 },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    pricing: {
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      serviceTierMultiplier: 1,
+      version: 'v1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
+    },
+    defaultVariant: 'v1',
+    variants: [{ id: 'v1' }, { id: 'fast' }],
+  },
+  version: '0',
+  createTime: null,
+  updateTime: null,
+}
 
 const modelEntry = {
   providerName: 'minimax',
@@ -218,8 +284,8 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
-      results: [modelEntry],
+      totalCount: 2,
+      results: [modelEntry, claudeModelEntry],
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID)),
@@ -270,7 +336,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(false)
 
     act(() => {
-      // freeze 规则：采用新 agent 的 name，冻结的 model/yolo 保持快照值。
+      // 采用新 agent 及其关联预设 model；yolo 保持快照值，后续手动选择覆盖。
       expect(result.current.selectAgent('coder')).toBe(true)
       expect(result.current.selectAgent('missing')).toBe(false)
       result.current.setYoloEnabled(true)
@@ -306,6 +372,90 @@ describe('useBoundBranchPanel', () => {
     expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
       expectedVersion: '0',
       yoloEnabled: true,
+    })
+  })
+
+  it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_MODEL+USER_MESSAGE', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectEnvironment('existing-env')
+      result.current.setYoloEnabled(true)
+    })
+
+    act(() => {
+      // 切换到目标 agent writer，其模型为 anthropic/Claude，变体为 fast
+      const ok = result.current.selectAgent('writer')
+      expect(ok).toBe(true)
+    })
+
+    expect(result.current.draft).toEqual({
+      agentName: 'writer',
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      environmentName: 'existing-env',
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(true)
+
+    await send(result)
+
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+    expect(batch.commands.map((cmd) => cmd.type)).toEqual([
+      'SET_AGENT',
+      'SET_MODEL',
+      'SET_ENVIRONMENT',
+      'USER_MESSAGE',
+    ])
+    expect(batch.commands[0]).toMatchObject({ agentName: 'writer' })
+    expect(batch.commands[1]).toMatchObject({
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+    })
+  })
+
+  it('rejects selectAgent when agent model or variant is unresolvable without mutating draft', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    const initialDraft = { ...result.current.draft! }
+
+    act(() => {
+      // 不存在的 model
+      expect(result.current.selectAgent('broken-model-agent')).toBe(false)
+    })
+    expect(result.current.draft).toEqual(initialDraft)
+
+    act(() => {
+      // 不存在的 variant
+      expect(result.current.selectAgent('broken-variant-agent')).toBe(false)
+    })
+    expect(result.current.draft).toEqual(initialDraft)
+  })
+
+  it('resets manual model modification when reselecting the same agent', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectModel({ providerName: 'custom', modelName: 'CustomModel', variant: 'v1' })
+    })
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+
+    act(() => {
+      // 重新选中当前 agent assistant，显式恢复 preset 模型设置
+      expect(result.current.selectAgent('assistant')).toBe(true)
+    })
+    expect(result.current.draft?.model).toEqual({
+      providerName: 'minimax',
+      modelName: 'MiniMax',
+      variant: 'default',
     })
   })
 
@@ -709,6 +859,10 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.dirty).toBe(false)
     // 即使是旧 Thread 的 snapshot 也绝不会被当作新 Thread 的状态初始化。
     expect(result.current.controller.thread).toBeUndefined()
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(false)
+    })
+    expect(result.current.draft).toBeUndefined()
 
     // submit 绝不把旧 draft 发到新 Thread。
     await act(async () => {

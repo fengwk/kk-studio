@@ -55,6 +55,7 @@ export function materializeBlankBranchDraft(
 
 /**
  * 根据明确选中的 Agent + catalog 构建完整 draft。
+ * 始终采用目标 Agent 所选取的 model 与 variant，同时保留已有 draft 的 environmentName 与 yoloEnabled。
  */
 export function materializeAgentBranchDraft(
   agent: AgentDefinitionDTO,
@@ -73,17 +74,9 @@ export function materializeAgentBranchDraft(
   if (existing == null) {
     return materialized
   }
-  const environmentName = existing.environmentName
-  if (existing.model.providerName === '' || existing.model.modelName === '') {
-    return {
-      ...materialized,
-      environmentName,
-    }
-  }
   return {
     ...materialized,
-    model: { ...existing.model },
-    environmentName,
+    environmentName: existing.environmentName,
     yoloEnabled: existing.yoloEnabled,
   }
 }

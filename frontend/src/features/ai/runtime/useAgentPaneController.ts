@@ -1218,12 +1218,17 @@ export function useAgentPaneController({
         return
       }
     } else {
-      setLocalDraft((current) => materializeAgentBranchDraft(
+      const nextDraft = materializeAgentBranchDraft(
         agent,
         models,
-        current,
+        localDraft,
         defaults.yoloEnabled ?? false,
-      ))
+      )
+      if (nextDraft == null) {
+        setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
+        return
+      }
+      setLocalDraft(nextDraft)
     }
     setInteraction(null)
     setActionError(null)

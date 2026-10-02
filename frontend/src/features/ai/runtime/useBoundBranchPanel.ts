@@ -4,6 +4,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
+  materializeAgentBranchDraft,
   projectPendingTarget,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
@@ -210,15 +211,25 @@ export function useBoundBranchPanel({
   }
 
   /**
-   * Draft-local agent 选择：解析 catalog（与 Agent picker 同源）；
-   * 返回是否解析成功，由调用方决定错误反馈。
+   * 解析目标 Agent 的模型后原子更新选择；未就绪或配置无效时保留原草稿。
    */
   function selectAgent(agentName: string): boolean {
+    if (boundBranchState == null || boundThread == null) {
+      return false
+    }
     const agent = controller.agents.find((candidate) => candidate.name === agentName)
     if (agent == null) {
       return false
     }
-    editDraft({ agentName })
+    const draft = materializeAgentBranchDraft(
+      agent,
+      controller.models,
+      boundBranchState.draft,
+    )
+    if (draft == null) {
+      return false
+    }
+    editDraft({ agentName: draft.agentName, model: draft.model })
     return true
   }
 

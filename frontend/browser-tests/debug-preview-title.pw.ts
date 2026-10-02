@@ -49,6 +49,7 @@ interface PreviewRequest {
     commands: Array<{
       type: string
       contents?: Array<{ type: string; text?: string }>
+      model?: { providerName: string; modelName: string; variant: string }
     }>
   }
 }
@@ -147,17 +148,17 @@ function modelRequestDebug() {
 }
 
 /** 预览响应回显 POST target 的游标，让 inspector 渲染值与请求游标严格同源。 */
-function draftRequestPreview(target: Cursor) {
+function draftRequestPreview(target: Cursor, modelName = 'minimax-m2.7') {
   return {
     status: 200,
     data: {
       kind: 'DRAFT_REQUEST_PREVIEW',
       providerType: 'openai-compatible',
-      modelName: 'minimax-m2.7',
+      modelName,
       bodyByteSize: 2048,
       bodyJson: JSON.stringify(
         {
-          model: 'minimax-m2.7',
+          model: modelName,
           messages: [{ role: 'user', content: DRAFT }],
           sourceHeadEntryId: target.headEntryId,
           nextCommandSequence: target.nextCommandSequence,
@@ -201,6 +202,7 @@ async function installPreviewApiMock(
   options: {
     cursor: () => Cursor
     onPreview?: (body: PreviewRequest['body']) => Promise<PreviewFulfillment>
+    agentSelection?: boolean
   },
 ): Promise<RecordedRequest[]> {
   const recorded: RecordedRequest[] = []
@@ -227,7 +229,7 @@ async function installPreviewApiMock(
           json: draftRequestPreview({
             headEntryId: body.target.expectedHeadEntryId,
             nextCommandSequence: body.target.expectedNextCommandSequence,
-          }),
+          }, body.commands.find((command) => command.type === 'SET_MODEL')?.model?.modelName),
         })
         return
       }
@@ -242,14 +244,32 @@ async function installPreviewApiMock(
         return
       }
       if (path === '/api/ai/catalog/agents') {
+        const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
+          name,
+          model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+          variant: 'fast',
+          config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+          version: '1',
+        })) : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
+          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: results.length, results } },
         })
         return
       }
       if (path === '/api/ai/catalog/models') {
+        const results = options.agentSelection ? [{
+          providerName: 'anthropic',
+          name: 'Claude',
+          config: {
+            limit: { context: 200000, output: 4096 },
+            abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+            defaultVariant: 'default',
+            variants: [{ id: 'default' }, { id: 'fast' }],
+          },
+          version: '1',
+        }] : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
+          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: results.length, results } },
         })
         return
       }
@@ -307,6 +327,48 @@ async function openDebugView(page: Page) {
 }
 
 test.describe('Debug Preview Title Real React Browser Regression', () => {
+  test('agent selection follows its model in preview and rejects invalid configuration without losing draft', async ({ page }) => {
+    // 真实 /agent 入口必须联动模型；拒绝无效配置后仍可用原选择预览同一草稿。
+    const recorded = await installPreviewApiMock(page, {
+      cursor: () => INITIAL_CURSOR,
+      agentSelection: true,
+    })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/browser-tests/debug-preview-harness.html')
+    const { composer, editor } = await openDebugView(page)
+    await editor.fill('/agent')
+    await composer.locator('.thread-command-palette button', { hasText: 'agent' }).click()
+    await page.getByRole('option', { name: 'coder coder', exact: true }).click()
+    await editor.fill(DRAFT)
+    await expect(editor).toHaveText(DRAFT)
+    await expect(composer).toContainText('Claude')
+    await expect(composer).toContainText('fast')
+    await page.locator('.thread-debug-preview-title-btn').click()
+    await expect.poll(() => recorded.filter((item) => item.kind === 'preview').length).toBe(1)
+    const request = recorded.find((item) => item.kind === 'preview') as PreviewRequest
+    expect(request.body.commands).toEqual([
+      expect.objectContaining({ type: 'SET_AGENT', agentName: 'coder' }),
+      expect.objectContaining({
+        type: 'SET_MODEL',
+        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      }),
+      expect.objectContaining({ type: 'USER_MESSAGE', contents: [{ type: 'TEXT', text: DRAFT }] }),
+    ])
+    await expect(page.getByTestId('preview-request-body')).toContainText('"model": "Claude"')
+
+    await composer.locator('.thread-dock-add').click()
+    await composer.locator('.thread-command-palette button', { hasText: 'agent' }).click()
+    await page.getByRole('option', { name: 'broken-agent broken-agent', exact: true }).click()
+    await expect(editor).toHaveText(DRAFT)
+    await expect(composer).toContainText('Claude')
+    await expect(page.getByRole('option', { name: 'broken-agent broken-agent', exact: true })).toBeVisible()
+    await expect(page.getByText(/broken-agent.*(无法|不可)|(?:无法|不可).*broken-agent/)).toBeVisible()
+    await page.getByRole('region', { name: '选择 Agent', exact: true }).getByRole('button', { name: '关闭' }).click()
+    await expect(editor).toBeVisible()
+    await expect(editor).toHaveText(DRAFT)
+    await page.screenshot({ path: resolve(reportsDir, 'agent-model-follow.png') })
+  })
+
   test('title click previews with a fresh cursor in both layouts, auto-selects the detail tab, and returns to the title without losing the draft', async ({
     page,
   }) => {

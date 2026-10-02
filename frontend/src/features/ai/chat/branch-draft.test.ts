@@ -189,6 +189,141 @@ describe('BranchDraft conversion and diff semantics', () => {
     expect(switchedFromEmpty?.environmentName).toBe('preserved-env')
   })
 
+  // 显式 Agent 选择应用完整模型预设，不能复用旧模型；其它草稿设置保持不变。
+  describe('materializeAgentBranchDraft model follow behavior', () => {
+    const claudeModel: AgentModelDTO = {
+      ...model,
+      providerName: 'anthropic',
+      name: 'claude',
+      config: {
+        ...model.config,
+        defaultVariant: 'v1',
+        variants: [{ id: 'v1' }, { id: 'v2' }],
+      },
+    }
+
+    it('updates provider and model to match the target agent', () => {
+      const claudeAgent: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        name: 'claude-agent',
+        model: 'anthropic/claude',
+        variant: null,
+      }
+      const existing = draftWith({
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        environmentName: 'env-1',
+        yoloEnabled: true,
+      })
+      const result = materializeAgentBranchDraft(claudeAgent, [model, claudeModel], existing)
+      expect(result).toEqual({
+        agentName: 'claude-agent',
+        model: { providerName: 'anthropic', modelName: 'claude', variant: 'v1' },
+        environmentName: 'env-1',
+        yoloEnabled: true,
+      })
+    })
+
+    it('respects explicit variant override over model default variant', () => {
+      const explicitVariantAgent: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        name: 'claude-v2',
+        model: 'anthropic/claude',
+        variant: 'v2',
+      }
+      const result = materializeAgentBranchDraft(explicitVariantAgent, [model, claudeModel], null)
+      expect(result?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'claude',
+        variant: 'v2',
+      })
+    })
+
+    it('falls back to model defaultVariant when agent variant is not specified', () => {
+      const defaultVariantAgent: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        name: 'claude-default',
+        model: 'anthropic/claude',
+        variant: null,
+      }
+      const result = materializeAgentBranchDraft(defaultVariantAgent, [model, claudeModel], null)
+      expect(result?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'claude',
+        variant: 'v1',
+      })
+    })
+
+    it('updates variant when switching between agents using the same model but different variants', () => {
+      const agentV1: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        name: 'agent-v1',
+        model: 'anthropic/claude',
+        variant: 'v1',
+      }
+      const agentV2: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        name: 'agent-v2',
+        model: 'anthropic/claude',
+        variant: 'v2',
+      }
+      const initial = materializeAgentBranchDraft(agentV1, [claudeModel], null)
+      expect(initial?.model.variant).toBe('v1')
+
+      const switched = materializeAgentBranchDraft(agentV2, [claudeModel], initial)
+      expect(switched?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'claude',
+        variant: 'v2',
+      })
+      expect(switched?.agentName).toBe('agent-v2')
+    })
+
+    it('resets manual model modification when reselecting the same agent', () => {
+      const rootAgent = agent([], [], [])
+      const existing = draftWith({
+        agentName: 'root',
+        model: { providerName: 'custom-provider', modelName: 'custom-model', variant: 'custom' },
+        environmentName: 'prod',
+        yoloEnabled: true,
+      })
+      const reselected = materializeAgentBranchDraft(rootAgent, [model], existing)
+      expect(reselected?.model).toEqual({
+        providerName: 'provider',
+        modelName: 'model',
+        variant: 'default',
+      })
+      expect(reselected?.environmentName).toBe('prod')
+      expect(reselected?.yoloEnabled).toBe(true)
+    })
+
+    it('retains environmentName and yoloEnabled from existing draft', () => {
+      const rootAgent = agent([], [], [])
+      const existing = draftWith({
+        environmentName: 'preserved-env',
+        yoloEnabled: true,
+      })
+      const result = materializeAgentBranchDraft(rootAgent, [model], existing)
+      expect(result?.environmentName).toBe('preserved-env')
+      expect(result?.yoloEnabled).toBe(true)
+    })
+
+    it('returns null and does not produce a draft if model, ref or variant is invalid', () => {
+      const agentNoModel: AgentDefinitionDTO = { ...agent([], [], []), model: '' }
+      expect(materializeAgentBranchDraft(agentNoModel, [model], draftWith())).toBeNull()
+
+      const agentWithMissingModel: AgentDefinitionDTO = { ...agent([], [], []), model: 'missing/model' }
+      expect(materializeAgentBranchDraft(agentWithMissingModel, [model], draftWith())).toBeNull()
+
+      const agentWithInvalidVariant: AgentDefinitionDTO = {
+        ...agent([], [], []),
+        model: 'provider/model',
+        variant: 'non-existent-variant',
+      }
+      expect(materializeAgentBranchDraft(agentWithInvalidVariant, [model], draftWith())).toBeNull()
+    })
+  })
+
   it('emits SET_AGENT/SET_MODEL only for the actually changed field', () => {
     const ids = (() => {
       let next = 0

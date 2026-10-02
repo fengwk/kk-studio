@@ -228,7 +228,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线布局回归 | 预览固有尺寸、等比缩小与窄屏约束；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:layout` | Playwright Chromium 离线组件回归 | 图片尺寸与窄屏约束、Debug 预览、`/agent` 模型联动及无效配置保护；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
