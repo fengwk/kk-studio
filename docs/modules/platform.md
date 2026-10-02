@@ -36,7 +36,7 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`HarnessOwnerQueryService`、`SessionDeletionOrchestrator`、`OwnerRef` | 产品 owner 的 Harness 命令接受、Session 查询与深删除；owner 只有 Chat 与 Issue+Agent 两种形态 |
 | [interaction](../../platform/src/main/java/fun/fengwk/kkstudio/platform/interaction) | `InteractionQueryService`、`InteractionService` | 把 Harness 两种等待（问卷 / 审批）投影为带产品来源的待处理列表，并提供唯一人工写入口 |
 | [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
-| [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | `PlatformEvidenceBlobPort`、`PlatformHarnessCommandAcceptancePort`、`PlatformAgentBranchSettingsPort`、`PlatformIssueAgentSessionDeletionPort`、`ProjectHarnessContributor`、`IssueTransitionTool` | Project 端口实现与 Issue Agent 工具；领域、用例、持久化与 Reconciler 在 [project](project.md) 模块 |
+| [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | `PlatformEvidenceBlobPort`、`PlatformHarnessCommandAcceptancePort`、`PlatformAgentBranchSettingsPort`、`PlatformDelegatedWorkActivityPort`、`PlatformIssueAgentSessionDeletionPort`、`ProjectHarnessContributor`、`IssueTransitionTool` | Project 端口实现与 Issue Agent 工具；领域、用例、持久化与 Reconciler 在 [project](project.md) 模块 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`StorageObjectCleanupService`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期、对象清理记录与对象存储 |
@@ -120,7 +120,7 @@ Card 状态只由这组事实派生：从未检查为 `UNCHECKED`，观察值等
 扫描只接受仓库根目录的 `<name>/SKILL.md`。每个文件必须含可解析的 YAML frontmatter，
 其中 `name` 与目录 basename 完全一致、`description` 非空且不超过 1024 字符；其它标准 frontmatter 字段不
 进入 Catalog。Package 内 name 不得重复，目录和符号链接都不得越出仓库树。repository URL
-不得携带 userinfo，第一阶段要求仓库可由 Platform 与 Daemon 直接读取，不设计凭据分发。
+不得携带 userinfo，仓库必须可由 Platform 与 Daemon 直接读取。
 
 远端检查与内容发布是两个 API 语义：
 
@@ -529,13 +529,14 @@ Project 的领域规则、Issue/Run/Evidence 用例、PostgreSQL 持久化与 Re
 ### 跨宿主端口实现
 
 [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter) 实现
-Project 模块声明的 4 个端口；它们都运行在调用方已有的物理事务里，不新开事务、不吞异常：
+Project 模块声明的 5 个端口；适配器参与调用方的事务编排，不吞掉宿主异常：
 
 | 端口实现 | 承接的宿主能力 |
 | --- | --- |
 | [`PlatformEvidenceBlobPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformEvidenceBlobPort.java) | 上传 `lockReady`/`delete` 与 Blob `retain`/`release`/`ACTIVE` 判定；storage 的「资源不存在」译为 Project not found，「未 READY/已 cleanup」译为 Project validation |
 | [`PlatformHarnessCommandAcceptancePort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformHarnessCommandAcceptancePort.java) | 以 `OwnerType.ISSUE_AGENT` owner 复用 [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) 的共享命令接受 |
 | [`PlatformAgentBranchSettingsPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformAgentBranchSettingsPort.java) | 复用 `AgentBranchSettingsMaterializer` 物化分支设置 |
+| [`PlatformDelegatedWorkActivityPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformDelegatedWorkActivityPort.java) | 按 Thread 持久 `status` 判断自身及委派子树是否静止，阻止 Run 提前收尾 |
 | [`PlatformIssueAgentSessionDeletionPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformIssueAgentSessionDeletionPort.java) | 复用 `SessionDeletionOrchestrator` 深删除该 owner 的 Harness Session |
 
 端口是两侧唯一的耦合面：Project 不 import platform 的任何类型，
@@ -666,15 +667,8 @@ Tool 终态结果由
 宿主已验证的文本 metadata 与有界 preview 随转换后的引用进入 history；物化器不读取
 `ResourceStore`、不执行 S3 I/O。任何一步失败都使调用方事务回滚，未消费 upload 由过期清理回收。
 
-Platform Plugin 不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
-`PluginResourceGateway` 用 Thread 解析当前 Session，并在签发输入前校验
-`session_blob_ref`；远端输出以有界流写入临时文件，边传输边做
-MIME sniff、size budget 与 SHA-256，落库走 `StorageUploadService.reserve` → 预签名 PUT 直传 → `complete`，Tool terminal 返回 `blob-upload:<uploadId>`。之后仍由
-同一个 `ToolResultFinalizer` 和
-`GlobalStorageToolResultHistoryMaterializer` 完成全量校验与 owner 原子转移，不建立
-Plugin 旁路。第三方下载只接受 HTTPS，禁用自动重定向和重试；校验后的公网 IP 直接用于连接，
-不再二次解析，并受 response/time/size budget 约束。这样 2K 视频和长音频不进入 JVM
-大数组，也不会把短期第三方 URL 写进历史。
+Plugin 媒体输入/输出也走上述 owner 转移与终态物化；第三方下载的地址准入、DNS pinning 与
+流式预算见 [Plugin 资源端口](#plugin-资源端口)，不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
 
 ## Environment
 
@@ -827,12 +821,13 @@ externalization，第一个 terminal 后任何迟到信号、其余 Resource 写
 ### turn 解析与 prompt 物化
 
 [DatabaseTurnResolver](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java)
-只以 candidate `EntryPath` 的最新 `BranchSettings` 为输入，在每个 live turn 解析：
+以 candidate `EntryPath` 的最新 `BranchSettings` 为分支输入，并现读 Catalog 和产品归属，在每个 live turn 解析：
 
 1. 当前 Agent、Model、Provider、Variant 与 ProviderFactory，并把 Variant 未显式声明的
    输出上限补齐为 Model 全局 `limit.output`；
-2. 当前 Environment context：只按 `BranchSettings.environmentName()` 查全局唯一且不可变的
-   name 得到路由身份，name 无法解析时确定性返回 `PLANNING_FAILED`；
+2. 当前 Environment context：普通 branch 按 `BranchSettings.environmentName()`，Issue Agent
+   按当前 Project workflow 阶段的 `environment` 选择；未配置时不沿用历史环境。
+   再按全局唯一且不可变的 name 得到路由身份，name 无法解析时返回 `PLANNING_FAILED`；
 3. Agent config 中的每个工具 name 都通过 `RuntimeToolCatalog.findTool(name)` 查找并
    校验 selectable；`NONE` 与 `OPTIONAL` 始终保留，`REQUIRED` 在 Branch 未选择
    Environment 时从最终模型工具列表过滤；`requiredEnvironmentId` 与已选环境冲突时在
@@ -840,6 +835,11 @@ externalization，第一个 terminal 后任何迟到信号、其余 Resource 写
 4. SkillRefs、subagents 与内部 `task`；配置 Skill 时确定性注入 `read`；
 5. Contributor context projector、system instruction、cache control、context window 与
    output budget。
+
+命中稳定 Issue+Agent 绑定时，`DatabaseProjectIssueTurnResolver` 同时提供当前阶段职责上下文
+与 `issue_transition` 工具。归属存在但不可执行（归档、暂停、阶段改派、Agent 不匹配或
+活动 Run 的 Thread/Session/阶段不匹配）时拒绝规划，不降级为普通 branch。Environment
+选择进入本 turn 的冻结请求与工具路由，不通过 `SET_ENVIRONMENT` 重写 Thread 历史设置。
 
 每个 Tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor。SkillRef 按
 `(packageName, name)` 从 Package 当前 JSON 快照解析；缺失引用返回 `PLANNING_FAILED`。
@@ -856,8 +856,8 @@ Skill binding。
 统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
 bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
 Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（该引用既可能来自该 Session 自己消费的附件，也
-可能来自 Issue 已发布证据的幂等授予，因此 Blob 实际可用时规范形态就是活动形态，不可用时确定性拒绝）（Blob 文本不设 8 MiB 源文件上限，单次返回窗口 ≤ 2000 行且 ≤ 60000 个 Unicode code point；`read` 是唯一获得 320 KiB / 2020 行内联预算的可信身份，其它工具的内联上限是 50 KiB / 2000 行），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
-路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
+来自工具结果消费；没有当前 Session 引用时确定性拒绝）（Blob 文本不设 8 MiB 源文件上限，单次返回窗口 ≤ 2000 行且 ≤ 60000 个 Unicode code point；`read` 是唯一获得 320 KiB / 2020 行内联预算的可信身份，其它工具的内联上限是 50 KiB / 2000 行），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+路径要求显式 `workdir`；`kkstudio:` URI 禁止携带非空 `workdir`，本地路径在没有绑定 Environment 时失败。
 Platform URI 不接受任意 HTTP(S) 透传。
 
 `kkstudio:/resources/<blobId>` 的读取预算在读取入口冻结一次（30 秒），覆盖 S3 `getObject`
@@ -885,7 +885,7 @@ Base64 正文。
 `DatabaseProviderResolutionService.resolve` 与协议编码器，在内存中构造末尾 USER_MESSAGE
 的候选历史并返回最终有效请求体。授权复用发送的 owner 归属校验；附件与 RESOURCE 复用
 消息内容转换，但 READY upload 只读查询，绝不消费或增加 Session ref。仅允许空闲、
-无排队且 head/sequence 与客户端游标一致的 Chat/Canvas Thread；下一步为自动压缩时
+无排队且 head/sequence 与客户端游标一致的 Chat Thread；下一步为自动压缩时
 明确拒绝精确预览。请求体可包含 Base64 媒体，按最终 wire body 原样返回；无凭据、
 认证 Header、网络传输或 durable 写入。结果是点击时快照，不保证之后发送保持相同。
 
@@ -912,9 +912,12 @@ Platform 在 Canvas 上的职责是：把 Function 的输出物化到本机 Stor
 原件流与 presign 访问。
 
 [CanvasBlobResourceMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobResourceMaterializer.java)
-把 Function 输出 spool 到临时目录（上限 512 MiB），在事务外写 `blobs/{blobId}/original`
-并 probe 媒体事实，然后在事务内锁 Canvas、确认恰好一个 RUNNING output pin、做 Blob
-dedup 和 `resourceId` 幂等 insert；并发落败方释放自身刚创建的 Blob 引用。所有浏览器上传
+通过统一 `StorageUploadService.stage` 在事务外准备媒体输出（上限 512 MiB）；Blob 去重、媒体
+probe 与预览属于上传阶段。随后短事务锁 Document 与 Run，确认当前 `RUNNING` 的 requestId，
+按 `resourceId` 幂等插入无 owner 的 Resource，与 `OUTPUT` pin 同事务写入，再 retain Blob
+并清理 upload owner。并发落败返回既有 Resource，不重复 retain；事务失败立即 best-effort
+清理未消费 upload，失败由过期清理兜底。TEXT 输出直接内联，先校验最多 1,048,576 个 Java 字符，
+不走 upload/Blob。所有浏览器上传
 与服务端 `stage` 都由统一上传服务在 Blob 绑定后调用
 [FfmpegStorageBlobPreviewService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/FfmpegStorageBlobPreviewService.java)，
 通过不经 shell 的 `MediaProcessRunner` 调用 ffmpeg 生成 webp，输入上限 512 MiB，超时与
@@ -933,6 +936,9 @@ Function adapter 只实现 `CanvasFunctionAdapter`：
 storage adapter；Canvas adapter 不直接拼 S3 key，也不直接管理 Canvas 引用计数。当前
 Function 扩展点是 `CanvasFunctionAdapter` + `CanvasFunctionCatalog`，Catalog 在启动装配
 时冻结能力快照。
+
+当前 `originalUrl(blobId, expiresSeconds)` 适配不采用调用方传入的有效期，而由 Storage
+预签名配置决定；原件流若实际长度与 Blob 事实不符，先关闭再拒绝。
 
 外部模型与媒体能力不再由 Platform 自带：ComfyUI/H3 与本地媒体处理都随构建期 Plugin 发布，
 Platform 只保留 `fake`/`opencli` 两个参考 adapter 与 Function runtime 所需的
@@ -972,7 +978,7 @@ ToolProcessor
   -> Runtime terminal CAS + owning Thread Work
 ```
 
-### Chat/Canvas 首条带附件消息
+### Chat 首条带附件消息
 
 ```text
 HTTP command-batch
@@ -1011,8 +1017,8 @@ Function dispatcher claim + RUNNING lease
   -> adapter checkpoint / third-party execution
   -> CanvasBlobResourceMaterializer
        -> spool + S3 put + media probe outside DB transaction
-       -> Canvas row lock + Blob dedup + resource insert in transaction
-  -> commit -> preview generation best-effort -> Canvas version/patch notification
+       -> Document/Run lock + resource insert + OUTPUT pin + upload owner transfer
+  -> completeSuccess: publish all slots + SUCCEEDED + release pins + revision notification
 ```
 
 ## 配置
@@ -1029,10 +1035,10 @@ Function dispatcher claim + RUNNING lease
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / concurrency 10 / totalConcurrency 0（不限）/ maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 16 MiB、heartbeat 60s | Environment 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
-| `integrations.openCliHub` | disabled、base URL 未配置；connect 5s、request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
+| `integrations.openCliHub` | disabled、base URL 未配置；connect 5s、request 120s、long poll 130s、stream buffer 16 KiB、JSON 512 KiB、error 4 KiB、maxOutputChars 65535 | adapter 创建与执行参数 |
 | `integrations.seedance` / `gptImage2` / `minimaxH3` | 各自 enabled/paid 开关、workspace、prompt 与 ComfyUI timeout、polling 约束 | adapter 的启动快照与执行读取点 |
 | `storageMedia` | upload 3600s、presign 默认 600s / 上限 3600s、media process 30s、thumbnail 512 / quality 80 | 上传与预签名生命周期、媒体处理预算 |
-| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s、失败与回退各 1s；event queue 512 / 2 MiB / 10s、heartbeat 20s；notification poll 5s、reconnect 1s | 组合根装配的 restart-required 软策略 |
+| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s；threadResolveFailure、modelDispatchBusyFallback、toolPreflightFailure、toolDispatchBusyFallback delay 各 1s；event queue 512 / 2 MiB / 10s、heartbeat 20s；notification poll 5s、reconnect 1s | 组合根装配的 restart-required 软策略 |
 
 SystemSettings 永不承载 Dispatcher 容量与调度节奏、数据库连接、filesystem root、
 ffmpeg binary、Daemon token/identity、Provider credential、ComfyUI API key、H3 bearer
@@ -1045,7 +1051,7 @@ token 或 OpenCLI instance identity。
 | `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避、admission 推迟与 bounded worker 容量；默认 `64/30s/1s/1s/5s/16/64`（maxDispatchTasks/lease/poll/rejection/admissionDeferral/worker/queue） |
 | `kk-studio.harness.execution-admission.{model,tool,skill-sync}` | platform | 进程级容量，默认 `16/64/8`；`skill-sync` 约束 Environment Skill Package 同步的并发（单 Environment 串行） |
 | `kk-studio.harness.runtime.{workers-enabled,resource-root,skill-cache-root}` | platform | worker 开关、内容寻址 Resource 存储根与 bare Skill Git cache 根（默认位于 `<cwd>/.kkstudio/`） |
-| `kk-studio.project.controller.*` | project | Issue Controller lease 30s、poll 1s、retry 5s、blocked 60s、run 30m、continuation 10、worker `8 + queue 64` |
+| `kk-studio.project.controller.*` | project | Issue Controller lease 30s、poll/rejection/active 1s、retry 5s、blocked 60s、run 30m、continuation 10、maxDispatchTasks 64、worker `8 + queue 64` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | platform | S3/MinIO 服务端与 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease,object-cleanup-interval,object-cleanup-retry-delay}` | platform | maintenance 轮询、cleanup lease 与对象清理记录的认领间隔/失败重试间隔，默认 `30s/5m/24h/30s` |
 | `kk-studio.plugins.credential-key-file` | platform | Plugin credential AES-256-GCM 主密钥的 owner-only 绝对文件；各 App 节点内容必须一致，不进入数据库 |

@@ -1,6 +1,6 @@
 # Canvas Core 模块
 
-Canvas 编辑器里的每一次拖动、建节点、引用上游资源，最终都要落到同一个 durable graph 上；Function 节点还要保存「用什么函数、参数是什么、跑到了哪一步」。这些事实的读法、写法与合法性判定必须与数据库、HTTP 和 Provider 无关，否则它们会在多个模块里各写一遍。`canvas-core` 就是这份契约：不可变的 graph 聚合、用户可见的 typed command、命令规划与冲突语义、Function SPI 与执行边界，全部只用 JDK 类型表达。它不连接 PostgreSQL、不装配 Spring、不认识 HTTP DTO；[canvas-infra](canvas-infra.md) 实现它的持久化端口与应用服务，[platform](platform.md) 提供宿主 Storage 与 Function adapter 适配，[web](web.md) 负责 HTTP/DTO 映射。
+`canvas-core` 定义 Canvas 的不可变 graph 聚合、typed command、命令规划与冲突语义，以及 Function SPI 与执行边界，全部只用 JDK 类型表达。它不连接 PostgreSQL、不装配 Spring、不认识 HTTP DTO；[canvas-infra](canvas-infra.md) 实现持久化端口与应用服务，[platform](platform.md) 提供宿主 Storage 适配，Platform 或构建期插件提供 Function adapter，[web](web.md) 负责 HTTP/DTO 映射。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
 
 模块的生产依赖为空，只有 JUnit 在 test scope（见 [`canvas/core/pom.xml`](../../canvas/core/pom.xml)）。[`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 扫描全部主源码，禁止 `java.sql`、`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及 Harness、Platform、Share、Web 包前缀，并断言 Catalog 只有一处事实源。
 
@@ -34,10 +34,11 @@ CanvasDocument
 - **名称**：前置条件为旧名称（`expectedName` / `expectedTitle`）；
 - **资源数组**：前置条件为有序 Resource ID 列表（`expectedResourceIds`），槽位意图由 [`CanvasResourceInput`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java)（`Keep`、`Text`、`Blob`）表达；
 - **Function**：前置条件为编辑起点的完整 [`CanvasFunction`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)（`{name,args}`，由 [`CanvasJson.JsonObject.equals`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasJson.java) 做严格 JSON 语义比较）；
+- **删除节点**：同时检查 `expectedResourceIds` 与 `expectedFunction`，还须满足无活跃 Run、无未解除引用等删除前提；
 - **分组归属**：前置条件为旧分组 ID（`expectedGroupId`）或成员节点集合（`expectedMemberNodeIds`）；
 - **几何布局**：`expectedTransform` 为空时表示在线操作按服务端接受顺序收敛；非空时表示重连积压的布局基线，若与服务端当前值不一致则拒绝，防止重放过期位置。
 
-写入口是 [`CanvasCommandService`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandService.java)：
+[`CanvasCommandService`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandService.java) 提供创建、编辑与删除；`applyCommands` 的实现遵循以下事务协议：
 
 ```text
 applyCommands(canvasId, idempotencyKey, commands)
@@ -80,7 +81,7 @@ Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始
 | `SUCCEEDED` / `CANCELLED` | lease 与 availableAt 皆空，终态不可再被 claim；`SUCCEEDED` 不得带 `error`，`CANCELLED` 可以带 |
 | `FAILED` / `UNKNOWN` | lease 与 availableAt 皆空，必须持有非空 `error` |
 
-`attempt` 非负，lease token 为 1～128 字符。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 是启动时冻结的引用资源，`OUTPUT` 是预分配目标资源；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。执行中若提交意图已持久化（`SUBMITTING`）但进程崩溃，租约到期后转为 `UNKNOWN` 状态并保留 pin 与目标资源，退出自动调度，绝不重试提交。人工核对后可通过 [`CanvasFunctionService.resolve`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionService.java) 传入 [`CanvasFunctionUnknownResolution`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownResolution.java)（`RESUME` 回到 READY 继续查询，`FAILED` / `CANCELLED` 释放 pin 与目标资源）。
+`attempt` 非负，lease token 为 1～128 字符。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 保护启动时冻结的引用资源，`OUTPUT` 在预分配目标资源实际物化后写入；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。执行中若提交意图已持久化（`SUBMITTING`）但进程崩溃，租约到期后转为 `UNKNOWN` 状态并保留 pin 与目标资源，退出自动调度，绝不重试提交。人工核对后可通过 [`CanvasFunctionService.resolve`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionService.java) 传入 [`CanvasFunctionUnknownResolution`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownResolution.java)（`RESUME` 回到 READY 继续查询，`FAILED` / `CANCELLED` 释放 pin 与未挂接的目标资源）。
 
 ## 不变量
 
@@ -99,7 +100,7 @@ Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始
 测试入口：
 
 - [`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 守卫零生产依赖、包边界与 Catalog 单一事实源；新增第三方 import 会直接失败。
-- [`CanvasValueObjectTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasValueObjectTest.java) 覆盖 document/resource/node/group/reference 的构造期不变量、集合 defensive copy、命令严格性与结果形态。
+- [`CanvasValueObjectTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasValueObjectTest.java) 覆盖 document/resource/reference/snapshot 的构造约束、集合 defensive copy、命令严格性与结果形态；节点与分组一致性另由命令规划测试覆盖。
 - [`CanvasCommandPlannerTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerTest.java)、[`CanvasCommandPlannerGroupTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerGroupTest.java) 与 [`CanvasCommandPlannerResourceTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlannerResourceTest.java) 覆盖节点、资源与分组的命令规划、前置条件校验与冲突判定。
 - [`CanvasJsonTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasJsonTest.java) 覆盖 JSON AST 解析与语义比较。
 - [`CanvasFunctionCatalogTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalogTest.java) 锁定可用性声明与冻结排序；[`CanvasFunctionDefinitionTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinitionTest.java)、[`CanvasFunctionArgsSchemaTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchemaTest.java) 与 [`CanvasFunctionFrozenTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenTest.java) 锁定 Function 定义、参数 Schema 校验与冻结引用的媒体事实。

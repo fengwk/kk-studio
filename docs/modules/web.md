@@ -4,7 +4,7 @@
 
 `web` 是 kk-studio 唯一的生产 Spring Boot composition root：它把 Platform application
 services、Canvas/Harness infra、纯 Java `harness-runtime`、第一方
-`BuiltinHarnessContributor`、可选 classpath Plugin 和受信任 Contributor JAR 快照组合成一个可运行的
+`BuiltinHarnessContributor` 与可选 classpath Plugin 的 Spring bean 组合成一个可运行的
 HTTP/WebSocket 进程，并把浏览器 REST、静态 SPA、浏览器 Application Event WebSocket
 与 Environment Daemon WebSocket 一起暴露给外部；领域规则由被组合的模块持有，
 Controller 只做 DTO 解析、调用 application service 和结果投影。
@@ -50,6 +50,7 @@ WebApplication
   -> selected Plugin AutoConfigurations -> StudioPlugin + HarnessContributor
   -> Canvas infra -> canvas-core
   -> HarnessRuntimeConfiguration -> harness-infra -> harness-runtime -> harness-tool / harness-environment
+       -> Platform PluginResourceGateway
   -> ContributorCatalogConfiguration -> Spring HarnessContributor beans（Builtin + 已安装 Plugin）-> HarnessCatalog
   -> RuntimeToolCatalogConfiguration -> HarnessToolCatalogAdapter + DB-backed McpToolCatalog -> CompositeRuntimeToolCatalog
   -> IssueControllerRuntimeConfiguration -> bounded Issue dispatcher + worker + poll
@@ -178,7 +179,7 @@ no-op），不产生 Command、Entry 或 Work。
   `ProjectWorkflowJsonCodec` 与 `ObjectMapper`，并提供 `parseUuid` / `parseNonNegativeLong`
   两个 HTTP 边界解析器。
 - [ProjectSnapshotAssembler](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssembler.java)
-  在只读事务里聚合未归档 Issues、依赖、blocked 状态与当前/最近 Run，
+  在只读 `REPEATABLE_READ` 事务里聚合 Project、未归档 Issues 与当前/最近 Run 摘要，
   并对每条跨表归属 fail closed。
 - [StrictJacksonConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
   配置 HTTP 的 Jackson 3 mapper：启用 `STRICT_DUPLICATE_DETECTION`、把日期写为时间戳、省略 null
@@ -365,11 +366,13 @@ Plugin 自己的管理面由 [StudioPluginController](../../web/src/main/java/fu
 | --- | --- | --- |
 | Harness workers | `HarnessRuntimeLifecycle`，`MAX_VALUE - 1` | `workers-enabled=false` 不启动 dispatcher；store、processor 与 realtime bean 仍可用；start 失败回滚 dispatcher，stop 幂等 |
 | Issue Controller | `IssueControllerRuntimeLifecycle`，`MAX_VALUE - 1` | 与 Harness workers 共用 `workers-enabled`；不启动时仍保留 REST 与 notification loop |
+| Canvas Function | `CanvasFunctionDispatcher`，`MAX_VALUE - 1` | 启动立即 wake，stop 取消 poll 并关闭 drain 入口；不受 Harness `workers-enabled` 控制 |
 | Browser heartbeat | `applicationEventHeartbeatScheduler` | destroy `shutdown`；handler `@PreDestroy` 先发 1012 `SEND_FAILED` |
 | Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
 | Harness processors / RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` 等 | Spring destroy `close`；heartbeat timer 用 `shutdown`，heartbeat worker 与 model flush executor 用 `close` |
-| Plugin credential refresh | `PluginCredentialRefreshDispatcher`（phase `MAX_VALUE`） | Platform 装配的调度器；启动立即 scan，随后默认每小时 scan，stop 取消调度并等待在途 scan，claim 后的 finalize 仍由 lease token 与 version 围栏 |
+| Plugin credential refresh | `PluginCredentialRefreshDispatcher`（phase `MAX_VALUE`） | 启动立即 scan，按最早到期行安排下一次扫描，默认每小时是最慢兜底；stop 取消调度并等待在途 scan，finalize 受 lease token 与 version 围栏 |
+| Storage maintenance | `StorageMaintenance`，`MAX_VALUE` | 启动 wake 与 fixed-delay poll；stop 暂停、close 关闭专用 executor，清理失败隔离 |
 | Daemon send deadline | `environmentDaemonSendDeadlineTimer` | 单线程 daemon timer，destroy `shutdown`；`removeOnCancelPolicy` 与不保留延迟任务 |
 | Dispatcher executors | `harnessDispatcherDrainExecutor`、`harnessDispatcherWorkerExecutor`、`harnessDispatcherPollScheduler`、`environmentSkillSyncExecutor` | destroy `shutdown`；`harnessModelFlushExecutor` 用 `close` |
 
@@ -398,8 +401,8 @@ controller、storage、Plugin credential、canvas、plugin）由 Platform、Plug
 - 代码没有 `spring-boot-starter-security`、`SecurityFilterChain` 或 Spring Security auth
   filter；HTTP TLS、用户认证和 ingress policy 属部署边界，不由当前 Web context 伪造。
 - Daemon WebSocket 的 registration token 是 deployment secret，保存在
-  `environment.registration_token`，不进 SystemSettings、DTO 或日志；gateway 在 HELLO
-  认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state。
+  `environment.registration_token`，不进 SystemSettings、通用 Card DTO 或日志；gateway 在 HELLO
+  认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state；令牌仅经显式创建/读取/轮换响应交给管理端，不出现在通用 Card DTO。
 - 系统不开放公开 S3 预签名端点；Blob 原始与预览访问统一由 Storage/Canvas 签发有限
   expiry 的 presigned URL；构建期 Plugin 的文件输入直接使用 blobId。
 - Plugin auth callback、明文 credential 与 renewal 参数只在 `no-store` 请求内短暂存在；

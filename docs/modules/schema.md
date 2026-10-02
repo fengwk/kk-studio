@@ -1,8 +1,11 @@
 # Schema 模块
 
-PostgreSQL 里到底有哪些表、哪些列在什么情况下可以为空、版本与租约怎么配对，是这套系统里被引用最多、也最难追溯的一类事实：应用代码可以用 try/catch 兜底，数据库约束一旦缺失就会长期积累脏数据。`schema` 模块把这份事实收敛成一个文件——[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 就是**当前全部结构**的完整声明，没有增量迁移链，没有第二份镜像。生产 Web 与各集成测试用同一份 Flyway 资源，因此「测试通过」和「生产建库」走的是同一段 DDL。
+`schema` 模块保存当前 PostgreSQL 表、列、外键、索引与 CHECK 约束的权威声明：
+[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。生产 Web 与集成测试
+使用同一份 Flyway 资源。没有增量迁移链；修改已执行的 V1 涉及 checksum 与数据库维护，
+不能把更新源码当作已更新数据库，操作边界见[修改 V1 的代价](#修改-v1-的代价)。
 
-模块本身没有 Java 源码、没有运行时依赖（见 [`schema/pom.xml`](../../schema/pom.xml)），资源入口只有四个文件：
+模块没有 Java 主源码与运行时依赖（见 [`schema/pom.xml`](../../schema/pom.xml)），另有 Java 契约测试；Flyway 资源入口只有四个文件：
 
 ```text
 schema/src/main/resources/db/migration/V1__schema.sql          唯一 versioned baseline
@@ -63,7 +66,7 @@ erDiagram
 | --- | --- |
 | Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package` |
 | Plugin | `plugin_credential`（加密凭据、状态与跨节点 refresh lease） |
-| MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
+| MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控；`mcp_tool.server_name` 是全库唯一 `ON DELETE CASCADE` 外键） |
 | Environment | `environment`、`environment_connection` |
 | Chat | `chat`、`chat_session` |
 | Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
@@ -81,9 +84,9 @@ erDiagram
 `skill_package` 每个 Package 只有一行，不再拆分独立 Skill 内容表：
 
 ```text
-package_name          PK，不可变
+package_name          varchar(128) PK，不可变，禁止 : / @ 和反斜杠
 description           nullable text
-repository_url        text，不可变且禁止内嵌 userinfo
+repository_url        text，不可变；要求 scheme、最多 2048 字符、无空白且禁止内嵌 userinfo
 branch                varchar(255)，非空白无环绕空白无控制字符，只用于检查候选更新
 current_commit        当前人工确认的 40/64 位小写 Git object id
 observed_head_commit  最近检查到的 branch HEAD，可空
@@ -108,6 +111,9 @@ references、scripts 与 assets 全部保留在 Git，不写 PostgreSQL。
 
 两者都属于可重建运行投影，不是 Package 内容或执行历史；断线时保留供 Card 诊断，Daemon
 重新 READY 后按当前事实收敛。
+
+同一连接行的 `runtime_info` 保存最近一次已接受的 READY 宿主 metadata：READY 时必须为
+非空 JSON object，断线或回到 CONNECTING 时保留，从未 READY 时可为空。
 
 ### Plugin credential
 
@@ -173,7 +179,7 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 
 ### Harness 交互与 ToolInvocation
 
-`harness_tool_invocation` 新增 `WAITING_INPUT` 状态及形状约束（`ck_harness_tool_waiting_input`：binding 非空，result 与 error 均为空），与 `WAITING_APPROVAL` 并列表达挂起等待。可空 `input_receipt` jsonb 仅在 SUCCEEDED 且 result 非空时存在，携带 `submissionId`、`actor`、`acceptedAt` 字符串（`ck_harness_tool_input_receipt`）。部分索引 `idx_harness_tool_invocation_pending` 在 `(created_at, id)` 上覆盖 WAITING_APPROVAL 与 WAITING_INPUT，支持统一待处理分页。`harness_thread` 增加 `(session_id, id)` unique 约束，支持同 Session 复合 FK。
+`harness_tool_invocation` 的 `WAITING_INPUT` 状态由 `ck_harness_tool_waiting_input` 限定形状：binding 非空，result 与 error 均为空；它与 `WAITING_APPROVAL` 并列表达挂起等待。可空 `input_receipt` jsonb 仅在 SUCCEEDED 且 result 非空时存在，携带 `submissionId`、`actor`、`acceptedAt` 字符串（`ck_harness_tool_input_receipt`）。部分索引 `idx_harness_tool_invocation_pending` 在 `(created_at, id)` 上覆盖 WAITING_APPROVAL 与 WAITING_INPUT，支持统一待处理分页。`harness_thread` 的 `(session_id, id)` unique 约束支持同 Session 复合 FK。
 
 ### 应用拥有的版本与提示
 
