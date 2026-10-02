@@ -1,9 +1,6 @@
 # Harness Environment Server
 
-`harness-environment-server` 是 Environment 链路中 Platform 一侧的会话核心：它把
-daemon wire 协议的消息流推进为可观察状态，独占连接代际、`environment_connection`
-路由租约围栏与按 `invocationId` 的在途调用生命周期，并向上层暴露传输、持久化与票据
-三类窄端口。协议形状、字段语义与大小约束由
+`harness-environment-server` 是 Platform 侧的环境会话核心，管理连接代际、路由租约围栏与按 `invocationId` 关联的在途调用。数据库、WebSocket 和对象存储由宿主通过窄端口接入。协议形状、字段语义与大小约束由
 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
 宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
 
@@ -22,7 +19,7 @@ Daemon -> HELLO(registrationToken, daemonInstanceId)
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
   Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(capabilities)
+Daemon -> READY(version, environment)
   -> leaseStore.markReady                                # 围栏失效即协议错误
   -> 重放未在当前连接代际发出的 INVOKE
 Daemon -> HEARTBEAT*
@@ -51,7 +48,7 @@ close(connectionId)
 | `BUSY` | [`EnvironmentCapabilityBusyException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityBusyException.java) | 帧确定未发送，连接保持可用，调用方可安全重试 |
 | `CLOSED` | [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java) | 帧确定未发送，调用确定未执行 |
 
-同一 Environment 内重复使用相同活动 `invocationId` 属于调用方错误，在发送任何帧之前即被拒绝。传输自身发送失败只体现为连接失效：核心关闭该连接，调用仍保留在途，交由同实例重连以相同 `invocationId` 重放收敛。挂起调用的重放只针对尚未在当前连接代际发出过的 INVOKE，因此不会重复发送。
+同一 Environment 内重复使用相同活动 `invocationId` 属于调用方错误，在发送任何帧之前即被拒绝。传输递交时抛错会关闭连接，但返回活动句柄，等待同实例恢复；不能把这条路径解释为确定未执行。恢复时，未取消的调用只向尚未发送过它的新连接代际重放 INVOKE，已取消的调用只重发 CANCEL，不再重发 INVOKE。取消意图与成功递交代际分别记录，BUSY/CLOSED 不算送达，也不靠空转轮询重试。
 
 ## 资源上传控制面
 
@@ -60,7 +57,7 @@ close(connectionId)
 ```text
 RESOURCE_UPLOAD_REQUEST
   -> invocation 必须仍活动且属于当前 READY Environment
-  -> 严格解码元数据，并在任何存储副作用前校验 WELCOME 通告的 maxResourceBytes
+  -> 严格解码元数据，并在任何存储副作用前校验当前 settings 的 maxResourceBytes
   -> 首次请求在核心锁外调用 ticketService.reserve，把结果固化为该 transfer 的票据事实
 
 RESOURCE_UPLOAD_COMMIT
@@ -85,7 +82,7 @@ COMPLETED
 
 - `expire(handle)` 由调用方在自身 deadline 上判定超时：它至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出重放集合，之后到达的 daemon 终态被 tombstone 静默丢弃。
 - 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后以相同 `invocationId` 重放，Daemon journal 负责重放 `STARTED` 与终态而不重复执行副作用。
-- 身份不同的新 Daemon 进程接管该 Environment 时，旧进程已不可能再提供终态，其全部在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并行释放名下上传，绝不留给新进程消费。
+- 身份不同的新 Daemon 进程接管该 Environment 时，核心不再接受旧实例作为恢复来源；旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放名下上传，不留给新进程消费。这不证明旧主机上的副作用已停止或回滚。
 - 已终结 invocation 的迟到或重放 `COMPLETED`/`FAILED`/`CANCELLED` 由 tombstone 吸收并静默丢弃，`STARTED`/`PROGRESS` 同样不回调；未知 `invocationId` 的回调按协议违规关闭连接，因为回调只按 `invocationId` 归属，不按连接代际。
 - `STARTED` 若携带 `replayed` 字段只能为 `true`，避免把从未执行过的调用伪装成重放。
 
@@ -101,7 +98,7 @@ COMPLETED
 
 ## 锁边界
 
-核心只用五个 monitor，锁顺序固定为 `gate > state > inventory`：
+理解并发时先区分协议推进、状态快照与回调执行。连接级锁的嵌套顺序为 `gate > state > inventory`，调用与 transfer 另有各自 monitor：
 
 | monitor | 保护对象 |
 | --- | --- |
@@ -131,7 +128,7 @@ COMPLETED
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.environment.server` | daemon wire 协议的服务端会话核心。`EnvironmentDaemonServer` 独占 HELLO/WELCOME/READY/HEARTBEAT/INVOKE/CANCEL、资源 transfer、租约围栏与按 `invocationId` 维度的在途调用状态；`DaemonEndpoint`/`DaemonChannel` 是 transport 窄端口，`DaemonLeaseStore`/`DaemonRegistrationDirectory` 是持久化窄端口，`DaemonResourceTicketService` 承载 Blob 上传生命周期，`EnvironmentSessionListener`/`EnvironmentServerSettings` 承载宿主回调与现读设置。本包只依赖 JDK、Jackson、`harness-common` 与 `harness-environment`，不感知 Spring、持久化实现与产品 DTO。 |
+| `fun.fengwk.kkstudio.harness.environment.server` | 会话、调用、transfer 与围栏裁决；外部 I/O 通过 transport、lease、registration、ticket 端口接入，不引入产品 DTO 或框架 |
 
 ## 源码与测试
 

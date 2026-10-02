@@ -1,12 +1,12 @@
 # Harness Environment
 
-`harness-environment` 提供 Runtime、Platform、Contributor API 与 Environment Daemon 共用的同一份环境执行契约：Environment 的唯一路由身份、与模型工具编排解耦的原子能力目录、调用侧的发送与流式语义，以及 Platform Gateway 与 Environment Daemon 之间的 daemon wire 协议全部 wire 形状。环境链路的另外两段——服务端会话与租约协调（[Harness Environment Server](harness-environment-server.md)）、宿主进程执行（[Harness Daemon](harness-daemon.md)）——只消费本模块的值契约与编解码器；该协议的消息矩阵、字段语义与大小约束只在本文件维护。
+`harness-environment` 定义环境执行的共享契约：路由身份、原子能力目录、调用侧发送语义，以及 Gateway 与 Daemon 的 wire 消息。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；连接和执行状态分别由 [Harness Environment Server](harness-environment-server.md) 与 [Harness Daemon](harness-daemon.md)维护。
 
 ## Environment 身份
 
 [`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是规范 UUID 路由身份：构造与解析只接受 `UUID#toString()` 的小写 canonical 文本，空白、大小写变体与其它形状一律拒绝，`toString()` 也只输出该形式。
 
-Stable Environment 资源、daemon envelope 的 scope、分支执行派生的环境路由与 harness work 亲和性共用这一个身份。display 名称只是元数据，不参与路由，路由身份也没有第二份包装类型。分支历史冻结用户可见的 `agentName`、model 与可空 Environment name：Environment 以全局唯一且不可变的 name 进入历史，每回合再解析为上面的路由身份；目录只由每次工具调用自己的 arguments 提供。
+Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个身份。展示名称不替代路由 UUID。产品侧历史如何冻结名称由 [Platform](platform.md)维护，本模块不推断会话或目录。
 
 ## 原子能力目录
 
@@ -122,7 +122,7 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 ```text
 Daemon -> HELLO(protocolVersion=2, registrationToken, capabilityCatalogVersion=2, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes)
-Daemon -> READY(capability descriptors, environment)
+Daemon -> READY(version=2, environment)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -140,7 +140,7 @@ Daemon -> CANCELLED | 已冻结的终态重放
 
 `WELCOME` payload 携带认证结果 `environmentId`、展示用 `name` 与本连接的资源字节预算 `maxResourceBytes`；Daemon 在收到它之前不接受任何 resource/binary 结果。
 
-`daemonInstanceId` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；同一进程断开重连时 Gateway 以相同 `invocationId` 重放在途 INVOKE（Daemon journal 去重，副作用不重复执行），身份不同则判定为换进程接管。握手失败时 Gateway 以 `ERROR` 收尾，`REGISTRATION_REJECTED` 与 `RETRY_LATER` 是仅有的两个冻结错误码。
+`daemonInstanceId` 是 Daemon 进程构造期随机生成一次、所有重连复用的规范 UUID；Gateway 保有在途记录时，同实例重连以相同 `invocationId` 恢复（已取消的调用只重发 CANCEL），Daemon journal 去重，副作用不重复执行。不同实例接管将旧调用判为结果不确定。两端在途记录均为进程内状态，协议不保证跨 Backend 重启或迁移的执行恢复。握手失败时 Gateway 以 `ERROR` 收尾，`REGISTRATION_REJECTED` 与 `RETRY_LATER` 是仅有的两个冻结错误码。
 
 传输层强制协商 `permessage-deflate`：两端都在握手阶段要求该扩展，任一侧未协商成功即按 RFC 6455 close code `1010` 关闭连接，双方都不退化为未压缩会话。
 
@@ -153,13 +153,13 @@ version=2
 environment: operatingSystem / timeZone / userName / homeDirectory / note
 ```
 
-READY 只公开宿主侧的五项环境元数据：目标操作系统、时区、Daemon 进程用户、该用户的
-canonical HOME 与可信操作者备注。`operatingSystem` 是发送前路径词法校验的目标
+READY 只公开宿主侧的五项环境元数据，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。五项数据为目标操作系统、时区、Daemon 进程用户、该用户的
+HOME 与可信操作者备注（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
 OS 依据；`userName` 与 `homeDirectory` 只用于 Card 和当前 Environment Prompt 展示，
 不构成 cwd、默认 workdir 或沙箱。`environment` 是必填对象且字段固定；未知字段、必填
 字段缺失或类型错误都是协议错误。
 
-载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
+载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符；未指定 note 时 Daemon 按 OS 生成默认说明。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
 Skill 安装状态通过内部 `skill.sync` 调用结果报告，MCP 目录完全属于 Platform。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java)
@@ -224,9 +224,9 @@ harness-environment
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.environment` | 环境身份标识。定义跨 Runtime、Platform Gateway 与 Daemon 共享的规范 UUID 路由身份（`EnvironmentId`），只做纯内存值对象与 canonical 格式校验；物理文件与网络 I/O 由各端实现承载。 |
-| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。冻结 catalog 版本 `"2"` 的 9 项模型能力与内部 `skill.sync` descriptor、底层异步执行接口与传输窄端口，并严格约束发送异常确定性与 `PROGRESS* -> exactly one terminal`。 |
-| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 daemon wire 协议全部 wire 形状：协议封包、READY 宿主元数据、INVOKE/结果/资源票据编解码器、预签名 PUT 值与 workdir 词法校验。连接代际、路由租约、对象存储 I/O 与执行日志由外层状态机和适配器管理。 |
+| `fun.fengwk.kkstudio.harness.environment` | canonical Environment UUID，无 I/O |
+| `fun.fengwk.kkstudio.harness.environment.capability` | 固定目录、schema、执行与传输 SPI、发送确定性与终态契约 |
+| `fun.fengwk.kkstudio.harness.environment.daemon` | wire 值与 codec、资源票据、远端 workdir 词法校验；不拥有连接、租约或执行状态 |
 
 ## 源码与测试
 

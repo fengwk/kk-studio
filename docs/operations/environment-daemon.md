@@ -1,594 +1,309 @@
 # Environment Daemon 安装与运行
 
-Environment Daemon 是宿主上的独立 JVM 进程，连接 Studio 的 Environment gateway，为 Agent 提供
-文件读写、命令执行、检索和 LSP 能力。规范安装路径是在目标宿主 clone 源码，再用平台对应的脚本
-安装为**当前用户**的常驻服务：Unix（Linux/macOS）用
-[scripts/daemon/install.sh](../../scripts/daemon/install.sh)，Windows 用
-[scripts/daemon/install.ps1](../../scripts/daemon/install.ps1)。服务启动并成功注册后，Studio 的
-Environment 页面会显示 `READY`，Agent 即可绑定它。
+Environment Daemon 把 Studio 的文件、命令、检索与 LSP 工具调用执行在你的主机上。每台需要提供宿主能力的主机单独安装一个 Daemon，以**当前用户**身份运行。默认安装官方 GitHub Release，不需要克隆仓库，也不需要 Git 或 Maven。
 
-进程内部的协议、能力协商与恢复语义见 [Harness Daemon 模块](../modules/harness-daemon.md)，跨模块
-边界见[系统设计](../system-design.md)。隔离测试栈里的容器内运行方式见
-[部署与运行](deployment.md#隔离栈与可靠性栈)。NAS 上的 App 容器只运行 App 本身，需要主机能力
-的每台主机各自运行本 Daemon。
+## 安装
 
-## 平台矩阵
+先在 Studio 的 Environment 页面创建目标 Environment，复制 registration token，并准备 gateway 地址，例如：
 
-| 平台 | 安装脚本 | 服务机制 | JAR | 服务定义 | 日志 |
-| --- | --- | --- | --- | --- | --- |
-| Linux | `scripts/daemon/install.sh` | `systemd --user` 用户服务 `kk-studio-daemon.service` | `~/.local/lib/kk-studio/kk-studio-daemon.jar`（0644） | `~/.config/systemd/user/kk-studio-daemon.service`（0644，首行为受管标记） | 用户 journal：`journalctl --user -u kk-studio-daemon.service` |
-| macOS | 同一个 Unix 脚本 | 当前用户 GUI 域（`gui/$(id -u)`）的 LaunchAgent `fun.fengwk.kkstudio.environment-daemon` | 与 Linux 相同路径 | `~/Library/LaunchAgents/fun.fengwk.kkstudio.environment-daemon.plist`（0644，受管标记是紧跟 XML 声明的第 2 行注释） | `~/Library/Logs/kk-studio/environment-daemon.stdout.log` 与 `environment-daemon.stderr.log` |
-| Windows 10/11 | `scripts/daemon/install.ps1` | 当前用户的 AtLogOn 计划任务 `kk-studio-environment-daemon-<当前用户 SID>` | `%LOCALAPPDATA%\kk-studio\daemon\kk-studio-daemon.jar` | Task Scheduler 中的任务定义（没有 plist/unit 文件） | Task Scheduler **不捕获** stdout/stderr |
-
-两个脚本都以当前用户身份安装、只操作该用户的受管路径，并且只管理自己写出的服务定义（见下文所有权
-标记）。Windows 任务只在该用户处于交互登录期间运行：它是计划任务，**不是 Windows Service**，没有
-systemd 等价的守护、停止超时与日志语义。macOS 的 LaunchAgent 属于当前用户的图形登录域，没有该域时
-安装直接失败。
-
-## 前置条件
-
-所有平台共同要求：
-
-- 目标主机的源码 checkout（`git clone` 后在该目录执行脚本），脚本自行解析仓库根：优先
-  `KK_STUDIO_REPO_ROOT`，否则从脚本位置向上寻找 worktree 根。
-- JDK 21：home 内 `bin/java -version` 报告 21，且必须提供可执行的 `bin/javac`（构建需要）。默认按
-  `JAVA_HOME_21` → `JAVA_HOME` → `PATH` 顺序解析绝对路径，也可通过 `--java-home` / `-JavaHome`
-  显式指定；环境变量提供的路径同样必须是绝对路径且不含控制字符。
-- 构建工具：Unix 上 PATH 要有 `mvn`，Windows 上要有 `mvn.cmd`，用于从当前源码 checkout 构建
-  shaded JAR。
-- Studio 中已存在目标 Environment，可打开 Environment 页面并复制 registration token。
-- 能访问 gateway origin，路径固定为 `/api/harness/environment-daemon/v1`，仅支持 `ws://` 或
-  `wss://` scheme，公共 TLS 地址形如
-  `wss://studio.example.com/api/harness/environment-daemon/v1`。
-- 反向代理必须协商 WebSocket `permessage-deflate` 扩展：Daemon 拒绝未压缩会话，也不会退化为普通
-  WebSocket。每个终止 WebSocket 的代理层都要启用压缩。
-
-平台差异：
-
-- Linux：可用的 `systemctl --user` 用户实例。不可用或未登录的用户环境会在触碰任何路径前报错退出。
-- macOS：可用的 `gui/$(id -u)` launchd 域，即真正的图形登录会话；没有同时登录桌面的纯 SSH 会话
-  因为不存在 GUI 域而失败。
-- Unix 通用：两个平台共用同一个 Bash 脚本，需要 Bash 可执行文件。
-- Windows：Windows 10/11，Windows PowerShell 5.1 或 PowerShell 7（脚本声明
-  `#Requires -Version 5.1`），当前会话具备 ScheduledTasks 模块命令（`Get-ScheduledTask`、
-  `New-ScheduledTask*`、`Register-ScheduledTask`、`Start-ScheduledTask`、`Stop-ScheduledTask`、
-  `Unregister-ScheduledTask`、`Get-ScheduledTaskInfo`），并且能解析到 `bash.exe`：Git for Windows
-  或兼容 Bash 提供的 `bash.exe` 是 `process.exec` 的默认解释器，缺失时可用 `-BashExecutable`
-  显式指定。
-
-## 运行边界
-
-Daemon 是普通宿主进程，继承启动它的用户权限：Linux/macOS 上继承该 Unix 用户的权限，Windows 上以
-`Interactive` 登录类型与 `Limited` 运行级别在该用户会话中运行。业务授权由 Studio 侧判定，宿主不提供
-文件系统沙箱。READY 自动报告进程用户与 canonical HOME，但两者都不是默认工作目录；相对文件路径与
-命令执行必须由调用显式给出 `workdir`。
-
-## 写入 registration token
-
-在 Studio 的 Environment 页面为目标 Environment 点击「复制 Token」（或先「重新生成 Token」再
-复制），并只以本机 owner-only 普通文件交给 Daemon。
-
-Linux/macOS 可直接在 Unix 安装命令中指定 `--registration-token '<token>'`，与
-`--registration-token-file <absolute-path>` **恰好二选一**。直接模式拒绝空值、任何空白和控制字符，
-默认写入 `~/.config/kk-studio/daemon.token`（0600），新建的凭证目录为 0700。现存文件可以原子替换；
-目标和父路径不能是符号链接，目标须为普通文件；HOME 及其下的现存父目录须为当前用户所有且不可被
-group/other 写入，目标文件也须为当前用户所有。脚本不会自动修改现存父目录的权限；
-例如 `~/.config` 为 0775 时，确认不需要共享写入后执行 `chmod go-w "$HOME/.config"` 再安装。
-
-直接 token 会出现在**安装脚本进程的 argv 和可能的 shell 历史**中，这是此便利入口的风险；
-显式使用 `bash -x` 也可能泄漏 token。若要避免这些暴露，请使用下述交互写文件方式，然后传文件路径。
-Windows 安装器仍然仅支持文件模式，不支持直接 token。
-
-Linux/macOS 手动写文件：
-
-```bash
-install -d -m 700 ~/.config/kk-studio
-(umask 077; cat > ~/.config/kk-studio/daemon.token)   # 粘贴 token，按 Ctrl-D 结束
-chmod 600 ~/.config/kk-studio/daemon.token           # 确认没有 group/other 权限位
+```text
+wss://studio.example.com/api/harness/environment-daemon/v1
 ```
 
-`umask 077` 让文件从创建起就是 0600，不会出现短暂可读窗口；用编辑器创建也可以，只要最终权限是 0600。
+主机需要 **JDK 21 与 Bash**。安装器会检查 Java 版本为 21，并要求 Java home 中同时有 `java` 与 `javac`；不是只装一个 JRE。Java home 按 `JAVA_HOME_21` → `JAVA_HOME` → PATH 查找，也可以用安装参数指定。gateway 仅支持 `ws://` / `wss://`；公网使用 `wss://`，每个终止 WebSocket 的代理层都须支持 `permessage-deflate` 压缩。
 
-Windows（PowerShell）：先让父目录 owner-only，再用不计入命令历史的交互输入写入 token，最后收敛文件
-DACL。三步都不可省略，顺序也不能颠倒。
+| 平台 | 额外条件 | 常驻方式 |
+| --- | --- | --- |
+| Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
+| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
+| Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、PATH 上的 `bash.exe` | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
+
+Windows 的 Bash 可来自 Git for Windows 或兼容实现；这是命令工具的解释器要求，并不要求使用 Git 克隆源码。macOS 纯 SSH 会话如果没有桌面登录域，不能安装 LaunchAgent。Linux 若需注销后继续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不会代为开启。
+
+### Linux / macOS
+
+在目标用户的终端复制执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash
+```
+
+默认命令是 `install`。脚本从终端询问 gateway 和 token，**token 输入不回显**；即使脚本来自管道，交互也从 `/dev/tty` 读取。没有交互终端时，须显式给出 gateway 与 token 文件路径。
+
+### Windows
+
+在目标用户的 PowerShell 中下载为临时文件，再用 `powershell -File` 执行；不使用 `iex`：
 
 ```powershell
-# 1) 父目录先收敛：禁用继承、移除继承来的 ACE，只保留当前用户 SID。
-$root = Join-Path $env:USERPROFILE ".config\kk-studio"
-New-Item -ItemType Directory -Path $root -Force | Out-Null
-$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-
-$dirAcl = Get-Acl -LiteralPath $root
-$dirAcl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($dirAcl.Access)) { [void] $dirAcl.RemoveAccessRuleAll($rule) }
-$dirAcl.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
-$dirAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
-  $sid, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"))
-Set-Acl -LiteralPath $root -AclObject $dirAcl
-
-# 2) 用 SecureString 交互输入读取 token：不回显，也不会进入命令历史。
-$tokenPath = Join-Path $root "daemon.token"
-New-Item -ItemType File -Path $tokenPath -Force | Out-Null
-$secure = Read-Host -Prompt "Registration token" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$installer = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-install-" + [Guid]::NewGuid().ToString("N") + ".ps1")
 try {
-  [IO.File]::WriteAllText(
-    $tokenPath,
-    [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr),
-    (New-Object System.Text.UTF8Encoding($false)))
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.ps1" -OutFile $installer
+    powershell -NoProfile -ExecutionPolicy Bypass -File $installer
+    if ($LASTEXITCODE -ne 0) { throw "Daemon install failed: $LASTEXITCODE" }
 } finally {
-  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
 }
-
-# 3) 文件 DACL 收敛：禁用继承，只留当前用户 SID 的 Read/Write，便于后续安全轮换。
-$fileAcl = Get-Acl -LiteralPath $tokenPath
-$fileAcl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($fileAcl.Access)) { [void] $fileAcl.RemoveAccessRuleAll($rule) }
-$fileAcl.SetOwner([System.Security.Principal.SecurityIdentifier]::new($sid))
-$ownerRights = [System.Security.AccessControl.FileSystemRights]::Read -bor `
-  [System.Security.AccessControl.FileSystemRights]::Write
-$fileAcl.AddAccessRule(
-  [System.Security.AccessControl.FileSystemAccessRule]::new(
-    $sid, $ownerRights, "Allow"))
-Set-Acl -LiteralPath $tokenPath -AclObject $fileAcl
 ```
 
-不要把 token 文本误当成文件路径（如 `-RegistrationTokenFile '<token>'`），也不要写入环境变量文件、
-文档或日志。`echo`、`Set-Content -Value` 等明文写法可能留在命令历史中；Unix 直接 token 入口也有
-上述 argv/历史暴露风险，优先使用交互文件模式。
+这段命令为 PowerShell 5.1 的下载启用 TLS 1.2，并避免依赖 IE 的页面解析。安装器同样询问 gateway，通过 `Read-Host -AsSecureString` 隐藏 token 输入。服务任务直接执行 Java，应用参数按 UTF-8 Base64 传输，支持含中文或 emoji 的路径、备注，不必修改系统 code page。Base64 是编码，不是加密。
 
-Token 校验（fail closed）分两处；安装器的**文件模式**只读元数据、不读取内容，
-Unix 直接模式则校验输入文本并写入默认文件，Daemon 在运行时读取文件内容：
+### 安装器会保存什么
 
-- Linux/macOS 安装脚本按 POSIX 元数据校验 `--registration-token-file`：必须是绝对路径、现存普通文件
-  （拒绝符号链接与目录）、非空、属主为当前用户、对属主可读，且不含任何 group/other 权限位
-  （`077` 掩码位全为 0）。
-- Windows 安装脚本按 ACL 校验 `-RegistrationTokenFile`：必须是绝对路径、现存普通文件、不是
-  reparse point、非空、Owner 为当前用户 SID、ACL 继承已禁用（`AreAccessRulesProtected`）、除当前
-  用户 SID 外没有任何 Allow ACE、不含 deny-read ACE，且当前用户 SID 具备读取权限。Windows 没有
-  POSIX 权限位，因此
-  owner-only 由 DACL 表达。
-- Daemon 进程启动时按平台对应的同一组路径规则再校验一次，然后**读取文件内容**（去除外围空白）用于
-  注册。Unix 上会重新检查属主与 group/other 位；Windows 上没有 POSIX 属性视图，Daemon 只读取内容。
-  凭证文本只存在于进程内存与注册报文，不会写入 argv、环境变量、数据目录或日志。
+默认下载 latest 对应的 `kk-studio-daemon-<tag>.jar` 与 `.jar.sha256`，核对摘要，再执行 JAR 的 `--version` 入口预检。发布元数据、LICENSE 与 THIRD_PARTY_NOTICES 可在 [GitHub Releases](https://github.com/fengwk/kk-studio/releases) 获取。安装器只写当前用户的服务定义与 JAR，不安装系统服务、管理命令 wrapper 或环境变量配置文件。
 
-服务定义与 Daemon argv 里只会出现 token 的**文件路径**；安装器不将直接 token 文本传给任何外部
-命令的 argv，也不通过脚本变量 export 到子进程环境，不打印其值。`mvn` 构建
-阶段完全看不到数据面配置。在 Studio 轮换 token 后，只需重写该文件并重启服务：Linux
-`systemctl --user restart kk-studio-daemon.service`，macOS
-`launchctl kickstart -k gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon`，Windows 用
-`Stop-ScheduledTask` 与 `Start-ScheduledTask` 重启该任务。
+| 内容 | Linux / macOS | Windows |
+| --- | --- | --- |
+| JAR | `~/.local/lib/kk-studio/kk-studio-daemon.jar` | `%LOCALAPPDATA%\kk-studio\daemon\kk-studio-daemon.jar` |
+| 交互输入的 token | `~/.config/kk-studio/daemon.token` | `%LOCALAPPDATA%\kk-studio\config\daemon.token` |
+| 默认数据目录 | `~/.kk-studio` | `%USERPROFILE%\.kk-studio` |
 
-## 安装与启动（install）
+Unix token 文件为 0600，新建凭证目录为 0700；现存父目录须由当前用户拥有且不可被 group/other 写入，脚本不会自动修复它们。Windows 新建凭证目录与文件由当前 SID 拥有，禁用 ACL 继承，只允许当前 SID FullControl；已有不安全目录、链接或 reparse point 会被拒绝。token 是磁盘上的明文凭证，隐藏输入不等于加密存储。
 
-Unix（Linux/macOS）单行命令：
+服务定义与 Daemon argv 只保存 token 的**文件路径**，不保存 token 文本。避免把 token 放入命令历史、日志或文档；直接 token 参数虽然可用，但会暴露在安装器 argv 和可能的 shell 历史中，优先交互输入或文件模式。
+
+Daemon 有当前用户的文件与命令权限，**没有文件系统沙箱**。只把 Environment 开放给可信的 Studio 用户和 Agent；`workdir` 是调用目录，不是权限边界，HOME 也不是默认工作目录。
+
+## 验证
+
+安装器默认最多等待 30 秒，再检查运行状态持续保持 3 秒。它验证的是服务或任务存活，**不是 gateway 注册成功**。
+
+| 平台 | 主机侧检查 | 日志 |
+| --- | --- | --- |
+| Linux | `systemctl --user is-active kk-studio-daemon.service` | `journalctl --user -u kk-studio-daemon.service -n 50 --no-pager` |
+| macOS | `launchctl print gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon` | `~/Library/Logs/kk-studio/environment-daemon.stdout.log` 与 `environment-daemon.stderr.log` |
+| Windows | 下文安装器的 `status` 命令，或 Task Scheduler | Task Scheduler **不捕获 stdout/stderr** |
+
+最后必须在 Studio 的 Environment 页面确认 **`READY`**。之后可在 Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment Tools。READY 后 Platform 会异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用，技能引用可退回 Platform Skill URI。
+
+## 一键更新
+
+更新时不必重复填写 gateway、token 或其它配置，也不需要 `git pull`。
+
+Linux / macOS：
 
 ```bash
-git clone https://github.com/fengwk/kk-studio.git
-cd kk-studio
-./scripts/daemon/install.sh install \
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
+```
+
+Windows：
+
+```powershell
+$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$installer = Join-Path ([IO.Path]::GetTempPath()) ("kk-studio-install-" + [Guid]::NewGuid().ToString("N") + ".ps1")
+try {
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.ps1" -OutFile $installer
+    powershell -NoProfile -ExecutionPolicy Bypass -File $installer upgrade
+    if ($LASTEXITCODE -ne 0) { throw "Daemon upgrade failed: $LASTEXITCODE" }
+} finally {
+    Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+}
+```
+
+`upgrade` 要求已有受管安装，默认下载 latest，只替换 JAR 并重启，保留服务定义、token 和数据目录。下载、SHA 校验或 JAR 入口预检失败时，旧 JAR 与旧服务不动；进入替换、重启阶段后的失败返回非零，**不承诺自动回滚**。Windows 的 `install` 会先保存交互 token，因此不要把重新安装与只更新 JAR 的 `upgrade` 混为一谈。
+
+重启会中断在途工具调用；进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。更新后重新确认 Studio `READY`。
+
+需要固定版本时，把实际 release tag 传给 `upgrade --version vX.Y.Z`（Unix）或 `upgrade -Version vX.Y.Z`（Windows）；`install` 也接受该参数。不带版本的下一次更新仍取 latest，pin 不是永久更新策略。
+
+旧版或手工维护的 **legacy unmanaged** unit、plist、同名任务不能自动接管。安装器按服务定义的所有权标记拒绝覆盖或删除；先确认配置、token 与数据位置，手动停止并迁移旧服务，再执行 `install`。不要仅补标记来绕过检查。
+
+## 日常管理
+
+可把脚本保存在用户目录，便于执行 `status`、`uninstall` 或带参数的 `install`。**本地脚本不会自动更新；升级前重新下载，才能拿到新版安装器。**
+
+Linux / macOS：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh -o "$HOME/kk-studio-install.sh"
+bash "$HOME/kk-studio-install.sh" status
+# 需要卸载时执行：
+# bash "$HOME/kk-studio-install.sh" uninstall
+```
+
+Windows：
+
+```powershell
+$ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$installer = Join-Path $env:USERPROFILE "kk-studio-install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.ps1" -OutFile $installer
+powershell -NoProfile -ExecutionPolicy Bypass -File $installer status
+# 需要卸载时执行：
+# powershell -NoProfile -ExecutionPolicy Bypass -File $installer uninstall
+```
+
+`status` 只读，不启动服务。退出码 `0`：Linux active、macOS loaded、Windows Running；`1`：未安装或不是受管安装；`3`：已有受管安装但未达到上述状态。macOS loaded 甚至不保证进程仍存活，三者都不能替代 Studio READY。
+
+### 改配置与轮换 token
+
+`upgrade` 不接收 gateway、LSP 等运行配置。改配置时重新执行 `install`，提供完整配置；使用已有 token 文件可避免再次输入：
+
+```bash
+bash "$HOME/kk-studio-install.sh" install \
   --gateway-uri wss://studio.example.com/api/harness/environment-daemon/v1 \
   --registration-token-file "$HOME/.config/kk-studio/daemon.token"
 ```
 
-Windows 单行命令：
-
 ```powershell
-git clone https://github.com/fengwk/kk-studio.git
-Set-Location kk-studio
-.\scripts\daemon\install.ps1 install `
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\kk-studio-install.ps1" install `
   -GatewayUri wss://studio.example.com/api/harness/environment-daemon/v1 `
-  -RegistrationTokenFile "$env:USERPROFILE\.config\kk-studio\daemon.token"
+  -RegistrationTokenFile "$env:LOCALAPPDATA\kk-studio\config\daemon.token"
 ```
 
-两个脚本的 `--registration-token-file` / `-RegistrationTokenFile` 都必须使用绝对路径。
-Unix 也可将上例最后一项换成 `--registration-token '<token>'`，由脚本写入默认文件，无需提前创建；
-请先了解上文的 argv/历史风险。Daemon 自身 CLI 与 Windows 安装器不接受此直接输入选项。
+Studio 重新生成 token 后，用交互安装重写默认 token，或安全更新原有文件再重启服务。Daemon 每次 HELLO 前读取文件；已被拒绝而退出的进程需要重启。
 
-### 通用安全顺序
+```bash
+# Linux
+systemctl --user restart kk-studio-daemon.service
+# macOS
+launchctl kickstart -k "gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon"
+```
 
-两个 install 子命令都先完成输入、所有权和新产物验证，再进入服务切换：
+```powershell
+$task = "kk-studio-environment-daemon-" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+Stop-ScheduledTask -TaskName $task
+# 确认任务离开 Running/Queued 后再启动
+Get-ScheduledTask -TaskName $task
+Start-ScheduledTask -TaskName $task
+```
 
-1. 校验全部输入：未知/重复选项、控制字符、非 `ws`/`wss` scheme 或缺少 host 的 gateway 地址、
-   非绝对路径（含 HOME 与仓库根）、非十进制非负整数的验证窗口、数据目录与 JDK 路径，以及 token
-   文件的属主与权限（Windows 为 ACL）；Unix 直接模式检查默认目标和父路径安全性。
-   不受支持的操作系统在同一阶段失败。
-2. 校验现有服务定义的所有权：目标位置已有服务定义但不是本脚本生成的，直接拒绝，见下文所有权标记。
-3. 构建并自证产物：`mvn -B -ntp -pl harness/daemon -am clean package`（Windows 用 `mvn.cmd`），
-   然后执行 `java -jar <jar> --version`，要求退出码为 0 且输出以 `kk-studio-daemon ` 开头。脚本传给
-   Maven 的唯一安装配置是 `JAVA_HOME`；gateway、token 路径与 token 文本都不进入 Maven argv 或环境。
-   这条检查只证明入口类与内嵌依赖可加载，**不校验**版本号与当前 checkout revision 是否一致。
-4. 暂存后替换：新产物先暂存到目标同一目录（因此不受跨文件系统改名限制），再替换目标路径。Unix 的
-   JAR 与 unit/plist 都是临时文件 + `mv -f` 原子改名；Windows 的 JAR 用同目录 `Move-Item -Force`
-   覆盖，任务定义则通过 `Register-ScheduledTask -Force` 重新注册。进入替换阶段后的宿主 API、磁盘或
-   启动失败会明确返回非 0 错误并给出定位提示（如 `systemctl --user status`、`launchctl print`），
-   但不承诺自动回滚已完成的服务切换。
-5. 直接 Java 动作：服务定义直接执行绝对路径的 `java`/`java.exe`，没有 cmd/shell wrapper、环境变量
-   文件、注册表项或 `~/.local/bin` 入口；配置只存在于服务定义本身，`mvn` 与令牌文本都不进入其中。
-6. 启动并验证：在最多 30 秒窗口内等待平台报告运行状态，再要求它在随后 3 秒内**持续**保持——一次瞬时
-   的成功状态不足以判定成功。两个窗口分别由 `DAEMON_VERIFY_TIMEOUT_SECONDS`（默认 30）与
-   `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）覆盖，取值必须是十进制非负整数；`0` 表示只做一次立即
-   检查、不要求稳定窗口。
+### 卸载与数据保留
 
-Unix 直接模式在上述输入、JDK、服务所有权、构建、JAR 校验以及 macOS plist lint 全部通过后才发布
-token：在目标同目录用 `mktemp` 与 `umask 077` 创建 0600 文件，使用 Bash builtin `printf` 写入，
-再原子改名，退出时清理未发布的暂存文件。Linux 在发布 JAR/unit 之前写入 token；macOS 在 lint
-之后、bootout 之前写入，保证启动时凭证已就位。未知参数、互斥输入、未管理服务或构建失败不会改旧
-token，也不会新建默认凭证文件。进入发布阶段后的磁盘或服务切换失败不承诺回滚 token。
+`uninstall` 停止服务、删除受管服务定义和 JAR，**保留 token 文件与整个数据目录**；macOS 日志和 Linux journal 历史也不主动清理。Windows 计划任务不是 Windows Service，重启设置仅为尽力而为，不能提供 systemd 等价的守护与日志语义。
 
-编译、产物校验与（macOS）plist lint 都发生在停掉现有服务之前，因此构建失败不会卸下或改写正在运行的
-安装。第 6 步只证明进程仍在运行，不代表 gateway 注册成功：注册与可用性以 Studio 的 `READY` 为准。
+数据目录持有 `daemon.lock`，同一目录只允许一个 Daemon。`resources/text` 保存命令与检索的大文本全文，模型历史可能仍引用其绝对路径，不会自动删除；`skills` 保存已安装包，`skill-work` 保存 Git 缓存及安装中间产物。启动清理遗留资源 `.part`，技能安装器恢复或清理 staging/backup，但保留发布后的全文与技能。彻底删除前先评估历史引用，并手动清理 token、数据和日志；卸载本身不会抹掉这些数据。
 
-### 所有权标记
+## 可选 LSP
 
-三个平台都以脚本写出的精确标记判断服务定义是否属于自己；缺失时一律拒绝覆盖或删除，避免接管人工维护
-的配置：
+**LSP client 已在 Daemon JAR 中**，不需要额外安装客户端。外部语言服务器及其运行依赖由你安装；Daemon 不负责下载或升级它们。没有 `--lsp-config` / `-LspConfig` 时，LSP 查询不可用，但文件、命令、检索仍可使用。
 
-- Linux：unit 文件首行必须是 `# Managed by scripts/daemon/install.sh`；
-- macOS：plist 第 2 行必须是 `<!-- Managed by scripts/daemon/install.sh -->`；
-- Windows：任务 `Description` 必须精确等于
-  `Managed by scripts/daemon/install.ps1; schema=1; ownerSid=<当前用户 SID>`。
+例如已安装 Node/npm 的开发主机可先安装 TypeScript 服务器：
 
-### Linux 执行流程
+```bash
+npm install -g typescript typescript-language-server
+```
 
-1. 预检 `systemctl --user` 与已存在的 unit 所有权，然后按通用顺序构建与校验产物。
-2. 安装 JAR 到 `$HOME/.local/lib/kk-studio/kk-studio-daemon.jar`（0644，同文件系统临时文件原子覆盖）。
-3. 写 unit 到 `$HOME/.config/systemd/user/kk-studio-daemon.service`（0644，临时文件 + `mv -f` 原子
-   替换）。`ExecStart` 中的每个参数都会被引号包裹，并转义反斜杠、双引号、`%` 与 `$`，避免 systemd
-   的变量展开与说明符二次解释。unit 固定了 `Restart=on-failure`、`RestartSec=10`、
-   `TimeoutStopSec=30`、`KillMode=mixed`、`UMask=0077`、`NoNewPrivileges=yes`、
-   `Wants=network-online.target`/`After=network-online.target`、
-   `StartLimitIntervalSec=300`/`StartLimitBurst=5` 与 `WantedBy=default.target`。
-4. 执行 `systemctl --user daemon-reload`、`systemctl --user enable kk-studio-daemon.service`、
-   `systemctl --user restart kk-studio-daemon.service`，然后等到服务 `active` 并在稳定窗口内持续
-   `active`。
-5. 若需要用户注销登录后守护进程仍保持常驻运行，需由系统管理员开启 linger（脚本不代为开启）：
-
-   ```bash
-   sudo loginctl enable-linger "$USER"
-   ```
-
-### macOS 执行流程
-
-1. 预检 `gui/$(id -u)` launchd 域与已存在的 plist 所有权。
-2. 构建并校验产物，同时生成 plist 临时文件并先过 `plutil -lint`；非法 XML 不会替换已有受管 plist。
-3. 若已有受管 plist，先执行 `launchctl bootout gui/<uid>/fun.fengwk.kkstudio.environment-daemon`，
-   并在验证窗口内轮询 `launchctl print` 直到它变为 unloaded——bootout 返回后任务仍可能短暂 loaded，
-   在真正卸载前不会替换 plist 或再次 bootstrap。该步骤在 JAR 发布之前完成。
-4. 发布 JAR，原子改名替换 plist，然后 `launchctl bootstrap gui/<uid> <plist>`；启动成功只由进程存活性
-   证明：用 `launchctl kickstart -p` 取得 PID，并在稳定窗口内用 `kill -0` 持续确认该 PID 存活。
-5. plist 键固定：`Label`、`ProgramArguments`（绝对路径的 java、同一个 JAR 与全部参数，逐项 XML 转义）、
-   `RunAtLoad=true`（登录即启动）、`KeepAlive={SuccessfulExit=false}`（非成功退出才重启）、
-   `ThrottleInterval=10`、`Umask=63`（八进制 077）、`WorkingDirectory=$HOME`、
-   `StandardOutPath`/`StandardErrorPath` 指向 `~/Library/Logs/kk-studio/`。plist 直接执行绝对路径
-   的 java，不经过 shell，也不读取环境变量。
-
-### Windows 执行流程
-
-1. 预检宿主与工具链：`$env:OS` 必须是 `Windows_NT`，ScheduledTasks 命令必须齐全，并解析当前用户
-   SID、用户 profile 与 `%LOCALAPPDATA%`；缺少任一命令或路径立即失败。
-2. 校验 gateway URI、token 文件 ACL、数据目录、JDK 21、`bash.exe` 与 `--lsp-config` 指向的配置文件，
-   并检查已存在任务的所有权标记。
-3. 构建并校验产物，然后把 JAR 暂存到 `%LOCALAPPDATA%\kk-studio\daemon` 下的临时文件。
-4. 任务定义：
-   - 动作直接执行 `java.exe`（绝对路径，无 wrapper、无重定向、不经过 cmd.exe 或 PowerShell runner），
-     WorkingDirectory 是安装目录（InstallRoot，即 `%LOCALAPPDATA%\kk-studio\daemon`），
-     `-jar` 使用固定 ASCII 相对名 `kk-studio-daemon.jar`；应用参数以首位 `--base64-args`
-     加逐 token UTF-8 Base64 传输，避免 Windows JDK 21 的 ANSI argv 转换丢失中文或 emoji。
-     工作目录与 Java 绝对路径通过任务的 Unicode 字段传递，不进入参数命令行；
-   - 触发器是当前用户 SID 的 `AtLogOn`；principal 为 `Interactive` 登录类型与 `Limited` 运行级别，
-     即只在该用户交互登录期间运行，且不提权；
-   - 设置为 `ExecutionTimeLimit=0`（无运行时限）、`AllowStartIfOnBatteries`、
-     `DontStopIfGoingOnBatteries`、`MultipleInstances=IgnoreNew`，以及 `RestartCount=3` 与
-     `RestartInterval=1 分钟`。这些重启设置是**尽力而为**的，不等价于 systemd 的守护与重启语义。
-5. 若已有任务处于 `Running`/`Queued`，先停止并等待它离开这两个状态，之后才替换 JAR；再用
-   `Register-ScheduledTask -Force` 重新注册任务，随后启动任务并等到 `Running` 且在稳定窗口内持续
-   `Running`。
-
-Task Scheduler 不捕获 Daemon 的 stdout/stderr：Windows 上没有 journal，也没有日志文件，诊断要靠前台
-运行复现或 Studio 侧状态。
-
-### 可选安装参数
-
-除 Unix 直接 token 入口外，两个脚本的参数一一对应，语义相同；所有取值都不能包含控制字符或换行：
-
-| Unix 选项 | Windows 参数 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `--gateway-uri` | `-GatewayUri` | 无（必填） | Studio Environment WebSocket gateway 地址，仅支持 `ws://` 或 `wss://` |
-| `--registration-token-file` | `-RegistrationTokenFile` | 无 | registration token 的绝对文件路径；Unix 与直接 token 恰好二选一，Windows 必填。属主必须是当前用户且仅该用户可读（Unix 0600 / Windows 仅当前 SID 的 Allow ACE） |
-| `--registration-token` | 不支持 | 写入 `$HOME/.config/kk-studio/daemon.token` | Unix 安装器直接输入，拒绝空值及空白；与文件选项互斥，存在调用者 argv/历史暴露风险 |
-| `--java-home` | `-JavaHome` | 自动解析 | 指定绝对 JDK 21 home（须含可执行的 `bin/java`、`bin/javac`）；默认顺序为 `JAVA_HOME_21` → `JAVA_HOME` → PATH |
-| `--data-dir` | `-DataDir` | `$HOME/.kk-studio`（Windows 为 `%USERPROFILE%\.kk-studio`） | 指定本地数据目录绝对路径 |
-| `--note` | `-Note` | 无 | 单行可信备注文本（不超过 512 字符，两端无空格），进入受信任模型 SYSTEM Prompt。只能由可信操作者设置，禁止包含凭证或秘密 |
-| `--bash-executable` | `-BashExecutable` | 自动解析 | `process.exec` 使用的 bash 可执行文件路径；Windows 默认解析 PATH 上的 `bash.exe` |
-| `--lsp-config` | `-LspConfig` | 缺省禁用 | LSP 配置文件的绝对路径；文件声明预先安装在目标主机的外部语言服务器（命令、扩展名与项目根标记），未提供时禁用 LSP 查询能力 |
-
-`upgrade`、`status`、`uninstall` 不接受任何安装参数；Windows 只把显式给出的 `-Note`、
-`-LspConfig` 等写进任务定义。Unix 的 `install --help` 只在它是 `install` 的完整参数列表时打印
-用法；Windows 的 `-Help`（`install -Help` 也接受）不与任何安装参数混用。其它组合按未知选项失败，
-避免帮助掩盖无效命令。
-
-### LSP 配置文件（`--lsp-config`）
-
-`--lsp-config` 只接受绝对路径。安装脚本只校验它是存在且可读的普通文件、再把该路径透传给 Daemon，
-不解析、不复制、不打印它的内容；Daemon 在解析 CLI 时一次性读出并校验，文件缺失、结构非法、取值越界
-或没有声明任何服务器都使启动失败，不做兼容回退，也不安装服务器。
+将下面的有效 JSON 保存为 UTF-8 文件，例如 Unix 的 `$HOME/.config/kk-studio/lsp.json`，或 Windows 的 `%LOCALAPPDATA%\kk-studio\config\lsp.json`：
 
 ```json
 {
   "servers": {
     "typescript": {
       "command": ["typescript-language-server", "--stdio"],
-      "extensions": [".ts", ".tsx"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx"],
       "rootMarkers": ["tsconfig.json"],
       "firstMatchMarkers": ["package.json"]
-    },
-    "jdtls": {
-      "command": ["/opt/jdtls/bin/jdtls"],
-      "extensions": [".java"],
-      "rootMarkers": ["pom.xml", "build.gradle"],
-      "firstMatchMarkers": ["build.xml"]
     }
   }
 }
 ```
 
-- `command` 是可执行文件与参数的完整命令，必须能在目标主机上直接执行；语言服务器需要预先安装，
-  Daemon 不做安装、升级或版本管理。
-- `extensions` 决定哪些文件由该服务器处理，必须是带前导点的后缀，比较时大小写不敏感。
-- `rootMarkers` 与 `firstMatchMarkers` 是项目根标记：文件所在目录到宿主根之间最靠上的
-  `rootMarkers` 命中优先，其次是最靠近文件的 `firstMatchMarkers` 命中，都没有才回退到文件所在目录。
-  `.git`（目录或文件）是扫描上界，标记查找不会越过它，因此嵌套 worktree 不会复用主仓的构建标记。
-- 服务器进程的工作目录就是发现到的项目根；`workdir` 只用于解析调用里的相对路径。
-- `jdtls` 由可执行文件基名识别，并额外获得 `java/classFileContents`：`jdt://` 目标直接取源码；
-  非 jdtls 服务器上的 `jdt://` 目标明确失败。
-
-改动配置后重新执行 `./scripts/daemon/install.sh install` 让服务定义带上新的路径；前台调试时直接给
-Daemon 传同一个选项即可。
-
-## 查看状态与日志（status）
-
-Linux：
-
-```bash
-./scripts/daemon/install.sh status
-```
-
-以非交互模式输出 `systemctl --user status kk-studio-daemon.service` 与 journal 末尾 20 行内容，退出码：
-`0` 服务 `active`；`1` 没有受管安装（无 unit，或存在不带受管标记的人工 unit，此时只报错不查询）；
-`3` 受管服务已安装但未 `active`。也可以直接用 systemd 原生命令：
-
-```bash
-systemctl --user is-active kk-studio-daemon.service
-journalctl --user -u kk-studio-daemon.service -n 50 --no-pager
-journalctl --user -u kk-studio-daemon.service -f
-```
-
-macOS：
-
-```bash
-./scripts/daemon/install.sh status
-```
-
-输出 `launchctl print gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon` 与
-`~/Library/Logs/kk-studio/` 下两个日志文件的末尾 20 行；只读，不会 kickstart 拉起服务。退出码：
-`0` launchd 已加载；`1` 没有受管安装；`3` 已安装但未加载。这里的 `0` 只表示服务已被 launchd 加载，
-不代表注册成功或健康。
-
-Windows：
+`command` 是程序与参数数组，不是 shell 命令字符串。它必须能在**服务进程**中解析；服务 PATH 可能不同于交互终端，推荐将首元素换为本机可执行程序的绝对路径。Windows 若使用 npm 的 `.cmd` 入口，最稳妥的是直接配置 Node 的绝对路径和已安装服务器的 JS 入口。可先安装到明确目录（需要该目录的写权限）：
 
 ```powershell
-.\scripts\daemon\install.ps1 status
+npm install --prefix C:\tools\lsp typescript typescript-language-server
 ```
 
-只读地输出任务的 `TaskName`、`State`、`Description` 与 `LastRunTime`、`LastTaskResult`、`NextRunTime`，
-不会启动任务。退出码：`0` 任务 `Running`；`1` 未安装，或任务不属于本脚本（只报错，不报告为受管安装）；
-`3` 已安装但未 `Running`。Task Scheduler 不捕获 stdout/stderr，`Running` 只表示任务进程存在，不等于
-gateway 健康。
+再使用以下 JSON；Node 不在默认位置时修改首元素：
 
-## 升级服务（upgrade）
+```json
+{
+  "servers": {
+    "typescript": {
+      "command": ["C:/Program Files/nodejs/node.exe", "C:/tools/lsp/node_modules/typescript-language-server/lib/cli.mjs", "--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx"],
+      "rootMarkers": ["tsconfig.json"],
+      "firstMatchMarkers": ["package.json"]
+    }
+  }
+}
+```
 
-当本仓库代码更新或切换 revision 后，直接在 checkout 目录执行 `upgrade`：
+用完整 `install` 命令把配置路径写入服务定义：
 
 ```bash
-git pull
-./scripts/daemon/install.sh upgrade
+bash "$HOME/kk-studio-install.sh" install \
+  --gateway-uri wss://studio.example.com/api/harness/environment-daemon/v1 \
+  --registration-token-file "$HOME/.config/kk-studio/daemon.token" \
+  --lsp-config "$HOME/.config/kk-studio/lsp.json"
 ```
 
 ```powershell
-git pull
-.\scripts\daemon\install.ps1 upgrade
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\kk-studio-install.ps1" install `
+  -GatewayUri wss://studio.example.com/api/harness/environment-daemon/v1 `
+  -RegistrationTokenFile "$env:LOCALAPPDATA\kk-studio\config\daemon.token" `
+  -LspConfig "$env:LOCALAPPDATA\kk-studio\config\lsp.json"
 ```
 
-`upgrade` 契约：
+配置文件路径必须绝对，不接受字面的 `~` 或环境变量占位符。安装器只检查文件存在、可读并透传路径；Daemon 在启动时解析 JSON，未知字段、空服务器表或非法条目会导致启动失败。更改同一文件内容后重启即可；更改路径则重新 install。
 
-- 要求已存在带受管标记的服务定义，且不接受任何配置参数；
-- 直接复用服务定义中已记录的完整配置（gateway、token 文件路径、note 等），无需重复输入；
-- 基于当前 checkout 重新构建 shaded JAR 并校验 `--version`；
-- 只替换 `~/.local/lib/kk-studio/kk-studio-daemon.jar` /
-  `%LOCALAPPDATA%\kk-studio\daemon\kk-studio-daemon.jar`，不改写服务定义（Windows 任务定义也不变）；
-- 平台重启方式：Linux `systemctl --user daemon-reload` + `restart`；macOS 用
-  `launchctl kickstart -k` 先停再起，让已加载的服务重新执行新 JAR；Windows 先停止任务、替换 JAR，再
-  启动任务；重启后都按同一窗口规则验证运行状态；
-- 重启会中断正在执行的工具调用（内存 Invocation journal 不跨进程保留），已落盘的数据和命令日志保持
-  完好。
+`extensions` 必须带前导点，匹配不区分大小写，同一后缀由先声明的服务器负责。项目根从目标文件向上查找：优先最靠上的 `rootMarkers` 命中，其次最近的 `firstMatchMarkers`，否则用文件父目录；不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动，调用 `workdir` 只解析相对文件路径。
 
-## 卸载服务（uninstall）
+Java 可声明 `command: ["/opt/jdtls/bin/jdtls"]`、`extensions: [".java"]`、`rootMarkers: ["pom.xml", "build.gradle"]`。程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。客户端连接按项目复用，调用超时或取消只取消请求，不杀掉其它调用共享的服务器。
+
+## 参数与排错
+
+安装器的完整用法由 [Unix 脚本](../../scripts/daemon/install.sh) 的 `--help` 和 [Windows 脚本](../../scripts/daemon/install.ps1) 的 `-Help` 提供：
+
+| Unix | Windows | 用途 |
+| --- | --- | --- |
+| `--version <vTAG>` | `-Version <vTAG>` | install/upgrade 固定发布版本，tag 匹配 `^v[0-9A-Za-z._-]+$` |
+| `--gateway-uri` | `-GatewayUri` | install 的 gateway；省略则交互询问 |
+| `--registration-token-file` | `-RegistrationTokenFile` | 现存非空、owner-only 普通文件的绝对路径，与直接 token 互斥 |
+| `--registration-token` | `-RegistrationToken` | 写入默认 token 文件；优先隐藏交互输入，避免 argv/历史暴露 |
+| `--java-home` | `-JavaHome` | 指定 JDK 21 home 的绝对路径 |
+| `--data-dir` | `-DataDir` | 数据目录绝对路径，默认用户 HOME 下 `.kk-studio` |
+| `--bash-executable` | `-BashExecutable` | 命令执行的 Bash；Windows 推荐明确指向 Git Bash，而不是 WSL 的 `System32\bash.exe` |
+| `--note` | `-Note` | 最多 512 字符、单行、无周边空白的可信备注；进入模型 SYSTEM Prompt，不放凭证或不可信文本 |
+| `--lsp-config` | `-LspConfig` | 外部语言服务器配置文件的绝对路径 |
+| `--from-source` | `-FromSource` | **仅供开发者**：从本地 checkout 用 Maven 构建，不可与版本 pin 混用 |
+
+只有源码模式需要仓库与 Maven（Windows 为 `mvn.cmd`）；从 checkout 执行脚本，或通过 `KK_STUDIO_REPO_ROOT` 指向 checkout。`status` / `uninstall` 不接收安装或发布物参数。
+
+手工 token 文件在 Unix 上须属于当前用户、无 group/other 权限位、属主可读且不是符号链接。Windows 须由当前 SID 拥有、禁用 ACL 继承、无其它 SID 的 Allow ACE、无 deny-read ACE 且当前 SID 可读，不能是 reparse point。安装器文件模式只校验元数据，不读内容；Daemon 启动时检查普通文件与 POSIX 权限，在每次 HELLO 前读 UTF-8 内容并去外围空白；Daemon 自身不复核 Windows DACL，因此不要绕过安装器的 ACL 校验。
+
+`DAEMON_VERIFY_TIMEOUT_SECONDS`（默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖验证窗口，均须十进制非负整数；0 表示立即检查，不等待对应窗口。
+
+| 现象 | 处理 |
+| --- | --- |
+| Java 版本或 home 预检失败 | 指定真正的 JDK 21 home，检查 `bin/java` 与 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
+| GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验。upgrade 仍保留旧服务 |
+| `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 手动迁移旧服务，不伪造所有权标记；Linux 标记是 unit 首行，macOS 是 plist 第二行，Windows 是精确任务 Description |
+| token 父目录权限失败 | Unix 确认共享需求后去掉 group/other 写权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存目录，不自动放宽规则 |
+| `environment registration is rejected` | 从目标 Environment 重新复制 token，安全更新文件并重启 |
+| WebSocket close code 1010 | 所有终止 WebSocket 的代理层启用 `permessage-deflate` |
+| 数据目录已占用 | 停止冲突进程，或给第二个 Daemon 独立 `--data-dir`；不要删锁文件来绕过独占锁 |
+| `systemctl --user` 不可用 | 确认用户登录实例，不在无用户 systemd 的容器中使用受管安装 |
+| macOS GUI 域不可用或 bootout 失败 | 登录桌面，用 `launchctl print` 检查旧 label；卸载完成之前不要覆盖旧 plist |
+| Windows 缺 ScheduledTasks 或 `bash.exe` | 使用完整 Windows PowerShell 会话，安装兼容 Bash，必要时传 `-BashExecutable` 绝对路径 |
+| Windows 执行策略阻止脚本 | 按上文 `powershell -ExecutionPolicy Bypass -File` 执行；组织策略仍可能限制运行 |
+| 服务存活但未 READY | 核对 gateway、token、网络和压缩；Linux 看 journal，macOS 看日志，Windows 用前台复现 |
+| LSP 显示未安装或查询失败 | 检查服务可见的程序路径、服务器依赖与项目根；read header 的 supported 只证明配置/程序发现，不证明服务器能初始化 |
+
+### 前台诊断
+
+先停止受管服务，避免数据锁冲突，再用相同 gateway、token 文件与数据目录启动 JAR，输出直接写控制台；`Ctrl-C` 结束，不提供常驻守护。Unix 示例：
 
 ```bash
-./scripts/daemon/install.sh uninstall
-```
-
-```powershell
-.\scripts\daemon\install.ps1 uninstall
-```
-
-`uninstall` 契约：
-
-- 要求平台服务管理器可用，且已存在的服务定义带受管标记（人工维护的配置一律拒绝删除）；
-- Linux：`systemctl --user disable --now kk-studio-daemon.service` 停止并禁用服务，失败时立即中止；
-  随后只删除受管 unit 与已安装 JAR，执行 `daemon-reload` 与 `reset-failed`；
-- macOS：若服务已加载先 `launchctl bootout`（失败则什么都不删，仍在运行的进程必须继续能找到自己的
-  JAR 与 plist）；随后只删除 plist 与已安装 JAR；
-- Windows：若任务处于 `Running`/`Queued` 先停止并等待其离开该状态，然后取消注册任务并删除 JAR；
-- 保留数据：registration token 文件与数据目录（默认 `$HOME/.kk-studio`，Windows 为
-  `%USERPROFILE%\.kk-studio`）被显式保留；macOS 还会保留
-  `~/Library/Logs/kk-studio/environment-daemon.{stdout,stderr}.log`，Linux 的 journal 历史留在
-  journal 中；Windows 安装器没有创建 stdout/stderr 日志文件；
-- 如需彻底清理历史数据，可手动删除数据目录与 token 文件：
-
-  ```bash
-  rm -f ~/.config/kk-studio/daemon.token
-  rm -rf ~/.kk-studio
-  ```
-
-## 数据目录布局
-
-默认数据目录为 `$HOME/.kk-studio`（Windows 为 `%USERPROFILE%\.kk-studio`），可用 `--data-dir` /
-`-DataDir` 指定为其它绝对路径。目录、锁文件、暂存文件与原文日志在支持 POSIX 的文件系统上收敛为
-owner-only（目录 0700、文件 0600；Linux unit 同时设置 `UMask=0077`，macOS plist 设置 `Umask=63`）；
-Windows 没有 POSIX 权限位，Daemon 退回使用 owner-only 的 ACL 视图。同一目录同一时间只允许一个
-Daemon 进程持有独占锁，第二个进程以明确错误退出。
-
-```text
-~/.kk-studio/
-  daemon.lock                          # 进程独占文件锁
-  resources/
-    text/<invocation>-<unique>.log     # 命令输出 durable 全文
-    staging/<name>.part                # 上传中转暂存，启动时清理遗留文件
-  skills/<package>/                    # 已安装的 Skill Package
-  skill-work/
-    cache/<package>.git                # 每个 Package 的 bare Git 缓存
-    staging/<package>.<uuid>/          # 安装暂存，启动时清空
-    backup/<package>.<uuid>/           # 原子替换前的备份，启动时回滚或清理
-```
-
-`resources/text` 下的全文日志是 durable 事实（模型历史可能仍引用其绝对路径），Daemon 不会自动
-删除，由运维按本地保留策略清理。启动清理只涉及未发布的中间产物：`resources/staging` 的遗留
-`*.part`、`skill-work/staging` 的全部内容，以及 `skill-work/backup` 中可回滚到 `skills/` 的备份；
-`skill-work/cache` 会保留以复用 Git 对象，仅当 Package 的 origin URL 不再匹配时整份丢弃重建。
-卸载服务时整个数据目录完整保留。
-
-## 验证 READY 与能力使用
-
-安装并启动后，按平台检查进程存活，再以 Studio 为准判定就绪：
-
-- Linux：`systemctl --user is-active kk-studio-daemon.service` 输出 `active`，且
-  `journalctl --user -u kk-studio-daemon.service -n 50 --no-pager` 中没有注册失败报错。
-- macOS：`./scripts/daemon/install.sh status` 退出码为 `0`，且 `~/Library/Logs/kk-studio/` 下两个日志
-  尾部没有注册失败报错。
-- Windows：`.\scripts\daemon\install.ps1 status` 退出码为 `0`（任务 `Running`）；Task Scheduler 不提供
-  stdout/stderr，注册失败只能从 Studio 侧状态或前台运行观察到。
-
-无论哪个平台，最终都必须确认 Studio 的 Environment 页面把该 Environment 显示为 `READY`：主机侧
-服务管理器状态（`active`、launchd `loaded`、任务 `Running`）只说明进程存在，单独不足以判定就绪。
-
-状态转为 `READY` 后：
-
-- 可在 Chat 对话分支中选择该 Environment，并为 Agent 配置需要的 Environment Tools；
-- Platform 会在 READY 后异步把当前已发布的 Skill Package 同步到 Daemon；若同步遇到异常，不影响
-  其它 Environment 命令与文件能力，Agent 会退回使用 Platform Skill URI。
-
-## 前台调试（非常驻）
-
-排查临时问题时，可以用已编译或已安装的 JAR 直接在前台运行：
-
-```bash
-/path/to/jdk-21/bin/java -jar "$HOME/.local/lib/kk-studio/kk-studio-daemon.jar" \
+"$JAVA_HOME_21/bin/java" -jar "$HOME/.local/lib/kk-studio/kk-studio-daemon.jar" \
   --gateway-uri wss://studio.example.com/api/harness/environment-daemon/v1 \
   --registration-token-file "$HOME/.config/kk-studio/daemon.token"
 ```
 
+Windows 使用机器启动入口保留 Unicode：
+
 ```powershell
-& "$env:JAVA_HOME_21\bin\java.exe" -jar `
-  "$env:LOCALAPPDATA\kk-studio\daemon\kk-studio-daemon.jar" `
-  --gateway-uri wss://studio.example.com/api/harness/environment-daemon/v1 `
-  --registration-token-file "$env:USERPROFILE\.config\kk-studio\daemon.token"
+$daemonArgs = @("--gateway-uri", "wss://studio.example.com/api/harness/environment-daemon/v1",
+    "--registration-token-file", "$env:LOCALAPPDATA\kk-studio\config\daemon.token")
+$encoded = @($daemonArgs | ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) })
+Push-Location "$env:LOCALAPPDATA\kk-studio\daemon"
+try { & "$env:JAVA_HOME_21\bin\java.exe" -jar kk-studio-daemon.jar --base64-args @encoded }
+finally { Pop-Location }
 ```
 
-前台运行时 `Ctrl-C` 直接终止进程，输出直接写在当前控制台。前台启动不具备任何平台的自动重启、资源
-约束与登录守护，仅用于临时开发或调试，不得作为常驻方案。
+以上假定 `JAVA_HOME_21` 已设置；否则替换为实际 JDK 21 路径。Daemon 自身 CLI 与安装器不同：只接收 `--registration-token-file`，不接受 token 文本；`--version` 是单独的信息命令，不是 release pin。自身还接受 `--heartbeat`（默认 `PT15S`）、`--reconnect-initial`（`PT1S`）与 `--reconnect-max`（`PT30S`），使用 ISO-8601 duration；心跳与最大退避须正数，初始退避非负且不超过最大值。工具执行超时由调用方提供，不是 Daemon 安装配置。
 
-普通 CLI 不变；机器启动入口是在首位传入 `--base64-args`，其后每个 token 是一个原始应用参数
-的 UTF-8 Base64，解码一次后仍按相同 CLI 规则校验。Base64 只是编码，不是加密，不能用来隐藏
-凭证。Windows 安装器及构建产物预检自动使用此入口；手工启动含系统 ANSI 字符集无法表示的
-字符时也需使用该传输方式，并以 JAR 父目录为工作目录、用 ASCII 相对 JAR 名启动。
-
-## 发布物获取（可移植替代方式）
-
-针对无法在宿主安装 Maven 或克隆源码的特殊环境，官方在 [GitHub Releases](https://github.com/fengwk/kk-studio/releases)
-提供预构建资产：
-
-| 文件 | 用途 |
-| --- | --- |
-| `kk-studio-daemon-<tag>.jar` | 可执行 Daemon shaded JAR |
-| `kk-studio-daemon-<tag>.jar.sha256` | JAR 的 SHA-256 校验文件 |
-| `kk-studio-daemon-<tag>.json` | 确定性发布元数据（tag、commit、`minimumJava=21`、artifact 摘要） |
-| `LICENSE` | Apache License 2.0 |
-| `THIRD_PARTY_NOTICES` | 第三方组件来源与许可 |
-
-校验并放置发布物示例：
-
-```bash
-RELEASE_TAG=vX.Y.Z                   # 替换为实际 release tag
-BASE="https://github.com/fengwk/kk-studio/releases/download/${RELEASE_TAG}"
-cd /tmp
-curl -fLO "$BASE/kk-studio-daemon-${RELEASE_TAG}.jar"
-curl -fLO "$BASE/kk-studio-daemon-${RELEASE_TAG}.jar.sha256"
-sha256sum -c "kk-studio-daemon-${RELEASE_TAG}.jar.sha256"
-mkdir -p ~/.local/lib/kk-studio
-install -m 644 "kk-studio-daemon-${RELEASE_TAG}.jar" ~/.local/lib/kk-studio/kk-studio-daemon.jar
-```
-
-发布物只提供预构建 JAR 与元数据的便携获取手段，不作为安装途径：常驻安装一律由平台对应的源码
-checkout 脚本管理（Unix 用 `scripts/daemon/install.sh`，Windows 用 `scripts/daemon/install.ps1`）。
-本仓库不提供手工编写 unit/plist、注册计划任务或外部 wrapper 的配置。
-
-## 常见问题
-
-| 现象 | 处理 |
-| --- | --- |
-| 启动/安装即失败，提示 token 文件必须是绝对路径、普通文件或 owner-only | Unix：`--registration-token-file` 必须是绝对路径下的现存普通文件（非符号链接），属主为当前用户且没有 group/other 权限位（用 `chmod 600` 修正）。Windows：`-RegistrationTokenFile` 必须是绝对路径、非 reparse point、Owner 为当前用户 SID、继承已禁用、除当前用户 SID 外无 Allow ACE；按上文 PowerShell 步骤重新收敛 DACL |
-| Windows 提示 `ACL inheritance must be disabled`、`must not grant access to another SID` 或 `must not be a reparse point` | 文件仍带有继承或其它 SID 的 Allow ACE（或本身是链接）；重做「写入 registration token」中父目录与文件两级 DACL 设置，不要用创建后不收敛权限的写文件方式 |
-| 非零退出，stderr 或日志提示 `environment registration is rejected` | token 已轮换、已撤销或与目标 Environment 不匹配；在 Studio 重新复制 token 并更新 token 文件内容，然后重启服务 |
-| 报 `UnsupportedClassVersionError` 或提示需要 JDK 21 | 当前使用的 java 版本低于 21；安装 JDK 21 并通过 `--java-home`/`-JavaHome` 或 `JAVA_HOME_21`/`JAVA_HOME` 指定 |
-| 连接反复断开，日志出现 WebSocket close code 1010 | Daemon 与 Gateway 之间的反向代理未开启 `permessage-deflate` 扩展；在每个终止 WebSocket 的代理层启用压缩 |
-| 启动报数据目录已被占用 | 同一数据目录下已有其它 Daemon 进程持有 `daemon.lock`；停止冲突进程或通过 `--data-dir`/`-DataDir` 指定独立路径 |
-| 提示 `systemctl --user is unavailable or unusable` | 当前宿主缺少可用的用户级 systemd 实例；检查是否处于非登录终端或无 systemd 的容器中，必要时改用前台调试 |
-| 提示 `launchctl GUI domain gui/<uid> is unavailable` | 当前会话没有图形登录域（例如纯 SSH）；在 macOS 桌面登录会话中重新执行安装 |
-| 提示 `cannot bootout` 或 `is still loaded after bootout` | 旧 LaunchAgent 未能在验证窗口内卸载，已有配置未被替换；先用 `launchctl print`/`launchctl bootout` 处理该 label 后重试 |
-| 提示 `generated LaunchAgent plist failed validation` | 生成的 plist 未通过 `plutil -lint`；已有受管 plist 未被替换，检查键取值后重试 |
-| `upgrade`/`status`/`uninstall` 提示 `refusing to touch unmanaged unit` 或 `refusing to touch unmanaged plist` | 服务定义缺少脚本写入的受管标记，说明它是人工编写或非脚本生成；先手工迁移或删除，再通过 install 脚本管理 |
-| Windows 提示 `refusing to touch unmanaged Scheduled Task` | 同名任务的 Description 不是脚本的精确所有权标记；删除或改名该任务后重跑 install |
-| Windows 提示 `required ScheduledTasks command is unavailable` | 当前 PowerShell 会话缺少 ScheduledTasks 模块；改用完整 Windows PowerShell 5.1/PowerShell 7 会话执行 |
-| Windows 提示 `cannot resolve bash.exe` | 未安装 Git for Windows 或兼容 Bash；安装后重试，或用 `-BashExecutable` 指定绝对路径 |
-| Windows 报禁止运行脚本（`running scripts is disabled on this system`） | 执行策略阻止脚本运行；用 `powershell -ExecutionPolicy Bypass -File .\scripts\daemon\install.ps1 ...` 运行，或在策略允许的会话中执行 |
-| Windows 提示 `scripts/daemon/install.ps1 supports Windows only` 或 `cannot locate the kk-studio repository root` | 脚本只在 Windows 上运行；仓库根解析失败时设置 `KK_STUDIO_REPO_ROOT` 指向 checkout |
-| Windows 任务 `Running` 但 Studio 未显示 `READY`，且看不到日志 | Task Scheduler 不捕获 stdout/stderr；用同一组参数前台运行复现，或从 Studio 侧查看注册与连接状态 |
-| Studio 页面始终显示离线，未转入 `READY` | 先确认 gateway 地址与 token；Linux 用 `journalctl --user -u kk-studio-daemon.service -n 50 --no-pager`，macOS 看 `~/Library/Logs/kk-studio/` 下两个日志，Windows 用前台运行查看控制台输出 |
-
-## CLI 选项
-
-以下为 Daemon 进程自身接受的完整命令行选项（与安装平台无关）：
-
-| 选项 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `--gateway-uri` | 是 | — | gateway 地址，仅接受 `ws`/`wss`，路径为 `/api/harness/environment-daemon/v1` |
-| `--registration-token-file` | 是 | — | registration token 的绝对文件路径，只能出现一次 |
-| `--heartbeat` | 否 | `PT15S` | 心跳间隔 |
-| `--reconnect-initial` | 否 | `PT1S` | 首次重连退避 |
-| `--reconnect-max` | 否 | `PT30S` | 最大重连退避 |
-| `--note` | 否 | 无 | 进入 READY 的可信备注，单行且不超过 512 字符，用于模型 SYSTEM Prompt |
-| `--data-dir` | 否 | `~/.kk-studio` | 本地数据目录，显式给出时必须绝对 |
-| `--bash-executable` | 否 | `bash` | `process.exec` 使用的 shell 路径 |
-| `--lsp-config` | 否 | 缺省禁用 | LSP 配置文件的绝对路径，未配置时 LSP 相关能力返回不可用 |
-| `--help`、`-h` | 否 | — | 作为唯一参数时打印用法并退出 |
-| `--version` | 否 | — | 作为唯一参数时打印版本并退出 |
-
-时间参数使用 ISO-8601 duration 文本，重连参数要求非负且首次退避不超过最大退避。未知参数一律
-启动失败，不做兼容回退；能力执行超时不属于 Daemon 配置，它由 Tool definition 的默认值与每次调用的
-显式 arguments 共同决定。
-
----
-
-上级：[系统设计](../system-design.md)。相关文档：[Harness Daemon 模块](../modules/harness-daemon.md)、[部署与运行](deployment.md)、[开发与测试](development-and-testing.md)。
+上级：[系统设计](../system-design.md)。协议与执行实现：[Harness Daemon](../modules/harness-daemon.md)、[Harness Environment](../modules/harness-environment.md)、[Harness Environment Server](../modules/harness-environment-server.md)。容器内运行见[部署与运行](deployment.md)，开发验证见[开发与测试](development-and-testing.md)。
