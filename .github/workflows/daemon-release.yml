@@ -27,6 +27,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NODE_VERSION: '24.14.0'
+  POSTGRES_VERSION: '17'
   # 暂存产物的唯一来源；工作流的资产校验与上传都只读这个目录。
   RELEASE_DIR: harness/daemon/target/release
 
@@ -125,6 +126,32 @@ jobs:
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
+      - name: Set up PostgreSQL client tools
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --retry 3 \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            "Suites: ${VERSION_CODENAME}-pgdg" \
+            "Architectures: $(dpkg --print-architecture)" \
+            'Components: main' \
+            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+            | sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
+          echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
+      - name: Verify PostgreSQL client selection
+        run: |
+          set -euo pipefail
+          for tool in psql pg_dump pg_restore createdb pg_isready; do
+            test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"
+            "${tool}" --version
+          done
       - name: Run repository script tests
         run: |
           set -euo pipefail
