@@ -24,7 +24,7 @@ docker compose -f deploy/local/compose.yaml up -d --build --wait
 `--wait` 会等到 PostgreSQL 与 MinIO 的 `healthcheck` 变为 `healthy`、一次性的
 `minio-init` 成功退出（`app` 以 `service_completed_successfully` 等待它），以及 `app` 的
 `curl http://127.0.0.1:8080/actuator/health` 通过。构建在容器内执行
-`mvn -Pdistribution -pl web -am -DskipTests clean package`，React 产物嵌入
+`mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package`，React 产物嵌入
 `BOOT-INF/classes/static`，因此本机不需要安装 JDK、Maven 或 npm。
 
 验证并打开界面：
@@ -94,8 +94,11 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下用 Flyway 执行
 [V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
 [R__dev_seed.sql](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql)，已执行版本
-记录在 `flyway_schema_history`。数据保存在命名卷 `kk-studio-postgres`，MinIO 数据保存在
-`kk-studio-minio`。`dev`/`e2e`/`canvas-test` 的 profile 与 seed 对应关系见
+记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres` 与 `kk-studio-minio`；
+默认 project `kk-studio-local` 下的 Docker 卷名分别为
+`kk-studio-local_kk-studio-postgres` 与 `kk-studio-local_kk-studio-minio`。
+普通启动与 `down` 都保留已有卷；启动不会重建健康的 PostgreSQL 或清空 S3 对象。
+`dev`/`e2e`/`canvas-test` 的 profile 与 seed 对应关系见
 [Schema 模块](../../docs/modules/schema.md)，生产 profile 见[部署与运行](../../docs/operations/deployment.md)。
 
 ## 停止与清理
@@ -104,11 +107,13 @@ PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下�
 # 停止：删除容器与宿主端口映射，保留 PostgreSQL 与 MinIO 命名卷
 docker compose -f deploy/local/compose.yaml down
 
-# 彻底清理：额外删除命名卷，回到空数据库与空 bucket；下次启动重新执行 Flyway
+# 仅在确认本栈全部数据可丢弃后：删除 PostgreSQL 和 MinIO 两个命名卷
 docker compose -f deploy/local/compose.yaml down -v
 ```
 
-`down -v` 不可恢复。确认没有残留监听：
+`down -v` 没有额外确认提示，会同时删除数据库与对象存储数据；没有独立备份就无法恢复。
+它不是升级或连接排错的默认步骤。下次启动从空数据重新执行 Flyway 与 bucket 初始化。
+确认没有残留监听：
 
 ```bash
 docker compose -f deploy/local/compose.yaml ps -a
@@ -122,7 +127,7 @@ ss -ltnp | grep -E ':8080|:5432|:9000' || true
 | `--wait` 超时，`app` 一直 unhealthy | 先看 `docker compose -f deploy/local/compose.yaml logs app postgres`；确认 PostgreSQL health 通过后再看 `/actuator/health` |
 | 宿主端口被占用 | 用 `KK_STUDIO_APP_PORT` / `KK_STUDIO_PG_PORT` / `KK_STUDIO_S3_PORT` 改映射，避免影响其它栈 |
 | 浏览器里图片或附件加载失败 | 检查 `KK_STUDIO_S3_PUBLIC_HOST` 是否可从浏览器访问，预签名 URL 使用该主机名 |
-| 改过 `KK_STUDIO_PG_*` 后连接失败 | 命名卷里已有旧数据库；`docker compose -f deploy/local/compose.yaml down -v` 后按新值重新初始化 |
+| 改过 PostgreSQL 配置后连接失败 | 先看 `ps` 与 `logs postgres app`。`KK_STUDIO_PG_HOST/PORT` 仅改宿主映射；`DATABASE/USER/PASSWORD` 是空卷初始化值，不会修改已有数据库。先恢复匹配旧卷的连接配置；确需改库名、角色或密码时，由数据所有者按 PostgreSQL 管理流程处理，不用 `down -v` 排错 |
 | 需要真实 Provider 的 E2E | 不在本栈执行；从宿主运行 `./scripts/dev/verify/e2e/run.sh --real`，见[开发与测试](../../docs/operations/development-and-testing.md) |
 
 隔离的 Canvas/Storage 测试栈见 [deploy/test](../test/README.md)。

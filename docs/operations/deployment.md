@@ -31,6 +31,10 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 `spring-boot-maven-plugin` 写入 `BOOT-INF/classes/static`。普通 `mvn test` / `mvn package`
 不激活该 profile。
 
+`clean package` 会重建 reactor 的构建产物；提取脚本写入指定输出目录、更新稳定别名，
+并删除同目录中其他版本的 `convention4j-agent-*.jar`，不要将输出目录指向需要保留多个版本的安装目录。
+运行 JAR 会连接配置的数据面并按 profile 初始化，先确认数据库、S3、Flyway owner 与 worker 的归属。
+
 可选 Plugin 是构建期依赖，不从运行目录动态发现。把对应 artifact 以 runtime scope 加入
 [`web/pom.xml`](../../web/pom.xml) 后，上面的 `-pl web -am` 会构建并把它写入 Fat JAR；
 移除 dependency 并重新构建后，该 Plugin 的管理端口、调度任务和模型工具都不存在。
@@ -42,7 +46,7 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 验证静态资源已进入产物：
 
 ```bash
-jar tf web/target/kk-studio-web-1.0.0.jar \
+"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.0.jar \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -70,9 +74,9 @@ runtime image。构建时从 Fat JAR 提取同版本 `convention4j-agent`，保�
 `Boot-Class-Path` 要求的版本化文件名并通过稳定别名启动 JVM；它负责线程池中的 TTL/MDC
 上下文透传，不替代跨服务的 Trace 传播。runtime image 不含 Maven、Node 和源码。
 
-App 依赖 PostgreSQL 与 MinIO `healthy`，并等待一次性的 `minio-init` 成功退出
+Compose 栈中的 App 依赖 PostgreSQL 与 MinIO `healthy`，并等待一次性的 `minio-init` 成功退出
 （`service_completed_successfully`）后才启动；启动期严格验证 S3 连接属性并探测 bucket 可访问性。
-`minio-init` 创建私有 bucket 后立即以 0 退出，没有 `healthcheck`，因此它不能作为 `service_healthy`
+`minio-init` 幂等创建私有 bucket，不清空已有对象；完成后以 0 退出，没有 `healthcheck`，因此它不能作为 `service_healthy`
 的目标。Storage 与 Canvas 是常驻服务，没有 disabled 503 状态。用生产 profile
 运行时必须提供外部 durable 服务：
 
@@ -80,17 +84,21 @@ App 依赖 PostgreSQL 与 MinIO `healthy`，并等待一次性的 `minio-init` �
 docker build -f deploy/local/Dockerfile -t kk-studio-app:production .
 docker run -d --name kk-studio-app -p 127.0.0.1:8080:8080 \
   -e SPRING_PROFILES_ACTIVE=prod \
-  -e KK_STUDIO_DB_URL=jdbc:postgresql://<pg-host>:5432/<database> \
-  -e KK_STUDIO_DB_USER=<user> -e KK_STUDIO_DB_PASSWORD=<password> \
-  -e KK_STUDIO_STORAGE_S3_ENDPOINT=http://<s3-host>:9000 \
-  -e KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=https://<browser-reachable-s3-origin> \
-  -e KK_STUDIO_STORAGE_S3_REGION=<region> \
-  -e KK_STUDIO_STORAGE_S3_BUCKET=<bucket> \
-  -e KK_STUDIO_STORAGE_S3_ACCESS_KEY=<access-key> \
-  -e KK_STUDIO_STORAGE_S3_SECRET_KEY=<secret-key> \
+  -e 'KK_STUDIO_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>' \
+  -e 'KK_STUDIO_DB_USER=<user>' -e 'KK_STUDIO_DB_PASSWORD=<password>' \
+  -e 'KK_STUDIO_STORAGE_S3_ENDPOINT=http://<s3-host>:9000' \
+  -e 'KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=https://<browser-reachable-s3-origin>' \
+  -e 'KK_STUDIO_STORAGE_S3_REGION=<region>' \
+  -e 'KK_STUDIO_STORAGE_S3_BUCKET=<bucket>' \
+  -e 'KK_STUDIO_STORAGE_S3_ACCESS_KEY=<access-key>' \
+  -e 'KK_STUDIO_STORAGE_S3_SECRET_KEY=<secret-key>' \
   kk-studio-app:production
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
+
+上面只展示键名与占位值，不可原样运行；真实部署用 owner-only 环境文件或编排 secret 注入，
+不要把真实密码直接写进 shell 历史或可见的命令参数。独立 `docker run` 没有 Compose 的等待链，
+PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而不是重建数据面。
 
 - `KK_STUDIO_STORAGE_S3_ENDPOINT` 是服务端读写地址；`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 是
   返回给浏览器的预签名直传/直下地址，必须是浏览器可访问的 origin，服务端 `PUT`/`GET`/
@@ -104,7 +112,8 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 ### 已执行旧 V1 的数据库
 
-Flyway V1 已随 Project/Issue、Harness Goal 与证据模型整体重写；在重写前初始化的**旧库不能直接运行新镜像**。
+先确认数据库记录的 V1 与待部署镜像是否兼容。健康且兼容的 PostgreSQL/S3 默认继续复用，
+更新镜像本身不要求重建数据面。若既有 V1 与当前 schema/checksum 不兼容，**旧库不能直接运行新镜像**。
 Flyway 校验失败不是可跳过的升级步骤：不得修改 `flyway_schema_history`、使用 `repair` 伪造
 checksum，或直接在有数据的旧库上重放 V1。源码合入 `dev` 也不等于批准生产数据库重建。
 
@@ -112,11 +121,14 @@ checksum，或直接在有数据的旧库上重放 V1。源码合入 `dev` 也�
 [共享数据库重建](development-and-testing.md#共享数据库重建)执行：先停止所有旧 App/Worker 和
 Daemon，等待在途调用收敛；从**与新部署相同的提交**对旧库只读执行 Catalog 导出 `--dry-run`
 和正式导出（仅当三张表列结构仍符合检查器契约时），再对旧库执行 `reset-database.sh --dry-run`。
-确认离线备份的存放位置、恢复权限和数据范围后，才在维护窗口执行 reset：脚本会生成完整备份、
+确认离线备份的存放位置、恢复权限和数据范围后，才在维护窗口执行 reset。
+脚本默认要求输入目标库名确认，无输入或不匹配就退出；`--yes` 跳过这道闸门，只能用于已明确授权的自动化，
+不代表获得了数据删除许可。确认后脚本会生成完整备份、
 冻结原库并创建同名空库；由唯一 Flyway owner 在空库执行新 V1，再回灌三张 Catalog 表，重建
-Environment/Daemon 注册，并用新镜像及独立 S3 bucket 验证健康与关键业务操作。旧 Project、
+Environment/Daemon 注册，并用新镜像及运维方指定的既有 S3 bucket 验证健康与关键业务操作。旧 Project、
 Issue、Chat、Harness、Blob 引用与历史设置**只保存在冻结快照/完整备份，不导入新库**；
-存储对象本身不由数据库 reset 删除，不得在确认快照保留策略前清理旧 bucket。
+存储对象本身不由数据库 reset 删除；脚本不要求新建或重建 bucket，应用只探测配置的 bucket 是否可访问。
+旧对象仍须按冻结快照/备份的恢复要求保留，不得把“新库没有引用”当作删除对象的授权。
 
 如导出预检不接受旧 Catalog 结构、生产依赖保留旧会话历史、备份不可验证或缺少可恢复的停机窗口，
 则**停止部署**，保持旧镜像/旧库运行；不可用不受支持的兼容别名或静默丢弃数据绕过预检。
@@ -164,6 +176,8 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。bucke
 
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
 [deploy/test/README.md](../../deploy/test/README.md)。
+其中基础设施检查可独立运行；`--with-app` 当前仍使用旧 Canvas version/command 契约，
+与现行 revision 契约不符，不能用该模式声称应用 smoke 已通过。
 
 ### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 
@@ -239,9 +253,9 @@ Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，
 
 - Daemon uid 不是 root；
 - mount 只有 `volume -> /workspace` 且可写、没有 bind mount；
-- JDK/Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
+- `java`/`javap`、Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
 - workspace 可写、Environment `READY`；
-- Compose config 不含 provider credential。
+- Compose config 不含 provider credential 或 bind mount。
 
 向 Daemon named volume 写入跨仓基线是独立的显式操作，必须给出 clean Git worktree：
 
@@ -272,7 +286,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
-| 显式 Seedance prepare-only | 外部 Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
+| 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
 Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
 Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也只在启动期读取。
@@ -307,20 +321,26 @@ Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network：
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和
 `KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 与
 [scripts/dev/verify/performance/run.sh](../../scripts/dev/verify/performance/run.sh) 会从宿主 proxy 变量生成 build 参数，
-loopback proxy 使用 host build network。proxy 不进入 App/Daemon runtime image，也不作为运行时
+离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
+loopback proxy。proxy 不进入 App/Daemon runtime image，也不作为运行时
 业务配置。
 
 ## 清理
 
+先使用保留数据的停止命令。带 `-v` / `--volumes` 的命令没有额外确认提示，只能在确认对应栈
+全部数据可丢弃后执行；不能用来修复生产认证、Flyway 校验或健康 S3 的连接问题。
+
 ```bash
-# local：保留或删除 PostgreSQL 与 MinIO 数据
+# local：停止并保留数据；第二条额外删除 PostgreSQL 与 MinIO 数据
 docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
 
-# test：删除容器、网络和 PostgreSQL/MinIO volumes
+# test：停止并保留数据；第二条额外删除 PostgreSQL/MinIO volumes
+docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 
-# distributed：删除双节点栈的容器、网络和 PostgreSQL/MinIO/daemon workspace volumes
+# distributed：停止并保留数据；第二条删除 PG/MinIO/daemon workspace volumes
+./scripts/dev/verify/e2e/distributed.sh down
 ./scripts/dev/verify/e2e/distributed.sh down --volumes
 
 # reliability：保留或删除 PostgreSQL/MinIO/workspace named volumes
@@ -332,7 +352,8 @@ ss -ltnp | grep -E ':8080|:5432|:9000|:15432|:15433|:18082|:18083|:18088|:18089|
 ```
 
 `down` 保留 named volume，`down -v` / `--volumes` 删除它并让下次启动重新执行 Flyway 与
-bucket 初始化。清理命令只作用于对应 Compose project，不影响其它 project 的容器、network 或
+bucket 初始化。离线 smoke、性能入口及 E2E `--distributed` 会自动删除各自测试栈的数据，
+执行前也必须确认同名 project 是可丢弃环境。清理命令只作用于对应 Compose project，不影响其它 project 的容器、network 或
 volume。任何 app、database、MinIO、mock、Daemon `READY` 或 smoke 失败都应保留诊断并进入失败
 路径，而不是把未验证的服务交给上层脚本。
 
@@ -355,20 +376,20 @@ tag 不同：
 
 | 分支 | 可变 tag | 用途 |
 | --- | --- | --- |
-| `dev` | `<namespace>/kk-studio:dev` | 自迭代：仓库门禁在提交前完成，push 后直接发布 |
+| `dev` | `<namespace>/kk-studio:dev` | 自迭代：push 后直接发布，不自动执行完整仓库门禁，需调用方另行验证 |
 | `main` | `<namespace>/kk-studio:main` | 用户使用的稳定版本：通过完整仓库门禁后发布 |
 
-NAS 上只运行一个 App 容器 `vps-kk-studio`，以 `prod` profile 常驻：它既是共享数据库唯一的
-Flyway owner，也是唯一的 Harness worker，Thread/Model/Tool 的异步执行都发生在这里。迭代手段
+本拓扑要求外部 NAS Compose 只运行一个 App 容器 `vps-kk-studio`，以 `prod` profile 常驻：
+它承担共享数据库唯一的 Flyway owner 与 Harness worker，Thread/Model/Tool 的异步执行都发生在这里。
+容器数量与 Gateway 域名由外部部署管理，本仓脚本不校验 NAS 的实际拓扑。迭代手段
 是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
 或 `gh` 配置。
 
-`prod` profile 的应用日志写入容器内 `/app/logs/kk-studio-all.log`，不写到 Docker 控制台。
-NAS Compose 将 `/app/logs` 绑定到宿主 `${DOCKER_VOLUMNS_DIR_SSD}/vps-kk-studio/logs`；
-宿主目录首次由 NAS `.vpsrc` 初始化给镜像用户 UID/GID `10001`，目录权限 `0700`。
-首次增加挂载前若要保留旧容器内的日志，应在替换容器之前另行复制；新挂载不会自动迁移旧文件。
-`docker logs` 中只有 JVM 或启动横幅不代表没有应用错误。排查异步 Work 时可用
-`docker exec vps-kk-studio sh -c 'tail -n 100 /app/logs/kk-studio-all.log'` 查看，并在分享前脱敏。
+镜像创建了 UID/GID `10001` 可写的 `/app/logs`，日志配置由 Platform 引入的 convention4j
+Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
+控制台只有 JVM 或启动横幅不代表没有应用错误。若日志写文件，按运行配置定位文件，再读取并脱敏。
+需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限，
+宿主权限按部署策略收紧；首次挂载不会自动迁移旧容器里的文件，需在替换前另行保存。
 共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
 不应挂成跨容器重启保留的数据卷。使用加密 Plugin 凭据时另需持久化的主密钥文件，并以只读方式挂入
 容器、设置 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`；文件内容必须是恰好 32 bytes 的原始 AES-256
@@ -386,9 +407,8 @@ NAS Compose 将 `/app/logs` 绑定到宿主 `${DOCKER_VOLUMNS_DIR_SSD}/vps-kk-st
 `127.0.0.1:18080`，Vite/HMR 默认监听 `127.0.0.1:5173`；配置文件的权限要求、键白名单与失败
 边界见[开发与测试](development-and-testing.md#本机-preview-的外部数据面)。
 
-Environment Daemon 不属于 NAS App 容器：需要主机能力时，规范路径是在目标主机 clone 源码并通过平台
-对应的安装脚本常驻（Linux/macOS 用 [scripts/daemon/install.sh](../../scripts/daemon/install.sh)，
-Windows 用 [scripts/daemon/install.ps1](../../scripts/daemon/install.ps1)），并连接 NAS App 的
+Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机按
+[Environment Daemon 安装与运行](environment-daemon.md)安装常驻服务，并连接 NAS App 的
 gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制、注册 token 文件、
 升级与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
@@ -396,8 +416,10 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制
 
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送
 `main` 时先执行全仓 Java/Frontend/脚本/文档/敏感数据门禁，再构建并发布
-`<namespace>/kk-studio:main`；推送 `dev` 时依赖提交前检查，跳过这组重复的全仓门禁，直接构建并
-发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。两者都附带 commit SHA tag、
+`<namespace>/kk-studio:main`；推送 `dev` 时不执行这组全仓门禁，直接构建并
+发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。需只验收不发布时可显式使用
+`workflow_dispatch` 的 `validate_only=true`，操作见[CI 验证](development-and-testing.md#ci-验证与镜像发布)。
+两者都附带 commit SHA tag、
 `linux/amd64` 平台和 Buildx GHA cache。这个 tag 标识构建所用的源码提交，不是可按提交重现的
 镜像摘要：基础镜像按 tag 解析，运行阶段执行 `apt-get upgrade`，因此同一次提交在不同日期构建
 可能得到不同镜像。Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
