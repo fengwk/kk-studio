@@ -83,10 +83,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -142,11 +144,15 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   private ScheduledExecutorService fixturePollScheduler;
   private HarnessWorkDispatcher fixtureDispatcher;
   private final AtomicInteger providerRequests = new AtomicInteger();
+  private final List<JsonNode> capturedProviderBodies = new CopyOnWriteArrayList<>();
+  private volatile boolean includeReasoning;
 
   @BeforeEach
   void setUpProvider() throws IOException {
     s3Storage.clear();
     providerRequests.set(0);
+    capturedProviderBodies.clear();
+    includeReasoning = false;
     storage = new ChatIntegrationSupport(storageUploadService, s3Storage, jdbc);
     startProviderServer();
     pointStubProviderAtLocalServer();
@@ -254,6 +260,155 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         preview.getBodyJson(),
         new String(durableBody, StandardCharsets.UTF_8),
         "预览体必须与 durable 发送路径的请求体逐字节一致");
+  }
+
+  /**
+   * 测试意图：真实 adapter 将普通 reasoning_content 持久化后，同一连接/模型只改变当前 system prompt 不应阻断预览或正式发送，也不得丢弃任一轮
+   * reasoning。闭合 turn 必须明确 COMPLETED，不能把失败后的静止误当成功。
+   */
+  @Test
+  void previewPreservesAllPlainReasoningAfterCurrentSystemPromptChanges() throws Exception {
+    includeReasoning = true;
+    String previousPrompt = "Today is 2026-10-01. Answer briefly.";
+    String currentPrompt = "Today is 2026-10-02. Answer briefly.";
+    updateSystemPrompt(previousPrompt);
+    Fixture fixture = fixtureWithCompletedTurn();
+    assertCompletedTurns(fixture, 1);
+    assertEquals(1, providerRequests.get());
+    assertTrue(
+        capturedProviderBodies
+            .getFirst()
+            .path("messages")
+            .get(0)
+            .path("content")
+            .asText()
+            .startsWith(previousPrompt),
+        "历史 turn 必须实际使用变更前的 system prompt");
+
+    acceptanceService.accept(
+        fixture.owner(),
+        new AcceptCommandsCommand(
+            fixture.threadTarget(),
+            draftCommands(userMessage(List.of(new TextMessageContent("second history message"))))));
+    drainUntilQuiescent(fixture.threadId());
+    assertCompletedTurns(fixture, 2);
+    assertEquals(2, providerRequests.get(), "两轮历史都必须实际经过本地 transport");
+    assertAssistantReasoning(capturedProviderBodies.get(1), List.of(cannedReasoning(1)));
+    assertEquals(
+        2,
+        jdbc.queryForObject(
+            "select count(*) from harness_entry where session_id = ? and entry_type = 'MESSAGE'"
+                + " and payload->'message'->>'role' = 'ASSISTANT'"
+                + " and provider_replay_state is not null",
+            Integer.class,
+            fixture.sessionId()),
+        "两轮 reasoning 历史都必须由真实 adapter 持久化 replay state");
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(fixture.threadId());
+    fixture =
+        new Fixture(
+            fixture.owner(),
+            fixture.sessionId(),
+            fixture.threadId(),
+            snapshot.entryPath().head().id(),
+            snapshot.thread().nextCommandSequence(),
+            fixture.resourceBlobId(),
+            fixture.providerBaseUrl());
+
+    // 只修改 Testcontainers 专用数据库中的 agent 定义，不更换 provider generation 或模型。
+    updateSystemPrompt(currentPrompt);
+    String uploadId =
+        storage.completeUpload(
+            "reasoning-draft.txt", "reasoning draft attachment".getBytes(StandardCharsets.UTF_8));
+    UUID blobId =
+        jdbc.queryForObject(
+            "select blob_id from storage_upload where id = ?",
+            UUID.class,
+            UUID.fromString(uploadId));
+    long refsBefore = blobRefCount(blobId);
+    AcceptCommandsCommand draft =
+        new AcceptCommandsCommand(
+            fixture.threadTarget(),
+            draftCommands(
+                userMessage(
+                    List.of(
+                        new TextMessageContent("third message after date change"),
+                        new AttachmentMessageContent(UUID.fromString(uploadId))))));
+    Map<String, Object> before = durableState(fixture, uploadId);
+    int requestsBefore = providerRequests.get();
+    HarnessProviderRequestPreviewDTO preview =
+        previewService.preview(fixture.threadId(), fixture.owner(), draft);
+
+    assertEquals(before, durableState(fixture, uploadId), "预览不得写入 durable 状态或消费 upload");
+    assertEquals(refsBefore, blobRefCount(blobId), "预览不得 retain 草稿附件");
+    assertEquals(requestsBefore, providerRequests.get(), "预览不得触发 transport");
+    JsonNode previewBody = objectMapper.readTree(preview.getBodyJson());
+    assertAssistantReasoning(previewBody, List.of(cannedReasoning(1), cannedReasoning(2)));
+    assertEquals("system", previewBody.path("messages").get(0).path("role").asText());
+    // 生产 prompt composer 还会附加环境/工具说明，因此检查 agent prompt 前缀而非整个复合 prompt。
+    assertTrue(
+        previewBody.path("messages").get(0).path("content").asText().startsWith(currentPrompt));
+    assertTrue(!preview.getBodyJson().contains(previousPrompt), "旧 system prompt 不得覆盖当前配置");
+    assertEquals("acceptance-stub", preview.getModelName());
+
+    byte[] durableBody =
+        encodeDurableSendBody(
+            fixture,
+            draft,
+            List.of(
+                new TextMessageContent("third message after date change"),
+                ResourceMessageContent.media(blobId, "reasoning-draft.txt")));
+    assertEquals(preview.getBodyJson(), new String(durableBody, StandardCharsets.UTF_8));
+    assertEquals(requestsBefore, providerRequests.get(), "只读 durable 规划与编码不得发送请求");
+
+    // 正式执行刚接受的同一草稿，验证生产 Processor 没有静默关闭为 FAILED。
+    drainUntilQuiescent(fixture.threadId());
+    assertCompletedTurns(fixture, 3);
+    assertEquals(requestsBefore + 1, providerRequests.get());
+    JsonNode wireBody = capturedProviderBodies.getLast();
+    assertEquals(previewBody, wireBody, "实际 transport 必须发送与预览相同的完整请求");
+    assertAssistantReasoning(wireBody, List.of(cannedReasoning(1), cannedReasoning(2)));
+  }
+
+  private void updateSystemPrompt(String prompt) {
+    assertEquals(
+        1,
+        jdbc.update(
+            "update agent_definition set system_prompt = ? where name = 'default-assistant'",
+            prompt));
+  }
+
+  private void assertCompletedTurns(Fixture fixture, int expected) {
+    assertEquals(
+        expected,
+        jdbc.queryForObject(
+            "select count(*) from harness_entry where session_id = ? and entry_type = 'TURN_END'",
+            Integer.class,
+            fixture.sessionId()));
+    assertEquals(
+        expected,
+        jdbc.queryForObject(
+            "select count(*) from harness_entry where session_id = ? and entry_type = 'TURN_END'"
+                + " and payload->>'outcome' = 'COMPLETED'",
+            Integer.class,
+            fixture.sessionId()),
+        "所有 turn 必须是 COMPLETED，而非失败后 quiescent");
+  }
+
+  private void assertAssistantReasoning(JsonNode body, List<String> expected) {
+    List<String> actual = new ArrayList<>();
+    for (JsonNode message : body.path("messages")) {
+      if ("assistant".equals(message.path("role").asText())) {
+        assertEquals(CANNED_ASSISTANT_TEXT, message.path("content").asText());
+        assertTrue(
+            message.path("reasoning_content").isTextual(), "每轮 assistant 必须保留普通文本 reasoning");
+        actual.add(message.path("reasoning_content").asText());
+      }
+    }
+    assertEquals(expected, actual, "全部 assistant reasoning 必须按历史顺序逐字保留");
+  }
+
+  private static String cannedReasoning(int turn) {
+    return "plain reasoning for turn " + turn + "\n检查日期并保留完整思考。";
   }
 
   /** 未 READY（PENDING）的 upload 必须 409 拒绝，且该 upload 行不得被消费、改写或删除。 */
@@ -605,13 +760,18 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     providerServer.createContext(
         "/chat/completions",
         exchange -> {
-          providerRequests.incrementAndGet();
+          int turn = providerRequests.incrementAndGet();
           try {
-            exchange.getRequestBody().readAllBytes();
+            capturedProviderBodies.add(objectMapper.readTree(exchange.getRequestBody()));
+            Map<String, String> delta = new LinkedHashMap<>();
+            delta.put("content", CANNED_ASSISTANT_TEXT);
+            if (includeReasoning) {
+              delta.put("reasoning_content", cannedReasoning(turn));
+            }
             byte[] body =
-                ("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
-                        + CANNED_ASSISTANT_TEXT
-                        + "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,"
+                ("data: {\"choices\":[{\"index\":0,\"delta\":"
+                        + objectMapper.writeValueAsString(delta)
+                        + ",\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,"
                         + "\"completion_tokens\":4,\"total_tokens\":16}}\n\n"
                         + "data: [DONE]\n\n")
                     .getBytes(StandardCharsets.UTF_8);
