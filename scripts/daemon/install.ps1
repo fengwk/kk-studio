@@ -117,6 +117,9 @@ Managed layout:
 Windows host semantics:
   The task uses an AtLogOn trigger, Interactive logon, and Limited run level.
   It runs only while that user has an interactive login.
+  It runs with its working directory at the managed install root, so the JAR is
+  named by its ASCII file name and every application argument is passed as one
+  Base64 token that only the daemon decodes.
   Task Scheduler does not capture daemon stdout/stderr.
   RestartCount/RestartInterval are best effort settings; this is not Windows
   Service/systemd supervision.
@@ -411,12 +414,17 @@ function Invoke-NativeProcess {
         [Parameter(Mandatory = $true)]
         [AllowEmptyCollection()]
         [AllowEmptyString()]
-        [string[]] $Arguments
+        [string[]] $Arguments,
+        [AllowEmptyString()][string] $WorkingDirectory
     )
     # Native stderr is data, not a PowerShell error record (notably on PS 5.1).
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $Executable
     $startInfo.Arguments = ConvertTo-WindowsCommandLine -Arguments $Arguments
+    if (-not [string]::IsNullOrEmpty($WorkingDirectory)) {
+        # Set natively, so a non-ASCII or spaced directory never enters a command line.
+        $startInfo.WorkingDirectory = $WorkingDirectory
+    }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
@@ -588,9 +596,16 @@ function Assert-BuiltJar {
         (Get-Item -LiteralPath $script:BuiltJar).Length -le 0) {
         Throw-Failure "built daemon JAR not found or empty: $($script:BuiltJar)"
     }
+    # Probe the JAR exactly as the task runs it: ASCII leaf resolved against a working
+    # directory, so a non-ASCII checkout path can never corrupt the -jar argument.
+    $jarDirectory = Split-Path -Parent $script:BuiltJar
+    $jarFileName = Split-Path -Leaf $script:BuiltJar
+    $arguments = @("-jar", $jarFileName) +
+        (ConvertTo-DaemonEncodedArguments -Arguments @("--version"))
     $result = Invoke-WithoutJavaOptionEnvironment {
         Invoke-NativeProcess -Executable $script:SelectedJava `
-            -Arguments @("-jar", $script:BuiltJar, "--version")
+            -Arguments $arguments `
+            -WorkingDirectory $jarDirectory
     }
     if ($result.ExitCode -ne 0) {
         Throw-Failure "built daemon JAR failed its --version check (exit code $($result.ExitCode))"
@@ -679,10 +694,24 @@ function ConvertTo-WindowsCommandLine {
     return ($serialized -join " ")
 }
 
+function ConvertTo-DaemonEncodedArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowEmptyString()]
+        [string[]] $Arguments
+    )
+    # Windows JDK 21 converts the Unicode command line through the system ANSI code page,
+    # losing characters before Java sees argv. Each application value therefore travels as
+    # an ASCII UTF-8 Base64 token, decoded once by the daemon (encoding, not encryption).
+    $encoded = foreach ($argument in $Arguments) {
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argument))
+    }
+    return @("--base64-args") + $encoded
+}
+
 function New-DaemonArgumentList {
     $arguments = @(
-        "-jar",
-        $script:InstalledJar,
         "--gateway-uri",
         $GatewayUri,
         "--registration-token-file",
@@ -697,7 +726,10 @@ function New-DaemonArgumentList {
     if ($script:InvocationParameters.ContainsKey("LspConfig")) {
         $arguments += @("--lsp-config", $script:ResolvedLspConfig)
     }
-    return $arguments
+    # The task runs with its working directory at InstallRoot, so the JAR is referenced by
+    # its fixed ASCII file name and the absolute install path never enters the command line.
+    return @("-jar", "kk-studio-daemon.jar") +
+        (ConvertTo-DaemonEncodedArguments -Arguments $arguments)
 }
 
 function New-DaemonScheduledTaskDefinition {
@@ -842,7 +874,7 @@ function Invoke-Install {
     $definition = New-DaemonScheduledTaskDefinition `
         -JavaExecutable $script:SelectedJava `
         -DaemonArguments (New-DaemonArgumentList) `
-        -WorkingDirectory $script:HomePath `
+        -WorkingDirectory $script:InstallRoot `
         -UserSid $script:CurrentSid `
         -Description $script:TaskDescription
 

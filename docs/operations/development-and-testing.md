@@ -115,6 +115,13 @@ pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_w
 捕获 stdout/stderr，以真实退出码判断执行成功；`java -version` 在 stderr 上输出是正常行为，
 JAR 的身份校验仍只接受 stdout。回归包含非零退出、双流大输出和 Java 选项环境变量恢复。
 
+参数保真回归使用安装器的真实应用参数 serializer，经 `java -jar probe.jar` 进入生产
+`DaemonArguments.decode`（夹具直接编译生产源码），逐 token 检查中文、emoji、空参数、
+引号与尾随反斜杠；stdout 使用 Base64，避免断言通道本身的编码干扰。夹具工作目录包含
+中文与空格，编译、打包和运行只传相对 ASCII 路径，匹配生产任务的启动方式。
+通用 Windows 命令行 quoting 仍有独立的未编码 ASCII 原生回归与 golden 测试。
+任务对象断言检查安装目录 WorkingDirectory、相对 JAR 名与编码参数，不注册真实任务。
+
 只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
 Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植

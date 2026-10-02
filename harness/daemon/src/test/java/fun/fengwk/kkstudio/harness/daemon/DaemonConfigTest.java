@@ -108,6 +108,33 @@ class DaemonConfigTest {
     assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
   }
 
+  /** 意图：传输解码后中文路径和 emoji note 按普通 CLI 构造真实配置，不增加任何配置来源。 */
+  @Test
+  void readsDecodedUnicodeArguments(@TempDir Path root) throws Exception {
+    Path token = ownerOnlyTokenFile(root.resolve("中文凭证"), TOKEN_TEXT);
+    Path data = root.resolve("中文数据 😀");
+    String bash = root.resolve("中文工具/bash").toString();
+    DaemonConfig config =
+        DaemonConfig.fromArgs(
+            DaemonArguments.decode(
+                DaemonArgumentsTest.encoded(
+                    "--gateway-uri",
+                    "ws://localhost/gateway",
+                    "--registration-token-file",
+                    token.toString(),
+                    "--data-dir",
+                    data.toString(),
+                    "--note",
+                    "中文说明 😀",
+                    "--bash-executable",
+                    bash)));
+    assertEquals(token.toAbsolutePath().normalize(), config.registrationTokenFile());
+    assertEquals(data.toAbsolutePath().normalize(), config.dataDir());
+    assertEquals("中文说明 😀", config.note());
+    assertEquals(bash, config.bashExecutable());
+    assertFalse(Files.exists(data), "configuration parsing must not open the data directory");
+  }
+
   /** 已删除的配置参数必须作为未知参数 fail closed，不提供任何兼容回退。 */
   @Test
   void rejectsRemovedEnvironmentRootArgument(@TempDir Path root) throws Exception {

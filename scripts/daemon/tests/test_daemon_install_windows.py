@@ -4,6 +4,8 @@ The repository's default script tests run on Linux, where the Windows-only Sched
 module does not exist. These tests therefore inspect lifecycle and security ordering directly.
 When a Windows PowerShell executable is available, the companion PowerShell test performs
 native parser, argv round-trip, and ScheduledTasks object checks without registering a task.
+That native leg compiles the production DaemonArguments decoder, so the installer serializer
+and the daemon argument contract are exercised together instead of against a fixture copy.
 """
 
 import os
@@ -28,6 +30,11 @@ def repository_root():
 REPOSITORY_ROOT = repository_root()
 INSTALL_SCRIPT = REPOSITORY_ROOT / "scripts" / "daemon" / "install.ps1"
 NATIVE_TEST = REPOSITORY_ROOT / "scripts" / "daemon" / "tests" / "test_daemon_install_windows.ps1"
+PROBE_RESOURCE_DIRECTORY = REPOSITORY_ROOT / "scripts" / "daemon" / "tests" / "resources"
+PROBE_SOURCE = PROBE_RESOURCE_DIRECTORY / "ProcessProbe.java"
+PRODUCTION_DECODER_RELATIVE = Path(
+    "fun/fengwk/kkstudio/harness/daemon/DaemonArguments.java"
+)
 DOCKER_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "docker-publish.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "daemon-release.yml"
 
@@ -209,6 +216,77 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         serializer = function_body("ConvertTo-WindowsCommandLineArgument")
         self.assertIn("2 * $backslashes", serializer)
         self.assertIn("$Argument -notmatch '[\\s\"]'", serializer)
+
+    def test_daemon_arguments_are_base64_encoded_behind_a_known_flag(self):
+        """Task Scheduler owns one command line, so each value must be an ASCII Base64 token."""
+        encoder = function_body("ConvertTo-DaemonEncodedArguments")
+        self.assertIn("[Text.Encoding]::UTF8.GetBytes($argument)", encoder)
+        self.assertIn("[Convert]::ToBase64String(", encoder)
+        self.assertIn('return @("--base64-args") + $encoded', encoder)
+
+        arguments = function_body("New-DaemonArgumentList")
+        self.assertIn("ConvertTo-DaemonEncodedArguments -Arguments $arguments", arguments)
+        self.assertIn('"-jar", "kk-studio-daemon.jar"', arguments)
+        self.assertNotIn("$script:InstalledJar", arguments)
+
+    def test_task_runs_in_the_install_root_so_the_jar_stays_a_relative_name(self):
+        """A profile-dependent absolute JAR path must never be stored in the task command line."""
+        self.assertIn("-WorkingDirectory $script:InstallRoot", function_body("Invoke-Install"))
+        definition = function_body("New-DaemonScheduledTaskDefinition")
+        self.assertIn("-WorkingDirectory $WorkingDirectory", definition)
+        self.assertIn("New-ScheduledTaskAction -Execute $JavaExecutable", definition)
+
+    def test_generic_capture_never_encodes_and_can_set_a_working_directory(self):
+        """Only the daemon serializer may encode; capture keeps verbatim argv and native cwd."""
+        capture = function_body("Invoke-NativeProcess")
+        self.assertIn("[AllowEmptyString()][string] $WorkingDirectory", capture)
+        self.assertIn("$startInfo.WorkingDirectory = $WorkingDirectory", capture)
+        self.assertNotIn("ToBase64String", capture)
+        self.assertNotIn("--base64-args", capture)
+
+        gate = function_body("Assert-BuiltJar")
+        self.assertIn("Split-Path -Parent $script:BuiltJar", gate)
+        self.assertIn("Split-Path -Leaf $script:BuiltJar", gate)
+        self.assertIn('@("-jar", $jarFileName)', gate)
+        self.assertIn(
+            'ConvertTo-DaemonEncodedArguments -Arguments @("--version")', gate
+        )
+        self.assertIn("-Arguments $arguments", gate)
+        self.assertIn("-WorkingDirectory $jarDirectory", gate)
+        self.assertNotIn("ToBase64String", gate)
+
+    def test_native_probe_runs_the_production_decoder_from_a_relative_ascii_jar(self):
+        """The native leg must exercise the shipped decoder, not a fixture copy of it."""
+        probe = PROBE_SOURCE.read_text(encoding="utf-8")
+        package = (
+            f"import {PRODUCTION_DECODER_RELATIVE.with_suffix('').as_posix()}"
+            .replace("/", ".")
+        )
+        self.assertIn(package, probe)
+        self.assertIn("DaemonArguments.decode(", probe)
+        self.assertEqual(
+            sorted(path.name for path in PROBE_RESOURCE_DIRECTORY.iterdir()),
+            ["ProcessProbe.java"],
+            "the decoder must never be copied into test resources",
+        )
+
+        source = REPOSITORY_ROOT / "harness" / "daemon" / "src" / "main" / "java" / (
+            PRODUCTION_DECODER_RELATIVE
+        )
+        self.assertTrue(source.is_file(), f"production decoder missing: {source}")
+        self.assertIn(
+            "package "
+            + PRODUCTION_DECODER_RELATIVE.parent.as_posix().replace("/", ".")
+            + ";",
+            source.read_text(encoding="utf-8"),
+        )
+        self.assertIn("public static String[] decode(", source.read_text(encoding="utf-8"))
+
+        native = NATIVE_TEST.read_text(encoding="ascii")
+        self.assertIn("ConvertTo-DaemonEncodedArguments -Arguments", native)
+        self.assertIn('"-jar", $Fixture.ProbeJar', native)
+        self.assertIn("-WorkingDirectory $Fixture.Workspace", native)
+        self.assertIn("Get-ProductionDaemonArgumentsSource", native)
 
 
 class TestWindowsInstallerLifecycle(unittest.TestCase):

@@ -6,10 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * DaemonMain 信息命令契约。
@@ -46,6 +51,7 @@ class DaemonMainTest {
             "--bash-executable",
             "--lsp-config",
             "--version",
+            "--base64-args",
           }) {
         assertTrue(usage.contains(option), "usage must document " + option);
       }
@@ -111,5 +117,54 @@ class DaemonMainTest {
                 DaemonConfig.fromArgs(
                     new String[] {"--help", "--gateway-uri", "ws://localhost/gateway"}));
     assertTrue(error.getMessage().contains("--help"), error.getMessage());
+  }
+
+  /** 意图：真实 main 最先解码；没有连接配置、HOME 是普通文件，信息命令仍成功，证明不进入运行时。 */
+  @Test
+  @ResourceLock(Resources.SYSTEM_OUT)
+  @ResourceLock(Resources.SYSTEM_PROPERTIES)
+  void encodedInformationCommandsReturnBeforeOpeningDataOrConnecting(@TempDir Path root)
+      throws Exception {
+    Path home = Files.writeString(root.resolve("not-a-directory"), "unchanged");
+    String previousHome = System.getProperty("user.home");
+    PrintStream previousOut = System.out;
+    try {
+      System.setProperty("user.home", home.toString());
+      for (String flag : new String[] {"--version", "--help", "-h"}) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+        DaemonMain.main(DaemonArgumentsTest.encoded(flag));
+        assertEquals(
+            flag.equals("--version")
+                ? "kk-studio-daemon development" + System.lineSeparator()
+                : DaemonMain.USAGE,
+            output.toString(StandardCharsets.UTF_8));
+      }
+      assertEquals("unchanged", Files.readString(home));
+      assertFalse(Files.exists(root.resolve(".kk-studio")));
+    } finally {
+      System.setOut(previousOut);
+      if (previousHome == null) {
+        System.clearProperty("user.home");
+      } else {
+        System.setProperty("user.home", previousHome);
+      }
+    }
+  }
+
+  /** 意图：真实入口的错误/嵌套/混用参数在配置与资源初始化之前失败，而不是二次解码。 */
+  @Test
+  void mainRejectsInvalidAndNestedTransport() {
+    for (String[] args :
+        new String[][] {
+          {"--base64-args", "%%%"},
+          {"--base64-args", "--version"},
+          DaemonArgumentsTest.encoded("--base64-args", "LS12ZXJzaW9u"),
+          DaemonArgumentsTest.encoded("--help", "--version"),
+          DaemonArgumentsTest.encoded("--note", "one", "--note", "two"),
+          DaemonArgumentsTest.encoded("--note")
+        }) {
+      assertThrows(IllegalArgumentException.class, () -> DaemonMain.main(args));
+    }
   }
 }

@@ -38,6 +38,11 @@ public final class DaemonMain {
         --help, -h                       Print this help and exit
         --version                        Print the daemon version and exit
 
+      Machine launch:
+        --base64-args <tokens...>         First argument only: each token is one application
+                                         argument encoded as UTF-8 Base64 (not encryption).
+                                         Decoded arguments follow the same CLI rules.
+
       Durations use ISO-8601 form (for example PT30S or PT5M). Unknown arguments fail closed.
       """;
 
@@ -57,7 +62,7 @@ public final class DaemonMain {
    * 混用与多余参数）一律交给 {@link DaemonConfig#fromArgs(String[])} 解析并失败关闭。
    */
   public static void main(String[] args) throws InterruptedException {
-    Objects.requireNonNull(args, "args");
+    args = DaemonArguments.decode(args);
     if (printInfoCommand(args, System.out)) {
       return;
     }

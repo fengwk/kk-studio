@@ -9,7 +9,7 @@ Environment Daemon 是运行在目标宿主上的独立 JVM 进程。它把 Plat
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 的装配顺序固定：
 
 ```text
-CLI -> DaemonConfig
+CLI -> DaemonArguments.decode -> information command / DaemonConfig
    -> DaemonDataDirectory.open(dataDir)          # owner-only 布局 + daemon.lock
    -> CodingToolsConfig.fromCli(dataDir/resources, ...)
    -> DaemonRuntime.create
@@ -17,6 +17,15 @@ CLI -> DaemonConfig
 ```
 
 单个 `--help`/`-h` 或 `--version` 是纯信息命令，在打开数据目录之前输出并直接返回；混用或多余参数一律交给配置解析并失败关闭。注册被拒时进程进入 FAILED，向 stderr 输出原因并以非零状态码退出。
+
+机器启动可在首位传入 `--base64-args`，后续每个 token 是一个原始应用参数的 UTF-8 Base64；
+[`DaemonArguments`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonArguments.java)
+严格解码一次后仍走同一套信息命令与配置校验。普通 CLI 不变；非法 Base64、非法 UTF-8、
+null 或 NUL 参数均失败关闭，传输错误不回显原值。Base64 只是编码，不是加密，也不是新的配置来源。
+Windows JDK 21 launcher 会把 Unicode 命令行转成系统 ANSI 字符集，无法表示的字符会在进入
+Java 前丢失；Windows 安装器因此将应用参数编码为 ASCII token，并把任务的 Unicode
+WorkingDirectory 设为安装目录，`-jar` 使用固定 ASCII 相对名 `kk-studio-daemon.jar`。
+Java 可执行文件仍使用任务 action 的绝对路径字段；无需 shell wrapper 或修改系统 code page。
 
 [`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)
 的完整选项、默认值与安装方式只在
