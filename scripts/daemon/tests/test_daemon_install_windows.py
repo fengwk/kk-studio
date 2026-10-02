@@ -366,6 +366,30 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
 class TestWindowsInstallerNativeContracts(unittest.TestCase):
     """Run native tests only where Windows and PowerShell are genuinely available."""
 
+    def test_task_identity_assertions_resolve_accounts_without_relaxing_ownership(self):
+        """Both task identities require SID equality, including native negative controls."""
+        native = NATIVE_TEST.read_text(encoding="ascii")
+        self.assertIn("[System.Security.Principal.NTAccount]::new($ActualIdentity).Translate(", native)
+        self.assertIn(
+            "Assert-Equal -Expected $ExpectedSid -Actual $actualSid.Value",
+            native,
+        )
+        for value in ("$definition.Principal.UserId", "$trigger.UserId"):
+            self.assertIn(
+                f"Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity {value}",
+                native,
+            )
+            self.assertNotIn(f"Assert-Equal -Expected $sid -Actual {value}", native)
+        for case in (
+            "account representation identifies current user",
+            "SID representation identifies current user",
+            "foreign SID is rejected",
+            "empty identity is rejected",
+            "unknown account is rejected",
+        ):
+            self.assertIn(case, native)
+        self.assertIn("        Test-WindowsIdentityAssertion\n", native)
+
     def test_real_windows_gate_blocks_main_images_and_daemon_releases(self):
         """Formal support requires both PowerShell hosts and real ScheduledTasks cmdlets in CI."""
         for workflow_path in (DOCKER_WORKFLOW, RELEASE_WORKFLOW):
