@@ -10,8 +10,10 @@ gateway/token/note" and "the unit is started directly without a shell" testable.
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -42,6 +44,8 @@ INSTALL_SCRIPT = REPOSITORY_ROOT / "scripts" / "daemon" / "install.sh"
 
 def write_executable(path, content):
     """Write one fake command with the executable bit already set."""
+    # Use the test interpreter even when the fixture deliberately restricts PATH.
+    content = content.replace("#!/usr/bin/env python3\n", f"#!{sys.executable}\n", 1)
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
 
@@ -68,7 +72,8 @@ class Fixture:
         jdk_tools=("java", "javac"),
         with_unit=None,
     ):
-        self.root = Path(root)
+        # macOS temporary paths may traverse /var -> /private/var; match the shell's PWD.
+        self.root = Path(root).resolve()
         self.home = self.root / "home"
         self.bin = self.root / "bin"
         self.jdk = self.root / "fake-jdk"
@@ -106,6 +111,8 @@ class Fixture:
             self.unit.write_text(with_unit, encoding="utf-8")
 
     def _write_toolchain(self, systemctl_mode, mvn_mode, java_mode, jar_body, jdk_tools):
+        # Linux contracts also run on Darwin; never fall through to real launchd tools.
+        write_executable(self.bin / "uname", "#!/bin/bash\nprintf 'Linux\\n'\n")
         write_executable(
             self.bin / "mvn",
             "#!/usr/bin/env bash\n"
@@ -229,7 +236,7 @@ class Fixture:
         if self.source_mode and arguments and arguments[0] == "upgrade":
             arguments = (arguments[0], "--from-source", *arguments[1:])
         return subprocess.run(
-            [str(self.script), *arguments],
+            ["/bin/bash", str(self.script), *arguments],
             cwd=str(cwd or self.repo),
             env=self.environment(**(env or {})),
             text=True,
@@ -245,7 +252,7 @@ class Fixture:
             "gateway-uri": GATEWAY_URI,
             "registration-token-file": str(self.token),
             "java-home": str(self.jdk),
-            "bash-executable": "/usr/bin/bash",
+            "bash-executable": "/bin/bash",
         }
         arguments.update(overrides)
         items = ["--from-source"] if self.source_mode else []
@@ -321,12 +328,14 @@ class InlineTokenContracts:
         # Record the real filesystem utilities too: an external printf/echo or exported secret
         # would otherwise evade the Maven/Java/service recorder assertions.
         for tool in ("mv", "cp", "chmod", "mktemp", "mkdir", "stat"):
+            # BSD cp/mv/mkdir live in /bin, whereas Linux commonly uses /usr/bin.
+            native_tool = shutil.which(tool, path="/usr/bin:/bin")
             write_executable(
                 fixture.bin / tool,
                 "#!/usr/bin/env bash\n"
                 f'printf \'{tool}|%s\\n\' "$*" >> "$FAKE_RECORD"\n'
                 f'/usr/bin/env >> "{child_environment}"\n'
-                f'exec /usr/bin/{tool} "$@"\n',
+                f'exec "{native_tool}" "$@"\n',
             )
         for replacement in (False, True):
             if replacement:
@@ -512,7 +521,7 @@ class TestDaemonInstallInterface(DaemonInstallTestCase):
         mode = INSTALL_SCRIPT.stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR, "install.sh must be executable")
         result = subprocess.run(
-            ["bash", "-n", str(INSTALL_SCRIPT)], text=True, capture_output=True, check=False
+            ["/bin/bash", "-n", str(INSTALL_SCRIPT)], text=True, capture_output=True, check=False
         )
         self.assertEqual(0, result.returncode, result.stderr)
 
@@ -669,7 +678,7 @@ class TestDaemonInstallSuccess(DaemonInstallTestCase):
                 systemd_escape("--note"),
                 systemd_escape(NOTE),
                 systemd_escape("--bash-executable"),
-                systemd_escape("/usr/bin/bash"),
+                systemd_escape("/bin/bash"),
                 systemd_escape("--lsp-config"),
                 systemd_escape(str(lsp_config)),
             ],

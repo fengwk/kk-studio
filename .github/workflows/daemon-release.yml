@@ -31,6 +31,28 @@ env:
   RELEASE_DIR: harness/daemon/target/release
 
 jobs:
+  validate_unix_daemon:
+    name: validate Unix daemon installer (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test installer with system Bash
+        # macOS /bin/bash is 3.2; fixtures never register real host services.
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          /bin/bash --version
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install.py
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_download.py
+
   validate_windows_daemon:
     name: validate Windows daemon installer
     runs-on: windows-latest
@@ -56,7 +78,9 @@ jobs:
 
   publish:
     name: build, stage and publish daemon release
-    needs: validate_windows_daemon
+    needs:
+      - validate_windows_daemon
+      - validate_unix_daemon
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
