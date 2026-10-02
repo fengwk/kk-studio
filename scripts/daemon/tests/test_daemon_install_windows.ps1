@@ -169,6 +169,8 @@ function Test-QuotingGoldenCases {
     }
 }
 
+. (Join-Path $PSScriptRoot "windows_release_contracts.ps1")
+
 function Get-RequiredJavaExecutable {
     $javaName = if ($env:OS -eq "Windows_NT") { "java.exe" } else { "java" }
     $java = Get-Command $javaName -CommandType Application `
@@ -636,6 +638,176 @@ function Test-MissingScheduledTaskLookup {
     }
 }
 
+function Test-RegistrationTokenPersistence {
+    # Real NTFS ACLs and Unicode bytes prove inline/prompt persistence remains private,
+    # atomic, and fail-closed without ever touching the user's actual configuration.
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("kk-token-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $root | Out-Null
+    $savedConfig = $script:ConfigRoot
+    $savedSid = $script:CurrentSid
+    $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Set-Acl -LiteralPath $root -AclObject (New-PrivateAcl -Directory)
+    $script:ConfigRoot = Join-Path $root (
+        "config " + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587)
+    )
+    $text = "fixture-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587, 0xD83D, 0xDE00)
+    $token = ConvertTo-SecureString $text -AsPlainText -Force
+    try {
+        $path = Save-RegistrationToken -Token $token
+        Assert-PrivateDirectory -Path $script:ConfigRoot
+        Assert-Equal -Expected $text -Actual ([IO.File]::ReadAllText($path)) `
+            -Message "private token bytes round-trip Unicode without BOM"
+        Assert-Equal -Expected $path -Actual (Assert-RegistrationTokenFile `
+            -Path $path -ExpectedOwnerSid $script:CurrentSid) `
+            -Message "persisted token satisfies the strict external-file ACL contract"
+        $replacement = ConvertTo-SecureString "replacement-fixture" -AsPlainText -Force
+        try {
+            $null = Save-RegistrationToken -Token $replacement
+            Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
+                -Message "atomic overwrite publishes the new token"
+        }
+        finally { $replacement.Dispose() }
+
+        $invalid = ConvertTo-SecureString "invalid`nfixture" -AsPlainText -Force
+        try {
+            Assert-Throws -Action { Save-RegistrationToken -Token $invalid } `
+                -ExpectedMessage "control characters" `
+                -Message "invalid token fails after staging without replacing the old token"
+            Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
+                -Message "failed credential staging keeps the old bytes"
+            Assert-Equal -Expected 0 -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot `
+                -Filter "*.tmp").Count -Message "failed credential staging removes its private temp file"
+        }
+        finally { $invalid.Dispose() }
+
+        $acl = Get-Acl -LiteralPath $path
+        $acl.SetAccessRuleProtection($false, $true)
+        Set-Acl -LiteralPath $path -AclObject $acl
+        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
+            -ExpectedMessage "inheritance must be disabled" `
+            -Message "an unsafe existing token is never overwritten"
+        Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
+            -Message "rejected target retains its original contents"
+        Set-Acl -LiteralPath $path -AclObject (New-PrivateAcl)
+
+        $acl = Get-Acl -LiteralPath $script:ConfigRoot
+        $acl.SetAccessRuleProtection($false, $true)
+        Set-Acl -LiteralPath $script:ConfigRoot -AclObject $acl
+        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
+            -ExpectedMessage "protected ACL inheritance" `
+            -Message "an inherited directory ACL fails before writing token bytes"
+        Set-Acl -LiteralPath $script:ConfigRoot -AclObject (New-PrivateAcl -Directory)
+
+        $world = [System.Security.Principal.SecurityIdentifier]::new("S-1-1-0")
+        $acl = Get-Acl -LiteralPath $script:ConfigRoot
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            $world, [System.Security.AccessControl.FileSystemRights]::Read,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        ))
+        Set-Acl -LiteralPath $script:ConfigRoot -AclObject $acl
+        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
+            -ExpectedMessage "another SID" -Message "a foreign directory Allow ACE is unsafe"
+        Set-Acl -LiteralPath $script:ConfigRoot -AclObject (New-PrivateAcl -Directory)
+        Assert-Equal -Expected 0 -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot `
+            -Filter "*.tmp").Count -Message "no temporary credential file remains"
+
+        $acl = Get-Acl -LiteralPath $root
+        $acl.SetAccessRuleProtection($false, $true)
+        Set-Acl -LiteralPath $root -AclObject $acl
+        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
+            -ExpectedMessage "protected ACL inheritance" `
+            -Message "an unsafe parent directory cannot be used to replace private storage"
+        Set-Acl -LiteralPath $root -AclObject (New-PrivateAcl -Directory)
+
+        $junction = Join-Path $root "junction"
+        New-Item -ItemType Junction -Path $junction -Target $script:ConfigRoot | Out-Null
+        try {
+            $script:ConfigRoot = $junction
+            Assert-Throws -Action { Save-RegistrationToken -Token $token } `
+                -ExpectedMessage "reparse point" -Message "reparse token storage is rejected"
+        }
+        finally {
+            # Remove only the junction itself, never recurse into its target.
+            [IO.Directory]::Delete($junction)
+        }
+    }
+    finally {
+        $token.Dispose()
+        $script:ConfigRoot = $savedConfig
+        $script:CurrentSid = $savedSid
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-InstallPrompts {
+    # Input collection is exercised independently of NTFS, downloads, JDK, and scheduler.
+    $savedParameters = $script:InvocationParameters
+    $savedGateway = $script:GatewayUri
+    $savedInlineToken = $script:RegistrationToken
+    $savedTokenFile = $script:ResolvedTokenFile
+    $savedData = $script:ResolvedDataDir
+    $savedJava = $script:SelectedJava
+    $savedJavaHome = $script:SelectedJavaHome
+    $savedBash = $script:SelectedBash
+    $savedHome = $script:HomePath
+    $prompts = [Collections.Generic.List[string]]::new()
+    $expectedToken = "fixture-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587)
+    function Read-Host {
+        param($Prompt, [switch] $AsSecureString)
+        $prompts.Add($Prompt)
+        if ($AsSecureString) {
+            return ConvertTo-SecureString $expectedToken -AsPlainText -Force
+        }
+        return "wss://studio.example.invalid/daemon"
+    }
+    function Save-RegistrationToken {
+        param([Security.SecureString] $Token)
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
+        try {
+            Assert-Equal -Expected $expectedToken `
+                -Actual ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) `
+                -Message "prompt supplies Unicode SecureString to private persistence"
+        }
+        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+        return "C:\Fixture\private.token"
+    }
+    function Resolve-JavaHome { param($ExplicitJavaHome) return [IO.Path]::GetTempPath() }
+    function Resolve-Executable { param($Value, $DefaultName, $OptionName) return "C:\Fixture\bash.exe" }
+    try {
+        $script:HomePath = [IO.Path]::GetTempPath()
+        $script:InvocationParameters = @{}
+        Resolve-InstallInputs
+        Assert-Equal -Expected 2 -Actual $prompts.Count -Message "omitted URI and token both prompt"
+        Assert-Equal -Expected "wss://studio.example.invalid/daemon" -Actual $script:GatewayUri `
+            -Message "prompted URI is used by daemon arguments"
+        Assert-Equal -Expected "C:\Fixture\private.token" -Actual $script:ResolvedTokenFile `
+            -Message "only the persisted file path reaches daemon arguments"
+        $prompts.Clear()
+        $script:RegistrationToken = $expectedToken
+        $script:InvocationParameters = @{
+            GatewayUri = $script:GatewayUri; RegistrationToken = $expectedToken
+        }
+        Resolve-InstallInputs
+        Assert-Equal -Expected 0 -Actual $prompts.Count -Message "explicit URI and inline token do not prompt"
+        Assert-True -Condition (-not $script:InvocationParameters.ContainsKey("RegistrationToken")) `
+            -Message "inline secret is removed from retained invocation parameters"
+        $script:InvocationParameters = @{ RegistrationToken = "fixture"; RegistrationTokenFile = "fixture" }
+        Assert-Throws -Action { Resolve-InstallInputs } -ExpectedMessage "mutually exclusive" `
+            -Message "inline and file credentials cannot be combined"
+    }
+    finally {
+        $script:InvocationParameters = $savedParameters
+        $script:GatewayUri = $savedGateway
+        $script:RegistrationToken = $savedInlineToken
+        $script:ResolvedTokenFile = $savedTokenFile
+        $script:ResolvedDataDir = $savedData
+        $script:SelectedJava = $savedJava
+        $script:SelectedJavaHome = $savedJavaHome
+        $script:SelectedBash = $savedBash
+        $script:HomePath = $savedHome
+    }
+}
+
 function Test-PureValidation {
     Assert-GatewayUri -Value "wss://studio.example.invalid/api/harness/environment-daemon/v1"
     Assert-GatewayUri -Value "ws://127.0.0.1:8080/path?x=1&y=2"
@@ -809,6 +981,8 @@ function Test-ScheduledTaskDefinition {
 
 try {
     Test-QuotingGoldenCases
+    Test-ReleaseInstallerContracts
+    Test-InstallPrompts
     Test-JavaVersionCapture
     Test-EncodedDaemonArgumentList
     $fixture = New-ProbeFixture -Java (Get-RequiredJavaExecutable)
@@ -825,6 +999,7 @@ try {
     Test-JdkVersionGate
     if (-not $ProcessOnly) {
         Test-RegistrationTokenAcl
+        Test-RegistrationTokenPersistence
         Test-MissingScheduledTaskLookup
         Test-PureValidation
         Test-WindowsIdentityAssertion

@@ -83,6 +83,9 @@ class TestWindowsInstallerSurface(unittest.TestCase):
         for option in (
             "-GatewayUri",
             "-RegistrationTokenFile",
+            "-RegistrationToken",
+            "-FromSource",
+            "-Version",
             "-JavaHome",
             "-DataDir",
             "-Note",
@@ -133,7 +136,7 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
             "StreamReader",
         )
         for value in forbidden:
-            self.assertNotIn(value, script_text())
+            self.assertNotIn(value, body)
         self.assertIn("must not contain a deny-read ACE", body)
 
     def test_missing_task_lookup_does_not_turn_absence_into_an_error(self):
@@ -361,6 +364,23 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         self.assertIn("finally", body)
         self.assertIn("$script:StagedJar", body)
         self.assertIn("Remove-Item -LiteralPath $script:StagedJar", body)
+        self.assertIn("Remove-Item -LiteralPath $script:DownloadDirectory", body)
+
+    def test_release_is_default_and_repository_resolution_is_source_only(self):
+        """Static supplement: standalone management must not resolve a checkout."""
+        self.assertIn('[string] $Command = "install"', script_text())
+        self.assertNotIn("Resolve-RepositoryRoot", function_body("Initialize-HostContext"))
+        assert_in_order(
+            self, function_body("Prepare-StagedJar"),
+            "if ($FromSource)", "Resolve-RepositoryRoot",
+            "Invoke-DaemonBuild", "Get-ReleaseJar", "Assert-BuiltJar", "Stage-BuiltJar",
+        )
+        release = function_body("Get-ReleaseJar")
+        self.assertIn("https://api.github.com/repos/fengwk/kk-studio/releases/latest", release)
+        self.assertIn("https://github.com/fengwk/kk-studio/releases/download/$tag", release)
+        self.assertIn("[Net.SecurityProtocolType]::Tls12", release)
+        self.assertIn("Get-FileHash", release)
+        self.assertNotIn("Invoke-DaemonBuild", release)
 
 
 class TestWindowsInstallerNativeContracts(unittest.TestCase):
