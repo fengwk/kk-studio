@@ -1,6 +1,6 @@
 # Harness Provider
 
-一次模型调用在成功时是一条漂亮的事件流，失败时才是维护者真正面对的东西：上游 200 但内容被安全策略过滤、连接在半个 JSON 里断掉、错误正文里带着要被原样展示给用户的上游诊断、thinking 签名用错一次就整轮作废。`harness-provider` 的职责是把这些情况都变成 Runtime 能安全消费的结果——它用纯 JDK 21 `HttpClient` 说四种上游协议，用有界增量解析器读取 SSE，把每条流收敛成一个中立的 `ProviderCompletion`，并且**绝不**用通用文案掩盖上游到底说了什么。
+`harness-provider` 用 JDK 21 `HttpClient` 实现四种模型协议，以有界增量解析器读取 SSE，将正常结束、安全过滤、截断与连接故障收敛为 Runtime 能消费的中立结果。它还负责原生推理回放与请求缓存断点；错误只做分类，保留上游诊断正文。
 
 模块无 Spring 依赖，生产直接依赖只有 [`harness-runtime`](harness-runtime.md)（协议中立 DTO 与错误分类）与 Jackson；凭据、长生命周期 `HttpClient`、工作线程与 Watchdog 调度器由 [Platform](platform.md) 注入。生产依赖见 [`pom.xml`](../../harness/provider/pom.xml)，[`ProviderModuleArchitectureTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModuleArchitectureTest.java) 扫描主源码 import 与 POM 守卫该边界。Platform 装配的模型专用 `HttpClient` 固定使用 HTTP/1.1（避免明文网关链路上的 h2c 升级）、`Redirect.NEVER`，并以受管虚拟线程为 worker。
 
@@ -24,7 +24,7 @@
 - 换行同时支持 CRLF、LF 与孤立 CR；`data:` 后仅紧邻的一个空格被剔除，多余前导空格与尾随空白完整保留；多行 `data:` 以 `\n` 合并。
 - 每个空行边界无条件重置事件缓冲与事件字节计数（无论该行是否有 data）；流 EOF 时 `flush()` 交付未以空行闭合的尾随事件。
 
-[`HttpOpenMetadata`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/HttpOpenMetadata.java) 与 `TransportException` 的安全标头共用 [`HeaderSanitizer`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/HeaderSanitizer.java) 的单一清洗规则：只放行诊断所需的白名单标头（`content-type`、`content-length`、`retry-after`、`x-ratelimit-*`、`x-request-id`、`request-id`），未知标头一律丢弃，命中 `token`、`key`、`auth`、`cookie`、`secret`、`credential` 关键词的标头值整体替换为 `[REDACTED]`，其余值剔除 CR/LF 并修剪周边空白，输出按大小写不敏感排序的不可变 Map。
+[`HttpOpenMetadata`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/HttpOpenMetadata.java) 与 `TransportException` 的安全标头共用 [`HeaderSanitizer`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/HeaderSanitizer.java) 的单一清洗规则：只放行固定白名单 `content-type`、`content-length`、`retry-after`、`x-request-id`、`request-id`，以及 `x-ratelimit-limit`、`x-ratelimit-remaining`、`x-ratelimit-reset`、`x-ratelimit-reset-requests`、`x-ratelimit-reset-tokens`，不是按前缀放行任意限流标头。未知标头一律丢弃；白名单内命中 `token`、`key`、`auth`、`cookie`、`secret`、`credential` 关键词的标头值整体替换为 `[REDACTED]`，其余值剔除 CR/LF 并修剪周边空白，输出按大小写不敏感排序的不可变 Map。
 
 [`TransportErrorKind`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/TransportErrorKind.java) 是封闭的七元集合 `IO`、`TIMEOUT`、`INVALID_RESPONSE`、`HTTP_STATUS`、`EXECUTOR_REJECTED`、`CALLBACK_FAILED`、`CANCELLED`。[`TransportException`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/TransportException.java) 是安全信道：`getMessage()` / `toString()` 只含 kind、状态码等类名级信息（换行被清洗），绝不输出 URI、token、请求体或错误正文；cause 被替换为只保留类名的安全异常；经过有界截断的诊断正文只能通过 `errorBodyBytes()` 防御性副本读取，`isErrorBodyTruncated()` 明确告知是否被截断。[`ServerSentEvent`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/ServerSentEvent.java) 的 `toString()` 也只输出 `eventLength` / `dataLength`，避免日常调试日志打印上游正文。
 
@@ -50,9 +50,9 @@
 
 Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，例如 `{"id":"default","protocolOptionsJson":"{\"temperature\":0.7}"}`。编辑器只用 `JSON.parse` 检查语法与对象根节点，不把解析后的数字重新序列化；提交和加载保留内部 JSON 文本，仅去除外层空白。后端严格校验重复键、类型、尾随内容与字节上限，运行时才将文本解码为原生对象，因此大整数与高精度小数不会经过浏览器浮点数往返。
 
-[`ProviderReplayState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayState.java) = `(format, affinity, sourcePrefixHash, payload)`，四种格式 [`ProviderReplayFormat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayFormat.java) 为 `anthropic_messages` / `openai_responses` / `openai_chat` / `gemini_content`。回放是 attempt 内的原生上下文，按 JSON 字段保留可回放的上游结构（`reasoning_content`、`encrypted_content`、thinking `signature` / redacted thinking、`thoughtSignature`），不承诺保留 wire 字节排版；它不进入公共 DTO、日志或异常。
+[`ProviderReplayState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayState.java) = `(format, affinity, sourcePrefixHash, payload)`，四种格式 [`ProviderReplayFormat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayFormat.java) 为 `anthropic_messages` / `openai_responses` / `openai_chat` / `gemini_content`。它从一次成功终态中冻结，随助手 Entry 持久保存，供后续请求重建原生上下文；按 JSON 字段保留可回放的上游结构（`reasoning_content`、`encrypted_content`、thinking `signature` / redacted thinking、`thoughtSignature`），不承诺保留 wire 字节排版，也不进入公共 DTO、日志或异常。它不同于下文仅在 attempt 内交付的原生 SSE 通道。
 
-冻结与回放的口径按协议有实质差异，这是最容易写错的地方：
+各协议的冻结条件如下：
 
 | 协议 | 冻结条件 | 工具调用诊断 |
 | --- | --- | --- |
@@ -61,9 +61,9 @@ Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，�
 | OpenAI Chat | 仅 `COMPLETE` | 截断时不冻结回放 |
 | OpenAI Responses | `COMPLETE` 或 `LENGTH`，且无诊断、非 FILTERED、非空占位符 | 同 Anthropic 语义 |
 
-原位回放须满足：原生 payload 结构合法，`affinity` 与当前 `ProviderDescriptor.affinity(requestedModel)` 相等，`sourcePrefixHash` 与当前 canonical prefix hash 相等，已规范化的文本/思考/函数工具事实与 durable 消息逐字段一致。已知 item/block 的合法原生附加字段不再被一概白名单裁剪：能证明可重建的字段可在 affinity/hash 失配时回退语义编码；签名、密文、注解、未知 item 等只有原生回放才能保真的事实若遇失配，必须 **fail closed** 为 `INVALID_REQUEST`，不得假装回退成功。非法 role、损坏结构或与 durable 事实矛盾也拒绝；回放 payload 不被改写。prefix hash 由各协议自己的 `*PrefixHasher` 计算（稳定字典序与确定性序列化，Anthropic 侧显式排除 `cache_control`），因此回放链路的稳定性不依赖 JSON 字段顺序。
+原位回放通常须满足：原生 payload 结构合法，`affinity` 与当前 `ProviderDescriptor.affinity(requestedModel)` 相等，`sourcePrefixHash` 与当前 canonical prefix hash 相等，已规范化的文本/思考/函数工具事实与 durable 消息逐字段一致；Chat 普通文本思考的前缀例外见下文。已知 item/block 的合法原生附加字段可以保留：能证明可重建的字段可在 affinity/hash 失配时回退语义编码；签名、密文、注解、未知 item 等只有原生回放才能保真的事实若遇失配，必须 **fail closed** 为 `INVALID_REQUEST`，不得假装回退成功。非法 role、损坏结构或与 durable 事实矛盾也拒绝；回放 payload 不被改写。prefix hash 由各协议自己的 `*PrefixHasher` 计算，使用稳定字典序与确定性序列化；Anthropic 显式排除 `cache_control`，Chat 与 Responses 排除 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options`、`prompt_cache_breakpoint`。因此缓存标记与 JSON 字段顺序不改变哈希口径。
 
-OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，避免把可回放的原生推理丢掉；而当终态 `reasoning` 只给出空占位符（`summary: []` 且无密文）时，流式累积的思考是唯一可得的语义表示，会被保留用于展示，但该 replay 不承载原生推理，既不冻结也不原位回放（非空的权威终态摘要仍优先）。私有推理文本只以 `summary` / durable thinking 的形式暴露，`encrypted_content` 绝不当作文本外泄。
+OpenAI Responses 流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留；而当终态 `reasoning` 只给出空占位符（`summary: []` 且无密文）时，流式累积的思考是唯一可得的语义表示，会被保留用于展示，但该 replay 不承载原生推理，既不冻结也不原位回放（非空的权威终态摘要仍优先）。私有推理文本只以 `summary` / durable thinking 的形式暴露，`encrypted_content` 绝不当作文本外泄。
 
 OpenAI Chat 的普通文本 `reasoning_content` 不属于签名或密文：与 durable thinking 逐字校验一致，且 payload 仅含标准文本/函数调用与该思考字段时，同一 `affinity` 内允许在 system 日期、提示词或工具定义前缀变化后原样回传。不能因前缀变化删除历史思考；[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`。`reasoning_details`、未知字段或嵌套扩展仍要求精确前缀匹配；普通思考也不得跨 provider、连接 generation 或模型转移。
 
@@ -123,7 +123,7 @@ OpenAI Chat 的普通文本 `reasoning_content` 不属于签名或密文：与 d
 
 [`AnthropicConfiguration`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicConfiguration.java) 解析 `anthropicThinkingMode`（`ADAPTIVE` / `BUDGET`，缺省 ADAPTIVE）和 `anthropicBetaFeatures`（去重、标识及头长度有界）：wire 模型标识直接取 `ModelDescriptor.modelId()`，不存在别名替换；JSON 语法与字段类型严格校验，未知配置字段忽略，异常绝不回显配置内容或凭据。推理编码上，`reasoningOff` 发送 `thinking: {"type": "disabled"}`；ADAPTIVE 发送 `thinking: {"type": "adaptive", "display": "summarized"}` 与 `output_config.effort`；BUDGET 发送 `thinking: {"type": "enabled", "budget_tokens": ..., "display": "summarized"}` 并把 `low` / `medium` / `high` 映射为 2048 / 8192 / 16384，`budget_tokens` 必须小于 `max_tokens`。运行时指定 effort 时原生 `thinking` / `output_config.effort` 不能冲突；`reasoningEffort` 为 null 时不由运行时声明推理字段，原生选项可按协议自身规则携带这些字段。Prompt Cache 支持 SYSTEM、TOOLS、CONVERSATION 三类显式断点，SHORT 用默认短 TTL，LONG 映射 `ttl: "1h"`；非 NONE 的缓存控制必须声明至少一种断点类别，实际没有合格内容时不制造缓存块。
 
-Anthropic 每次最多放置 **4 个**断点：TOOLS、SYSTEM 各最多占 1 个，其余保留最近历史模型请求端点和当前末端。这样较大增量不会仅因上一轮端点移出服务端的 20 位置回看窗口而失去该查找位置；连续工具调用/结果不能简单按工具数量推算窗口。断点只添加到支持的非空 text、image、document、tool_use、tool_result 块，未知 opaque、thinking、redacted thinking 与 compaction 块保留但不新增标记。compaction 裁去历史时同步清空旧端点引用；标记始终在原生校验与 prefix hash 冻结后注入。
+Anthropic 每次最多放置 **4 个**断点：TOOLS、SYSTEM 各最多占 1 个，其余保留最近历史模型请求端点和当前末端，而不是只标记最后一块。历史请求端点按助手消息之前的合格输入块追踪，保留不依赖新增内容块的数量。断点只添加到支持的非空 text、image、document、tool_use、tool_result 块，未知 opaque、thinking、redacted thinking 与 compaction 块保留但不新增标记。compaction 裁去历史时同步清空旧端点引用；标记始终在原生校验与 prefix hash 冻结后注入。
 
 缓存字段由运行时独占：原生工具直属的 `protocolOptions.tools[].cache_control`（包括 `null`）在编码前被拒绝，即使 retention 为 NONE 也不允许透传；工具 schema 内同名业务属性不受此规则影响。该限制与顶层 `cache_control` 的所有权一致，防止外带断点突破预算或绕过禁用策略。
 
@@ -131,7 +131,7 @@ Anthropic 每次最多放置 **4 个**断点：TOOLS、SYSTEM 各最多占 1 个
 
 **OpenAI Responses**（[`OpenAiResponsesProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesProviderAdapter.java)）。[`OpenAiResponsesConfig`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesConfig.java) 解析 `openAiPromptCacheMode`。系统指令编码为顶层 `instructions` 字符串，会话输入项中绝不出现系统或开发者指令；有状态 `previous_response_id` / `conversation` 与无状态 replay 不兼容，明确拒绝。推理字段：运行时关闭时写 `reasoning.effort: "none"` 且不自动添加 `summary` 与 `include`；启用时写 `reasoning.effort`，缺失时补 `summary: "auto"` 与顶层 `include: ["reasoning.encrypted_content"]`，不覆盖兼容的原生附加选项。函数工具一律以 `strict: true` 发送，参数 schema 深拷贝后由 [`OpenAiResponsesStrictSchema`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesStrictSchema.java) 递归归一化：每个 object 节点（含 `items` 与嵌套 object）显式写出全量 `required` 与 `additionalProperties: false`；只有源 schema 确实把某属性排除在 `required` 之外、且它当前不允许 null 时才改写为 `anyOf: [原 schema, {"type": "null"}]`，本来就是必填或已允许 null 的属性保持原样；调用方共享的 `inputSchemaJson` 绝不被修改。`max_output_tokens` 的下限 `16` 只属于本 Provider——**低于 16 直接以 `INVALID_REQUEST` 拒绝，不静默提升也不改写**。提示缓存模式下 `AUTOMATIC` 不发送任何缓存字段，`LEGACY` 发送 `prompt_cache_key` 与 `prompt_cache_retention`，`GPT_5_6_EXPLICIT` 发送 `prompt_cache_options` 与 conversation content block 上的 `prompt_cache_breakpoint`（无 SYSTEM 断点）。
 
-**Google Gemini**（[`GeminiProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiProviderAdapter.java)）。[`GeminiEndpoints.resolveStreamUri`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiEndpoints.java) 保留 raw authority 与 raw base path，去除尾斜杠后按 RFC 3986 path-segment 语义编码 model name 并追加 `/models/{encodedModel}:streamGenerateContent?alt=sse`，绝不把 API Key 拼进 URL。角色映射只有 `user` 与 `model`，相邻同 role 内容合并为一个 content 节点；原生 signed Part 回放时仍保持签名及 Part 边界。Prompt Cache 固定为隐式 `PromptCacheCapability.automatic()`：服务端自行评估并回报 `cachedContentTokenCount`，编码器不发任何 cache hint，且显式非空 `cacheControl` 会被拒绝。
+**Google Gemini**（[`GeminiProviderAdapter`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiProviderAdapter.java)）。[`GeminiEndpoints.resolveStreamUri`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/gemini/GeminiEndpoints.java) 保留 raw authority 与 raw base path，去除尾斜杠后按 RFC 3986 path-segment 语义编码 model name 并追加 `/models/{encodedModel}:streamGenerateContent?alt=sse`，绝不把 API Key 拼进 URL。角色映射只有 `user` 与 `model`，相邻同 role 内容合并为一个 content 节点；原生 signed Part 回放时仍保持签名及 Part 边界。Prompt Cache 固定为隐式 `PromptCacheCapability.automatic()`：服务端自行评估并回报 `cachedContentTokenCount`，编码器不发任何 cache hint；`cacheControl.retention` 非 `NONE` 或断点集合非空都以 `INVALID_REQUEST` 拒绝。
 
 ### OpenAI 显式缓存的请求边界
 

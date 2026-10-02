@@ -2,19 +2,19 @@
 
 MCP 工具要接进 Harness，关键风险只有一条：一次远端调用把 Backend 线程挂死，或者取消与超时互相覆盖，让「已发出的请求」和「已放弃的等待」产生两种事实。本模块把底层 LangChain4j MCP SDK 收敛在一处，对调用方只暴露稳定的配置、工具定义、调用结果、总预算与取消契约，因此产品侧的发现与执行可以共用同一份超时、取消与清理语义。
 
-本模块交付的是一份无状态的 MCP client 能力：把配置收敛为不可变值对象、列举远端工具、执行单次调用并映射结果，并用一份覆盖初始化与执行的总预算与调用级取消约束每次调用。传输只有 Streamable HTTP 一种，调用发生在 Backend 进程内；产品侧的 MCP Server/Tool 持久化、名称寻址、工具身份与 per-call 生命周期由 [`platform`](platform.md) 拥有。
+本模块把配置收敛为不可变值对象，提供远端工具发现、单次调用与结果映射，并用覆盖初始化与执行的总预算及调用级取消约束每次调用。client 实例持有连接与 worker 池，须显式关闭；模块不保存产品持久化事实。传输只有 Streamable HTTP 一种，调用发生在 Backend 进程内；产品侧的 MCP Server/Tool 持久化、名称寻址、工具身份与 per-call 生命周期由 [`platform`](platform.md) 拥有。
 
 ## 包架构
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.mcp` | MCP client/config/result 模型、LangChain4j Streamable HTTP 适配、deadline 与取消协调 | 无状态调用能力；产品事实持久化、工具身份与 per-call 生命周期归 Platform |
+| `fun.fengwk.kkstudio.harness.mcp` | MCP client/config/result 模型、LangChain4j Streamable HTTP 适配、deadline 与取消协调 | 管理 client 内的连接与 worker；产品事实持久化、工具身份与 per-call 生命周期归 Platform |
 
 生产依赖只有 `langchain4j-mcp`、[`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/mcp/pom.xml)）；不依赖 Spring、JDBC、[`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、Platform 或 Daemon。
 
 ## Client 与配置
 
-[`McpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpClient.java) 只有三个方法：`listTools`、`callTool` 与幂等 `close`。公共签名不出现任何 SDK 类型——返回值是模块自有的 [`McpToolDefinition`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpToolDefinition.java)（`inputSchemaJson` 必须是 JSON object，不接受把非法 schema 降级成字符串）与 [`McpToolCallResult`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpToolCallResult.java)，后者的内容列表映射为 [`harness-common`](harness-common.md) 的 `ResultContent`。`listTools` 与 `callTool` 都强制调用方显式传入 deadline 与取消令牌，不存在无预算的隐式默认。
+[`McpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpClient.java) 继承 `AutoCloseable`，只有三个方法：`listTools`、`callTool` 与幂等 `close`。公共签名不出现任何 SDK 类型——返回值是模块自有的 [`McpToolDefinition`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpToolDefinition.java)（`inputSchemaJson` 必须是 JSON object，不接受把非法 schema 降级成字符串）与 [`McpToolCallResult`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpToolCallResult.java)，后者的内容列表映射为 [`harness-common`](harness-common.md) 的 `ResultContent`。`listTools` 与 `callTool` 都强制调用方显式传入 deadline 与取消令牌，不存在无预算的隐式默认。
 
 [`McpClientFactory`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpClientFactory.java) 是唯一构造入口，只有 `createRemote` 一条路径（`Duration` 重载只是 `McpDeadline.of` 的便捷包装）：构造 Streamable HTTP transport，固定 client protocol version `2025-11-25`，并关闭 SDK 的工具列表缓存（`cacheToolList(false)`）、工具列表变更订阅与自动健康检查——每次构造出的 client 都是独立实体，不隐式复用任何远端状态。Header 的环境变量替换由调用方预先完成，本模块拿到的是已解析值；Request 侧的 `timeout` 与初始化共用同一份剩余预算。
 
@@ -30,13 +30,13 @@ MCP 工具要接进 Harness，关键风险只有一条：一次远端调用把 B
 
 取消只终止本次本地等待：令牌取消时取消该调用的 worker future 并中断其线程，因此不注册额外的协议取消 aborter，也绝不关闭共享 client，同一 client 上的其它并发调用不受影响。
 
-[`LangChainMcpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/LangChainMcpClient.java) 把阻塞 SDK 调用限制在 64 个真实 worker 上，交接队列为不保存等待任务的 `SynchronousQueue`，与外层工具 admission 的默认并发相同，不另设配置。池满或 client 已关闭时提交映射为可重试的 `McpException`，不会挂起调用方；`future.cancel` 只结束本地等待，不响应 interrupt 的 worker 继续占用名额，因此后续调用不会靠取消提前腾出容量。
+[`LangChainMcpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/LangChainMcpClient.java) 把阻塞 SDK 调用限制在每个 client 实例的 64 个真实 worker 上，交接队列为不保存等待任务的 `SynchronousQueue`，与外层工具 admission 的默认并发相同，不另设配置。池满或 client 已关闭时提交抛 `McpException`，分别标明容量不足或实例关闭，不会挂起调用方；该异常不携带重试分类，是否重试由调用方决定。`future.cancel` 只结束本地等待，不响应 interrupt 的 worker 继续占用名额，因此后续调用不会靠取消提前腾出容量。
 
 [`LangChainMcpClient`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/LangChainMcpClient.java) 还区分了两类失败：工具自身以错误结束（SDK 抛 `ToolExecutionException`）映射为 `McpToolCallResult.errorText`，因为它仍是可读的工具输出；只有连接或协议失败才抛 [`McpException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpException.java)、[`McpTimeoutException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpTimeoutException.java) 或 [`McpCancelledException`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpCancelledException.java)。上层据此决定是保留 client 还是重建，把工具报错误判成链路故障会连带销毁仍健康的连接。
 
 ## 结果映射
 
-[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元。文本计入单次响应的累计预算；`image` 在解码前按 encoded 长度检查 decoded 上界，非法 Base64 退化为保留结构的有界 JSON，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型先用有界 JSON writer 写出，超过 `JsonResultContent` 的 1 MiB 上限时直接失败，不退化为同尺寸无界文本。单次响应全部 text 与 binary 字节合计不超过 64 MiB，该上限对齐既有 terminal/daemon 的 64 MiB 边界，不是新的调用配置。空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
+[`McpResultExtractor`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/McpResultExtractor.java) 由 factory 安装到 SDK builder，把 MCP content 转成 [`harness-common`](harness-common.md) 的内容单元。文本计入单次响应的累计预算；`image` 在解码前按 encoded 长度检查 decoded 上界，非法 Base64 退化为保留结构的有界 JSON，缺省 mediaType 用 `application/octet-stream`；resource 或任意扩展类型先用有界 JSON writer 写出，超过 `JsonResultContent` 的 1 MiB 上限时直接失败，不退化为同尺寸无界文本。单次响应的聚合内容预算为 64 MiB，不是调用配置。空内容补一个空 `TextResultContent`。工具入参侧则相反地严格：`callTool` 要求 arguments 是严格 JSON object，若入参存在重复键或尾随内容，本地直接以固定文本拒绝，绝不让服务端按「哪个键胜出」的偶然实现执行，也不回显 payload 片段。
 
 ## 源码与测试
 

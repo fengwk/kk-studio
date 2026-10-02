@@ -46,7 +46,9 @@ task 准入（全局事务级 advisory lock，仅 task 接受路径）
 
 `loadEntryPath` 用单条 `WITH RECURSIVE ... CYCLE id SET is_cycle USING path` 递归 CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出，同时以环路哨兵检测并拒绝父子成环。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 
-`loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只读 ROOT、head、环路哨兵与匹配该 `contributorId` 的 CUSTOM 节点并验证连通性，结果不回填完整路径缓存。深删除按阶梯取锁、按逆序删除：`deleteThreads` 要求目标 Thread 全部已加锁、UUID 去重排序，再按升阶梯依次锁 Command、Model、Tool、Work，然后按逆序删除 Work、Command、Tool、Model，最后删 Thread；`deleteEntries` 叶子优先逐层删除直到只剩 ROOT，Session 由独立的 `deleteSession` 删除。
+`loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只读 ROOT、head、环路哨兵与匹配该 `contributorId` 的 CUSTOM 节点并验证连通性，结果不回填完整路径缓存。
+
+深删除按阶梯取锁：`deleteThreads` 将 UUID 排序，但重复 ID 直接抛 `IllegalArgumentException`，不静默去重。目标 Thread 必须全部已加锁且属于已锁执行树；仍被 join 引用、或删除父 Thread 却遗漏其存活子 Thread 时同样拒绝。随后依次锁 Command、Model、Tool、Work，删除顺序为 Work、Command、Tool、Model，最后整批删除 Thread。`deleteEntries` 叶子优先逐层删除直到只剩 ROOT，Session 由独立的 `deleteSession` 删除。
 
 ## Work 的 claim / lease / wake
 
@@ -61,7 +63,7 @@ conflict: available_at = least(current, statement_timestamp())
           lease_token / lease_until 保持不变
 ```
 
-需要把一次唤醒（重试）排到未来时由 `rescheduleWork` 用相对 `Duration` 表达：`available_at = statement_timestamp() + delay`，并清空租约；`delay` 必须是非负整毫秒（零表示立即）。因此 JVM 时钟与数据库的偏差既不会把「立即 Work」延后，也不会让重试提前或推迟。
+需要把一次唤醒（重试）排到未来时由 `rescheduleWork` 用相对 `Duration` 表达，目标时刻为 `statement_timestamp() + delay`；`delay` 必须是非负整毫秒（零表示立即）。它总是清空租约、保留 `wake_version`：认领后没有新 wake 时采用目标时刻；已有新 wake 时取当前 `available_at` 与目标时刻的最小值，避免旧执行体延后新的唤醒。因此 JVM 时钟与数据库的偏差不会改变重试的相对延迟。
 
 环境亲和性一旦绑定即冻结：upsert 的更新条件为 `harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null`，因此既有行绑定了 `required_environment_id` 时，后续传入不一致的非空环境 ID 会让 UPDATE 命中 0 行，实现层随即抛 `IllegalArgumentException` 拒绝，执行环境不会漂移。
 
@@ -69,7 +71,7 @@ conflict: available_at = least(current, statement_timestamp())
 
 环境路由围栏就嵌在这条 claim 之上：当 `required_environment_id` 为空时任何活跃 Dispatcher 节点都可认领；非空时用 `exists` 检查 `environment_connection` 中存在 `environment_id` 匹配、`owner_node_id` 等于当前 Dispatcher 的 `nodeInstanceId`、状态为 `READY` 且 `lease_until > statement_timestamp()` 的连接记录。断开、未就绪、归属他人或租约过期的环境一律不返回候选（fail closed），底层数据库故障则让整个 claim 事务回滚。这条路由围栏与 `FOR UPDATE SKIP LOCKED` 的行级并发控制、应用层 `lease_token` / `lease_until` 的所有权围栏分属三个层次，互不替代——路由回答「哪台机器该做」，行锁回答「谁先抢到」，租约回答「谁还在拥有」。
 
-围栏原语沿同一层次展开，且全部以数据库时钟为唯一权威时间域（JVM 传入的 `now` 只校验毫秒精度，不参与有效性比较）：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > statement_timestamp()`；`renewWork` 在持锁前提下把 `lease_until` 延展到「`statement_timestamp()` + 传入 `Duration`」，现有租约已覆盖目标时点则保持不变并返回 `false`，绝不缩短；[`PostgresqlWorkChannel`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlWorkChannel.java) 在 `requestWork` 之后于同一事务内 `pg_notify`，通知只在提交后才投递。
+围栏原语沿同一层次展开，且全部以数据库时钟为唯一权威时间域（JVM 传入的 `now` 只校验毫秒精度，不参与有效性比较）：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > statement_timestamp()`；`renewWork` 在持锁前提下把 `lease_until` 延展到「`statement_timestamp()` + 传入 `Duration`」，现有租约已覆盖目标时点则保持不变并返回 `false`，绝不缩短。事务实现的 `notifyWorkAvailable` 向 [`PostgresqlWorkChannel`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlWorkChannel.java) 定义的 `harness_runtime_work` 通道执行 `pg_notify`：`requestWork`、保留新 wake 的 `completeWork` 与 `rescheduleWork` 都在各自事务内发通知，仅提交后投递。
 
 ## Dispatcher 生命周期
 
@@ -81,11 +83,11 @@ wake merge -> round-robin claim THREAD/MODEL/TOOL（携带 nodeInstanceId）
   -> 任务收尾触发一次新的 wake
 ```
 
-调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；THREAD / MODEL / TOOL 之间用实例级 round-robin 游标轮转，避免类型饥饿；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，可重复调用；外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
+调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；THREAD / MODEL / TOOL 之间用实例级 round-robin 游标轮转，避免类型饥饿；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，运行期间重复调用是 no-op，`stop()` 后再调用则抛 `IllegalStateException`。外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
 
 worker 线程池必须是 fail-fast 拒绝策略（`AbortPolicy` 一类），构造时显式检查，拒绝 `CallerRunsPolicy` / `DiscardPolicy` / `DiscardOldestPolicy`。容量打满抛拒绝异常时，Dispatcher 先 `lockClaimedWork` 确认本节点仍持有有效租约，再按 `executorRejectionDelay` 延迟 `rescheduleWork` 归还租约并终止当前 drain，避免在过载下陷入 claim-拒绝的紧密循环。Processor 抛 `RuntimeException` 时只记日志、保留数据库租约，等租约自然过期后由后续调度重新认领并按持久化状态恢复。
 
-Work 终态由业务数据提交之后才推进：[`completeWork`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 在排他锁下校验 `lease_token` 与认领时的 `wake_version`——版本未变说明期间没有新唤醒，直接删除该行；被新唤醒推进过则清空租约保留行交给下一轮；所有权已失效则抛异常回滚整个事务。`rescheduleWork` 清空租约并重设 `available_at` 且保持 `wake_version` 不变。
+Work 完成与业务写入在同一事务提交：[`completeWork`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 在排他锁下校验 `lease_token` 与认领时的 `wake_version`——版本未变说明期间没有新唤醒，直接删除该行；被新唤醒推进过则清空租约保留行交给下一轮；所有权已失效则抛异常回滚整个事务。
 
 [`HarnessWorkDispatcherConfig`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfig.java) 是调度器的部署级配置契约，也是本模块唯一暴露给进程启动参数的部分：
 
@@ -116,7 +118,7 @@ NOTIFY RESYNC    = 提示重读快照
 
 ```text
 reference() -> 规范 file:///root/<sha256>，纯内存、无存储副作用
-put()       -> SHA-256 -> NOFOLLOW/CREATE_NEW 临时文件 -> force 落盘 -> create-only 硬链接发布
+put()       -> SHA-256 -> WRITE/CREATE_NEW 临时文件 -> force 落盘 -> create-only 硬链接发布 -> NOFOLLOW 校验
 read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘要
 ```
 
@@ -139,7 +141,7 @@ read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘�
 
 测试分四组，入口都在 [`harness/infra/src/test`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/) 下；改 Store 或调度前先从这里定位对应断言：
 
-- 真实 PostgreSQL 契约（需要 Testcontainers 启动数据库）：[`runtime/store/testing` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/)；[`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java) 锁定八表形状（含 `harness_thread_join` 的固定回执与交付约束），[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)、[`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java) 覆盖事务边界、锁序递增与句柄生命周期；[`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java) 用 CTE 计数器把冷读一次 CTE、连续 append 零 CTE 与会话驱逐变成可断言事实；[`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java) 覆盖 claim、lease、wake、NOTIFY 唤醒与周期轮询语义；深删除顺序、命令邮箱、Entry 树与 Invocation 状态一致性由同目录按域拆分的其余 PostgreSQL 契约测试覆盖。
+- 真实 PostgreSQL 契约（需要 Testcontainers 启动数据库）：[`runtime/store/testing` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/)；[`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java) 锁定八表形状（含 `harness_thread_join` 的固定回执与交付约束），[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)、[`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java) 覆盖事务边界、锁序递增与句柄生命周期；[`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java) 用 CTE 计数器把冷读一次 CTE、连续 append 零 CTE 与会话驱逐变成可断言事实；[`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java) 覆盖 claim、lease、wake 与 NOTIFY 唤醒；周期轮询由下列 Dispatcher 生命周期测试覆盖。深删除顺序、命令邮箱、Entry 树与 Invocation 状态一致性由同目录按域拆分的其余 PostgreSQL 契约测试覆盖。
 - 调度循环：[`dispatch` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/)；[`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)、[`HarnessWorkDispatcherAdmissionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherAdmissionTest.java)、[`HarnessWorkDispatcherConfigTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfigTest.java) 覆盖单次 drain、周期调度、有界分发、执行器拒绝归还、平滑停止与配置边界。
 - Realtime 与本地资源：[`postgresql` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/) 的 [`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`PostgresqlRealtimeEventSinkIntegrationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkIntegrationTest.java)、[`PostgresqlRealtimeEventSourceTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceTest.java)、[`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java) 覆盖规范编解码、超限降级、分块上界与 `Array` 释放、批量保序与回滚不产生通知、Source 围栏控制；[`LocalFileResourceStoreTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStoreTest.java) 覆盖哈希寻址、并发 create-only 发布、NOFOLLOW 打开与精确校验，并通过可注入写入步骤在部分写入与 `force` 失败处注入故障，断言失败后根目录无临时文件残留。
 - 架构守卫：[`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java) 守卫生产依赖范围与包结构。
