@@ -15,6 +15,7 @@ script with the ANSI code page.
 #>
 
 function Test-ReleaseInstallerContracts {
+    $productionInputs = (Get-Command Resolve-InstallInputs).ScriptBlock
     $calls = [Collections.Generic.List[string]]::new()
     $releases = [Collections.Generic.List[object]]::new()
     $downloads = [Collections.Generic.List[object]]::new()
@@ -47,6 +48,7 @@ function Test-ReleaseInstallerContracts {
         SelectedJava = ""
         Task = $null
         Definition = $null
+        TokenReference = $null
         LatestTag = $latestTag
         AssetAction = $null
         ChecksumAction = $null
@@ -98,6 +100,7 @@ function Test-ReleaseInstallerContracts {
         $script:InvocationParameters = @{}
         $script:RepoRoot = $null; $script:BuiltJar = $null
         $script:StagedJar = $null; $script:DownloadDirectory = $null
+        $script:ResolvedReleaseTag = $null
         $state.Task = New-ManagedTaskFixture
         $state.Definition = $null
         $state.LatestTag = $latestTag
@@ -242,6 +245,7 @@ function Test-ReleaseInstallerContracts {
             [IO.File]::WriteAllText($script:BuiltJar, $sourceJar)
         }
         $FromSource = $true
+        $state.Probe.Stdout = $sourceJar
         $script:InvocationParameters = @{ FromSource = $true }
         $expectedJar = Join-Path $repo "harness\daemon\target\kk-studio-daemon.jar"
         Assert-Equal -Expected 0 -Actual (Invoke-Main) -Message "an explicit -FromSource upgrade succeeds"
@@ -256,11 +260,117 @@ function Test-ReleaseInstallerContracts {
             -Message "the locally built JAR is published to the managed JAR"
     }
 
+    function Test-TokenPublicationContracts {
+        # Real input resolution retains a SecureString; only publication is mocked (NTFS ACL
+        # persistence is covered separately on Windows). Failures must keep the old bytes.
+        $Command = "install"
+        $GatewayUri = $gateway
+        $failure = ""
+        New-Item -ItemType Directory -Path $state.ConfigRoot -Force | Out-Null
+        function Resolve-InstallInputs {
+            try { & $productionInputs }
+            finally { $state.TokenReference = $script:PendingToken }
+        }
+        function Resolve-JavaHome {
+            param($ExplicitJavaHome)
+            if ($failure -eq "java") { throw "fixture java failure" }
+            return $state.JavaHome
+        }
+        function Resolve-Executable {
+            param($Value, $DefaultName, $OptionName)
+            if ($failure -eq "bash") { throw "fixture bash failure" }
+            return $bash
+        }
+        function Find-DaemonTask {
+            $calls.Add("Find-DaemonTask")
+            if ($failure -eq "ownership-refresh" -and
+                @($calls | Where-Object { $_ -eq "Find-DaemonTask" }).Count -eq 2) {
+                $state.Task.Description = "foreign task"
+            }
+            return $state.Task
+        }
+        function New-DaemonScheduledTaskDefinition {
+            param($JavaExecutable, $DaemonArguments, $WorkingDirectory, $UserSid, $Description)
+            $calls.Add("New-DaemonScheduledTaskDefinition")
+            if ($failure -eq "definition") { throw "fixture definition failure" }
+            return [pscustomobject] @{ DaemonArguments = $DaemonArguments }
+        }
+        function Stop-DaemonTaskIfRunning {
+            param($Task)
+            $calls.Add("Stop-DaemonTaskIfRunning")
+            if ($failure -eq "stop") { throw "fixture stop failure" }
+        }
+        function Save-RegistrationToken {
+            param([Security.SecureString] $Token)
+            # Early publication must fail even on the success path.
+            Assert-True -Condition ($probes.Count -eq 1 -and
+                $calls -contains "New-DaemonScheduledTaskDefinition" -and
+                $calls -contains "Stop-DaemonTaskIfRunning") `
+                -Message "token publication waits for JAR, definition and stopped task"
+            Assert-ManagedTask -Task $state.Task
+            $calls.Add("Save-RegistrationToken")
+            [IO.File]::WriteAllText($tokenFile, "replacement fixture")
+            return $tokenFile
+        }
+        foreach ($case in @(
+            @{ Failure = "token"; Error = "control characters" },
+            @{ Failure = "java"; Error = "fixture java failure" },
+            @{ Failure = "bash"; Error = "fixture bash failure" },
+            @{ Failure = "ownership"; Error = "unmanaged Scheduled Task" },
+            @{ Failure = "download"; Error = "fixture download failure" },
+            @{ Failure = "checksum"; Error = "checksum mismatch" },
+            @{ Failure = "version"; Error = "does not match resolved release tag" },
+            @{ Failure = "definition"; Error = "fixture definition failure" },
+            @{ Failure = "stop"; Error = "fixture stop failure" },
+            @{ Failure = "ownership-refresh"; Error = "unmanaged Scheduled Task" },
+            @{ Failure = ""; Error = "" }
+        )) {
+            Reset-ReleaseFixture
+            $failure = $case.Failure
+            $script:RegistrationToken = "replacement fixture"
+            if ($failure -eq "token") { $script:RegistrationToken = "invalid`nfixture" }
+            $script:InvocationParameters = @{ GatewayUri = $gateway; RegistrationToken = "replacement fixture" }
+            [IO.File]::WriteAllText($tokenFile, "previous fixture")
+            if ($failure -eq "ownership") { $state.Task.Description = "foreign task" }
+            if ($failure -eq "download") { $state.FailUri = Get-ReleaseUri -Tag $latestTag }
+            if ($failure -eq "checksum") {
+                $state.ChecksumAction = { param($Uri, $OutFile) New-ChecksumFile -OutFile $OutFile -Hash ("0" * 64) }
+            }
+            if ($failure -eq "version") { $state.Probe.Stdout = "kk-studio-daemon 9.9.9" }
+            if ($failure -eq "") {
+                Assert-Equal -Expected 0 -Actual (Invoke-Main) -Message "successful reinstall publishes a token"
+                Assert-Equal -Expected "replacement fixture" -Actual ([IO.File]::ReadAllText($tokenFile)) `
+                    -Message "preflight success permits token replacement"
+            } else {
+                Assert-Throws -Action { Invoke-Main } -ExpectedMessage $case.Error `
+                    -Message "$failure fails before credential publication"
+                Assert-Equal -Expected "previous fixture" -Actual ([IO.File]::ReadAllText($tokenFile)) `
+                    -Message "$failure preserves the running installation's token"
+                Assert-Equal -Expected $previousJar -Actual ([IO.File]::ReadAllText($state.InstalledJar)) `
+                    -Message "$failure preserves the old JAR"
+                Assert-True -Condition ($calls -notcontains "Save-RegistrationToken") `
+                    -Message "$failure never enters token persistence"
+            }
+            Assert-Equal -Expected $null -Actual $script:PendingToken -Message "$failure clears pending secret"
+            Assert-True -Condition ([string]::IsNullOrEmpty($script:RegistrationToken)) `
+                -Message "$failure clears inline secret"
+            if ($null -ne $state.TokenReference) {
+                Assert-Throws -Action {
+                    $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($state.TokenReference)
+                    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+                } -ExpectedMessage "disposed" `
+                    -Message "$failure disposes the retained SecureString"
+            }
+            Assert-True -Condition (-not $script:InvocationParameters.ContainsKey("RegistrationToken")) `
+                -Message "$failure removes the retained credential parameter"
+        }
+    }
+
     $savedScriptState = @{}
     foreach ($name in @("InvocationParameters", "VerifyTimeoutSeconds", "VerifyStableSeconds", "RepoRoot", "BuiltJar",
             "HomePath", "InstallRoot", "InstalledJar", "CurrentSid", "TaskName", "TaskDescription", "SelectedJavaHome",
             "SelectedJava", "SelectedBash", "ResolvedTokenFile", "ResolvedDataDir", "ResolvedLspConfig", "StagedJar",
-            "DownloadDirectory", "ConfigRoot")) {
+            "DownloadDirectory", "ConfigRoot", "ResolvedReleaseTag", "PendingToken", "RegistrationToken")) {
         $variable = Get-Variable -Name $name -Scope Script -ErrorAction SilentlyContinue
         $savedScriptState[$name] = if ($null -eq $variable) { $null } else { $variable.Value }
     }
@@ -316,6 +426,7 @@ function Test-ReleaseInstallerContracts {
         $script:InvocationParameters = @{ Version = $Version }
         # Distinct bytes per tag, so the published JAR proves which asset was downloaded.
         $state.AssetAction = { param($Uri, $OutFile) [IO.File]::WriteAllText($OutFile, "kk-studio-daemon 0.9.1") }
+        $state.Probe.Stdout = "kk-studio-daemon 0.9.1"
         Assert-Equal -Expected 0 -Actual (Invoke-Main) -Message "a pinned upgrade succeeds"
         Assert-True -Condition ($releases.Count -eq 0) -Message "a pinned version resolves no latest release"
         Assert-Equal -Expected (Get-ReleaseUri -Tag $Version) -Actual $downloads[0].Uri -Message "the pinned JAR is downloaded"
@@ -371,6 +482,37 @@ function Test-ReleaseInstallerContracts {
         Assert-Throws -Action { Invoke-Main } -ExpectedMessage "exit code 23" -Message "a JAR that cannot run --version is refused"
         Assert-UpgradeRefused -Message "a failing artifact probe"
 
+        # A valid checksum/identity prefix cannot hide a release version mismatch.
+        foreach ($banner in @("kk-studio-daemon 9.9.9", "kk-studio-daemon 2.4.6 extra",
+                " kk-studio-daemon 2.4.6")) {
+            Reset-ReleaseFixture
+            $state.Probe.Stdout = $banner
+            Assert-Throws -Action { Invoke-Main } -ExpectedMessage "does not match resolved release tag" `
+                -Message "release stdout must match the exact resolved version"
+            Assert-UpgradeRefused -Message "a mismatched release version"
+        }
+
+        # Broken actions fail closed: no other Java can validate a task left with a bad path.
+        foreach ($actions in @(@(), @([pscustomobject] @{ Execute = "" }),
+                @([pscustomobject] @{ Execute = (Join-Path $sandbox "missing-java.exe") }),
+                @($state.Task.Actions[0], $state.Task.Actions[0]))) {
+            Reset-ReleaseFixture
+            $state.Task.Actions = $actions
+            Assert-Throws -Action { Invoke-Main } -ExpectedMessage "exactly one existing Java" `
+                -Message "upgrade rejects a missing or ambiguous Java action"
+            Assert-UpgradeRefused -Message "an invalid Java action"
+            Assert-Equal -Expected 0 -Actual $downloads.Count -Message "invalid actions fail before downloading"
+            Assert-True -Condition ($calls -notcontains "Resolve-JavaHome") `
+                -Message "invalid actions never fall back to a different Java"
+        }
+        Reset-ReleaseFixture
+        $otherExecutable = Join-Path $state.JavaHome "bin/not-java.exe"
+        [IO.File]::WriteAllText($otherExecutable, "not java fixture")
+        $state.Task.Actions[0].Execute = $otherExecutable
+        Assert-Throws -Action { Invoke-Main } -ExpectedMessage "validated JDK 21" `
+            -Message "an existing non-Java action cannot borrow the JDK version check"
+        Assert-UpgradeRefused -Message "a mismatched Java executable"
+
         # ---- status is read-only, whether or not a managed task exists ----
         $Command = "status"
         Reset-ReleaseFixture
@@ -396,6 +538,7 @@ function Test-ReleaseInstallerContracts {
         $Command = "upgrade"
         Reset-ReleaseFixture
         Test-SourceUpgrade
+        Test-TokenPublicationContracts
     }
     finally {
         foreach ($name in $savedScriptState.Keys) {
