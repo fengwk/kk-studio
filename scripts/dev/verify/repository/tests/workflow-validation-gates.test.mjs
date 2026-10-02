@@ -25,16 +25,17 @@ function evaluate(expression, branch, event, validateOnly, status = {}) {
     needs: {
       validate: { result: status.repository ?? 'success' },
       validate_windows_daemon: { result: status.windows ?? 'success' },
+      validate_unix_daemon: { result: status.unix ?? 'success' },
     },
     always: () => true,
     cancelled: () => status.cancelled ?? false,
   }, { timeout: 100 })
 }
 
-test('push gates stay main-only; explicit manual validation runs both gates on any branch', () => {
+test('push gates stay main-only; explicit manual validation runs all gates on any branch', () => {
   // Evaluate the actual expressions, so changing just one job or accepting push inputs fails.
   assert.match(docker, /validate_only:\n\s+description: .+\n\s+type: boolean\n\s+default: false/u)
-  for (const job of ['validate', 'validate_windows_daemon']) {
+  for (const job of ['validate', 'validate_windows_daemon', 'validate_unix_daemon']) {
     for (const branch of ['main', 'dev', 'worktree/repair']) {
       for (const event of ['push', 'workflow_dispatch']) {
         for (const optIn of [false, true]) {
@@ -55,14 +56,17 @@ test('validation-only never publishes; failed or cancelled gates cannot publish'
   for (const branch of ['main', 'dev']) {
     for (const repository of ['success', 'failure', 'cancelled', 'skipped']) {
       for (const windows of ['success', 'failure', 'cancelled', 'skipped']) {
-        for (const cancelled of [false, true]) {
-          const state = { repository, windows, cancelled }
-          assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
-          assert.equal(
-            evaluate(expression, branch, 'push', false, state),
-            !cancelled && ['success', 'skipped'].includes(repository)
-              && ['success', 'skipped'].includes(windows),
-          )
+        for (const unix of ['success', 'failure', 'cancelled', 'skipped']) {
+          for (const cancelled of [false, true]) {
+            const state = { repository, windows, unix, cancelled }
+            assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
+            assert.equal(
+              evaluate(expression, branch, 'push', false, state),
+              !cancelled && ['success', 'skipped'].includes(repository)
+                && ['success', 'skipped'].includes(windows)
+                && ['success', 'skipped'].includes(unix),
+            )
+          }
         }
       }
     }
