@@ -105,17 +105,19 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 
 ### CI 验证与镜像发布
 
-`docker-publish` 在 `main` 上先执行仓库与 Windows 安装器门禁再发布；`dev` push 默认只构建发布，
-不会执行这两项门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
+`docker-publish` 在 `main` 上先执行仓库、Unix 与 Windows 安装器门禁再发布；`dev` push 默认只构建发布，
+不会执行这些门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
 先把待验证提交推送到目标分支，再显式运行不发布模式：
 
 ```bash
 gh workflow run docker-publish.yml --ref dev -f validate_only=true
 ```
 
-该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Windows PS5.1 / PS7 原生安装器回归，
+该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装器回归，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
+Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
+不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装器门禁。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
@@ -125,6 +127,8 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 ### Daemon 安装脚本回归
 
 在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。
+Unix fixtures 替代网络与服务管理命令，真实执行安装器、SHA 校验、文件替换与终端交互；
+覆盖 latest/固定版本、失败保留旧安装、升级复用配置以及无仓库安装。不注册真实 systemd/launchd 服务。
 Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
 
 ```powershell
