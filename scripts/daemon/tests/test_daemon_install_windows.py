@@ -430,7 +430,17 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
         self.assertIn("- validate_windows_daemon", docker)
         self.assertIn("needs.validate_windows_daemon.result == 'success'", docker)
         release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("needs: validate_windows_daemon", release)
+        # Inspect publish prerequisites, not mentions in another job or a comment.
+        publish = re.search(r"(?ms)^  publish:\n(.*?)(?=^  \w+:|\Z)", release)
+        self.assertIsNotNone(publish)
+        needs = re.search(r"(?m)^    needs:\n((?:      - \w+\n)+)", publish.group(1))
+        self.assertIsNotNone(needs)
+        self.assertEqual(
+            ["validate_windows_daemon", "validate_unix_daemon"],
+            re.findall(r"(?m)^      - (\w+)$", needs.group(1)),
+        )
+        # Default success gating must not be replaced by an always()/skip bypass.
+        self.assertNotRegex(publish.group(1), r"(?m)^    if:")
 
     def test_native_capture_keeps_streams_separate_and_drains_both_before_waiting(self):
         """Guard PS 5.1 compatibility and deadlock ordering; real outcomes are tested in PowerShell."""

@@ -206,11 +206,13 @@ class DownloadContracts:
         fixture = self.fixture()
         # Supply only the required external utilities; no SHA256 GNU binary can be discovered.
         for tool in (
-            "bash", "python3", "env", "uname", "stat", "id", "chmod", "mkdir",
+            "env", "uname", "stat", "id", "chmod", "mkdir",
             "rm", "mktemp", "cp", "mv", "cat", "tr", "head", "sed",
         ):
             if not (fixture.bin / tool).exists():
                 (fixture.bin / tool).symlink_to(shutil.which(tool))
+        # Even this intentionally minimal PATH must select Apple's Bash 3.2 on macOS.
+        (fixture.bin / "bash").symlink_to("/bin/bash")
         shasum = shutil.which("shasum")
         self.assertIsNotNone(shasum, "test host needs shasum to exercise the macOS fallback")
         write_executable(
@@ -403,7 +405,7 @@ class DownloadContracts:
         fixture = self.fixture()
         for arguments in ([], ["install", "--gateway-uri", GATEWAY_URI]):
             result = subprocess.run(
-                ["bash", str(fixture.script), *arguments],
+                ["/bin/bash", str(fixture.script), *arguments],
                 env=fixture.environment(), capture_output=True, text=True,
                 start_new_session=True, check=False,
             )
