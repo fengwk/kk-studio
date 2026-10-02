@@ -11,7 +11,7 @@ import {
   useAgentPaneController,
 } from '@/features/ai/runtime/useAgentPaneController'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import { createTextPart } from '@/features/ai/composer/composer-parts'
+import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { ApiError } from '@/shared/api/client'
@@ -3238,6 +3238,254 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(controller2.current.pendingMessage).toBeNull()
 
       pane1.unmount()
+    })
+  })
+
+  describe('selectAgent model follow & validation behavior', () => {
+    const claudeModel = {
+      providerName: 'anthropic',
+      name: 'Claude',
+      description: null,
+      config: {
+        limit: { context: 200000, output: 4096 },
+        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        pricing: {
+          currency: 'USD',
+          pricingTier: 'default',
+          serviceTier: 'standard',
+          serviceTierMultiplier: 1,
+        },
+        defaultVariant: 'v1',
+        variants: [{ id: 'v1' }, { id: 'fast' }],
+      },
+      version: '0',
+      createTime: null,
+      updateTime: null,
+    }
+
+    const coderAgent: AgentDefinitionDTO = {
+      name: 'coder',
+      description: null,
+      systemPrompt: null,
+      model: 'anthropic/Claude',
+      variant: 'fast',
+      environmentId: null,
+      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+      version: '0',
+      createTime: null,
+      updateTime: null,
+    }
+
+    const brokenAgent: AgentDefinitionDTO = {
+      name: 'broken-agent',
+      description: null,
+      systemPrompt: null,
+      model: 'nonexistent/model',
+      variant: null,
+      environmentId: null,
+      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+      version: '0',
+      createTime: null,
+      updateTime: null,
+    }
+
+    // 两类入口均需先验证完整预设；拒绝选择不得清空正文、附件或关闭选择面板。
+    it.each(['blank', 'bound'])('preserves draft and interaction on invalid agent selection in %s mode', async (mode) => {
+      vi.mocked(agentService.listAgents).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 3,
+        results: [agents[0]!, coderAgent, brokenAgent],
+      })
+      vi.mocked(agentService.listModels).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [models[0]!, claudeModel],
+      })
+
+      if (mode === 'bound') {
+        localStorage.setItem(
+          `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+          JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+        )
+      }
+      const hook = renderController({ agents: [agents[0]!, coderAgent, brokenAgent] })
+      await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+      const initialDraft = { ...hook.result.current.activeDraft! }
+
+      act(() => {
+        hook.result.current.composer.onPartsChange([
+          createTextPart('preserved draft text'),
+          { type: 'attachment', partId: 'attachment-1', uploadId: 'local-upload-1', filename: 'notes.txt' },
+        ])
+        hook.result.current.openInteraction('agent')
+      })
+      const preservedParts = hook.result.current.composer.parts
+      expect(hook.result.current.interaction).toBe('agent')
+
+      // 选择无法解析模型的 agent
+      act(() => {
+        hook.result.current.selectAgent('broken-agent')
+      })
+
+      // 验证：报错、保留 interaction、保留原 draft，绝不将 localDraft 置 null
+      expect(hook.result.current.error).toBe('Agent broken-agent 的模型或变体无法解析，请选择其他 Agent。')
+      expect(hook.result.current.interaction).toBe('agent')
+      expect(hook.result.current.activeDraft).toEqual(initialDraft)
+      expect(partsToText(hook.result.current.composer.parts)).toBe('preserved draft text')
+      expect(hook.result.current.composer.parts).toEqual(preservedParts)
+
+      // 成功选择 coder agent：关闭交互并原子更新 agentName 和 model
+      act(() => {
+        hook.result.current.selectAgent('coder')
+      })
+      expect(hook.result.current.error).toBeNull()
+      expect(hook.result.current.interaction).toBeNull()
+      expect(hook.result.current.activeDraft?.agentName).toBe('coder')
+      expect(hook.result.current.activeDraft?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'Claude',
+        variant: 'fast',
+      })
+      expect(partsToText(hook.result.current.composer.parts)).toBe('preserved draft text')
+      expect(hook.result.current.composer.parts).toEqual(preservedParts)
+
+      // 手动修改模型后，再次选择同一 agent 显式重置为该 agent 的预设模型
+      act(() => {
+        hook.result.current.composer.settings?.onModelChange({
+          providerName: 'custom',
+          modelName: 'Custom',
+          variant: 'v1',
+        })
+      })
+      expect(hook.result.current.activeDraft?.model.modelName).toBe('Custom')
+
+      act(() => {
+        hook.result.current.selectAgent('coder')
+      })
+      expect(hook.result.current.activeDraft?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'Claude',
+        variant: 'fast',
+      })
+    })
+
+    it('atomically follows target agent model in bound mode, sending SET_AGENT+SET_MODEL+USER_MESSAGE on submit', async () => {
+      // 发送必须把 Agent 与模型设置放在同一消息批次，不能只更新 UI 标签。
+      vi.mocked(agentService.listAgents).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [agents[0]!, coderAgent],
+      })
+      vi.mocked(agentService.listModels).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [models[0]!, claudeModel],
+      })
+
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      const hook = renderController({ agents: [agents[0]!, coderAgent] })
+      await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+
+      act(() => {
+        hook.result.current.selectAgent('coder')
+      })
+      expect(hook.result.current.activeDraft?.agentName).toBe('coder')
+      expect(hook.result.current.activeDraft?.model).toEqual({
+        providerName: 'anthropic',
+        modelName: 'Claude',
+        variant: 'fast',
+      })
+
+      await act(async () => {
+        await hook.result.current.composer.onSubmit([createTextPart('bound message')])
+      })
+
+      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+      const [batchRequest] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+      expect(batchRequest.commands.map((c) => c.type)).toEqual([
+        'SET_AGENT',
+        'SET_MODEL',
+        'USER_MESSAGE',
+      ])
+      expect(batchRequest.commands[0]).toMatchObject({ agentName: 'coder' })
+      expect(batchRequest.commands[1]).toMatchObject({
+        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      })
+    })
+
+    it('includes SET_AGENT and SET_MODEL for the new agent model in the bound preview request batch', async () => {
+      // 预览与发送使用同一草稿，预览不得遗留旧模型。
+      vi.mocked(agentService.listAgents).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [agents[0]!, coderAgent],
+      })
+      vi.mocked(agentService.listModels).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [models[0]!, claudeModel],
+      })
+
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      mockDebugProjection()
+      const serveFresh = snapshotGate()
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce(previewResponse({
+        providerName: 'anthropic',
+        modelName: 'Claude',
+        bodyJson: '{"messages":[{"role":"user","content":"preview test message"}]}',
+        sourceHeadEntryId: 'head-1',
+      }))
+
+      const hook = renderController({ agents: [agents[0]!, coderAgent] })
+      await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+
+      // 切换到 coder agent
+      act(() => {
+        hook.result.current.selectAgent('coder')
+        hook.result.current.composer.onPartsChange([createTextPart('preview test message')])
+        hook.result.current.composer.onPreviewReadinessChange?.({ canPreview: true, reason: null })
+      })
+      expect(hook.result.current.activeDraft?.agentName).toBe('coder')
+      expect(hook.result.current.activeDraft?.model.modelName).toBe('Claude')
+
+      // 挂载 composerRef handle
+      hook.result.current.composer.composerRef.current = {
+        preparePreview: () => ({
+          payload: [createTextPart('preview test message')],
+          localDraft: [createTextPart('preview test message')],
+        }),
+      }
+
+      serveFresh(() => Promise.resolve(snapshot(thread({ headEntryId: 'head-1', nextCommandSequence: '1' }))))
+
+      await act(async () => {
+        await hook.result.current.handlePreview()
+      })
+
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      const [threadId, request] = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]!
+      expect(threadId).toBe(THREAD_ID)
+      expect(request.commands.map((c) => c.type)).toEqual([
+        'SET_AGENT',
+        'SET_MODEL',
+        'USER_MESSAGE',
+      ])
+      expect(request.commands[0]).toMatchObject({ agentName: 'coder' })
+      expect(request.commands[1]).toMatchObject({
+        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      })
     })
   })
 })

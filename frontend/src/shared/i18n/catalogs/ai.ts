@@ -106,8 +106,8 @@ export const aiCatalog = {
     'zh-CN': '审批工具调用',
   },
   'ai.runtime.action.agentUnresolvable': {
-    'en-US': 'The agent {agent} has no resolvable model; pick another agent.',
-    'zh-CN': 'Agent {agent} 没有可解析的模型，请选择其他 Agent。',
+    'en-US': 'The model or variant for Agent {{selectedAgent}} cannot be resolved; pick another agent.',
+    'zh-CN': 'Agent {{selectedAgent}} 的模型或变体无法解析，请选择其他 Agent。',
   },
   'ai.common.loadingResourceEditor': {
     'en-US': 'Loading resource editor',

@@ -54,6 +54,14 @@ function DebugPreviewHarnessApp() {
                 createTime: '2026-10-01T00:00:00Z',
                 updateTime: '2026-10-01T00:00:00Z',
               },
+              ...['coder', 'broken-agent'].map((name) => ({
+                name,
+                description: name,
+                model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+                variant: 'fast',
+                config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+                version: '1',
+              })),
             ]}
           />
         </div>

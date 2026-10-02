@@ -273,6 +273,10 @@ target 三态是：
 | `NEW_THREAD_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `NEW_THREAD` 建立分支，Thread 名固定 `branch-<threadId 前 8 位>` |
 | `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
 
+显式选择 Agent 时，所有 target 同步采用其模型与变体（Agent 未指定变体则使用模型默认值），
+保留环境、YOLO、输入和附件；重新选择同一 Agent 也会恢复其模型预设。
+模型或变体无法解析时提示错误，保持原选择和草稿不变。Catalog 刷新不触发此联动。
+
 `PendingAcceptance` 按 owner 与 pane id 写入 localStorage，包含 frozen request、
 BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending acceptance 时
 拒绝切换 target，generation 与 target identity 防止旧请求覆盖新 Pane。
