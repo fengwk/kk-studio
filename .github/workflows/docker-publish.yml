@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       validate_only:
-        description: Run all repository and Windows gates without publishing an image
+        description: Run all repository and daemon platform gates without publishing an image
         type: boolean
         default: false
 
@@ -36,6 +36,26 @@ env:
   POSTGRES_VERSION: '17'
 
 jobs:
+  validate_unix_daemon:
+    name: validate Unix daemon installer (${{ matrix.os }})
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test installer with system Bash
+        # macOS /bin/bash is 3.2; neither the runner default nor Homebrew Bash is acceptable.
+        # Fixtures record service operations without registering systemd/launchd services.
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          /bin/bash --version
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install.py
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py
+          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_download.py
+
   validate_windows_daemon:
     name: validate Windows daemon installer
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
@@ -150,6 +170,7 @@ jobs:
     needs:
       - validate
       - validate_windows_daemon
+      - validate_unix_daemon
     # `main` 只能在全量门禁成功后发布；`dev` 的 validate job 按设计为 skipped，
     # 仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
     if: >-
@@ -161,6 +182,10 @@ jobs:
         && (
           needs.validate_windows_daemon.result == 'success'
           || needs.validate_windows_daemon.result == 'skipped'
+        )
+        && (
+          needs.validate_unix_daemon.result == 'success'
+          || needs.validate_unix_daemon.result == 'skipped'
         )
       }}
     runs-on: ubuntu-latest

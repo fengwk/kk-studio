@@ -1,7 +1,7 @@
 """macOS LaunchAgent contracts for ``scripts/daemon/install.sh``.
 
-These cases run on Linux. ``uname``, ``launchctl`` and ``plutil`` are recorder fakes, so the
-assertions cover the generated plist and the launchd lifecycle without a Darwin host. ``plutil``
+These cases run on Linux and macOS. ``uname``, ``launchctl`` and ``plutil`` are recorder fakes,
+so assertions cover the generated plist and lifecycle without registering a real service. ``plutil``
 parses the generated XML with the same rules Python's ``plistlib`` uses later, which is what
 makes "invalid plist is not installed" testable before any real ``plutil`` is available.
 """
@@ -11,6 +11,7 @@ from pathlib import Path
 import plistlib
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -236,6 +237,24 @@ class TestMacosInlineToken(InlineTokenContracts, DarwinInstallTestCase):
 class TestMacosInstallContract(DarwinInstallTestCase):
     """The generated LaunchAgent is the whole macOS configuration surface."""
 
+    def test_fixture_uses_system_bash_and_current_python(self):
+        """The macOS CI suite must test Bash 3.2, not a Homebrew/PATH replacement."""
+        fixture = self.fixture()
+        self.assertTrue(
+            (fixture.bin / "plutil").read_text().startswith(f"#!{sys.executable}\n")
+        )
+        fixture.script.write_text('printf "%s\\n" "$BASH" "$BASH_VERSION"\n')
+        write_executable(fixture.bin / "bash", "#!/bin/sh\nexit 99\n")
+        result = fixture.run("--help")
+        self.assertEqual(0, result.returncode, result.stderr)
+        expected = subprocess.run(
+            ["/bin/bash", "-c", 'printf "%s\\n" "$BASH" "$BASH_VERSION"'],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertEqual(expected.stdout, result.stdout)
+        if sys.platform == "darwin":
+            self.assertTrue(result.stdout.splitlines()[1].startswith("3.2."), result.stdout)
+
     def test_install_writes_the_shared_jar_and_a_direct_launch_agent(self):
         """Install must create the shared Unix JAR and a plist that execs java directly."""
         fixture = self.fixture(jar_body="shaded-jar-payload")
@@ -276,7 +295,7 @@ class TestMacosInstallContract(DarwinInstallTestCase):
                 "--note",
                 SPECIAL_NOTE,
                 "--bash-executable",
-                "/usr/bin/bash",
+                "/bin/bash",
                 "--lsp-config",
                 str(lsp_config),
             ],

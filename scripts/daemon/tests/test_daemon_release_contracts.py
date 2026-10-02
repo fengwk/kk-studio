@@ -614,6 +614,8 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
         used = re.findall(r"(?m)^\s+(?:-\s+)?uses: (\S+)(?:\s+#\s*(\S+))?\s*$", self.workflow)
         self.assertEqual(
             [
+                # Unix and Windows validation each require their own pinned checkout.
+                (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
                 (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
                 (f"actions/setup-java@{SETUP_JAVA_SHA}", "v4"),
                 (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
