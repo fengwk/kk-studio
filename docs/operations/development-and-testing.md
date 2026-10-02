@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.1.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.2.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -212,7 +212,7 @@ branch coverage 作为参考指标，具体数字以对应模块的 `target/site
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean package
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.1.jar
+"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.2.jar
 ```
 
 `distribution` profile 在 `prepare-package` 安装 Node 与 npm、对 [`frontend/`](../../frontend/) 执行

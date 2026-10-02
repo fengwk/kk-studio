@@ -44,7 +44,7 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 # 它派生），不是 Daemon 配置：Daemon 自身的数据目录由 --data-dir 决定。
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.1.jar"}
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.2.jar"}
 DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
 
 step() { echo "==> $*"; }
