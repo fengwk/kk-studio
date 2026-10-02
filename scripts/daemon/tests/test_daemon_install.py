@@ -55,6 +55,8 @@ def systemd_escape(value):
 class Fixture:
     """One isolated HOME, checkout and fake toolchain for a single install scenario."""
 
+    source_mode = True
+
     def __init__(
         self,
         root,
@@ -223,7 +225,9 @@ class Fixture:
         return environment
 
     def run(self, *arguments, env=None, cwd=None):
-        """Run the shipped installer with one scenario's environment."""
+        """Source-build fixtures explicitly opt into source upgrades; release fixtures do not."""
+        if self.source_mode and arguments and arguments[0] == "upgrade":
+            arguments = (arguments[0], "--from-source", *arguments[1:])
         return subprocess.run(
             [str(self.script), *arguments],
             cwd=str(cwd or self.repo),
@@ -231,6 +235,8 @@ class Fixture:
             text=True,
             capture_output=True,
             check=False,
+            # Missing credentials must never prompt on the test runner's actual terminal.
+            start_new_session=True,
         )
 
     def install_arguments(self, **overrides):
@@ -242,7 +248,7 @@ class Fixture:
             "bash-executable": "/usr/bin/bash",
         }
         arguments.update(overrides)
-        items = []
+        items = ["--from-source"] if self.source_mode else []
         for name, value in arguments.items():
             if value is None:
                 continue
@@ -537,16 +543,19 @@ class TestDaemonInstallInterface(DaemonInstallTestCase):
         self.assertIn("Loaded is not a", result.stdout)
         self.assertNotIn("Exit 0 when running", result.stdout)
 
-    def test_missing_command_and_unknown_command_fail_closed(self):
-        """No command or an unknown command must print the usage and exit non-zero."""
+    def test_missing_command_prompts_and_unknown_command_fails_closed(self):
+        """Default install without a terminal requires explicit credentials; unknown commands fail."""
         fixture = self.fixture()
         empty = fixture.run()
         self.assertNotEqual(0, empty.returncode)
-        self.assertIn("Usage:", empty.stdout + empty.stderr)
+        self.assertIn("noninteractive install requires", empty.stderr)
 
         unknown = fixture.run("reinstall")
         self.assertNotEqual(0, unknown.returncode)
         self.assertIn("unknown command", unknown.stderr)
+        misplaced_secret = fixture.run(TOKEN_VALUE)
+        self.assertNotEqual(0, misplaced_secret.returncode)
+        self.assertNotIn(TOKEN_VALUE, misplaced_secret.stdout + misplaced_secret.stderr)
         self.assertEqual([], fixture.tools())
 
     def test_install_help_requires_the_complete_argument_list(self):

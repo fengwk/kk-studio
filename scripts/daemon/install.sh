@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# scripts/daemon/install.sh — 从当前源码 checkout 安装/升级 Environment Daemon
+# scripts/daemon/install.sh — 从官方 GitHub Release 安装/升级 Environment Daemon
 #
-# 单一职责：把 `harness/daemon` 构建出的 shaded JAR 与一个由本脚本拥有的用户服务
+# 单一职责：把发布的 shaded JAR 与一个由本脚本拥有的用户服务
 # 安装到当前用户，并提供状态查询与卸载。Linux 使用 `systemd --user`；macOS 使用
-# 当前用户 GUI 域的 LaunchAgent。它不下载发布物、不生成
+# 当前用户 GUI 域的 LaunchAgent。显式 --from-source 才解析仓库并构建；不生成
 # `~/.local/bin` wrapper，也不写任何 daemon 环境变量文件：服务定义是配置的唯一载体，
 # 凭证只以 owner-only 文件路径出现在 `--registration-token-file`。
 #
@@ -16,7 +16,7 @@
 #   scripts/daemon/install.sh --help
 #
 # 前置条件：Linux + 可用的 `systemctl --user`，或 macOS + 可用的 `gui/$(id -u)`
-# LaunchAgent 域；PATH 上的 Maven、JDK 21。其它系统在触碰受管路径之前失败。
+# LaunchAgent 域；JDK 21、curl 与 SHA256 工具。源码模式还需要 Maven。
 #
 # 安全边界：所有取值先校验再构建；未知/重复选项、控制字符、非 ws/wss scheme、相对路径
 # 与不合规 token 文件都在触碰任何安装路径之前失败。文件模式只校验元数据；直接 token
@@ -24,23 +24,12 @@
 
 set -euo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
-# 不依赖本脚本在仓库中的深度。
-if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
-else
-  REPO_ROOT=$SCRIPT_DIR
-  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-  done
-  if [ ! -e "$REPO_ROOT/.git" ]; then
-    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
-    exit 1
-  fi
-fi
-
-BUILT_JAR="$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"
+REPO_ROOT=
+BUILT_JAR=
+FROM_SOURCE=false
+RELEASE_TAG=
+RELEASE_BASE=https://github.com/fengwk/kk-studio/releases
+DOWNLOAD_DIR=
 
 # HOME 参与所有受管路径的推导：必须先证明它是绝对路径且不含控制字符，才允许它进入 unit。
 if [ -z "${HOME:-}" ]; then
@@ -53,9 +42,6 @@ esac
 case "$HOME" in
   /*) ;;
   *) echo "ERROR: HOME must be an absolute path: $HOME" >&2; exit 1 ;;
-esac
-case "$REPO_ROOT" in
-  *[[:cntrl:]]*) echo "ERROR: repository root must not contain control characters" >&2; exit 1 ;;
 esac
 
 SERVICE_NAME=kk-studio-daemon.service
@@ -101,18 +87,18 @@ TEMP_PATHS=()
 
 usage() {
   cat <<'EOF'
-Usage: scripts/daemon/install.sh <command> [options]
+Usage: bash install.sh [command] [options]
 
 Install, upgrade, inspect or remove the kk-studio Environment Daemon as a
-per-user service built from this source checkout. Linux uses `systemd --user`;
+per-user service from the official GitHub Release. Linux uses `systemd --user`;
 macOS uses a LaunchAgent in the current user's GUI domain.
 
 Commands:
-  install    Build this checkout, install/update the managed JAR and service
+  install    Default command. Download, install/update the managed JAR and service
              definition, start it and verify the service stays running.
-  upgrade    Require an existing managed service, rebuild this checkout and
+  upgrade    Require an existing managed service, download the latest release and
              replace only the JAR, then restart and verify. Configuration
-             already stored in the service is reused; no daemon option is
+             already stored in the service is reused; no daemon configuration option is
              accepted and nothing has to be repeated.
   status     Print non-interactive service status and a short log tail.
              Linux: exit 0 when the unit is active, 1 when not installed,
@@ -127,7 +113,7 @@ Commands:
              is the complete install argument list; other combinations fail.
 
 Install options:
-  --gateway-uri <uri>                 Required. Environment server WebSocket
+  --gateway-uri <uri>                 Environment server WebSocket
                                       gateway; scheme must be ws or wss.
   --registration-token <token>        Exactly one token option is required.
                                       Write to $HOME/.config/kk-studio/daemon.token
@@ -138,7 +124,7 @@ Install options:
                                       holds the registration token. Its content
                                       is never read or printed by this script.
   --java-home <dir>                   Optional. Absolute JDK 21 home used for
-                                      the build and the unit. Default order:
+                                      verification and the unit. Default order:
                                       JAVA_HOME_21, JAVA_HOME, then PATH.
   --data-dir <path>                   Optional. Absolute daemon data directory
                                       (default: $HOME/.kk-studio).
@@ -149,6 +135,15 @@ Install options:
   --lsp-config <path>                 Optional. Absolute path to a JSON file
                                       declaring language servers. Omitted by
                                       default, which disables LSP queries.
+
+Missing gateway/token are prompted via /dev/tty (token input is hidden).
+Without a terminal, pass --gateway-uri and one registration token option.
+
+Install/upgrade artifact options:
+  --version <vTAG>                    Pin an official release; default: latest.
+                                      Tag must match ^v[0-9A-Za-z._-]+$.
+  --from-source                      Build the local checkout with Maven instead
+                                      of downloading. Cannot combine with --version.
 
 Unknown or duplicated options fail closed. Values must not contain control
 characters; tokens, gateway values and notes never reach the Maven build.
@@ -187,6 +182,9 @@ cleanup() {
   for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
     rm -f "$path"
   done
+  if [ -n "$DOWNLOAD_DIR" ]; then
+    rm -rf "$DOWNLOAD_DIR"
+  fi
 }
 
 # 只有 Linux 与 Darwin 有受管安装路径。探测必须发生在任何 mkdir/替换之前，否则不受支持的
@@ -199,6 +197,8 @@ require_supported_host() {
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -300,9 +300,18 @@ parse_install_options() {
   local option value
   while [ $# -gt 0 ]; do
     option=$1
+    if [ "$option" = --from-source ]; then
+      if option_seen "$option"; then
+        fail "duplicate option: $option"
+      fi
+      mark_option_seen "$option"
+      FROM_SOURCE=true
+      shift
+      continue
+    fi
     case "$option" in
       --gateway-uri | --registration-token | --registration-token-file | --java-home | --data-dir | --note | \
-        --bash-executable | --lsp-config) ;;
+        --bash-executable | --lsp-config | --version) ;;
       *) fail "unknown option: unexpected argument (value omitted)" ;;
     esac
     if option_seen "$option"; then
@@ -324,6 +333,7 @@ parse_install_options() {
       --note) NOTE=$value ;;
       --bash-executable) BASH_EXECUTABLE=$value ;;
       --lsp-config) LSP_CONFIG=$value ;;
+      --version) RELEASE_TAG=$value ;;
     esac
   done
 }
@@ -516,12 +526,183 @@ resolve_java_home() {
 # 构建：显式 JAVA_HOME 走 Maven，其余一切（gateway、token 路径、note）都不进入构建，
 # 因此 Maven 既看不到数据面配置，也不进入 Daemon 的连接参数。
 build_daemon() {
+  resolve_repository_root
   require_cmd mvn
   step "Cleaning and packaging harness/daemon (JAVA_HOME=$SELECTED_JAVA_HOME)"
   (
     cd "$REPO_ROOT"
     env JAVA_HOME="$SELECTED_JAVA_HOME" mvn -B -ntp -pl harness/daemon -am clean package
   )
+}
+
+# 仓库解析只属于开发者源码模式；curl | bash 的 BASH_SOURCE 可以不存在。
+resolve_repository_root() {
+  if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
+    REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd -P)
+  else
+    [ -n "${BASH_SOURCE[0]:-}" ] || fail "--from-source requires a checkout or KK_STUDIO_REPO_ROOT"
+    REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+    while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
+      REPO_ROOT=$(dirname "$REPO_ROOT")
+    done
+    [ -e "$REPO_ROOT/.git" ] || fail "cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT"
+  fi
+  reject_control_characters "$REPO_ROOT" "repository root"
+  BUILT_JAR="$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"
+}
+
+validate_release_tag() {
+  [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] ||
+    fail "--version must be a safe release tag matching ^v[0-9A-Za-z._-]+$"
+}
+
+validate_artifact_options() {
+  if [ -n "$RELEASE_TAG" ]; then
+    validate_release_tag
+    [ "$FROM_SOURCE" = false ] || fail "--from-source cannot be combined with --version"
+  fi
+}
+
+parse_upgrade_options() {
+  local option
+  while [ $# -gt 0 ]; do
+    option=$1
+    case "$option" in
+      --from-source)
+        option_seen "$option" && fail "duplicate option: $option"
+        mark_option_seen "$option"
+        FROM_SOURCE=true
+        shift
+        ;;
+      --version)
+        option_seen "$option" && fail "duplicate option: $option"
+        mark_option_seen "$option"
+        [ $# -ge 2 ] || fail "missing value for $option"
+        require_option_value "$2" "$option"
+        RELEASE_TAG=$2
+        shift 2
+        ;;
+      *) fail "upgrade accepts no options for daemon configuration; use --version or --from-source" ;;
+    esac
+  done
+}
+
+# curl 不读取用户 curlrc；请求及全部重定向只允许 HTTPS（保留默认 TLS 证书验证）。
+release_curl() {
+  curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$@"
+}
+
+download_daemon() {
+  local effective_url asset checksum expected actual checksum_pattern
+  require_cmd curl
+  if [ -z "$RELEASE_TAG" ]; then
+    effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' \
+      "$RELEASE_BASE/latest") || fail "cannot resolve the latest official release"
+    case "$effective_url" in
+      "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
+      *) fail "latest release did not resolve to an official immutable release tag" ;;
+    esac
+  fi
+  validate_release_tag
+  asset="kk-studio-daemon-${RELEASE_TAG}.jar"
+  DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX") ||
+    fail "cannot create release download staging directory"
+  BUILT_JAR="$DOWNLOAD_DIR/$asset"
+  checksum="$BUILT_JAR.sha256"
+  step "Downloading official release $RELEASE_TAG"
+  release_curl --output "$BUILT_JAR" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
+    fail "cannot download daemon release JAR"
+  release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
+    fail "cannot download daemon release SHA256"
+  # 标准 sha256sum 单行格式；拒绝额外条目，文件名必须匹配本次产物。
+  expected=$(cat "$checksum")
+  checksum_pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
+  [[ $expected =~ $checksum_pattern ]] || fail "invalid daemon release SHA256 file"
+  expected=${BASH_REMATCH[1]}
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "$BUILT_JAR") || fail "cannot calculate daemon release SHA256"
+  else
+    require_cmd shasum
+    actual=$(shasum -a 256 "$BUILT_JAR") || fail "cannot calculate daemon release SHA256"
+  fi
+  actual=${actual%% *}
+  # Bash 3.2 没有 ${value,,}，使用 tr 规范大小写。
+  expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
+  [ "$actual" = "$expected" ] ||
+    fail "daemon release SHA256 mismatch; existing installation was not changed"
+}
+
+# 提示直接读写 controlling terminal，而不是管道里的脚本 stdin。
+prompt_install_value() {
+  local kind=$1
+  if ! { exec 3<>/dev/tty; } 2>/dev/null; then
+    fail "noninteractive install requires --gateway-uri and --registration-token or --registration-token-file"
+  fi
+  if [ "$kind" = gateway ]; then
+    printf 'Gateway URI: ' >&3
+    IFS= read -r GATEWAY_URI <&3 || fail "cannot read gateway URI from /dev/tty"
+    require_option_value "$GATEWAY_URI" --gateway-uri
+  else
+    printf 'Registration token (hidden): ' >&3
+    IFS= read -r -s INLINE_TOKEN <&3 || fail "cannot read registration token from /dev/tty"
+    printf '\n' >&3
+    require_option_value "$INLINE_TOKEN" --registration-token
+    mark_option_seen --registration-token
+  fi
+  exec 3>&-
+}
+
+# Release 升级用服务已配置的 Java 进行预检，不改写或求值任何保存的 daemon argv。
+# Linux 只解码本脚本写入的第一个带引号单词；不支持的定义失败关闭。
+resolve_upgrade_java_home() {
+  local line encoded java_path= character index=0 closed=false
+  if [ "$FROM_SOURCE" = true ]; then
+    resolve_java_home
+    return
+  fi
+  if [ "$HOST_OS" = Darwin ]; then
+    require_cmd plutil
+    java_path=$(plutil -extract ProgramArguments.0 raw -o - "$PLIST_PATH") ||
+      fail "cannot read Java executable from managed LaunchAgent"
+  else
+    line=$(sed -n '/^ExecStart=/p' "$UNIT_PATH")
+    case "$line" in
+      'ExecStart="'*) encoded=${line#'ExecStart="'} ;;
+      *) fail "cannot read Java executable from managed unit" ;;
+    esac
+    while [ "$index" -lt "${#encoded}" ]; do
+      character=${encoded:index:1}
+      index=$((index + 1))
+      case "$character" in
+        '"') closed=true; break ;;
+        '\')
+          [ "$index" -lt "${#encoded}" ] || fail "invalid Java executable in managed unit"
+          character=${encoded:index:1}
+          index=$((index + 1))
+          case "$character" in
+            '\' | '"') ;;
+            *) fail "unsupported Java executable escape in managed unit" ;;
+          esac
+          ;;
+        '%' | '$')
+          [ "${encoded:index:1}" = "$character" ] ||
+            fail "unsupported Java executable expansion in managed unit"
+          index=$((index + 1))
+          ;;
+      esac
+      java_path=$java_path$character
+    done
+    [ "$closed" = true ] || fail "invalid Java executable in managed unit"
+  fi
+  reject_control_characters "$java_path" "managed Java executable"
+  require_absolute_path "$java_path" "managed Java executable"
+  case "$java_path" in
+    */bin/java) ;;
+    *) fail "managed Java executable must be a JDK bin/java path" ;;
+  esac
+  local java_home=${java_path%/bin/java}
+  assert_jdk21 "$java_home"
+  printf '%s\n' "$java_home"
 }
 
 # 安装前必须证明新产物真的可执行：`java -jar <jar> --version` 成功是唯一能同时证明入口类与
@@ -539,13 +720,17 @@ verify_built_jar() {
     'kk-studio-daemon '*) ;;
     *) fail "unexpected daemon --version output: $output" ;;
   esac
+  if [ "$FROM_SOURCE" = false ] && [ "$output" != "kk-studio-daemon ${RELEASE_TAG#v}" ]; then
+    fail "daemon --version does not match the requested release tag"
+  fi
 }
 
 # 同目录临时文件 + rename：替换必须与目标处于同一文件系统，中途失败也不留半份产物。
 # 路径必须在当前 shell 登记。命令替换会丢弃数组变更，退出清理就看不到这次暂存。
 register_temp_path() {
   local directory=$1 name=$2
-  REGISTERED_TEMP_PATH="$directory/.$name.tmp.$$"
+  REGISTERED_TEMP_PATH=$(umask 077; mktemp "$directory/.$name.tmp.XXXXXXXX") ||
+    fail "cannot create installation staging file"
   TEMP_PATHS+=("$REGISTERED_TEMP_PATH")
 }
 
@@ -553,7 +738,7 @@ stage_jar() {
   mkdir -p "$INSTALL_ROOT"
   register_temp_path "$INSTALL_ROOT" kk-studio-daemon.jar
   STAGED_JAR=$REGISTERED_TEMP_PATH
-  # 源路径由仓库根推导，不是用户选项；不用 GNU 专用的 `--` 操作数，BSD cp 不接受它。
+  # 源路径由构建或已校验下载推导；不用 GNU 专用的 `--` 操作数，BSD cp 不接受它。
   cp "$BUILT_JAR" "$STAGED_JAR"
   chmod 0644 "$STAGED_JAR"
 }
@@ -858,14 +1043,15 @@ print_installed_summary() {
 
 prepare_install_inputs() {
   parse_install_options "$@"
-  if [ -z "$GATEWAY_URI" ]; then
-    fail "missing required option: --gateway-uri"
-  fi
+  validate_artifact_options
   if option_seen --registration-token && option_seen --registration-token-file; then
     fail "choose exactly one of --registration-token and --registration-token-file"
   fi
+  if [ -z "$GATEWAY_URI" ]; then
+    prompt_install_value gateway
+  fi
   if ! option_seen --registration-token && ! option_seen --registration-token-file; then
-    fail "missing required option: --registration-token or --registration-token-file"
+    prompt_install_value token
   fi
   validate_gateway_uri
   if option_seen --registration-token; then
@@ -894,7 +1080,11 @@ prepare_install_inputs() {
 }
 
 prepare_validated_jar() {
-  build_daemon
+  if [ "$FROM_SOURCE" = true ]; then
+    build_daemon
+  else
+    download_daemon
+  fi
   verify_built_jar
   stage_jar
 }
@@ -954,12 +1144,12 @@ cmd_install() {
   esac
 }
 
-# 升级不重复任何配置：服务定义保留安装时的取值，只替换由本仓库重新构建出来的 JAR。
+# 升级不重复任何配置：服务定义保留安装时的取值，只替换已校验的 JAR。
 cmd_upgrade_linux() {
   require_systemd_user
   require_managed_unit
 
-  SELECTED_JAVA_HOME=$(resolve_java_home)
+  SELECTED_JAVA_HOME=$(resolve_upgrade_java_home)
   prepare_validated_jar
   publish_staged_jar
   step "Replaced $INSTALLED_JAR"
@@ -975,7 +1165,7 @@ cmd_upgrade_darwin() {
   require_launchd_gui_domain
   require_managed_plist
 
-  SELECTED_JAVA_HOME=$(resolve_java_home)
+  SELECTED_JAVA_HOME=$(resolve_upgrade_java_home)
   prepare_validated_jar
   publish_staged_jar
   step "Replaced $INSTALLED_JAR"
@@ -988,9 +1178,8 @@ cmd_upgrade_darwin() {
 }
 
 cmd_upgrade() {
-  if [ $# -ne 0 ]; then
-    fail "upgrade accepts no options"
-  fi
+  parse_upgrade_options "$@"
+  validate_artifact_options
   resolve_verification_windows
   case "$HOST_OS" in
     Linux) cmd_upgrade_linux ;;
@@ -1123,7 +1312,9 @@ usage_error() {
 
 main() {
   if [ $# -eq 0 ]; then
-    usage_error
+    set -- install
+  elif [[ $1 = --* ]] && [ "$1" != --help ]; then
+    set -- install "$@"
   fi
   # 帮助不依赖宿主。其它命令在解析选项或触碰受管路径之前就拒绝不受支持的系统。
   case "$1" in
@@ -1157,7 +1348,7 @@ main() {
       cmd_uninstall "$@"
       ;;
     *)
-      echo "ERROR: unknown command: $1" >&2
+      echo "ERROR: unknown command (value omitted)" >&2
       usage_error
       ;;
   esac
