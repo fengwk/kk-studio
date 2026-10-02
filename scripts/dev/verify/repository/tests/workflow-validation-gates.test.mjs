@@ -87,23 +87,28 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   const major = fixture.match(/^POSTGRES_MAJOR = (\d+)$/m)?.[1]
   assert.ok(major)
   assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
-  assert.ok(docker.includes(`POSTGRES_VERSION: '${major}'`))
-  const setup = docker.indexOf('- name: Set up PostgreSQL client tools')
-  const selection = docker.indexOf('- name: Verify PostgreSQL client selection')
-  const scripts = docker.indexOf('- name: Run repository script tests')
-  const validation = docker.indexOf('- name: Verify Java sources, tests and coverage')
-  assert.ok(setup > 0 && setup < selection && selection < scripts && scripts < validation)
-  const block = docker.slice(setup, validation)
-  assert.ok(block.includes('https://www.postgresql.org/media/keys/ACCC4CF8.asc'))
-  assert.ok(block.includes('URIs: https://apt.postgresql.org/pub/repos/apt'))
-  assert.ok(block.includes('Suites: ${VERSION_CODENAME}-pgdg'))
-  assert.ok(block.includes('Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc'))
-  assert.ok(block.indexOf('/etc/apt/sources.list.d/pgdg.sources') < block.indexOf('sudo apt-get update'))
-  assert.doesNotMatch(block, /allow-unauthenticated|trusted=yes/u)
-  assert.ok(block.includes('sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"'))
-  assert.ok(block.includes('echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"'))
-  assert.ok(block.includes('for tool in psql pg_dump pg_restore createdb pg_isready; do'))
-  assert.ok(block.includes('test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"'))
+  for (const [source, validationName] of [
+    [docker, 'Verify Java sources, tests and coverage'],
+    [release, 'Verify the daemon module'],
+  ]) {
+    assert.ok(source.includes(`POSTGRES_VERSION: '${major}'`))
+    const setup = source.indexOf('- name: Set up PostgreSQL client tools')
+    const selection = source.indexOf('- name: Verify PostgreSQL client selection')
+    const scripts = source.indexOf('- name: Run repository script tests')
+    const validation = source.indexOf(`- name: ${validationName}`)
+    assert.ok(setup > 0 && setup < selection && selection < scripts && scripts < validation)
+    const block = source.slice(setup, validation)
+    assert.ok(block.includes('https://www.postgresql.org/media/keys/ACCC4CF8.asc'))
+    assert.ok(block.includes('URIs: https://apt.postgresql.org/pub/repos/apt'))
+    assert.ok(block.includes('Suites: ${VERSION_CODENAME}-pgdg'))
+    assert.ok(block.includes('Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc'))
+    assert.ok(block.indexOf('/etc/apt/sources.list.d/pgdg.sources') < block.indexOf('sudo apt-get update'))
+    assert.doesNotMatch(block, /allow-unauthenticated|trusted=yes/u)
+    assert.ok(block.includes('sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"'))
+    assert.ok(block.includes('echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"'))
+    assert.ok(block.includes('for tool in psql pg_dump pg_restore createdb pg_isready; do'))
+    assert.ok(block.includes('test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"'))
+  }
 })
 
 test('both release workflows run the second Windows host even after the first fails', () => {
