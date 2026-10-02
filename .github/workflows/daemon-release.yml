@@ -49,6 +49,8 @@ jobs:
         shell: powershell
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
       - name: Test installer with PowerShell 7
+        # A failed PS 5.1 test must not hide PS 7 failures; the job still fails closed.
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
 
