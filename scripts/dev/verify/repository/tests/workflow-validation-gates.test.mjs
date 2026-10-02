@@ -77,6 +77,25 @@ test('manual validation and image publishing have separate concurrency groups', 
   assert.ok(group?.includes("${{ inputs.validate_only && 'validate' || 'publish' }}"))
 })
 
+test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
+  // Installing a client alone is insufficient: PATH must select every binary from that major.
+  const fixture = readFileSync(new URL('scripts/ops/tests/test_agent_catalog_integration.py', root), 'utf8')
+  const major = fixture.match(/^POSTGRES_MAJOR = (\d+)$/m)?.[1]
+  assert.ok(major)
+  assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
+  assert.ok(docker.includes(`POSTGRES_VERSION: '${major}'`))
+  const setup = docker.indexOf('- name: Set up PostgreSQL client tools')
+  const selection = docker.indexOf('- name: Verify PostgreSQL client selection')
+  const scripts = docker.indexOf('- name: Run repository script tests')
+  const validation = docker.indexOf('- name: Verify Java sources, tests and coverage')
+  assert.ok(setup > 0 && setup < selection && selection < scripts && scripts < validation)
+  const block = docker.slice(setup, validation)
+  assert.ok(block.includes('sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"'))
+  assert.ok(block.includes('echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"'))
+  assert.ok(block.includes('for tool in psql pg_dump pg_restore createdb pg_isready; do'))
+  assert.ok(block.includes('test "$(command -v "${tool}")" = "/usr/lib/postgresql/${POSTGRES_VERSION}/bin/${tool}"'))
+})
+
 test('both release workflows run the second Windows host even after the first fails', () => {
   // Do not use continue-on-error: either native host must still fail the release gate.
   for (const [name, source] of [['docker', docker], ['release', release]]) {

@@ -115,6 +115,11 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
 
+数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
+bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
+`psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
+测试在创建容器前检查工具链，不兼容时直接失败，不跳过数据库回归。
+
 ### Daemon 安装脚本回归
 
 在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。
