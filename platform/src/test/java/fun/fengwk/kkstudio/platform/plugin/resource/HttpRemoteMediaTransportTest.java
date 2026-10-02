@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin.resource;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -485,31 +487,49 @@ class HttpRemoteMediaTransportTest {
         new HttpRemoteMediaTransport(
             TIMEOUT,
             new PublicAddressDnsResolver(new PublicAddressPolicy(new SequencedHostResolver())));
-    Thread testThread = Thread.currentThread();
-    Thread interrupter =
+    URI uri = URI.create("http://" + LOOPBACK + ":" + server.getAddress().getPort() + "/upload");
+    AtomicReference<Throwable> outcome = new AtomicReference<>();
+    AtomicBoolean interruptedAtReturn = new AtomicBoolean();
+    CountDownLatch putDone = new CountDownLatch(1);
+    Thread worker =
         new Thread(
             () -> {
-              awaitQuietly(bodyConsumed);
-              testThread.interrupt();
-            });
+              try {
+                transport.put(uri, Map.of(), file, TIMEOUT);
+              } catch (Throwable failure) {
+                outcome.set(failure);
+              } finally {
+                // 在 PUT 的调用边界采样并清除标志；join/server.stop/close 不得影响这个断言。
+                interruptedAtReturn.set(Thread.interrupted());
+                putDone.countDown();
+              }
+            },
+            "interrupted-media-upload");
+    worker.setDaemon(true);
     try {
-      interrupter.start();
-      URI uri = URI.create("http://" + LOOPBACK + ":" + server.getAddress().getPort() + "/upload");
+      worker.start();
+      assertTrue(bodyConsumed.await(5, TimeUnit.SECONDS), "server must consume the upload body");
+      worker.interrupt();
+      assertTrue(putDone.await(5, TimeUnit.SECONDS), "interrupted PUT must finish before cleanup");
 
       PluginResourceUnavailableException failure =
-          assertThrows(
-              PluginResourceUnavailableException.class,
-              () -> transport.put(uri, Map.of(), file, TIMEOUT));
+          assertInstanceOf(PluginResourceUnavailableException.class, outcome.get());
 
-      assertTrue(failure.getMessage().contains("interrupted"));
+      assertEquals("presigned media upload was interrupted", failure.getMessage());
+      assertInstanceOf(InterruptedException.class, failure.getCause());
+      assertTrue(interruptedAtReturn.get(), "PUT must restore the caller's interrupt flag");
     } finally {
+      // 即使请求体等待或断言失败，也放行服务端并有界回收 worker；JUnit 线程不参与中断。
       releaseResponse.countDown();
-      interrupter.join();
-      server.stop(0);
-      transport.close();
+      worker.interrupt();
+      try {
+        transport.close();
+      } finally {
+        server.stop(0);
+        worker.join(5_000);
+        assertFalse(worker.isAlive(), "upload worker must terminate");
+      }
     }
-    // 中断标记必须被恢复：这里读出来并清掉，避免污染后续共用该线程的测试。
-    assertTrue(Thread.interrupted());
   }
 
   /** 关闭传输后下载客户端不可再用，资源不会被重复占用。 */
