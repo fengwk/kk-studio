@@ -9,15 +9,17 @@
 | 工具 | 用途与约束 |
 | --- | --- |
 | JDK 21 | 所有 Maven 命令显式使用 `JAVA_HOME_21`；根 POM 的 `maven.compiler.release` 是 `21` |
-| Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 都要求 JDK 21：`JAVA_HOME_21` 或 `JAVA_HOME` 必须指向 21，缺失或不可执行时在启动任何服务前失败 |
+| Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 优先取 `JAVA_HOME_21`，否则取 `JAVA_HOME`，检查 java 可执行但不检查版本号，调用方须确保为 21；[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh) 只接受 `JAVA_HOME_21` 并校验版本 |
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
-| `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 启动前后检查端口与健康状态 |
+| `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
 | Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
 [deploy/test](../../deploy/test/README.md) 提供隔离离线栈。开发循环默认连接 PostgreSQL，
-因此先把其中一个栈拉起来。
+因此先准备可丢弃的数据库与 S3。不要不加区分地把两个栈都启动：
+本地栈默认数据库是 `kk_studio`，test 栈是 `canvas_test`，而宿主 `e2e` profile 默认连接
+`127.0.0.1:5432/kk_studio_e2e`；还需按 profile/环境配置实际连接项，启动依赖不等于已经创建所需数据库。
 
 ## 日常开发循环
 
@@ -37,9 +39,14 @@
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
 | Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.0.jar` |
 
-`start` 会先停止受管进程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
+`start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
 目标 `backend`、`frontend`、`all`。
+
+默认 `DEV_KILL_PORTS=true`：`start`、`restart` 和 `stop` 都会终止 dev 端口上的**任意监听进程**，
+不局限于本脚本启动的进程，温和终止后仍存活会强杀。运行前确认端口归属；
+不允许清理其他进程时设 `DEV_KILL_PORTS=false`，端口冲突将由启动检查报错。
+PID 文件也应只属于当前受管实例，不要复用其他工作区的运行目录。
 
 可用环境变量：
 
@@ -49,7 +56,7 @@ Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`�
 | `FRONTEND_HOST` / `FRONTEND_PORT` | `127.0.0.1` / `5173` | Vite 监听地址与端口 |
 | `SPRING_PROFILES_ACTIVE` | `e2e` | Backend profile |
 | `DEV_WORK_DIR` | `runtime/dev` | log 与 PID 目录 |
-| `DEV_KILL_PORTS` | `true` | `stop` 时同时释放 dev 端口上的监听进程 |
+| `DEV_KILL_PORTS` | `true` | stop 流程终止 dev 端口的任意监听者，start/restart 也调用它；false 只停止 PID 文件管理的进程 |
 | `DEV_SKIP_PACKAGE` | `false` | JAR 与 `web/target/.kk-studio-revision` 记录的修订都匹配当前 `HEAD` 时跳过 Maven |
 | `DEV_SKIP_NPM_INSTALL` | `false` | 完全跳过前端依赖安装或刷新 |
 | `DEV_READY_TIMEOUT_SECONDS` | `90` | 等待 Backend/Vite ready 的预算，超时打印日志并以非零状态退出 |
@@ -73,13 +80,14 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 
 | 意图 | 命令 |
 | --- | --- |
-| 快速确认改动可编译、格式正确 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate` |
+| 只做 Java 静态与格式检查 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate` |
+| 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 只格式化本次改动的模块 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
-| 隔离栈端到端 smoke | `./scripts/dev/verify/smoke/offline-chat.sh --with-app` |
+| 隔离栈基础设施 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 的 Canvas 契约阻塞见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
 | 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
 | 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`python3 scripts/dev/verify/repository/check-sensitive-data.py` |
@@ -89,15 +97,9 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 
 真实 Provider、真实 Tool、UI、分布式和镜像扫描都只在显式开关下运行，默认路径不产生模型费用。
 
-越靠上的检查越便宜，越靠下的越接近真实环境；日常改动先跑上两行，涉及契约或执行路径时再往下走：
-
-| 目的 | 入口 |
-| --- | --- |
-| 静态与格式门禁 | `mvn validate`、`npm --prefix frontend run lint` |
-| Java 与 Frontend 单测、覆盖率 | `mvn test`、`mvn verify`、`npm --prefix frontend run test\|coverage` |
-| 免费端到端契约 | `./scripts/dev/verify/e2e/run.sh`、`./scripts/dev/verify/smoke/offline-chat.sh --with-app` |
-| 真实 Provider、Tool、UI、分布式栈 | `./scripts/dev/verify/e2e/run.sh --real`、`--with-tools`、`--ui`、`--distributed` |
-| 可靠性、性能、供应链 | [`scripts/dev/verify/reliability`](../../scripts/dev/verify/reliability/)、`./scripts/dev/verify/performance/run.sh`、`./scripts/dev/verify/supply-chain/run.sh` |
+日常改动先做静态检查与受影响模块的编译/定向测试，再按风险选择更接近真实环境的验证。
+免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
+启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -280,8 +282,10 @@ docker compose -f deploy/reliability/compose.yaml config --quiet
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
 [`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
-`compose run --rm` 执行初始化。`--with-app` 另外覆盖全局 Blob、Canvas Resource、
-signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
+`compose run --rm` 执行初始化。`--with-app` 的目标是验证全局 Blob、Canvas Resource、
+signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat，但脚本仍读取已不存在的 Canvas
+`version/baseVersion` 并发送旧 command，当前不能作为这条应用链路通过的证据。
+具体阻塞与可用的基础设施步骤见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
 再检查浏览器入口。文档、敏感数据与 Git 空白检查：
@@ -339,7 +343,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
-免费 L1 覆盖的产品契约面（`requires=-` 即可运行）：
+免费 L1 覆盖的部分产品契约面：
 
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
@@ -350,7 +354,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
   `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
-  物化门禁。
+  物化门禁；该 case 需要 `host-mock`，不是 `requires=-`。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此
@@ -467,10 +471,14 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 
 `--iterations` 取值 `1..100`（默认 `3`），首轮失败即停止后续轮次。runner 不启动
 backend/frontend/daemon/Compose，只从仓库根目录用 JDK 21 运行冻结的 Java/Surefire 集合；
+测试本身会按各自基座启动隔离 PostgreSQL Testcontainers，仍需 Docker，不操作部署数据库；
+每轮开始还会删除目标模块原有 Surefire 报告目录，当前结果复制到本次报告目录。
 `TARGET_MODULES` 与 `TARGET_FQCNS` 是该集合的唯一精确 inventory，覆盖 Web event/transport、
 Canvas Function Work/dispatcher、Harness Work/notification 和 Platform Storage cleanup。每轮要求
-目标模块的 Surefire XML 证明 `tests > 0`、`failures = 0`、`errors = 0` 且不是全 skipped；缺类、
-invalid XML、Maven `[ERROR]`、`Surefire is going to kill` 或非零退出都失败。
+目标模块的 Surefire XML 证明 `tests > 0`、`failures = 0`、`errors = 0` 且不是全 skipped；
+缺失目标类或不符合 testsuite 身份/计数约束的报告、Maven `[ERROR]`、
+`Surefire is going to kill` 或非零退出都失败。
+XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 XML 的完整校验。
 
 ### 隔离栈与真实 Agent 矩阵
 
@@ -480,11 +488,12 @@ invalid XML、Maven `[ERROR]`、`Surefire is going to kill` 或非零退出都�
 
 ```bash
 ./scripts/dev/verify/reliability/stack.sh snapshot
-./scripts/dev/verify/reliability/stack.sh case-reset <case-id> <pi|pi-base>
-./scripts/dev/verify/reliability/stack.sh case-deps <case-id>
+./scripts/dev/verify/reliability/stack.sh case-reset '<case-id>' pi
+./scripts/dev/verify/reliability/stack.sh case-deps '<case-id>'
 ./scripts/dev/verify/reliability/stack.sh tool-smoke
 ```
 
+先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
 `tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 经 stdin 送入
 Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
@@ -495,7 +504,7 @@ Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provi
 node scripts/dev/verify/reliability/run-agent-matrix.mjs --help
 node scripts/dev/verify/reliability/run-agent-matrix.mjs --list
 node scripts/dev/verify/reliability/run-agent-matrix.mjs --only CASE_ID
-node scripts/dev/verify/reliability/reassess-agent-run.mjs <runId>
+node scripts/dev/verify/reliability/reassess-agent-run.mjs '<runId>'
 ```
 
 | Flag | 默认/语义 |
@@ -533,11 +542,21 @@ runner 使用 Node built-in `fetch`，单请求 timeout `5000ms`，固定使用
 [deploy/test](../../deploy/test/README.md) 的离线 mock 与其默认宿主端口，不读真实凭证、不启动
 Daemon。
 
+运行开始与退出都无确认提示地执行同名测试栈的 `down --volumes --remove-orphans`，
+删除 PostgreSQL/MinIO 数据；`--skip-build` 只跳过镜像构建，不取消这项副作用。
+执行前确认 `kk-studio-canvas-test` project 没有需要保留的数据。
+
 | 场景 | 并发 | 请求 | error | p95 | throughput RPS | 最少样本 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
 | `catalog` | 16 | `GET /api/ai/catalog/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
 | `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/decimal version | 0 | `<=1500ms` | `>=5` | 20 |
+
+**Canvas 场景目前被响应契约阻塞**：
+[`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 的 `validateCanvasCreateResponse`
+要求 `canvas.version`，但当前 [`CanvasDocumentDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasDocumentDTO.java)
+只有 `revision`。上表描述脚本现有断言与阈值，不表示完整基线可通过；
+必须先对齐 runner 和测试，再以新报告判断性能，不能把字段校验失败解释为吞吐或延迟回归。
 
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas worker 按 run title prefix 清理已知和扫描出的资源；正常、失败、超时、INT、
@@ -595,8 +614,8 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 
 ## 本机 preview 与 NAS 自迭代
 
-自迭代使用 NAS 上共享数据面的单个 App 容器 `vps-kk-studio`：它以 `prod` profile 常驻，是共享
-数据库唯一的 Flyway owner，也是唯一的 Harness worker。镜像、挂载与变量契约见
+本拓扑要求外部 NAS 部署以单个 `prod` App `vps-kk-studio` 承担共享
+数据库唯一的 Flyway owner 与 Harness worker；本仓脚本不校验外部容器数量。镜像、挂载与变量契约见
 [部署与运行](deployment.md#nas-运行拓扑)。
 
 | 面 | 位置 |
@@ -608,8 +627,9 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 Human 在本机 preview 提交命令时，同步 HTTP 处理使用当前工作区代码，随后产生的异步 Harness Work
 使用 NAS 上正在运行的镜像，同一用户流程明确允许跨两个版本边界；共享 PostgreSQL/S3 是唯一数据
 事实源，不为本机 preview 复制数据，也不为短期版本错位增加运行时兼容层。兼容时直接继续迭代；
-schema、持久 JSON 或 Work wire 确实不兼容时，先把 NAS App 推进到当前 revision，必要时按下文重建
-共享数据库，再恢复本机 preview。修改 processor/runtime 等异步执行路径不会在本机 preview 中
+schema、持久 JSON 或 Work wire 确实不兼容时，停止 preview 写入并评估已授权的部署切换；
+只有无法沿用现有 schema 且数据所有者批准重建时才按下文处理数据库，健康 S3 默认继续复用。
+修改 processor/runtime 等异步执行路径不会在本机 preview 中
 生效，这些改动在 NAS 镜像更新前只能由自动化测试验证，本机 preview 只覆盖前端、同步 API 和查询
 行为。
 
@@ -636,6 +656,8 @@ install -d -m 700 ~/.config/kk-studio
 install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared-preview.env
 ```
 
+只在首次配置时复制模板；`install` 会覆盖同名配置文件，不要用它重置已有凭据。随后在仓库之外填入真实值。
+
 [scripts/dev/app.sh](../../scripts/dev/app.sh) 只按 `KEY=VALUE` 逐行字面量解析，不使用 `source`/`eval`，
 只按第一个 `=` 拆分，忽略空行与 `#` 注释行；键必须落在外部数据面的白名单内，值不缺失、不出现在
 日志或命令参数里。任何失败（相对路径、目录、符号链接、属主不符、权限过宽、未知键、缺值）都在
@@ -653,14 +675,15 @@ install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared
 缺配置或不一致时在启动前失败。`SPRING_PROFILES_ACTIVE` 不是 `prod`、Flyway 没有关闭、或进程
 试图承担 Harness worker，都会直接报错，不会让本机进程成为第二个迁移执行者或第二个 worker。
 
-Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，规范路径是在那台
-主机 clone 源码并通过平台对应的安装脚本常驻（Linux/macOS 用
-[scripts/daemon/install.sh](../../scripts/daemon/install.sh)，Windows 用
-[scripts/daemon/install.ps1](../../scripts/daemon/install.ps1)），连接 NAS App 的 gateway
-`wss://<studio-origin>/api/harness/environment-daemon/v1`；前置条件、注册 token 文件、构建安装、
-升级与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
+Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，按
+[Environment Daemon 安装与运行](environment-daemon.md)在该主机安装常驻服务，连接 NAS App 的
+gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。
 
 ### 共享数据库重建
+
+这不是默认开发或升级步骤。健康且与当前镜像兼容的 PostgreSQL/S3 继续复用；
+只有数据所有者明确批准数据范围、停机窗口与恢复方案时才执行重建。
+新库只回灌 Catalog，其余运行数据不回灌；旧数据虽保留在快照/备份中，也不能从新入口直接访问。
 
 数据库维护由三个独立入口组成：
 
@@ -759,7 +782,11 @@ reset 在任何改库操作前检查权限、目标库状态和其他会话；�
 也不代替调用者停止应用写入。调用者必须在整个 reset 期间保持目标库停写。preflight 会再次确认
 当时没有其他会话，但一次会话计数不是后续写入的屏障。
 
-随后写入并验证 custom-format `pg_dump`。这份备份是 dump 开始时的一致时间点，不保证包含
+真实执行在 preflight 后要求输入目标数据库名确认；无可读输入或名称不匹配就失败，
+不会写备份或改库。`--dry-run` 不进入确认或改库流程。
+`--yes` 可以跳过输入闸门，但只用于已有明确授权的非交互自动化，不能代替数据所有者批准。
+
+确认后写入并验证 custom-format `pg_dump`。这份备份是 dump 开始时的一致时间点，不保证包含
 dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` 才是 reset 完成前的最新旧库。
 空库保持原 owner/encoding/locale/tablespace/connection limit。创建或改名失败时自动删除不完整空库并
 恢复原库名。默认备份目录为
@@ -772,10 +799,11 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 4. 回灌：
 
 ```bash
-./scripts/ops/import-agent-catalog.sh --package <package-dir> --dry-run
-./scripts/ops/import-agent-catalog.sh --package <package-dir>
+./scripts/ops/import-agent-catalog.sh --package '<package-dir>' --dry-run
+./scripts/ops/import-agent-catalog.sh --package '<package-dir>'
 ```
 
+将 `<package-dir>` 替换为本次已验证导出包的绝对目录，再先预检、后真实回灌。
 恢复事务先排他锁定三张表并复查为空，再按外键顺序 COPY，提交前逐表比对包内指纹；锁超时、并发
 写入、脏表或指纹不符都会整体回滚。失败日志只保留 SQLSTATE 与固定安全类别，不保留行值。
 
@@ -808,10 +836,10 @@ Agent 在本机 preview 上遵循以下闭环：
    重启受管的 Backend/Vite，不需要重建任何容器。
 4. 重启前提交源码和必要的 durable 进度；重启只在当前回合内短暂中断 preview 的连接。
 5. 验证 Backend health、Frontend、应用事件 WebSocket 后再继续下一轮。
-6. 功能达到可验收状态后提交并 push 目标分支，同时报告变更、验证和已知风险；涉及
+6. 功能达到可验收状态后提交变更并报告验证和已知风险；只有获得发布授权后才 push 目标分支，涉及
    processor/runtime 等异步执行路径的改动必须附带自动化测试证据。
 
-完整协作顺序是：
+获得发布与部署授权后的协作顺序是：
 
 ```text
 Agent modifies dev
@@ -825,7 +853,7 @@ Agent modifies dev
 ```
 
 以下变更可能使本机代码与 NAS Worker 不兼容，不能仅凭本机 preview 完成端到端验收；遇到它们时应
-先更新 NAS 镜像，涉及 V1 时在已批准的维护窗口重建共享数据库：
+先评估 NAS 镜像切换；V1 不兼容且批准放弃新入口中的旧运行数据时，才在维护窗口重建共享数据库：
 
 - 未合入 `main` 的 Flyway migration 或破坏性 schema 变更；
 - 删除或重命名持久 JSON 字段、数据库枚举值或 wire 字段；
@@ -881,9 +909,9 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 
 | 现象 | 先执行 | 边界 |
 | --- | --- | --- |
-| JDK/compile/checkstyle 失败 | `"$JAVA_HOME_21/bin/java" -version`；`env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate` | 必须是 JDK 21；先修复 Spotless/Checkstyle |
+| JDK/compile/checkstyle 失败 | `"$JAVA_HOME_21/bin/java" -version`；`env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` | 必须是 JDK 21；validate 只检查静态规则，不能证明编译通过 |
 | Frontend 找不到依赖或 Playwright | `npm --prefix frontend ci`；`npm --prefix frontend run test` | 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定 |
-| dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 用 `DEV_KILL_PORTS=true` 或换端口 |
+| dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 先确认监听者归属；换端口或设 `DEV_KILL_PORTS=false`，不要默认强杀不属于本次开发的服务 |
 | 本机 preview 启动即失败 | `./scripts/dev/shared-preview.sh status`；核对 `SHARED_PREVIEW_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
@@ -892,7 +920,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
 | 敏感数据门禁失败 | `python3 scripts/dev/verify/repository/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
-| loopback proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行 `./scripts/dev/verify/smoke/offline-chat.sh --with-app` | loopback proxy 使用 host build network，代理值不进入镜像 |
+| proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行基础设施 smoke | 离线 smoke 对可解析 proxy 默认使用 host build network；performance 仅自动处理 loopback proxy，代理值不进入 runtime 镜像 |
 
 ---
 
