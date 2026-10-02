@@ -438,7 +438,11 @@ function Save-RegistrationToken {
         Assert-PrivateDirectory -Path $script:ConfigRoot
         if (Test-Path -LiteralPath $target) {
             $null = Assert-RegistrationTokenFile -Path $target -ExpectedOwnerSid $script:CurrentSid
-            [IO.File]::Replace($temporary, $target, $null)
+            # A bare PowerShell $null binds to String.Empty here on both PS 5.1 and 7.
+            # NullString supplies a real .NET null: atomic replacement without a secret backup.
+            [IO.File]::Replace(
+                $temporary, $target, [System.Management.Automation.Language.NullString]::Value
+            )
         } else {
             [IO.File]::Move($temporary, $target)
         }
