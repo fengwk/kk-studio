@@ -1,119 +1,93 @@
-# 内置检索测试映射
+# 内置检索的行为验证
 
-`fs.grep` 与 `fs.find` 在 kk-studio 里由 Daemon 内的纯 Java 实现承担，pi-base 的同类行为则由
-ripgrep / fd 子进程加一层 TypeScript 工具包装实现。两者对外契约一致，内部分层、失败面和资源边界并不同，
-因此 pi-base 的测试不能按文件平移。本文件逐用例给出源用例、适用性、kk 对应用例与映射结论，供后续接手者判断
-某个行为是否仍然被覆盖，以及为什么某个源用例不再存在。
+`fs.grep` 与 `fs.find` 由 Daemon 内的 Java 实现遍历、解码和匹配，不启动 ripgrep/fd。
+验证重点是“哪些路径真正搜索过、命中如何定位、遇到错误是否漏报”，而不是外部命令参数或退出码。
+能力契约见[内置工具设计](../modules/builtin-tools-design.md)，进程与输出存储见
+[Bash 行为验证](builtin-bash-tests.md)。
 
-## 心智模型
+## 运行与证据
 
-- **实现位置**：检索逻辑全部在 `harness/daemon` 的 `coding` 包内，测试是 JVM 内的真实文件系统测试，
-  不启动外部检索二进制。
-- **能力边界**：Daemon 只负责「给定显式 `workdir` 与 `path`，返回命中行或路径」。schema 校验、prompt、
-  调用上下文传递、结果编解码、字节级输出预算与落盘由 harness environment / daemon runtime 承担。
-  这些层的行为在 pi-base 里由 `grep` 包装器承担，因此对应源用例属于不同模块。
-- **契约差异**：pi-base 依赖 ripgrep/fd 的输出协议（JSON `bytes` 字段、`--full-path`、退出码、
-  非零退出时的部分输出、二进制可用性探测）。kk-studio 自己遍历与解码，协议层差异以「显式失败」替代
-  「解析外部输出」，相关源用例按此改写或排除。
-- **文本编码**：编码只支持 UTF-8 与 BOM 判定的 UTF-16LE/BE。旧编码（如 GBK）字节严格解码失败即按二进制
-  显式报错，不产生替换字符，也不静默漏报命中。
-- **忽略规则**：从检索目标自身向上解析，与调用 `workdir` 无关。
-
-`映射结论` 一列描述承接关系：`承接` 表示该源用例的行为由右列的 kk 用例负责守住，`不适用` 表示当前没有对应契约（原因写在适用性一列）。断言内容以右列用例为准，每一行的实际通过情况以「复核方式」中的命令输出为唯一依据，本文不记录某一次运行的结论；未被承接的条目不进入回归。
-
-## 证据来源
-
-- [`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)：
-  原生检索端到端行为，含上限、失败、超时、编码与特殊文件。
-- [`FindGrepCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java)：
-  glob 语义、输出格式、落盘、`SearchFiles` 遍历契约。
-- [`GitIgnoreDiscoveryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java)：
-  祖先 `.gitignore`、`info/exclude`、`.git` 文件 worktree 的解析。
-- [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、
-  [`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、
-  [`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)：
-  参数校验、workdir 语义、有效超时与取消。
-
-## grep 原生路径（`pi-base/tests/grep-native.test.ts`）
-
-| 源用例 | 适用性 | kk 对应用例 | 映射结论 |
-| --- | --- | --- | --- |
-| `decodes real ripgrep path.bytes and lines.bytes …` | 差异：kk 不做 rg JSON 解码，编码由共享 `TextStreams` 判定（GBK 按二进制显式报错） | `NativeSearchCapabilitiesTest#grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、`#grepFindsMatchInSecondHalfOfOverLongLine` | 承接 |
-| `returns the required-argument error for a missing pattern` | 适用（schema 必填校验） | `CodingCapabilitiesEdgeTest#everyDescriptorRejectsWrongTypedAndUnknownArguments` | 承接 |
-| `passes ignore_case through to native ripgrep` | 适用（不再有进程参数传递面） | `NativeSearchCapabilitiesTest#grepSupportsLiteralRegexIgnoreCaseAndIncludeWithoutDuplicateLines`、`FindGrepCapabilitiesTest#grepIgnoreCaseAndIncludePatternFilter` | 承接 |
-| `skips unparseable ripgrep output lines and formats matches as relative locations` | 差异：无外部输出可解析；等价契约为相对定位且不输出上下文行 | `FindGrepCapabilitiesTest#grepMatchCenteredExcerptForLongLines`、`FindGrepCapabilitiesTest#findMatchesBasenameAndPathGlobPatternsDeterministically` | 承接 |
-| `reads the matched line from disk when ripgrep omits line text` | 排除：rg 输出协议专属，kk 自己读文件，不存在缺失行文本的分支 | — | 不适用 |
-| `reports match limits and long-line truncation from ripgrep output` | 适用（上限与长行截断语义保留） | `NativeSearchCapabilitiesTest#searchLimitsStayInlineAndTruncateLongLines`、`FindGrepCapabilitiesTest#grepMatchCenteredExcerptForLongLines` | 承接 |
-| `leaves byte truncation to the shared tool-output layer` | 适用（kk 同样返回完整命中集合，字节预算在输出层） | `FindGrepCapabilitiesTest#grepSpoolsLargeResultsToBoundedTextResultWithPath` | 承接 |
-| `persists complete native grep output before returning the shared truncated preview` | 适用（完整输出落盘后返回有界预览） | `FindGrepCapabilitiesTest#grepSpoolsLargeResultsToBoundedTextResultWithPath`、`OutputSpoolTest`、`TextOutputStoreTest` | 承接 |
-| `returns no-match and ripgrep failure results distinctly` | 适用并加强：无匹配仍在但存在未搜索路径时为错误 | `FindGrepCapabilitiesTest#grepReturnsNoMatchesFoundWhenEmpty`、`NativeSearchCapabilitiesTest#grepEnumeratesAndBoundsUnsearchedPaths`、`#grepRejectsDirectBinarySkipsDirectoryBinaryAndReportsInvalidRegex` | 承接 |
-| `reports a timeout when ripgrep does not finish before timeout_seconds` | 适用 | `NativeSearchCapabilitiesTest#grepSingleLineTimesOutWhileScanningManyLines`、`#grepMultilineTimesOutDuringWholeFileScan`、`CodingCapabilitiesTest#searchCapabilitiesConsumeResolvedRequestTimeout` | 承接 |
-| `applies grep timeout while waiting for ripgrep acquisition` | 差异：无二进制获取阶段；等价契约是 deadline 覆盖整个调用（含扫描） | `NativeSearchCapabilitiesTest#deadlineCheckedSequenceEnforcesTimeoutMidScan`、`CodingCapabilitiesTest#searchCapabilitiesConsumeResolvedRequestTimeout` | 承接 |
-
-## grep 多行行为（`pi-base/tests/grep-multiline-behavior.test.ts`）
-
-| 源用例 | 适用性 | kk 对应用例 | 映射结论 |
-| --- | --- | --- | --- |
-| `renders grep calls with all optional flags` | 排除：TUI 渲染层，Daemon 不参与渲染；字段本身由 schema 与参数校验覆盖 | `CodingCapabilitiesEdgeTest#everyDescriptorRejectsWrongTypedAndUnknownArguments` | 不适用 |
-| `supports multiline grep with relative paths and limit notices` | 适用（`limit` 约束命中数，同一命中的覆盖行整体输出） | `NativeSearchCapabilitiesTest#grepMultilineHonorsLimit`、`#grepMultilineReportsCoveredLinesOnce` | 承接 |
-| `truncates long multiline match lines and uses the basename for single-file searches` | 适用 | `FindGrepCapabilitiesTest#grepMatchCenteredExcerptForLongLines`、`#grepDirectFileSearchAndErrors` | 承接 |
-| `rejects already-aborted multiline searches` | 适用（取消必须在开始前与扫描中均可响应） | `NativeSearchCapabilitiesTest#deadlineCheckedSequenceSurfacesCancellationAsInterruption`、`#searchControlActivelyChecksTimeoutAndCancellation`、`CodingCapabilitiesEdgeTest#abstractCodingExecutionUsesInjectedExecutorAndInterruptsOnCancel` | 承接 |
-
-## grep 多行错误路径（`pi-base/tests/grep-multiline-errors.test.ts`）
-
-| 源用例 | 适用性 | kk 对应用例 | 映射结论 |
-| --- | --- | --- | --- |
-| `returns no matches for multiline searches with no results` | 适用 | `FindGrepCapabilitiesTest#grepReturnsNoMatchesFoundWhenEmpty`、`NativeSearchCapabilitiesTest#grepMultilineHandlesEmptyAndBinaryFiles` | 承接 |
-| `explains ripgrep regex failures for standard and multiline searches` | 适用（只保留「正则非法即显式错误」，错误文本不再引用 rg） | `FindGrepCapabilitiesTest#grepRe2jRegexSyntaxValidAndInvalid`、`NativeSearchCapabilitiesTest#grepRejectsDirectBinarySkipsDirectoryBinaryAndReportsInvalidRegex` | 承接 |
-
-## find 原生路径（`pi-base/tests/find-tool-native.test.ts`）
-
-| 源用例 | 适用性 | kk 对应用例 | 映射结论 |
-| --- | --- | --- | --- |
-| `uses full-path matching for slash patterns and relativizes fd output` | 适用（`--full-path` 等价为含 `/` 的 pattern 全路径匹配） | `FindGrepCapabilitiesTest#findMatchesBasenameAndPathGlobPatternsDeterministically`、`NativeSearchCapabilitiesTest#globPatternsArePlatformIndependentAndSegmentAware`、`#findMatchesBasenamesAndSearchRelativePathsInDeterministicOrder`、`FindGrepCapabilitiesTest#findEarlyStopsAtLimitPlusOne` | 承接 |
-| `preserves trailing spaces in matched file names` | 适用 | `NativeSearchCapabilitiesTest#findPreservesTrailingSpaceInMatchedFileName` | 承接 |
-| `distinguishes empty results from fd execution failures` | 差异：无 fd 退出码；等价契约为无匹配仍是结果、不可搜索路径是错误 | `FindGrepCapabilitiesTest#findReturnsNoFilesFoundWhenNoMatches`、`#searchFilesIgnoresSymlinksAndValidatesDirectory`、`NativeSearchCapabilitiesTest#findReportsUnsearchedPathsWhenNothingMatches` | 承接 |
-| `reports fd availability failures before spawning a search process` | 排除：kk 不依赖外部二进制，不存在可用性探测；等价失败面是路径与 workdir 校验 | `NativeSearchCapabilitiesTest#searchRejectsMissingPath`、`#searchRejectsUnreadableSearchRoot`、`WorkdirPathSemanticsTest#relativeWorkdirIsRejected`、`#unusableWorkdirIsRejected` | 不适用（失败面改写） |
-| `keeps partial fd output from non-zero exits` | 排除：不启动子进程，不存在「非零退出附带部分输出」状态；不完整结果的对应处理是未搜索路径枚举 | `NativeSearchCapabilitiesTest#findReportsUnsearchedPathsWhenNothingMatches` | 不适用（状态不存在） |
-| `leaves byte truncation to the shared tool-output layer` | 适用 | `FindGrepCapabilitiesTest#findSpoolsLargeResultsToBoundedTextResultWithPath` | 承接 |
-| `aborts before and during fd execution` | 适用（取消在遍历前与遍历中都必须及时终止） | `NativeSearchCapabilitiesTest#findTimesOutOnTinyDeadline`、`#searchControlActivelyChecksTimeoutAndCancellation`、`#deadlineCheckedSequenceSurfacesCancellationAsInterruption` | 承接 |
-| `keeps the default force-kill watchdog after cancellation rejects` | 排除：检索不启动子进程；强制终止契约由承载子进程的能力（命令执行、LSP）验证 | `ProcessScopeTest.terminateLetsTheCommandRunItsTerminationTrap` | 不适用（层次不同） |
-
-## grep/find 工具包装（`pi-base/tests/search-tools.test.ts`）
-
-| 源用例 | 适用性 | kk 对应用例 | 映射结论 |
-| --- | --- | --- | --- |
-| `returns matching lines from builtin output without adding anchors` | 适用（输出契约：`path:line: text`，不加锚点） | `FindGrepCapabilitiesTest#grepMatchCenteredExcerptForLongLines`、`#grepRe2jRegexSyntaxValidAndInvalid` | 承接 |
-| `reports timeout guidance` | 适用 | `NativeSearchCapabilitiesTest#grepSingleLineTimesOutWhileScanningManyLines`、`CodingCapabilitiesTest#searchCapabilitiesConsumeResolvedRequestTimeout` | 承接 |
-| `does not misreport parent cancellation as a timeout` | 适用（取消必须区别于超时） | `NativeSearchCapabilitiesTest#deadlineCheckedSequenceSurfacesCancellationAsInterruption`、`CodingCapabilitiesEdgeTest#abstractCodingExecutionUsesInjectedExecutorAndInterruptsOnCancel` | 承接 |
-| `reports binary file guidance` | 适用并加强：直接目标是显式错误，目录扫描中的二进制静默跳过 | `NativeSearchCapabilitiesTest#grepRejectsDirectBinarySkipsDirectoryBinaryAndReportsInvalidRegex`、`#grepDetectsBinaryContentBeyondProbePrefix`、`#grepRejectsInvalidTextEncodingInsteadOfMissingMatches` | 承接 |
-| `falls through to upstream grep when the search path is missing` | 排除：kk 没有上游工具回退，缺失路径必须显式失败 | `NativeSearchCapabilitiesTest#searchRejectsMissingPath` | 不适用（回退不存在） |
-| `preserves no-match output` | 适用 | `FindGrepCapabilitiesTest#grepReturnsNoMatchesFoundWhenEmpty` | 承接 |
-| `returns builtin result when no text block is present` | 排除：结果编解码属于 harness environment / daemon codec 层 | `EnvironmentCapabilityContractTest` | 不适用（层次不同） |
-| `preserves passthrough lines` | 排除：kk 的 grep 只产生命中行，不存在上游透传行 | — | 不适用 |
-| `preserves builtin truncation text and details` | 适用（上限/截断提示保留） | `NativeSearchCapabilitiesTest#searchLimitsStayInlineAndTruncateLongLines` | 承接 |
-| `surfaces non-timeout builtin errors` | 适用 | `FindGrepCapabilitiesTest#grepDirectFileSearchAndErrors`、`NativeSearchCapabilitiesTest#grepReportsUnreadableDirectFile` | 承接 |
-| `validates required path` | 适用（schema 必填） | `CodingCapabilitiesEdgeTest#everyDescriptorRejectsWrongTypedAndUnknownArguments` | 承接 |
-| `passes include to builtin grep as glob` | 适用 | `FindGrepCapabilitiesTest#grepIgnoreCaseAndIncludePatternFilter` | 承接 |
-| `passes toolCallId and ctx to builtin grep` | 排除：调用身份与上下文传递属于 daemon runtime / environment，不在检索能力内 | `DaemonRuntimeTest` | 不适用（层次不同） |
-| `does not reject legacy-encoded text files as binary before delegating grep` | 差异：kk 只支持 UTF-8 与 UTF-16，GBK 等旧编码按二进制显式报错，不静默替换 | `NativeSearchCapabilitiesTest#grepRejectsInvalidTextEncodingInsteadOfMissingMatches` | 承接（契约改写） |
-| `passes multiline to builtin grep when a custom factory is provided` | 适用 | `FindGrepCapabilitiesTest#grepMultilineSearch` | 承接 |
-| `supports multiline matches and prefixes every matched line` | 适用 | `NativeSearchCapabilitiesTest#grepMultilineReportsCoveredLinesOnce`、`#grepMultilineHonorsLimit` | 承接 |
-| `is registered when piBaseExtension is loaded` | 排除：注册属于 capability catalog | `CodingCapabilitiesTest#registersEnvironmentDescriptorsAndRejectsMalformedArguments`、`EnvironmentCapabilityCatalogTest` | 不适用（层次不同） |
-| `uses the current execution cwd` | 差异：kk 要求每次调用显式传 `workdir`，不继承调用方当前目录 | `WorkdirPathSemanticsTest#eachInvocationUsesItsOwnWorkdir`、`#relativePathsResolveFromExplicitWorkdir`、`#omittedWorkdirIsRejectedWithoutDefaultFallback` | 承接（契约改写） |
-| `applies timeout_seconds without passing it to the built-in find` | 适用 | `NativeSearchCapabilitiesTest#findTimesOutOnTinyDeadline`、`CodingCapabilitiesTest#searchCapabilitiesConsumeResolvedRequestTimeout` | 承接 |
-| `rethrows non-timeout find errors` | 适用 | `NativeSearchCapabilitiesTest#searchRejectsMissingPath`、`#findReportsUnsearchedPathsWhenNothingMatches` | 承接 |
-| `uses pi-base raw renderer for find even when collapsed result lines are not configured` | 排除：TUI 渲染层 | — | 不适用 |
-
-## 复核方式
+从仓库根目录使用 JDK 21：
 
 ```bash
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon -am test
-env JAVA_HOME=$JAVA_HOME_21 mvn -pl harness/daemon -am validate   # Checkstyle + Spotless
+env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test
+env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 ```
 
-JaCoCo 报告由 `test` 阶段生成到 `harness/daemon/target/site/jacoco`；daemon 模块没有绑定 `jacoco:check`，因此覆盖率是
-参考指标而不是构建门禁。核心检索路径（`GrepCapability`、`FindCapability`、`SearchFiles`、`SearchControl`、
-`GitIgnoreRules`、`GlobPattern`、`TextStreams`）按仓库「核心路径行覆盖率 ≥ 90%、分支覆盖率作为参考」的约定度量，
-达成度以报告为准，本文不固定某次运行的百分比。检索行为属于本机平台能力：需要在真实文件系统
-权限、符号链接与稀疏文件上执行，因此没有独立于 JVM 的等价验证入口。
+这些测试使用真实本地文件系统、临时文件、权限、符号链接与稀疏文件，不调用模型或部署数据库。
+检索测试本身不启动外部检索二进制；上述整个 Daemon 套件还会运行 Bash/LSP 的真实子进程测试。
+`validate` 只做 Checkstyle/Spotless 等静态检查，不编译、不执行检索。
+
+| 测试类 | 负责的证据 |
+| --- | --- |
+| [`NativeSearchCapabilitiesTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java) | 匹配、编码、上限、特殊文件、未搜索路径、超时与取消 |
+| [`FindGrepCapabilitiesTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java) | glob、结果格式、全文落盘、`SearchFiles` 遍历 |
+| [`GitIgnoreDiscoveryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java) | 祖先 `.gitignore`、`info/exclude`、`.git` 文件与 linked worktree 的发现 |
+| `CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest` | schema 参数、有效调用预算、注入执行器与取消 |
+| `WorkdirPathSemanticsTest` | 每次调用独立的路径解析基准、相对路径、缺失或不可用 workdir |
+
+只跑检索可用上述类名筛选 `-Dtest`，同时保留 `-am -Dsurefire.failIfNoSpecifiedTests=false`，
+并确认 Daemon 的 `target/surefire-reports` 有实际执行记录。`test` 生成
+`harness/daemon/target/site/jacoco`；Daemon 不绑定 `jacoco:check`。
+度量核心是 `GrepCapability`、`FindCapability`、`SearchFiles`、`SearchControl`、`GitIgnoreRules`、
+`GlobPattern`、`TextStreams`，行覆盖率目标 ≥90%，分支作为参考，不固定某次运行数字。
+
+## 先验证检索范围
+
+绝对 path 不需 workdir，相对 path 必须有显式绝对 workdir，不继承 Daemon cwd。
+`WorkdirPathSemanticsTest.eachInvocationUsesItsOwnWorkdir`、
+`relativePathsResolveFromExplicitWorkdir`、`relativeWorkdirIsRejected`、`unusableWorkdirIsRejected`
+守卫这条边界。schema 必填、类型和未知参数由
+`CodingCapabilitiesEdgeTest.everyDescriptorRejectsWrongTypedAndUnknownArguments` 验证。
+
+忽略规则从**检索目标自身**向上发现，与调用 workdir 无关；`.git` 目录或文件界定仓库上界。
+`GitIgnoreDiscoveryTest` 是发现规则的直接证据，`NativeSearchCapabilitiesTest` 与
+`FindGrepCapabilitiesTest` 验证规则对实际结果的影响。
+符号链接的遍历行为由 `searchFilesIgnoresSymlinksAndValidatesDirectory` 固定；
+缺失或不可读根不是“空结果”（`searchRejectsMissingPath`、`searchRejectsUnreadableSearchRoot`）。
+
+## Grep 的成功、空结果与不完整结果
+
+| 行为 | 主要断言 |
+| --- | --- |
+| literal/regex、ignore_case、include，不重复输出同一行 | `NativeSearchCapabilitiesTest.grepSupportsLiteralRegexIgnoreCaseAndIncludeWithoutDuplicateLines`、`FindGrepCapabilitiesTest.grepIgnoreCaseAndIncludePatternFilter` |
+| 非法正则明确失败 | `grepRe2jRegexSyntaxValidAndInvalid`、`grepRejectsDirectBinarySkipsDirectoryBinaryAndReportsInvalidRegex` |
+| 单文件与目录的定位输出、长行命中附近摘录 | `grepDirectFileSearchAndErrors`、`grepMatchCenteredExcerptForLongLines`、`grepFindsMatchInSecondHalfOfOverLongLine` |
+| multiline 命中计数与覆盖行去重 | `grepMultilineHonorsLimit`、`grepMultilineReportsCoveredLinesOnce`、`grepMultilineSearch` |
+| 结果上限与长行截断说明 | `searchLimitsStayInlineAndTruncateLongLines`、`grepMatchCenteredExcerptForLongLines` |
+| 真正无匹配 | `grepReturnsNoMatchesFoundWhenEmpty`、`grepMultilineHandlesEmptyAndBinaryFiles` |
+| 未搜索路径有界枚举，不能伪装成无匹配 | `grepEnumeratesAndBoundsUnsearchedPaths`、`grepReportsUnreadableDirectFile` |
+| 大结果在共享输出层落盘，返回有界预览与路径 | `grepSpoolsLargeResultsToBoundedTextResultWithPath` |
+
+定位形态是相对路径、行号与命中文本，不添加展示锚点，也不透传外部程序的杂项输出。
+只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE；直接二进制目标报错，目录中的二进制文件跳过。
+非法旧编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
+`grepDetectsBinaryContentBeyondProbePrefix`）。多行扫描有独立整文件预算，不应把它误写成 read 的文件大小上限。
+
+## Find 的路径匹配与停止条件
+
+- `findMatchesBasenameAndPathGlobPatternsDeterministically`、
+  `globPatternsArePlatformIndependentAndSegmentAware`、
+  `findMatchesBasenamesAndSearchRelativePathsInDeterministicOrder`：不含 `/` 的模式匹配 basename，
+  含 `/` 的模式匹配检索相对路径，结果顺序确定。
+- `findPreservesTrailingSpaceInMatchedFileName`：不 trim 文件名。
+- `findEarlyStopsAtLimitPlusOne`：达到结果上限后用额外一个结果确认截断，而非无界遍历。
+- `findReturnsNoFilesFoundWhenNoMatches` 与 `findReportsUnsearchedPathsWhenNothingMatches`：
+  空结果与不可搜索路径不同，后者不能当成功的无匹配。
+- `findSpoolsLargeResultsToBoundedTextResultWithPath`：字节预算由共享输出层负责，全文发布后才交付有界预览。
+
+全文发布的权限、原子性和存储失败降级由 `OutputSpoolTest`、`TextOutputStoreTest` 验证，
+见[Bash 输出与协议终态](builtin-bash-tests.md#输出与协议终态)；不能用一条检索落盘成功测试宣称所有存储失败已覆盖。
+
+## 取消、超时与能力边界
+
+`searchCapabilitiesConsumeResolvedRequestTimeout` 固定有效预算进入检索。
+`grepSingleLineTimesOutWhileScanningManyLines`、`grepMultilineTimesOutDuringWholeFileScan`、
+`findTimesOutOnTinyDeadline` 验证扫描能截止；`deadlineCheckedSequenceEnforcesTimeoutMidScan`、
+`deadlineCheckedSequenceSurfacesCancellationAsInterruption`、`searchControlActivelyChecksTimeoutAndCancellation`
+验证扫描中的检查点。取消不能被误报成超时，已取消调用也不能继续遍历。
+
+检索没有外部二进制获取、force-kill watchdog、非零退出附带部分输出或上游 fallback。
+capability 注册与结果协议由 [`harness/environment`](../../harness/environment)、Daemon Runtime 负责，终端渲染由前端负责，
+不属于本文的检索覆盖率口径。权限、特殊文件与 symlink 测试的跳过项需按宿主平台报告；
+一个平台通过不等于全部原生文件系统已验收。
