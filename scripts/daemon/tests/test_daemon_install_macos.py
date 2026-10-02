@@ -21,6 +21,7 @@ from test_daemon_install import (
     NOTE,
     TOKEN_VALUE,
     Fixture,
+    InlineTokenContracts,
     write_executable,
 )
 
@@ -209,6 +210,27 @@ class DarwinInstallTestCase(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         return DarwinFixture(temporary.name, **kwargs)
+
+
+class TestMacosInlineToken(InlineTokenContracts, DarwinInstallTestCase):
+    """Shared credential contracts plus the macOS-only lint publication boundary."""
+
+    def test_inline_lint_failure_preserves_old_or_absent_token(self):
+        """The token must not publish until plist lint succeeds."""
+        for present in (False, True):
+            fixture = self.fixture(plutil_mode="fail")
+            before = fixture.token.read_bytes()
+            if not present:
+                fixture.token.unlink()
+                fixture.token_dir.rmdir()
+            result = self.inline_install(fixture)
+            self.assertNotEqual(0, result.returncode)
+            if present:
+                self.assertEqual(before, fixture.token.read_bytes())
+            else:
+                self.assertFalse(fixture.token_dir.exists())
+            self.assertEqual([], fixture.launchctl_invocations())
+            self.assertEqual([], list(fixture.home.rglob("*.tmp.*")))
 
 
 class TestMacosInstallContract(DarwinInstallTestCase):

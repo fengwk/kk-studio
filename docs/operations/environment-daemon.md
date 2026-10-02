@@ -68,7 +68,18 @@ Daemon 是普通宿主进程，继承启动它的用户权限：Linux/macOS 上�
 在 Studio 的 Environment 页面为目标 Environment 点击「复制 Token」（或先「重新生成 Token」再
 复制），并只以本机 owner-only 普通文件交给 Daemon。
 
-Linux/macOS：
+Linux/macOS 可直接在 Unix 安装命令中指定 `--registration-token '<token>'`，与
+`--registration-token-file <absolute-path>` **恰好二选一**。直接模式拒绝空值、任何空白和控制字符，
+默认写入 `~/.config/kk-studio/daemon.token`（0600），新建的凭证目录为 0700。现存文件可以原子替换；
+目标和父路径不能是符号链接，目标须为普通文件；HOME 及其下的现存父目录须为当前用户所有且不可被
+group/other 写入，目标文件也须为当前用户所有。脚本不会自动修改现存父目录的权限；
+例如 `~/.config` 为 0775 时，确认不需要共享写入后执行 `chmod go-w "$HOME/.config"` 再安装。
+
+直接 token 会出现在**安装脚本进程的 argv 和可能的 shell 历史**中，这是此便利入口的风险；
+显式使用 `bash -x` 也可能泄漏 token。若要避免这些暴露，请使用下述交互写文件方式，然后传文件路径。
+Windows 安装器仍然仅支持文件模式，不支持直接 token。
+
+Linux/macOS 手动写文件：
 
 ```bash
 install -d -m 700 ~/.config/kk-studio
@@ -122,11 +133,12 @@ $fileAcl.AddAccessRule(
 Set-Acl -LiteralPath $tokenPath -AclObject $fileAcl
 ```
 
-不要把 token 文本作为命令参数或在提示符下明文输入（例如 `echo`、`Set-Content -Value`、
-`-RegistrationTokenFile '<token>'` 之类的写法），那会留在命令历史里；也不要把 token 写进命令行参数、
-环境变量文件、文档、日志或 shell 历史。
+不要把 token 文本误当成文件路径（如 `-RegistrationTokenFile '<token>'`），也不要写入环境变量文件、
+文档或日志。`echo`、`Set-Content -Value` 等明文写法可能留在命令历史中；Unix 直接 token 入口也有
+上述 argv/历史暴露风险，优先使用交互文件模式。
 
-Token 校验（fail closed）分两处；安装脚本只读元数据、**不读取内容**，Daemon 只在运行时读取内容：
+Token 校验（fail closed）分两处；安装器的**文件模式**只读元数据、不读取内容，
+Unix 直接模式则校验输入文本并写入默认文件，Daemon 在运行时读取文件内容：
 
 - Linux/macOS 安装脚本按 POSIX 元数据校验 `--registration-token-file`：必须是绝对路径、现存普通文件
   （拒绝符号链接与目录）、非空、属主为当前用户、对属主可读，且不含任何 group/other 权限位
@@ -140,7 +152,8 @@ Token 校验（fail closed）分两处；安装脚本只读元数据、**不读�
   注册。Unix 上会重新检查属主与 group/other 位；Windows 上没有 POSIX 属性视图，Daemon 只读取内容。
   凭证文本只存在于进程内存与注册报文，不会写入 argv、环境变量、数据目录或日志。
 
-服务定义里只会出现 token 的**文件路径**，token 文本绝不进入命令行参数、构建参数或日志；`mvn` 构建
+服务定义与 Daemon argv 里只会出现 token 的**文件路径**；安装器不将直接 token 文本传给任何外部
+命令的 argv，也不通过脚本变量 export 到子进程环境，不打印其值。`mvn` 构建
 阶段完全看不到数据面配置。在 Studio 轮换 token 后，只需重写该文件并重启服务：Linux
 `systemctl --user restart kk-studio-daemon.service`，macOS
 `launchctl kickstart -k gui/$(id -u)/fun.fengwk.kkstudio.environment-daemon`，Windows 用
@@ -169,6 +182,8 @@ Set-Location kk-studio
 ```
 
 两个脚本的 `--registration-token-file` / `-RegistrationTokenFile` 都必须使用绝对路径。
+Unix 也可将上例最后一项换成 `--registration-token '<token>'`，由脚本写入默认文件，无需提前创建；
+请先了解上文的 argv/历史风险。Daemon 自身 CLI 与 Windows 安装器不接受此直接输入选项。
 
 ### 通用安全顺序
 
@@ -176,7 +191,8 @@ Set-Location kk-studio
 
 1. 校验全部输入：未知/重复选项、控制字符、非 `ws`/`wss` scheme 或缺少 host 的 gateway 地址、
    非绝对路径（含 HOME 与仓库根）、非十进制非负整数的验证窗口、数据目录与 JDK 路径，以及 token
-   文件的属主与权限（Windows 为 ACL）。不受支持的操作系统在同一阶段失败。
+   文件的属主与权限（Windows 为 ACL）；Unix 直接模式检查默认目标和父路径安全性。
+   不受支持的操作系统在同一阶段失败。
 2. 校验现有服务定义的所有权：目标位置已有服务定义但不是本脚本生成的，直接拒绝，见下文所有权标记。
 3. 构建并自证产物：`mvn -B -ntp -pl harness/daemon -am clean package`（Windows 用 `mvn.cmd`），
    然后执行 `java -jar <jar> --version`，要求退出码为 0 且输出以 `kk-studio-daemon ` 开头。脚本传给
@@ -193,6 +209,12 @@ Set-Location kk-studio
    的成功状态不足以判定成功。两个窗口分别由 `DAEMON_VERIFY_TIMEOUT_SECONDS`（默认 30）与
    `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）覆盖，取值必须是十进制非负整数；`0` 表示只做一次立即
    检查、不要求稳定窗口。
+
+Unix 直接模式在上述输入、JDK、服务所有权、构建、JAR 校验以及 macOS plist lint 全部通过后才发布
+token：在目标同目录用 `mktemp` 与 `umask 077` 创建 0600 文件，使用 Bash builtin `printf` 写入，
+再原子改名，退出时清理未发布的暂存文件。Linux 在发布 JAR/unit 之前写入 token；macOS 在 lint
+之后、bootout 之前写入，保证启动时凭证已就位。未知参数、互斥输入、未管理服务或构建失败不会改旧
+token，也不会新建默认凭证文件。进入发布阶段后的磁盘或服务切换失败不承诺回滚 token。
 
 编译、产物校验与（macOS）plist lint 都发生在停掉现有服务之前，因此构建失败不会卸下或改写正在运行的
 安装。第 6 步只证明进程仍在运行，不代表 gateway 注册成功：注册与可用性以 Studio 的 `READY` 为准。
@@ -268,12 +290,13 @@ Task Scheduler 不捕获 Daemon 的 stdout/stderr：Windows 上没有 journal，
 
 ### 可选安装参数
 
-两个脚本的参数一一对应，语义相同；所有取值都不能包含控制字符或换行：
+除 Unix 直接 token 入口外，两个脚本的参数一一对应，语义相同；所有取值都不能包含控制字符或换行：
 
 | Unix 选项 | Windows 参数 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `--gateway-uri` | `-GatewayUri` | 无（必填） | Studio Environment WebSocket gateway 地址，仅支持 `ws://` 或 `wss://` |
-| `--registration-token-file` | `-RegistrationTokenFile` | 无（必填） | registration token 的绝对文件路径，属主必须是当前用户且仅该用户可读（Unix 0600 / Windows 仅当前 SID 的 Allow ACE） |
+| `--registration-token-file` | `-RegistrationTokenFile` | 无 | registration token 的绝对文件路径；Unix 与直接 token 恰好二选一，Windows 必填。属主必须是当前用户且仅该用户可读（Unix 0600 / Windows 仅当前 SID 的 Allow ACE） |
+| `--registration-token` | 不支持 | 写入 `$HOME/.config/kk-studio/daemon.token` | Unix 安装器直接输入，拒绝空值及空白；与文件选项互斥，存在调用者 argv/历史暴露风险 |
 | `--java-home` | `-JavaHome` | 自动解析 | 指定绝对 JDK 21 home（须含可执行的 `bin/java`、`bin/javac`）；默认顺序为 `JAVA_HOME_21` → `JAVA_HOME` → PATH |
 | `--data-dir` | `-DataDir` | `$HOME/.kk-studio`（Windows 为 `%USERPROFILE%\.kk-studio`） | 指定本地数据目录绝对路径 |
 | `--note` | `-Note` | 无 | 单行可信备注文本（不超过 512 字符，两端无空格），进入受信任模型 SYSTEM Prompt。只能由可信操作者设置，禁止包含凭证或秘密 |

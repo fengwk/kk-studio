@@ -3,13 +3,13 @@
 #
 # 单一职责：把 `harness/daemon` 构建出的 shaded JAR 与一个由本脚本拥有的用户服务
 # 安装到当前用户，并提供状态查询与卸载。Linux 使用 `systemd --user`；macOS 使用
-# 当前用户 GUI 域的 LaunchAgent。它不下载发布物、不解析 token 内容、不生成
+# 当前用户 GUI 域的 LaunchAgent。它不下载发布物、不生成
 # `~/.local/bin` wrapper，也不写任何 daemon 环境变量文件：服务定义是配置的唯一载体，
 # 凭证只以 owner-only 文件路径出现在 `--registration-token-file`。
 #
 # 用法：
 #   scripts/daemon/install.sh install --gateway-uri <ws://...|wss://...> \
-#     --registration-token-file <absolute-path> [options]
+#     (--registration-token <token> | --registration-token-file <absolute-path>) [options]
 #   scripts/daemon/install.sh upgrade
 #   scripts/daemon/install.sh status
 #   scripts/daemon/install.sh uninstall
@@ -19,8 +19,8 @@
 # LaunchAgent 域；PATH 上的 Maven、JDK 21。其它系统在触碰受管路径之前失败。
 #
 # 安全边界：所有取值先校验再构建；未知/重复选项、控制字符、非 ws/wss scheme、相对路径
-# 与不合规 token 文件都在触碰任何安装路径之前失败。token 文件只被 stat 校验，内容既不
-# 读取也不打印，也不进入 argv 或环境变量。
+# 与不合规 token 文件都在触碰任何安装路径之前失败。文件模式只校验元数据；直接 token
+# 通过 builtin printf 写入默认文件，不传给子进程。调用者 argv/历史及显式 bash -x 不在保密边界内。
 
 set -euo pipefail
 
@@ -87,6 +87,9 @@ VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 # 顶层选项取值；空字符串表示未给出。
 GATEWAY_URI=
 TOKEN_FILE=
+# 避免同名环境变量的 export 属性被脚本赋值继承。
+export -n INLINE_TOKEN
+INLINE_TOKEN=
 OPT_JAVA_HOME=
 DATA_DIR=
 NOTE=
@@ -126,7 +129,12 @@ Commands:
 Install options:
   --gateway-uri <uri>                 Required. Environment server WebSocket
                                       gateway; scheme must be ws or wss.
-  --registration-token-file <path>    Required. Absolute owner-only file that
+  --registration-token <token>        Exactly one token option is required.
+                                      Write to $HOME/.config/kk-studio/daemon.token
+                                      atomically (0600); no whitespace allowed.
+                                      Visible in caller argv/shell history;
+                                      explicit bash -x can disclose it.
+  --registration-token-file <path>    Alternative. Absolute owner-only file that
                                       holds the registration token. Its content
                                       is never read or printed by this script.
   --java-home <dir>                   Optional. Absolute JDK 21 home used for
@@ -153,6 +161,8 @@ Environment:
                                      check). Both must be non-negative integers.
 
 Managed layout:
+  $HOME/.config/kk-studio/daemon.token              mode 0600 (inline token only)
+          newly created credential directories: mode 0700
   $HOME/.local/lib/kk-studio/kk-studio-daemon.jar     mode 0644
   Linux:  $HOME/.config/systemd/user/kk-studio-daemon.service mode 0644
   macOS:  $HOME/Library/LaunchAgents/fun.fengwk.kkstudio.environment-daemon.plist
@@ -291,9 +301,9 @@ parse_install_options() {
   while [ $# -gt 0 ]; do
     option=$1
     case "$option" in
-      --gateway-uri | --registration-token-file | --java-home | --data-dir | --note | \
+      --gateway-uri | --registration-token | --registration-token-file | --java-home | --data-dir | --note | \
         --bash-executable | --lsp-config) ;;
-      *) fail "unknown option: $option" ;;
+      *) fail "unknown option: unexpected argument (value omitted)" ;;
     esac
     if option_seen "$option"; then
       fail "duplicate option: $option"
@@ -307,6 +317,7 @@ parse_install_options() {
     require_option_value "$value" "$option"
     case "$option" in
       --gateway-uri) GATEWAY_URI=$value ;;
+      --registration-token) INLINE_TOKEN=$value ;;
       --registration-token-file) TOKEN_FILE=$value ;;
       --java-home) OPT_JAVA_HOME=$value ;;
       --data-dir) DATA_DIR=$value ;;
@@ -328,7 +339,7 @@ validate_gateway_uri() {
   fi
 }
 
-# token 文件是凭证的唯一载体：这里只做 stat 级校验，绝不读取或输出其内容。
+# 文件模式这里只做 stat 级校验，绝不读取或输出其内容。
 validate_token_file() {
   local name=--registration-token-file owner mode
   require_absolute_path "$TOKEN_FILE" "$name"
@@ -355,6 +366,62 @@ validate_token_file() {
   if (( (8#$mode & 8#400) == 0 )); then
     fail "$name must be readable by its owner"
   fi
+}
+
+# 默认路径不得经过链接；HOME 及其下的已有父目录须由当前用户拥有且不可被
+# group/other 写入。系统祖先（如 /home）不要求由当前用户拥有。
+validate_inline_token_target() {
+  local home=$HOME owner mode uid
+  # HOME 尾部斜杠不能让其自身绕过 owner/权限检查。
+  while [ "$home" != "/" ] && [ "${home%/}" != "$home" ]; do
+    home=${home%/}
+  done
+  local path="$home/.config/kk-studio"
+  uid=$(id -u)
+  while [ "$path" != "/" ]; do
+    [ ! -L "$path" ] || fail "default token parent must not be a symbolic link"
+    case "$path/" in
+      "$home/"*)
+        if [ -e "$path" ]; then
+          [ -d "$path" ] || fail "default token parent must be a directory"
+          owner=$(file_owner_uid "$path") || fail "cannot read default token parent owner"
+          [ "$owner" = "$uid" ] || fail "default token parent must be owned by the current user"
+          mode=$(file_mode "$path") || fail "cannot read default token parent permissions"
+          case "$mode" in
+            '' | *[!0-7]*) fail "cannot interpret default token parent permissions" ;;
+          esac
+          if (( (8#$mode & 8#022) != 0 )); then
+            fail "default token parent must not be group or other writable: $path"
+          fi
+        fi
+        ;;
+    esac
+    path=${path%/*}
+    [ -n "$path" ] || path=/
+  done
+  [ ! -L "$TOKEN_FILE" ] || fail "default token file must not be a symbolic link"
+  if [ -e "$TOKEN_FILE" ]; then
+    [ -f "$TOKEN_FILE" ] || fail "default token file must be a regular file"
+    owner=$(file_owner_uid "$TOKEN_FILE") || fail "cannot read default token file owner"
+    [ "$owner" = "$uid" ] || fail "default token file must be owned by the current user"
+  fi
+}
+
+# 全部预检/构建（macOS 包括 lint）之后、服务切换之前发布。随机同目录文件
+# 从创建起为 0600；仅 builtin printf 接触文本，trap 清理未发布的暂存文件。
+publish_inline_token() {
+  [ -n "$INLINE_TOKEN" ] || return 0
+  validate_inline_token_target
+  local directory="$HOME/.config/kk-studio" temp
+  (umask 077; mkdir -p "$directory")
+  validate_inline_token_target
+  temp=$(umask 077; mktemp "$directory/.daemon.token.tmp.XXXXXXXX") ||
+    fail "cannot stage default token file"
+  TEMP_PATHS+=("$temp")
+  chmod 0600 "$temp"
+  builtin printf '%s' "$INLINE_TOKEN" >"$temp"
+  mv -f "$temp" "$TOKEN_FILE"
+  INLINE_TOKEN=
 }
 
 validate_note() {
@@ -794,11 +861,22 @@ prepare_install_inputs() {
   if [ -z "$GATEWAY_URI" ]; then
     fail "missing required option: --gateway-uri"
   fi
-  if [ -z "$TOKEN_FILE" ]; then
-    fail "missing required option: --registration-token-file"
+  if option_seen --registration-token && option_seen --registration-token-file; then
+    fail "choose exactly one of --registration-token and --registration-token-file"
+  fi
+  if ! option_seen --registration-token && ! option_seen --registration-token-file; then
+    fail "missing required option: --registration-token or --registration-token-file"
   fi
   validate_gateway_uri
-  validate_token_file
+  if option_seen --registration-token; then
+    case "$INLINE_TOKEN" in
+      *[[:space:][:cntrl:]]*) fail "--registration-token must not contain whitespace or control characters" ;;
+    esac
+    TOKEN_FILE="$HOME/.config/kk-studio/daemon.token"
+    validate_inline_token_target
+  else
+    validate_token_file
+  fi
   if [ -n "$NOTE" ]; then
     validate_note
   fi
@@ -829,6 +907,7 @@ cmd_install_linux() {
   fi
 
   prepare_validated_jar
+  publish_inline_token
   publish_staged_jar
   step "Installed $INSTALLED_JAR"
   write_unit_file
@@ -852,6 +931,7 @@ cmd_install_darwin() {
 
   prepare_validated_jar
   stage_plist_file
+  publish_inline_token
   if [ -e "$PLIST_PATH" ]; then
     bootout_loaded_service
   fi

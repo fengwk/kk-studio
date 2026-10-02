@@ -296,6 +296,207 @@ class DaemonInstallTestCase(unittest.TestCase):
         self.assertEqual(jar_text, fixture.jar.read_text(encoding="utf-8"))
 
 
+class InlineTokenContracts:
+    """Run identical credential security assertions with Linux and Darwin recorder tools."""
+
+    def inline_install(self, fixture, *extra, **kwargs):
+        return fixture.install(
+            *extra, **{"registration-token-file": None,
+                       "registration-token": TOKEN_VALUE, **kwargs}
+        )
+
+    def test_inline_creation_replacement_and_preservation(self):
+        """Private creation and replacement leave only a path in service/tool output."""
+        fixture = self.fixture()
+        fixture.token.unlink()
+        fixture.token_dir.rmdir()
+        fixture.token_dir.parent.rmdir()
+        child_environment = fixture.root / "children.env"
+        # Record the real filesystem utilities too: an external printf/echo or exported secret
+        # would otherwise evade the Maven/Java/service recorder assertions.
+        for tool in ("mv", "cp", "chmod", "mktemp", "mkdir", "stat"):
+            write_executable(
+                fixture.bin / tool,
+                "#!/usr/bin/env bash\n"
+                f'printf \'{tool}|%s\\n\' "$*" >> "$FAKE_RECORD"\n'
+                f'/usr/bin/env >> "{child_environment}"\n'
+                f'exec /usr/bin/{tool} "$@"\n',
+            )
+        for replacement in (False, True):
+            if replacement:
+                fixture.token.chmod(0o644)
+                fixture.token.write_text("old-value")
+                previous_inode = fixture.token.stat().st_ino
+            fixture.record.write_text("")
+            result = self.inline_install(fixture, env={"INLINE_TOKEN": "inherited-marker"})
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertEqual(TOKEN_VALUE, fixture.token.read_text())
+            self.assertEqual(0o600, stat.S_IMODE(fixture.token.stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(fixture.token_dir.stat().st_mode))
+            self.assertEqual(0o700, stat.S_IMODE(fixture.token_dir.parent.stat().st_mode))
+            if replacement:
+                self.assertNotEqual(previous_inode, fixture.token.stat().st_ino)
+            self.assertEqual(["daemon.token"], [p.name for p in fixture.token_dir.iterdir()])
+            service = fixture.plist if hasattr(fixture, "plist") else fixture.unit
+            for text in (result.stdout + result.stderr, service.read_text(),
+                         fixture.record.read_text(), fixture.mvn_environment.read_text(),
+                         child_environment.read_text()):
+                self.assertNotIn(TOKEN_VALUE, text)
+            self.assertNotIn("INLINE_TOKEN=", fixture.mvn_environment.read_text())
+            self.assertIn(str(fixture.token), service.read_text())
+            records = fixture.records()
+            token_publish = next(
+                i for i, (tool, args) in enumerate(records)
+                if tool == "mv" and args.endswith(f" {fixture.token}")
+            )
+            jar_publish = next(
+                i for i, (tool, args) in enumerate(records)
+                if tool == "mv" and args.endswith(f" {fixture.jar}")
+            )
+            self.assertLess(token_publish, jar_publish)
+            if hasattr(fixture, "plist"):
+                self.assertLess(fixture.tools().index("plutil"), token_publish)
+                if replacement:
+                    self.assertLess(token_publish, records.index(
+                        ("launchctl", f"bootout {fixture.target}")
+                    ))
+        removed = fixture.run("uninstall")
+        self.assertEqual(0, removed.returncode, removed.stderr)
+        self.assertEqual(TOKEN_VALUE, fixture.token.read_text())
+
+    def test_inline_token_is_written_literally(self):
+        """Shell metacharacters in the value are data, never evaluated or treated as printf format."""
+        fixture = self.fixture()
+        value = "fixture-$HOME-`id`-%s-\"quote\"-'quote'-\\-;end"
+        result = self.inline_install(fixture, **{"registration-token": value})
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(value, fixture.token.read_text())
+        for output in (result.stdout, result.stderr, fixture.record.read_text(),
+                       fixture.mvn_environment.read_text()):
+            self.assertNotIn(value, output)
+
+    def test_inline_invalid_inputs_have_no_side_effects(self):
+        """Reject ambiguous, repeated, empty and whitespace credentials without echoing values."""
+        cases = [
+            (["--registration-token-file", "not-absolute"], {}),
+            (["--registration-token", TOKEN_VALUE], {}),
+            ([TOKEN_VALUE], {}),
+            (["--unknown", TOKEN_VALUE], {}),
+        ]
+        cases.extend(([], {"registration-token": value})
+                     for value in ("", " ", "a b", "\tbad", "bad\n", "bad\r", "bad\x01"))
+        for extra, overrides in cases:
+            with self.subTest(extra=extra, overrides=overrides):
+                fixture = self.fixture()
+                before = fixture.token.read_bytes()
+                result = self.inline_install(fixture, *extra, **overrides)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(before, fixture.token.read_bytes())
+                self.assertEqual([], fixture.tools())
+                self.assertNotIn(TOKEN_VALUE, result.stdout + result.stderr)
+
+    def test_inline_build_and_preflight_failures_preserve_token(self):
+        """Failures before publication cannot create or replace a credential."""
+        for present in (False, True):
+            for env in ({"FAKE_MVN_MODE": "fail"}, {"FAKE_MVN_MODE": "missing-jar"},
+                        {"FAKE_JAVA_MODE": "version-fail"}, {"FAKE_JAVA_MODE": "jdk17"}):
+                with self.subTest(present=present, env=env):
+                    fixture = self.fixture()
+                    before = fixture.token.read_bytes()
+                    if not present:
+                        fixture.token.unlink()
+                        fixture.token_dir.rmdir()
+                    result = self.inline_install(fixture, env=env)
+                    self.assertNotEqual(0, result.returncode)
+                    if present:
+                        self.assertEqual(before, fixture.token.read_bytes())
+                    else:
+                        self.assertFalse(fixture.token_dir.exists())
+                    self.assertNotIn(TOKEN_VALUE, result.stdout + result.stderr)
+
+    def test_inline_rejects_unsafe_targets_and_parents(self):
+        """Metadata preflight rejects links, wrong types, foreign owners and writable parents."""
+        for kind in ("file-link", "parent-link", "directory", "parent-file", "writable-home",
+                     "writable", "foreign-parent", "foreign-file"):
+            with self.subTest(kind=kind):
+                fixture = self.fixture()
+                before = fixture.token.read_bytes()
+                if kind == "file-link":
+                    fixture.token.unlink()
+                    fixture.token.symlink_to(fixture.root / "missing")
+                elif kind == "directory":
+                    fixture.token.unlink()
+                    fixture.token.mkdir()
+                elif kind in ("parent-link", "parent-file"):
+                    fixture.token.unlink()
+                    fixture.token_dir.rmdir()
+                    if kind == "parent-link":
+                        fixture.token_dir.symlink_to(fixture.root)
+                    else:
+                        fixture.token_dir.write_text("not-directory")
+                elif kind == "writable":
+                    fixture.token_dir.parent.chmod(0o777)
+                elif kind == "writable-home":
+                    fixture.home.chmod(0o777)
+                else:
+                    # Fake stat changes only owner metadata, not caller uid or permissions.
+                    target = fixture.token_dir if kind == "foreign-parent" else fixture.token
+                    write_executable(
+                        fixture.bin / "stat",
+                        '#!/usr/bin/env bash\n'
+                        f'if [ "$2" = "%u" ] && [ "$3" = "{target}" ]; then\n'
+                        f'  printf "%s\\n" "{os.getuid() + 1}"; exit 0\nfi\n'
+                        'exec /usr/bin/stat "$@"\n',
+                    )
+                result = self.inline_install(
+                    fixture, env={"HOME": str(fixture.home) + ("/" if kind == "writable-home" else "")}
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn("mvn", fixture.tools())
+                self.assertNotIn(TOKEN_VALUE, result.stdout + result.stderr)
+                if kind in ("writable", "foreign-parent", "foreign-file"):
+                    self.assertEqual(before, fixture.token.read_bytes())
+
+    def test_inline_unmanaged_service_and_unknown_input_never_create_token(self):
+        """Neither a foreign service nor parser rejection may publish an absent default file."""
+        for present in (False, True):
+            for foreign in (False, True):
+                fixture = self.fixture()
+                before = fixture.token.read_bytes()
+                if not present:
+                    fixture.token.unlink()
+                    fixture.token_dir.rmdir()
+                service = fixture.plist if hasattr(fixture, "plist") else fixture.unit
+                if foreign:
+                    service.parent.mkdir(parents=True, exist_ok=True)
+                    service.write_text("foreign-service\n")
+                result = self.inline_install(fixture, *([] if foreign else [TOKEN_VALUE]))
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn("mvn", fixture.tools())
+                if present:
+                    self.assertEqual(before, fixture.token.read_bytes())
+                else:
+                    self.assertFalse(fixture.token_dir.exists())
+                if foreign:
+                    self.assertEqual("foreign-service\n", service.read_text())
+
+    def test_inline_failed_rename_cleans_staging_and_preserves_token(self):
+        """A publication failure keeps the old file and removes the secret staging file."""
+        fixture = self.fixture()
+        before = fixture.token.read_bytes()
+        write_executable(fixture.bin / "mv", "#!/usr/bin/env bash\nexit 1\n")
+        result = self.inline_install(fixture)
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, fixture.token.read_bytes())
+        self.assertEqual(["daemon.token"], [p.name for p in fixture.token_dir.iterdir()])
+        self.assertEqual([], list(fixture.home.rglob("*.tmp.*")))
+        self.assertNotIn(TOKEN_VALUE, result.stdout + result.stderr)
+
+
+class TestLinuxInlineToken(InlineTokenContracts, DaemonInstallTestCase):
+    """Unix credential contracts against the fake systemd host."""
+
+
 class TestDaemonInstallInterface(DaemonInstallTestCase):
     """Entry-point contract: syntax, executable bit, help and usage failures."""
 
@@ -319,6 +520,9 @@ class TestDaemonInstallInterface(DaemonInstallTestCase):
                 self.assertIn(expected, result.stdout)
             self.assertIn("--gateway-uri", result.stdout)
             self.assertIn("--registration-token-file", result.stdout)
+            self.assertIn("--registration-token <token>", result.stdout)
+            self.assertIn("argv/shell history", result.stdout)
+            self.assertIn("bash -x", result.stdout)
         # 帮助是纯信息命令：不得构建、不得写任何安装路径。
         self.assertEqual([], fixture.tools())
         self.assertFalse(fixture.unit.exists())
@@ -355,15 +559,15 @@ class TestDaemonInstallInterface(DaemonInstallTestCase):
         trailing_unknown = fixture.install("--help", "--unknown")
         self.assertNotEqual(0, trailing_unknown.returncode)
         # 帮助不能吞掉任何其它参数：第一个无法识别的参数就是失败原因。
-        self.assertIn("unknown option: --help", trailing_unknown.stderr)
+        self.assertIn("unknown option:", trailing_unknown.stderr)
 
         leading_unknown = fixture.install("--unknown", "--help")
         self.assertNotEqual(0, leading_unknown.returncode)
-        self.assertIn("unknown option: --unknown", leading_unknown.stderr)
+        self.assertIn("unknown option:", leading_unknown.stderr)
 
         mixed = fixture.run("install", "--help", "--gateway-uri", GATEWAY_URI)
         self.assertNotEqual(0, mixed.returncode)
-        self.assertIn("unknown option: --help", mixed.stderr)
+        self.assertIn("unknown option:", mixed.stderr)
 
         # 帮助与失败都不得构建或写入任何安装路径。
         self.assertFalse(fixture.unit.exists())
@@ -701,7 +905,7 @@ class TestDaemonInstallValidation(DaemonInstallTestCase):
         fixture = self.fixture()
         unknown = fixture.install("--token", "value")
         self.assert_failed_without_install(fixture, unknown)
-        self.assertIn("unknown option: --token", unknown.stderr)
+        self.assertIn("unknown option:", unknown.stderr)
 
         duplicate = fixture.install("--note", "second", **{"note": "first"})
         self.assert_failed_without_install(fixture, duplicate)
@@ -807,11 +1011,11 @@ class TestDaemonInstallValidation(DaemonInstallTestCase):
 
         bridge = fixture.install(**{"lsp-bridge-command": "cmd"})
         self.assert_failed_without_install(fixture, bridge)
-        self.assertIn("unknown option: --lsp-bridge-command", bridge.stderr)
+        self.assertIn("unknown option:", bridge.stderr)
 
         javap = fixture.install(**{"javap-executable": "/bin/javap"})
         self.assert_failed_without_install(fixture, javap)
-        self.assertIn("unknown option: --javap-executable", javap.stderr)
+        self.assertIn("unknown option:", javap.stderr)
 
     def test_java_home_environment_values_are_validated(self):
         """Env-provided JDK homes are validated like the explicit option, not silently skipped."""
