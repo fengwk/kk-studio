@@ -1,66 +1,74 @@
 # 脚本入口索引
 
-本目录只放仓库宿主侧（开发者与 CI）的工作流入口。Compose、Dockerfile、容器内入口与运行时
-资产留在 [deploy](../deploy/local/README.md)；本页回答的是「要做什么 → 跑哪条命令」。
+这里收录宿主上的安装、开发、验证与数据库维护入口。Daemon 默认安装官方 release，脚本下载到主机就能用，**无需源码 checkout**；开发、验证、发布资产暂存和数据库维护依赖仓库中的代码或配置，以下路径按仓库根目录书写。需要定位仓库的入口通常优先使用 `KK_STUDIO_REPO_ROOT`，否则从脚本位置寻找 worktree 根，具体参数以各入口帮助为准。
 
-所有命令都从仓库根目录执行；脚本自行解析仓库根（优先 `KK_STUDIO_REPO_ROOT`，否则向上寻找
-worktree 根），因此不受调用者 cwd 影响。任务级细节见
-[开发与测试](../docs/operations/development-and-testing.md) 与
-[部署与运行](../docs/operations/deployment.md)。
+Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/README.md)。不要把宿主脚本与容器启动入口混用。
+
+## 安装与管理 Daemon
+
+| 平台 | 入口 | 所需环境与行为 |
+| --- | --- | --- |
+| Linux / macOS | [daemon/install.sh](daemon/install.sh) | JDK 21、Bash、curl、SHA-256 工具；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
+| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | JDK 21、PowerShell 5.1/7、ScheduledTasks、`bash.exe`；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
+
+默认 `install` 从 GitHub latest 下载 JAR 与 SHA 文件，隐藏交互询问 gateway/token，写用户服务定义并启动。`upgrade` 下载新 JAR、复用已有配置并重启；`status` 只读；`uninstall` 删除受管服务定义与 JAR，保留 token、数据目录。支持 `--version` / `-Version` 固定发布版本；仅开发者使用 `--from-source` / `-FromSource`，该模式才需要 checkout 与 Maven。
+
+Unix 安装与更新可直接执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
+```
+
+Windows 下载脚本为临时或明确的用户文件，再用 `powershell -File` 执行，不使用 `iex`。PowerShell 5.1 的 TLS 1.2、Unicode、token 权限、可复制安装/更新命令与三平台排错统一见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。可保留脚本日常管理，但要重新下载才能获取新版安装器。升级不自动回滚，也不接管 legacy unmanaged 服务。
 
 ## 日常开发
 
-| 任务 | 入口 | 前置条件 | 副作用 / 费用 | CI |
-| --- | --- | --- | --- | --- |
-| 启动、查看或停止本机开发栈 | [dev/app.sh](dev/app.sh) | JDK 21、Maven、Node/npm、curl、jq、lsof，可用的 PostgreSQL/S3 | 构建 web 产物、按需 `npm install`/`npm ci`、默认回收 18080/5173 端口占用、日志写 `runtime/dev` | 否 |
-| 连外部数据面的本机 preview | [dev/shared-preview.sh](dev/shared-preview.sh) | 同上，外加 owner-only 数据面配置文件（默认 `$HOME/.config/kk-studio/shared-preview.env`） | 同上；固定 `prod` profile，不做 migration 与分布式 Work | 否 |
+| 任务 | 入口 | 前置条件与影响 |
+| --- | --- | --- |
+| 本机 Backend + Vite 生命周期 | [dev/app.sh](dev/app.sh) `start` / `stop` / `restart` / `status` / `logs` / `tail` | JDK 21、Maven、Node/npm、curl、jq、lsof，PostgreSQL/S3 配置；按 revision 构建 Backend、按需安装前端依赖，默认回收 18080/5173 端口监听者，日志在 `runtime/dev` |
+| 连接外部数据面的本机 preview | [dev/shared-preview.sh](dev/shared-preview.sh)，同上子命令 | 复用 app 入口，另需 owner-only 配置文件，默认 `$HOME/.config/kk-studio/shared-preview.env`；固定 prod、禁用 Flyway 与本机 Harness worker |
 
-模板与例子：[dev/shared-preview.env.example](dev/shared-preview.env.example)。
+数据面配置模板：[dev/shared-preview.env.example](dev/shared-preview.env.example)。`app.sh` 的 e2e profile 可同步完整的真实 Provider 凭据对，不要把带真实凭据的启动误当成完全离线操作。操作说明见[开发与测试](../docs/operations/development-and-testing.md)。
 
-## 验证
+## 验证入口
 
-`dev/verify/` 下每个能力自包含入口、实现、测试与测试资源。费用栏只描述本机资源与外部调用，
-不改变任何默认开关：真模型、真实提交与联网扫描都必须显式打开。
+先选择要验证的能力，而不是一次运行所有入口。默认 E2E 不调用付费模型；真实模型、工具、UI 与分布式栈通过显式开关启用，开关并不都能组合。
 
-| 任务 | 入口 | 前置条件 | 副作用 / 费用 | CI |
-| --- | --- | --- | --- | --- |
-| 免费 API/链路矩阵（默认 L1） | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) | JDK 21、Maven、Node、python3、curl，可复用的 backend 与 Vite | 复用或重启本机服务，报告写 `reports/e2e/` | 否 |
-| 真模型矩阵 | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) `--real` | 8 个 `TEST_*_BASE_URL` / `TEST_*_API_KEY` | 真实付费请求 | 否 |
-| Tool / UI / 分布式扩展 | 同上 `--with-tools`、`--ui`、`--distributed` | Docker（分布式）、已安装的 Playwright 依赖（`npm --prefix frontend ci`） | 本地容器、浏览器与截图 | 否 |
-| 双节点分布式栈生命周期 | [dev/verify/e2e/distributed.sh](dev/verify/e2e/distributed.sh) | Docker Engine 与 Compose v2 | 创建/删除容器、网络与数据卷 | 否 |
-| 离线性能基线 | [dev/verify/performance/run.sh](dev/verify/performance/run.sh) | Docker、Node | 构建镜像、短时压测，报告写 `reports/performance/` | 否 |
-| 可靠性确定性回归 | [dev/verify/reliability/regression.sh](dev/verify/reliability/regression.sh) | JDK 21、Maven、realpath、setsid | 反复执行冻结的 JUnit 集合，报告写 `reports/reliability/` | 否 |
-| 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、python3、`PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree | 创建/删除隔离栈与数据卷 | 否 |
-| Agent 可靠性矩阵 | [dev/verify/reliability/run-agent-matrix.mjs](dev/verify/reliability/run-agent-matrix.mjs) | Docker、`TEST_MINIMAX_*` | 真实付费模型调用 | 否 |
-| 供应链 SBOM 与漏洞门禁 | [dev/verify/supply-chain/run.sh](dev/verify/supply-chain/run.sh) | Docker、Node、网络、git | 构建镜像、访问 NVD 与 npm registry，报告只写本地目录 | 否 |
-| 隔离栈端到端 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 还需 python3 | 创建/删除栈与数据卷 | 否 |
-| 真实 Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL` | 只做页面准备，不提交生成、不下载视频 | 否 |
-| 文档与仓库结构检查 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node | 只读 | 是 |
-| 唯一生产基线库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10` | 创建并删除无网络/无宿主端口的临时容器，只加载唯一 V1 基线、校验 16 张目标表结构并运行共享 SQL 探针；不访问部署数据库 | 否 |
-| 敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git | 只读 | 是 |
+| 任务 | 入口 | 前置条件与影响 |
+| --- | --- | --- |
+| 默认免费 L1 API 矩阵 | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) | JDK 21、Maven、Node、python3、curl，Backend/Vite 可复用或由入口启动；报告在 `reports/e2e` |
+| 真模型、Tool、Branch、UI、Canvas 扩展 | 同一 E2E 入口：`--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-storage`、`--with-canvas-function` | real 需 4 个 Provider 的 8 个 `TEST_*` URL/key，branch 隐含 real；tools 启动/复用 Daemon；UI 需 Playwright；Canvas storage 需 S3，function 使用免费 fake 并隐含 storage + rebuild |
+| 免费双节点矩阵 | 同一 E2E 入口：`--distributed` | 需 Docker；不能与 real/tools/branch/UI/storage/function 组合，结束清理隔离栈与数据卷 |
+| 双节点栈生命周期 | [dev/verify/e2e/distributed.sh](dev/verify/e2e/distributed.sh) | Docker Engine 与 Compose v2；创建/删除容器、网络和数据卷 |
+| 本机免费性能基线 | [dev/verify/performance/run.sh](dev/verify/performance/run.sh) | Docker、Node；构建隔离测试镜像、短时压测，报告在 `reports/performance`，不是无 Docker 的纯离线构建 |
+| 确定性可靠性回归 | [dev/verify/reliability/regression.sh](dev/verify/reliability/regression.sh) | JDK 21、Maven、realpath、setsid；反复执行指定 JUnit 集合，报告在 `reports/reliability` |
+| 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、python3；snapshot 需 `PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree，创建/删除隔离栈与数据卷 |
+| Agent 可靠性矩阵 | [dev/verify/reliability/run-agent-matrix.mjs](dev/verify/reliability/run-agent-matrix.mjs) | Node、Docker、可靠性栈与 `TEST_MINIMAX_*`；真实付费模型调用 |
+| SBOM、依赖与镜像漏洞检查 | [dev/verify/supply-chain/run.sh](dev/verify/supply-chain/run.sh) `sbom` / `audit` / `image` / `all` | 按子命令需 JDK 21/Maven、Node/npm、Docker、git 与网络；访问 registry、NVD/漏洞库，报告在 `reports/supply-chain`；`test` 只运行脚本测试 |
+| 隔离栈端到端 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 python3；创建/删除栈与数据卷 |
+| Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
+| 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
+| Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1、检查 16 张目标表与 SQL 探针，不访问部署库 |
+| 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git，只读；命中只报告规则与位置，不回显敏感值 |
+| Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.py](dev/verify/repository/check-sensitive-history.py) | python3、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
 
-## 发布与运维
+E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。覆盖率/进程矩阵的 CI 辅助脚本位于 [process-scope](dev/verify/process-scope/)，不用于启动应用。
 
-| 任务 | 入口 | 前置条件 | 副作用 / 费用 | CI |
-| --- | --- | --- | --- | --- |
-| 安装、升级、查询、卸载 Environment Daemon（Linux/macOS） | [daemon/install.sh](daemon/install.sh) `install` / `upgrade` / `status` / `uninstall` | 源码 checkout、JDK 21、Maven、合规的 token 文件；Linux 需可用的 `systemctl --user`，macOS 需可用的 `gui/$(id -u)` 域 | 构建 daemon、写 `$HOME/.local/lib/kk-studio`、写平台服务定义（systemd user unit 或 LaunchAgent plist）并重启用户服务；`uninstall` 只删除受管定义与 JAR，保留 token 文件与数据目录 | 否 |
-| 安装、升级、查询、卸载 Environment Daemon（Windows 10/11） | [daemon/install.ps1](daemon/install.ps1) `install` / `upgrade` / `status` / `uninstall` | 源码 checkout、JDK 21、Maven（`mvn.cmd`）、DACL 合规的 token 文件、ScheduledTasks 模块、`bash.exe`（Git for Windows 或兼容 Bash） | 构建 daemon、写 `%LOCALAPPDATA%\kk-studio\daemon`、注册当前用户 AtLogOn 计划任务；`uninstall` 停止并注销任务、删除 JAR，保留 token 文件与数据目录 | 否 |
-| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) | JDK 21、已构建的 shaded JAR、sha256sum | 整体重建 `harness/daemon/target/release` | 是 |
-| 导出当前 V1 Agent catalog（Provider / Model / Agent 定义） | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | 原生 libpq 客户端（`psql`）、python3、CLI 或 `VPS_POSTGRES_*`/libpq 连接设置；三张表列集合必须精确匹配当前 V1 | 只读目标库；旧结构直接拒绝；在仓库外 owner-only 目录写入版本化包（`catalog.sql`、`manifest.json`、`sha256sums.txt`，权限 0600） | 否 |
-| 备份、冻结旧库并以原元数据重建空库 | [ops/reset-database.sh](ops/reset-database.sh) | 原生 libpq 客户端（`psql`、`pg_dump`、`pg_restore`、`createdb`）、python3、目标库 owner 角色（或 superuser）且具备 CREATEDB、CLI 或 `VPS_POSTGRES_*`/libpq 连接设置、无其他数据库会话 | 在仓库外写入完整 custom-format 备份与 sha256 校验文件，目标库重命名为带时间戳快照并禁止连接，先以临时名建好空库再改名成目标库名；非 `--yes` 需交互输入库名确认 | 否 |
-| 回灌 Agent catalog 包 | [ops/import-agent-catalog.sh](ops/import-agent-catalog.sh) `--package PATH` | 原生 libpq 客户端（`psql`）、python3、CLI 或 `VPS_POSTGRES_*`/libpq 连接设置，目标库已完成 Flyway V1 初始化且三张表为空、V1 checksum 一致 | 单事务恢复 agent_provider、agent_model、agent_definition 三张表数据（事务内加锁、复查空表并比对指纹后才提交），失败整体回滚；失败时在仓库外保留只含 SQLSTATE 与安全类别的 mode 0600 日志 | 否 |
+## 发布与数据库维护
 
-Environment Daemon 的平台差异（Linux `systemd --user`、macOS LaunchAgent、Windows 10/11 计划任务）、
-参数与故障处理见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
+| 任务 | 入口 | 前置条件与影响 |
+| --- | --- | --- |
+| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、JDK 21、git、sha256sum、已构建 shaded JAR；校验后替换 `harness/daemon/target/release`，生成 JAR、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
+| 导出 V1 Agent catalog | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | psql、python3、数据库连接；只读当前 V1 的 Provider/Model/Agent 三张表，旧结构拒绝，包写仓库外 owner-only 目录；SQL 包含 Provider 凭据 |
+| 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
+| 回灌 catalog | [ops/import-agent-catalog.sh](ops/import-agent-catalog.sh) `--package PATH` | psql、python3；目标已初始化当前 Flyway V1，三张表为空且 checksum 匹配；单事务加锁、COPY 与指纹核对，事务失败整体回滚，失败日志只含安全类别/SQLSTATE |
 
-## 结构约定
+数据库入口不管理服务生命周期。连接参数优先级为 CLI → `VPS_POSTGRES_*` → 标准 libpq；不从命令行接收密码，不交互询问口令，缺凭据直接失败。先用各入口 `--dry-run` 看计划；reset 不执行 Flyway，空库 schema 初始化由外部流程完成。部署步骤见[部署与运行](../docs/operations/deployment.md)。
 
-- 顶层只有 `dev/`、`daemon/`、`ops/` 三个领域，加上本索引；没有兼容 wrapper 或符号链接。
-- `dev/verify/<capability>/` 放该能力的入口与实现，`<capability>/tests/` 只放该能力自己的测试与
-  测试资源；测试不跨能力堆在同一个目录里。CI 直接用 `scripts/*/tests` 与
-  `scripts/dev/verify/*/tests` 发现测试，因此新增能力不需要改 workflow。
-- 表格里的入口是公开入口；`dev/lib/` 是 dev 能力之间共享的私有实现（跨能力共享的开发自动化代码），`ops/lib/` 是数据库维护入口共享的私有实现（底层 helper 为 `ops/agent_catalog.py`），同目录下的 `lib/`、`cases/`、`ui/`、`fixtures/` 与 `tests/` 是实现与
-  测试细节，均不是公开入口、不单独作为命令承诺。
-- 宿主人类/CI 工作流属于本目录；Compose、Dockerfile、容器内 entrypoint 与 mock 运行时资产属于
-  [deploy](../deploy/local/README.md)，容器内入口不从这里启动。
-- 目录内相对引用可以按相对路径书写；跨目录定位仓库根一律用上述根解析规则，不写死目录深度。
+## 目录与维护边界
+
+- `dev/`、`daemon/`、`ops/` 是三个领域，没有兼容 wrapper 或符号链接。
+- `dev/verify/<capability>/tests` 放对应脚本测试和资源；CI 发现 `scripts/*/tests` 与 `scripts/dev/verify/*/tests`。测试目录不是公开操作入口。
+- [dev/lib](dev/lib/) 共享开发自动化实现；[ops/lib](ops/lib/) 与 [ops/agent_catalog.py](ops/agent_catalog.py) 共享数据库维护实现。同目录的 `cases`、`ui`、`fixtures`、`lib` 属于实现细节，不把它们单独承诺为用户命令。
+- 新增入口时维护这里的用途、前置条件与副作用；参数细节放入口帮助和对应操作文档，不在索引重复源码流程。
