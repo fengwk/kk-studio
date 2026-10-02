@@ -101,6 +101,20 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
+### CI 验证与镜像发布
+
+`docker-publish` 在 `main` 上先执行仓库与 Windows 安装器门禁再发布；`dev` push 默认只构建发布，
+不会执行这两项门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
+先把待验证提交推送到目标分支，再显式运行不发布模式：
+
+```bash
+gh workflow run docker-publish.yml --ref dev -f validate_only=true
+```
+
+该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Windows PS5.1 / PS7 原生安装器回归，
+但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
+Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
+
 ### Daemon 安装脚本回归
 
 在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。

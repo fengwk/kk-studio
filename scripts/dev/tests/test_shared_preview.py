@@ -199,11 +199,17 @@ class TestAppImagePublishWorkflow(unittest.TestCase):
             )
         self.assertIn('echo "unsupported publish branch: ${GITHUB_REF_NAME}" >&2', workflow)
 
-    def test_repository_validation_stays_main_only_and_credentials_stay_in_secrets(self):
-        """The expensive gates stay on main; registry credentials never become build inputs."""
+    def test_push_validation_stays_main_only_and_credentials_stay_in_secrets(self):
+        """Push gates stay on main; manual validation is opt-in and never a build credential."""
         workflow = PUBLISH_WORKFLOW.read_text()
 
-        self.assertIn("if: github.ref_name == 'main'", workflow)
+        self.assertEqual(
+            2,
+            workflow.count(
+                "    if: github.ref_name == 'main' || "
+                "(github.event_name == 'workflow_dispatch' && inputs.validate_only)\n"
+            ),
+        )
         self.assertIn("needs.validate.result == 'skipped'", workflow)
         self.assertIn("!cancelled()", workflow)
         self.assertIn("password: ${{ secrets.DOCKERHUB_TOKEN }}", workflow)

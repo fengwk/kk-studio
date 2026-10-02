@@ -16,9 +16,14 @@ on:
       - main
       - dev
   workflow_dispatch:
+    inputs:
+      validate_only:
+        description: Run all repository and Windows gates without publishing an image
+        type: boolean
+        default: false
 
 concurrency:
-  group: docker-publish-${{ github.ref }}
+  group: docker-publish-${{ github.ref }}-${{ inputs.validate_only && 'validate' || 'publish' }}
   # 频繁 push dev 时只允许最新提交发布可变 `:dev` tag，避免较老 workflow 后完成并回退镜像。
   cancel-in-progress: true
 
@@ -32,7 +37,7 @@ env:
 jobs:
   validate_windows_daemon:
     name: validate Windows daemon installer
-    if: github.ref_name == 'main'
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -48,12 +53,14 @@ jobs:
         shell: powershell
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
       - name: Test installer with PowerShell 7
+        # Collect both host results even if the PS 5.1 test fails; either failure blocks publish.
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
 
   validate:
     name: validate repository
-    if: github.ref_name == 'main'
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -70,7 +77,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Verify Java sources, tests and coverage
-        run: mvn -B -ntp verify
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
       - name: Lint frontend
@@ -119,6 +126,7 @@ jobs:
       ${{
         always()
         && !cancelled()
+        && !(github.event_name == 'workflow_dispatch' && inputs.validate_only)
         && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
         && (
           needs.validate_windows_daemon.result == 'success'
