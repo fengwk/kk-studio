@@ -1,15 +1,15 @@
 # Share 模块
 
-前端、Electron 客户端或任何脚本都要在后端 API 的 JSON 上读写；一旦字段名、可空性或 `version` 的类型由某个 Controller 临时决定，客户端就会在版本升级后静默错位。`share` 把这些对外的 JSON 形状集中成一份可独立编译、可独立测试的契约：请求体、响应体、枚举、sealed union 与它们的 Jackson 注解。它的生产依赖只有 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），不依赖 Spring、PostgreSQL、Flyway，也不认识 `canvas-core`、`platform` 或 `harness-*`——因此契约测试可以在毫秒级跑完，wire 改动也不会牵动领域代码。
+`share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖只有 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），不依赖 Spring、PostgreSQL、Flyway、`canvas-core`、`platform` 或 `harness-*`，契约测试可独立运行。
 
 它只描述传输契约，不承载领域行为：DTO 不代表领域状态，也不决定持久化结构。领域到 DTO 的映射在 [web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，业务语义（version CAS、幂等键、引用计数、调度）在 [platform](platform.md)、[canvas-core](canvas-core.md)、[canvas-infra](canvas-infra.md) 与 [project](project.md)。
 
 ## 严格 JSON 边界
 
-未知字段的拒绝来自每个 DTO 自己的 `@JsonAnySetter`，不是全局 Jackson 默认：请求 DTO 的 `rejectUnknownField` 抛 `IllegalArgumentException("unknown field: <字段名>")`，响应 DTO 抛 `Unknown response field`，因此「客户端发了个我们不认识的字段」是显式失败而不是静默忽略。多态 command 再由 Jackson 的 `type` discriminator 解码：
+需要严格解码的 DTO 通过自己的 `@JsonAnySetter` 拒绝未知字段，不依赖全局 Jackson 默认：请求 DTO 的 `rejectUnknownField` 抛 `IllegalArgumentException("unknown field: <字段名>")`，Project 等响应 DTO 抛 `Unknown response field`。纯响应投影如 Canvas Snapshot 不重复声明该检查，具体区分见下文。多态 command 由 Jackson 的 `type` discriminator 解码：
 
 ```json
-{ "type": "CREATE_NODE", "nodeId": "...", "name": "...", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "resources": [] }
+{ "type": "CREATE_NODE", "nodeId": "...", "name": "说明", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "function": null, "resources": [{ "kind": "TEXT", "name": "说明.txt", "textContent": "内容" }] }
 ```
 
 [`CanvasCommandDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasCommandDTO.java) 的 11 个子类型与 [canvas-core](canvas-core.md) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
@@ -42,7 +42,9 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/UpdateIssueRequestDTO.java) 的可空字段、[`PauseIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/PauseIssueRequestDTO.java)/[`StopIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/StopIssueRequestDTO.java) 的 `detail`、[`ResolveUnknownIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/ResolveUnknownIssueRequestDTO.java) 的 `verification` 与 [`AppendIssueActivityRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
 
-后端绝不知道 S3 的 bucket 与对象 key：Storage DTO 只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，[canvas 的预签名端点](canvas-core.md)同理。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；[`EnvironmentRegistrationTokenDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentRegistrationTokenDTO.java) 是唯一的显式读取端点，不进通用投影，响应禁止缓存。[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` 包 15 个 DTO 的字段名，任何 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`tempDir`、`binary`、`prefix`、`username`、`password` 等）出现即失败。
+Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；[`EnvironmentRegistrationTokenDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentRegistrationTokenDTO.java) 仅用于创建、显式读取与轮换令牌的响应，不进通用 Card 投影，响应禁止缓存。
+
+[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` 包 15 个 DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；`compactionKeepRecentTokens` 是预算计数，显式豁免。
 
 Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界错误；[`PluginAuthCompleteRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/PluginAuthCompleteRequestDTO.java) 的 `callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
 
@@ -55,7 +57,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、Model、Agent、ModelRef、Tool catalog |
 | [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
 | [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
-| [ai.plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/) | 已安装构建期 Plugin、安全认证状态，以及 prepare/complete/refresh 请求与响应 |
+| [ai.plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
 | [ai.chat](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/chat/) | Chat 的创建、更新与投影 |
 | [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [ai.interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、交互 owner、分页与人工输入提交回执 |
@@ -65,7 +67,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
 | [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 六个 settings section、schema 与 update request |
 
-只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、Issue 列表与预算摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
+只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/Skill 再塞进一段展示文本。DTO 同时携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 仍按字符串原样展示，secret 与 Base64 正文不进入 DTO。
 
@@ -84,7 +86,7 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/S
 ## 从哪里改
 
 - 改 Canvas wire：[share/canvas/](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [core 的 `CanvasCommand`](canvas-core.md)（若命令集合变化）、[`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
-- 改 Project wire：[share/project/](../../share/src/main/java/fun/fengwk/kkstudio/share/project/)，同时同步 Web Controller 与前端 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
+- 改 Project wire：[share/project/](../../share/src/main/java/fun/fengwk/kkstudio/share/project/)，同时同步 Web Controller、`ProjectDtoMapper` 与前端 [features/projects/types.ts](../../frontend/src/features/projects/types.ts) 及 codec。
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest`、`CanvasDtoContractTest` 与 `ProjectDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 share：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
 

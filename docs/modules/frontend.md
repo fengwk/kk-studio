@@ -3,7 +3,7 @@
 [`frontend/`](../../frontend) 是独立的 React/Vite/TypeScript 工程：它把后端 durable
 Snapshot 与有损 realtime 事件还原成可恢复的浏览器工作台。开发期由 Vite 提供页面并把
 `/api` 代理到后端；发布期由 Maven `distribution` profile 构建后嵌入 Web Fat JAR。
-入口、脚本和工具链见 [frontend/package.json](../../frontend/package.json) 和
+Vite 同时代理 WebSocket 并重写其 Origin，适配后端同源校验。入口、脚本和工具链见 [frontend/package.json](../../frontend/package.json) 和
 [vite.config.ts](../../frontend/vite.config.ts)。
 
 ## 浏览器侧事实与同步契约
@@ -61,9 +61,8 @@ path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId`、`
 | `builtin.settings` | `/settings` | lazy 加载 Settings feature |
 
 [ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 收敛提供
-`pages`、`dialogs`、`overlays` 和 `toolRenderers` 四个具备实际用途的 registry。AI 专用
-二级导航由 AI pages 自身的 `navItem` 元数据派生并在 feature 内部本地渲染，不再设立伪通用
-Navigation registry，亦不保留零生产消费者的 panels/widgets/inspectors/commands/statuses 槽位。
+`pages`、`dialogs`、`overlays` 和 `toolRenderers` 四个 registry。AI 二级导航由 pages 自身的
+`navItem` 元数据派生并在 feature 内部渲染。
 同一 contribution id 的候选按 `priority` 降序、注册顺序升序选择，卸载高优先级候选后
 低优先级候选接管；重复 extension id、非法 contribution id 和非法 page path 在注册时被拒绝。
 `OverlayHost` 统一渲染 dialogs 和 overlays。`toolRenderers` 的 `id` 必须与后端冻结的
@@ -201,12 +200,10 @@ installed commit 与实际 Prompt XML。
 Subagent 列表与 Cache 摘要也作为独立条目可点击查看详情：Subagent 展示真实名称与描述；
 Cache 策略展示留存档位（真实保留 NONE 并提示不保证 Provider 自动缓存）、前缀标识与断点，
 不伪造 raw 数据。
-各检查器标题直接采用目标标识（如 `edit`、`dev`、`Explorer`、`缓存策略`、`请求快照`），
-去除冗余的「检查器:」前缀。
-Detail 和 Inspector 独立渲染于第 3列，不再侵入 `AgentPane` 的底部小部件栈，确保底部的
-Composer 和队列控制区在任何分辨率下均保持可见且交互不受遮挡。
+各检查器标题采用目标标识（如 `edit`、`dev`、`Explorer`、`缓存策略`、`请求快照`）。
+Detail 和 Inspector 渲染于第 3 列，Composer 和队列控制区留在底部。
 
-Debug 视图标题精简本地化为“下一次请求预览”（去掉 DEBUG 前缀），环境 pill 紧凑展示当前环境。视图明确区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`。顶部 Rails
+Debug 标题为“下一次请求预览”，环境 pill 展示当前环境。视图区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`。顶部 Rails
 属于前者；后者通过仅在活动 `frozenInvocation` 存在时渲染的“请求快照”按钮展示由冻结 ModelRequestSpec 物化的 canonical
 ProviderRequest（空态防御留在 Inspector 内部不再常显无效按钮），其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
 历史实际请求。详情完整保留可读 JSON，但不展示 credential、Authorization header、
@@ -253,13 +250,18 @@ Composer 区域包含编辑器、命令菜单、底栏 controls 与附件栏，�
 关闭 slash 提示时主动 blur 避免立即再开。菜单可见时 Enter 执行可见选项；收起状态下不执行隐藏命令，
 且 `canSend` 阻止 slash 发送普通消息。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
 
-Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；分屏下拉菜单采用高特异性 `.ui-select.chat-layout-selector.is-compact .ui-select-menu` 约束 `80px` 紧凑定宽与 `28px` option 最小高度，全部 9 项在视口高度 ≥ 350px 时自适应容纳且无纵向滚动条，超短视口（< 300px）保留滚动能力，在 320px 窄屏下靠右对齐且不横向溢出，同时不影响全仓其他通用 Select；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。
+Chat Pane 的布局与 target 相互独立。布局支持 1–9 分屏（`single`、`split-2`、`split-3`、
+`grid-4` 至 `grid-9`），使用可访问下拉菜单切换，按 Chat id 保存在
+`kk-studio.chat-pane.<chatId>`。5 分屏为左侧整高加右侧 2×2，7 分屏为左侧整高加右侧
+3×2，9 分屏为 3×3；窄屏（≤960px）降级为纵向单列滚动。紧凑菜单样式仅作用于布局选择器，
+超短视口保留滚动，不改变通用 Select。
 
 底部 ThreadStatusFooter 左对齐并固定为两条只读信息行：第一行以中点连接环境与上下文，
 第二行展示与回合摘要同格式的用量统计：
 `↑input · ↓output · Rcache · Wcache · $cost · cache N% · X tok/s`。
 每条统计在超宽时单行省略，不折行；`title` 保留完整摘要。上下文输入采用最新模型调用估算，
 同回合内多个 Assistant 调用的 usage 和 cost 累计聚合，有效流式时长与解码 token 共同计算速率。
+缓存读写为 0 时省略对应 `R`/`W` 项；缓存率分母为 0 显示 `cache —`，无有效测速样本显示 `— tok/s`。
 
 回合摘要统计该回合的调用，Footer 用量统计当前分支所有已关闭回合（含首次请求）。两处缓存率均为
 `cacheRead / (input + cacheRead + cacheWrite)`；`input` 是未缓存输入，输出与推理 token 不进入
@@ -276,6 +278,7 @@ target 三态是：
 显式选择 Agent 时，所有 target 同步采用其模型与变体（Agent 未指定变体则使用模型默认值），
 保留环境、YOLO、输入和附件；重新选择同一 Agent 也会恢复其模型预设。
 模型或变体无法解析时提示错误，保持原选择和草稿不变。Catalog 刷新不触发此联动。
+Issue Agent 的受控 Pane 不开放 Agent 切换，`allowSwitchAgent=false` 同样阻止该操作。
 
 `PendingAcceptance` 按 owner 与 pane id 写入 localStorage，包含 frozen request、
 BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending acceptance 时
@@ -318,13 +321,17 @@ Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-qu
 - 保存状态栏严格遵循 fail-closed 语义：仅在 `commandPending === false && draftPersistPending === false && !storageError` 时才渲染“已保存”；写入中显示“保存中...”，失败保留 dirty 状态并暴露重试入口；
 - 节点 transform 由 [transform-batch.ts](../../frontend/src/features/canvas/transform-batch.ts)
   以 `180ms` debounce 聚合，每次移动递增草稿世代（generation），批次命令冻结并携带世代 ACK，落盘 ACK 仅按世代精准清除，杜绝在途请求返回冲掉追加的用户移动；
-- Function Config 编辑立即写入本地草稿并分配世代，320ms 防抖仅控制网络调度，输入在防抖窗口期内即使崩溃也安全落盘；
+- Function Config 编辑立即更新本地草稿、分配世代并排入持久化链，320ms 防抖仅控制网络调度；跨刷新恢复只保证 IndexedDB 事务已完成的输入，不保证尚在落盘中的最后输入；
 - Function Run 提交前在 localStorage 持久化冻结当前 `requestDTO`（包含 `{ requestId }`）；403 / 409 及其他 4xx 终态客户端错误立即清理持久化记录；408（超时）、429（限流）、5xx 与网络中断属于非终态可重试，保留原 attempt，重试时严格传给 start 接口原样 requestDTO 并复用原 `requestId`，绝不重新生成 key 或采用新 revision 替换；
 - bfcache 恢复保护：监听 `pageshow`，仅在 `event.persisted === true`（真正的 bfcache 恢复）时处置；若休眠期间 session 已被同源其他活页面持有，执行安全 reload 重新分配隔离会话，绝不强夺活所有权造成多标签 scope 污染；未冲突时安全重新 claim 租约并恢复心跳；
 - 参数 JSON 编辑器展开时从当前 `parameters` 衍生文本；非脏态下表单控件修改实时同步更新 JSON 文本；用户编辑非法 JSON（语法错误或非对象）时展示错误 alert，绝不反向调用更新覆盖有效表单；
 - [canvas-version-events.ts](../../frontend/src/features/canvas/canvas-version-events.ts)
   订阅 `{kind: "canvas", id}`，首次 `subscribed`、重连、`resync` 和 `error` 都读取
   权威 Snapshot，`revision` 事件只有严格大于本地 revision 时才触发读取。
+
+Canvas 本地存储按 `userId + canvasId + editingSessionId` 隔离；当前 `getCurrentUserId()` 固定
+返回 `anonymous`，不是已接入的登录身份。内容冲突入口是“以远端基线重试”、另存为新节点和
+放弃草稿，不自动合并；远端删除仅允许另存新 ID 或放弃。
 
 上传走分阶段协议，任何中途切换都作废整批：
 
@@ -374,6 +381,17 @@ System Prompt 仍只展示 Skill 自身的 name、description 与 path，相同 
 Model 的 Variant 思考强度字段始终可见；Reasoning 关闭时置灰并关联禁用原因提示，
 重新开启时保留当前表单草稿值。关闭状态下保存不输出 `reasoningEffort`，原生协议选项
 仍可独立编辑，Variant ID 不会自动填充思考强度。
+
+#### 分支 Goal
+
+Chat 的 `/goal` 打开目标面板，`/goal <正文>` 直接提交 typed `GOAL` 命令；面板支持设置、
+更新与清除，正文非空、无首尾空白且最多 2000 个 Unicode code point。目标正文由用户拥有，
+Agent 的 `get_goal`/`update_goal` 只读取目标与报告 `complete`/`blocked` 进度，见
+[Harness Builtin](harness-builtin.md#goal)。
+
+[`BranchGoalPanel`](../../frontend/src/features/ai/runtime/thread-panel/BranchGoalPanel.tsx) 展示当前
+goalId、正文与终态报告。进度只认当前 goalId，旧目标报告显示为 stale，不冒充当前目标进度。
+Issue Agent 不开放 Goal 编辑，服务端也拒绝该 owner 的 `GOAL` 命令；Issue 要求与交接由工作流维护。
 
 Environment 卡片只展示 capability 的 canonical `id`，管理弹窗只投影宿主事实
 （`EnvironmentHostSection`：OS、时区、Daemon 进程用户、HOME、可选备注与最后活跃
@@ -432,7 +450,10 @@ MiniMax Mavis 卡片是这套交互的一个实例，Connect 流程为：
 依据项目工作流配置中的状态自然 token（`states`）动态分列展示未归档与归档 Issue，支持标题/编号检索与按状态流转。
 IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot，
 支持 Issue 状态转移、人工解除阻塞/恢复、重新打开、终止执行、追加活动（评论与指令），以及上传与预览证据；
-对处于 `UNKNOWN` 的 Issue 提供人工核查输入解除门禁。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，并在详情页右侧受控 AgentPane 中承载交互，Project feature 不维护自己的运行时状态机。
+`pauseReason=UNKNOWN` 时提供人工核查输入解除门禁；Issue 的 `state` 是项目工作流编码，
+不能把它与 Run 的 `UNKNOWN` 终态混为一谈。还支持以 `expectedVersion` CAS 重置阶段额度；
+`stageBudgets` 来自 Issue Detail，显示 `state/maxRuns/usedRuns/remainingRuns`。Issue Agent 会话由
+Issue 归属驱动，在详情页右侧受控 AgentPane 承载交互，Project feature 不维护另一套运行时状态机。
 
 [ProjectsInvalidationBridge](../../frontend/src/features/projects/extensions/projects-extension.tsx)
 作为 ExtensionHost overlay 订阅 `{kind: "projects"}`，并通过

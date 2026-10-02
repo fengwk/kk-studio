@@ -10,8 +10,8 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 PostgreSQL 持久化与 REST 调度都在模块内，经
 [`ProjectAutoConfiguration`](../../project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。模块不实现 HTTP DTO、Environment 校验、Session 深删除与全局 Blob 存储：
-这些跨宿主能力只经下面的端口调用，由 [platform](platform.md) 实现，依赖方向永不反转。模块内唯一的宿主无关
-生产依赖是 `harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`），
+这些跨宿主能力只经下面的端口调用，由 [platform](platform.md) 实现。生产依赖包括
+`harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）与 Spring Boot、MyBatis、Jackson 通用框架，
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
 同时锁定「生产依赖集合精确相等」与 import 白名单。
 
@@ -20,7 +20,7 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 | 包 | 内容 |
 | --- | --- |
 | [domain](../../project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
-| [model](../../project/src/main/java/fun/fengwk/kkstudio/project/model) | Issue、Project、Run、Activity、Evidence 与 Work 的领域对象 |
+| [model](../../project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
 | [repo](../../project/src/main/java/fun/fengwk/kkstudio/project/repo) | 仓库契约与 PostgreSQL 实现（`repo/impl` 下另有 mapper 与 DO） |
 | [service](../../project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project/Issue/Run/Evidence 与 Work 邮箱 |
 | [controller](../../project/src/main/java/fun/fengwk/kkstudio/project/controller) | Issue 调度的部署级配置与确定性推进 |
@@ -48,7 +48,8 @@ not found、「未 READY/已 cleanup」译为 validation），模块内不做第
 
 [`ProjectWorkflowJsonCodec`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)
 严格解析 `{"states":[...]}`：拒绝重复字段、未知字段、尾随内容和非法类型；编码为确定性 JSON，
-可用于请求指纹。每个 state 使用项目内唯一的大写自然编码。
+可用于请求指纹。每个 state 使用项目内唯一的大写自然编码（`[A-Z][A-Z0-9_]{0,63}`），
+阶段数量由项目配置决定，不是全局固定枚举。默认流程为 `INIT -> WORK -> DONE`，另含 `BLOCKED`；默认 `WORK` 未绑定 Agent，是人工阶段。
 `INIT`、`BLOCKED`、`DONE` 必须存在；正常边只指向已声明阶段，不通往 `BLOCKED`。
 启用工作阶段须从 `INIT` 可达，且存在到 `DONE` 的正常路径。
 
@@ -69,6 +70,10 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 保存 `(startEntryId, endEntryId]`、Session/Thread、阶段与终态事实。每 Issue 唯一活动 Run、
 终态必须冻结区间、FAILED/UNKNOWN 必须给出原因等不变量由 `project_issue_run` 的检查约束与
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
+
+Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` Thread 时随 `NEW_SESSION` 写入；
+修改项目开关不改写既有 Thread。阶段 Environment 则在每个 live turn 由 Platform 从当前 workflow
+解析，未配置时本 turn 不选择环境；它不是重写 Thread `BranchSettings` 的命令。两者的作用域不同。
 
 ## 用例事务与持久化
 
