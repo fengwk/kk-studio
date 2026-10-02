@@ -74,6 +74,8 @@ $script:ResolvedLspConfig = $null
 $script:StagedJar = $null
 $script:DownloadDirectory = $null
 $script:ConfigRoot = $null
+$script:PendingToken = $null
+$script:ResolvedReleaseTag = $null
 
 function Write-Usage {
     @'
@@ -383,6 +385,22 @@ function Assert-PrivateDirectory {
     }
     if (-not $canWrite) {
         Throw-Failure "token directory must be writable by its owner"
+    }
+}
+
+function Assert-SecureRegistrationToken {
+    param([Parameter(Mandatory = $true)][Security.SecureString] $Token)
+    $pointer = [IntPtr]::Zero
+    try {
+        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
+        Assert-RequiredValue `
+            -Value ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) `
+            -Name "registration token"
+    }
+    finally {
+        if ($pointer -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+        }
     }
 }
 
@@ -697,20 +715,19 @@ function Resolve-InstallInputs {
         $script:ResolvedTokenFile = Assert-RegistrationTokenFile `
             -Path $RegistrationTokenFile -ExpectedOwnerSid $script:CurrentSid
     } else {
-        $secureToken = if ($script:InvocationParameters.ContainsKey("RegistrationToken")) {
+        $script:PendingToken = if ($script:InvocationParameters.ContainsKey("RegistrationToken")) {
             Assert-RequiredValue -Value $RegistrationToken -Name "registration token"
             ConvertTo-SecureString -String $RegistrationToken -AsPlainText -Force
         } else {
             Read-Host "Registration token" -AsSecureString
         }
-        try {
-            $script:ResolvedTokenFile = Save-RegistrationToken -Token $secureToken
-        }
-        finally {
-            $secureToken.Dispose()
-            $script:RegistrationToken = $null
-            $script:InvocationParameters.Remove("RegistrationToken")
-        }
+        $script:RegistrationToken = $null
+        $script:InvocationParameters.Remove("RegistrationToken")
+        $script:PSBoundParameters.Remove("RegistrationToken") | Out-Null
+        Assert-SecureRegistrationToken -Token $script:PendingToken
+        # Only the future path enters the task definition; credential bytes are not published
+        # until all preflight checks pass and the previous task has stopped.
+        $script:ResolvedTokenFile = Join-Path $script:ConfigRoot "daemon.token"
     }
     if ($script:InvocationParameters.ContainsKey("DataDir")) {
         Assert-AbsoluteWindowsPath -Value $DataDir -Name "-DataDir"
@@ -780,6 +797,11 @@ function Assert-BuiltJar {
         Throw-Failure "built daemon JAR failed its --version check (exit code $($result.ExitCode))"
     }
     $output = $result.Stdout
+    if (-not [string]::IsNullOrEmpty($script:ResolvedReleaseTag) -and
+        $output.TrimEnd([char[]] @("`r", "`n")) -cne
+        ("kk-studio-daemon " + $script:ResolvedReleaseTag.Substring(1))) {
+        Throw-Failure "daemon --version does not match resolved release tag"
+    }
     if (-not $output.Trim().StartsWith(
         "kk-studio-daemon ",
         [StringComparison]::Ordinal
@@ -800,6 +822,7 @@ function Stage-BuiltJar {
 
 function Prepare-StagedJar {
     if ($FromSource) {
+        $script:ResolvedReleaseTag = $null
         $script:RepoRoot = Resolve-RepositoryRoot
         $script:BuiltJar =
             Join-Path $script:RepoRoot "harness\daemon\target\kk-studio-daemon.jar"
@@ -832,6 +855,7 @@ function Get-ReleaseJar {
             $tag = $release.tag_name
         }
         Assert-ReleaseTag -Tag $tag
+        $script:ResolvedReleaseTag = $tag
         $asset = "kk-studio-daemon-$tag.jar"
         $baseUri = "https://github.com/fengwk/kk-studio/releases/download/$tag"
         $script:DownloadDirectory = Join-Path ([IO.Path]::GetTempPath()) (
@@ -1104,6 +1128,9 @@ function Invoke-Install {
     if ($null -ne $managedBeforePublish) {
         Assert-ManagedTask -Task $managedBeforePublish
     }
+    if ($null -ne $script:PendingToken) {
+        $null = Save-RegistrationToken -Token $script:PendingToken
+    }
     Publish-StagedJar
     $managedBeforeRegistration = Find-DaemonTask
     if ($null -ne $managedBeforeRegistration) {
@@ -1126,16 +1153,21 @@ function Invoke-Upgrade {
     Initialize-HostContext
     $task = Get-RequiredManagedTask
     $actions = @($task.Actions)
-    if ($actions.Count -eq 1 -and
-        -not [string]::IsNullOrEmpty($actions[0].Execute) -and
-        (Test-Path -LiteralPath $actions[0].Execute -PathType Leaf)) {
-        $script:SelectedJavaHome = Assert-Jdk21 -Candidate (
-            Split-Path -Parent (Split-Path -Parent $actions[0].Execute)
-        )
-        $script:SelectedJava = $actions[0].Execute
-    } else {
-        $script:SelectedJavaHome = Resolve-JavaHome -ExplicitJavaHome ""
-        $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
+    if ($actions.Count -ne 1 -or
+        [string]::IsNullOrEmpty($actions[0].Execute) -or
+        -not (Test-Path -LiteralPath $actions[0].Execute -PathType Leaf)) {
+        Throw-Failure "upgrade requires exactly one existing Java task action"
+    }
+    $script:SelectedJavaHome = Assert-Jdk21 -Candidate (
+        Split-Path -Parent (Split-Path -Parent $actions[0].Execute)
+    )
+    $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
+    if (-not [string]::Equals(
+        [IO.Path]::GetFullPath($actions[0].Execute),
+        [IO.Path]::GetFullPath($script:SelectedJava),
+        [StringComparison]::OrdinalIgnoreCase
+    )) {
+        Throw-Failure "task action must execute the validated JDK 21 bin\java.exe"
     }
 
     Prepare-StagedJar
@@ -1207,28 +1239,28 @@ function Invoke-Uninstall {
 }
 
 function Invoke-Main {
-    if ($Help) {
-        foreach ($name in ($script:InstallParameterNames + @("Version", "FromSource"))) {
-            if ($script:InvocationParameters.ContainsKey($name)) {
-                Throw-Failure "-Help cannot be combined with -$name"
-            }
-        }
-        Write-Usage
-        return 0
-    }
-    if ($FromSource -and $script:InvocationParameters.ContainsKey("Version")) {
-        Throw-Failure "-FromSource and -Version are mutually exclusive"
-    }
-    if ($script:InvocationParameters.ContainsKey("Version")) {
-        Assert-ReleaseTag -Tag $Version
-    }
-    if ($Command -in @("status", "uninstall") -and
-        ($script:InvocationParameters.ContainsKey("Version") -or
-         $script:InvocationParameters.ContainsKey("FromSource"))) {
-        Throw-Failure "$Command accepts neither -Version nor -FromSource"
-    }
-
     try {
+        if ($Help) {
+            foreach ($name in ($script:InstallParameterNames + @("Version", "FromSource"))) {
+                if ($script:InvocationParameters.ContainsKey($name)) {
+                    Throw-Failure "-Help cannot be combined with -$name"
+                }
+            }
+            Write-Usage
+            return 0
+        }
+        if ($FromSource -and $script:InvocationParameters.ContainsKey("Version")) {
+            Throw-Failure "-FromSource and -Version are mutually exclusive"
+        }
+        if ($script:InvocationParameters.ContainsKey("Version")) {
+            Assert-ReleaseTag -Tag $Version
+        }
+        if ($Command -in @("status", "uninstall") -and
+            ($script:InvocationParameters.ContainsKey("Version") -or
+             $script:InvocationParameters.ContainsKey("FromSource"))) {
+            Throw-Failure "$Command accepts neither -Version nor -FromSource"
+        }
+
         switch ($Command) {
             "install" { return (Invoke-Install) }
             "upgrade" { return (Invoke-Upgrade) }
@@ -1237,6 +1269,14 @@ function Invoke-Main {
         }
     }
     finally {
+        if ($null -ne $script:PendingToken) {
+            $script:PendingToken.Dispose()
+            $script:PendingToken = $null
+        }
+        $script:RegistrationToken = $null
+        $script:InvocationParameters.Remove("RegistrationToken")
+        $script:PSBoundParameters.Remove("RegistrationToken") | Out-Null
+        $script:ResolvedReleaseTag = $null
         if (-not [string]::IsNullOrEmpty($script:StagedJar) -and
             (Test-Path -LiteralPath $script:StagedJar)) {
             Remove-Item -LiteralPath $script:StagedJar -Force `
