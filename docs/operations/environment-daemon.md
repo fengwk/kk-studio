@@ -102,7 +102,7 @@ try {
 }
 ```
 
-`upgrade` 要求已有受管安装，默认下载 latest，只替换 JAR 并重启，保留服务定义、token 和数据目录。下载、SHA 校验或 JAR 入口预检失败时，旧 JAR 与旧服务不动；进入替换、重启阶段后的失败返回非零，**不承诺自动回滚**。Windows 的 `install` 会先保存交互 token，因此不要把重新安装与只更新 JAR 的 `upgrade` 混为一谈。
+`upgrade` 要求已有受管安装，默认下载 latest，只替换 JAR 并重启，保留服务定义、token 和数据目录。下载、SHA 校验或 JAR 入口预检失败时，旧 JAR 与旧服务不动；进入替换、重启阶段后的失败返回非零，**不承诺自动回滚**。重新执行 `install` 会按本次输入重写服务配置，交互输入的 token 也会在预检成功后写入；只更新程序请用 `upgrade`。
 
 重启会中断在途工具调用；进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。更新后重新确认 Studio `READY`。
 

@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -47,6 +48,24 @@ def function_body(script_path, function_name):
 
 class TestDevAppPackaging(unittest.TestCase):
     """Deleted classes must not survive a dev-requested backend rebuild."""
+
+    def test_launchers_and_documentation_follow_reactor_version(self):
+        """A release bump must not leave launchers or runnable examples pointing at an old JAR."""
+        namespace = {"m": "http://maven.apache.org/POM/4.0.0"}
+        version = ET.parse(REPOSITORY_ROOT / "pom.xml").findtext("m:version", namespaces=namespace)
+        self.assertIsNotNone(version)
+        expected = f"kk-studio-web-{version}.jar"
+        for relative in (
+            "scripts/dev/app.sh",
+            "scripts/dev/verify/e2e/lib.sh",
+            "docs/operations/deployment.md",
+            "docs/operations/development-and-testing.md",
+        ):
+            with self.subTest(path=relative):
+                names = re.findall(r"kk-studio-web-[\w.+-]+\.jar",
+                                   (REPOSITORY_ROOT / relative).read_text())
+                self.assertTrue(names)
+                self.assertEqual({expected}, set(names))
 
     def test_dev_backend_start_uses_clean_package(self):
         body = function_body(APP_SCRIPT, "package_backend")
