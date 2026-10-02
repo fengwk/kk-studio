@@ -686,6 +686,60 @@ function Test-PureValidation {
     }
 }
 
+function Assert-WindowsIdentity {
+    param(
+        [Parameter(Mandatory = $true)][string] $ExpectedSid,
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()][string] $ActualIdentity,
+        [Parameter(Mandatory = $true)][string] $Message
+    )
+    # ScheduledTasks may return an account name even when constructed with a SID.
+    # Resolve the identity, not its spelling; unknown accounts must fail closed.
+    if ([string]::IsNullOrWhiteSpace($ActualIdentity)) {
+        throw "assertion failed: $Message (empty Windows identity)"
+    }
+    try {
+        $actualSid = if ($ActualIdentity -match "^S-\d-") {
+            [System.Security.Principal.SecurityIdentifier]::new($ActualIdentity)
+        } else {
+            [System.Security.Principal.NTAccount]::new($ActualIdentity).Translate(
+                [System.Security.Principal.SecurityIdentifier]
+            )
+        }
+    }
+    catch {
+        throw "assertion failed: $Message (cannot resolve Windows identity)"
+    }
+    Assert-Equal -Expected $ExpectedSid -Actual $actualSid.Value -Message $Message
+}
+
+function Test-WindowsIdentityAssertion {
+    # Both representations must pass; a different valid SID and unresolved names must fail.
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $sid = $identity.User.Value
+        Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity $sid `
+            -Message "SID representation identifies current user"
+        Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity $identity.Name `
+            -Message "account representation identifies current user"
+        Assert-Throws -Action {
+            Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity "S-1-1-0" `
+                -Message "different identity"
+        } -ExpectedMessage "different identity" -Message "foreign SID is rejected"
+        Assert-Throws -Action {
+            Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity "" -Message "empty identity"
+        } -ExpectedMessage "empty Windows identity" -Message "empty identity is rejected"
+        $unknown = "kkmissing$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+        Assert-Throws -Action {
+            Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity "$env:COMPUTERNAME\$unknown" `
+                -Message "unknown identity"
+        } -ExpectedMessage "cannot resolve Windows identity" -Message "unknown account is rejected"
+    }
+    finally {
+        $identity.Dispose()
+    }
+}
+
 function Test-ScheduledTaskDefinition {
     # Constructs the real task object from the production arguments and never registers it.
     Import-Module ScheduledTasks -ErrorAction Stop
@@ -719,7 +773,7 @@ function Test-ScheduledTaskDefinition {
     Assert-Equal -Expected $installRoot -Actual $action.WorkingDirectory `
         -Message "action working directory is the managed install root"
 
-    Assert-Equal -Expected $sid -Actual $definition.Principal.UserId `
+    Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity $definition.Principal.UserId `
         -Message "principal belongs to current SID"
     Assert-True -Condition (
     [string] $definition.Principal.LogonType -in @("Interactive", "InteractiveToken", "3")
@@ -749,7 +803,7 @@ function Test-ScheduledTaskDefinition {
     Assert-Equal -Expected 1 -Actual @($definition.Triggers).Count `
         -Message "one logon trigger"
     $trigger = @($definition.Triggers)[0]
-    Assert-Equal -Expected $sid -Actual $trigger.UserId `
+    Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity $trigger.UserId `
         -Message "logon trigger is scoped to current SID"
 }
 
@@ -773,6 +827,7 @@ try {
         Test-RegistrationTokenAcl
         Test-MissingScheduledTaskLookup
         Test-PureValidation
+        Test-WindowsIdentityAssertion
         Test-ScheduledTaskDefinition
     }
     $scope = if ($ProcessOnly) { "Portable process" } else { "Windows daemon installer native" }
