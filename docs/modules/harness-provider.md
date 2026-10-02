@@ -65,6 +65,8 @@ Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，�
 
 OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，避免把可回放的原生推理丢掉；而当终态 `reasoning` 只给出空占位符（`summary: []` 且无密文）时，流式累积的思考是唯一可得的语义表示，会被保留用于展示，但该 replay 不承载原生推理，既不冻结也不原位回放（非空的权威终态摘要仍优先）。私有推理文本只以 `summary` / durable thinking 的形式暴露，`encrypted_content` 绝不当作文本外泄。
 
+OpenAI Chat 的普通文本 `reasoning_content` 不属于签名或密文：与 durable thinking 逐字校验一致，且 payload 仅含标准文本/函数调用与该思考字段时，同一 `affinity` 内允许在 system 日期、提示词或工具定义前缀变化后原样回传。不能因前缀变化删除历史思考；[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`。`reasoning_details`、未知字段或嵌套扩展仍要求精确前缀匹配；普通思考也不得跨 provider、连接 generation 或模型转移。
+
 工具绑定或 Environment 变化可能要求把历史工具调用转为普通上下文。若该助手消息携带 replay，Runtime 不理解其原生 payload，因而保守拒绝整条消息的降级，在启动 Gateway 前终止为 `INVALID_REQUEST`；没有 replay 的历史仍可按语义投影。恢复方式是还原工具绑定与环境，或在新上下文中用显式摘要继续，不能直接删除签名或密文来强行重试。模型切换与历史前缀编辑仍由各编码器检查 affinity/hash；显式压缩以摘要重建上下文，是有损语义边界，不宣称原生状态无损迁移。
 
 媒体能力由 [`ProviderMediaCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderMediaCapabilities.java) 按用户内容与工具结果分别声明；Platform 把它与模型 `inputModalities` 取交集，把 durable Blob 引用转换成 attempt-only 的 Base64 data URI。编码器不访问 Blob 存储，也不生成私网地址或预签名 URL，未声明的 adapter 默认为 `NONE`。
