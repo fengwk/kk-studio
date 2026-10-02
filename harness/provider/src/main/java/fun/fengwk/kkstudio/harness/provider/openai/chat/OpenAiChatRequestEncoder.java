@@ -56,9 +56,9 @@ import java.util.Set;
  *
  * <p>assistant replay 只在 payload 仅含可等价重建的事实（role、文本 content、恰好 {@code
  * id/type/function{name,arguments}} 的现代 function tool_calls）时才允许在 affinity/sourcePrefixHash
- * 失配后退回语义编码；{@code refusal} 区分、{@code reasoning_content}、{@code reasoning_details}、{@code
- * audio}、已废弃的 {@code function_call}、custom/未知调用与任何额外顶层/嵌套字段都是 durable 无法表达的 native-only 事实，失配时必须
- * fail closed 而不是静默丢弃。
+ * 失配后退回语义编码。普通 {@code reasoning_content} 与 durable thinking 校验一致后可在同 affinity 下跨前缀变化原样保留， 但不可跨
+ * provider/model 转移；{@code refusal} 区分、{@code reasoning_details}、{@code audio}、已废弃的 {@code
+ * function_call}、custom/未知调用与任何额外顶层/嵌套字段都是 durable 无法表达的 native-only 事实，失配时必须 fail closed 而不是静默丢弃。
  */
 final class OpenAiChatRequestEncoder {
 
@@ -89,9 +89,9 @@ final class OpenAiChatRequestEncoder {
   private static final List<String> NULLABLE_REPLAY_FIELDS =
       List.of("content", "refusal", "reasoning_content", "reasoning_details", "tool_calls");
 
-  /** 可等价重建的 fallback-safe 顶层字段：其余字段（refusal、reasoning_*、audio、function_call 等）都是 native-only 事实。 */
-  private static final Set<String> FALLBACK_SAFE_REPLAY_FIELDS =
-      Set.of("role", "content", "tool_calls");
+  /** 同 affinity 下不依赖历史前缀的文本/函数事实；reasoning_content 仍不可跨 affinity 迁移。 */
+  private static final Set<String> PREFIX_INDEPENDENT_REPLAY_FIELDS =
+      Set.of("role", "content", "tool_calls", "reasoning_content");
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -450,16 +450,15 @@ final class OpenAiChatRequestEncoder {
       // 同 format 即使 affinity/hash 失配，也必须先严格校验 shape 与 durable 一致性，损坏必须 INVALID_REQUEST
       boolean nativeOnly = validateReplayPayload(replayState.payload(), message.contents());
 
-      boolean runtimeMatch =
-          currentPrefixHash != null
-              && replayState.affinity().equals(descriptor.affinity(requestedModel))
-              && replayState.sourcePrefixHash().equals(currentPrefixHash);
-      if (runtimeMatch) {
-        // 原位回放：known 字段已在 validateReplayPayload 中完成类型校验与 durable 一致性校验，其余厂商原生 assistant 字段原样透传
+      boolean affinityMatch = replayState.affinity().equals(descriptor.affinity(requestedModel));
+      boolean prefixMatch =
+          currentPrefixHash != null && replayState.sourcePrefixHash().equals(currentPrefixHash);
+      if (affinityMatch && (prefixMatch || !nativeOnly)) {
+        // 普通 reasoning_content 是已验证的文本，不是前缀签名；提示词变化不能使历史思考丢失或阻断下一轮。
         return buildReplayMessage(replayState.payload());
       }
-      if (nativeOnly) {
-        // native-only 字段无法用 durable 语义表达：失配时只能 fail closed，绝不静默丢弃
+      if (nativeOnly || replayState.payload().hasNonNull("reasoning_content")) {
+        // 不透明字段仍要求原位回放；普通思考也不得静默丢弃或转移到另一个 provider/model。
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "native replay fields require matching affinity and source prefix hash");
@@ -552,15 +551,14 @@ final class OpenAiChatRequestEncoder {
       }
     }
 
-    // 顶层 fallback-safe 字段只有 role/content/tool_calls：refusal/reasoning_*/audio/function_call
-    // 与任何未知字段都是
-    // durable 无法重建的 native-only 事实（显式 null 不承载事实，按未声明处理）
+    // 普通 reasoning_content 由下方逐字校验；refusal/reasoning_details/audio/function_call
+    // 与未知字段仍是不可跨前缀重建的 native-only 事实（显式 null 不承载事实）。
     boolean nativeOnly = false;
     Iterator<String> topFields = payload.fieldNames();
     while (topFields.hasNext()) {
       String field = topFields.next();
       JsonNode value = payload.get(field);
-      if (!FALLBACK_SAFE_REPLAY_FIELDS.contains(field) && value != null && !value.isNull()) {
+      if (!PREFIX_INDEPENDENT_REPLAY_FIELDS.contains(field) && value != null && !value.isNull()) {
         nativeOnly = true;
       }
     }

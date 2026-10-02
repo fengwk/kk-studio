@@ -39,12 +39,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 测试意图：验证 provider 原生 assistant message 的累积与 replay 保真——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
@@ -570,9 +572,9 @@ class OpenAiChatNativeReplayTest {
   }
 
   /**
-   * 测试意图：native-only 字段（audio、废弃的 function_call、reasoning_content、refusal 区分、tool_calls 的额外嵌套字段）无法由
-   * durable 语义等价重建，affinity 或 prefix hash 失配时必须 fail closed；只含 role/文本 content/现代 function
-   * tool_calls 的 payload 仍回退语义编码。
+   * 测试意图：native-only 字段（audio、废弃的 function_call、refusal 区分、tool_calls 的额外嵌套字段）无法由 durable
+   * 语义等价重建，affinity 或 prefix hash 失配时必须 fail closed；只含 role/文本 content/现代 function tool_calls 的
+   * payload 仍回退语义编码。
    */
   @Test
   @DisplayName("native-only replay 字段失配时 fail closed，最小可重建 payload 仍回退语义编码")
@@ -605,7 +607,7 @@ class OpenAiChatNativeReplayTest {
         descriptor.affinity("another-model"),
         mismatchedHash);
 
-    // 3. reasoning_content 属于 native-only：即使与 durable thinking 完全一致，hash 失配时也必须 fail closed
+    // 3. reasoning_content 即使与 durable thinking 完全一致，也不能转移到另一个模型。
     ObjectNode reasoningPayload = MAPPER.createObjectNode();
     reasoningPayload.put("role", "assistant");
     reasoningPayload.put("content", "Hello");
@@ -614,7 +616,7 @@ class OpenAiChatNativeReplayTest {
         user,
         List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
         reasoningPayload,
-        modelAffinity(),
+        descriptor.affinity("another-model"),
         mismatchedHash);
 
     // 4. refusal 区分属于 native-only：affinity 失配时 fail closed
@@ -683,6 +685,126 @@ class OpenAiChatNativeReplayTest {
       assertEquals("Hello", wireAsst.path("content").asText());
       assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
       assertEquals("fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asText());
+    }
+  }
+
+  /** 普通思考不绑定 system 日期或工具定义前缀，保留原文且不修改 durable replay。 */
+  @Test
+  void preservesPlainReasoningAcrossSystemPrefixChanges() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash =
+        encoder
+            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
+            .sourcePrefixHash();
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "先分析\nthen answer");
+    ProviderReplayState replay =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, payload);
+    ProviderMessage assistant =
+        assistant(
+            List.of(new ProviderThinkingBlock("先分析\nthen answer"), new ProviderTextBlock("Hello")),
+            replay);
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("read", "Read a file", "{\"type\":\"object\"}");
+    for (boolean changeSystem : List.of(true, false)) {
+      String system = changeSystem ? "Today is a new day." : "Test system instruction.";
+      ProviderRequest changed =
+          new ProviderRequest(
+              modelDesc,
+              defaultVariant,
+              1024,
+              system,
+              List.of(user, assistant),
+              changeSystem ? List.of() : List.of(tool),
+              ProviderCacheControl.none());
+      JsonNode wire =
+          MAPPER.readTree(
+              encoder
+                  .encode(changed, descriptor, OpenAiChatConfiguration.defaults())
+                  .bodyUtf8Bytes());
+      assertEquals(system, wire.at("/messages/0/content").asText());
+      assertEquals(payload, wire.path("messages").get(2));
+      assertEquals(payload, replay.payload());
+    }
+  }
+
+  /** 即使前缀完全相同，普通思考也不自动转移到不同 provider、连接 generation 或 wire 模型。 */
+  @Test
+  void refusesPlainReasoningAcrossAffinityChanges() {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash =
+        encoder
+            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
+            .sourcePrefixHash();
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "reasoning");
+    ProviderReplayAffinity original = modelAffinity();
+    for (ProviderReplayAffinity other :
+        List.of(
+            descriptor.affinity("another-model"),
+            new ProviderReplayAffinity(
+                original.providerType(),
+                "other-provider",
+                original.connectionGenerationId(),
+                original.modelId()),
+            new ProviderReplayAffinity(
+                original.providerType(),
+                original.providerName(),
+                new UUID(0L, 1L),
+                original.modelId()))) {
+      assertNativeOnlyReplayRejected(
+          user,
+          List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello")),
+          payload,
+          other,
+          hash);
+    }
+  }
+
+  /** 放行普通思考不放行混入的 opaque 字段、损坏结构或与 durable 不一致的数据。 */
+  @Test
+  void rejectsOpaqueOrCorruptReasoningEvenAtSameAffinity() {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    List<ProviderContentBlock> contents =
+        List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello"));
+    for (String field : List.of("reasoning_details", "vendor_signature", "audio", "refusal")) {
+      ObjectNode payload = MAPPER.createObjectNode();
+      payload.put("role", "assistant");
+      payload.put("content", "Hello");
+      payload.put("reasoning_content", "reasoning");
+      switch (field) {
+        case "reasoning_details" -> payload.putArray(field).addObject().put("signature", "opaque");
+        case "audio" -> payload.putObject(field).put("id", "audio_1");
+        case "refusal" -> payload.put(field, "");
+        default -> payload.put(field, "opaque");
+      }
+      assertNativeOnlyReplayRejected(user, contents, payload, modelAffinity(), "0".repeat(64));
+    }
+    for (JsonNode badReasoning :
+        List.of(MAPPER.getNodeFactory().textNode("tampered"), MAPPER.createObjectNode())) {
+      ObjectNode payload = MAPPER.createObjectNode();
+      payload.put("role", "assistant");
+      payload.put("content", "Hello");
+      payload.set("reasoning_content", badReasoning);
+      ProviderReplayState replay =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), "0".repeat(64), payload);
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(user, assistant(contents, replay)),
+                      descriptor,
+                      OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
     }
   }
 
