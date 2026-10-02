@@ -15,7 +15,9 @@ manualCompactionAvailability / compactThread / getThreadSnapshot
 findJoin / projectJoinReceipt / findAncestorChain
 ```
 
-除 `manualCompactionAvailability`、`findThreadCommand`、`listPendingInteractions`、`findJoin`、`projectJoinReceipt`、`findAncestorChain`、`getSession*`、`listThreadsBySession` 这类只读查询外，每个方法都在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。唯一跨越事务边界的是 Stop 的本地取消——`stop` 把取消登记在 [`HarnessStore#afterCommit`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 上：无外层事务时在该事务提交后执行，加入调用方外层事务时只在该物理事务真正提交后执行，**外层回滚即不取消**；取消失败不回滚已提交的事实。对称地，必须在事务外工作的入口（手动压缩的 `resolve`）先调用 `assertNoAmbientTransaction` 拒绝带环境事务的调用。
+普通控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。`compactThread` 是例外，采用短事务规划、事务外 resolve、第二短事务 CAS 提交，入口先用 `assertNoAmbientTransaction` 拒绝外层环境事务。`getThreadSnapshot` 等查询也使用 Store 事务，其中快照查询会加锁，不能把“只读”理解为“无锁”。
+
+Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStore#afterCommit`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 上，无外层事务时在该事务提交后执行，加入调用方外层事务时只在该物理事务真正提交后执行，**外层回滚即不取消**；取消失败不回滚已提交的事实。
 
 所有业务拒绝都是类型化的 [`HarnessRuntimeConflictException`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeConflictException.java)（`STALE_VERSION`、`STALE_COMMAND_CURSOR`、`IDEMPOTENCY_KEY_REUSED`、`PARTIAL_COMMAND_REPLAY`、`COMMAND_REPLAY_ORDER_MISMATCH`、`THREAD_ID_REUSED`、`TERMINAL_APPLY_PENDING`、`STOP_REQUEST_ID_REUSED`、`APPROVAL_NOT_APPLICABLE`、`APPROVAL_DECISION_MISMATCH`、`INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE`、`INPUT_SUBMISSION_MISMATCH`、`MANUAL_COMPACTION_UNAVAILABLE`）或 `HarnessRuntimeNotFoundException`；被破坏的持久化不变量（所有权错误、sibling 混合挂接、`callIndex` 不连续）一律以 `IllegalStateException` fail closed，绝不降级成业务错误。
 
@@ -107,7 +109,7 @@ DISPATCHING -> READY（Busy）/ FAILED（Rejected）/ CANCELLED / UNKNOWN
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 ```
 
-`attempt` 只在「Gateway 确认已启动」的转换上精确 +1：`DISPATCHING -> RUNNING`、以及 Stop 窗口内的 `DISPATCHING -> UNKNOWN` / `-> CANCELLED`；`Busy` 弹回与启动前拒绝都不增加它。`RUNNING -> READY` 重试时追加一条 `ModelAttemptFailure`（含 attempt、sequence、text、thinking、error、`failedAt`、`retryAt`）并清空活动 checkpoint，下次调度用同一冻结参数重新发起。checkpoint 只能在 `RUNNING -> RUNNING` 或 `RUNNING -> terminal` 中引入或增长，更大 sequence 必须保持 text/thinking 严格前缀增长，终态与重试只能原样保留或清除它；终态结果链接回 Entry 时同时清空 checkpoint 与失败审计。
+`attempt` 在 `DISPATCHING -> RUNNING`、`-> UNKNOWN` 或 `-> CANCELLED` 上精确 +1：前者确认已启动，后两者保守计入可能已启动的恢复或 Stop 窗口；`Busy` 弹回与启动前拒绝都不增加它。`RUNNING -> READY` 重试时追加一条 `ModelAttemptFailure`（含 attempt、sequence、text、thinking、error、`failedAt`、`retryAt`）并清空活动 checkpoint，下次调度用同一冻结参数重新发起。checkpoint 只能在 `RUNNING -> RUNNING` 或 `RUNNING -> terminal` 中引入或增长；同 sequence 必须精确重放，更大 sequence 必须保留 text/thinking 原前缀且至少一项严格增长。离开 RUNNING 或处于终态内不能再增长 checkpoint，只能原样保留或清除；终态结果链接回 Entry 时同时清空 checkpoint 与失败审计。
 
 [`ModelRequestSpec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec.java) 冻结一次调用不可变的请求契约：
 
@@ -157,21 +159,23 @@ ModelRequestSpec 构造前已被过滤。Gateway 对陈旧或伪造 binding 继�
 结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool
 行与父 ModelInvocation。
 
-`Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行，`reschedule` 清空租约并重设 `availableAt`。`leaseToken` + `wakeVersion` 共同构成所有权围栏，让迟到的旧执行体无法提交或删除更新的 wake。`claim` / `renew` 用租约时长（`Duration`）描述新 deadline，`reschedule` 用非负整毫秒 `Duration` 描述相对当前的重试延迟（零表示立即），`request` 则只表达「立即唤醒」的一次调度原语；有效性判定、deadline 与 due 全部在**单一权威时间域**内完成：生产实现是数据库时钟（`statement_timestamp()`），内存实现是传入的 `now`。因此节点 JVM 时钟与数据库的偏差既不会让刚落地的租约在自己的时间域内瞬间失效、把已过期租约延展，也不会把「立即 Work」延迟或改变重试相对量。
+`Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行。`reschedule` 总是清空租约：没有新 wake 时采用目标时刻，有新 wake 时取现有 `availableAt` 与目标时刻的较早值，不让旧 claim 延后新唤醒。`leaseToken`、有效租约与认领时的 `wakeVersion` 共同拦截迟到的旧执行体，防止删除更新的 wake。
+
+Store 的 `claimNextWork` / `renewWork` 用租约时长（`Duration`）描述新 deadline，`rescheduleWork` 用非负整毫秒 `Duration` 描述相对当前的重试延迟（零表示立即），`requestWork` 只表达「立即唤醒」；`Work` 纯函数接收由该时间域算出的绝对时刻。有效性判定、deadline 与 due 全部在**单一权威时间域**内完成：生产实现是数据库时钟（`statement_timestamp()`），内存实现是传入的 `now`。节点 JVM 时钟与数据库的偏差不会改变租约有效性或重试相对延迟。
 
 **`requiredEnvironmentId` 仅当 Work target 为 `TOOL` 时允许非空；对 THREAD 与 MODEL 类型的 Work 必须为空，不需要绑定执行主机的服务端 TOOL 也可以为空。** 对非 TOOL 传入非空环境 ID 时领域构造器直接抛 `IllegalArgumentException`。环境要求在 Work 首次创建时冻结，并在后续 `request`、`claim`、`renew`、`complete`、`reschedule` 中完整保留；后续 `request` 传入冲突的非空环境 ID 同样抛异常拒绝。Runtime 只负责在 Work 行上携带这条路由要求，真正的节点分发由 Infra 按当前节点是否持有该 Environment 的 READY 连接租约实施围栏（见 [Harness Infra](harness-infra.md)）。
 
 ## 三个 Processor
 
-Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor；Processor 从不在内部循环，每个 claim 只做一个持久化动作，下一个动作一律由同事务的 `requestWork` 驱动。
+Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread claim 只归约一个持久化动作；Model / Tool claim 则驱动一次外部调用，期间可以续租、提交流式 checkpoint 与终态。后续调度由同事务的 `requestWork` 驱动，不在 Processor 内空转 Agent Loop。
 
 [`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 先校验 claim 所有权与 per-thread 准入，再锁 Session `KEY SHARE` + Thread、构建 `EntryPath` 并分类：
 
-- `MODEL_TERMINAL_PENDING`：原子写入 Assistant / Error / Compaction 终态结果并物理删除 ModelInvocation；
+- `MODEL_TERMINAL_PENDING`：原子写入 Assistant / Error / Compaction 终态结果；关闭 turn 时物理删除 ModelInvocation，进入 Tool phase 时保留父行并挂接 Assistant Entry；
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool Result，追加 `TURN_END(continueModel=true)`，删除 children 与父 ModelInvocation；
 - `MODEL_ACTIVE` / `TOOL_ACTIVE`：下游长执行仍在进行，完成本次 claim 即归还；
-- `CONTINUATION_DUE`：启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
-- `IDLE_OR_HISTORICAL`：有待处理用户指令就启动 INPUT 回合，否则完成 claim。
+- `CONTINUATION_DUE`：先处理适用的自动压缩，否则启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
+- `IDLE_OR_HISTORICAL`：先处理适用的压缩义务；普通 soft threshold 只在有真实用户需求时触发。有需求且无需压缩则启动 INPUT，否则传播 Idle 并完成 claim。
 
 需要外部解析器的回合走投机规划：第一短事务锁 Session `KEY SHARE` -> Thread、捕获命令快照与 cutoff、校验并对临近过期租约补齐余量、分配 candidate Entry ID 构造完整合法的 candidate `EntryPath`（不写任何持久化状态）；事务外调用 `TurnResolver`，期间由本地 `WorkHeartbeat` 续租；第二短事务以 source head、cutoff 内命令精确快照与 claim ownership 作 CAS，一次性提交 `TURN_START` + Message + 命令标记 + Thread 更新 + ModelInvocation/MODEL Work。Resolved 请求在提交前还要经机械一致性校验（route / model / variant / tools / compaction 必须与 candidate 分支事实一致，不一致即抛错且零写入）；任何 CAS 或 claim 损失都会整体回滚并映射为 `LOST_OWNERSHIP`，Resolver 异常、返回 null 或心跳调度失败则按统一的失败延迟 reschedule，绝不静默丢失 Work。重复或陈旧的 THREAD claim 是 no-op。
 
@@ -193,11 +197,11 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor；Processor �
 TURN_START(COMPACTION) -> ModelInvocation（summarization systemInstruction + USER，zero tools）-> COMPACTION(summaryText) -> TURN_END
 ```
 
-[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 默认 `keepRecentTokens=20_000`、可选 `fallbackModel`，并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。有效保留量按 `reserve` 与 `maxOutputTokens` 取小，因此窗口很小时不会预留超过可用输出。
+[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 默认 `keepRecentTokens=20_000`、可选 `fallbackModel`，并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。最近上下文保留量与摘要输出预留量是两个不同参数，分别受上下文窗口与输出上限约束。
 
-[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：只读 `EntryPath` 与配置，从尾部累计估算长度（`ceil(chars/4)`，媒体占位 4800 字符）越过 `effectiveKeep` 后取下一个合法切分点，绝不切在 ToolResult 或 COMPACTION 回合内部；切分落在 Agent 轮次中间时先出 HISTORY 中间摘要，再由 continuation 义务驱动 TURN_PREFIX 生成最终摘要。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把 LENGTH 截断、FILTERED 过滤、非法 stop reason、返回工具调用、空摘要、保留段解析失败与无 token 收益判定为失败（`COMPACTION_OUTPUT_TRUNCATED`、`COMPACTION_CONTENT_FILTERED`、`COMPACTION_INVALID_RESPONSE`、`COMPACTION_EMPTY_SUMMARY`、`COMPACTION_NO_GAIN`）；失败、停止或未完成的压缩结束当前 attempt 且不自行重试，hard overflow 最多触发一次恢复，切换 fallback model 时下一次规划继承原阶段与切分锚点。
+[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：只读 `EntryPath` 与配置，从尾部累计估算长度（`ceil(chars/4)`，媒体占位 4800 字符）越过 `effectiveKeep` 后取下一个合法切分点，绝不切在 ToolResult 或 COMPACTION 回合内部；切分落在 Agent 轮次中间时先出 HISTORY 中间摘要，再由 continuation 义务驱动 TURN_PREFIX 生成最终摘要。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把 LENGTH 截断、FILTERED 过滤、非法 stop reason、返回工具调用、空摘要、保留段解析失败与无 token 收益判定为失败（`COMPACTION_OUTPUT_TRUNCATED`、`COMPACTION_CONTENT_FILTERED`、`COMPACTION_INVALID_RESPONSE`、`COMPACTION_EMPTY_SUMMARY`、`COMPACTION_INVALID_SUMMARY`、`COMPACTION_NO_GAIN`）；失败、停止或未完成的压缩结束当前 attempt 且不自行重试，hard overflow 最多触发一次恢复，切换 fallback model 时下一次规划继承原阶段与切分锚点。
 
-手工压缩走 `compactThread`：第一短事务按 version / availability / boundary 规划，事务外 resolve，第二短事务以 source head、命令快照与 claim 作 CAS 提交；[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是瞬时投影，给出 `THREAD_BUSY`、`OWNERSHIP_BARRIER`、`NO_RESOLVED_CONTEXT`、`MODEL_CHANGED`、`BELOW_MINIMUM`、`NOTHING_TO_COMPACT` 等禁用原因，但最终仍由 `expectedVersion` CAS 决定。
+手工压缩走 `compactThread`：第一短事务按 version / availability / boundary 规划，事务外 resolve，第二短事务复验 expected version、source head 与完整排队命令快照，成功解析时原子提交 COMPACTION Turn 与 MODEL Work，确定性拒绝时提交失败终态。它不认领 THREAD Work。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是瞬时投影，给出 `THREAD_BUSY`、`OWNERSHIP_BARRIER`、`NO_RESOLVED_CONTEXT`、`MODEL_CHANGED`、`BELOW_MINIMUM`、`NOTHING_TO_COMPACT` 等禁用原因，不能替代提交时的复验。
 
 Stop 在 Thread 锁内校验归属、version 与客户端 `stopRequestId`：活跃回合闭合后把该幂等键写入 `STOPPED` `TURN_END` 的 `closeRequestId`，因此重放返回同一 `StopResult`。检测到活跃 Model/Tool 调用时写入 ASSISTANT_ABORTED / ASSISTANT_ERROR 屏障、闭合回合、清理关联 Work 并物理删除未完成的 Invocation 行。**空闲（无 live Invocation）Stop 留下 durable 事实**：path 无 open Turn 时写入完整的 `STOP` barrier Turn（`TURN_START(STOP)` → `ASSISTANT_ERROR(CANCELLED)` → `STOPPED` `TURN_END`）；path 上本线程的 open Turn 已不可能再被模型推进时，若它已有完整 assistant 结果就直接用于 `STOPPED` `TURN_END`（不重复 assistant 结果），尚无 assistant 结果且允许屏障则在 Turn 内部追加取消屏障；两者都不成立（尚无输入的空 `INPUT` Turn，或 assistant 结果仍缺 Tool 结果）时先按 history normalization 补齐 synthetic `UNKNOWN`/`HISTORY_CUT` ToolResult 并以 `CANCELLED`/`HISTORY_CUT` 收尾，再写 `STOP` barrier Turn——绝不嵌套第二个 `TURN_START`、不伪造模型完成，也不留模糊错误。STOP Turn 是原子控制屏障：新分支（`NEW_THREAD`）绝不能 fork 到其未闭合 prefix，但完整闭合的 `STOPPED` `TURN_END` 边界可正常 fork。所有分支都在同一事务把 head 推进到该 `TURN_END` 并恰好递增一次 version；open Turn 属于其它线程的共享历史时，该 Turn 与其停止边界的所有权都归其 owner 线程，本线程只取消排队 Command 而不写停止边界（`stoppedTurnEndEntryId` 为 null）。在物理提交之后（`afterCommit`）才在当前 JVM 内 best-effort 本地取消，本地取消成败不影响已持久化的终态；重放与并发由 `StopResult` 与所有权围栏收敛。
 
@@ -269,11 +273,11 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
-| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 独占单 Store 事务与类型化冲突；递归生命周期收敛与 `admission -> tree -> session -> thread -> command -> invocation -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
+| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；递归生命周期收敛与 `admission -> tree -> session -> thread -> command -> invocation -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
 | `runtime.admission` | `ConcurrencyAdmission` 进程内非阻塞并发槽位 | 纯内存，不持久化、不跨进程协调 |
 | `runtime.cache` | `PromptCacheAffinityKeyFactory` 与 `PromptCacheRequestFinalizer` | 纯内存派生稳定亲和键，规划时冻结缓存策略意图，不依赖尚未物化的历史 |
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |
-| `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；环境与目录不进入分支历史 |
+| `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；Environment name 进入 settings，内部路由 ID 与目录不进入分支历史 |
 | `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
 | `runtime.input` | `ask_user` 冻结问卷的值契约（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 纯值对象与校验：不访问 Store、不做 I/O；等待冻结与派发门禁归 `runtime.processor` |
 | `runtime.interaction` | `PendingInteraction` 与 `PendingInteractionPage`：WAITING_INPUT / WAITING_APPROVAL 的只读投影与稳定分页 | 不新增持久化事实，也不持有产品归属；owner 与 Pane 跳转由上层按 Session/Thread 解析 |
@@ -284,7 +288,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 | `runtime.model` | `ModelDescriptor`、`ModelVariant`、`ModelPricing`、`ModelUsage`、`ModelCost`、`ModelInvocationError` | 纯领域值对象；用量非负、成本总额等于分项之和 |
 | `runtime.model.cache` | `PromptCachePolicy`、`PromptCacheCapability`、`PromptCacheMode`、`PromptCacheRetention`、`ProviderCacheControl` | 静态策略与指令契约，不维护缓存存储或命中事实 |
 | `runtime.model.codec` | `ModelDescriptor` 与 `ModelVariant` 的权威 JSON 编解码 | 拒绝未知字段，不允许数据库 resource id 或密钥进入该边界 |
-| `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体 SDK 解耦；SDK 类型只在 Platform 适配层出现 |
+| `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体协议实现解耦；wire 编码与 SSE 解析归 `harness-provider` |
 | `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码；顶层精确字段集合，观测计时 `decodeDurationMillis` 必填但可为 null | 只依赖 Jackson 与纯 model 类型 |
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
 | `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink`、`WorkDispatchAdmission` 与 `WorkDispatchRequest` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |

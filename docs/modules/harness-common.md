@@ -1,8 +1,8 @@
 # Harness Common
 
-Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量齐了吗、这段 JSON 能不能信、这个 Resource 引用是否规范、工具产出的内容能不能存、模型给的参数是否符合 schema。若这些问题在 Runtime、Tool、MCP、Daemon 与 Platform 各写一遍，宽松度必然分叉——一处容忍重复键，另一处不容忍；一处按字符数限长，另一处按字节。本模块把这些判断收敛成一组无状态值对象与严格校验工具，供各上层模块直接引用；唯一的例外是只缓存 classpath 模板的 [`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)。
+`harness-common` 为 Runtime、Tool、MCP、Daemon 与 Platform 提供共享的基础契约：prompt 模板、严格 JSON、规范 Resource 引用、结果内容、输入 schema 与文本窗口。值对象与校验工具不保存业务状态；[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 只缓存 classpath 模板。
 
-这里没有网络与存储 I/O、生命周期、持久化与容器装配：构造期约束以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败是 `IllegalStateException`，`null` 入参是 NPE。生产依赖只有 JDK 与 Jackson（见 [`pom.xml`](../../harness/common/pom.xml)），由 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 扫描主源码 import 与 POM 守卫；工具身份、环境标识、执行 SPI、存储与装配分别归 [`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、[`harness-runtime`](harness-runtime.md) 与外部容器。
+除 classpath 模板加载外，本模块不负责打开网络或存储资源，也不管理执行生命周期、持久化与容器装配。构造期约束通常以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败是 `IllegalStateException`；`null` 的拒绝或缺省处理以各入口契约为准。生产依赖只有 JDK 与 Jackson（见 [`pom.xml`](../../harness/common/pom.xml)），由 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 扫描主源码 import 与 POM 守卫；工具身份、环境标识、执行 SPI、存储与装配分别归 [`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、[`harness-runtime`](harness-runtime.md) 与外部容器。
 
 ## 包架构
 
@@ -65,6 +65,12 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 - [`InputNormalizer`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java) 在严格校验前做静默容错：`IntegerSchema` 字段接受 `-?\d+` 形式的数字字符串并改写为 JSON 整数，`NumberSchema` 字段接受必须有整数部分、可带小数或指数的十进制文本并按 `BigDecimal` 改写（不受 double 范围限制）；两种改写都在文本超出 long / `BigDecimal` 表示能力时保持原样，其它类型不做转换。归一化递归进入数组与嵌套对象，输出是重新序列化的紧凑 JSON，因此空白与数字字面量可能与原文本不同。显式 `null` 只对 schema 已声明且未列入 `required` 的属性删除，语义等同于缺省；required 属性与未声明属性上的 `null` 原样留给校验器（`additionalProperties=false` 时未声明属性会被拒绝）。
 - [`SchemaJsonCodec`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java) 是 schema 的确定性编解码器：编码时 `properties` 与 `required` 按字典序输出，解码时拒绝未知字段、缺失 `type` / `properties` / `required` / `additionalProperties`、`required` 中出现未声明属性；文本解码入口另外拒绝重复键与尾随 token。Provider tool schema 与 harness 内部 schema 都以它为唯一序列化实现。
 
+## 字符流窗口
+
+[`TextReadWindow`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/text/TextReadWindow.java) 接收已经严格解码的 `Reader`，本地文件与受管 Blob 共用这一份窗口状态机。`offset` 与 `column_offset` 从 1 起，`limit` 默认且最大 2000 行，正文最多 60000 个 Unicode 码点，不计行号、元数据和行分隔符；列偏移只作用于起始行。窗口预算不拆代理对，CRLF、CR、LF 都是行边界。截断输出 `next` 坐标，恰好到 EOF 不算截断；空文件或行起点越过 EOF 返回 `range: empty`，有效行上的越界列则拒绝。
+
+它扫描到 EOF 才能给出文件级 `ends_with_newline` 与准确截断结论，但只保留窗口正文，内存不随全文长度增长。调用方负责参数校验、编码嗅探、开关流、BOM 与检查点异常映射；核心在每块读取前后执行 checkpoint，使适配器能中止超时或取消的扫描。NUL、畸形代理对和解码错误按“看似二进制”拒绝，其他读取故障保留 `IOException`。`withoutLeadingBom` 只剥首字符；已在字节层剥离 BOM 的适配器不能再包装一次，以免吞掉正文紧邻的 `U+FEFF`。行列内部按 `long` 计数，输出位置超出协议 `int` 范围时明确失败。
+
 ## 源码与测试
 
 - Prompt：[`PromptTemplate.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java)、[`PromptTemplateLoader.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)
@@ -73,6 +79,7 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 - Result：[`ResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)
 - Skill：[`SkillNames.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/skill/SkillNames.java)
+- 文本窗口：[`TextReadWindowTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/text/TextReadWindowTest.java) 覆盖分页、码点边界、续读坐标、BOM 与读取检查点。
 - 改动前先跑 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 确认依赖方向未破；[`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java) 覆盖六类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码，[`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java) 锁定精确变量匹配；同包 `BoundedOutputStreamTest` 与 `BoundedJsonWriterTest` 覆盖中文与 emoji 的 UTF-8 字节边界、只计数不保留字节与超限早停。
 
 ---
