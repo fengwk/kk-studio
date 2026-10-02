@@ -1,14 +1,28 @@
+import fun.fengwk.kkstudio.harness.daemon.DaemonArguments;
+
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Base64;
 
-/** Non-mutating native fixture: distinct streams, pipe pressure, argv, and JAR version gates. */
+/**
+ * Non-mutating native fixture: distinct streams, pipe pressure, decoded argv, and JAR version gates.
+ *
+ * <p>Every mode runs on the production {@link DaemonArguments#decode(String[])} contract, so the
+ * installer serializer and the daemon decoder are exercised together instead of a copied decoder.
+ * Echo prints Base64 of each decoded token, which keeps the assertion transport pure ASCII.
+ */
 class ProcessProbe {
   public static void main(String[] args) throws Exception {
-    switch (args[0]) {
+    if (args.length == 0) {
+      throw new IllegalArgumentException("expected a mode argument");
+    }
+    // Exactly the daemon entry contract: Base64 tokens after --base64-args, otherwise as-is.
+    String[] decoded = DaemonArguments.decode(args);
+    switch (decoded[0]) {
       case "echo":
-        for (int i = 1; i < args.length; i++) {
+        for (String argument : Arrays.copyOfRange(decoded, 1, decoded.length)) {
           System.out.println(
-              Base64.getEncoder().encodeToString(args[i].getBytes(StandardCharsets.UTF_8)));
+              Base64.getEncoder().encodeToString(argument.getBytes(StandardCharsets.UTF_8)));
         }
         break;
       case "fail":
@@ -36,7 +50,7 @@ class ProcessProbe {
         }
         break;
       default:
-        throw new IllegalArgumentException(args[0]);
+        throw new IllegalArgumentException(decoded[0]);
     }
   }
 }

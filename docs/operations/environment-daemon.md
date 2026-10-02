@@ -250,8 +250,10 @@ Set-Location kk-studio
 3. 构建并校验产物，然后把 JAR 暂存到 `%LOCALAPPDATA%\kk-studio\daemon` 下的临时文件。
 4. 任务定义：
    - 动作直接执行 `java.exe`（绝对路径，无 wrapper、无重定向、不经过 cmd.exe 或 PowerShell runner），
-     工作目录是当前用户 profile；参数用 Windows 命令行序列化，空串或含空白/引号的参数按
-     JDK 使用的 Windows C runtime 规则加引号并转义反斜杠，因此含空格的路径不会被拆分；
+     WorkingDirectory 是安装目录（InstallRoot，即 `%LOCALAPPDATA%\kk-studio\daemon`），
+     `-jar` 使用固定 ASCII 相对名 `kk-studio-daemon.jar`；应用参数以首位 `--base64-args`
+     加逐 token UTF-8 Base64 传输，避免 Windows JDK 21 的 ANSI argv 转换丢失中文或 emoji。
+     工作目录与 Java 绝对路径通过任务的 Unicode 字段传递，不进入参数命令行；
    - 触发器是当前用户 SID 的 `AtLogOn`；principal 为 `Interactive` 登录类型与 `Limited` 运行级别，
      即只在该用户交互登录期间运行，且不提权；
    - 设置为 `ExecutionTimeLimit=0`（无运行时限）、`AllowStartIfOnBatteries`、
@@ -483,6 +485,11 @@ Daemon 进程持有独占锁，第二个进程以明确错误退出。
 
 前台运行时 `Ctrl-C` 直接终止进程，输出直接写在当前控制台。前台启动不具备任何平台的自动重启、资源
 约束与登录守护，仅用于临时开发或调试，不得作为常驻方案。
+
+普通 CLI 不变；机器启动入口是在首位传入 `--base64-args`，其后每个 token 是一个原始应用参数
+的 UTF-8 Base64，解码一次后仍按相同 CLI 规则校验。Base64 只是编码，不是加密，不能用来隐藏
+凭证。Windows 安装器及构建产物预检自动使用此入口；手工启动含系统 ANSI 字符集无法表示的
+字符时也需使用该传输方式，并以 JAR 父目录为工作目录、用 ASCII 相对 JAR 名启动。
 
 ## 发布物获取（可移植替代方式）
 
