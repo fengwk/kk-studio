@@ -57,6 +57,7 @@ class StorageMaintenanceTest {
     }
   }
 
+  /** 等待最后一个服务的第三次调用与整个 drain 结束，再验证不足一批时停止，不能在 sweep 后抢先观察 cleanup。 */
   @Test
   void startupWakeDrainsFullBatchesUntilBothServicesAreIdle() throws Exception {
     StorageUploadService uploads = mock(StorageUploadService.class);
@@ -78,6 +79,14 @@ class StorageMaintenanceTest {
               return blobResults.remove();
             });
     StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
+    CountDownLatch cleanupCalls = new CountDownLatch(3);
+    when(cleanups.sweepOnce())
+        .thenAnswer(
+            ignored -> {
+              // Mockito 先记录调用再执行 Answer，因此信号发出时第三次调用已可验证。
+              cleanupCalls.countDown();
+              return 0;
+            });
     StorageMaintenance maintenance =
         new StorageMaintenance(uploads, blobs, cleanups, properties(Duration.ofHours(1)));
     try {
@@ -85,12 +94,15 @@ class StorageMaintenanceTest {
 
       assertTrue(uploadCalls.await(5, TimeUnit.SECONDS));
       assertTrue(blobCalls.await(5, TimeUnit.SECONDS));
-      verify(uploads, times(3)).expireOnce();
-      verify(blobs, times(3)).sweepDeleting();
-      verify(cleanups, times(3)).sweepOnce();
+      assertTrue(cleanupCalls.await(5, TimeUnit.SECONDS));
+      // 同一单线程 executor 的屏障确认 drain 已自然退出，避免 close 掩盖多余批次。
+      executor(maintenance).submit(() -> {}).get(5, TimeUnit.SECONDS);
     } finally {
       maintenance.close();
     }
+    verify(uploads, times(3)).expireOnce();
+    verify(blobs, times(3)).sweepDeleting();
+    verify(cleanups, times(3)).sweepOnce();
   }
 
   /** 对象清理记录的全批次同样驱动 drain 继续，直到某一轮不足一个批次为止。 */
@@ -113,10 +125,14 @@ class StorageMaintenanceTest {
       maintenance.start();
 
       assertTrue(cleanupCalls.await(5, TimeUnit.SECONDS));
-      verify(cleanups, times(3)).sweepOnce();
+      // 最后一次 Answer 的信号只代表调用已记录；屏障才确认不足一批后不再 drain。
+      executor(maintenance).submit(() -> {}).get(5, TimeUnit.SECONDS);
     } finally {
       maintenance.close();
     }
+    verify(uploads, times(3)).expireOnce();
+    verify(blobs, times(3)).sweepDeleting();
+    verify(cleanups, times(3)).sweepOnce();
   }
 
   @Test
