@@ -24,8 +24,8 @@ Daemon 不绑定 `jacoco:check`。检查目标类实际执行与平台跳过项�
 [`LspDiscoveryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LspDiscoveryTest.java)
 验证扩展名大小写、JSON 配置拒绝、命令的绝对/家目录路径与安装状态：
 
-- `prefersShallowestRootMarkerInsideGitBoundary` 证明同一 Git 边界内最浅的 root marker 胜过模块内的
-  更深 root marker；该用例没有同时构造 first-match marker，不能用它宣称跨类别优先级已被断言。
+- `prefersShallowestRootMarkerInsideGitBoundary` 验证同一 Git 边界内最浅的 root marker
+  优先于更深的 root marker。
 - `stopsAtWorktreeGitFileBoundary` 与 `fallsBackToFirstMatchMarkerThenFileParent` 验证 `.git` 文件/目录
   是扫描上界、缺 root marker 时的回退；非 Git 项目由 `nonGitProjectUsesFileParentDirectory` 验证。
 - `supportRequiresInstalledExecutable`、`resolvesAbsoluteAndHomeRelativeCommands`、
@@ -56,7 +56,7 @@ schema 的 required 不恒要求 workdir，但能力层仍校验相对路径所�
 `definitionSyncsDocumentAndFormatsLocations` 验证默认位置与请求形态。
 UTF-8 的非 BMP 偏移由 `utf8PositionEncodingConvertsCodePointOffsets` 断言，
 CRLF、末行和 UTF-32 由 `LspClientProtocolTest.positionBoundariesCoverCrlfLastLineAndUtf32` 断言。
-**当前没有非 BMP 字符的码点→UTF-16 单元差异断言**，不能把 ASCII 或 UTF-32 用例算成该分支覆盖。
+涉及非 BMP 字符时，分别检查协商位置编码下的请求坐标；ASCII 用例不提供 UTF-16 单元差异的证据。
 
 ## 文档同步、能力与结果
 
@@ -70,7 +70,7 @@ CRLF、末行和 UTF-32 由 `LspClientProtocolTest.positionBoundariesCoverCrlfLa
   文件消失拒绝同步，不发 didClose；文档状态在客户端关闭时整体清空。
 - `unsupportedDefinitionIsReportedWithoutRequest`、`unsupportedWorkspaceSymbolsAreReportedWithoutRequest`、
   `serverWithoutCapabilitiesAdvertisesNothing`：未声明能力不发请求并给可读错误。
-  实现接受 boolean true 与 options object，但假服务器只提供布尔形态，options-object 分支尚无测试证据。
+  能力声明可使用 boolean true 或 options object；验证 options object 时需让夹具真实返回该形态。
 - `formatsLocationLinksAndEmptyResults`、`formatsWorkspaceSymbolShapes`、
   `oddSymbolsAndLocationsAreFormattedDeterministically`：Location/LocationLink、两种 symbol 形态、空结果、
   种类与 limit，`jdt://` 结果不改写。
@@ -78,7 +78,7 @@ CRLF、末行和 UTF-32 由 `LspClientProtocolTest.positionBoundariesCoverCrlfLa
   `jdtlsCommandDetectionCoversWrappersAndSeparators`：仅 jdtls 路线处理对应请求，不用 javap 伪造源码。
 - `answersServerRequestsAndUnknownMethods`、`answersClientFacingServerMessages`：
   应答服务器 workspace 请求和未知方法；`toleratesStrayOutputBeforeTheFirstMessage` 验证协议前杂项输出。
-  独立的服务器请求 id 夹具不证明“恰好复用客户端 id”的碰撞分支已覆盖。
+  双向请求 id 的冲突应使用同值 id 的夹具单独验证。
 
 read header 的可用态由 `LspCapabilitiesTest.readReportsConfiguredLspStatus` 固定；
 服务器支持状态的发现不启动进程，诊断通知不被当作模型可见文档状态。
@@ -88,7 +88,7 @@ read header 的可用态由 `LspCapabilitiesTest.readReportsConfiguredLspStatus`
 `LspServiceTest`、`LspServiceLifecycleTest` 与 `LspClientPoolConcurrencyTest` 验证同项目复用、
 并发启动去重、失败共享、空闲回收、启动中关闭与崩溃后重建。
 池的实现键包含 root、server id 与配置指纹；`differentWorkspaceRootsUseDifferentClients`
-**只固定不同 root 的隔离**，当前没有“同 root/id、不同配置”的直接断言。
+验证不同 root 的隔离。配置指纹变化的复用行为应使用同 root/id 的夹具观察。
 
 调用方超时/取消只结束请求，发送 `$/cancelRequest`，不关闭共享客户端：
 `slowRequestIsCancelledAtTheCallerDeadline`、`timeoutFailsAtTheCallerDeadlineWithoutClosingTheSharedClient`、

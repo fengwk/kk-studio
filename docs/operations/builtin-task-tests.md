@@ -55,8 +55,10 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl web -am test \
 `HarnessStoreJoinContract` 是抽象测试基座，由 `InMemoryJoinTest` 与 `PostgresqlJoinTest` 执行，
 不能只过滤抽象类就声称存储契约通过。目标模块 `target/surefire-reports` 应有实际执行记录；
 Docker 不可用时的跳过不算数据库事务已验证。
-覆盖率在各模块 `target/site/jacoco`，对应 `verify` 门禁按各 POM 的类清单检查，
-过滤集合不代表全模块覆盖率。
+覆盖率在各模块 `target/site/jacoco`。上述 `test` 命令生成报告；配置了 JaCoCo `check` 的模块
+在 `verify` 阶段按各 POM 的类清单执行门禁，[harness/infra](../../harness/infra/pom.xml) 不绑定该门禁。
+[harness/builtin](../../harness/builtin/pom.xml) 的门禁检查 Contributor/GoalStateCodec，而非全部 Task 实现。
+过滤集合的覆盖率只代表本次执行范围。
 
 ## 参数、授权、身份与幂等
 
@@ -78,7 +80,7 @@ Docker 不可用时的跳过不算数据库事务已验证。
 
 `SubagentConfigTest`、`BuiltinHarnessContributorConfigurationTest` 与 `SystemSettingsTest`
 固定 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency`、`maxTurns` 四个设置：
-全局 `maxTotalConcurrency=0` 表示不限，其余核心预算必须为正。没有子会话独立的重试配置层。
+全局 `maxTotalConcurrency=0` 表示不限，其余核心预算必须为正。
 
 `HarnessRuntimeJoinAcceptanceTest` 与 `HarnessStoreJoinContract` 验证深度、父直接活跃孩子和
 跨所有根的全局活跃子 Thread 上限；根不计入，同一忙碌子多个 join 不重复占额。
@@ -134,5 +136,4 @@ advisory 树锁阻塞、错误回滚、stale version 零写入和恰一次交付
 
 它分别验证 accepted tool_result 与同一子 Thread 的 durable 完成提醒，以及 parentThreadId/ROOT
 投影；不能把即时受理当作完成。准备、凭据与报告见[开发与测试](development-and-testing.md#e2e)。
-终端状态栏、按键、CLI viewer 和 TUI 审批中继不属于这些测试的证据面；
-Studio Thread 面板交互由前端测试另行验证。
+Studio Thread 面板的导航与审批交互由前端组件测试验证，真实浏览器行为选择 UI 矩阵。

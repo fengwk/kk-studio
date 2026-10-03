@@ -57,7 +57,7 @@ Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模�
 文本最多展示 2000 行、60000 码点正文，截断位置包含下一行/列坐标；`column_offset` 不限于 `limit=1`。
 内部按 long 计数，输出坐标超出 int 协议范围时显式失败，不截断成错误的续读位置。
 为给出准确总行数和末尾换行事实，读取必须扫描到 EOF：不存在 64 MiB 文件拒绝上限，
-成本由 Daemon 调用预算、受管侧 30 秒扫描预算和取消/中断控制。稀疏大文件也不是无成本读取。
+成本由 Daemon 调用预算、Resource reader 的 30 秒预算和取消/中断控制。稀疏大文件也不是无成本读取。
 
 ## 本地路径、编码与文件类型
 
@@ -84,9 +84,10 @@ read 不等待进程内文件变更队列，也没有成功 observer 回调；�
 ## 受管结果与 durable history
 
 `PlatformReadToolExecutorTest`、`PlatformResourceContentReaderTest`、`PlatformSkillContentReaderTest`
-验证 Resource/Skill 读取进入同一窗口投影；`S3StorageDeadlineIntegrationTest` 验证响应头前与响应体内阻塞时
-存储截止时间生效及错误翻译。受管窗口本身的 30 秒预算是实现约束，
-不能把线程中断用例称为 30 秒定时截止的直接证据。
+验证 Resource/Skill 读取进入同一窗口投影；
+[`S3StorageDeadlineIntegrationTest`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/S3StorageDeadlineIntegrationTest.java)
+验证响应头前与响应体内阻塞时存储截止时间生效及错误翻译。
+`PlatformResourceContentReader` 的 30 秒预算与线程中断是两种约束，应分别观察超时与取消路径。
 `ToolResultFinalizerTest` 验证可信 read 身份专属的 **320 KiB / 2020 物理行**内联预算：
 2000 行与 60000 码点的最坏文本窗口连同行号、header 仍在预算内，因此文本不产生 resource 预览。
 图片等二进制结果的外部化不是这条内联保证。

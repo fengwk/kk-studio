@@ -1,7 +1,8 @@
 # 部署与运行
 
-本文覆盖从源码构建可运行产物、在容器里运行 App、接入外部 PostgreSQL 与 S3、生产反向代理，
-以及本仓库提供的隔离栈和 NAS 运行拓扑。跨模块边界的整体模型见
+部署需要一个内嵌前端的 App、PostgreSQL 数据库和 S3 bucket。首次安装先准备数据面与运行配置，
+再启动唯一 Flyway owner；日常升级复用数据面，恢复与重建由数据所有者单独批准。
+本文给出构建、运行、升级与维护路径，以及隔离栈和 NAS 拓扑。跨模块边界的整体模型见
 [系统设计](../system-design.md)。
 
 日常本地使用走 [deploy/local](../../deploy/local/README.md) 的 Compose 栈，隔离测试走
@@ -9,7 +10,17 @@
 下的定位，不重复其步骤。开发、质量检查和 NAS 自迭代流程见
 [开发与测试](development-and-testing.md)。
 
-## 构建可运行产物
+## 首次安装
+
+1. 准备 PostgreSQL 与可访问的私有 S3 bucket，确认数据库角色、对象存储凭据和备份策略。
+2. 构建下面的 Fat JAR 或 App 镜像，配置 `prod` 数据源、S3 服务端地址与浏览器公开地址。
+3. 指定唯一 Flyway owner 初始化空库。共享数据面的其它 App 关闭 Flyway；
+   启用 Worker 的节点使用相同产物与 Plugin 集合。
+4. 检查 `/actuator/health`、UI、预签名上传/下载与关键业务操作。
+   需要宿主工具时再安装 Daemon，并在 Studio 确认 Environment `READY`。
+5. 对外开放前完成 TLS、外部认证与 WebSocket 代理配置，见[生产部署与反向代理](#生产部署与反向代理)。
+
+### 构建可运行产物
 
 一个 Fat JAR 同时包含后端和 React 静态资源，`app` 镜像与本地栈都用它。
 
@@ -55,7 +66,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 SPA BrowserRouter 的刷新路径由 Web app fallback 到 `index.html`，因此不需要额外的
 Nginx 或前端容器。
 
-## 运行 App 容器
+### 运行 App 容器
 
 App 镜像由 [deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建，也是本地栈、测试
 栈、性能基线和供应链扫描共用的 Dockerfile：
@@ -110,30 +121,49 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
   没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与全部
   `KK_STUDIO_STORAGE_S3_*` 同样必须显式提供。
 
-### 已执行旧 V1 的数据库
+## 运行配置
 
-先确认数据库记录的 V1 与待部署镜像是否兼容。健康且兼容的 PostgreSQL/S3 默认继续复用，
-更新镜像本身不要求重建数据面。若既有 V1 与当前 schema/checksum 不兼容，**旧库不能直接运行新镜像**。
-Flyway 校验失败不是可跳过的升级步骤：不得修改 `flyway_schema_history`、使用 `repair` 伪造
-checksum，或直接在有数据的旧库上重放 V1。源码合入 `dev` 也不等于批准生产数据库重建。
+生产 App 使用 `SPRING_PROFILES_ACTIVE=prod`，通过 `KK_STUDIO_DB_*` 连接 PostgreSQL，
+通过 `KK_STUDIO_STORAGE_S3_*` 连接对象存储。服务端 endpoint 用于读写对象，public endpoint
+用于浏览器预签名上传/下载；两者都须可达，bucket 在 App 启动前准备好。
+空库初始化只由一个 Flyway owner 执行，Worker、Plugin 集合与密钥在节点间保持一致。
 
-上线前由数据所有者批准维护窗口和数据范围，然后按
-[共享数据库重建](development-and-testing.md#共享数据库重建)执行：先停止所有旧 App/Worker 和
-Daemon，等待在途调用收敛；从**与新部署相同的提交**对旧库只读执行 Catalog 导出 `--dry-run`
-和正式导出（仅当三张表列结构仍符合检查器契约时），再对旧库执行 `reset-database.sh --dry-run`。
-确认离线备份的存放位置、恢复权限和数据范围后，才在维护窗口执行 reset。
-脚本默认要求输入目标库名确认，无输入或不匹配就退出；`--yes` 跳过这道闸门，只能用于已明确授权的自动化，
-不代表获得了数据删除许可。确认后脚本会生成完整备份、
-冻结原库并创建同名空库；由唯一 Flyway owner 在空库执行新 V1，再回灌三张 Catalog 表，重建
-Environment/Daemon 注册，并用新镜像及运维方指定的既有 S3 bucket 验证健康与关键业务操作。旧 Project、
-Issue、Chat、Harness、Blob 引用与历史设置**只保存在冻结快照/完整备份，不导入新库**；
-存储对象本身不由数据库 reset 删除；脚本不要求新建或重建 bucket，应用只探测配置的 bucket 是否可访问。
-旧对象仍须按冻结快照/备份的恢复要求保留，不得把“新库没有引用”当作删除对象的授权。
+真实连接与凭据由仓库外 owner-only 文件或编排 secret 注入。使用已保存的 Plugin 凭据时，
+所有 App 挂载同一份原始 32-byte 主密钥；替换为空文件或新密钥会使已有凭据无法读取。
+Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由运行时 SystemSettings 管理。
+完整变量分类与凭据文件要求见[运行配置与凭据](#运行配置与凭据)，
+对外入口要求见[生产部署与反向代理](#生产部署与反向代理)。
 
-如导出预检不接受旧 Catalog 结构、生产依赖保留旧会话历史、备份不可验证或缺少可恢复的停机窗口，
-则**停止部署**，保持旧镜像/旧库运行；不可用不受支持的兼容别名或静默丢弃数据绕过预检。
-回退时停止新 App，使用已验证的冻结快照和旧镜像恢复旧入口；新库中写入的事实不会自动合并回
-旧库。真正执行重建、清理快照或切换生产服务均需另行明确授权。
+## 升级
+
+部署前核对目标镜像与数据库 schema、持久 JSON、Work wire 和 Plugin 集合的兼容性，
+保存当前镜像标识、运行配置、Plugin 主密钥与可恢复的数据备份。镜像构建成功只证明产物生成，
+发布前的验证入口见[开发与测试](development-and-testing.md)。
+
+兼容的数据面继续复用。停止 Worker 领取新 Work，排空在途调用，在批准的窗口替换 App 镜像；
+由唯一 Flyway owner 完成 schema 校验/初始化，再恢复其它节点。检查健康、关键业务操作和
+Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，避免不同 Plugin 集合混跑。
+
+Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_history` 或用 `repair` 伪造 checksum
+会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
+它是备份、冻结、建空库与 Catalog 回灌流程，不是自动迁移。
+
+## 恢复与重建
+
+恢复前停止所有 App/Worker、preview 写入和 Daemon，等待在途操作收敛。
+先验证备份摘要、可恢复性、权限、S3 对象保留范围以及匹配的镜像与 Plugin 主密钥。
+数据库与对象存储的备份应能恢复同一业务状态；仅恢复数据库不能补回已删除的对象。
+
+已执行数据库重建时，原库以 `<db>_pre_<UTCstamp>` 冻结保留，全库 dump 另存仓库之外。
+在停机窗口保留并移开当前库、让原库名空闲，再由数据库管理员恢复冻结库的连接权限与原名，
+配合对应镜像、配置、主密钥和 S3 数据恢复入口。也可在隔离目标用经过验证的全库 dump 恢复并验收后切换。
+新库中的写入不会自动合并回冻结库，切换前由数据所有者决定其保护方式。
+
+若目标是建立新的空数据面，按[共享数据库重建](development-and-testing.md#共享数据库重建)
+先执行导出与 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，再批准停机和实际执行。
+重建后只回灌 Provider/Model/Agent Catalog；会话、项目、画布、运行历史与 Blob 引用保留在
+冻结库/备份中，新的入口无法直接访问它们。Environment/Daemon 与其它运行配置需要重新登记。
+reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
 ## 生产部署与反向代理
 
@@ -176,8 +206,8 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。bucke
 
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
 [deploy/test/README.md](../../deploy/test/README.md)。
-其中基础设施检查可独立运行；`--with-app` 当前仍使用旧 Canvas version/command 契约，
-与现行 revision 契约不符，不能用该模式声称应用 smoke 已通过。
+基础模式检查容器、PostgreSQL、bucket 与 mock；`--with-app` 增加 Blob、Canvas revision/typed command、
+fake Function 与 Chat 的应用契约检查。一次运行的通过范围以退出状态和实际诊断为准。
 
 ### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 
