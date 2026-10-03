@@ -26,6 +26,7 @@ import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -57,10 +58,29 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
 
   TransportConfigCallback callback() {
     return transport -> {
-      if (transport instanceof TransportHttp http) {
-        http.setHttpConnectionFactory(this);
+      String scheme = transport.getURI() == null ? null : transport.getURI().getScheme();
+      String normalized = scheme == null ? null : scheme.toLowerCase(Locale.ROOT);
+      if ("http".equals(normalized) || "https".equals(normalized)) {
+        if (transport instanceof TransportHttp http) {
+          http.setHttpConnectionFactory(this);
+        }
+        return;
       }
+      if ("file".equals(normalized)) {
+        // 本地 file 仓库不需要网络代理或 socket 超时。
+        return;
+      }
+      // 未被 connect/read 网络保护覆盖的 Git transport：fail-closed，不留无限等待旁路。
+      throw new UnsupportedTransportException(
+          "unsupported Git transport scheme: " + (normalized == null ? "(none)" : normalized));
     };
+  }
+
+  /** 未被网络保护覆盖的 Git transport；调用方必须转换为稳定错误而不是继续等待。 */
+  static final class UnsupportedTransportException extends RuntimeException {
+    UnsupportedTransportException(String message) {
+      super(message);
+    }
   }
 
   @Override
@@ -123,6 +143,9 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
   /** 稳定分类沿 JGit 异常链传播，不依赖其本地化错误文本。 */
   static String failureCode(Throwable error) {
     for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof UnsupportedTransportException) {
+        return "UNSUPPORTED_REPOSITORY_SCHEME";
+      }
       if (cause instanceof SocketTimeoutException) {
         return "GIT_CONNECT_TIMEOUT".equals(cause.getMessage())
             ? "GIT_CONNECT_TIMEOUT"
@@ -135,6 +158,12 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
   static boolean canFallback(Throwable error) {
     if (!failureCode(error).equals("GIT_FETCH_FAILED")) {
       return false;
+    }
+    for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+      if (cause instanceof InterruptedIOException) {
+        // 取消或中断（含 socket 超时）绝不能触发第二次 fetch，即使链条上另有匹配文本。
+        return false;
+      }
     }
     for (Throwable cause = error; cause != null; cause = cause.getCause()) {
       if (cause instanceof RefNotAdvertisedException) {

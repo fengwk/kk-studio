@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -48,8 +49,14 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   /** 40 或 64 位小写 hex object id，与 {@code skill_package} 的列约束一致。 */
   private static final Pattern COMMIT = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
 
-  /** Git repository URL：必须带 scheme、无环绕空白、无控制字符、≤2048、不得内嵌 userinfo。 */
+  /** Git repository URL：必须带受支持 scheme、无环绕空白、无控制字符、≤2048、不得内嵌 userinfo。 */
   private static final Pattern REPOSITORY_URL = Pattern.compile("^[a-z][a-z0-9+.-]*://[^\\s]+$");
+
+  /** 本地 file 仓库可由 {@code File#toURI()} 产生单斜杠形式：{@code file:/path}。 */
+  private static final Pattern FILE_URL = Pattern.compile("^file:/[^\\s]*$");
+
+  /** 只有受网络保护覆盖的 http/https 与本地直读 file 允许进入 Git 网络层。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
   private static final Pattern USERINFO = Pattern.compile("://[^/\\s]*@");
 
@@ -340,17 +347,27 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
           SkillPackageGuard.RESOURCE, "repositoryUrl must be a non-blank, unpadded URL");
     }
     if (raw.length() > MAX_REPOSITORY_URL_CHARS
-        || !REPOSITORY_URL.matcher(raw).matches()
+        || !(REPOSITORY_URL.matcher(raw).matches() || FILE_URL.matcher(raw).matches())
         || USERINFO.matcher(raw).find()
         || raw.codePoints().anyMatch(SkillCatalogServiceImpl::isControl)) {
+      // 非法输入可能内嵌凭据，诊断不得回显原始 URL。
       throw new AiValidationException(
           SkillPackageGuard.RESOURCE,
-          "repositoryUrl must carry a scheme, contain no userinfo and be at most "
+          "repositoryUrl must be a supported http/https/file URL without userinfo and be at most "
               + MAX_REPOSITORY_URL_CHARS
-              + " characters: "
-              + raw);
+              + " characters");
+    }
+    String scheme = schemeOf(raw);
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
+      throw new AiValidationException(
+          SkillPackageGuard.RESOURCE, "unsupported repositoryUrl scheme: " + scheme);
     }
     return raw;
+  }
+
+  private static String schemeOf(String raw) {
+    int index = raw.indexOf(':');
+    return index <= 0 ? "" : raw.substring(0, index).toLowerCase(Locale.ROOT);
   }
 
   private static String requireBranch(String raw) {

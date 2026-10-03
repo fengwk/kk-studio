@@ -24,8 +24,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
@@ -40,6 +42,9 @@ import java.util.regex.Pattern;
 public class JGitSkillCache implements SkillGitCache {
 
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
+
+  /** 受网络保护覆盖或本地直读的仓库 scheme；其他 scheme 在直接入口 fail-closed。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
   private final Path cacheRoot;
   private final int connectMillis;
@@ -69,9 +74,7 @@ public class JGitSkillCache implements SkillGitCache {
 
   @Override
   public String resolveBranchHead(String repositoryUrl, String branch) {
-    if (repositoryUrl == null || repositoryUrl.isBlank()) {
-      throw new SkillGitException("repositoryUrl must not be blank");
-    }
+    validateRepositoryUrl(repositoryUrl);
     if (branch == null || branch.isBlank()) {
       throw new SkillGitException("branch must not be blank");
     }
@@ -124,9 +127,7 @@ public class JGitSkillCache implements SkillGitCache {
   public void ensureCommit(String packageName, String repositoryUrl, String commit) {
     validateCommit(commit);
     validatePackageName(packageName);
-    if (repositoryUrl == null || repositoryUrl.isBlank()) {
-      throw new SkillGitException("repositoryUrl must not be blank");
-    }
+    validateRepositoryUrl(repositoryUrl);
 
     Object lock = packageLocks.computeIfAbsent(packageName, k -> new Object());
     synchronized (lock) {
@@ -317,6 +318,23 @@ public class JGitSkillCache implements SkillGitCache {
     if (commit == null || !COMMIT_PATTERN.matcher(commit).matches()) {
       throw new SkillGitException("Invalid commit format: " + commit);
     }
+  }
+
+  /** 直接入口同样 fail-closed：只接受受保护 HTTP(S) 或本地 file 仓库。 */
+  private static void validateRepositoryUrl(String repositoryUrl) {
+    if (repositoryUrl == null || repositoryUrl.isBlank()) {
+      throw new SkillGitException("repositoryUrl must not be blank");
+    }
+    String scheme = schemeOf(repositoryUrl);
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
+      throw new SkillGitException(
+          "UNSUPPORTED_REPOSITORY_SCHEME: unsupported repository scheme: " + scheme);
+    }
+  }
+
+  private static String schemeOf(String repositoryUrl) {
+    int index = repositoryUrl.indexOf(':');
+    return index <= 0 ? "" : repositoryUrl.substring(0, index).toLowerCase(Locale.ROOT);
   }
 
   private static void validatePackageName(String packageName) {

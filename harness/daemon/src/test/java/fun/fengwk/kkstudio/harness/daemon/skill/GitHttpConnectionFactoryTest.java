@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.skill;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -255,6 +256,13 @@ class GitHttpConnectionFactoryTest {
       assertFalse(
           GitHttpConnectionFactory.canFallback(
               new IOException("unadvertised object", new SocketTimeoutException("timeout"))));
+      assertFalse(
+          GitHttpConnectionFactory.canFallback(
+              new IOException("not our ref", new InterruptedIOException("cancelled"))));
+      assertEquals(
+          "UNSUPPORTED_REPOSITORY_SCHEME",
+          GitHttpConnectionFactory.failureCode(
+              new GitHttpConnectionFactory.UnsupportedTransportException("git://host/repo")));
 
       assertEquals(
           "GIT_CONNECT_TIMEOUT",
@@ -356,7 +364,7 @@ class GitHttpConnectionFactoryTest {
     assertTrue(disconnected.await(2, TimeUnit.SECONDS));
   }
 
-  /** 意图：TransportConfigCallback 仅为 TransportHttp 配置连接工厂，不影响其他协议。 */
+  /** 意图：callback 只为 http/https 配置连接工厂，放行本地 file，其他协议 fail-closed。 */
   @Test
   void callbackConfiguresTransportHttpOnly(@TempDir Path directory) throws Exception {
     try (Repository repo = Git.init().setDirectory(directory.toFile()).call().getRepository();
@@ -368,10 +376,19 @@ class GitHttpConnectionFactoryTest {
         assertSame(factory, ((TransportHttp) transport).getHttpConnectionFactory());
       }
 
-      URIish nonHttpUri = new URIish("file:///tmp/repo.git");
-      try (Transport nonHttpTransport = new NonHttpTransport(nonHttpUri)) {
-        assertFalse(nonHttpTransport instanceof TransportHttp);
-        factory.callback().configure(nonHttpTransport);
+      URIish fileUri = new URIish("file:///tmp/repo.git");
+      try (Transport fileTransport = new NonHttpTransport(fileUri)) {
+        assertFalse(fileTransport instanceof TransportHttp);
+        assertDoesNotThrow(() -> factory.callback().configure(fileTransport));
+      }
+
+      URIish gitUri = new URIish("git://example.test/repo.git");
+      try (Transport gitTransport = new NonHttpTransport(gitUri)) {
+        GitHttpConnectionFactory.UnsupportedTransportException error =
+            assertThrows(
+                GitHttpConnectionFactory.UnsupportedTransportException.class,
+                () -> factory.callback().configure(gitTransport));
+        assertEquals("UNSUPPORTED_REPOSITORY_SCHEME", GitHttpConnectionFactory.failureCode(error));
       }
     }
   }

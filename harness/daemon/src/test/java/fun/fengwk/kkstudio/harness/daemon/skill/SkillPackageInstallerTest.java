@@ -352,6 +352,22 @@ class SkillPackageInstallerTest {
       assertEquals("INVALID_REPOSITORY_URL", error.code());
     }
 
+    // 非法 scheme 与含凭据的 URL：错误码稳定，且错误信息绝不回显原始输入或凭据。
+    for (String secretUrl :
+        new String[] {
+          "git://example.com/repo.git",
+          "ssh://example.com/repo.git",
+          "https://user:pass@example.com/repo.git"
+        }) {
+      SkillSyncException error =
+          assertThrows(
+              SkillSyncException.class,
+              () -> installer.install("valid-pkg", secretUrl, validBranch, validCommit));
+      assertEquals("INVALID_REPOSITORY_URL", error.code());
+      assertFalse(error.getMessage().contains(secretUrl));
+      assertFalse(error.getMessage().contains("user:pass"));
+    }
+
     // 非法 branch
     for (String badBranch :
         new String[] {null, "", " ", " leading", "trailing ", "bad\u0001branch", "a".repeat(256)}) {
