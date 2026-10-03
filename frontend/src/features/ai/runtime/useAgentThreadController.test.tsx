@@ -19,8 +19,9 @@ import {
   partsToText,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
-import { composerDraftStorageKey } from '@/features/ai/composer/composer-draft'
+import { composerDraftStorageKey, restoreComposerDraft } from '@/features/ai/composer/composer-draft'
 import { pendingStopStorageKey } from '@/features/ai/runtime/pending-stop-sidecar'
+import { loadBoundPendingMessage } from '@/features/ai/runtime/agent-pane/pane-target'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
@@ -2019,5 +2020,517 @@ describe('useAgentThreadController', () => {
     await waitFor(() => expect(result2.current.disabled).toBe(false))
     expect(result2.current.thread?.status).toBe('QUEUED')
     expect(result2.current.working).toBe(true)
+  })
+
+  it('deferred send success: switches to thread B with draft/pending/inflight, late success clears origin sidecar without polluting B', async () => {
+    // 测试意图：验证 Thread A 发送在途时切换至 Thread B，Thread B 具有自己的草稿与在途提交；
+    // Thread A 发送成功返回后，只清除 Thread A 的持久化 sidecar，绝不清除或污染 Thread B 的草稿、pending 与 in-flight 锁
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    const baseA = branchDraftFromThread(threadA)
+    const baseB = branchDraftFromThread(threadB)
+
+    let resolveSendA!: () => void
+    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      resolveSendA = () => resolve([])
+    })
+    let resolveSendB!: () => void
+    const sendPromiseB = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      resolveSendB = () => resolve([])
+    })
+
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(async (req) => {
+      if (req.target.type === 'THREAD' && req.target.threadId === THREAD_ID) {
+        return sendPromiseA
+      }
+      return sendPromiseB
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = tid === THREAD_ID_2 ? baseB : baseA
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // Thread A 提交消息
+    act(() => result.current.setDraft([createTextPart('message A')]))
+    let submitPromiseA!: Promise<void>
+    act(() => {
+      submitPromiseA = result.current.submitMessage()
+    })
+    expect(result.current.pending).toBe(true)
+    expect(loadBoundPendingMessage(THREAD_ID)).not.toBeNull()
+
+    // 切换至 Thread B
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+
+    // Thread B 不应该继承 Thread A 的 pending 状态
+    expect(result.current.pending).toBe(false)
+
+    // Thread B 输入草稿并提交消息
+    act(() => result.current.setDraft([createTextPart('draft B')]))
+    let submitPromiseB!: Promise<void>
+    act(() => {
+      submitPromiseB = result.current.submitMessage()
+    })
+    expect(result.current.pending).toBe(true)
+    expect(loadBoundPendingMessage(THREAD_ID_2)).not.toBeNull()
+
+    // 此时 Thread A 的请求迟到返回成功
+    await act(async () => {
+      resolveSendA()
+      await submitPromiseA
+    })
+
+    // 关键断言：
+    // 1. Thread A 的 sidecar 成功被清理
+    expect(loadBoundPendingMessage(THREAD_ID)).toBeNull()
+    // 2. Thread B 的 pending 状态与草稿绝未被 Thread A 的迟到成功清除或破坏
+    expect(result.current.pending).toBe(true)
+    expect(loadBoundPendingMessage(THREAD_ID_2)).not.toBeNull()
+
+    // 解决 Thread B 的请求
+    await act(async () => {
+      resolveSendB()
+      await submitPromiseB
+    })
+    expect(result.current.pending).toBe(false)
+    expect(loadBoundPendingMessage(THREAD_ID_2)).toBeNull()
+  })
+
+  it('deferred send definite failure: switches to thread B, late definite failure clears origin sidecar and preserves origin draft without polluting B', async () => {
+    // 测试意图：验证 Thread A 发送在途时切换至 Thread B，Thread A 遭遇确切业务失败（400）；
+    // 迟到失败应清除 Thread A 的 pending sidecar，并将失败草稿保存在 Thread A 的 storage 中，
+    // 绝不在 Thread B 面板上展示错误，也绝不覆盖 Thread B 当前编辑的草稿。
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let rejectSendA!: (err: unknown) => void
+    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+      rejectSendA = reject
+    })
+
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(async (req) => {
+      if (req.target.type === 'THREAD' && req.target.threadId === THREAD_ID) {
+        return sendPromiseA
+      }
+      return []
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = branchDraftFromThread(curThread)
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // Thread A 发送
+    act(() => result.current.setDraft([createTextPart('failed msg A')]))
+    let submitPromiseA!: Promise<void>
+    act(() => {
+      submitPromiseA = result.current.submitMessage()
+    })
+
+    // 切换至 Thread B
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+
+    // 用户在 Thread B 输入新草稿
+    act(() => result.current.setDraft([createTextPart('active draft on B')]))
+
+    // Thread A 确切失败（400）
+    await act(async () => {
+      rejectSendA(new ApiError('message rejected', 400))
+      await submitPromiseA.catch(() => undefined)
+    })
+
+    // 关键断言：
+    // 1. Thread B 界面无错误
+    expect(result.current.actionError).toBeNull()
+    // 2. Thread B 的草稿仍是 active draft on B，未被 Thread A 失败草稿覆盖
+    expect(partsToText(result.current.draft)).toBe('active draft on B')
+    // 3. Thread A 的 pending sidecar 被清除
+    expect(loadBoundPendingMessage(THREAD_ID)).toBeNull()
+    // 4. Thread A 的 storage 中安全持久化了失败的草稿
+    const persistedDraftA = restoreComposerDraft(`thread:${THREAD_ID}`, [])
+    expect(partsToText(persistedDraftA)).toBe('failed msg A')
+  })
+
+  it('deferred send unknown failure: switches to thread B, late unknown failure marks unknown sidecar and does not surface error on B', async () => {
+    // 测试意图：验证 Thread A 发送在途时切换至 Thread B，Thread A 遭遇网络异常等未知结果（非确切失败）；
+    // 迟到失败应保留 Thread A 的 unknown sidecar 供重试，绝不在 Thread B 暴露错误，也绝不覆盖 Thread B 草稿
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let rejectSendA!: (err: unknown) => void
+    const sendPromiseA = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+      rejectSendA = reject
+    })
+
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(async (req) => {
+      if (req.target.type === 'THREAD' && req.target.threadId === THREAD_ID) {
+        return sendPromiseA
+      }
+      return []
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = branchDraftFromThread(curThread)
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // Thread A 发送
+    act(() => result.current.setDraft([createTextPart('unknown msg A')]))
+    let submitPromiseA!: Promise<void>
+    act(() => {
+      submitPromiseA = result.current.submitMessage()
+    })
+
+    // 切换至 Thread B
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+    act(() => result.current.setDraft([createTextPart('B draft text')]))
+
+    // Thread A 网络断开
+    await act(async () => {
+      rejectSendA(new TypeError('Network lost'))
+      await submitPromiseA.catch(() => undefined)
+    })
+
+    // 断言：
+    // 1. Thread B 无错误
+    expect(result.current.actionError).toBeNull()
+    // 2. Thread B 草稿完好
+    expect(partsToText(result.current.draft)).toBe('B draft text')
+    // 3. Thread A sidecar 标记 unknownOutcome
+    const pendingA = loadBoundPendingMessage(THREAD_ID)
+    expect(pendingA).not.toBeNull()
+    expect(pendingA?.unknownOutcome).toBe(true)
+  })
+
+  it('deferred stale cursor fetch: switches to thread B during snapshot fetch, aborts auto-retry and avoids cross-binding send', async () => {
+    // 测试意图：验证 Thread A 在遭遇 STALE_COMMAND_CURSOR 并在 getThreadSnapshot 获取权威快照期间，
+    // 若用户切换到了 Thread B，快照返回后必须被 guard 拦截，绝不跨 binding 自动发起第二次 acceptCommandBatch
+    const threadA = threadFixture({ threadId: THREAD_ID, headEntryId: 'h1', nextCommandSequence: '1' })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+
+    let resolveSnapshotA!: (snap: HarnessThreadSnapshotDTO) => void
+    const snapshotPromiseA = new Promise<HarnessThreadSnapshotDTO>((resolve) => {
+      resolveSnapshotA = resolve
+    })
+
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      if (tid === THREAD_ID_2) {
+        return snapshotOf(threadB)
+      }
+      return snapshotPromiseA
+    })
+
+    // 首次 getThreadSnapshot 立即返回 threadA
+    resolveSnapshotA(snapshotOf(threadA))
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = branchDraftFromThread(curThread)
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // 重新准备 snapshotPromiseA 用于 stale cursor 重试阶段
+    let resolveStaleSnapshot!: (snap: HarnessThreadSnapshotDTO) => void
+    const staleSnapshotPromise = new Promise<HarnessThreadSnapshotDTO>((resolve) => {
+      resolveStaleSnapshot = resolve
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      if (tid === THREAD_ID_2) {
+        return snapshotOf(threadB)
+      }
+      return staleSnapshotPromise
+    })
+
+    // 第一次 acceptCommandBatch 抛出 STALE_COMMAND_CURSOR
+    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
+      new ApiError(409, 'STALE_COMMAND_CURSOR', 'stale cursor'),
+    )
+
+    act(() => result.current.setDraft([createTextPart('retry msg')]))
+    let submitPromise!: Promise<void>
+    act(() => {
+      submitPromise = result.current.submitMessage()
+    })
+
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+
+    // 在 getThreadSnapshot 挂起期间，切换至 Thread B
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+
+    // 释放 Thread A 的 snapshot
+    const advancedA = { ...threadA, headEntryId: 'h2', nextCommandSequence: '2' }
+    await act(async () => {
+      resolveStaleSnapshot(snapshotOf(advancedA, { entries: [{ entryId: 'h1', sessionId: 's1', parentEntryId: null, entryType: 'MESSAGE', payloadJson: '{}', createTime: null }] }))
+      await submitPromise.catch(() => undefined)
+    })
+
+    // 关键断言：绝不发出第二次 acceptCommandBatch 重试调用
+    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('A -> B -> A switching: stale operation from epoch 0 does not clear or overwrite new state in epoch 2', async () => {
+    // 测试意图：验证 A -> B -> A 重新绑定后，epoch 计数递增；来自 epoch 0 的旧迟到操作
+    // 绝不清除 epoch 2 的 pendingMessage、绝不覆盖 epoch 2 的新草稿、也绝不释放 epoch 2 的锁
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let resolveSendEpoch0!: () => void
+    const sendPromiseEpoch0 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      resolveSendEpoch0 = () => resolve([])
+    })
+    let resolveSendEpoch2!: () => void
+    const sendPromiseEpoch2 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      resolveSendEpoch2 = () => resolve([])
+    })
+
+    let callCount = 0
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(async () => {
+      callCount += 1
+      if (callCount === 1) {
+        return sendPromiseEpoch0
+      }
+      return sendPromiseEpoch2
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = branchDraftFromThread(curThread)
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // epoch 0: Thread A 发送
+    act(() => result.current.setDraft([createTextPart('message in epoch 0')]))
+    let submitPromiseEpoch0!: Promise<void>
+    act(() => {
+      submitPromiseEpoch0 = result.current.submitMessage()
+    })
+    expect(result.current.pending).toBe(true)
+
+    // 切到 Thread B (epoch 1)
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+    expect(result.current.pending).toBe(false)
+
+    // 切回 Thread A (epoch 2)
+    rerender({ tid: THREAD_ID })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID))
+
+    // 验证：维持既有未决 sidecar，不允许直接发送新消息
+    expect(result.current.replayPending).toBe(true)
+    act(() => result.current.setDraft([createTextPart('blocked message')]))
+    await act(async () => {
+      await result.current.submitMessage()
+    })
+    expect(result.current.actionError).not.toBeNull()
+
+    // 显式放弃未决消息，然后发起 epoch 2 的新请求
+    act(() => result.current.abandonPendingMessage())
+    expect(result.current.replayPending).toBe(false)
+
+    act(() => result.current.setDraft([createTextPart('message in epoch 2')]))
+    let submitPromiseEpoch2!: Promise<void>
+    act(() => {
+      submitPromiseEpoch2 = result.current.submitMessage()
+    })
+    expect(result.current.pending).toBe(true)
+    const newSidecar = loadBoundPendingMessage(THREAD_ID)
+    expect(newSidecar).not.toBeNull()
+    expect(partsToText(newSidecar?.localDraft ?? [])).toBe('message in epoch 2')
+
+    // 真实 deferred 旧结果与新请求交叠：来自 epoch 0 的请求迟到返回
+    await act(async () => {
+      resolveSendEpoch0()
+      await submitPromiseEpoch0
+    })
+
+    // 关键断言：
+    // 1. 旧 operation 成功绝不能清除 epoch 2 的新 sidecar (storage 清理比较了 request identity)
+    const preservedSidecar = loadBoundPendingMessage(THREAD_ID)
+    expect(preservedSidecar).not.toBeNull()
+    expect(partsToText(preservedSidecar?.localDraft ?? [])).toBe('message in epoch 2')
+    // 2. 旧 operation 的 finally 绝不能释放 epoch 2 的新 lock 或误扣减 counter
+    expect(result.current.pending).toBe(true)
+    expect(result.current.replayPending).toBe(true)
+
+    // 结束 epoch 2 的请求
+    await act(async () => {
+      resolveSendEpoch2()
+      await submitPromiseEpoch2
+    })
+    expect(result.current.pending).toBe(false)
+    expect(loadBoundPendingMessage(THREAD_ID)).toBeNull()
+  })
+
+  it('A -> B -> A switching: stale failed operation does not overwrite new sidecar or new stored draft', async () => {
+    // 测试意图：验证 A -> B -> A 切回后发出新请求，来自旧 epoch 0 的失败操作（无论 definite 还是 unknown）
+    // 绝不覆盖同 Thread 当前已存在的新 sidecar，也绝不覆盖同 Thread 正在编辑的新草稿
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let rejectSendEpoch0!: (err: unknown) => void
+    const sendPromiseEpoch0 = new Promise<HarnessThreadCommandDTO[]>((_resolve, reject) => {
+      rejectSendEpoch0 = reject
+    })
+    let resolveSendEpoch2!: () => void
+    const sendPromiseEpoch2 = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
+      resolveSendEpoch2 = () => resolve([])
+    })
+
+    let callCount = 0
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(async () => {
+      callCount += 1
+      if (callCount === 1) {
+        return sendPromiseEpoch0
+      }
+      return sendPromiseEpoch2
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) =>
+        useAgentThreadController(tid, [], (parts) => {
+          const curThread = tid === THREAD_ID_2 ? threadB : threadA
+          const curBase = branchDraftFromThread(curThread)
+          return buildBatchFor(curThread, curBase, curBase)(parts)
+        }),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // epoch 0 发送
+    act(() => result.current.setDraft([createTextPart('old message in epoch 0')]))
+    let submitPromiseEpoch0!: Promise<void>
+    act(() => {
+      submitPromiseEpoch0 = result.current.submitMessage()
+    })
+
+    // 切到 Thread B 再切回 Thread A
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+    rerender({ tid: THREAD_ID })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID))
+
+    // 放弃旧未决并发送 epoch 2 新请求
+    act(() => result.current.abandonPendingMessage())
+    act(() => result.current.setDraft([createTextPart('new message in epoch 2')]))
+    let submitPromiseEpoch2!: Promise<void>
+    act(() => {
+      submitPromiseEpoch2 = result.current.submitMessage()
+    })
+
+    // 此时 epoch 0 遭遇未知异常（网络断开）失败
+    await act(async () => {
+      rejectSendEpoch0(new TypeError('network failed'))
+      await submitPromiseEpoch0.catch(() => undefined)
+    })
+
+    // 关键断言：
+    // 1. 旧 unknown 失败绝不覆盖同 Thread 正在在途的新 sidecar
+    const storedSidecar = loadBoundPendingMessage(THREAD_ID)
+    expect(storedSidecar).not.toBeNull()
+    expect(partsToText(storedSidecar?.localDraft ?? [])).toBe('new message in epoch 2')
+    // 2. 当前 UI 内存中的新在途 pending 依然处于正常在途状态，未被旧 failure 污染
+    expect(result.current.pendingMessage?.unknownOutcome).toBe(false)
+    expect(partsToText(result.current.pendingMessage?.localDraft ?? [])).toBe('new message in epoch 2')
+    // 3. 新在途操作不受旧 failure 影响，lock 未被释放
+    expect(result.current.pending).toBe(true)
+
+    // 解决 epoch 2
+    await act(async () => {
+      resolveSendEpoch2()
+      await submitPromiseEpoch2
+    })
+    expect(result.current.pending).toBe(false)
+    expect(loadBoundPendingMessage(THREAD_ID)).toBeNull()
+  })
+
+  it('deferred approval and compaction: late responses after rebind do not pollute new panel state', async () => {
+    // 测试意图：验证 Thread A 发起 approval 或 compaction 操作后切换至 Thread B，
+    // 迟到的失败或成功绝不清除或污染 Thread B 的 conflict 与错误提示
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let rejectApprovalA!: (err: unknown) => void
+    const approvalPromiseA = new Promise<ToolInvocationDTO>((_resolve, reject) => {
+      rejectApprovalA = reject
+    })
+    vi.mocked(harnessService.decideApproval).mockImplementation(async () => approvalPromiseA)
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // Thread A 发起审批
+    let approvalAction!: Promise<void>
+    act(() => {
+      approvalAction = result.current.decideApproval('inv-1', 'ALLOW')
+    })
+
+    // 切换至 Thread B
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+
+    // Thread A 审批迟到失败
+    await act(async () => {
+      rejectApprovalA(new Error('approval backend error'))
+      await approvalAction
+    })
+
+    // 断言 Thread B 绝不受影响
+    expect(result.current.actionError).toBeNull()
+    expect(result.current.conflict).toBeNull()
   })
 })
