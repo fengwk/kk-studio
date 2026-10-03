@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -91,7 +90,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertTrue(hasStopActivity);
 
     // Reconciler 认领 work 并调谐，判定门禁关闭直接收敛，绝不创建新 Run
-    workStore.requestWork(issue.getId(), Instant.now());
+    workStore.requestWork(issue.getId(), Duration.ZERO);
     IssueWorkClaim claim = claimWork();
     assertNotNull(claim);
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -121,7 +120,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.CANCELLED, cancelledRun.getStatus());
     assertNotNull(cancelledRun.getEndedAt());
 
-    workStore.requestWork(issue.getId(), Instant.now());
+    workStore.requestWork(issue.getId(), Duration.ZERO);
     IssueWorkClaim claim = claimWork();
     assertNotNull(claim);
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -636,10 +635,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
   }
 
   private IssueWorkClaim claimWork() {
-    Instant now = Instant.now();
     String leaseToken = UUID.randomUUID().toString();
-    IssueWork work =
-        workStore.claimNext(now, leaseToken, now.plus(Duration.ofMinutes(1))).orElse(null);
+    IssueWork work = workStore.claimNext(leaseToken, Duration.ofMinutes(1)).orElse(null);
     if (work == null) {
       return null;
     }

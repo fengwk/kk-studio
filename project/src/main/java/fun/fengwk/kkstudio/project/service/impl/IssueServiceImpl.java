@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.service.impl.IssueActivityIdempotency.Identity;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -268,7 +269,7 @@ public class IssueServiceImpl implements IssueService {
         objectMapper.createObjectNode());
     persist(locked, expectedVersion);
     // 指示已持久接受，由 mailbox 在安全点投递给明确的当前 Run。
-    issueWorkStore.requestWork(issueId, Instant.now());
+    issueWorkStore.requestWork(issueId, Duration.ZERO);
     return issueRepository.getById(issueId);
   }
 
@@ -951,7 +952,7 @@ public class IssueServiceImpl implements IssueService {
     if (stage == null || !stage.enabled() || !stage.hasAgent()) {
       return;
     }
-    issueWorkStore.requestWork(issue.getId(), Instant.now());
+    issueWorkStore.requestWork(issue.getId(), Duration.ZERO);
   }
 
   private Issue persist(Locked locked, long expectedVersion) {

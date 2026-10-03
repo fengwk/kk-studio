@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -129,13 +130,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
   /** 获取指定 Issue 的调度工作 Claim，保证在调谐前该工作已到期并被成功锁定。 */
   private IssueWorkClaim claimWork(UUID issueId) {
-    Instant now = Instant.now();
-    issueWorkStore.requestWork(issueId, now.minusSeconds(1));
+    issueWorkStore.requestWork(issueId, Duration.ZERO);
     String leaseToken = key("lease");
-    Instant leaseUntil = now.plusSeconds(30);
     IssueWork claimed =
         issueWorkStore
-            .claimNext(now, leaseToken, leaseUntil)
+            .claimNext(leaseToken, Duration.ofSeconds(30))
             .orElseThrow(
                 () -> new IllegalStateException("Failed to claim work for issue " + issueId));
     return new IssueWorkClaim(
@@ -957,13 +956,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    Instant now = Instant.now();
-    issueWorkStore.requestWork(issue.getId(), now.minusSeconds(1));
+    issueWorkStore.requestWork(issue.getId(), Duration.ZERO);
     String token = key("lease");
-    Instant shortLeaseUntil = now.plusSeconds(5);
-    IssueWork claimed = issueWorkStore.claimNext(now, token, shortLeaseUntil).orElseThrow();
+    IssueWork claimed = issueWorkStore.claimNext(token, Duration.ofSeconds(5)).orElseThrow();
     IssueWorkClaim claim =
-        new IssueWorkClaim(issue.getId(), token, shortLeaseUntil, claimed.getWakeVersion());
+        new IssueWorkClaim(issue.getId(), token, claimed.getLeaseUntil(), claimed.getWakeVersion());
 
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
@@ -973,11 +970,12 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertNull(work.getLeaseToken());
     assertNull(work.getLeaseUntil());
     assertNotNull(work.getDueAt());
+    assertEquals(work.getUpdatedAt().plusSeconds(1), work.getDueAt());
   }
 
-  /** 测试意图：当 claim 在调谐完成前已被新唤醒或并发操作 supersede 时，finish 安全记录围栏不匹配且不导致事务回滚。 */
+  /** 测试意图：不存在的 Issue 在 lockIssue 返回 null 后安全收敛，完成不存在的 work 不导致事务回滚。 */
   @Test
-  void reconcileFinishHandlesSupersededClaimGracefully() {
+  void reconcileHandlesMissingIssueGracefully() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("已取代Claim调谐", agent, agent, 3);
     Issue issue = createIssue(projectId);
