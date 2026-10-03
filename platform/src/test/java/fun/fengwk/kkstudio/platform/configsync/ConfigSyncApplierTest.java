@@ -23,9 +23,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -41,9 +39,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -57,7 +53,6 @@ import java.util.UUID;
  */
 class ConfigSyncApplierTest {
 
-  private final AgentProviderRepository providerRepository = mock(AgentProviderRepository.class);
   private final AgentProviderService providerService = mock(AgentProviderService.class);
   private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
   private final AgentModelService modelService = mock(AgentModelService.class);
@@ -72,7 +67,6 @@ class ConfigSyncApplierTest {
 
   private final ConfigSyncApplier applier =
       new ConfigSyncApplier(
-          providerRepository,
           providerService,
           modelRepository,
           modelService,
@@ -144,16 +138,13 @@ class ConfigSyncApplierTest {
   }
 
   @Test
-  void newProviderIsCreatedAndExistingProviderIsUpdated() {
-    when(providerRepository.getByName("new")).thenReturn(null);
-    AgentProvider existing = new AgentProvider();
-    existing.setName("old");
-    existing.setVersion(3L);
-    when(providerRepository.getByName("old")).thenReturn(existing);
+  void providersAreImportedViaExplicitUpsertCommand() {
+    ConfigSyncParser.ProviderSpec created = providerSpec("new");
+    ConfigSyncParser.ProviderSpec existing = providerSpec("old");
 
     applier.apply(
         plan(
-            List.of(providerSpec("new"), providerSpec("old")),
+            List.of(created, existing),
             List.of(),
             List.of(),
             List.of(),
@@ -161,15 +152,11 @@ class ConfigSyncApplierTest {
             List.of(),
             null));
 
-    ArgumentCaptor<AgentProviderCreateDTO> create =
-        ArgumentCaptor.forClass(AgentProviderCreateDTO.class);
-    verify(providerService).createProvider(create.capture());
-    assertEquals("new", create.getValue().getName());
-
-    ArgumentCaptor<AgentProviderUpdateDTO> update =
-        ArgumentCaptor.forClass(AgentProviderUpdateDTO.class);
-    verify(providerService).updateProvider(eq("old"), update.capture());
-    assertEquals("3", update.getValue().getExpectedVersion());
+    // 导入使用显式 upsert 命令恢复文件事实，不再区分 create/update，也不再读取 repository 判断存在性。
+    verify(providerService).importProvider("new", created.properties());
+    verify(providerService).importProvider("old", existing.properties());
+    verify(providerService, never()).createProvider(any());
+    verify(providerService, never()).updateProvider(any(), any());
   }
 
   @Test
