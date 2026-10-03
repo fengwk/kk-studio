@@ -22,7 +22,7 @@ export interface ConfigSyncRef {
   name: string
 }
 
-/** 库存条目：在引用之上附带其直接依赖，用于 UI 展示依赖闭包。 */
+/** 库存条目：在引用之上附带其依赖，用于 UI 展示导出范围。 */
 export interface ConfigSyncItem extends ConfigSyncRef {
   dependencies: ConfigSyncRef[]
 }

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -15,10 +16,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
@@ -40,13 +47,14 @@ import java.util.UUID;
  * 配置同步 HTTP + 真实 backend 集成测试。
  *
  * <p>真实隔离 PostgreSQL（{@link ConfigSyncTestSupport} 的进程级 disposable 容器）、真实 JGit 本地 {@code file://}
- * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/${@code ${VAR}} 原值、exact commit 恢复、同名
+ * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/{@code ${VAR}} 原值、exact commit 恢复、同名
  * upsert、部分 settings、skip、事务回滚与 {@code no-store}。
- *
- * <p>部分断言锁定 CONTRACT.md 的期望行为；当前 base 生产实现仍存在已知缺陷（由独立 sync-api 修复），这些回归用例在修复合并前会红，
- * 断言按契约书写、不为迁就当前实现而放宽。
  */
 class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
+
+  @Autowired private ConfigSyncParser parser;
+  @Autowired private ConfigSyncPlanner planner;
+  @Autowired private ConfigSyncApplier applier;
 
   private static final String DEV_SKILL_MD =
       """
@@ -92,7 +100,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode providerDto = createProvider(provider, "no store provider");
     JsonNode envDto = createEnvironment(envName);
     String token = envDto.path("registrationToken").asText();
-    String credential = "sk-secret-" + suffix;
+    String credential = "sk-configsync-" + provider;
 
     // 直接写入的 credential 在公开 DTO 中不可读；inventory 更不得包含任何配置值。
     assertTrue(token.length() > 0);
@@ -116,6 +124,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     }
     String inventoryText = body(inventoryResult);
     assertFalse(inventoryText.contains(token), "inventory must not leak environment token");
+    assertFalse(inventoryText.contains(credential), "inventory must not leak provider credential");
     assertFalse(
         inventoryText.contains("credential"), "inventory must not contain credential field");
     assertFalse(inventoryText.contains("registrationToken"));
@@ -132,6 +141,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .andReturn();
     String yaml = data(exportResult).path("yaml").asText();
     assertTrue(yaml.contains(provider));
+    assertTrue(yaml.contains(credential), "export must include the original credential");
 
     // import 成功 no-store。
     mockMvc
@@ -155,10 +165,23 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .andReturn();
     assertFalse(body(errorResult).contains(credential));
 
+    // JSON 本身尚未解析成功时也不能缓存或回显请求中的凭据。
+    MvcResult parseError =
+        mockMvc
+            .perform(
+                post("/api/settings/sync/import")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"yaml\":\"" + credential))
+            .andExpect(status().isBadRequest())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andReturn();
+    assertFalse(body(parseError).contains(credential));
+
     // 清理本用例新建资源，避免污染同库后续断言。
     deleteOk(
         "/api/harness/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
-    deleteOk("/api/ai/catalog/providers/" + provider, providerDto.path("version").asText());
+    deleteOk(
+        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   // ---------------------------------------------------------------- seven kinds round trip
@@ -226,6 +249,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String yaml =
         postData("/api/settings/sync/export", exportRequest(selection)).path("yaml").asText();
     // 凭据/registrationToken/MCP header 原值随导出。
+    assertTrue(yaml.contains("sk-configsync-" + provider), "provider credential must be exported");
+    assertTrue(yaml.contains("Bearer literal-secret"), "MCP credential headers must be exported");
     assertTrue(
         yaml.contains(token), "export must carry the environment registrationToken original value");
 
@@ -298,6 +323,12 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode reSkill = getData("/api/ai/catalog/skill-packages/" + pkg);
     assertEquals(commit1, reSkill.path("currentCommit").asText());
     assertEquals(1, reSkill.path("skills").size());
+
+    // 再次导出逐字段比对，而不是只证明同名条目存在或 imported 列表非空。
+    String restoredYaml =
+        postData("/api/settings/sync/export", exportRequest(selection)).path("yaml").asText();
+    assertEquals(
+        parseYaml(yaml), parseYaml(restoredYaml), "all seven kinds must preserve editable facts");
   }
 
   // ---------------------------------------------------------------- closure / no reverse
@@ -441,6 +472,48 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   // ---------------------------------------------------------------- settings
 
+  /** 导入恢复文件的凭据事实，不能把普通编辑的“空值保留旧凭据”语义带入同步。 */
+  @Test
+  void sameNameProviderWithoutCredentialClearsTheTargetCredential() throws Exception {
+    String name = "clear_credential_" + unique();
+    JsonNode created = createProvider(name, "configured target");
+    assertTrue(created.path("configured").asBoolean());
+
+    importYaml("providers:\n  - name: " + name + "\n    providerType: openai\n");
+
+    assertFalse(findProvider(name).path("configured").asBoolean());
+    String exported =
+        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            .path("yaml")
+            .asText();
+    assertFalse(
+        exported.contains("credential:"),
+        "an unconfigured provider must not retain the target credential");
+  }
+
+  /** 准备期间出现并发设置写入时，旧计划必须 CAS 冲突，之前写入的 Provider 同事务回滚。 */
+  @Test
+  void concurrentSettingsChangeRejectsThePreparedAggregateAndRollsBackEarlierWrites()
+      throws Exception {
+    String name = "settings_cas_" + unique();
+    JsonNode before = getData("/api/settings");
+    ConfigSyncPlan plan =
+        planner.plan(
+            parser.parse(
+                "providers:\n  - name: "
+                    + name
+                    + "\n    providerType: openai\nsettings:\n  aiRuntime:\n    retryBaseDelayMillis: 9999\n"));
+    boolean concurrentYolo = !before.path("tool").path("defaultYolo").asBoolean();
+    importYaml("settings:\n  tool:\n    defaultYolo: " + concurrentYolo + "\n");
+    JsonNode concurrent = getData("/api/settings");
+
+    assertThrows(SystemSettingsVersionConflictException.class, () -> applier.apply(plan));
+
+    assertNull(findProvider(name), "writes preceding the settings CAS must be rolled back");
+    assertEquals(
+        concurrent, getData("/api/settings"), "concurrent values and version must remain intact");
+  }
+
   /** 部分 settings 只合入给出字段、不重置省略字段；未知 section 必须只报告该 section 而不整体丢弃。 */
   @Test
   void partialSettingsMergeAndUnknownSectionIsReported() throws Exception {
@@ -475,7 +548,10 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 空 settings 对象是合法的 no-op 合并。
     JsonNode emptyResult = importYaml("settings: {}\n");
-    assertTrue(emptyResult.path("imported").findValuesAsText("name").contains("settings"));
+    assertEquals(0, emptyResult.path("imported").size(), "no-op does not report an applied item");
+    assertEquals(0, emptyResult.path("skipped").size());
+    assertEquals(
+        mixedAfter, getData("/api/settings"), "no-op must not alter values or CAS version");
 
     // 恢复原值，避免影响后续断言（本类每个测试重建 schema，此处仍显式恢复）。
     importYaml("settings:\n  aiRuntime:\n    retryBaseDelayMillis: " + originalDelay + "\n");
@@ -663,15 +739,24 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode createProvider(String name, String description) throws Exception {
-    AgentProviderCreateDTO dto = new AgentProviderCreateDTO();
-    dto.setName(name);
-    dto.setDescription(description);
-    dto.setProviderType("openai");
-    dto.setBaseUrl("https://example.com/v1");
-    dto.setCredential("sk-configsync-" + name);
-    dto.setModelCallTimeoutMillis(120000L);
-    dto.setModelCallIdleTimeoutMillis(30000L);
-    return postData("/api/ai/catalog/providers", dto);
+    // credential 为 WRITE_ONLY；测试请求不能通过响应侧 DTO 序列化，否则会悄悄丢掉待验证的凭据。
+    return postData(
+        "/api/ai/catalog/providers",
+        Map.of(
+            "name",
+            name,
+            "description",
+            description,
+            "providerType",
+            "openai",
+            "baseUrl",
+            "https://example.com/v1",
+            "credential",
+            "sk-configsync-" + name,
+            "modelCallTimeoutMillis",
+            120000L,
+            "modelCallIdleTimeoutMillis",
+            30000L));
   }
 
   private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)

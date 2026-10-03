@@ -207,6 +207,38 @@ describe('SyncTab', () => {
     expect(document.activeElement).toBe(exportButton)
   })
 
+  it('cycles Tab focus within the modal in both directions', async () => {
+    const user = userEvent.setup()
+    renderSyncTab()
+    const dialog = await openExportModal()
+    const first = within(dialog).getByRole('button', { name: '关闭' })
+    const last = within(dialog).getByRole('button', { name: '导出' })
+    // 弹窗首尾互相续接，不让键盘焦点落到背景设置页。
+    first.focus()
+    await user.tab({ shift: true })
+    expect(last).toHaveFocus()
+    await user.tab()
+    expect(first).toHaveFocus()
+    dialog.focus()
+    await user.tab({ shift: true })
+    expect(last).toHaveFocus()
+  })
+
+  it('keeps focus on the modal when every control is disabled during import', async () => {
+    const user = userEvent.setup()
+    const pending = deferred<{ imported: []; skipped: [] }>()
+    mocks.importConfig.mockReturnValue(pending.promise)
+    const { container } = renderSyncTab()
+    await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    // 正在导入时控件均禁用，Tab 仍留在弹窗而不是穿透到后台。
+    await user.tab()
+    expect(dialog).toHaveFocus()
+    pending.resolve({ imported: [], skipped: [] })
+    await within(dialog).findByText('没有可导入的配置。')
+  })
+
   it('blocks export when the selection is empty', async () => {
     renderSyncTab()
     const dialog = await openExportModal()

@@ -66,6 +66,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [project](../../share/src/main/java/fun/fengwk/kkstudio/share/project/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
 | [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 六个 settings section、schema 与 update request |
+| [configsync](../../share/src/main/java/fun/fengwk/kkstudio/share/configsync/) | 七类配置引用、依赖清单、YAML 导入/导出与跳过原因 |
 
 只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
@@ -81,7 +82,7 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请�
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。
-- DTO 不回显 credential、secret 或对象存储内部标识；Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
+- 常规 DTO 不回显 credential、secret 或对象存储内部标识；配置同步的显式 YAML 导出包含所需凭据，响应禁止缓存。Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 
 ## 从哪里改
 

@@ -51,6 +51,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
+| Configuration sync | `/api/settings/sync`、`/export`、`/import` | GET 清单、POST 选择导出与 YAML 导入；响应禁止缓存 |
 | Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、运维 events |
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。公开 command-batches 接纳 Chat；
@@ -89,6 +90,7 @@ advice 按 Controller 范围映射 validation 400、not found 404、version/dupl
 locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
+配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
 Daemon registration token 在 HELLO 中绑定 Environment，通用 Card 只返回安全投影。
 Plugin auth 请求 no-store，数据库保存认证密文，主密钥缺失时凭据读写失败关闭。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
