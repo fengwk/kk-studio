@@ -316,7 +316,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | distributed | node identity/ports | `DISTRIBUTED_*` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_MINIO_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
-| supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
+| supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |

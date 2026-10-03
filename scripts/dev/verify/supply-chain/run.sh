@@ -29,6 +29,7 @@ TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9
 TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
 TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1
 TRIVY_CACHE_VOLUME=${SUPPLY_CHAIN_TRIVY_CACHE_VOLUME:-kk-studio-trivy-cache}
+TRIVY_NETWORK=${SUPPLY_CHAIN_TRIVY_NETWORK:-}
 APP_IMAGE=${SUPPLY_CHAIN_APP_IMAGE:-kk-studio-app:supply-chain}
 DAEMON_IMAGE=${SUPPLY_CHAIN_DAEMON_IMAGE:-kk-studio-daemon:supply-chain}
 TRIVY_SKIP_DB_UPDATE=${TRIVY_SKIP_DB_UPDATE:-false}
@@ -87,6 +88,9 @@ Environment:
   SUPPLY_CHAIN_DAEMON_IMAGE Daemon image tag (default: kk-studio-daemon:supply-chain)
   SUPPLY_CHAIN_TRIVY_CACHE_VOLUME
                             Named Trivy cache volume (default: kk-studio-trivy-cache)
+  SUPPLY_CHAIN_TRIVY_NETWORK
+                            Optional Docker network name/id (e.g. host); empty
+                            keeps automatic loopback-proxy network selection
   TRIVY_SKIP_DB_UPDATE      Use the existing named cache in offline mode when true
 EOF
 }
@@ -742,13 +746,13 @@ test "$uid" -ne 0
 java -version
 node_version="$(node --version)"
 printf 'node=%s\n' "$node_version"
-if [[ ! "$node_version" =~ ^v22\.19\.[0-9]+$ ]]; then
+if [[ "$node_version" != v22.23.3 ]]; then
     printf 'unexpected Node version: %s\n' "$node_version" >&2
     exit 1
 fi
 npm_version="$(npm --version)"
 printf 'npm=%s\n' "$npm_version"
-if [[ "$npm_version" != 11.19.0 ]]; then
+if [[ "$npm_version" != 11.21.0 ]]; then
     printf 'unexpected npm version: %s\n' "$npm_version" >&2
     exit 1
 fi
@@ -825,7 +829,9 @@ prepare_trivy_docker_run() {
         --volume /var/run/docker.sock:/var/run/docker.sock
         --volume "$TRIVY_CACHE_VOLUME:/root/.cache/trivy"
     )
-    if has_loopback_proxy; then
+    if [[ -n "$TRIVY_NETWORK" ]]; then
+        TRIVY_DOCKER_RUN_ARGS+=(--network "$TRIVY_NETWORK")
+    elif has_loopback_proxy; then
         TRIVY_DOCKER_RUN_ARGS+=(--network host)
     fi
 
@@ -920,7 +926,6 @@ run_image_scan() {
     trivy_args+=(
         --format json
         --severity HIGH,CRITICAL
-        --ignore-unfixed
         "$image"
     )
 
@@ -1224,6 +1229,12 @@ main() {
             ;;
     esac
 
+    if [[ "$MODE" == image || "$MODE" == all ]]; then
+        # Accept one network name/id, never Docker flags or shell fragments.
+        if [[ -n "$TRIVY_NETWORK" && ! "$TRIVY_NETWORK" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+            die "SUPPLY_CHAIN_TRIVY_NETWORK must be a Docker network name/id"
+        fi
+    fi
     require_cmd node
     if [[ "$MODE" == image ]]; then
         require_cmd docker
