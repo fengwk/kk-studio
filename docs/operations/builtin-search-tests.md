@@ -10,12 +10,15 @@
 从仓库根目录使用 JDK 21：
 
 ```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test
+env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test \
+  -Dtest='NativeSearchCapabilitiesTest,FindGrepCapabilitiesTest,GitIgnoreDiscoveryTest,WorkdirPathSemanticsTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 ```
 
 这些测试使用真实本地文件系统、临时文件、权限、符号链接与稀疏文件，不调用模型或部署数据库。
-检索测试本身不启动外部检索二进制；上述整个 Daemon 套件还会运行 Bash/LSP 的真实子进程测试。
+上述定向集合不启动外部检索二进制；去掉 `-Dtest` 可跑完整 Daemon 套件，
+其中 Bash/LSP 测试会创建真实子进程。schema 与预算传递改动还应选择下表的 Coding 测试类。
 `validate` 只做 Checkstyle/Spotless 等静态检查，不编译、不执行检索。
 
 | 测试类 | 负责的证据 |
@@ -30,7 +33,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 并确认 Daemon 的 `target/surefire-reports` 有实际执行记录。`test` 生成
 `harness/daemon/target/site/jacoco`；Daemon 不绑定 `jacoco:check`。
 度量核心是 `GrepCapability`、`FindCapability`、`SearchFiles`、`SearchControl`、`GitIgnoreRules`、
-`GlobPattern`、`TextStreams`，行覆盖率目标 ≥90%，分支作为参考，不固定某次运行数字。
+`GlobPattern`、`TextStreams`，按仓库关键路径目标检查本次行覆盖率与未覆盖路径，分支作为参考。
 
 ## 先验证检索范围
 
@@ -45,6 +48,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 `FindGrepCapabilitiesTest` 验证规则对实际结果的影响。
 符号链接的遍历行为由 `searchFilesIgnoresSymlinksAndValidatesDirectory` 固定；
 缺失或不可读根不是“空结果”（`searchRejectsMissingPath`、`searchRejectsUnreadableSearchRoot`）。
+起点自身已被祖先规则忽略时直接结束遍历，由 `searchFilesReturnsEarlyWhenSearchDirectoryItselfIsIgnored` 验证。
 
 ## Grep 的成功、空结果与不完整结果
 
@@ -59,10 +63,13 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 | 未搜索路径有界枚举，不能伪装成无匹配 | `grepEnumeratesAndBoundsUnsearchedPaths`、`grepReportsUnreadableDirectFile` |
 | 大结果在共享输出层落盘，返回有界预览与路径 | `grepSpoolsLargeResultsToBoundedTextResultWithPath` |
 
-定位形态是相对路径、行号与命中文本，不添加展示锚点，也不透传外部程序的杂项输出。
+定位结果包含可再次访问的路径、行号与命中文本；提供 workdir 时使用相对展示，
+无 workdir 的绝对目标保留绝对路径。
 只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE；直接二进制目标报错，目录中的二进制文件跳过。
-非法旧编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
-`grepDetectsBinaryContentBeyondProbePrefix`）。多行扫描有独立整文件预算，不应把它误写成 read 的文件大小上限。
+非法编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
+`grepDetectsBinaryContentBeyondProbePrefix`）。单行保留上限为 1 Mi 字符，超出时以无法完整搜索失败，
+由 `grepFailsExplicitlyWhenSingleLineExceedsRetentionLimit` 验证；这与命中后的有界摘录不同。
+多行扫描有独立整文件预算，不是 read 的文件大小上限。
 
 ## Find 的路径匹配与停止条件
 
@@ -87,7 +94,6 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 `deadlineCheckedSequenceSurfacesCancellationAsInterruption`、`searchControlActivelyChecksTimeoutAndCancellation`
 验证扫描中的检查点。取消不能被误报成超时，已取消调用也不能继续遍历。
 
-检索没有外部二进制获取、force-kill watchdog、非零退出附带部分输出或上游 fallback。
-capability 注册与结果协议由 [`harness/environment`](../../harness/environment)、Daemon Runtime 负责，终端渲染由前端负责，
-不属于本文的检索覆盖率口径。权限、特殊文件与 symlink 测试的跳过项需按宿主平台报告；
+capability 注册与结果协议由 [`harness/environment`](../../harness/environment)、Daemon Runtime 负责，
+终端渲染由前端负责，需选择相应层的测试。权限、特殊文件与 symlink 测试的跳过项需按宿主平台报告；
 一个平台通过不等于全部原生文件系统已验收。

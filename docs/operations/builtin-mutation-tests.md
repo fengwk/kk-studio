@@ -32,8 +32,7 @@ Daemon 没有 `jacoco:check` 门禁。
   `rejectsOverlappingMatchesWithoutReplaceAll`、`rejectsOverlappingReplaceAll`、
   `rejectsEmptyOldString`：无匹配、歧义与重叠不能部分写入，也不把匹配文本回显到错误。
 - `rejectsIdenticalOldAndNewString` 与 `rejectsNoOpEditDifferingOnlyByLineEndingSpelling`：
-  相同文本及只改变归一化行尾拼写的 no-op 都拒绝。后者确实命中**编码后字节等于原文件**的检查，
-  不能把这个分支列为不可达或未覆盖。
+  相同文本及只改变归一化行尾拼写的 no-op 都拒绝，检查编码后的字节与原文件相同这一边界。
 - `rejectsDirectoryAsWriteTarget`、`rejectsDirectoryEditTarget`、`rejectsNonRegularNodesBeforeIo`、
   `rejectsDanglingSymbolicLinkWriteTarget`：在内容 I/O 前拒绝不支持的节点，避免设备/FIFO 带来的阻塞或副作用。
   二进制判定需要读取内容，但 `rejectsExistingBinaryFileWithoutModifyingIt`、`rejectsBinaryEditTarget`
@@ -62,7 +61,7 @@ edit 读取当前文件，不提供跨调用 stale-read 保护（`editsCurrentFi
 
 [`TextFileCodecTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextFileCodecTest.java)
 验证 UTF-8 与 BOM 标记的 UTF-16LE/BE、NUL 判定、有效替换字符和严格无损编码。
-没有 legacy 字符集猜测、无 BOM UTF-16 启发式或控制字符密度嗅探。
+输入编码按 UTF-8 或 BOM 识别，非法字节直接拒绝。
 无法编码的孤立代理项由 `rejectsLossyEncodingAndInvalidArguments` 及能力层的
 `rejectsContentThatCannotBeRepresentedInExistingEncoding`、
 `editRejectsContentThatCannotBeRepresentedInExistingEncoding` 验证提交前拒绝。
@@ -81,8 +80,8 @@ edit 读取当前文件，不提供跨调用 stale-read 保护（`editsCurrentFi
 并发编辑不会相互覆盖；它不是跨进程锁或外部编辑器并发协议。
 取消用例验证等待临界区期间取消不写入；
 `keepsCommittedWriteSuccessfulWhenCancelArrivesAfterCompletion` 验证已提交后到达的取消不把成功改成失败。
-edit 在读取后、提交前还有一次取消检查，目前缺少能确定性停在该时点的测试夹具，
-不要把读前取消证据宣称为该时点的覆盖。
+edit 在读取后、提交前还有一次取消检查；验证此时点时需要确定性屏障，
+分别断言取消结果与目标文件未变。
 
 不支持原子改名的平台直接抛 `AtomicMoveNotSupportedException`，**没有非原子覆盖回退**。
 原生文件系统的成功路径不证明不支持原子改名的失败路径；
@@ -101,7 +100,7 @@ Windows、不同文件系统与权限能力应分别报告实际运行证据。
 - `hugeDiffIsTruncatedWithMarker`、`truncatedDiffDoesNotSplitEmojiSurrogatePairs`：
   大 diff 有界并报告截断，不拆开代理对；行号右对齐至少两位。
 
-diff 是结果预览，不是跨调用编辑基线。算法内部的空对齐区与结果行越界守卫缺少直接触发证据，
-其是否未覆盖应以当前 JaCoCo 报告复核，而不是沿用一次历史结论。
+diff 是已提交结果的预览，不提供跨调用编辑基线。结合本次 JaCoCo 报告检查对齐与行号边界，
+为实际未覆盖的失败路径补充能触发该路径的夹具。
 核心度量类是 `WriteCapability`、`EditCapability`、`TextFileCommit`、`TextFileCodec`、`EnvironmentPaths`，
-行覆盖率目标 ≥90%，分支作为参考。
+按仓库关键路径目标度量行覆盖率，分支作为参考；Daemon 不绑定自动 `jacoco:check` 门禁。
