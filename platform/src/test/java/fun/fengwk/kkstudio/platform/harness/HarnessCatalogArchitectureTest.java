@@ -5,16 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -25,6 +29,81 @@ import java.util.stream.Stream;
  * entry types），并严禁通过 {@code HarnessCatalog} 进行工具查找。
  */
 class HarnessCatalogArchitectureTest {
+
+  private static final String PLATFORM_PATH = "fun/fengwk/kkstudio/platform/";
+  private static final Pattern HARNESS_IMPORT =
+      Pattern.compile(
+          "(?m)^\\s*import\\s+(?:static\\s+)?"
+              + "fun\\.fengwk\\.kkstudio\\.platform\\.harness\\.[\\w.*]+\\s*;");
+
+  @Test
+  void catalogAndStorageDoNotImportPlatformHarness() throws IOException {
+    // 意图：catalog/storage 组合根不得反向依赖执行域；独立的 harness 模块 API 不在禁用范围内。
+    assertEquals(List.of(), scanReverseDependencies(locatePlatformMainJava()));
+  }
+
+  @Test
+  void reverseDependencyScannerDetectsImportsInBothDomains(@TempDir Path main) throws IOException {
+    // 意图：以正常、静态、多行及 wildcard import 负例验证扫描器，避免仅扫描当前零违规源码的空洞守卫。
+    Path catalog = main.resolve(PLATFORM_PATH + "catalog/tool/Bad.java");
+    Path storage = main.resolve(PLATFORM_PATH + "storage/configuration/Bad.java");
+    Files.createDirectories(catalog.getParent());
+    Files.createDirectories(storage.getParent());
+    Files.writeString(
+        catalog,
+        """
+        import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+        import static fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer.*;
+        import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+        """);
+    Files.writeString(
+        storage,
+        """
+        import
+          fun.fengwk.kkstudio.platform.harness.tool.gateway.*;
+        import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+        """);
+    List<String> violations = scanReverseDependencies(main);
+    assertEquals(3, violations.size());
+    assertEquals(
+        2, violations.stream().filter(v -> v.startsWith(PLATFORM_PATH + "catalog/")).count());
+    assertEquals(
+        1, violations.stream().filter(v -> v.startsWith(PLATFORM_PATH + "storage/")).count());
+    Files.writeString(
+        catalog,
+        """
+        import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
+        """);
+    Files.writeString(
+        storage,
+        """
+        import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+        """);
+    assertEquals(List.of(), scanReverseDependencies(main));
+  }
+
+  private static List<String> scanReverseDependencies(Path main) throws IOException {
+    List<String> violations = new ArrayList<>();
+    for (String domain : List.of("catalog", "storage")) {
+      try (Stream<Path> paths = Files.walk(main.resolve(PLATFORM_PATH + domain))) {
+        for (Path path :
+            paths
+                .filter(Files::isRegularFile)
+                .filter(p -> p.toString().endsWith(".java"))
+                .sorted()
+                .toList()) {
+          Matcher matcher = HARNESS_IMPORT.matcher(Files.readString(path, StandardCharsets.UTF_8));
+          while (matcher.find()) {
+            violations.add(
+                main.relativize(path)
+                    + ": forbidden reverse dependency "
+                    + matcher.group().strip());
+          }
+        }
+      }
+    }
+    return violations;
+  }
 
   @Test
   void fourConsumersUseRuntimeToolCatalogAndRestrictHarnessCatalog() throws IOException {
@@ -41,7 +120,7 @@ class HarnessCatalogArchitectureTest {
             "fun/fengwk/kkstudio/platform/catalog/definition/service/impl/"
                 + "AgentDefinitionConfigValidator.java");
     Path queryServicePath =
-        main.resolve("fun/fengwk/kkstudio/platform/harness/tool/ToolCatalogQueryService.java");
+        main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/ToolCatalogQueryService.java");
 
     List<Path> allConsumers = List.of(resolverPath, gatewayPath, validatorPath, queryServicePath);
     List<Path> externalPackageConsumers = List.of(resolverPath, gatewayPath, validatorPath);
@@ -121,10 +200,10 @@ class HarnessCatalogArchitectureTest {
             main.resolve(
                     "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java")
                 .normalize(),
-            main.resolve("fun/fengwk/kkstudio/platform/harness/tool/HarnessToolCatalogAdapter.java")
+            main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/HarnessToolCatalogAdapter.java")
                 .normalize(),
             main.resolve(
-                    "fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java")
+                    "fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java")
                 .normalize(),
             main.resolve(
                     "fun/fengwk/kkstudio/platform/harness/tool/gateway/"

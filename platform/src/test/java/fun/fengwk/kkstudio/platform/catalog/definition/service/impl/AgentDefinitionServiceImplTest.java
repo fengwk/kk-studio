@@ -21,11 +21,11 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
