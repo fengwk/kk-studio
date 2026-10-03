@@ -52,6 +52,11 @@ export interface SystemSettingsEnvironmentDraft {
   heartbeatTimeoutMillis: DraftNumericField
 }
 
+export interface SystemSettingsNetworkDraft {
+  proxyUrl: string
+  noProxyHosts: string
+}
+
 export interface ComfyuiIntegrationDraft {
   enabled: boolean
   baseUrl: string
@@ -137,6 +142,7 @@ export interface SystemSettingsSectionsDraft {
   tool: SystemSettingsToolDraft
   aiRuntime: SystemSettingsAiRuntimeDraft
   environment: SystemSettingsEnvironmentDraft
+  network: SystemSettingsNetworkDraft
   integrations: SystemSettingsIntegrationsDraft
   storageMedia: SystemSettingsStorageMediaDraft
   advanced: SystemSettingsAdvancedDraft
@@ -179,6 +185,10 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
     environment: {
       maxResourceBytes: dto.environment.maxResourceBytes,
       heartbeatTimeoutMillis: dto.environment.heartbeatTimeoutMillis,
+    },
+    network: {
+      proxyUrl: dto.network.proxyUrl ?? '',
+      noProxyHosts: dto.network.noProxyHosts,
     },
     integrations: integrationsToDraft(dto.integrations),
     storageMedia: {
@@ -346,6 +356,10 @@ export function assembleSettingsUpdate(
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),
       heartbeatTimeoutMillis: requiredLong(draft.environment.heartbeatTimeoutMillis),
+    },
+    network: {
+      proxyUrl: nullableText(draft.network.proxyUrl),
+      noProxyHosts: draft.network.noProxyHosts.trim(),
     },
     integrations: {
       comfyui: {

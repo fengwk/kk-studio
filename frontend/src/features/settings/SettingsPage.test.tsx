@@ -77,19 +77,21 @@ async function tabByName(name: string) {
 }
 
 describe('SettingsPage general tab + notifications', () => {
-  it('renders every top-level settings tab', async () => {
+  // 页签顺序直接来自 schema，网络位于环境之后、集成之前。
+  it('renders every top-level settings tab in schema order', async () => {
     renderSettings()
-    for (const name of [
+    await tabByName('网络')
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       '常规',
+      '插件',
       'AI 运行时',
       '工具与权限',
       '环境',
+      '网络',
       '集成',
       '存储与媒体',
       '高级',
-    ]) {
-      expect(await tabByName(name)).toBeInTheDocument()
-    }
+    ])
   })
 
   it('distinguishes an off setting from browser permission that is already granted', () => {
