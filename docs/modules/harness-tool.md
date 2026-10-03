@@ -25,7 +25,7 @@
 ToolCall normalized = call.validateFor(descriptor);
 ```
 
-该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 inputSchema 归一化数字字符串与可缺省 null，最后由 `InputValidator` 严格校验。参数名、required、类型和附加属性规则均取自 schema。参数改变时返回新的 ToolCall，执行、审批与历史动作渲染使用该返回值；原始 function call 保存在模型结果中供 wire replay。
+该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 inputSchema 归一化数字字符串与可缺省 null，最后由 `InputValidator` 严格校验。参数名、required、类型和附加属性规则均取自 schema。参数改变时返回新的 ToolCall，执行、审批与历史动作渲染使用该返回值。
 
 同一入口在主源码的五个边界各调用一次，因为各处看到的参数必须一致：Planner 校验 Provider wire 上那条 raw call 可按 schema 归一化，历史动作渲染按同一份归一化参数生成语义动作，durable `ToolInvocation` 入库时校验一次，transient `ToolInvocationRequest` 在权限 preflight、审批预览与执行之前固化归一化副本，Contributor SPI 的 `ToolExecutionRequest` 构造时再校验一次。原始 function call 仍原样保存在模型结果与 assistant history 中，供审计与 wire replay。
 

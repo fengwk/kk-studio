@@ -3,7 +3,7 @@
 一条命令在本机拉起可用的 Studio：[compose.yaml](compose.yaml) 里的 `app` 由
 [Dockerfile](Dockerfile) 构建成 Spring Boot Fat JAR 镜像，同时服务 UI、API 和 SPA
 fallback；`postgres` 保存全部 durable 数据；`minio` 提供 S3 兼容对象存储，`minio-init`
-创建私有 bucket。UI 与 API 由同一 App 服务；Environment Daemon 独立安装。
+创建私有 bucket；Environment Daemon 独立安装。
 
 需要让 Agent 操作本机文件、命令或检索时，再单独安装
 [Environment Daemon](../../docs/operations/environment-daemon.md)。隔离测试栈、分布式
@@ -12,13 +12,15 @@ fallback；`postgres` 保存全部 durable 数据；`minio` 提供 S3 兼容对�
 ## 前置条件
 
 - Docker Engine 与 Docker Compose v2（`docker compose version` 可用）。
-- 首次构建需要拉取镜像并下载 Maven 与 npm 依赖；本机不需要 JDK 或 Node。
+- 首次构建需要拉取镜像并下载 Maven 与 npm 依赖。
 - 默认宿主端口 `8080`、`5432`、`9000` 未被占用。
 
 MinIO server 的平台限制、mc 本地构建与源码许可见
 [开发栈 MinIO 依赖](../dependencies/minio-client/README.md)；ARM 宿主需要 amd64 模拟能力。
 
 ## 启动并验证
+
+以下命令均在仓库根目录执行。
 
 ```bash
 docker compose -f deploy/local/compose.yaml up -d --build --wait
@@ -55,7 +57,7 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Harness API | <http://localhost:8080/api/harness/threads> 等 |
+| Canvas / Catalog API | <http://localhost:8080/api/canvases>、<http://localhost:8080/api/ai/catalog/providers> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码 `kk_studio`） |
 | MinIO S3 API | <http://localhost:9000> |
@@ -130,7 +132,7 @@ docker compose -f deploy/local/compose.yaml down -v
 
 `down -v` 没有额外确认提示，会同时删除数据库与对象存储数据；没有独立备份就无法恢复。
 它不是升级或连接排错的默认步骤。下次启动从空数据重新执行 Flyway 与 bucket 初始化。
-确认没有残留监听：
+确认没有残留监听（按当前配置的宿主端口核对，默认 8080/5432/9000）：
 
 ```bash
 docker compose -f deploy/local/compose.yaml ps -a

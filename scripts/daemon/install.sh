@@ -312,7 +312,7 @@ parse_install_options() {
     case "$option" in
       --gateway-uri | --registration-token | --registration-token-file | --java-home | --data-dir | --note | \
         --bash-executable | --lsp-config | --version) ;;
-      *) fail "unknown option: unexpected argument (value omitted)" ;;
+      *) fail "unknown option: unexpected argument (value not echoed)" ;;
     esac
     if option_seen "$option"; then
       fail "duplicate option: $option"
@@ -1267,7 +1267,7 @@ uninstall_linux() {
   echo "Removed:   $UNIT_PATH"
   echo "Removed:   $INSTALLED_JAR"
   echo "Preserved: the registration token file and the daemon data directory (default \$HOME/.kk-studio)"
-  echo "Preserved: nothing else under \$HOME/.config/kk-studio or \$HOME/.kk-studio was touched"
+  echo "Preserved: no other file under \$HOME/.config/kk-studio or \$HOME/.kk-studio was changed"
 }
 
 uninstall_darwin() {
@@ -1348,7 +1348,7 @@ main() {
       cmd_uninstall "$@"
       ;;
     *)
-      echo "ERROR: unknown command (value omitted)" >&2
+      echo "ERROR: unknown command (value not echoed)" >&2
       usage_error
       ;;
   esac

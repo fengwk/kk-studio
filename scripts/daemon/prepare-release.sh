@@ -87,10 +87,13 @@ Staged assets:
   LICENSE                             Apache License 2.0
   THIRD_PARTY_NOTICES                 third-party component notices
 
-Requires a JDK 21 (JAVA_HOME_21, JAVA_HOME, or one JDK's java/jar on PATH) and a
-daemon JAR already built by `mvn -pl harness/daemon -am clean package`.
+Requires a JDK 21 (JAVA_HOME_21, JAVA_HOME, or one JDK's java/jar on PATH), a Git
+checkout, sha256sum, and a daemon JAR already built by
+`mvn -pl harness/daemon -am clean package`. <release-tag> must equal the JAR's
+packaged version (v<Implementation-Version>).
 
-Assets are always staged under harness/daemon/target/release.
+Assets are always staged under harness/daemon/target/release. Each run first
+removes and rebuilds that directory, deleting any other files in it.
 EOF
 }
 

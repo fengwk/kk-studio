@@ -451,9 +451,16 @@ async function main(argv) {
   const args = parseArgs(argv)
   if (args.help) {
     console.log(`Usage: node scripts/dev/verify/e2e/run-matrix.mjs [options]
-  --base-url --base-url-b --frontend-url --real --with-tools --with-branch
-  --with-canvas-storage --with-canvas-function --distributed
-  --only <id> --level L1/L2/L3/L4/L5 --list --docs --report-root DIR`)
+  --base-url URL --base-url-b URL --frontend-url URL
+  --real --with-tools --with-branch --with-canvas-storage --with-canvas-function
+  --distributed
+  --only CASE_ID (repeatable) --level L1/L2/L3/L4/L5 (repeatable)
+  --daemon-env NAME   Daemon environment name for tool cases
+  --report-root DIR   Report directory (default: reports/e2e)
+  --no-report         Run cases without writing a report
+  --list              List registered cases with level, id and requirements
+  --docs              List registered cases with each case's docs
+  -h, --help          Show this help`)
     return 0
   }
   if (args.list || args.docs) {
@@ -588,7 +595,7 @@ void pathToFileURL
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (err) => {
-    console.error(err)
+    console.error(`ERROR: ${err?.message ?? err}`)
     process.exit(2)
   },
 )
