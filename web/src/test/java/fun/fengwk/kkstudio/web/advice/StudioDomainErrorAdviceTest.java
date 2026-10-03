@@ -78,7 +78,7 @@ class StudioDomainErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("agent model 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("Agent Model 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",
