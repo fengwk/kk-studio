@@ -1,25 +1,15 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import layoutConfig from './playwright.layout.config'
 
 describe('playwright layout config', () => {
   it('enables retain-on-failure trace to capture initial failure diagnostics without retries', () => {
-    // 布局测试在未开启重试的环境下运行，配置必须为 retain-on-failure 才能在首轮失败时落盘 trace.zip。
-    // 若配置为 on-first-retry，在 retries=0 或首次超时崩溃时不会留存任何 trace 现场。
+    // 零重试环境也必须保留首轮失败的 trace，不能依赖 on-first-retry。
     expect(layoutConfig.use?.trace).toBe('retain-on-failure')
-    expect(layoutConfig.use?.trace).not.toBe('on-first-retry')
-
-    const source = readFileSync(path.resolve(__dirname, 'playwright.layout.config.ts'), 'utf8')
-    expect(source).toContain("trace: 'retain-on-failure'")
-    expect(source).not.toContain("trace: 'on-first-retry'")
   })
 
   it('captures screenshots only on failure to assist layout error diagnosis', () => {
+    // 失败截图补充 DOM 与网络时间线，成功用例不保留额外诊断文件。
     expect(layoutConfig.use?.screenshot).toBe('only-on-failure')
-
-    const source = readFileSync(path.resolve(__dirname, 'playwright.layout.config.ts'), 'utf8')
-    expect(source).toContain("screenshot: 'only-on-failure'")
   })
 
   it('preserves default layout test execution and webServer behaviors without loosening thresholds', () => {
