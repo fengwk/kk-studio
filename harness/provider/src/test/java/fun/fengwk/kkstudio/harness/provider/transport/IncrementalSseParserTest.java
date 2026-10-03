@@ -422,6 +422,76 @@ class IncrementalSseParserTest {
     assertEquals(TransportErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
+  /** 测试意图：无冒号的 data 是空值而非未知字段，裸 event 也必须保留为空事件名。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"data\n\n", "event\ndata\n\n"})
+  void bare_fields_dispatch_empty_data(String input) {
+    String eventName = input.startsWith("event") ? "" : null;
+    assertEquals(List.of(new ServerSentEvent(eventName, "")), parseChunked(input, 1));
+  }
+
+  /** 测试意图：裸 data 在首行和续行都贡献空行，多行拼接不得丢失空值或额外分发。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"data\ndata: tail\n\n", "data: head\ndata\ndata: tail\n\n"})
+  void bare_data_preserves_multiline_boundaries(String input) {
+    String expectedData = input.startsWith("data\n") ? "\ntail" : "head\n\ntail";
+    assertEquals(List.of(new ServerSentEvent(null, expectedData)), parseChunked(input, 1));
+  }
+
+  /** 测试意图：空 event（有无冒号）覆盖本事件的旧名称，且不泄漏到下一事件。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"event", "event:", "event: "})
+  void empty_event_overrides_previous_name(String emptyEvent) {
+    assertEquals(
+        List.of(new ServerSentEvent("", "value"), new ServerSentEvent(null, "next")),
+        parseChunked("event: previous\n" + emptyEvent + "\ndata: value\n\ndata: next\n\n", 1));
+  }
+
+  /** 测试意图：不足三字节的普通字段前缀在 EOF 正常刷新，未知字段不产生回调。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"d", "da"})
+  void short_non_bom_prefix_flushes_without_events(String input) {
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
+    feedString(parser, input);
+    assertEquals(List.of(), events);
+    parser.flush();
+    assertEquals(List.of(), events);
+    parser.flush();
+    assertEquals(List.of(), events);
+  }
+
+  /** 测试意图：EOF 刷新的普通前缀仍受字节限制，不能因 BOM 探测缓冲而被丢弃。 */
+  @Test
+  void short_non_bom_prefix_is_counted_at_eof() {
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser =
+        new IncrementalSseParser(new HttpSseLimits(1, 1024, 1024, 1024), events::add);
+    feedString(parser, "da");
+    assertEquals(List.of(), events);
+    TransportException error = assertThrows(TransportException.class, parser::flush);
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("SSE line size exceeded limit", error.getMessage());
+    assertEquals(List.of(), events);
+  }
+
+  /** 测试意图：一或两字节的截断 BOM 是非法 UTF-8，EOF 必须拒绝且零回调。 */
+  @ParameterizedTest
+  @ValueSource(ints = {1, 2})
+  void truncated_bom_fails_closed_at_eof(int length) {
+    List<ServerSentEvent> events = new ArrayList<>();
+    IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
+    byte[] bom = {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
+    for (int i = 0; i < length; i++) {
+      parser.feed(bom, i, 1);
+      assertEquals(List.of(), events);
+    }
+    TransportException error = assertThrows(TransportException.class, parser::flush);
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("Malformed UTF-8 in SSE stream", error.getMessage());
+    assertEquals(List.of(), events);
+  }
+
   private static List<ServerSentEvent> parseAll(String input) {
     List<ServerSentEvent> events = new ArrayList<>();
     IncrementalSseParser parser = new IncrementalSseParser(HttpSseLimits.DEFAULT, events::add);
