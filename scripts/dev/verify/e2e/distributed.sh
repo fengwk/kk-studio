@@ -2,7 +2,7 @@
 # scripts/dev/verify/e2e/distributed.sh — 双节点分布式测试栈单一生命周期入口
 #
 # 子命令：
-#   up          构建镜像（可跳过）、启动完整栈并等待 health/READY
+#   up          构建镜像（app/daemon 可跳过）、启动完整栈并等待 health/READY
 #   status      打印容器、两个 App health 与 Environment 状态
 #   logs        打印容器日志（默认全部服务，可用参数过滤）
 #   disconnect-db-a|reconnect-db-a
@@ -54,9 +54,10 @@ usage() {
 Usage: scripts/dev/verify/e2e/distributed.sh <command> [arguments]
 
 Commands:
-  up [--skip-build]      Build images unless --skip-build, start the stack and
+  up [--skip-build]      Build images, start the stack and
                          wait for dependency health, both app healthchecks and
-                         both daemon READY projections.
+                         both daemon READY projections. --skip-build skips only
+                         app/daemon images; the shared MinIO client is still built.
   status                 Print container state, both app health endpoints and
                          the public Environment projections.
   logs [services...]     Print the last DISTRIBUTED_LOG_TAIL lines (default 200).
@@ -163,8 +164,11 @@ cmd_up() {
   if [ "$skip_build" = "false" ]; then
     build_images
   else
-    step "Skipping image build (--skip-build)"
+    step "Skipping app/daemon image builds (--skip-build)"
   fi
+
+  step "Building shared MinIO client image (using cached layers)"
+  "${COMPOSE[@]}" build minio-init
 
   step "Starting distributed stack"
   "${COMPOSE[@]}" up -d --wait --no-build
