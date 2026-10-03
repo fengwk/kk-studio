@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -664,6 +665,155 @@ class EnvironmentServiceImplTest {
     assertThrows(
         AiVersionConflictException.class,
         () -> service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "other-token", "0"));
+  }
+
+  /** 意图：导入 create 返回 false 时冒泡，不留下半成品。 */
+  @Test
+  void importEnvironmentPropagatesCreateFailure() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    when(repo.existsByName("imported")).thenReturn(false);
+    when(repo.getByRegistrationToken("token-1")).thenReturn(null);
+    when(repo.create(any())).thenReturn(false);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        IllegalStateException.class, () -> service.importEnvironment("imported", "token-1"));
+  }
+
+  /** 意图：并发插入触发唯一约束竞争时映射为业务重复错误。 */
+  @Test
+  void importEnvironmentMapsDuplicateKeyToDuplicate() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    when(repo.existsByName("imported")).thenReturn(false);
+    when(repo.getByRegistrationToken("token-1")).thenReturn(null);
+    when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiDuplicateException.class, () -> service.importEnvironment("imported", "token-1"));
+  }
+
+  /** 意图：目标行不存在时 lockById 返回 null 必须 404。 */
+  @Test
+  void updateRegistrationTokenRejectsMissingEnvironment() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    when(repo.lockById(ENV_ID)).thenReturn(null);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "new-token", "0"));
+  }
+
+  /** 意图：token 与当前值一致时幂等成功返回，且不写库。 */
+  @Test
+  void updateRegistrationTokenIsIdempotentWhenUnchanged() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    when(repo.lockById(ENV_ID)).thenReturn(environment("old-token", 0L));
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    EnvironmentCardDTO card =
+        service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "old-token", "0");
+
+    assertEquals("old-token", card.getRegistrationToken());
+    verify(repo, never()).updateById(any(), anyLong());
+  }
+
+  /** 意图：CAS 失败且重读发现行已消失时按 404 语义失败。 */
+  @Test
+  void updateRegistrationTokenCasLossWithMissingRowThrowsNotFound() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    Environment env = environment("old-token", 0L);
+    when(repo.lockById(ENV_ID)).thenReturn(env);
+    when(repo.updateById(env, 0L)).thenReturn(false);
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "new-token", "0"));
+  }
+
+  /** 意图：CAS 失败但行仍在（版本已前进）时按版本冲突失败。 */
+  @Test
+  void updateRegistrationTokenCasLossWithNewerVersionThrowsConflict() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    Environment env = environment("old-token", 0L);
+    when(repo.lockById(ENV_ID)).thenReturn(env);
+    when(repo.updateById(env, 0L)).thenReturn(false);
+    when(repo.getById(ENV_ID)).thenReturn(environment("newer-token", 2L));
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "new-token", "0"));
+  }
+
+  /** 意图：唯一 token 竞争触发约束异常时映射为业务重复错误。 */
+  @Test
+  void updateRegistrationTokenMapsDuplicateKeyToDuplicate() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    Environment env = environment("old-token", 0L);
+    when(repo.lockById(ENV_ID)).thenReturn(env);
+    when(repo.updateById(env, 0L)).thenThrow(new DuplicateKeyException("dup"));
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiDuplicateException.class,
+        () -> service.updateRegistrationToken(EnvironmentId.of(ENV_ID), "new-token", "0"));
+  }
+
+  private static Environment environment(String registrationToken, long version) {
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setRegistrationToken(registrationToken);
+    env.setVersion(version);
+    env.setCreateTime(NOW);
+    env.setUpdateTime(NOW);
+    return env;
   }
 
   private static EnvironmentConnection connection(List<EnvironmentEvent> events) {

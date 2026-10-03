@@ -31,21 +31,39 @@ final class AgentProviderMutationFactory {
   }
 
   AgentProvider newProvider(String name, AgentProviderEditablePropertiesDTO properties) {
-    Mutation mutation = newMutation(properties, name, null, null, true);
+    Mutation mutation = newMutation(properties, name, null, null, false);
     AgentProvider provider = new AgentProvider();
     provider.setConnectionGenerationId(UUID.randomUUID());
     apply(provider, mutation);
     return provider;
   }
 
+  /** 普通 CRUD 更新：null/空白凭据视为保留原值（WRITE_ONLY 编辑语义）。 */
   void update(AgentProvider provider, AgentProviderEditablePropertiesDTO properties) {
+    update(provider, properties, true);
+  }
+
+  /** 导入式覆盖：null/空白凭据表示文件事实为“无凭据”，必须清空而非沿用旧值。 */
+  void importUpdate(AgentProvider provider, AgentProviderEditablePropertiesDTO properties) {
+    update(provider, properties, false);
+  }
+
+  /** 校验名称并返回 canonical 值，供导入路径按名称做 upsert 定位。 */
+  String canonicalName(String name) {
+    return requireName(name);
+  }
+
+  private void update(
+      AgentProvider provider,
+      AgentProviderEditablePropertiesDTO properties,
+      boolean preserveMissingCredential) {
     Mutation mutation =
         newMutation(
             properties,
             provider.getName(),
             provider.getCredential(),
             provider.getConfigJson(),
-            false);
+            preserveMissingCredential);
     boolean protocolChanged =
         !Objects.equals(provider.getProviderType(), mutation.providerType())
             || !Objects.equals(provider.getBaseUrl(), mutation.baseUrl())
@@ -72,7 +90,7 @@ final class AgentProviderMutationFactory {
       String fallbackName,
       String existingCredential,
       String existingConfigJson,
-      boolean creating) {
+      boolean preserveMissingCredential) {
     if (properties == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -82,7 +100,7 @@ final class AgentProviderMutationFactory {
       throw new AiValidationException(RESOURCE, RESOURCE + " providerType must not be blank");
     }
     String credential = editableSupport.trimToNull(properties.getCredential());
-    if (!creating && credential == null) {
+    if (preserveMissingCredential && credential == null) {
       credential = existingCredential;
     }
     String description = editableSupport.trimToNull(properties.getDescription());

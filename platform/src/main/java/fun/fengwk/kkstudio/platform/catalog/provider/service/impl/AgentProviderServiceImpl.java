@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
 /** 全局 provider CRUD。 */
@@ -40,19 +41,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   @Override
   @Transactional
   public AgentProviderDTO createProvider(AgentProviderCreateDTO createDTO) {
-    String name = createDTO == null ? null : createDTO.getName();
-    AgentProvider provider = providerMutationFactory.newProvider(name, createDTO);
-    try {
-      if (!agentProviderRepository.create(provider)) {
-        throw new IllegalStateException("create agent provider failed");
-      }
-    } catch (DuplicateKeyException error) {
-      // 创建直接依赖 name 主键的幂等唯一约束；同名已存在时数据库拒绝，不预先查询。
-      throw new AiDuplicateException(
-          RESOURCE, "agent provider name already exists: " + provider.getName(), error);
-    }
-    AgentProvider loaded = agentProviderRepository.getByName(provider.getName());
-    return agentProviderConverter.convert(loaded);
+    return insertProvider(createDTO == null ? null : createDTO.getName(), createDTO);
   }
 
   @Override
@@ -66,6 +55,42 @@ public class AgentProviderServiceImpl implements AgentProviderService {
     AgentProvider provider = providerGuard.requireProvider(name);
     ensureExpectedVersion(provider, name, rawExpected, expected);
     providerMutationFactory.update(provider, updateDTO);
+    return persistUpdate(provider, name, rawExpected, expected);
+  }
+
+  @Override
+  @Transactional
+  public AgentProviderDTO importProvider(
+      String name, AgentProviderEditablePropertiesDTO properties) {
+    String canonicalName = providerMutationFactory.canonicalName(name);
+    AgentProvider existing = agentProviderRepository.getByName(canonicalName);
+    if (existing == null) {
+      return insertProvider(canonicalName, properties);
+    }
+    // 同名覆盖：以读取到的当前版本做 CAS，null/空白凭据按文件事实清空（与普通 update 的保留语义相反）。
+    long expected = existing.getVersion();
+    providerMutationFactory.importUpdate(existing, properties);
+    return persistUpdate(existing, canonicalName, CatalogVersions.format(expected), expected);
+  }
+
+  private AgentProviderDTO insertProvider(
+      String name, AgentProviderEditablePropertiesDTO properties) {
+    AgentProvider provider = providerMutationFactory.newProvider(name, properties);
+    try {
+      if (!agentProviderRepository.create(provider)) {
+        throw new IllegalStateException("create agent provider failed");
+      }
+    } catch (DuplicateKeyException error) {
+      // 创建直接依赖 name 主键的幂等唯一约束；同名已存在时数据库拒绝，不预先查询。
+      throw new AiDuplicateException(
+          RESOURCE, "agent provider name already exists: " + provider.getName(), error);
+    }
+    AgentProvider loaded = agentProviderRepository.getByName(provider.getName());
+    return agentProviderConverter.convert(loaded);
+  }
+
+  private AgentProviderDTO persistUpdate(
+      AgentProvider provider, String name, String rawExpected, long expected) {
     if (!agentProviderRepository.updateByName(provider, expected)) {
       AgentProvider reread = agentProviderRepository.getByName(name);
       if (reread == null) {

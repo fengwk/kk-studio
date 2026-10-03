@@ -12,9 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
@@ -28,9 +26,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -47,7 +42,6 @@ import java.util.List;
 @Component
 public class ConfigSyncApplier {
 
-  private final AgentProviderRepository providerRepository;
   private final AgentProviderService providerService;
   private final AgentModelRepository modelRepository;
   private final AgentModelService modelService;
@@ -91,18 +85,8 @@ public class ConfigSyncApplier {
 
   private void applyProviders(List<ConfigSyncParser.ProviderSpec> providers) {
     for (ConfigSyncParser.ProviderSpec spec : providers) {
-      AgentProvider existing = providerRepository.getByName(spec.name());
-      if (existing == null) {
-        AgentProviderCreateDTO create = new AgentProviderCreateDTO();
-        copyProvider(spec.properties(), create);
-        create.setName(spec.name());
-        providerService.createProvider(create);
-      } else {
-        AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
-        copyProvider(spec.properties(), update);
-        update.setExpectedVersion(CatalogVersions.format(existing.getVersion()));
-        providerService.updateProvider(spec.name(), update);
-      }
+      // 导入是恢复文件业务事实：使用显式导入命令，凭据为 null 表示清空而非沿用旧值。
+      providerService.importProvider(spec.name(), spec.properties());
     }
   }
 
@@ -167,16 +151,6 @@ public class ConfigSyncApplier {
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。
     dto.setExpectedVersion(update.expectedVersion());
     systemSettingsService.update(dto);
-  }
-
-  private static void copyProvider(
-      AgentProviderEditablePropertiesDTO source, AgentProviderEditablePropertiesDTO target) {
-    target.setDescription(source.getDescription());
-    target.setProviderType(source.getProviderType());
-    target.setBaseUrl(source.getBaseUrl());
-    target.setCredential(source.getCredential());
-    target.setModelCallTimeoutMillis(source.getModelCallTimeoutMillis());
-    target.setModelCallIdleTimeoutMillis(source.getModelCallIdleTimeoutMillis());
   }
 
   private static void copyModel(

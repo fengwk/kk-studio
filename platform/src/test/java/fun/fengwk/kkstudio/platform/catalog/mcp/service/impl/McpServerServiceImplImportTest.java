@@ -124,6 +124,60 @@ class McpServerServiceImplImportTest {
   }
 
   @Test
+  void newServerCreateFailureIsRejected() {
+    when(repository.getForUpdate("mcp")).thenReturn(Optional.empty());
+    when(repository.create(any())).thenReturn(false);
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null));
+  }
+
+  @Test
+  void newServerDiscoveryStatusCasConflictIsRejected() {
+    when(repository.getForUpdate("mcp")).thenReturn(Optional.empty());
+    when(repository.create(any())).thenReturn(true);
+    when(repository.updateDiscoveryStatus("mcp", 0L, McpDiscoveryStatus.AVAILABLE))
+        .thenReturn(false);
+
+    assertThrows(
+        AiVersionConflictException.class,
+        () ->
+            service.importServer(
+                "mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(tool("mcp_mcp_echo"))));
+  }
+
+  @Test
+  void existingServerWithoutDiscoveryCountsPersistedTools() {
+    McpServer existing = existing(0L);
+    when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
+    when(repository.update(existing, 0L)).thenReturn(true);
+    when(repository.listTools("mcp")).thenReturn(List.of(tool("mcp_mcp_old")));
+
+    McpServerDTO dto = service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null);
+
+    assertEquals("UNVERIFIED", dto.getDiscoveryStatus());
+    assertEquals(1, dto.getToolCount());
+  }
+
+  @Test
+  void existingServerDiscoveryStatusCasConflictIsRejected() {
+    McpServer existing = existing(0L);
+    when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
+    when(repository.update(existing, 0L)).thenReturn(true);
+    when(repository.listTools("mcp")).thenReturn(List.of());
+    when(repository.selectReferencedToolNames()).thenReturn(List.of());
+    when(repository.updateDiscoveryStatus("mcp", 1L, McpDiscoveryStatus.AVAILABLE))
+        .thenReturn(false);
+
+    assertThrows(
+        AiVersionConflictException.class,
+        () ->
+            service.importServer(
+                "mcp", URL, Map.of(), Boolean.TRUE, 30_000L, List.of(tool("mcp_mcp_new"))));
+  }
+
+  @Test
   void existingServerReplacesToolsAndMarksAvailable() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
