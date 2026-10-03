@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
@@ -200,6 +201,7 @@ public class McpServerServiceImpl implements McpServerService {
   }
 
   @Override
+  @Transactional
   public McpServerDTO importServer(
       String name,
       String url,
@@ -229,7 +231,10 @@ public class McpServerServiceImpl implements McpServerService {
         for (McpTool tool : discoveredTools) {
           repository.insertTool(tool);
         }
-        repository.updateDiscoveryStatus(canonicalName, 0L, McpDiscoveryStatus.AVAILABLE);
+        if (!repository.updateDiscoveryStatus(canonicalName, 0L, McpDiscoveryStatus.AVAILABLE)) {
+          throw new AiVersionConflictException(
+              RESOURCE, CatalogVersions.format(0L), CatalogVersions.format(server.getVersion()));
+        }
         server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
       }
       return McpServerConverter.convert(
@@ -241,7 +246,9 @@ public class McpServerServiceImpl implements McpServerService {
     existing.setDiscoveryStatus(McpDiscoveryStatus.UNVERIFIED);
     if (!repository.update(existing, expected)) {
       throw new AiVersionConflictException(
-          RESOURCE, CatalogVersions.format(expected), CatalogVersions.format(existing.getVersion()));
+          RESOURCE,
+          CatalogVersions.format(expected),
+          CatalogVersions.format(existing.getVersion()));
     }
     long updatedVersion = expected + 1;
     if (discoveredTools != null) {

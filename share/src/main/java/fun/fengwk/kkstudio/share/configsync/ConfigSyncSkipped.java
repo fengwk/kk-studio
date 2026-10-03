@@ -5,9 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * 导入时被明确跳过的条目：按 CONTRACT.md 使用字符串 kind，reason 不含任何配置值或凭据。
- */
+/** 导入时被明确跳过的条目：kind 为字符串，reason 不含任何配置值或凭据。 */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

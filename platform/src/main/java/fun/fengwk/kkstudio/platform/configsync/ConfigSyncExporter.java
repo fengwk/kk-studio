@@ -28,8 +28,8 @@ import java.util.Set;
 /**
  * 把一次快照按引用选择导出为纯结构 YAML 文档。
  *
- * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、Provider generation、连接/发现状态等运行态事实；凭据、registrationToken
- * 与 MCP headers 按原值导出，{@code ${VAR}} 不解析。
+ * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、Provider generation、连接/发现状态等运行态事实；凭据、registrationToken 与 MCP
+ * headers 按原值导出，{@code ${VAR}} 不解析。
  */
 @AllArgsConstructor
 @Component
@@ -72,7 +72,8 @@ public final class ConfigSyncExporter {
 
     List<Object> skills = new ArrayList<>();
     for (SkillPackage pkg : snapshot.skillPackages()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.getPackageName()))) {
+      if (selected.contains(
+          ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.getPackageName()))) {
         skills.add(exportSkillPackage(pkg));
       }
     }
@@ -95,7 +96,8 @@ public final class ConfigSyncExporter {
     putIfNotEmpty(document, ConfigSyncKind.MCP_SERVERS, mcpServers);
 
     if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, "settings"))) {
-      SystemSettingsSectionsDTO sections = systemSettingsCodec.toSections(snapshot.settings().settings());
+      SystemSettingsSectionsDTO sections =
+          systemSettingsCodec.toSections(snapshot.settings().settings());
       document.put(ConfigSyncKind.SETTINGS.wireValue(), yaml.toMap(sections, "settings"));
     }
 
@@ -103,7 +105,8 @@ public final class ConfigSyncExporter {
   }
 
   private Map<String, Object> exportProvider(AgentProvider provider) {
-    ModelCallTimeoutPolicy timeout = providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+    ModelCallTimeoutPolicy timeout =
+        providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("name", provider.getName());
     putIfNotNull(map, "description", provider.getDescription());

@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.service;
 
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
-
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 
 import java.util.List;
 

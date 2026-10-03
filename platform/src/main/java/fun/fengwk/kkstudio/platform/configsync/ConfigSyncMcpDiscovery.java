@@ -14,8 +14,8 @@ import java.util.Objects;
 /**
  * 配置同步的 MCP 工具发现准备。
  *
- * <p>生产装配用 {@code new McpToolDiscovery()}；发现是网络 I/O，必须在数据库写事务之外执行。失败不伪造工具结果：返回 {@code null}
- * 表示该 server 只保存配置并保持 {@code UNVERIFIED}。
+ * <p>生产装配用 {@code new McpToolDiscovery()}；发现是网络 I/O，必须在数据库写事务之外执行。失败不伪造工具结果：返回 {@code null} 表示该
+ * server 只保存配置并保持 {@code UNVERIFIED}。
  */
 @Component
 public class ConfigSyncMcpDiscovery {

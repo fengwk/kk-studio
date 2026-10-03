@@ -99,8 +99,11 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     String canonicalName = validateName(name);
     String token = validateRegistrationToken(registrationToken);
     if (environmentRepository.existsByName(canonicalName)) {
-      throw new AiDuplicateException(
-          RESOURCE, "environment name already exists: " + canonicalName);
+      throw new AiDuplicateException(RESOURCE, "environment name already exists: " + canonicalName);
+    }
+    if (environmentRepository.getByRegistrationToken(token) != null) {
+      // 不回显 token 值，只报告冲突资源。
+      throw new AiDuplicateException(RESOURCE, "environment registrationToken already in use");
     }
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
@@ -112,7 +115,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
-          RESOURCE, "environment name already exists: " + canonicalName, error);
+          RESOURCE, "environment name or registrationToken already exists", error);
     }
     Environment created = environmentRepository.getById(env.getId());
     return toCardDto(created, true);
