@@ -140,6 +140,9 @@ docker build \
   --build-arg "KK_STUDIO_MAVEN_BUILD_OPTS=${CANVAS_TEST_BUILD_MAVEN_OPTS:-}" \
   "$REPO_ROOT"
 
+step "Building the shared MinIO client image (using cached layers)"
+"${COMPOSE[@]}" build minio-init
+
 step "Starting isolated dependencies and waiting for health checks"
 if [[ "$WITH_APP" == "true" ]]; then
   # app 以 service_completed_successfully 等待一次性的 minio-init，因此 --wait 能收敛。
