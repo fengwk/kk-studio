@@ -1,6 +1,6 @@
 # 内置 Bash 的行为验证
 
-修改命令执行、输出捕获或终态处理时，需要分别验证进程是否收敛、输出是否保真、协议是否只提交一次终态。
+修改 `process.exec` 命令执行、输出捕获或终态处理时，需要分别验证进程是否收敛、输出是否保真、协议是否只提交一次终态。
 这三件事由不同层负责，不能用“收到了失败结果”代替“后代进程已经退出”。
 工具契约见[内置工具设计](../modules/builtin-tools-design.md)，运行与安装见
 [Environment Daemon](environment-daemon.md)。
@@ -26,7 +26,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/runtime -am test \
 ```
 
 Daemon 的重点类是 `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScopeCrossPlatformTest`、
-`ProcessScopeStateTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、
+`ProcessScopeHelperFailureTest`、`PosixProcessGroupTest`、`ProcessScopeStateTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、
 `OutputSpoolTest`、`TextOutputStoreTest` 和 `DaemonRuntimeTest`。只筛选某类时仍保留 `-am` 与
 `-Dsurefire.failIfNoSpecifiedTests=false`，并检查目标模块的 Surefire XML 确实执行了目标用例；
 上游模块没有同名测试不应导致失败，但目标用例缺失也不能当作通过。
@@ -73,7 +73,8 @@ POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_J
   `commandCanTrapTerminationBeforeTheForceKill` 验证。超时夹具先等命令就绪屏障，再触发生产超时任务，
   避免把 helper 冷启动速度误当成超时语义。
 - 许可前取消、许可与派生竞争、并发终止、状态损坏、身份核验和私有目录清理：由 `ProcessScopeTest`
-  与 `ProcessScopeStateTest` 验证。发过信号不等于收敛，不可判定时必须如实报告失败。
+  验证；`ProcessScopeStateTest` 验证状态文件读写与失败处理。
+  检查终止后的存活状态与身份证据，无法判定收敛时报告失败。
 - 不依赖平台 shell 的进程层级与 stdin/duplex 语义：由 `ProcessScopeCrossPlatformTest`
   使用真实 Java 进程和原生 pid 验证。LSP 使用同一个范围的 `startDuplex` 模式，stdin/stdout/stderr 保持独立，
   相关启动失败与关闭清理由 `LspClientTest`、`LspClientPoolConcurrencyTest` 验证。
@@ -88,6 +89,8 @@ keeper 被外部强杀后的 POSIX 兜底依赖 Linux/WSL `/proc` 成员枚举�
 负责内联预算、有界预览和全文捕获；
 [`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java)
 负责私有存储与发布。
+默认全文捕获预算为 1 GiB，耗尽后继续排空输出并计数。全文发布优先原子改名，不支持时使用普通改名；
+文件编辑提交的原子替换要求则见[文件变更验证](builtin-mutation-tests.md#原子提交权限并发和取消)。
 
 | 情况 | 主要证据与预期 |
 | --- | --- |
@@ -100,8 +103,8 @@ keeper 被外部强杀后的 POSIX 兜底依赖 Linux/WSL `/proc` 成员枚举�
 
 `detailsJson.textOutput` 的 `path`、`captureTruncated`、`captureFailed`、`totalBytes` 与 `totalLines`
 是判断结果是否完整的事实，不按文本里的 “limit” 等字样猜测截断。私有目录被外部删除时降级为预览；
-当前调用不自愈、不重试。文件通道写入、flush/close 抛 IOException 的具体分支仍缺确定性故障夹具，
-不能用“发布失败用例已通过”宣称所有 I/O 失败都被覆盖。
+当前调用返回降级结果；排查时同时检查预览、捕获状态和 staging 清理。
+需要验证文件通道写入或 flush/close 异常时，使用能触发该分支的故障夹具并检查本次覆盖报告。
 
 [`DaemonRuntimeTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)
 验证超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出；
@@ -134,8 +137,8 @@ Windows 必须用 `--bash-executable` 指定 Git Bash：裸名 `bash` 可能命�
 
 helper 是独立 JVM，默认不进入主覆盖数据。矩阵启用
 `-Dkk-studio.process-scope.helper-coverage=true`，收集 `target/jacoco-helper/*.exec`。
-合并作业校验三平台 class 文件一致，再合并数据；门禁要求以下七类全部出现，**合计**行覆盖率 ≥90%，
-不是逐类 ≥90%：`ProcessScope`、`ProcessScopeHelper`、`PosixProcessGroup`、`ProcessScopeState`、
-`WindowsJobScope`、`WindowsCommandLine`、`BashCapability`。单平台数字与同一次矩阵的合并数字必须分开报告。
+合并作业校验三平台 class 文件一致，再合并数据。核心类清单、合计行覆盖率计算与阈值由
+[gate-core-coverage.py](../../scripts/dev/verify/process-scope/gate-core-coverage.py) 定义；
+单平台数字与同一次矩阵的合并数字分别报告。
 
 终端折叠、计时文案与渲染回退不是 Daemon 的职责，以上测试不提供前端展示证据。

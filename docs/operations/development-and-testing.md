@@ -87,7 +87,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 只格式化本次改动的模块 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
-| 隔离栈基础设施 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 的 Canvas 契约阻塞见 [deploy/test](../../deploy/test/README.md) |
+| 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
 | 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
 | 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`python3 scripts/dev/verify/repository/check-sensitive-data.py` |
@@ -100,6 +100,10 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 日常改动先做静态检查与受影响模块的编译/定向测试，再按风险选择更接近真实环境的验证。
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
+
+内置工具的定向测试、平台条件与报告判断分别见
+[Read](builtin-read-tests.md)、[文件变更](builtin-mutation-tests.md)、[检索](builtin-search-tests.md)、
+[Bash](builtin-bash-tests.md)、[LSP](builtin-lsp-tests.md) 和 [Task/Thread Join](builtin-task-tests.md)。
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -127,8 +131,9 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 ### Daemon 安装脚本回归
 
 在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。
-Unix fixtures 替代网络与服务管理命令，真实执行安装器、SHA 校验、文件替换与终端交互；
-覆盖 latest/固定版本、失败保留旧安装、升级复用配置以及无仓库安装。不注册真实 systemd/launchd 服务。
+Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与终端交互，
+验证 latest/固定版本、预检失败保留安装、升级复用配置、受管身份与无 checkout 安装。
+测试不注册真实 systemd/launchd 服务。
 Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
 
 ```powershell
@@ -136,16 +141,9 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daem
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
 ```
 
-该套件不注册任务，检查真实 ScheduledTasks 定义、ACL、Java argv 和生产进程捕获。Java 探测独立
-捕获 stdout/stderr，以真实退出码判断执行成功；`java -version` 在 stderr 上输出是正常行为，
-JAR 的身份校验仍只接受 stdout。回归包含非零退出、双流大输出和 Java 选项环境变量恢复。
-
-参数保真回归使用安装器的真实应用参数 serializer，经 `java -jar probe.jar` 进入生产
-`DaemonArguments.decode`（夹具直接编译生产源码），逐 token 检查中文、emoji、空参数、
-引号与尾随反斜杠；stdout 使用 Base64，避免断言通道本身的编码干扰。夹具工作目录包含
-中文与空格，编译、打包和运行只传相对 ASCII 路径，匹配生产任务的启动方式。
-通用 Windows 命令行 quoting 仍有独立的未编码 ASCII 原生回归与 golden 测试。
-任务对象断言检查安装目录 WorkingDirectory、相对 JAR 名与编码参数，不注册真实任务。
+该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
+应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
+验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
 
 只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
@@ -180,29 +178,17 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 
 ### JaCoCo
 
-根 POM 提供 JaCoCo `0.8.11`：`prepare-agent` 注入 test JVM，`test` 阶段执行 `report`，报告位于各
-模块的 `target/site/jacoco/`。[`harness/common`](../../harness/common/pom.xml)、
-[`harness/mcp`](../../harness/mcp/pom.xml)、[`harness/tool`](../../harness/tool/pom.xml)、
-[`harness/environment`](../../harness/environment/pom.xml)、
-[`harness/environment-server`](../../harness/environment-server/pom.xml)、
-[`harness/runtime`](../../harness/runtime/pom.xml)、
-[`harness/contributor-api`](../../harness/contributor-api/pom.xml)、
-[`harness/builtin`](../../harness/builtin/pom.xml)、
-[`harness/provider`](../../harness/provider/pom.xml)、[`platform`](../../platform/pom.xml)、
-[`project`](../../project/pom.xml)、[`plugins/minimax-mavis`](../../plugins/minimax-mavis/pom.xml)、
-[`plugins/canvas-media`](../../plugins/canvas-media/pom.xml) 和 [`web`](../../web/pom.xml)
-在各自 POM 中把 JaCoCo `check` 绑定到 `verify`，line coverage 下限为 `0.90`，个别类要求 `1.00`。
-多数模块按 `CLASS` include 只检查当前关键类，[`harness/mcp`](../../harness/mcp/pom.xml) 与
-[`project`](../../project/pom.xml) 则按 `BUNDLE` include 检查子包：
+根 [pom.xml](../../pom.xml) 的 JaCoCo 为测试 JVM 注入 agent，在 `test` 阶段生成各模块的
+`target/site/jacoco/`。配置了 `check` 的模块在 `verify` 阶段执行覆盖率门禁；
+检查范围、CLASS/BUNDLE 口径与阈值以对应模块 POM 为准，定向测试报告只代表选中的集合。
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
 find . -path '*/target/site/jacoco/index.html' -print
 ```
 
-普通 `mvn test` 只生成报告；低于门禁的 line coverage 会让 `mvn verify` 的 `jacoco:check` 失败。
-branch coverage 作为参考指标，具体数字以对应模块的 `target/site/jacoco/jacoco.csv` 为准，被检查的
-类清单与各自阈值以模块 POM 的 jacoco 配置为准。
+关键逻辑改动查看本次报告的行覆盖率与未覆盖路径，分支覆盖率作为参考；
+低于模块配置的门禁会使 `verify` 失败。不要把静态检查、跳过测试或其它平台的结果算作本次覆盖。
 
 ### Fat JAR
 
@@ -212,12 +198,12 @@ branch coverage 作为参考指标，具体数字以对应模块的 `target/site
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean package
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.2.jar
 ```
 
 `distribution` profile 在 `prepare-package` 安装 Node 与 npm、对 [`frontend/`](../../frontend/) 执行
 `npm ci` 与 `npm run build`，并把产物打进 `BOOT-INF/classes/static`；普通 `mvn test` /
-`mvn package` 不激活它。
+`mvn package` 不激活它。提取并加载 convention4j agent 的启动命令见
+[构建可运行产物](deployment.md#构建可运行产物)。
 
 ## Frontend 检查
 
@@ -239,8 +225,7 @@ npm --prefix frontend run coverage
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
 
-[vite.config.ts](../../frontend/vite.config.ts) 的 coverage include 是 `src/**/*.{ts,tsx}`，排除
-`src/main.tsx` 和 `src/test-setup.ts`，lines、functions、branches、statements 阈值均为 `80%`，
+[vite.config.ts](../../frontend/vite.config.ts) 定义 coverage include、exclude 与各项阈值，
 报告目录是 `frontend/coverage/`。[test-setup.ts](../../frontend/src/test-setup.ts) 为每个测试清空
 localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、dialog、
 scrollIntoView 和 React Flow layout 提供确定性 stub。
@@ -268,7 +253,8 @@ payload 只含 settings、不物化任何委派运行树元数据。
 通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
 这些是 jsdom 回归，不替代真实浏览器验证。
 
-真实 `read` 工具的 L4 用例 `tool.read_turn` 断言非 YOLO tool turn 的审批链路，以及 durable
+真实 `read` 工具的 L4 用例 `tool.read_turn` 需要 `--real --with-tools --with-canvas-storage`，
+断言非 YOLO tool turn 的审批链路，以及 durable
 `tool_result` 内联的完整 `path`/`ends_with_newline`/`range` 投影。read 文本窗口恒在终态链路为 read
 身份加宽的内联预算（320 KiB / 2020 行）内，因此不产生 resource 预览；工具结果外部化到全局 Blob 与
 session 归属由 platform 集成测试守卫，E2E 没有真实模型 tool→blob 端到端证据。
@@ -286,10 +272,10 @@ docker compose -f deploy/reliability/compose.yaml config --quiet
 [`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
 [`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、常驻依赖 health、非 root runtime、PostgreSQL、一次性
 `minio-init` bucket 初始化与 HTTP mock smoke 组合成一个可清理入口；不启用 app 时只等待常驻依赖 `healthy`，再用
-`compose run --rm` 执行初始化。`--with-app` 的目标是验证全局 Blob、Canvas Resource、
-signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat，但脚本仍读取已不存在的 Canvas
-`version/baseVersion` 并发送旧 command，当前不能作为这条应用链路通过的证据。
-具体阻塞与可用的基础设施步骤见 [deploy/test](../../deploy/test/README.md)。
+`compose run --rm` 执行初始化。`--with-app` 验证全局 Blob、Canvas revision 与 typed command
+变化集、signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
+Chat command batch 使用 `owner.type=CHAT` 与 `owner.chatId`；画布使用 `CREATE_NODE`、
+`SET_NODE_FUNCTION` 和语义组前置条件。完整检查与清理语义见 [deploy/test](../../deploy/test/README.md)。
 
 Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应用在 `/actuator/health` 通过后
 再检查浏览器入口。文档、敏感数据与 Git 空白检查：
@@ -336,7 +322,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
 | `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用 Canvas 真实链路 UI 用例（编辑保存、重开读回、fake 运行产出资源、跨节点引用后再运行），该用例只绑定 `fake-image`，不会提交付费 Function |
-| `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--ui`、`--with-canvas-*` 组合 |
+| `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行 Playwright UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
@@ -554,13 +540,11 @@ Daemon。
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
 | `catalog` | 16 | `GET /api/ai/catalog/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
-| `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/decimal version | 0 | `<=1500ms` | `>=5` | 20 |
+| `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/规范十进制 revision | 0 | `<=1500ms` | `>=5` | 20 |
 
-**Canvas 场景目前被响应契约阻塞**：
-[`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 的 `validateCanvasCreateResponse`
-要求 `canvas.version`，但当前 [`CanvasDocumentDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasDocumentDTO.java)
-只有 `revision`。上表描述脚本现有断言与阈值，不表示完整基线可通过；
-必须先对齐 runner 和测试，再以新报告判断性能，不能把字段校验失败解释为吞吐或延迟回归。
+阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。
+这是本机免费回归基线，不是容量规划；以本次 `reports/performance/latest/report.md` 的样本、
+错误、延迟、吞吐与清理结果判断是否通过，字段契约失败应先按正确性问题处理。
 
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas worker 按 run title prefix 清理已知和扫描出的资源；正常、失败、超时、INT、
@@ -685,9 +669,10 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。
 
 ### 共享数据库重建
 
-这不是默认开发或升级步骤。健康且与当前镜像兼容的 PostgreSQL/S3 继续复用；
-只有数据所有者明确批准数据范围、停机窗口与恢复方案时才执行重建。
-新库只回灌 Catalog，其余运行数据不回灌；旧数据虽保留在快照/备份中，也不能从新入口直接访问。
+这是独立的数据库维护流程：验证备份、冻结原库、建立空库，再初始化 schema 和回灌 Catalog。
+它不是自动迁移。健康且与镜像兼容的数据面继续复用；
+只有数据所有者批准数据范围、停机窗口与恢复方案时才执行重建。
+恢复入口与对象存储保护要求见[恢复与重建](deployment.md#恢复与重建)。
 
 数据库维护由三个独立入口组成：
 
@@ -744,38 +729,34 @@ export VPS_POSTGRES_DATABASE=
 
 #### 数据范围
 
-只迁移以下三张表：
+导出包持有以下三张 Catalog 表：
 
 1. `agent_provider`
 2. `agent_model`
 3. `agent_definition`
 
-以下内容不迁移：
-
-- `environment` 与注册令牌。维护后必须重新创建 Environment Card，并用新令牌替换各主机上的
-  Daemon token 文件；只有有效令牌重连后才会重新生成 `environment_connection`；
-- `skill_package`、`plugin_credential`、`mcp_server`、`mcp_tool`；
-- Chat、Canvas、Project、Issue、Harness、Storage 等运行数据；
-- `system_setting` 数据；V1 初始化会创建默认配置。
-
-详细语义见 [Schema 模块](../modules/schema.md#修改-v1-的代价)。
+全库备份与冻结库持有其余数据，包括 Chat、Canvas、Project、Issue、Harness、Blob 引用和设置。
+新库只回灌 Catalog，其它运行数据无法从新入口访问。维护后重新创建 Environment、轮换各主机
+Daemon token，并按需登记 Skill Package、Plugin credential、MCP 与系统设置；V1 初始化提供默认设置。
 
 #### 执行
 
-1. 导出并记录输出的 `package_dir`：
+1. 批准维护窗口后停止全部 App/Worker、preview 与 Daemon，等待在途调用收敛，
+   保持整个维护过程停写。从与目标部署相同的提交执行导出预检，确认列结构、包目录与数据范围，
+   再导出并记录 `package_dir`：
 
 ```bash
 ./scripts/ops/export-agent-catalog.sh --dry-run
 ./scripts/ops/export-agent-catalog.sh
 ```
 
-导出只承认当前 V1 的三张 catalog 表及其精确列集合。任何旧结构、额外列或缺失列都会在写产物前
-fail closed；常驻维护入口不包含旧结构判别、字段投影或工具标识迁移。三张表的指纹、行数和
+导出要求三张 Catalog 表与当前 schema 的精确列集合匹配；多列、缺列或缺表会在写产物前失败。
+预检失败时保留原服务与数据，先由数据所有者决定维护方案。三张表的指纹、行数和
 COPY 数据来自同一个 `psql` 进程里的 `REPEATABLE READ READ ONLY` 事务，因此成功的包对应
 这一个快照，而不是多次独立查询拼起来的结果。输出目录为 `0700`，
 `catalog.sql`、`manifest.json` 与 `sha256sums.txt` 均为 `0600`。
 
-2. 备份并重建空库：
+2. 确认仓库外备份位置、访问权限、空间与恢复能力，预检后备份并建立空库：
 
 ```bash
 ./scripts/ops/reset-database.sh --dry-run
@@ -792,13 +773,16 @@ reset 在任何改库操作前检查权限、目标库状态和其他会话；�
 
 确认后写入并验证 custom-format `pg_dump`。这份备份是 dump 开始时的一致时间点，不保证包含
 dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` 才是 reset 完成前的最新旧库。
-空库保持原 owner/encoding/locale/tablespace/connection limit。创建或改名失败时自动删除不完整空库并
-恢复原库名。默认备份目录为
+备份经 `pg_restore --list` 检查并生成 SHA-256；它验证备份格式，不代替隔离恢复演练。
+空库保持原 owner/encoding/locale/tablespace/connection limit。
+目标空库就位前失败时，脚本尝试清理不完整空库、解冻并恢复原库名；恢复失败会报告人工处理步骤。
+空库已就位后的初始化、回灌或验收失败不会自动回退。默认备份目录为
 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`。
 
 3. 通过部署侧既有的 schema/Flyway 初始化路径在空库上应用当前
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
 脚本；import 会验证目标列集合以及本地、导出包、`flyway_schema_history` 三方 V1 checksum。
+初始化期间保持对外入口关闭和 Worker 停止，回灌完成前避免向 Catalog 写入。
 
 4. 回灌：
 
@@ -811,10 +795,12 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 恢复事务先排他锁定三张表并复查为空，再按外键顺序 COPY，提交前逐表比对包内指纹；锁超时、并发
 写入、脏表或指纹不符都会整体回滚。失败日志只保留 SQLSTATE 与固定安全类别，不保留行值。
 
-维护流程自身的验收入口是 `python3 -m unittest discover -s scripts/ops/tests`：契约测试把当前 V1 的
-Flyway checksum 固定为断言（V1 变化即导致失败），集成测试在一次性本地 PostgreSQL 容器里跑通
-export、reset 空库、外部 V1 初始化后的 import、错误回滚、owner-only 产物与敏感值不外泄（本机没有
-可用 Docker 时跳过）。改动 V1 后必须重跑这两个入口，再把契约测试里的 checksum 重新固定为新值。
+5. 重新登记 Environment/Daemon 与运行配置，检查 App 健康、Catalog、关键业务和既有 bucket。
+   验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
+
+维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证 checksum、
+export/reset/import、事务回滚、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
+Docker 不可用时跳过的结果不能当作数据库流程通过。
 
 #### 权限、产物与清理
 
@@ -823,7 +809,7 @@ export、reset 空库、外部 V1 初始化后的 import、错误回滚、owner-
   - 非 superuser 角色必须拥有 `CREATEDB`；
   - 非 superuser 角色必须能对原 owner 角色 `SET ROLE`（即拥有其成员资格），否则 `createdb --owner=<原 owner>` 会被拒绝；
   - `pg_dump` 必须能读取库内全部表；备份步骤会在任何数据库变更前验证这一点；
-- **导出与回灌权限**：`export-agent-catalog.sh` 与 `import-agent-catalog.sh` 只需要对三张 catalog 表拥有读/写权限，回灌时还需要读取 `flyway_schema_history`；两者都**不需要**访问维护数据库；
+- **导出与回灌权限**：导出需要读取三张 Catalog 表；回灌需要其读写/锁表权限和 `flyway_schema_history` 读取权限；两者连接目标库；
 - **敏感产物**：catalog 包、冻结快照和全库备份都可能含真实 Provider 凭据；不得提交、粘贴到日志或上传公共存储；
 - **本地产物**：默认都位于 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance`，目录为
   `0700`、文件为 `0600`，也可通过各入口的 `--work-dir` 覆盖；
@@ -857,7 +843,7 @@ Agent modifies dev
 ```
 
 以下变更可能使本机代码与 NAS Worker 不兼容，不能仅凭本机 preview 完成端到端验收；遇到它们时应
-先评估 NAS 镜像切换；V1 不兼容且批准放弃新入口中的旧运行数据时，才在维护窗口重建共享数据库：
+先评估 NAS 镜像切换；若需要空库，由数据所有者按独立维护流程批准数据范围与恢复方案：
 
 - 未合入 `main` 的 Flyway migration 或破坏性 schema 变更；
 - 删除或重命名持久 JSON 字段、数据库枚举值或 wire 字段；
@@ -865,8 +851,8 @@ Agent modifies dev
 - 改变 S3 object key、Blob 引用计数或 cleanup 生命周期；
 - 需要重建镜像与重启 NAS 容器，或使共享 durable 状态在旧镜像下不可读的数据变更。
 
-版本错位本身不是错误，也不要求每次本机修改都先发布镜像；只有实际触发上述不兼容边界时才收敛
-版本。仓库不为旧 NAS 镜像保留兼容 shim。
+同步 preview 与异步 Worker 可以使用不同提交，但必须遵守同一 durable 契约。
+触发上述不兼容边界时先收敛版本，再恢复共享数据面的写入。
 
 源码仓库、Dockerfile 和 image layer 只保存环境变量名与无敏感默认值。数据库、S3、Provider、
 Gateway 和 Daemon registration credential 由 NAS 私密环境文件在运行时注入，本机 preview 的

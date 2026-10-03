@@ -3,7 +3,7 @@
 一条命令在本机拉起可用的 Studio：[compose.yaml](compose.yaml) 里的 `app` 由
 [Dockerfile](Dockerfile) 构建成 Spring Boot Fat JAR 镜像，同时服务 UI、API 和 SPA
 fallback；`postgres` 保存全部 durable 数据；`minio` 提供 S3 兼容对象存储，`minio-init`
-创建私有 bucket。栈内没有 Nginx、没有独立前端容器，也不包含 Environment Daemon。
+创建私有 bucket。UI 与 API 由同一 App 服务；Environment Daemon 独立安装。
 
 需要让 Agent 操作本机文件、命令或检索时，再单独安装
 [Environment Daemon](../../docs/operations/environment-daemon.md)。隔离测试栈、分布式
@@ -100,6 +100,20 @@ PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下�
 普通启动与 `down` 都保留已有卷；启动不会重建健康的 PostgreSQL 或清空 S3 对象。
 `dev`/`e2e`/`canvas-test` 的 profile 与 seed 对应关系见
 [Schema 模块](../../docs/modules/schema.md)，生产 profile 见[部署与运行](../../docs/operations/deployment.md)。
+
+## 更新与数据保护
+
+更新前保存数据库、对象存储和运行配置，确认待运行镜像与 schema 兼容。
+使用同一 Compose project 重新构建并启动 App：
+
+```bash
+docker compose -f deploy/local/compose.yaml up -d --build --wait
+curl -fsS http://127.0.0.1:8080/actuator/health
+```
+
+该命令保留命名卷。健康通过后检查界面与预签名上传/下载；Flyway 校验失败时保留数据并排查
+schema 差异。需要恢复或建立空库时按[部署维护流程](../../docs/operations/deployment.md#恢复与重建)
+执行，不能用删除卷代替备份和恢复。
 
 ## 停止与清理
 

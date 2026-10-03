@@ -4,14 +4,6 @@
 MinIO 与 bucket 初始化、一个可配置 HTTP mock，以及可选的当前 App 镜像。它用于 Canvas
 Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat 的确定性 smoke。
 
-**当前应用 smoke 存在契约阻塞**：`offline-chat.sh --with-app` 在创建画布后读取 `canvas["version"]`，
-后续还发送 `expectedVersion` / `CREATE_RESOURCE_NODE` 并检查 `baseVersion`。当前
-[`CanvasDocumentDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasDocumentDTO.java)
-只提供 `revision`，command/patch 契约见
-[`canvas-api.mjs`](../../scripts/dev/verify/e2e/cases/canvas-api.mjs)。
-因此该模式不能作为当前 Canvas/Chat 链路已通过的证据，需先修复脚本；不带 `--with-app` 的基础设施
-检查不读取这些字段。修复前可按手动步骤保留诊断，用当前 E2E case 验证对应 API，而非降低断言或换旧镜像。
-
 需要本地可用界面时用 [deploy/local](../local/README.md)；可靠性栈、分布式双节点和生产部署见
 [部署与运行](../../docs/operations/deployment.md)。
 
@@ -46,20 +38,24 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 默认应用镜像 tag 为 `kk-studio-app:canvas-test`；同名旧镜像 tag 会被本次构建更新。
 脚本只接受 `--with-app` 与 `-h` / `--help`，其它参数报错退出。
 
-`--with-app` 在步骤 6 之后用仓库内极小 PNG/MP4 fixture 尝试以下应用检查；
-上述契约阻塞会在画布创建后中止，后续项目不能视作实际覆盖：
+`--with-app` 在步骤 6 之后用仓库内极小 PNG/MP4 fixture 检查应用契约：
 
 - 全局 Blob `reserve -> checksummed create-only PUT -> complete`，验证首次写入成功、不同内容的
   重复写入被 MinIO 拒绝、original 字节不变、URL DTO 不暴露 bucket/key；
-- Canvas Resource node、preview signed GET 与 snapshot；
-- 打开 `kk-studio.canvas.function.fake-enabled` 后的 fake image Function node：start、poll、
+- Canvas document/snapshot 的 `revision`，`CREATE_NODE` 挂载 Blob Resource，patch 的变化集、
+  幂等重放不推进 revision，以及 preview signed GET；具体 typed command 契约见
+  [`canvas-api.mjs`](../../scripts/dev/verify/e2e/cases/canvas-api.mjs)；
+- `/api/canvas-functions` 的函数目录与 `SET_NODE_FUNCTION` 的函数名、结构化 args 和
+  `expectedFunction` 前置条件；打开 `kk-studio.canvas.function.fake-enabled` 后的 fake image：start、poll、
   terminal snapshot 替换与 preview signed GET；
 - OpenCLI fake Hub 上的 `gpt-image-2` 与 `seedance2.0fast` 两条 adapter 闭环，验证 GPT Image
   四个、Seedance 六个 durable checkpoint；
-- `dev` seed 的 stub Chat `create Chat/Thread -> USER_MESSAGE -> poll 至 quiescent`，断言
+- `dev` seed 的 stub Chat：创建 Chat，再以 `owner: {type: "CHAT", chatId: ...}` 提交
+  Harness command batch 创建 Thread、发送 `USER_MESSAGE`，poll 至 quiescent，断言
   durable assistant MESSAGE、`TURN_END` 为 `COMPLETED` 且无 `ASSISTANT_ERROR` 条目。
 
-这里没有浏览器登录、真实 provider 或付费请求。
+这条 smoke 使用容器内 mock，不需要浏览器登录或真实 Provider 凭据，也不提交付费请求。
+它定义要检查的范围，不是某次执行的通过记录；检查失败即非零退出并输出诊断。
 
 ## 手动使用
 
