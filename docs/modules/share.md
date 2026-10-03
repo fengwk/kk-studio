@@ -1,8 +1,8 @@
 # Share 模块
 
-`share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖只有 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），不依赖 Spring、PostgreSQL、Flyway、`canvas-core`、`platform` 或 `harness-*`，契约测试可独立运行。
+`share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖为 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），契约测试可独立运行。
 
-它只描述传输契约，不承载领域行为：DTO 不代表领域状态，也不决定持久化结构。领域到 DTO 的映射在 [web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，业务语义（version CAS、幂等键、引用计数、调度）在 [platform](platform.md)、[canvas-core](canvas-core.md)、[canvas-infra](canvas-infra.md) 与 [project](project.md)。
+DTO 表达 HTTP 请求与投影。领域到 DTO 的转换在 [Web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，version CAS、幂等、引用计数与调度由 [Platform](platform.md)、[Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) 与 [Project](project.md) 维护。
 
 ## 严格 JSON 边界
 
@@ -16,7 +16,7 @@
 
 字符串到 UUID 与数字的解析属于 HTTP 边界：[`WebDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 与 [`ProjectDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectDtoMapper.java) 要求 canonical UUID 文本（`UUID.toString()` 的往返必须一致），[`HarnessRuntimeRequestMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java) 与 Project 的 `parseNonNegativeLong` 只接受 canonical decimal（`0|[1-9]\d*`，向上另有 `[1-9]\d*` 的正数形态）且必须能放进 `long`；共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 
-长的 durable 游标在 wire 上保持十进字符串：Canvas document/patch/revision event 的 `revision`、Harness Thread 的 `sequence`、Project/Issue 的 `version`、`nextIssueNumber`、`number`、`sequence`、`nextActivityCursor`、`ordinal`、`budgetAfterOrdinal`、`usedRuns`、`remainingRuns`、`observedActivitySequence`、`remainingExecutionMs` 以及各请求 DTO 的 `expectedVersion` 都是 `String`，[`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java) 与 [`ProjectDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java) 用反射断言这些字段的 Java 类型就是 `String`，避免有人图方便改回 `long` 让 JS 丢精度。
+durable 游标在 wire 上保持十进字符串：Canvas 的 revision、Harness Thread 的 sequence、Project/Issue 的 version、nextIssueNumber、number、sequence、nextActivityCursor、ordinal、budgetAfterOrdinal、usedRuns、remainingRuns、observedActivitySequence、remainingExecutionMs 及请求 expectedVersion 均为 String，以保持 JS 端整数精度。[`CanvasDtoContractTest`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java) 与 [`ProjectDtoContractTest`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java) 反射验证字段类型。
 
 ## 可空字段与安全输出
 
@@ -69,7 +69,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 
 只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
-Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/Skill 再塞进一段展示文本。DTO 同时携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 仍按字符串原样展示，secret 与 Base64 正文不进入 DTO。
+Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
 
 严格程度按用途区分：请求体与对外投影显式拒绝未知字段，纯响应投影（如 `CanvasSnapshotDTO`）与内部嵌套结构不需要重复声明。领域身份使用 sealed interface / record 表达封闭集合（命令、patch 项、资源输入、冲突载荷），普通数据用 Lombok `@Data`。
 
@@ -79,7 +79,7 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/S
 - required-nullable 字段即使为 `null` 也必须序列化，避免客户端把「未返回」当成「无值」。
 - durable 版本与序号在 wire 上永远是十进字符串；`ModelRef` 是 `providerName/modelName`，只在第一个 `/` 处分割，因此模型名本身可以包含斜杠而 provider 名不能。
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
-- Canvas 没有可写的 link 模型：连线与引用全部从 Function args 派生为只读投影，`CanvasSnapshotDTO` 只有 document、nodes、groups 与 references 四个字段，`CanvasPatchDTO` 也只有单个被接受的 `revision` 加节点/分组变化。
+- Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。
 - DTO 不回显 credential、secret 或对象存储内部标识；Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 
@@ -94,7 +94,7 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/S
 
 | 领域 | 测试目录 | 代表测试 |
 | --- | --- | --- |
-| Canvas | [canvas/](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/) | [`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java)：revision 字段类型必须是十进字符串、required-nullable 字段必须显式发 null、`CanvasDocumentDTO` 不得出现 `threadId`，且不存在整图 CAS 游标与可写 link 模型（`expectedVersion`、`baseVersion`、`links`、`CanvasLinkDTO` 均无对应字段或类）、11 个 typed command 集合与核心严格一致 |
+| Canvas | [canvas/](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/) | [`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java)：十进 revision、required-nullable 发射、独立 document 字段、派生引用投影，以及与 Core 一致的 11 个 typed command |
 | Harness Runtime | [ai/runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
 | Project | [project/](../../share/src/test/java/fun/fengwk/kkstudio/share/project/) | [`ProjectDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段、decimal version 与全包 33 个 DTO 字段集合精确匹配 |
 | Catalog | [ai/catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/) | [`ModelRefTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ModelRefTest.java)：canonical 身份解析；[`ToolCatalogDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ToolCatalogDtoContractTest.java)：工具目录契约 |

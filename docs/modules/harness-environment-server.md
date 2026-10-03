@@ -4,7 +4,7 @@
 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
 宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
 
-它是一个纯 Java 模块：生产依赖只有 `harness-common`、`harness-environment` 与 Jackson，不感知 Spring、JDBC、Servlet、JSR-356 或任何产品 DTO，因此整个会话状态机可以在普通单元测试里用内存 fake 完整驱动。宿主的装配位置见 [Platform](platform.md) 与 [Web](web.md)。
+生产依赖为 `harness-common`、`harness-environment` 与 Jackson。会话状态机通过 lease、registration、channel 和 ticket 端口消费宿主能力，可用内存 fake 在普通单元测试中驱动；生产装配见 [Platform](platform.md) 与 [Web](web.md)。
 
 ## 会话建立与租约围栏
 
@@ -30,11 +30,11 @@ close(connectionId)
 
 [`DaemonLeaseStore`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java) 只表达围栏返回值，[`LeaseBindResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java) 以 `Acquired`、`Rejected`、`RetryLater` 三态表达认证与抢占结论；`markReady`、`heartbeat`、`holdsReadyLease` 与建连时的 `hasActiveLeaseToken` 以布尔值表达围栏是否仍然成立。围栏失守时核心按协议错误关闭连接，不尝试自行修复路由。
 
-`Rejected` 与 `RetryLater` 是仅有的两个会写入冻结错误码的路径（`REGISTRATION_REJECTED` 与 `RETRY_LATER`）；存储抛出运行时异常时同样 fail-closed 关闭连接，但错误帧只带说明文本，不冒充这两个码。[`DaemonRegistrationDirectory`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 只做 token 到 `environmentId` 的解析，token 明文不回显。
+`Rejected` 与 `RetryLater` 分别写入 `REGISTRATION_REJECTED` 与 `RETRY_LATER`。存储运行时异常使连接 fail closed，错误帧给出独立说明文本。[`DaemonRegistrationDirectory`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java) 将 token 解析为 environmentId，反馈保持去敏。
 
 ## 调用所有权与并发
 
-调用只按 `(environmentId, invocationId)` 关联。同一 Environment 的多个 invocation 立即发送并并发持有，不存在 per-Environment 并发槽位、队列或容量配置。`invoke` 的前置条件按固定顺序执行：
+调用按 `(environmentId, invocationId)` 关联。同一 Environment 的多个 invocation 并发持有；传输队列负责有界出站，工具执行 admission 由调用层管理。`invoke` 按固定顺序复验：
 
 1. 校验 capability descriptor 与 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 完全一致，并要求 `call.id` 是 canonical UUID；
 2. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
@@ -82,9 +82,9 @@ COMPLETED
 
 - `expire(handle)` 由调用方在自身 deadline 上判定超时：它至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出重放集合，之后到达的 daemon 终态被 tombstone 静默丢弃。
 - 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后以相同 `invocationId` 重放，Daemon journal 负责重放 `STARTED` 与终态而不重复执行副作用。
-- 身份不同的新 Daemon 进程接管该 Environment 时，核心不再接受旧实例作为恢复来源；旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放名下上传，不留给新进程消费。这不证明旧主机上的副作用已停止或回滚。
+- 身份不同的新 Daemon 接管 Environment 时，旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放其上传；新进程从自己的实例事实开始接受调用。旧主机副作用的停止或回滚仍需独立核查。
 - 已终结 invocation 的迟到或重放 `COMPLETED`/`FAILED`/`CANCELLED` 由 tombstone 吸收并静默丢弃，`STARTED`/`PROGRESS` 同样不回调；未知 `invocationId` 的回调按协议违规关闭连接，因为回调只按 `invocationId` 归属，不按连接代际。
-- `STARTED` 若携带 `replayed` 字段只能为 `true`，避免把从未执行过的调用伪装成重放。
+- `STARTED` 的可选 replayed 字段仅允许 true，表示已有 journal 记录的重放。
 
 资源上传控制帧与终态的先后顺序由两端共同保证：Daemon 只在「调用仍活动」与「发送」的临界区内出站控制帧，核心则在终态核对前拒绝一切未就绪、伪造、重复或与申请不符的上传引用。
 
@@ -136,7 +136,7 @@ COMPLETED
 
 测试守卫：
 
-- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 驱动完整状态机，覆盖同环境并发调用、终态唯一、超时 `expire`、队列 `BUSY` 拒绝、同实例重连重放、异实例接管、连接代际接管、上传申请/提交幂等与伪造/漂移拒绝、终态引用核对与清理、握手校验与租约围栏 fail-closed，以及并发回调顺序（阻塞中 partial 不越过后到 terminal、回调内重入 `receive`、listener 抛异常不阻剩余终态、接管时丢弃旧连接排队 partial、回调积压超限 fail-closed）与 `expire` 对终态帧 32 轮真实竞态。
+- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭。
 - [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java)：测试基座，只表达核心真正依赖的窄端口语义，不模拟 SQL 或 WebSocket。
 - [`EnvironmentServerModuleArchitectureTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerModuleArchitectureTest.java)：守卫主源码 import 白名单与 POM 生产依赖白名单。
 

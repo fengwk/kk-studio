@@ -1,12 +1,12 @@
 # 内置工具与异步委派
 
-本文定义内置工具的当前契约，供实现、代码审查和自动化验收使用。环境执行由 Daemon 承担，委派执行复用 Harness；工具描述必须足以让没有历史对话的 Agent 正确使用。先了解[系统设计](../system-design.md)中的 Harness 与 Environment 边界。
+本文说明内置工具的使用与执行契约：环境工具由 Daemon 执行，task 在 Harness 中持久接受委派。工具说明、参数 schema 和实现共同给出一次调用所需的输入。模块分工见[系统设计](../system-design.md)。
 
 ## 环境与路径
 
-Environment 提供宿主事实，不提供默认 cwd。`home` 仅用于展示，不作为项目目录。任务路径来自用户、Issue 或委派提示词；相对本地路径必须提供绝对 `workdir`。子 Agent 按配置继承 Environment，不继承父对话。并行 Thread 不是隔离文件系统。
+Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、Issue 或委派提示词给出；相对本地路径必须提供绝对 `workdir`。子 Agent 按配置继承 Environment，并从自己的对话历史执行；并行 Thread 共享所选宿主文件系统，文件隔离由任务安排与部署决定。
 
-文件能力使用 Java，不依赖 rg/fd；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
+文件能力使用 Java 实现；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
 
 ## 文件读取
 
@@ -37,27 +37,27 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 
 ## 文件变更与搜索
 
-现有文件原子替换须保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 的完整内容按其明确写入契约处理，不做意外内容变换。无法无损编码则拒绝。成功提交后的通知或展示失败不得误报为未修改。diff 只展示真实行变化（含文件末尾换行有无），内联 diff 超过 30 × 1024 个 Java 字符（UTF-16 code unit，非 UTF-8 字节）即截断并显式标注；原行数与新行数的乘积超过 2,000,000 时退化为整段删除加整段新增，仍是真实行。设备、FIFO 等非普通文件必须在 I/O 前拒绝。
+现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。无法无损编码则拒绝。提交成功后，通知或展示故障单独报告。diff 展示真实行变化（含末尾换行），超过 30 × 1024 个 Java 字符（UTF-16 code unit）时截断并标注；裁去公共前后缀后，变更区域的原行数乘新行数超过 2,000,000 时改用整段删除/新增。设备、FIFO 等非普通文件在 I/O 前拒绝。
 
-grep 对完整搜索内容匹配，展示缩略与搜索完整性分开。超时、资源限制和读失败不可报告为无匹配；任意正则不承诺无限输入和固定内存同时成立。Java 实现需明确限制并中断，不能以线程取消假装已经终止不可中断的计算。
+grep 对完整搜索内容匹配，展示缩略与搜索完整性分开。超时、资源限制和读失败各自报告；搜索范围、正则支持与输出上限按能力 schema 和 Daemon 实现校验，取消收尾须等待实际计算终止。
 
 grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、分层规则、否定规则和 .git/info/exclude，支持 .git 文件形式的 worktree。不因调用 workdir 变化而改变同一目标的忽略行为。不引入 Environment 根目录。
 
 ## 命令执行
 
-bash 是显式 workdir 的单次命令，不管理常驻终端。成功、非零退出、超时和取消都收尾并保留已捕获输出。大输出沿用本地日志存储，清晰报告捕获限制和保存失败。取消或失败不代表副作用回滚。终止先温和停止再强制收敛，验证平台差异。提示词不得残留 shell 模板变量或声称错误的实际执行 shell。
+bash 在显式 workdir 中执行一次命令。成功、非零退出、超时和取消都收尾并保留已捕获输出；大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 进程执行范围](harness-daemon.md#进程执行范围)。
 
 ## LSP 生命周期
 
 根据目标文件自动选择服务器并发现项目根；调用方不提供额外 cwd。项目根用于 rootUri/workspaceFolders 和服务器进程目录，不改变文件工具路径规则。仓库边界内选择构建根或最近标记，没有标记回退文件目录，不能跨 worktree 边界错误复用。
 
-Java 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 后的同步不能使已提交修改失败。保留 definition、workspace symbols 和 JDTLS Java 反编译三种工具；源码正文不得被路径替换污染，不用 javap 字节码冒充源码。
+Java 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 的提交与后续同步分别报告。查询提供 definition、workspace symbols 和 JDTLS Java 反编译，正文按语言服务器返回的源码展示。
 
 客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
 
 ## 异步 task
 
-task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 表示在原历史上继续，允许切换 Agent，使用目标配置和权限。继续只允许子 Thread 的持久父发起：父身份取自不可变的父子关系而不是调用参数，且父必须仍然接受本次调用（head 未被推进、未停留在停止边界）。子是否已结清不影响继续——向仍在执行的子追加输入即排队，等它真正的下一次空闲。max_turns 是阶段汇报软预算，不伪装成强制执行上限。
+task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等待下一次空闲。max_turns 是阶段汇报软预算。
 
 持久接受后返回 JSON `{"thread_id":"...","status":"accepted"}`，不等待结果。即时回执不重复 prompt；tool_result 的 details 带 `kind=task.accepted` 供 UI 识别，其 thread_id / status 与回执一致，另附会话与幂等元数据。
 
@@ -69,7 +69,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 Thread 整体空闲要求无待处理命令、无本地适用 Invocation、无 continuation 或到期压缩义务，且全部永久直接子 Thread 都为 `IDLE`。等待审批或人工输入仍属于适用 Invocation；未交付的 join 回执不影响空闲判定。父本地已结束、孩子未空闲时为 `WAITING_CHILDREN`，不空转模型或保留等待线程。嵌套任务按直接父子逐层结清。
 
-内部用工具 invocation ID 唯一标识本次委派，记录父子 Thread、本次执行边界、结果和投递状态；固定归属与每次执行身份分开。复用 Session/Thread/Entry/Command/Work，不建立第二执行引擎。
+内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、执行边界、匹配结果和投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 
 子 Thread 首次转为 `IDLE`、join 匹配、父结果命令入队与父重新变为非空闲在同一数据库事务内完成，没有空闲交接窗口。接受与结果交付使用工具 invocation ID 作为稳定幂等身份；同一忙碌子 Thread 可以接受多个 join，并发额度按非空闲 Thread 而非 join 数量计。Work 的通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢失；join 不另设重投扫描，匹配与交付随生命周期事务推进，停止父的已匹配回执在父接受真实新输入时交付。
 
@@ -79,6 +79,6 @@ Thread 整体空闲要求无待处理命令、无本地适用 Invocation、无 c
 
 逐用例的来源、适用性与对应测试维护在 [内置 Read 测试映射](../operations/builtin-read-tests.md)、[内置 Bash 测试映射](../operations/builtin-bash-tests.md)、[内置检索测试映射](../operations/builtin-search-tests.md)、[内置 LSP 测试映射](../operations/builtin-lsp-tests.md)、[内置 Task 测试映射](../operations/builtin-task-tests.md) 与 [内置文件变更测试映射](../operations/builtin-mutation-tests.md)。
 
-回归覆盖 Unicode/换行/EOF/长行无损续读、权限与提交边界、忽略规则、完整搜索、失败日志、LSP 协议和回收、异步接受/换 Agent/权限/幂等/重启/停止/嵌套/无空闲交接窗口。新测试注明意图；结构化数据放测试资源。核心路径 JaCoCo 行覆盖率目标至少 90%，分支作为参考，平台专属检查不得用跳过宣称通过。
+测试映射按读取、修改、检索、命令、LSP 与 task 分组，覆盖分页边界、失败后的文件/进程状态、协议生命周期及委派接受与交付。自动化入口与覆盖率门禁见 [开发与测试](../operations/development-and-testing.md)。
 
 技术实现和验证分别参考 [Daemon](harness-daemon.md)、[Builtin](harness-builtin.md)、[Runtime](harness-runtime.md) 和 [开发与测试](../operations/development-and-testing.md)。

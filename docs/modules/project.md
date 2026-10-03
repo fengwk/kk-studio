@@ -6,11 +6,11 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 不会因为切换 Agent 重置。先从[系统设计](../system-design.md)理解模块边界；
 完整的事务边界和表关系见[Canvas / Project](../canvas-project.md)。
 
-[`project/`](../../project/pom.xml) 是不依赖宿主的 Maven 模块：领域规则、Issue 用例、
-PostgreSQL 持久化与 REST 调度都在模块内，经
+[`project/`](../../project/pom.xml) 集中提供领域规则、Issue 用例、
+PostgreSQL 持久化与 REST 调度，经
 [`ProjectAutoConfiguration`](../../project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
-装配进宿主应用。模块不实现 HTTP DTO、Environment 校验、Session 深删除与全局 Blob 存储：
-这些跨宿主能力只经下面的端口调用，由 [platform](platform.md) 实现。生产依赖包括
+装配进宿主应用。HTTP DTO 映射由 Web 提供，Environment 校验、Session 深删除与 Blob 操作
+通过下文端口调用 [Platform](platform.md) 的适配。生产依赖包括
 `harness-runtime` 的协议类型（`BranchSettings`、`AcceptedCommands`）与 Spring Boot、MyBatis、Jackson 通用框架，
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
 同时锁定「生产依赖集合精确相等」与 import 白名单。
@@ -31,7 +31,7 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 
 [`port`](../../project/src/main/java/fun/fengwk/kkstudio/project/port) 是模块唯一的对外能力面；
 [`ProjectArchitectureTest`](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
-守卫「主源码不 import platform/web/canvas、pom 不声明宿主模块」这条边界。
+校验主源码与 POM 的依赖方向：Project 使用协议类型和通用框架，宿主实现端口。
 
 | 端口 | 宿主必须提供的语义 | 事务要求 |
 | --- | --- | --- |
@@ -41,20 +41,20 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 | [`DelegatedWorkActivityPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/DelegatedWorkActivityPort.java) | 查询 Thread 委派子树是否仍有未交付工作：宿主按 Thread 持久 `status` 非 `IDLE` 判定，为真时禁止 Run 提前收尾 | 加入协调器已有事务读取 |
 | [`IssueAgentSessionDeletionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueAgentSessionDeletionPort.java) | 深删除该 `Issue + Agent` 名下的 Harness Session 与 Blob 引用 | 在调用方锁序内，逐 owner 调用 |
 
-端口只声明语义，不引入持久化与 Spring 类型：宿主把平台异常收敛为 Project 错误（例如「上传不存在」译为
-not found、「未 READY/已 cleanup」译为 validation），模块内不做第二套翻译。
+端口用领域类型声明语义。宿主适配器将平台异常译为 Project 错误，例如上传不存在为
+not found，未 READY/已 cleanup 为 validation。
 
 ## 工作流配置
 
 [`ProjectWorkflowJsonCodec`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)
 严格解析 `{"states":[...]}`：拒绝重复字段、未知字段、尾随内容和非法类型；编码为确定性 JSON，
 可用于请求指纹。每个 state 使用项目内唯一的大写自然编码（`[A-Z][A-Z0-9_]{0,63}`），
-阶段数量由项目配置决定，不是全局固定枚举。默认流程为 `INIT -> WORK -> DONE`，另含 `BLOCKED`；默认 `WORK` 未绑定 Agent，是人工阶段。
+阶段数量由项目配置决定。默认流程为 `INIT -> WORK -> DONE`，另含 `BLOCKED`；默认 WORK 是人工阶段。
 `INIT`、`BLOCKED`、`DONE` 必须存在；正常边只指向已声明阶段，不通往 `BLOCKED`。
 启用工作阶段须从 `INIT` 可达，且存在到 `DONE` 的正常路径。
 
 [`IssueStateTransitions`](../../project/src/main/java/fun/fengwk/kkstudio/project/domain/IssueStateTransitions.java)
-区分正常转移、业务阻塞与恢复、以及从 `DONE` 显式重开。问卷等待与人工暂停不是工作流状态。
+区分正常转移、业务阻塞与恢复，以及从 DONE 显式重开。问卷等待与人工暂停分别由 Runtime 等待事实和 Issue 暂停字段表达。
 
 ## 预算与运行记录
 
@@ -111,7 +111,15 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 claim、bounded handoff 与 poll 生命周期，
 [`IssueReconciler`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueReconciler.java)
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
-都只是唤醒；租约参数见 [platform](platform.md) 的配置表。
+提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
+
+Work 请求在冲突时用 SQL least 保留较早 due_at 并增加 wake_version。
+Dispatcher 在 Java 中用 Clock 计算重排目标时刻，IssueWorkStore 将该 Instant 传给
+lease-token 围栏更新；SQL 用 least 保留现有 due_at 与目标时刻的较早值，并清空租约。
+实现见 [`IssueControllerDispatcher`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueControllerDispatcher.java)、
+[`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
+及 [`IssueWorkMapper`](../../project/src/main/java/fun/fengwk/kkstudio/project/repo/impl/mapper/IssueWorkMapper.java)。
+此处的 JVM 时间计算与 [Harness Infra](harness-infra.md#work-的-claim--lease--wake) 的数据库时间域各有自己的契约。
 
 ## 错误映射
 
