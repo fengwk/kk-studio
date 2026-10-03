@@ -1,7 +1,7 @@
 # 文档导航
 
-从你要完成的任务出发选择文档。每个主题只有一份事实源；上级文档帮助建立心智模型，
-具体参数和实现细节留在对应模块或运行指南中。
+首次使用从[项目 README](../README.md)开始；理解代码先读[系统设计](system-design.md)。
+模块文档说明具体契约和实现，运行指南提供配置、命令与安全操作路径。
 
 ## 我现在要做什么
 
@@ -16,7 +16,8 @@
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
-| 理解 Canvas / Project 的产品行为与数据约束 | [Canvas、Project 与交互](canvas-project.md)及唯一生产基线 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
+| 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas、Project 与交互](canvas-project.md) |
+| 核对数据库关系、约束与基线 | [Schema](modules/schema.md)及 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
 ## 按代码区域理解系统
@@ -31,7 +32,7 @@
 | [Harness Infra](modules/harness-infra.md) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
 | [Harness Provider](modules/harness-provider.md) | 模型请求、SSE、reasoning replay 和上游错误如何处理？ |
 | [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
-| [Harness Contributor API](modules/harness-contributor-api.md) | Builtin、构建期 Plugin 与 Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
+| [Harness Contributor API](modules/harness-contributor-api.md) | Builtin 与 Plugin 的 Contributor 如何在启动时注册并冻结为 catalog？ |
 | [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
 | [内置工具与异步委派](modules/builtin-tools-design.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
 | [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
@@ -52,7 +53,7 @@
 | [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function ports 如何定义？ |
 | [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
-| [Project](modules/project.md) | 工作流状态、Issue 阶段预算与 Agent Thread 身份如何校验？ |
+| [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
 
 ### 应用边界
