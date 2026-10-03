@@ -19,6 +19,7 @@ import org.eclipse.jgit.transport.Transport;
 import org.eclipse.jgit.transport.TransportHttp;
 import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.http.HttpConnection;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,14 +44,25 @@ import java.security.cert.Certificate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 @Timeout(10)
 class GitHttpConnectionFactoryTest {
+
+  /** 取消观察任务的目标执行器；每个测试方法独享，用完即关闭以模拟 runtime 生命周期。 */
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+  @AfterEach
+  void closeExecutor() {
+    executor.shutdownNow();
+  }
 
   /** 意图：JGit 单一 timeout 不得覆盖分别设置的 connect/read；所有透传方法保留 JDK HTTP/TLS 契约。 */
   @Test
@@ -65,7 +77,7 @@ class GitHttpConnectionFactoryTest {
     raw.inputStream = new ByteArrayInputStream(new byte[] {1, 2});
 
     URL url = createUrl(raw);
-    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor)) {
       HttpConnection connection = factory.create(url, Proxy.NO_PROXY);
 
       assertEquals(60_000, raw.getConnectTimeout());
@@ -133,7 +145,7 @@ class GitHttpConnectionFactoryTest {
   /** 意图：连接与读取失败有稳定、不同的分类并释放连接；超时绝不能进入 exact commit 回退。 */
   @Test
   void classifiesFailuresAndNeverRetriesTimeouts() throws Exception {
-    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(30, 90)) {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor, 30, 90)) {
       RecordingConnection connectFail = new RecordingConnection(null);
       connectFail.connectFailure = new SocketTimeoutException("connect");
       HttpConnection connectConn = factory.create(createUrl(connectFail));
@@ -297,22 +309,22 @@ class GitHttpConnectionFactoryTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          new GitHttpConnectionFactory(0, 1);
+          new GitHttpConnectionFactory(executor, 0, 1);
         });
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          new GitHttpConnectionFactory(-1, 1);
+          new GitHttpConnectionFactory(executor, -1, 1);
         });
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          new GitHttpConnectionFactory(1, 0);
+          new GitHttpConnectionFactory(executor, 1, 0);
         });
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          new GitHttpConnectionFactory(1, -1);
+          new GitHttpConnectionFactory(executor, 1, -1);
         });
   }
 
@@ -341,7 +353,7 @@ class GitHttpConnectionFactoryTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+                  try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor)) {
                     assertThrows(
                         IOException.class,
                         () -> {
@@ -364,11 +376,81 @@ class GitHttpConnectionFactoryTest {
     assertTrue(disconnected.await(2, TimeUnit.SECONDS));
   }
 
+  /** 意图：正常 factory close 取消注入 executor 上的观察任务，不留仍在等待发起线程中断的 watcher。 */
+  @Test
+  void normalCloseStopsCancellationTask() throws Exception {
+    TrackingExecutor tracking = new TrackingExecutor();
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(tracking)) {
+      factory.create(createUrl(new RecordingConnection(null)));
+      assertTrue(tracking.running.await(2, TimeUnit.SECONDS), "watcher must start");
+      factory.close();
+      assertTrue(tracking.terminated.await(2, TimeUnit.SECONDS), "watcher must stop");
+    } finally {
+      tracking.shutdownNow();
+    }
+  }
+
+  /** 意图：runtime 关闭 executor 时观察任务被中断，未完成的真实网络调用被断开，不等 read idle 到期。 */
+  @Test
+  void executorShutdownCancelsInFlightConnection() throws Exception {
+    ExecutorService watcherExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch disconnected = new CountDownLatch(1);
+    RecordingConnection raw = new RecordingConnection(null);
+    URL url = createUrl(raw);
+    raw.onGetResponseCode =
+        () -> {
+          entered.countDown();
+          while (disconnected.getCount() != 0) {
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+          }
+          throw new IOException("closed");
+        };
+    raw.onDisconnect = disconnected::countDown;
+
+    CompletableFuture<Void> done = new CompletableFuture<>();
+    Thread.ofVirtual()
+        .start(
+            () -> {
+              try (GitHttpConnectionFactory factory =
+                  new GitHttpConnectionFactory(watcherExecutor)) {
+                assertThrows(IOException.class, () -> factory.create(url).getResponseCode());
+                done.complete(null);
+              } catch (Throwable error) {
+                done.completeExceptionally(error);
+              }
+            });
+
+    try {
+      assertTrue(entered.await(2, TimeUnit.SECONDS));
+      watcherExecutor.shutdownNow();
+      done.get(2, TimeUnit.SECONDS);
+      assertTrue(disconnected.await(2, TimeUnit.SECONDS));
+    } finally {
+      watcherExecutor.shutdownNow();
+    }
+  }
+
+  /** 意图：executor 已拒绝提交观察任务时，刚建立的连接必须断开，操作以取消失败而不是泄漏连接。 */
+  @Test
+  void rejectedCancellationSubmissionReleasesConnection() throws Exception {
+    ExecutorService rejected = Executors.newVirtualThreadPerTaskExecutor();
+    rejected.shutdownNow();
+    RecordingConnection raw = new RecordingConnection(null);
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(rejected)) {
+      InterruptedIOException error =
+          assertThrows(InterruptedIOException.class, () -> factory.create(createUrl(raw)));
+      assertTrue(error.getMessage().contains("cancelled"));
+      assertEquals(1, raw.disconnectCount.get());
+      assertFalse(GitHttpConnectionFactory.canFallback(error));
+    }
+  }
+
   /** 意图：callback 只为 http/https 配置连接工厂，放行本地 file，其他协议 fail-closed。 */
   @Test
   void callbackConfiguresTransportHttpOnly(@TempDir Path directory) throws Exception {
     try (Repository repo = Git.init().setDirectory(directory.toFile()).call().getRepository();
-        GitHttpConnectionFactory factory = new GitHttpConnectionFactory(1000, 2000)) {
+        GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor, 1000, 2000)) {
       URIish httpUri = new URIish("http://127.0.0.1/test.git");
       try (Transport transport = Transport.open(repo, httpUri)) {
         assertTrue(transport instanceof TransportHttp);
@@ -396,7 +478,7 @@ class GitHttpConnectionFactoryTest {
   /** 意图：调用线程已处于中断状态时，create 立即抛出 InterruptedIOException。 */
   @Test
   void createRejectsInterruptedCallingThread() throws Exception {
-    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor)) {
       RecordingConnection raw = new RecordingConnection(null);
       URL url = createUrl(raw);
       Thread.currentThread().interrupt();
@@ -422,7 +504,7 @@ class GitHttpConnectionFactoryTest {
     URL url1 = createUrl(raw1);
     URL url2 = createUrl(raw2);
 
-    GitHttpConnectionFactory factory = new GitHttpConnectionFactory();
+    GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor);
     factory.create(url1);
     factory.create(url2);
 
@@ -462,7 +544,7 @@ class GitHttpConnectionFactoryTest {
   @Test
   void cancellationDuringCreationReleasesNewConnection() throws Exception {
     RecordingConnection raw = new RecordingConnection(null);
-    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor)) {
       URL closing =
           new URL(
               null,
@@ -477,7 +559,7 @@ class GitHttpConnectionFactoryTest {
       assertThrows(IOException.class, () -> factory.create(closing));
       assertEquals(1, raw.disconnectCount.get());
     }
-    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory(executor)) {
       HttpConnection connection = factory.create(createUrl(raw));
       factory.close();
       assertThrows(IOException.class, connection::connect);
@@ -488,6 +570,51 @@ class GitHttpConnectionFactoryTest {
   @FunctionalInterface
   private interface ThrowingSupplier<T> {
     T get() throws IOException;
+  }
+
+  /** 追踪单个提交任务的启动与终止，用于断言观察任务在 factory close 后确实退出。 */
+  private static final class TrackingExecutor extends AbstractExecutorService {
+    private final ExecutorService delegate = Executors.newVirtualThreadPerTaskExecutor();
+    private final CountDownLatch running = new CountDownLatch(1);
+    private final CountDownLatch terminated = new CountDownLatch(1);
+
+    @Override
+    public void execute(Runnable command) {
+      delegate.execute(
+          () -> {
+            running.countDown();
+            try {
+              command.run();
+            } finally {
+              terminated.countDown();
+            }
+          });
+    }
+
+    @Override
+    public void shutdown() {
+      delegate.shutdown();
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return delegate.shutdownNow();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return delegate.isShutdown();
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return delegate.isTerminated();
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+      return delegate.awaitTermination(timeout, unit);
+    }
   }
 
   private static final class FailingInputStream extends InputStream {

@@ -80,7 +80,8 @@ class CodingCapabilitiesTest {
             workspaceRoot.resolve("skills"),
             workspaceRoot.resolve("cache"),
             workspaceRoot.resolve("staging"),
-            workspaceRoot.resolve("backup"));
+            workspaceRoot.resolve("backup"),
+            executor);
     CodingCapabilities.registerAll(registry, config, lspService, installer, executor, scheduler);
 
     assertEquals(
@@ -899,7 +900,8 @@ class CodingCapabilitiesTest {
             workspaceRoot.resolve("skills"),
             workspaceRoot.resolve("cache"),
             workspaceRoot.resolve("staging"),
-            workspaceRoot.resolve("backup"));
+            workspaceRoot.resolve("backup"),
+            executor);
     SkillSyncCapability capability = new SkillSyncCapability(config(), installer, executor);
 
     String args =

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.skill;
 import static org.junit.jupiter.api.Assertions.*;
 
 import org.eclipse.jgit.api.Git;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,10 +11,20 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Timeout(10)
 class SkillPackageInstallerNetworkTest {
+
+  /** Git 取消观察使用测试自有的 executor；用完即关闭，模拟 runtime 生命周期。 */
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+  @AfterEach
+  void tearDown() {
+    executor.shutdownNow();
+  }
 
   /** 意图：daemon fetch 持续 socket 数据超过短测试 budget 仍可完成原子安装。 */
   @Test
@@ -90,13 +101,14 @@ class SkillPackageInstallerNetworkTest {
     }
   }
 
-  private static SkillPackageInstaller installer(Path root, int readMillis) {
+  private SkillPackageInstaller installer(Path root, int readMillis) {
     return new SkillPackageInstaller(
         root.resolve("skills"),
         root.resolve("cache"),
         root.resolve("staging"),
         root.resolve("backup"),
         1000,
-        readMillis);
+        readMillis,
+        executor);
   }
 }
