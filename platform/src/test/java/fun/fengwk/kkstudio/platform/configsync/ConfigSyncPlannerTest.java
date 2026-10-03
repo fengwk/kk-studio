@@ -4,6 +4,8 @@ import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpServ
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpTool;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.model;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.provider;
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.providerAndModelYaml;
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.skillPackage;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,6 +28,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -38,7 +41,8 @@ import java.util.Optional;
 
 /**
  * 测试意图：锁定 Planner 的外部准备与依赖判定——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
- * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过），Skill 名称先校验且 Git 错误不回显 URL，settings 携带快照版本。
+ * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过），Skill 名称先校验且 Git 错误不回显 URL，Skill re-import 只在 URL
+ * 不变且不丢被引用技能时进行，Agent 未满足依赖逐条给出明确原因，settings 合并后缺依赖 skip / 非法字段拒绝。
  */
 class ConfigSyncPlannerTest {
 
@@ -71,36 +75,28 @@ class ConfigSyncPlannerTest {
     return planner.plan(parser.parse(yamlText));
   }
 
-  private static final String PROVIDER_AND_MODEL =
-      "providers:\n"
-          + "  - name: p\n"
-          + "    providerType: openai\n"
-          + "models:\n"
-          + "  - providerName: p\n"
-          + "    name: m\n"
-          + "    modelId: gpt\n"
-          + "    config:\n"
-          + "      limit: {context: 1000, output: 100}\n"
-          + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
-          + "      pricing:\n"
-          + "        currency: USD\n"
-          + "        pricingTier: t\n"
-          + "        serviceTier: s\n"
-          + "        serviceTierMultiplier: 1\n"
-          + "        version: v\n"
-          + "        inputPerMillionTokens: 0\n"
-          + "        outputPerMillionTokens: 0\n"
-          + "        cacheReadPerMillionTokens: 0\n"
-          + "        cacheWritePerMillionTokens: 0\n"
-          + "        cacheWriteLongPerMillionTokens: 0\n"
-          + "        reasoningPerMillionTokens: 0\n"
-          + "      defaultVariant: default\n"
-          + "      variants:\n"
-          + "        - id: default\n";
+  private static final String PROVIDER_AND_MODEL = providerAndModelYaml();
+
+  /** 拼接一个 document 内的 Agent 条目；configLines 使用 6 空格缩进。 */
+  private static String agent(String name, String model, String configLines) {
+    return "  - name: " + name + "\n    model: " + model + "\n    config:\n" + configLines;
+  }
+
+  private static String agentConfigLines() {
+    return "      tools: []\n      skills: []\n      subagents: []\n";
+  }
 
   private static boolean skipped(List<ConfigSyncSkipped> skipped, String kind, String name) {
     return skipped.stream()
         .anyMatch(entry -> kind.equals(entry.getKind()) && name.equals(entry.getName()));
+  }
+
+  private static String reason(List<ConfigSyncSkipped> skipped, String kind, String name) {
+    return skipped.stream()
+        .filter(entry -> kind.equals(entry.getKind()) && name.equals(entry.getName()))
+        .map(ConfigSyncSkipped::getReason)
+        .findFirst()
+        .orElseThrow();
   }
 
   @Test
@@ -115,12 +111,7 @@ class ConfigSyncPlannerTest {
             + "  - name: mcp\n"
             + "    url: https://mcp.example.com/mcp\n"
             + "agents:\n"
-            + "  - name: a\n"
-            + "    model: p/m\n"
-            + "    config:\n"
-            + "      tools: [tool_x]\n"
-            + "      skills: []\n"
-            + "      subagents: []\n";
+            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MCP_SERVERS, "mcp")));
@@ -164,42 +155,13 @@ class ConfigSyncPlannerTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of("tool_x"));
 
     String yamlText =
-        "providers:\n"
-            + "  - name: p\n"
-            + "    providerType: openai\n"
-            + "models:\n"
-            + "  - providerName: p\n"
-            + "    name: m\n"
-            + "    modelId: gpt\n"
-            + "    config:\n"
-            + "      limit: {context: 1000, output: 100}\n"
-            + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
-            + "      pricing:\n"
-            + "        currency: USD\n"
-            + "        pricingTier: t\n"
-            + "        serviceTier: s\n"
-            + "        serviceTierMultiplier: 1\n"
-            + "        version: v\n"
-            + "        inputPerMillionTokens: 0\n"
-            + "        outputPerMillionTokens: 0\n"
-            + "        cacheReadPerMillionTokens: 0\n"
-            + "        cacheWritePerMillionTokens: 0\n"
-            + "        cacheWriteLongPerMillionTokens: 0\n"
-            + "        reasoningPerMillionTokens: 0\n"
-            + "      defaultVariant: default\n"
-            + "      variants:\n"
-            + "        - id: default\n"
+        PROVIDER_AND_MODEL
             + "mcpServers:\n"
             + "  - name: mcp\n"
             + "    url: https://mcp.example.com/mcp\n"
             + "    enabled: false\n"
             + "agents:\n"
-            + "  - name: a\n"
-            + "    model: p/m\n"
-            + "    config:\n"
-            + "      tools: [tool_x]\n"
-            + "      skills: []\n"
-            + "      subagents: []\n";
+            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     verify(mcpDiscovery, never()).discoverOrNull(any());
@@ -234,20 +196,203 @@ class ConfigSyncPlannerTest {
     String yamlText =
         "skillPackages:\n"
             + "  - packageName: pkg\n"
-            + "    repositoryUrl: https://example.com/x.git\n"
+            + "    repositoryUrl: https://example.com/pkg.git\n"
             + "    branch: main\n"
             + "    currentCommit: "
             + "a".repeat(40)
             + "\n";
     ConfigSyncPlan plan = plan(yamlText);
 
-    ConfigSyncSkipped skip =
-        plan.skipped().stream()
-            .filter(entry -> "skillPackages".equals(entry.getKind()))
-            .findFirst()
-            .orElseThrow();
-    assertEquals("cannot restore exact commit", skip.getReason());
-    assertFalse(skip.getReason().contains("user:pass"));
+    assertEquals("cannot restore exact commit", reason(plan.skipped(), "skillPackages", "pkg"));
+    assertFalse(reason(plan.skipped(), "skillPackages", "pkg").contains("user:pass"));
+  }
+
+  @Test
+  void existingSkillPackageIsRescannedAndAdvertised() {
+    // 既有 Skill Package 的 repositoryUrl 不变时按 exact commit 重扫 manifest，并把发布技能放入可用依赖池。
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(skillPackage("pkg", "s1", "s2")),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    when(skillGitCache.scanManifest("pkg", "a".repeat(40)))
+        .thenReturn(List.of(new SkillManifestEntry("s2", "published")));
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "skillPackages:\n"
+            + "  - packageName: pkg\n"
+            + "    repositoryUrl: https://example.com/pkg.git\n"
+            + "    branch: main\n"
+            + "    currentCommit: "
+            + "a".repeat(40)
+            + "\n"
+            + "agents:\n"
+            + agent(
+                "a",
+                "p/m",
+                "      tools: []\n      skills:\n        - packageName: pkg\n          name: s2\n"
+                    + "      subagents: []\n");
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertEquals(1, plan.skillPackages().size());
+    assertEquals(
+        List.of("s2"),
+        plan.skillPackages().get(0).manifest().stream().map(SkillManifestEntry::name).toList());
+    verify(skillGitCache).ensureCommit("pkg", "https://example.com/pkg.git", "a".repeat(40));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+  }
+
+  @Test
+  void existingSkillPackageRepositoryUrlChangeIsSkipped() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(skillPackage("pkg", "s")),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText =
+        "skillPackages:\n"
+            + "  - packageName: pkg\n"
+            + "    repositoryUrl: https://example.com/other.git\n"
+            + "    branch: main\n"
+            + "    currentCommit: "
+            + "a".repeat(40)
+            + "\n";
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertEquals(
+        "repositoryUrl is immutable for an existing package",
+        reason(plan.skipped(), "skillPackages", "pkg"));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void existingSkillPackageLosingReferencedSkillIsSkipped() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(skillPackage("pkg", "s1", "s2")),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    when(skillGitCache.scanManifest("pkg", "a".repeat(40)))
+        .thenReturn(List.of(new SkillManifestEntry("s1", "kept")));
+    when(agentDefinitionRepository.existsReferencingSkill("pkg", "s2")).thenReturn(true);
+
+    String yamlText =
+        "skillPackages:\n"
+            + "  - packageName: pkg\n"
+            + "    repositoryUrl: https://example.com/pkg.git\n"
+            + "    branch: main\n"
+            + "    currentCommit: "
+            + "a".repeat(40)
+            + "\n";
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertTrue(reason(plan.skipped(), "skillPackages", "pkg").contains("s2"));
+    assertTrue(plan.skillPackages().isEmpty());
+  }
+
+  @Test
+  void enabledMcpDiscoveryImportsDiscoveredToolsAndSatisfiesAgents() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    when(mcpDiscovery.discoverOrNull(any())).thenReturn(List.of(mcpTool("tool_x", "mcp")));
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "mcpServers:\n"
+            + "  - name: mcp\n"
+            + "    url: https://mcp.example.com/mcp\n"
+            + "agents:\n"
+            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertEquals(1, plan.mcpServers().size());
+    assertEquals(1, plan.mcpServers().get(0).discoveredTools().size());
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MCP_SERVERS, "mcp")));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+  }
+
+  @Test
+  void invalidMcpServerConfigIsRejectedBeforeDiscovery() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText = "mcpServers:\n" + "  - name: mcp\n" + "    url: not-a-url\n";
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
+    verify(mcpDiscovery, never()).discoverOrNull(any());
+  }
+
+  @Test
+  void agentUnresolvedDependenciesAreSkippedWithDistinctReasons() {
+    // 既有 provider/model/skill 使依赖可满足；每个 Agent 只留一个未满足依赖，验证原因定位准确。
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(
+                    ConfigSyncFixtures.agent(
+                        "existing",
+                        "p",
+                        "m",
+                        ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
+                List.of(skillPackage("pkg", "s1")),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText =
+        "agents:\n"
+            + agent("missing_model", "q/x", agentConfigLines())
+            + agent(
+                "invalid_skill",
+                "p/m",
+                "      tools: []\n      skills:\n        - null\n      subagents: []\n")
+            + agent(
+                "missing_pkg",
+                "p/m",
+                "      tools: []\n      skills:\n        - packageName: ghost\n          name: s\n      subagents: []\n")
+            + agent(
+                "missing_skill",
+                "p/m",
+                "      tools: []\n      skills:\n        - packageName: pkg\n          name: nope\n      subagents: []\n")
+            + agent(
+                "missing_sub",
+                "p/m",
+                "      tools: []\n      skills: []\n      subagents: [ghost]\n")
+            + "environments:\n"
+            + "  - name: env\n"
+            + "    registrationToken: tok\n";
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "missing_model"));
+    assertEquals("invalid skill reference", reason(plan.skipped(), "agents", "invalid_skill"));
+    assertEquals("missing skill package: ghost", reason(plan.skipped(), "agents", "missing_pkg"));
+    assertEquals("missing skill: pkg/nope", reason(plan.skipped(), "agents", "missing_skill"));
+    assertEquals("missing subagent: ghost", reason(plan.skipped(), "agents", "missing_sub"));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
   }
 
   @Test
@@ -268,33 +413,92 @@ class ConfigSyncPlannerTest {
         "providers:\n"
             + "  - name: p\n"
             + "    providerType: unsupported_protocol\n"
-            + "models:\n"
-            + "  - providerName: p\n"
-            + "    name: m\n"
-            + "    modelId: gpt\n"
-            + "    config:\n"
-            + "      limit: {context: 1000, output: 100}\n"
-            + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
-            + "      pricing:\n"
-            + "        currency: USD\n"
-            + "        pricingTier: t\n"
-            + "        serviceTier: s\n"
-            + "        serviceTierMultiplier: 1\n"
-            + "        version: v\n"
-            + "        inputPerMillionTokens: 0\n"
-            + "        outputPerMillionTokens: 0\n"
-            + "        cacheReadPerMillionTokens: 0\n"
-            + "        cacheWritePerMillionTokens: 0\n"
-            + "        cacheWriteLongPerMillionTokens: 0\n"
-            + "        reasoningPerMillionTokens: 0\n"
-            + "      defaultVariant: default\n"
-            + "      variants:\n"
-            + "        - id: default\n";
+            + ConfigSyncFixtures.resourceYaml("model-entry.yaml")
+            + "agents:\n"
+            + agent("a", "p/m", agentConfigLines());
     ConfigSyncPlan plan = plan(yamlText);
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
     assertTrue(plan.models().isEmpty());
     assertTrue(skipped(plan.skipped(), "models", "p/m"));
+    // 被 poison 的 Model 不能被 Agent 借用。
+    assertEquals("missing model: p/m", reason(plan.skipped(), "agents", "a"));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+  }
+
+  @Test
+  void existingSkillGitFailurePoisonsAgentsReferencingIt() {
+    // 既有 Skill Package 重新导入时 Git 恢复失败：skill 被 skip，引用它的 Agent 也必须一起 skip，
+    // 不能退回借用快照中的既有包。
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(skillPackage("pkg", "s")),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    doThrow(new SkillGitException("boom"))
+        .when(skillGitCache)
+        .ensureCommit(anyString(), anyString(), anyString());
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "skillPackages:\n"
+            + "  - packageName: pkg\n"
+            + "    repositoryUrl: https://example.com/pkg.git\n"
+            + "    branch: main\n"
+            + "    currentCommit: "
+            + "a".repeat(40)
+            + "\n"
+            + "agents:\n"
+            + agent(
+                "a",
+                "p/m",
+                "      tools: []\n      skills:\n        - packageName: pkg\n          name: s\n"
+                    + "      subagents: []\n");
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertEquals("cannot restore exact commit", reason(plan.skipped(), "skillPackages", "pkg"));
+    assertEquals("missing skill package: pkg", reason(plan.skipped(), "agents", "a"));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+  }
+
+  @Test
+  void skippedExistingMcpToolCannotBeBorrowedByAgentViaCatalog() {
+    // 既有 MCP 工具存在但本次 discovery 失败 skip 该 Server：引用其工具名的 Agent 必须 skip，
+    // 且不得回退到 RuntimeToolCatalog 兜底。
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(mcpServer("mcp", true)),
+                List.of(mcpTool("tool_x", "mcp"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    when(mcpDiscovery.discoverOrNull(any())).thenReturn(null);
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "mcpServers:\n"
+            + "  - name: mcp\n"
+            + "    url: https://mcp.example.com/mcp\n"
+            + "agents:\n"
+            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+    ConfigSyncPlan plan = plan(yamlText);
+
+    assertTrue(skipped(plan.skipped(), "mcpServers", "mcp"));
+    assertEquals(
+        "unsupported or unknown agent tool: tool_x", reason(plan.skipped(), "agents", "a"));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+    verify(toolCatalog, never()).findTool(anyString());
   }
 
   @Test
@@ -317,6 +521,45 @@ class ConfigSyncPlannerTest {
     assertNotNull(plan.settings());
     assertEquals("5", plan.settings().expectedVersion());
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SETTINGS, "settings")));
+  }
+
+  @Test
+  void settingsFallbackModelMissingIsSkipped() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan =
+        plan(
+            "settings:\n"
+                + "  aiRuntime:\n"
+                + "    compactionFallbackModel:\n"
+                + "      providerName: p\n"
+                + "      modelName: m\n"
+                + "      variant: v\n");
+
+    assertNull(plan.settings());
+    assertEquals("missing fallback model: p/m", reason(plan.skipped(), "settings", "settings"));
+  }
+
+  @Test
+  void settingsPromptAgentMissingIsSkipped() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan =
+        plan("settings:\n  integrations:\n    minimaxH3:\n      promptAgentName: ghost\n");
+
+    assertNull(plan.settings());
+    assertEquals("missing prompt agent: ghost", reason(plan.skipped(), "settings", "settings"));
+  }
+
+  @Test
+  void settingsInvalidFieldIsRejected() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText = "settings:\n  aiRuntime:\n    retryBackoffStrategy: BOGUS\n";
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -359,38 +602,9 @@ class ConfigSyncPlannerTest {
     when(toolCatalog.findTool("builtin")).thenReturn(Optional.empty());
 
     String yamlText =
-        "providers:\n"
-            + "  - name: p\n"
-            + "    providerType: openai\n"
-            + "models:\n"
-            + "  - providerName: p\n"
-            + "    name: m\n"
-            + "    modelId: gpt\n"
-            + "    config:\n"
-            + "      limit: {context: 1000, output: 100}\n"
-            + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
-            + "      pricing:\n"
-            + "        currency: USD\n"
-            + "        pricingTier: t\n"
-            + "        serviceTier: s\n"
-            + "        serviceTierMultiplier: 1\n"
-            + "        version: v\n"
-            + "        inputPerMillionTokens: 0\n"
-            + "        outputPerMillionTokens: 0\n"
-            + "        cacheReadPerMillionTokens: 0\n"
-            + "        cacheWritePerMillionTokens: 0\n"
-            + "        cacheWriteLongPerMillionTokens: 0\n"
-            + "        reasoningPerMillionTokens: 0\n"
-            + "      defaultVariant: default\n"
-            + "      variants:\n"
-            + "        - id: default\n"
+        PROVIDER_AND_MODEL
             + "agents:\n"
-            + "  - name: a\n"
-            + "    model: p/m\n"
-            + "    config:\n"
-            + "      tools: [builtin]\n"
-            + "      skills: []\n"
-            + "      subagents: []\n";
+            + agent("a", "p/m", "      tools: [builtin]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));

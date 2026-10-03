@@ -26,7 +26,11 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -186,6 +190,23 @@ final class ConfigSyncFixtures {
 
   static List<String> listOf(String... values) {
     return new ArrayList<>(Arrays.asList(values));
+  }
+
+  /** 读取与本 fixture 同包的测试 YAML 资源；长 YAML 不再以字符串拼接内联。 */
+  static String resourceYaml(String name) {
+    try (InputStream in = ConfigSyncFixtures.class.getResourceAsStream(name)) {
+      if (in == null) {
+        throw new IllegalStateException("missing test yaml resource: " + name);
+      }
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+  }
+
+  /** 通用「Provider p + Model p/m」文档基座；具体测试再追加 mcpServers/agents 等段落。 */
+  static String providerAndModelYaml() {
+    return "providers:\n  - name: p\n    providerType: openai\n" + resourceYaml("model-entry.yaml");
   }
 
   static Map<String, Object> mapOf(Object... keyValues) {

@@ -1,0 +1,18 @@
+    config:
+      limit: {context: 1000, output: 100}
+      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}
+      pricing:
+        currency: USD
+        pricingTier: t
+        serviceTier: s
+        serviceTierMultiplier: 1
+        version: v
+        inputPerMillionTokens: 0
+        outputPerMillionTokens: 0
+        cacheReadPerMillionTokens: 0
+        cacheWritePerMillionTokens: 0
+        cacheWriteLongPerMillionTokens: 0
+        reasoningPerMillionTokens: 0
+      defaultVariant: default
+      variants:
+        - id: default
