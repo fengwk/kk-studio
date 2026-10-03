@@ -2,12 +2,9 @@ package fun.fengwk.kkstudio.project.controller;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -37,7 +34,6 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   private final IssueWorkStore workStore;
   private final Function<IssueWorkClaim, IssueReconcileOutcome> reconciler;
   private final IssueControllerProperties properties;
-  private final Clock clock;
   private final Executor drainExecutor;
   private final Executor workerExecutor;
   private final ScheduledExecutorService pollScheduler;
@@ -54,7 +50,6 @@ public final class IssueControllerDispatcher implements AutoCloseable {
       IssueWorkStore workStore,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
@@ -62,7 +57,6 @@ public final class IssueControllerDispatcher implements AutoCloseable {
         workStore,
         Objects.requireNonNull(reconciler, "reconciler")::reconcile,
         properties,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler);
@@ -72,14 +66,12 @@ public final class IssueControllerDispatcher implements AutoCloseable {
       IssueWorkStore workStore,
       Function<IssueWorkClaim, IssueReconcileOutcome> reconciler,
       IssueControllerProperties properties,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
     this.workStore = Objects.requireNonNull(workStore, "workStore");
     this.reconciler = Objects.requireNonNull(reconciler, "reconciler");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
     this.drainExecutor = requireFailFastExecutor(drainExecutor, "drainExecutor");
     this.workerExecutor = requireFailFastExecutor(workerExecutor, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");
@@ -205,13 +197,13 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   }
 
   private IssueWorkClaim claimNext() {
-    Instant now = clock.instant();
     String token = UUID.randomUUID().toString();
-    Instant leaseUntil = now.plus(properties.getLeaseDuration());
     return workStore
-        .claimNext(now, token, leaseUntil)
+        .claimNext(token, properties.getLeaseDuration())
         .map(
-            work -> new IssueWorkClaim(work.getIssueId(), token, leaseUntil, work.getWakeVersion()))
+            work ->
+                new IssueWorkClaim(
+                    work.getIssueId(), token, work.getLeaseUntil(), work.getWakeVersion()))
         .orElse(null);
   }
 
@@ -269,13 +261,11 @@ public final class IssueControllerDispatcher implements AutoCloseable {
     }
   }
 
-  /** 归还 claim：把同一次 claim 立即到期并交还 lease；归还失败仅留 lease 自愈。 */
+  /** 归还 claim：延后 rejectionDelay 并交还 lease；归还失败仅留 lease 自愈。 */
   private void returnClaim(IssueWorkClaim claim) {
     try {
       workStore.rescheduleWork(
-          claim.issueId(),
-          claim.leaseToken(),
-          clock.instant().plus(properties.getRejectionDelay()));
+          claim.issueId(), claim.leaseToken(), claim.wakeVersion(), properties.getRejectionDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to return claim for issueId={}; failure={}",
@@ -288,7 +278,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   private void tryRescheduleOnFailure(IssueWorkClaim claim) {
     try {
       workStore.rescheduleWork(
-          claim.issueId(), claim.leaseToken(), clock.instant().plus(properties.getRetryDelay()));
+          claim.issueId(), claim.leaseToken(), claim.wakeVersion(), properties.getRetryDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to reschedule work after reconciler failure for issueId={}; failure={}",

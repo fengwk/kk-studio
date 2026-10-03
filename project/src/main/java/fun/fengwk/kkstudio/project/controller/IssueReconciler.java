@@ -203,22 +203,22 @@ public class IssueReconciler {
     Instant now = clock.instant();
     LockedIssue locked = lockIssue(claim.issueId());
     if (locked == null) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
-    heartbeat(claim, now);
+    heartbeat(claim);
 
     Project project = locked.project();
     Issue issue = locked.issue();
     if (project.isArchived()
         || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
     if (activeRun != null) {
       return reconcileActiveRun(project, issue, activeRun, claim, now);
     }
-    return reconcileIdle(project, issue, claim, now);
+    return reconcileIdle(project, issue, claim);
   }
 
   private IssueReconcileOutcome reconcileActiveRun(
@@ -228,11 +228,7 @@ public class IssueReconciler {
       ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
       if (isProcessing(snapshot)) {
         return finish(
-            claim,
-            now,
-            true,
-            now.plus(properties.getActiveDelay()),
-            IssueReconcileOutcome.DEFERRED_PROCESSING);
+            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
       }
       // 归属已不存在：Run 无法再被驱动，安全收尾为失败并显式要求人工核查。
       return failRun(
@@ -240,7 +236,6 @@ public class IssueReconciler {
           snapshot.thread().headEntryId(),
           STALE_REASON,
           claim,
-          now,
           IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
     ProjectWorkflowState stage = workflowStage(project, run.getState());
@@ -258,20 +253,16 @@ public class IssueReconciler {
       ThreadSnapshot staleSnapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
       if (isProcessing(staleSnapshot)) {
         return finish(
-            claim,
-            now,
-            true,
-            now.plus(properties.getActiveDelay()),
-            IssueReconcileOutcome.DEFERRED_PROCESSING);
+            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
       }
       IssueActivity deliverable = nextDeliverableInstruction(run);
       if (deliverable != null) {
         deliverInstruction(issue, run, binding, staleSnapshot, deliverable);
-        return finish(claim, now, true, now, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
+        return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
       }
       String staleUnknown = unknownToolReason(staleSnapshot);
       if (staleUnknown != null) {
-        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim, now);
+        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim);
       }
       if (hasProgress(run, staleSnapshot)) {
         UUID finalAnswerId =
@@ -288,18 +279,13 @@ public class IssueReconciler {
             finalAnswerId,
             null);
         return finish(
-            claim,
-            now,
-            true,
-            now.plus(properties.getActiveDelay()),
-            IssueReconcileOutcome.STALE_RUN_CLOSED);
+            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.STALE_RUN_CLOSED);
       }
       return failRun(
           run,
           staleSnapshot.thread().headEntryId(),
           STALE_REASON,
           claim,
-          now,
           IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
 
@@ -307,7 +293,7 @@ public class IssueReconciler {
     String unknownReason = isProcessing(snapshot) ? null : unknownToolReason(snapshot);
     if (unknownReason != null) {
       // 外部副作用结果未定优先于额度与静态收尾：按既有 UNKNOWN 入口收敛并保留人工核查。
-      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim, now);
+      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim);
     }
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
       if (isProcessing(snapshot)) {
@@ -318,18 +304,13 @@ public class IssueReconciler {
           issue.setPauseDetail(BUDGET_REASON);
         }
         return finish(
-            claim,
-            now,
-            true,
-            now.plus(properties.getActiveDelay()),
-            IssueReconcileOutcome.DEFERRED_PROCESSING);
+            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
       }
       return failRun(
           run,
           snapshot.thread().headEntryId(),
           BUDGET_REASON,
           claim,
-          now,
           IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
     }
     if (run.getStatus() == IssueRunStatus.RUNNING) {
@@ -339,11 +320,7 @@ public class IssueReconciler {
     if (isProcessing(snapshot)) {
       // 未处理命令或在途调用：不投递、不等待、不收尾。
       return finish(
-          claim,
-          now,
-          true,
-          now.plus(properties.getActiveDelay()),
-          IssueReconcileOutcome.DEFERRED_PROCESSING);
+          claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
 
     boolean gateClosed = issue.isGateClosed();
@@ -352,37 +329,24 @@ public class IssueReconciler {
     if (run.getStatus() == IssueRunStatus.WAITING) {
       if (gateClosed || waitingTool) {
         return finish(
-            claim,
-            now,
-            true,
-            now.plus(properties.getBlockedDelay()),
-            IssueReconcileOutcome.WAITING_FOR_GATE);
+            claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
       }
       // 门禁与安全等待均已解除，恢复同一 Run：不新建 Run，也不重新扣额度。
       issueRunService.resumeRun(run.getId(), run.getVersion());
-      return finish(
-          claim,
-          now,
-          true,
-          now.plus(properties.getActiveDelay()),
-          IssueReconcileOutcome.RUN_RESUMED);
+      return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.RUN_RESUMED);
     }
 
     if (gateClosed || waitingTool) {
       // 门禁关闭或工具等待：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
       issueRunService.waitRun(run.getId(), run.getVersion());
       return finish(
-          claim,
-          now,
-          true,
-          now.plus(properties.getBlockedDelay()),
-          IssueReconcileOutcome.WAITING_FOR_GATE);
+          claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
     }
 
     IssueActivity deliverable = nextDeliverableInstruction(run);
     if (deliverable != null) {
       deliverInstruction(issue, run, binding, snapshot, deliverable);
-      return finish(claim, now, true, now, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
+      return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
     }
 
     if (run.getNextState() != null) {
@@ -398,7 +362,7 @@ public class IssueReconciler {
           snapshot.thread().headEntryId(),
           finalAnswerId,
           run.getNextState());
-      return finish(claim, now, true, now, IssueReconcileOutcome.RUN_HANDED_OFF);
+      return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.RUN_HANDED_OFF);
     }
 
     if (hasProgress(run, snapshot)) {
@@ -414,33 +378,27 @@ public class IssueReconciler {
           finalAnswerId,
           null);
       // 保持当前阶段：下一次催促必须重新检查额度后新建 Run。
-      return finish(claim, now, true, now, IssueReconcileOutcome.RUN_COMPLETED);
+      return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.RUN_COMPLETED);
     }
-    return finish(
-        claim,
-        now,
-        true,
-        now.plus(properties.getActiveDelay()),
-        IssueReconcileOutcome.DEFERRED_IDLE);
+    return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_IDLE);
   }
 
-  private IssueReconcileOutcome reconcileIdle(
-      Project project, Issue issue, IssueWorkClaim claim, Instant now) {
+  private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, IssueWorkClaim claim) {
     if (project.isArchived()
         || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
     if (issue.isGateClosed()) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE);
     }
     ProjectStateCode state = ProjectStateCode.of(issue.getState());
     if (ProjectWorkflowReservedState.isReserved(state)) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_NO_AGENT);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_NO_AGENT);
     }
     ProjectWorkflowState stage = workflowStage(project, issue.getState());
     if (stage == null || !stage.enabled() || !stage.hasAgent()) {
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_NO_AGENT);
+      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_NO_AGENT);
     }
     var budget = stageBudgetRepository.get(issue.getId(), issue.getState());
     if (budget != null) {
@@ -451,46 +409,34 @@ public class IssueReconciler {
         // 额度用尽只展示待人工授权：保留 mailbox 以便授权后立即推进。
         return finish(
             claim,
-            now,
             true,
-            now.plus(properties.getBlockedDelay()),
+            properties.getBlockedDelay(),
             IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED);
       }
     }
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
     if (activeRun != null) {
       return finish(
-          claim,
-          now,
-          true,
-          now.plus(properties.getActiveDelay()),
-          IssueReconcileOutcome.DEFERRED_PROCESSING);
+          claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
     issueRunService.acceptRun(issue.getId(), acceptKey(issue));
-    return finish(
-        claim,
-        now,
-        true,
-        now.plus(properties.getActiveDelay()),
-        IssueReconcileOutcome.RUN_ACCEPTED);
+    return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.RUN_ACCEPTED);
   }
 
   /**
-   * 结束一次 claim：{@code keepPolling} 为真时归还 lease 并把 {@code due_at} 推后（mailbox 保留），否则完成并删除 mailbox 行。
+   * 结束一次 claim：{@code keepPolling} 为真时归还 lease 并把 {@code due_at} 推后（mailbox 保留），否则完成当前版本（有新 wake
+   * 时只释放 lease，保留 mailbox）。
    *
-   * <p>两种情况都以调用方自己的 lease token 围栏；围栏未匹配说明 lease 已被接管或并发新唤醒已到达，此时新事实由下一次 claim 处理，因此只记录而不抛出。
+   * <p>两种情况都以调用方自己的 lease token 围栏；返回 false 说明未删除（含新 wake 已释放 lease）或租约围栏未匹配，此时新事实由下一次 claim
+   * 处理，因此只记录而不抛出。
    */
   private IssueReconcileOutcome finish(
-      IssueWorkClaim claim,
-      Instant now,
-      boolean keepPolling,
-      Instant dueAt,
-      IssueReconcileOutcome outcome) {
+      IssueWorkClaim claim, boolean keepPolling, Duration delay, IssueReconcileOutcome outcome) {
     boolean applied =
         keepPolling
-            ? issueWorkStore.rescheduleWork(claim.issueId(), claim.leaseToken(), dueAt)
-            : issueWorkStore.completeWork(
-                claim.issueId(), claim.leaseToken(), claim.wakeVersion(), now);
+            ? issueWorkStore.rescheduleWork(
+                claim.issueId(), claim.leaseToken(), claim.wakeVersion(), delay)
+            : issueWorkStore.completeWork(claim.issueId(), claim.leaseToken(), claim.wakeVersion());
     if (!applied) {
       log.debug(
           "Issue work claim was already superseded; issueId={}, leaseToken={}",
@@ -523,11 +469,9 @@ public class IssueReconciler {
     return new LockedIssue(project, issue);
   }
 
-  /** 领取即续租：把 lease 至少延长一个完整租期，处理时长不再受初始租期限制。 */
-  private void heartbeat(IssueWorkClaim claim, Instant now) {
-    Instant base = claim.leaseUntil().isAfter(now) ? claim.leaseUntil() : now;
-    issueWorkStore.renewLease(
-        claim.issueId(), claim.leaseToken(), now, base.plus(properties.getLeaseDuration()));
+  /** 领取即续租：由数据库保证至少剩余一个完整租期且不缩短当前 lease，并持有 work 行锁到 finish。 */
+  private void heartbeat(IssueWorkClaim claim) {
+    issueWorkStore.renewLease(claim.issueId(), claim.leaseToken(), properties.getLeaseDuration());
   }
 
   /** 判断本次 Run 的活动执行时长是否已耗尽。 */
@@ -560,25 +504,19 @@ public class IssueReconciler {
       UUID endEntryId,
       String reason,
       IssueWorkClaim claim,
-      Instant now,
       IssueReconcileOutcome outcome) {
     issueRunService.failRun(
         run.getId(), run.getVersion(), failKey(run, endEntryId), endEntryId, reason);
     // 失败与 ERROR 暂停门禁同事务写入，等待显式恢复；mailbox 保留以便恢复后立即推进。
-    return finish(claim, now, true, now.plus(properties.getBlockedDelay()), outcome);
+    return finish(claim, true, properties.getBlockedDelay(), outcome);
   }
 
   /** 结果未定的工具调用走既有 UNKNOWN 收尾：不发布证据、不完成、不交接，人工核查后才能重试。 */
   private IssueReconcileOutcome unknownRun(
-      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim, Instant now) {
+      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim) {
     issueRunService.markUnknown(
         run.getId(), run.getVersion(), unknownKey(run, endEntryId), endEntryId, reason);
-    return finish(
-        claim,
-        now,
-        true,
-        now.plus(properties.getBlockedDelay()),
-        IssueReconcileOutcome.RUN_UNKNOWN);
+    return finish(claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.RUN_UNKNOWN);
   }
 
   private boolean hasProgress(IssueRun run, ThreadSnapshot snapshot) {

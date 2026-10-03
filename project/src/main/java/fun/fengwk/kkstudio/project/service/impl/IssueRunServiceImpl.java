@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.service.impl.IssueActivityIdempotency.Identity;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -246,7 +247,7 @@ public class IssueRunServiceImpl implements IssueRunService {
       throw new ProjectVersionConflictException(
           "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
     }
-    issueWorkStore.requestWork(issueId, Instant.now());
+    issueWorkStore.requestWork(issueId, Duration.ZERO);
     return issueRunRepository.getById(run.getId());
   }
 

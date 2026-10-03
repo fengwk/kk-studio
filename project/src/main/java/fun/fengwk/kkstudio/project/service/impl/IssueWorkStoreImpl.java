@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import java.time.Instant;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,7 +18,8 @@ import java.util.UUID;
 /**
  * Issue 调度邮箱用例实现：lease/wake 围栏的薄业务边界。
  *
- * <p>只在内存层面校验 lease 与唤醒版本形状，真正的串行化由 {@code project_issue_work} 的行锁与条件更新保证。
+ * <p>入口校验 Issue 标识、lease token 和相对 Duration；调度时间、租约有效性与 wake 围栏由 PostgreSQL 决定。续租先获取 work
+ * 行锁，串行化与条件更新在调用方事务中完成。
  */
 @Service
 @AllArgsConstructor
@@ -30,10 +31,10 @@ public class IssueWorkStoreImpl implements IssueWorkStore {
 
   @Override
   @Transactional
-  public IssueWork requestWork(UUID issueId, Instant dueAt) {
+  public IssueWork requestWork(UUID issueId, Duration delay) {
     Objects.requireNonNull(issueId, "issueId");
-    Instant targetDue = dueAt != null ? dueAt : Instant.now();
-    IssueWork work = repository.requestWork(issueId, targetDue);
+    requireDuration(delay, false);
+    IssueWork work = repository.requestWork(issueId, delay);
     if (work == null) {
       throw new ProjectValidationException("issue_work", "Failed to request issue work");
     }
@@ -52,59 +53,53 @@ public class IssueWorkStoreImpl implements IssueWorkStore {
 
   @Override
   @Transactional
-  public Optional<IssueWork> claimNext(Instant now, String leaseToken, Instant leaseUntil) {
-    Objects.requireNonNull(now, "now");
+  public Optional<IssueWork> claimNext(String leaseToken, Duration leaseDuration) {
     String token = requireLeaseToken(leaseToken);
-    Objects.requireNonNull(leaseUntil, "leaseUntil");
-    if (!leaseUntil.isAfter(now)) {
-      throw new ProjectValidationException("issue_work", "leaseUntil must be after now");
-    }
-    return Optional.ofNullable(repository.claimNext(now, token, leaseUntil));
+    requireDuration(leaseDuration, true);
+    return Optional.ofNullable(repository.claimNext(token, leaseDuration));
   }
 
   @Override
   @Transactional
-  public void renewLease(UUID issueId, String leaseToken, Instant now, Instant newLeaseUntil) {
+  public void renewLease(UUID issueId, String leaseToken, Duration leaseDuration) {
     Objects.requireNonNull(issueId, "issueId");
     String token = requireLeaseToken(leaseToken);
-    Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
+    requireDuration(leaseDuration, true);
+    // 在 reconciler 的外层事务中，这个锁从 heartbeat 一直持有到 finish。
     IssueWork work = repository.lockById(issueId);
     if (work == null) {
       throw new ProjectNotFoundException("issue_work");
     }
-    if (work.getLeaseToken() == null || !work.getLeaseToken().equals(token)) {
-      throw new ProjectValidationException("issue_work", "Lease token mismatch for renewal");
-    }
-    if (work.getLeaseUntil() == null || !work.getLeaseUntil().isAfter(now)) {
-      throw new ProjectValidationException("issue_work", "Lease has already expired");
-    }
-    if (!newLeaseUntil.isAfter(work.getLeaseUntil())) {
-      throw new ProjectValidationException(
-          "issue_work", "newLeaseUntil must extend beyond the current leaseUntil");
-    }
-    if (!repository.renewLease(issueId, token, now, newLeaseUntil)) {
+    if (!repository.renewLease(issueId, token, leaseDuration)) {
       throw new ProjectValidationException("issue_work", "Failed to renew issue work lease");
     }
   }
 
   @Override
   @Transactional
-  public boolean completeWork(
-      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
+  public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
     Objects.requireNonNull(issueId, "issueId");
     String token = requireLeaseToken(leaseToken);
-    Objects.requireNonNull(now, "now");
-    return repository.deleteIfWakeMatches(issueId, token, claimedWakeVersion, now);
+    return repository.completeWork(issueId, token, claimedWakeVersion);
   }
 
   @Override
   @Transactional
-  public boolean rescheduleWork(UUID issueId, String leaseToken, Instant dueAt) {
+  public boolean rescheduleWork(
+      UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
     Objects.requireNonNull(issueId, "issueId");
     String token = requireLeaseToken(leaseToken);
-    Objects.requireNonNull(dueAt, "dueAt");
-    return repository.releaseLease(issueId, token, dueAt);
+    requireDuration(delay, false);
+    return repository.rescheduleWork(issueId, token, claimedWakeVersion, delay);
+  }
+
+  private static void requireDuration(Duration duration, boolean lease) {
+    Objects.requireNonNull(duration, "duration");
+    if (duration.isNegative() || (lease && duration.toMillis() == 0)) {
+      throw new ProjectValidationException(
+          "issue_work",
+          lease ? "leaseDuration must be at least 1ms" : "delay must not be negative");
+    }
   }
 
   private static String requireLeaseToken(String leaseToken) {
