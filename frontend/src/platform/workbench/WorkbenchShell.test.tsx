@@ -6,7 +6,20 @@ import { CatalogRuntimeContext, useOptionalCatalogRuntime } from '@/features/ai/
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider, useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import type { PrimaryNavItem } from '@/platform/shell/types'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
+
+const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
+  {
+    id: 'test',
+    groupId: 'test',
+    to: '/test',
+    labelKey: 'test',
+    ariaKey: 'test',
+    shortLabel: 'T',
+    icon: () => null,
+  },
+]
 
 describe('WorkbenchShell', () => {
   it('renders a registered Studio page without a feature switch', async () => {
@@ -105,7 +118,7 @@ describe('WorkbenchShell', () => {
       <QueryClientProvider client={queryClient}>
         <ExtensionHostProvider host={host}>
           <MemoryRouter initialEntries={['/interactions']}>
-            <WorkbenchShell>
+            <WorkbenchShell navItems={FIXTURE_NAV_ITEMS}>
               <div data-testid="explicit-children">Explicit Interactions Page</div>
             </WorkbenchShell>
           </MemoryRouter>
@@ -169,7 +182,7 @@ function renderWorkbench(host: ExtensionHost, entry: string) {
     <QueryClientProvider client={queryClient}>
       <ExtensionHostProvider host={host}>
         <MemoryRouter initialEntries={[entry]}>
-          <Routes><Route path="/*" element={<WorkbenchShell />} /></Routes>
+          <Routes><Route path="/*" element={<WorkbenchShell navItems={FIXTURE_NAV_ITEMS} />} /></Routes>
         </MemoryRouter>
       </ExtensionHostProvider>
     </QueryClientProvider>,

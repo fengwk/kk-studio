@@ -11,9 +11,9 @@ import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
-import { ApprovalCard } from './ApprovalCard'
-import { QuestionnaireCard } from './QuestionnaireCard'
-import { useInteractionsController } from './useInteractionsController'
+import { ApprovalCard } from '@/features/ai/runtime/interactions/ApprovalCard'
+import { QuestionnaireCard } from '@/features/ai/runtime/interactions/QuestionnaireCard'
+import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
 
 export function InteractionsPage() {
   const { t } = useI18n()

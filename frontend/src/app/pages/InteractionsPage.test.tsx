@@ -143,4 +143,107 @@ describe('InteractionsPage', () => {
       expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=th-2')
     })
   })
+
+  it('navigates to /projects when getIssue fails', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
+      items: [
+        {
+          interactionId: 'int-err',
+          status: 'WAITING_INPUT',
+          threadId: 'th-err',
+          sessionId: 'sess-err',
+          owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-missing', agentName: 'coder' },
+          toolCallId: 'call-err',
+          toolName: 'ask_user',
+          argumentsJson: '{}',
+          approvalJson: null,
+          createTime: '2026-09-27T10:00:00Z',
+        },
+      ],
+      nextCursor: null,
+    })
+    vi.spyOn(projectsApi, 'getIssue').mockRejectedValue(new Error('not found'))
+
+    render(<InteractionsPage />, { wrapper })
+    await waitFor(() => {
+      expect(screen.getByTitle('Issue: issue-missing (coder)')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTitle('Issue: issue-missing (coder)'))
+    await waitFor(() => {
+      expect(mockedNavigate).toHaveBeenCalledWith('/projects')
+    })
+  })
+
+  it('supports refresh, load more, raw arguments rendering, and item removal on card success', async () => {
+    let listCount = 0
+    vi.spyOn(interactionService, 'listInteractions').mockImplementation(async (_cursor, _limit) => {
+      listCount++
+      if (listCount === 1) {
+        return {
+          items: [
+            {
+              interactionId: 'int-raw',
+              status: 'COMPLETED' as never,
+              threadId: 'th-raw',
+              sessionId: 'sess-raw',
+              owner: { type: 'UNKNOWN' as never },
+              toolCallId: 'call-raw',
+              toolName: 'tool',
+              argumentsJson: '{"rawParam":123}',
+              approvalJson: null,
+              createTime: '2026-09-27T10:00:00Z',
+            },
+            {
+              interactionId: 'int-appr',
+              status: 'WAITING_APPROVAL',
+              threadId: 'th-appr',
+              sessionId: 'sess-appr',
+              owner: { type: 'CHAT', chatId: 'c1' },
+              toolCallId: 'call-appr',
+              toolName: 'shell',
+              argumentsJson: '{"cmd":"ls"}',
+              approvalJson: JSON.stringify({ required: true }),
+              createTime: '2026-09-27T10:00:00Z',
+            },
+          ],
+          nextCursor: 'cursor-2',
+        }
+      }
+      return {
+        items: [
+          {
+            interactionId: 'int-more',
+            status: 'WAITING_INPUT',
+            threadId: 'th-more',
+            sessionId: 'sess-more',
+            owner: { type: 'CHAT', chatId: 'c1' },
+            toolCallId: 'call-more',
+            toolName: 'ask_user',
+            argumentsJson: JSON.stringify({ questions: [{ question: 'More Q', options: [] }] }),
+            approvalJson: null,
+            createTime: '2026-09-27T10:00:00Z',
+          },
+        ],
+        nextCursor: null,
+      }
+    })
+
+    render(<InteractionsPage />, { wrapper })
+    await waitFor(() => {
+      expect(screen.getByText('{"rawParam":123}')).toBeInTheDocument()
+      expect(screen.getByText('加载更多')).toBeInTheDocument()
+    })
+
+    // Click refresh button in header
+    const refreshBtn = screen.getByRole('button', { name: '刷新' })
+    fireEvent.click(refreshBtn)
+
+    // Click load more
+    const loadMoreBtn = screen.getByText('加载更多')
+    fireEvent.click(loadMoreBtn)
+    await waitFor(() => {
+      expect(screen.getByText('More Q')).toBeInTheDocument()
+    })
+  })
 })

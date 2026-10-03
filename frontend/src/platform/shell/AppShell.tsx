@@ -1,9 +1,7 @@
 import { Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
-import { QueryClient, QueryClientContext, useQuery } from '@tanstack/react-query'
-import { useContext } from 'react'
-import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { PageContribution } from '@/platform/extensions/types'
 import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
@@ -13,22 +11,12 @@ import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
 
-const fallbackQueryClient = new QueryClient({
-  defaultOptions: { queries: { enabled: false } },
-})
-
 function usePendingInteractionsCount(): number {
-  const contextClient = useContext(QueryClientContext)
-  const client = contextClient ?? fallbackQueryClient
-  const { data } = useQuery(
-    {
-      queryKey: queryKeys.interactions.list(null, 50),
-      queryFn: () => interactionService.listInteractions(null, 50),
-      staleTime: 5000,
-      enabled: Boolean(contextClient),
-    },
-    client,
-  )
+  const { data } = useQuery({
+    queryKey: queryKeys.interactions.list(null, 50),
+    queryFn: () => interactionService.listInteractions(null, 50),
+    staleTime: 5000,
+  })
   return data?.items?.length ?? 0
 }
 
@@ -96,7 +84,7 @@ function resolveRouteLayout(
 export function AppShell({
   children,
   pages: explicitPages,
-  navItems = PRIMARY_NAV_ITEMS,
+  navItems,
 }: AppShellProps) {
   const location = useLocation()
   const host = useOptionalExtensionHostSnapshot()

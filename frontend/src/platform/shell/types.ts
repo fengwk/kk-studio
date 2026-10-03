@@ -14,5 +14,5 @@ export interface PrimaryNavItem {
 export interface AppShellProps {
   children?: ReactNode
   pages?: readonly PageContribution[]
-  navItems?: readonly PrimaryNavItem[]
+  navItems: readonly PrimaryNavItem[]
 }
