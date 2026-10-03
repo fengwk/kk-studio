@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.read;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 
@@ -59,19 +58,14 @@ public class PlatformSkillContentReader {
 
     try {
       gitCache.ensureCommit(packageName, pkg.getRepositoryUrl(), currentCommit);
-    } catch (SkillGitException e) {
-      throw new PlatformReadException("skill content is unavailable: " + e.getMessage(), e);
     } catch (Exception e) {
       throw new PlatformReadException("skill content is unavailable: " + e.getMessage(), e);
     }
 
-    String repoPath =
-        relativePath.startsWith(skillName + "/") ? relativePath : skillName + "/" + relativePath;
+    String repoPath = skillName + "/" + relativePath;
 
     try {
       return gitCache.readFile(packageName, currentCommit, repoPath);
-    } catch (SkillGitException e) {
-      throw new PlatformReadException("failed to read skill file: " + e.getMessage(), e);
     } catch (Exception e) {
       throw new PlatformReadException("failed to read skill file: " + e.getMessage(), e);
     }
