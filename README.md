@@ -12,8 +12,8 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
                                             +-> Branch 选择 Environment（需要主机工具时）
 ```
 
-> `kk-studio` 当前没有内置登录鉴权。默认本地栈只监听 `127.0.0.1`；部署到局域网或
-> 公网前，必须在外部入口配置 TLS 和访问控制。
+> `kk-studio` 的登录鉴权由外部入口承担。默认本地栈只监听 `127.0.0.1`；部署到局域网或
+> 公网前，必须配置 TLS 和访问控制。
 
 ## 能做什么
 
@@ -24,7 +24,8 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境由 Branch 选择 |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
 | MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
-| Projects 与 Canvas | 管理 Project / Issue，并通过 Canvas、Function 和 ComfyUI 组织图形工作流 |
+| Canvas | 用节点组织文本与媒体，通过资源引用和显式 Function 运行完成裁剪、生成或 ComfyUI 处理 |
+| Project / Issue | 配置工作阶段、Agent 分工与执行额度，在稳定 Thread 中完成工作并跟踪交付证据 |
 
 当前内置模型协议包括 OpenAI Chat Completions、OpenAI Responses、Anthropic
 Messages 和 Google Gemini。
@@ -58,9 +59,9 @@ docker compose -f deploy/local/compose.yaml up -d --build --wait
   `docker compose -f deploy/local/compose.yaml logs -f app`
 
 本地栈使用 `dev` profile，并预置 `stub` Provider、`acceptance-stub` Model 和
-`default-assistant` Agent，便于查看 Catalog 结构。`deploy/local` **不包含**
-`stub.local` 模型服务；它们是 Catalog 示例，不是可用的离线模型。直接使用
-`default-assistant` 发消息会连接失败，请先按下一节接入自己的 Provider。
+`default-assistant` Agent，便于查看 Catalog 结构。这些示例配置指向 `stub.local`，
+该模型服务需单独提供；直接使用 `default-assistant` 发消息会连接失败。
+请先按下一节接入自己的 Provider。
 
 ## 完成第一次对话
 
@@ -173,7 +174,8 @@ python3 scripts/dev/verify/repository/check-sensitive-data.py
 | [Environment Daemon](docs/operations/environment-daemon.md) | 安装、注册、常驻、升级和本机状态 |
 | [部署与运行](docs/operations/deployment.md) | Fat JAR、镜像、部署拓扑和运行配置 |
 | [开发与测试](docs/operations/development-and-testing.md) | 开发环境和全部质量入口 |
-| [系统设计](docs/system-design.md) | 数据边界、执行链路、并发和恢复模型 |
+| [系统设计](docs/system-design.md) | 系统职责、依赖、配置与执行恢复链 |
+| [Canvas、Project 与交互](docs/canvas-project.md) | 资源编辑、Function 运行、Issue 分工、交接和人工输入 |
 | [文档导航](docs/README.md) | 所有模块与 Operations 文档 |
 
 ## 安全与许可证
