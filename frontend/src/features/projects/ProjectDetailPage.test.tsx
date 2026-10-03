@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router'
 import { ProjectDetailPage } from './ProjectDetailPage'
@@ -137,7 +137,7 @@ describe('ProjectDetailPage', () => {
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T00:00:00Z',
         },
-        run: null,
+        currentOrLatestRun: null,
       },
       {
         issue: {
@@ -153,18 +153,15 @@ describe('ProjectDetailPage', () => {
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T01:00:00Z',
         },
-        run: {
+        currentOrLatestRun: {
           id: 'd0000000-0000-0000-0000-000000000001',
           issueId: 'b0000000-0000-0000-0000-000000000002',
           ordinal: '1',
           state: 'IN_PROGRESS',
           agentName: 'backend-dev',
           status: 'RUNNING',
-          startEntryId: 'entry-1',
-          endEntryId: null,
-          remainingExecutionMs: '10000',
-          createdAt: '2026-09-14T00:30:00Z',
-          updatedAt: '2026-09-14T00:35:00Z',
+          startedAt: '2026-09-14T00:30:00Z',
+          endedAt: null,
         },
       },
     ],
@@ -796,6 +793,279 @@ describe('ProjectDetailPage', () => {
       expect(search).toContain('filter=active')
       expect(search).not.toContain('issue=')
       expect(search).not.toContain('thread=')
+    })
+  })
+
+  it('opens thread from IssueDetailModal: updates URL with thread parameter and mounts dock', async () => {
+    // 测试意图：验证从 Issue 详情中点击“打开 Agent 线程”时，handleOpenThread 将 thread 写入 URL 并展示受控 Dock
+    const api = createMockApi()
+    const targetIssue = mockSnapshot.issues[0].issue
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}?issue=${targetIssue.id}`],
+    )
+
+    // 等待弹窗打开
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+
+    // 切换到 Agent 线程 Tab
+    fireEvent.click(screen.getByRole('button', { name: /Agent 线程/ }))
+    const openThreadBtn = await screen.findByTitle('打开此 Agent 线程视图')
+    fireEvent.click(openThreadBtn)
+
+    // 验证 URL 更新为包含 issue 和 thread，且挂载 AgentPane
+    await waitFor(() => {
+      expect(getNav().location.search).toContain(`issue=${targetIssue.id}`)
+      expect(getNav().location.search).toContain('thread=th-valid-101')
+      expect(screen.getByTestId('controlled-agent-pane')).toBeInTheDocument()
+    })
+  })
+
+  it('closes issue detail modal in non-dock mode (clears issue) and dock mode (retains dock)', async () => {
+    // 测试意图：验证 handleCloseIssueDetail 在普通模式下清空 URL issue 参数；在 Dock manual 模式下仅关闭弹窗并保留 Dock
+    const api = createMockApi()
+    const targetIssue = mockSnapshot.issues[0].issue
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}?issue=${targetIssue.id}`],
+    )
+
+    // 1. 普通模式下关闭：URL 中 issue 被清理
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+    const closeBtns = screen.getAllByRole('button', { name: '关闭' })
+    fireEvent.click(closeBtns[0])
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+      expect(getNav().location.search).not.toContain('issue=')
+    })
+
+    // 2. Dock 模式下通过 manual modal 打开后再关闭：仅关弹窗，保留 Dock 与 URL
+    act(() => {
+      getNav().navigate(`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`)
+    })
+    await screen.findByTestId('controlled-agent-pane')
+    fireEvent.click(screen.getByRole('button', { name: '查看完整 Issue 详情' }))
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+
+    // 点击关闭弹窗
+    const modalCloseBtns = screen.getAllByRole('button', { name: '关闭' })
+    fireEvent.click(modalCloseBtns[0])
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+      expect(screen.getByTestId('controlled-agent-pane')).toBeInTheDocument()
+      expect(getNav().location.search).toContain('thread=th-valid-101')
+    })
+  })
+
+  it('handles project archive toggle, header actions, and modal triggers', async () => {
+    // 测试意图：验证头部归档/取消归档切换、编辑与删除弹窗打开与关闭，以及 onBack 点击
+    const onBack = vi.fn()
+    const api = createMockApi({
+      archiveProject: vi.fn().mockResolvedValue({ ...mockSnapshot.project, archivedAt: '2026-09-30T00:00:00Z' }),
+      unarchiveProject: vi.fn().mockResolvedValue({ ...mockSnapshot.project, archivedAt: null }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
+
+    await screen.findByText('Awesome Platform')
+
+    // 1. 点击返回按钮
+    fireEvent.click(screen.getByRole('button', { name: '返回项目列表' }))
+    expect(onBack).toHaveBeenCalledTimes(1)
+
+    // 2. 点击归档按钮
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    await waitFor(() => {
+      expect(api.archiveProject).toHaveBeenCalledWith(projectId, { expectedVersion: '2' })
+    })
+
+    // 3. 点击编辑按钮打开 EditProjectModal 并关闭
+    fireEvent.click(screen.getByRole('button', { name: '编辑 / 工作流' }))
+    expect(await screen.findByRole('dialog', { name: '编辑项目' })).toBeInTheDocument()
+    const editCloseBtns = screen.getAllByRole('button', { name: '关闭' })
+    fireEvent.click(editCloseBtns[editCloseBtns.length - 1])
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '编辑项目' })).not.toBeInTheDocument()
+    })
+
+    // 4. 点击删除按钮打开 DeleteProjectModal 并关闭
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(await screen.findByRole('dialog', { name: '确认删除项目' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '确认删除项目' })).not.toBeInTheDocument()
+    })
+  })
+
+  it('handles reload snapshot, create issue modal cancellation, and archive failure', async () => {
+    // 测试意图：验证刷新 Snapshot、新建 Issue 弹窗取消以及归档异常分支
+    const api = createMockApi({
+      archiveProject: vi.fn().mockRejectedValue(new Error('Archive failed')),
+    })
+
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+    await screen.findByText('Awesome Platform')
+
+    // 1. 刷新 Snapshot
+    fireEvent.click(screen.getByRole('button', { name: '刷新项目 Snapshot' }))
+    await waitFor(() => {
+      expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2)
+    })
+
+    // 2. 归档异常分支
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    expect(await screen.findByText('Archive failed')).toBeInTheDocument()
+
+    // 3. 点击新建 Issue 弹窗并关闭
+    const createBtn = screen.getByRole('button', { name: '新建 Issue' })
+    fireEvent.click(createBtn)
+    expect(await screen.findByRole('dialog', { name: '新建 Issue' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '新建 Issue' })).not.toBeInTheDocument()
+    })
+  })
+
+  it.each(['人工核查', '阻塞'])('opens the selected issue from the %s card action', async (action) => {
+    // 两张卡片各自定位，快捷操作只能打开自身详情。
+    const inProgressIssue = {
+      ...mockSnapshot.issues[0].issue,
+      state: 'IN_PROGRESS',
+    }
+    const unknownRunIssue = {
+      ...mockSnapshot.issues[1].issue,
+      id: 'iss-unknown',
+      title: 'Unknown Run Issue',
+      state: 'INIT',
+    }
+    const customSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      issues: [
+        { issue: inProgressIssue, currentOrLatestRun: null },
+        {
+          issue: unknownRunIssue,
+          currentOrLatestRun: {
+            id: 'run-unk',
+            issueId: unknownRunIssue.id,
+            ordinal: '1',
+            state: 'INIT',
+            status: 'UNKNOWN',
+            agentName: 'Coder',
+            startedAt: '2026-10-01T00:00:00Z',
+            endedAt: null,
+          },
+        },
+      ],
+    }
+
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue(customSnapshot),
+    })
+
+    const { getNav } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+    await screen.findByText('Awesome Platform')
+
+    const issue = action === '人工核查' ? unknownRunIssue : inProgressIssue
+    const card = screen.getByRole('button', { name: `Issue #${issue.number} ${issue.title}` })
+    fireEvent.click(within(card).getByRole('button', { name: action }))
+    await waitFor(() => {
+      expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(issue.id)
+    })
+  })
+
+  it('unarchives project when project is already archived', async () => {
+    // 测试意图：验证已归档项目点击取消归档调用 unarchiveProject
+    const archivedSnapshot = {
+      ...mockSnapshot,
+      project: {
+        ...mockSnapshot.project,
+        archivedAt: '2026-09-30T00:00:00Z',
+      },
+    }
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue(archivedSnapshot),
+      unarchiveProject: vi.fn().mockResolvedValue({ ...archivedSnapshot.project, archivedAt: null }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    await screen.findByText('Awesome Platform')
+    expect(screen.getByText('已归档')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '取消归档' }))
+    await waitFor(() => {
+      expect(api.unarchiveProject).toHaveBeenCalledWith(projectId, { expectedVersion: '2' })
+    })
+  })
+
+  it('renders error banner and back button when snapshot is not found', async () => {
+    // 测试意图：验证 snapshot 为空时展示错误横幅与返回列表按钮
+    const onBack = vi.fn()
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockRejectedValue(new Error('Project not found')),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={onBack} api={api} />)
+
+    expect(await screen.findByText('Project not found')).toBeInTheDocument()
+    const backBtn = screen.getByRole('button', { name: '返回项目列表' })
+    fireEvent.click(backBtn)
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('recovers blocked issues and reopens done issues using each card version', async () => {
+    // 卡片动作携带自身版本和新的请求身份，避免复用其他卡片的 CAS 基线。
+    const blockedIssue = {
+      ...mockSnapshot.issues[0].issue,
+      state: 'BLOCKED',
+    }
+    const doneIssue = {
+      ...mockSnapshot.issues[1].issue,
+      state: 'DONE',
+    }
+    const customSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      issues: [
+        { issue: blockedIssue, currentOrLatestRun: null },
+        { issue: doneIssue, currentOrLatestRun: null },
+      ],
+    }
+
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue(customSnapshot),
+      recoverIssue: vi.fn().mockResolvedValue(blockedIssue),
+      reopenIssue: vi.fn().mockResolvedValue(doneIssue),
+    })
+
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    await screen.findByText('Awesome Platform')
+
+    // 1. 点击“新建 Issue”打开 CreateIssueModal
+    const createBtn = screen.getByRole('button', { name: '新建 Issue' })
+    fireEvent.click(createBtn)
+    expect(await screen.findByRole('dialog', { name: '新建 Issue' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    // 2. 点击 BLOCKED 卡片上的恢复按钮
+    const recoverBtn = screen.getByRole('button', { name: '恢复' })
+    fireEvent.click(recoverBtn)
+    await waitFor(() => {
+      expect(api.recoverIssue).toHaveBeenCalledWith(blockedIssue.id, {
+        expectedVersion: blockedIssue.version,
+        requestKey: expect.any(String),
+      })
+    })
+
+    // 3. 点击 DONE 卡片上的重新打开按钮
+    const reopenBtn = screen.getByRole('button', { name: '重开' })
+    fireEvent.click(reopenBtn)
+    await waitFor(() => {
+      expect(api.reopenIssue).toHaveBeenCalledWith(doneIssue.id, {
+        expectedVersion: doneIssue.version,
+        requestKey: expect.any(String),
+      })
     })
   })
 })
