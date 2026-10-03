@@ -32,7 +32,7 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [plugin](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin) | 安装目录、安全管理面、凭据加密与资源端口 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
-| [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema 与版本快照 |
+| [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与启动期全局代理装配 |
 
 ## Catalog
 

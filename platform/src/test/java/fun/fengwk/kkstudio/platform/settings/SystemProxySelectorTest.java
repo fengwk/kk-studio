@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.network;
+package fun.fengwk.kkstudio.platform.settings;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
