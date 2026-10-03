@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.eclipse.jgit.api.Git;
@@ -107,6 +108,31 @@ public class JGitSkillCacheTest {
             SkillGitException.class,
             () -> cache.resolveBranchHead(tempDir.toUri().toString(), "main"));
     assertFalse(fileHead.getMessage().contains("UNSUPPORTED_REPOSITORY_SCHEME"));
+  }
+
+  @Test
+  public void directEntriesRejectCredentialsBeforeNetwork(@TempDir Path tempDir) {
+    // 测试意图：非 Web 调用同样在网络前拒绝凭据，错误及 cause 不泄漏原始 URL。
+    JGitSkillCache cache = new JGitSkillCache(tempDir.resolve("cache"));
+    String repositoryUrl = "https://user:private-value@example.invalid/repo.git";
+    SkillGitException head =
+        assertThrows(
+            SkillGitException.class, () -> cache.resolveBranchHead(repositoryUrl, "main"));
+    SkillGitException fetch =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.ensureCommit("pkg", repositoryUrl, "0".repeat(40)));
+    assertEquals("repositoryUrl must not contain userinfo", head.getMessage());
+    assertEquals(head.getMessage(), fetch.getMessage());
+    assertNull(head.getCause());
+    assertNull(fetch.getCause());
+    assertFalse(Files.exists(tempDir.resolve("cache/pkg.git")));
+    SkillGitException malformed =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.resolveBranchHead("https://user:private value@example.invalid", "main"));
+    assertEquals("repositoryUrl must be a valid URL without userinfo", malformed.getMessage());
+    assertNull(malformed.getCause());
   }
 
   @Test

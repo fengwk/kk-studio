@@ -234,11 +234,17 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 
 ## 配置
 
-在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、integrations、
-storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
+在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
+integrations、storageMedia、advanced 七个 section。strict codec 与 record 校验完整聚合，
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
 `SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
 aiRuntime 包含重试策略、压缩保留量、可空 `compactionFallbackModel` 和 subagent 限额。
+
+network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
+null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`。
+设置在启动时冻结，保存后重启各 Backend 节点生效；模型、Git、MCP、集成、媒体与 S3
+统一使用该策略，无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，
+Host/SNI 与证书校验保留原域名。Daemon 与浏览器的网络策略独立。
 
 部署级设置由各 `@ConfigurationProperties` 定义，进程启动时装配：
 

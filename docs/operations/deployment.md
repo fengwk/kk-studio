@@ -350,13 +350,25 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
   `KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` 落到共享卷都会直接扩大该端口的暴露面，
   应作为部署变更评审。
 
-Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network：App image build 支持
+构建代理与运行代理独立。App image build 支持
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和
 `KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 与
 [scripts/dev/verify/performance/run.sh](../../scripts/dev/verify/performance/run.sh) 会从宿主 proxy 变量生成 build 参数，
 离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
-loopback proxy。proxy 不进入 App/Daemon runtime image，也不作为运行时
-业务配置。
+loopback proxy。这些 build 参数不会自动进入 App/Daemon runtime。
+
+Backend 的运行代理在 **系统设置 → 网络** 保存，全局只配置一个无认证 HTTP 代理地址
+`http://host:port`；HTTPS 请求通过 CONNECT。地址留空即强制直连，不继承宿主环境变量。
+保存后重启各 Backend 节点生效，无模型、Git 或插件单独覆盖。绕过规则用逗号分隔，
+支持主机、域名后缀、IP、可选端口与 `*`，例如 `localhost,127.*,::1,minio,*.internal`；
+不支持 CIDR、SOCKS、代理认证或 TLS 到代理。代理失败不会自动改为直连。
+本机/内网 S3、Hub、ComfyUI 应纳入绕过规则；多节点代理地址必须对每个节点可达，
+容器里的 `127.0.0.1` 不是宿主机。公网媒体下载即使走代理也要求 Backend 正向解析
+并校验全部地址，CONNECT 固定到已校验 IP，不能用代理绕过公网地址准入。
+
+Daemon 不读取这项 Backend 配置；它遵循本机环境与操作系统代理，
+具体来源与服务进程环境见 [Environment Daemon](environment-daemon.md#本机代理)。
+浏览器直传/下载以及 Hub、ComfyUI 自身的外部请求由各自的网络配置决定。
 
 ## 清理
 
