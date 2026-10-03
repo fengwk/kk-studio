@@ -237,32 +237,31 @@ export async function runWorkspaceContractMatrix(ui) {
           await bindThreadComposer(page, goto, fixture)
           const footer = page.getByLabel('会话状态')
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
-          const environment = footer.locator('.thread-status-environment .thread-status-seg')
-          const environmentText = await environment.innerText()
+          const metadata = footer.locator('.thread-status-line-meta')
+          const usage = footer.locator('.thread-status-line-usage')
+          const environmentText = `env:${fixture.otherEnvironment.name} (unavailable)`
           // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable），
           // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
           assert(
-            environmentText === `env:${fixture.otherEnvironment.name} (unavailable)`,
-            `Footer environment fact is not the current agent-bound readonly identity: ${environmentText}`,
+            await metadata.innerText() === `${environmentText} · ctx 30/4.1k`,
+            `Footer environment/context facts are incorrect: ${await metadata.innerText()}`,
           )
           assert(
-            await environment.getAttribute('title') === environmentText,
-            `Footer environment title must equal its visible fact: ${await environment.getAttribute('title')}`,
+            (await metadata.getAttribute('title'))?.startsWith(`${environmentText} · `),
+            `Footer metadata title is missing its environment identity: ${await metadata.getAttribute('title')}`,
           )
           assert(
-            (await footer.locator('.thread-status-usage').innerText()).includes('↑16')
-            && (await footer.locator('.thread-status-usage').innerText()).includes('↓9')
-            && (await footer.locator('.thread-status-usage').innerText()).includes('R14'),
+            await usage.innerText() === '↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s',
             `Footer usage facts are incomplete: ${await footer.innerText()}`,
           )
           assert(
-            (await footer.locator('.thread-status-context').innerText()).includes('ctx 30/4.1k'),
-            `Footer context fact is incorrect: ${await footer.innerText()}`,
+            (await metadata.getAttribute('title'))?.includes('30 / 4096 tokens'),
+            `Footer context title is incorrect: ${await metadata.getAttribute('title')}`,
           )
           assert(
-            (await footer.locator('.thread-status-cache').innerText()).includes('cache 47%'),
-            `Footer cache hit fact is incorrect: ${await footer.innerText()}`,
+            (await usage.getAttribute('title'))?.includes('cache 47%'),
+            `Footer usage title is missing its cache hit fact: ${await usage.getAttribute('title')}`,
           )
           assert(await footer.locator('.thread-status-git').count() === 0, 'missing Git fact was fabricated')
           assert(await footer.getByRole('button').count() === 0, 'readonly Footer rendered a button')

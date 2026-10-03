@@ -614,7 +614,7 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 
 Human 在本机 preview 提交命令时，同步 HTTP 处理使用当前工作区代码，随后产生的异步 Harness Work
 使用 NAS 上正在运行的镜像，同一用户流程明确允许跨两个版本边界；共享 PostgreSQL/S3 是唯一数据
-事实源，不为本机 preview 复制数据，也不为短期版本错位增加运行时兼容层。兼容时直接继续迭代；
+事实源。两个版本的 schema、持久 JSON 与 Work wire 兼容时可继续迭代；
 schema、持久 JSON 或 Work wire 确实不兼容时，停止 preview 写入并评估已授权的部署切换；
 只有无法沿用现有 schema 且数据所有者批准重建时才按下文处理数据库，健康 S3 默认继续复用。
 修改 processor/runtime 等异步执行路径不会在本机 preview 中
