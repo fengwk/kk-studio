@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -12,6 +15,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
@@ -24,6 +28,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** JDK HttpServer 验证 Hub wire、媒体流式边界、URL 同源约束和 cancel 语义。 */
+@ResourceLock("jvm-proxy-selector")
 class OpenCliHubClientTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
@@ -39,6 +47,48 @@ class OpenCliHubClientTest {
   private OpenCliHubProperties properties;
   private SystemSettingsSnapshot snapshot;
   private OpenCliHubClient client;
+
+  /** Hub 客户端捕获启动期统一 selector；不解析远端 Hub 域名，上传经本地 HTTP 代理完成。 */
+  @Test
+  void usesTheInstalledSystemProxy() {
+    ProxySelector previous = ProxySelector.getDefault();
+    ProxySelector selector = mock(ProxySelector.class);
+    when(selector.select(any(URI.class)))
+        .thenReturn(
+            List.of(
+                new Proxy(
+                    Proxy.Type.HTTP,
+                    new InetSocketAddress("127.0.0.1", server.getAddress().getPort()))));
+    server.createContext(
+        "/api/resources/uploads",
+        exchange -> {
+          exchange.getRequestBody().readAllBytes();
+          respond(
+              exchange,
+              201,
+              """
+              {"status":201,"code":"CREATED","success":true,"data":{"items":[{
+                "resourcePath":"/resources/proxy/source.png"
+              }]}}
+              """);
+        });
+    try {
+      ProxySelector.setDefault(selector);
+      OpenCliHubClient proxied =
+          new OpenCliHubClient(
+              properties,
+              new SystemSettingsSnapshot(
+                  settings(openCliHub("http://unresolvable.invalid", 121_000L))),
+              mapper);
+      assertEquals(
+          "/resources/proxy/source.png",
+          proxied
+              .upload("source.png", "image/png", 3, new ByteArrayInputStream(new byte[] {1, 2, 3}))
+              .resourcePath());
+    } finally {
+      ProxySelector.setDefault(previous);
+    }
+  }
 
   @BeforeEach
   void setUp() throws IOException {

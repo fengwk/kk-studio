@@ -3,17 +3,24 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
 import java.net.ServerSocket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,6 +35,7 @@ import java.util.Map;
  * <p>只使用本机 loopback {@link HttpServer}，不访问真实网络。这里锁定三件必须成立的事：请求按 HTTP/1.1 发送并带上 header/body、302
  * 不会被自动跟随、传输失败一律映射为不含凭据的 {@link MavisTransportException}。
  */
+@ResourceLock("jvm-proxy-selector")
 class JdkMavisHttpTransportTest {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
@@ -35,6 +43,32 @@ class JdkMavisHttpTransportTest {
   private final List<RecordedExchange> recorded = new ArrayList<>();
   private HttpServer server;
   private String origin;
+
+  /** 生产构造捕获已经安装的系统 selector，不可解析的 API 域名必须由本地 HTTP 代理接收。 */
+  @Test
+  void usesTheInstalledSystemProxy() {
+    ProxySelector previous = ProxySelector.getDefault();
+    ProxySelector selector = mock(ProxySelector.class);
+    when(selector.select(any(URI.class)))
+        .thenReturn(
+            List.of(
+                new Proxy(
+                    Proxy.Type.HTTP,
+                    new InetSocketAddress("127.0.0.1", server.getAddress().getPort()))));
+    try {
+      ProxySelector.setDefault(selector);
+      MavisHttpResponse response =
+          new JdkMavisHttpTransport()
+              .send(
+                  new MavisHttpRequest(
+                      "GET", "http://unresolvable.invalid/echo", Map.of(), null, TIMEOUT));
+      assertEquals(200, response.statusCode());
+      assertEquals(1, recorded.size());
+      assertEquals("unresolvable.invalid", recorded.getFirst().headers().get("host"));
+    } finally {
+      ProxySelector.setDefault(previous);
+    }
+  }
 
   /** 每次测试都在随机 loopback 端口上启动一个只服务固定路径的服务器。 */
   @BeforeEach

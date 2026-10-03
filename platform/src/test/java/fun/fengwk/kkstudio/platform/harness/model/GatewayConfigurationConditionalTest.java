@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
+import java.net.ProxySelector;
 import java.time.Duration;
 
 /**
@@ -25,6 +27,8 @@ class GatewayConfigurationConditionalTest {
 
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
+          .withBean(
+              "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""))
           .withBean(
               SystemSettingsSnapshot.class,
               () -> new SystemSettingsSnapshot(SystemSettings.DEFAULT));

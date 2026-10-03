@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -13,6 +16,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 import java.io.ByteArrayInputStream;
 import java.io.FilterInputStream;
@@ -20,15 +24,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 标准客户端以本地 HTTP route 验证 multipart、严格 history、编码、流式 view 与 pending-only cancel。 */
+@ResourceLock("jvm-proxy-selector")
 class StandardComfyuiClientTest {
 
   private static final UUID CANVAS = new UUID(0L, 7L);
@@ -46,6 +55,33 @@ class StandardComfyuiClientTest {
   private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
   private final AtomicReference<String> uploadContentLength = new AtomicReference<>();
   private final AtomicInteger uploadStatus = new AtomicInteger(200);
+
+  /** 生产构造使用已安装的系统代理；无法直连的 ComfyUI 域名经本地代理完成标准 prompt 请求。 */
+  @Test
+  void usesTheInstalledSystemProxy() {
+    ProxySelector previous = ProxySelector.getDefault();
+    ProxySelector selector = mock(ProxySelector.class);
+    when(selector.select(any(URI.class)))
+        .thenReturn(
+            List.of(
+                new Proxy(
+                    Proxy.Type.HTTP,
+                    new InetSocketAddress("127.0.0.1", server.getAddress().getPort()))));
+    try {
+      ProxySelector.setDefault(selector);
+      StandardComfyuiClient proxied =
+          new StandardComfyuiClient(
+              "http://unresolvable.invalid",
+              "test-token",
+              Duration.ofSeconds(1),
+              Duration.ofSeconds(2),
+              new ObjectMapper());
+      ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
+      assertEquals("p1", proxied.submit(workflow, "client-1"));
+    } finally {
+      ProxySelector.setDefault(previous);
+    }
+  }
 
   @BeforeEach
   void setUp() throws IOException {
