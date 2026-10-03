@@ -196,6 +196,7 @@ case "\${1:-}" in
     run)
         version=false
         smoke=false
+        probe=false
         for arg in "$@"; do
             if [[ "$arg" == version ]]; then
                 version=true
@@ -203,9 +204,25 @@ case "\${1:-}" in
             if [[ "$arg" == /bin/sh || "$arg" == /bin/bash ]]; then
                 smoke=true
             fi
+            if [[ "$arg" == --input-type=module ]]; then
+                probe=true
+            fi
         done
         if [[ "$version" == true ]]; then
             printf '%s\\n' '{"Version":"0.74.0"}'
+        elif [[ "$probe" == true ]]; then
+            cat >"\${FAKE_DOCKER_PROBE_STDIN_FILE}"
+            case "\${FAKE_DOCKER_PROBE_MODE:-valid}" in
+                empty) exit 0 ;;
+                invalid) printf '%s\\n' 'not json' ;;
+                incomplete) printf '%s\\n' '{"status":"ASSERTIONS_SATISFIED"}' ;;
+                nonzero)
+                    cat "\${FAKE_DOCKER_PROBE_FIXTURE}"
+                    printf '%s\\n' 'simulated probe failure' >&2
+                    exit 19
+                    ;;
+                *) cat "\${FAKE_DOCKER_PROBE_FIXTURE}" ;;
+            esac
         elif [[ "$smoke" == true ]]; then
             smoke_failure="\${FAKE_DOCKER_SMOKE_FAILURE:-}"
             if [[ "$smoke_failure" == true || "$smoke_failure" == all ]] || \
@@ -247,6 +264,8 @@ esac
             ...process.env,
             PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
             FAKE_DOCKER_CALLS_FILE: callsFile,
+            FAKE_DOCKER_PROBE_STDIN_FILE: path.join(root, 'probe-stdin.mjs'),
+            FAKE_DOCKER_PROBE_FIXTURE: path.join(path.dirname(SCRIPT), 'tests/npm-cache-probe.fixture.json'),
         },
     }
 }
@@ -793,6 +812,8 @@ test('fails closed when the daemon smoke fails even though Trivy exits zero', ()
             readFileSync(path.join(reportRoot, 'latest/logs/daemon-image-smoke.log'), 'utf8'),
             /simulated image smoke failure/,
         )
+        // Intent: a failed prerequisite must not run the independent cache probe.
+        assert.equal(existsSync(toolchain.env.FAKE_DOCKER_PROBE_STDIN_FILE), false)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
     }
@@ -975,4 +996,115 @@ test('pins runtime versions and only overrides vulnerable npm bundles with upstr
     assert.doesNotMatch(daemon, /npm pack (tar|http-cache-semantics)@/)
     assert.match(daemon, /USER 10001:10001/)
     assert.match(runScript(['help']).stdout, /SUPPLY_CHAIN_TRIVY_NETWORK/)
+})
+
+test('injects the real probe through stdin with no network, host mounts or user environment', () => {
+    // Intent: enforce the isolation contract and retain observations without granting vulnerability clearance.
+    // Intent: use actual npm bundle report data to validate integration, without simulating a cache implementation.
+    const toolchain = createFakeDockerToolchain()
+    const reportRoot = path.join(toolchain.root, 'reports')
+    try {
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            HTTP_PROXY: 'http://synthetic-user:synthetic-password@127.0.0.1:7890',
+            NVD_API_KEY: 'synthetic-probe-must-not-inherit',
+        })
+        assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+        const calls = readFileSync(toolchain.callsFile, 'utf8')
+        const probeCalls = calls.split('\n')
+            .filter(line => line.startsWith('run ') && line.includes('--input-type=module'))
+        assert.deepEqual(probeCalls, [
+            'run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node kk-studio-daemon:supply-chain --input-type=module',
+        ])
+        assert.doesNotMatch(probeCalls[0], /--env|-e |--volume|-v |--mount|--user|--privileged/)
+        assert.equal(readFileSync(toolchain.env.FAKE_DOCKER_PROBE_STDIN_FILE, 'utf8'),
+            readFileSync(path.join(path.dirname(SCRIPT), 'npm-cache-probe.mjs'), 'utf8'))
+        assert.ok(calls.indexOf('--entrypoint /bin/bash') < calls.indexOf(probeCalls[0]))
+        assert.ok(calls.indexOf(probeCalls[0]) < calls.indexOf('aquasec/trivy@'))
+        const report = JSON.parse(readFileSync(path.join(reportRoot, 'latest/image/npm-cache-probe.json'), 'utf8'))
+        assert.equal(report.runtime.shared, false)
+        for (const id of ['auth-change-no-vary', 'no-cache-max-stale']) {
+            assert.equal(report.cases.find(item => item.id === id).status, 'OBSERVED')
+        }
+        assert.equal(readFileSync(path.join(reportRoot, 'latest/logs/npm-cache-probe.log'), 'utf8'), '')
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+for (const mode of ['nonzero', 'empty', 'invalid', 'incomplete']) {
+    test(`fails daemon smoke on ${mode} probe output and still runs Trivy`, () => {
+        // Intent: neither a clean scan nor a zero exit with missing/invalid evidence may hide a failed probe.
+        const toolchain = createFakeDockerToolchain()
+        const reportRoot = path.join(toolchain.root, 'reports')
+        try {
+            const result = runScript(['image'], {
+                ...toolchain.env,
+                SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+                FAKE_DOCKER_PROBE_MODE: mode,
+            })
+            assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+            const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
+            assert.equal(summary.status, 'FAIL')
+            assert.equal(summary.checks.find(item => item.name === 'daemon-image-smoke').status, 'FAIL')
+            assert.equal(summary.checks.find(item => item.name === 'app-image-smoke').status, 'PASS')
+            for (const name of ['app-image-scan', 'daemon-image-scan']) {
+                assert.equal(summary.checks.find(item => item.name === name).status, 'PASS')
+            }
+            assert.match(summary.failures.join('\n'), /daemon npm cache probe/)
+            const log = readFileSync(path.join(reportRoot, 'latest/logs/npm-cache-probe.log'), 'utf8')
+            if (mode === 'nonzero') {
+                assert.match(log, /simulated probe failure/)
+                assert.match(summary.failures.join('\n'), /exit 19/)
+            } else {
+                assert.ok(log.length > 0, 'report validation failure must retain diagnostics')
+            }
+            const calls = readFileSync(toolchain.callsFile, 'utf8')
+            assert.equal(calls.split('\n').filter(line => line.includes('aquasec/trivy@')).length, 3)
+        } finally {
+            rmSync(toolchain.root, { recursive: true, force: true })
+        }
+    })
+}
+
+test('requires complete assertions but accepts either defect observation without suppressing Trivy', () => {
+    // Intent: valid JSON is not enough; required boundaries fail closed, while defect observations remain non-gating.
+    const variants = [
+        { name: 'shared-true', mutate: report => { report.runtime.shared = true }, exit: 1 },
+        { name: 'missing-case', mutate: report => { report.cases.pop() }, exit: 1 },
+        { name: 'failed-control', mutate: report => { report.cases[0].status = 'FAILED' }, exit: 1 },
+        { name: 'false-origin-claim', mutate: report => { report.cases[2].originHits = 1 }, exit: 1 },
+        { name: 'not-observed', mutate: report => {
+            for (const item of report.cases.filter(item => item.kind === 'observation')) {
+                item.status = 'NOT_OBSERVED'
+                item.originHits = 2
+                item.source = 'B'
+                item.secondBody = `SYNTHETIC_BODY_B_${item.id}`
+                item.cacheStatus.second = 'updated'
+            }
+        }, exit: 0 },
+    ]
+    for (const variant of variants) {
+        const toolchain = createFakeDockerToolchain()
+        const reportRoot = path.join(toolchain.root, 'reports')
+        try {
+            const fixture = JSON.parse(readFileSync(toolchain.env.FAKE_DOCKER_PROBE_FIXTURE, 'utf8'))
+            variant.mutate(fixture)
+            const fixtureFile = path.join(toolchain.root, 'mutated-probe.json')
+            writeFileSync(fixtureFile, JSON.stringify(fixture))
+            const result = runScript(['image'], {
+                ...toolchain.env,
+                SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+                FAKE_DOCKER_PROBE_FIXTURE: fixtureFile,
+            })
+            assert.equal(result.status, variant.exit, `${variant.name}: ${result.stdout}\n${result.stderr}`)
+            const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
+            assert.equal(summary.checks.find(item => item.name === 'daemon-image-smoke').status,
+                variant.exit === 0 ? 'PASS' : 'FAIL')
+            assert.equal(summary.checks.find(item => item.name === 'daemon-image-scan').status, 'PASS')
+        } finally {
+            rmSync(toolchain.root, { recursive: true, force: true })
+        }
+    }
 })
