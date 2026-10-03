@@ -159,7 +159,7 @@ describe('ResourceAttachmentChip', () => {
       </ResourceBlobUrlContext.Provider>,
     )
     await waitFor(() => expect(resolveBlobUrls).toHaveBeenCalledWith('file-2'))
-    expect(screen.getByTitle(/attachment/)).toHaveClass('is-file')
+    expect(screen.getByTitle(/附件/)).toHaveClass('is-file')
   })
 
   it('lets authoritative non-media types override a stale attachment type', async () => {

@@ -919,7 +919,7 @@ export function useAgentPaneController({
       return
     }
     if (capabilities?.allowGenericChat === false) {
-      setActionError('当前受控模式下禁止通用 Chat 发送')
+      setActionError(t('ai.runtime.action.genericChatDisabled'))
       return
     }
     if (isBoundTarget(target)) {
@@ -1096,7 +1096,7 @@ export function useAgentPaneController({
     switch (command.id) {
       case 'thread':
         if (capabilities?.allowBranching === false) {
-          setActionError('当前受控模式不支持分支切换或分叉')
+          setActionError(t('ai.runtime.action.branchingDisabled'))
           return
         }
         if (hasPendingOperation()) {
@@ -1107,7 +1107,7 @@ export function useAgentPaneController({
         return
       case 'tree':
         if (capabilities?.allowBranching === false) {
-          setActionError('当前受控模式不支持分支切换或分叉')
+          setActionError(t('ai.runtime.action.branchingDisabled'))
           return
         }
         if (hasPendingOperation()) {
@@ -1125,7 +1125,7 @@ export function useAgentPaneController({
           return
         }
         if (capabilities?.allowBranching === false) {
-          setActionError('当前受控模式不支持分支切换或分叉')
+          setActionError(t('ai.runtime.action.branchingDisabled'))
           return
         }
         if (capabilities?.allowNewSession === false) {
@@ -1145,7 +1145,7 @@ export function useAgentPaneController({
         return
       case 'agent':
         if (capabilities?.allowSwitchAgent === false) {
-          setActionError('当前受控模式不支持切换 Agent')
+          setActionError(t('ai.runtime.action.agentSwitchDisabled'))
           return
         }
         setInteraction('agent')
@@ -1204,7 +1204,7 @@ export function useAgentPaneController({
 
   function selectAgent(agentName: string): void {
     if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowSwitchAgent === false) {
-      setActionError('当前受控模式不支持切换 Agent')
+      setActionError(t('ai.runtime.action.agentSwitchDisabled'))
       return
     }
     const agent = agents.find((item) => item.name === agentName)
@@ -1236,7 +1236,7 @@ export function useAgentPaneController({
 
   function selectEntry(entry: HarnessSessionEntryDTO): void {
     if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
-      setActionError('当前受控模式不支持分支切换或分叉')
+      setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
     const draft = branchDraftFromEntry(entry, activeDraft)
@@ -1250,7 +1250,7 @@ export function useAgentPaneController({
 
   function selectSession(session: RuntimeSessionSummaryDTO): void {
     if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
-      setActionError('当前受控模式不支持分支切换或分叉')
+      setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
     setThreadNavigationSessionId(session.sessionId)
@@ -1259,7 +1259,7 @@ export function useAgentPaneController({
 
   function selectThread(thread: RuntimeThreadSummaryDTO): void {
     if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
-      setActionError('当前受控模式不支持分支切换或分叉')
+      setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
     changeTarget({ kind: 'BOUND_THREAD', threadId: thread.threadId }, activeDraft)

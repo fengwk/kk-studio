@@ -99,7 +99,7 @@ describe('ThreadWidgetStack', () => {
   })
 
   it('renders localized status text when working with workingLabel', () => {
-    // 测试意图：当线程处于等待子线程或排队中状态时，若 working=true，ThreadWidgetStack 必须优先展示格式化后的本地化文案。
+    // 测试意图：当线程处于等待子 Thread或排队中状态时，若 working=true，ThreadWidgetStack 必须优先展示格式化后的本地化文案。
     const waitingLabel = formatThreadStatusLabel('WAITING_CHILDREN')
     const { rerender } = render(
       <ThreadWidgetStack
@@ -108,7 +108,7 @@ describe('ThreadWidgetStack', () => {
         queuedMessages={[]}
       />,
     )
-    expect(screen.getByText('等待子线程')).toBeInTheDocument()
+    expect(screen.getByText('等待子 Thread')).toBeInTheDocument()
 
     const queuedLabel = formatThreadStatusLabel('QUEUED')
     rerender(
@@ -132,6 +132,6 @@ describe('ThreadWidgetStack', () => {
       />,
     )
     expect(container).toBeEmptyDOMElement()
-    expect(screen.queryByText('等待子线程')).not.toBeInTheDocument()
+    expect(screen.queryByText('等待子 Thread')).not.toBeInTheDocument()
   })
 })

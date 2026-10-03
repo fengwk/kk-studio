@@ -207,7 +207,7 @@ export const settingsCatalog = {
   },
   'settings.error.numericFieldRequired': {
     'en-US': 'A required numeric field is empty; fill it in before saving.',
-    'zh-CN': '存在为空的其他必需数值字段，请填写后再保存。',
+    'zh-CN': '存在为空的必需数值字段，请填写后再保存。',
   },
   'settings.error.partialModelSelection': {
     'en-US': 'The fallback model selection is incomplete; fill in all three fields or clear all of them.',
@@ -737,7 +737,7 @@ export const settingsCatalog = {
   },
   'settings.field.integrations.seedance.enabled.hint': {
     'en-US': 'Whether to enable the Seedance multimodal video production integration.',
-    'zh-CN': '是否启用 Seedance 短剧与多模态视频生产集成服务。',
+    'zh-CN': '是否启用 Seedance 多模态视频生成集成。',
   },
   'settings.field.integrations.seedance.workspaceId': {
     'en-US': 'Workspace ID',
@@ -793,7 +793,7 @@ export const settingsCatalog = {
   },
   'settings.field.integrations.gptImage2.paidEnabled.hint': {
     'en-US': 'Whether to enable the GPT-Image-2 paid image generation and editing capability.',
-    'zh-CN': '是否启用 GPT-Image-2 高级付费图像生成与编辑功能。',
+    'zh-CN': '是否启用 GPT-Image-2 付费图像生成与编辑功能。',
   },
   'settings.field.integrations.gptImage2.askTimeoutSeconds': {
     'en-US': 'Ask timeout (s)',
@@ -837,7 +837,7 @@ export const settingsCatalog = {
   },
   'settings.field.integrations.minimaxH3.promptAgentName': {
     'en-US': 'Prompt agent name',
-    'zh-CN': '提示词代理名',
+    'zh-CN': '提示词 Agent 名称',
   },
   'settings.field.integrations.minimaxH3.promptAgentName.hint': {
     'en-US': 'Agent name delegated for MiniMax-H3 prompt generation. Leave empty to use the default agent.',
@@ -919,7 +919,7 @@ export const settingsCatalog = {
   },
   'settings.field.storageMedia.uploadExpiresSeconds.hint': {
     'en-US': 'Expiration period in seconds for temporary upload credentials and upload URLs.',
-    'zh-CN': '本地或直传上传凭证及临时上传链接的有效秒数。',
+    'zh-CN': '临时上传凭证与上传链接的有效秒数。',
   },
   'settings.field.storageMedia.s3PresignDefaultExpiresSeconds': {
     'en-US': 'S3 presign default expiry (s)',

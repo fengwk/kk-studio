@@ -21,7 +21,7 @@ export interface ThreadStatusModel {
 }
 
 export interface ThreadStatusModelInput {
-  /** Environment 身份；null 时只读展示 `none env`。 */
+  /** Environment 身份；null 时只读展示 `未选择环境`。 */
   environment?: EnvironmentStatusIdentity | null
   /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean

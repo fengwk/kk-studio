@@ -6,8 +6,8 @@ export const canvasCatalog = {
     'zh-CN': '正在加载画布',
   },
   'canvas.library.eyebrow': {
-    'en-US': 'Agent-native workspace',
-    'zh-CN': 'Agent 原生工作区',
+    'en-US': 'Agent workspace',
+    'zh-CN': 'Agent 工作区',
   },
   'canvas.library.headingLine1': {
     'en-US': 'Put ideas, references, and results',
@@ -18,8 +18,8 @@ export const canvasCatalog = {
     'zh-CN': '放在同一个空间。',
   },
   'canvas.library.description': {
-    'en-US': 'Organize durable resources and call typed image or video Functions.',
-    'zh-CN': '组织持久化资源，并调用类型明确的图片或视频 Function。',
+    'en-US': 'Organize assets and run image or video Functions.',
+    'zh-CN': '整理素材，并运行图片或视频 Function。',
   },
   'canvas.library.title': {
     'en-US': 'Your canvases',
@@ -52,6 +52,18 @@ export const canvasCatalog = {
   'canvas.library.realCanvas': {
     'en-US': 'Server snapshot',
     'zh-CN': '服务端快照',
+  },
+  'canvas.library.untitled': {
+    'en-US': 'Untitled canvas',
+    'zh-CN': '未命名画布',
+  },
+  'canvas.library.emptyTitle': {
+    'en-US': 'No canvases yet',
+    'zh-CN': '还没有画布',
+  },
+  'canvas.library.emptyDescription': {
+    'en-US': 'Create a blank canvas to organize resources and Functions.',
+    'zh-CN': '创建一个空白画布，开始组织资源与 Function。',
   },
   'canvas.toast.library.created': {
     'en-US': 'Created canvas “{{title}}”',
@@ -122,8 +134,8 @@ export const canvasCatalog = {
     'zh-CN': '调整对话面板宽度',
   },
   'canvas.stage.ariaLabel': {
-    'en-US': 'Infinite canvas. Drag resources, connect ResourceNodes to Function nodes, and drop media files to upload.',
-    'zh-CN': '无限画布。拖动资源，将 ResourceNode 连接到 Function 节点，或拖入媒体文件上传。',
+    'en-US': 'Infinite canvas. Drag resources, connect them to Function nodes, and drop media files to upload.',
+    'zh-CN': '无限画布。拖动资源并连接 Function 节点，或拖入媒体文件上传。',
   },
   'canvas.stage.minimap': {
     'en-US': 'Canvas minimap',
@@ -514,12 +526,12 @@ export const canvasCatalog = {
     'zh-CN': '开始 Canvas 对话',
   },
   'canvas.agent.blankDescription': {
-    'en-US': 'Choose the agent below; the first message creates the thread bound to this canvas.',
-    'zh-CN': '在下方选择 Agent；第一条消息将创建绑定到本画布的对话。',
+    'en-US': 'Choose an agent below; send the first message to start a conversation on this canvas.',
+    'zh-CN': '在下方选择 Agent；发送第一条消息即可开始本画布的对话。',
   },
   'canvas.agent.agentMissing': {
-    'en-US': 'No resolvable agent configuration yet; pick an agent to continue.',
-    'zh-CN': '暂无可解析的 Agent 配置，请先选择一个 Agent。',
+    'en-US': 'No agent is available yet; pick an agent to continue.',
+    'zh-CN': '暂无可用的 Agent，请选择一个继续。',
   },
   'canvas.agent.collapse': {
     'en-US': 'Collapse the Chat panel',
