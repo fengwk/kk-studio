@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
- * System settings 的六个强类型 section 载体（tool / aiRuntime / environment / integrations / storageMedia /
- * advanced），是 GET 响应数据与 PUT 请求体的公共部分。
+ * System settings 的七个强类型 section 载体（tool / aiRuntime / environment / network / integrations /
+ * storageMedia / advanced），是 GET 响应数据与 PUT 请求体的公共部分。
  *
  * <p>每个 section 都是必填对象；客户端必须发送完整聚合，缺失 section 或未知字段都会失败。仓库/Web 约定：{@code Long} 字段（时长 {@code
  * *Millis}、字节、秒数）在 HTTP wire 上输出规范非负十进制字符串（前端友好、bigint-safe），{@code Integer} 字段为 JSON 数值。秘密与
@@ -19,6 +19,8 @@ public class SystemSettingsSectionsDTO {
   private SystemSettingsAiRuntimeDTO aiRuntime;
 
   private SystemSettingsEnvironmentDTO environment;
+
+  private SystemSettingsNetworkDTO network;
 
   private SystemSettingsIntegrationsDTO integrations;
 

@@ -1,8 +1,12 @@
 package fun.fengwk.kkstudio.share.systemsettings;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -25,7 +29,7 @@ class SystemSettingsDtoContractTest {
     assertRejectsUnknown(
         () ->
             objectMapper.readValue(
-                "{\"tool\":{},\"aiRuntime\":{},\"environment\":{},\"integrations\":{},"
+                "{\"tool\":{},\"aiRuntime\":{},\"environment\":{},\"network\":{},\"integrations\":{},"
                     + "\"storageMedia\":{},\"advanced\":{},\"unknown\":1}",
                 SystemSettingsUpdateDTO.class));
     assertRejectsUnknown(
@@ -43,6 +47,11 @@ class SystemSettingsDtoContractTest {
             objectMapper.readValue(
                 "{\"paidEnabled\":false,\"unknown\":1}",
                 SystemSettingsIntegrationsDTO.GptImage2DTO.class));
+    // network 只允许两个全局字段，不接受 enabled 或模块级 override。
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"enabled\":true}", SystemSettingsNetworkDTO.class));
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"overrides\":{}}", SystemSettingsNetworkDTO.class));
   }
 
   @Test
@@ -80,6 +89,9 @@ class SystemSettingsDtoContractTest {
     assertTrue(json.contains("\"aiRuntime\""), "aiRuntime section must serialize: " + json);
     assertTrue(json.contains("\"modelGatewayBusyRetryMillis\""));
     assertTrue(json.contains("\"permission\""));
+    assertTrue(json.contains("\"network\""));
+    assertTrue(json.contains("\"proxyUrl\""));
+    assertTrue(json.contains("\"noProxyHosts\":\"localhost,127.*,::1\""));
   }
 
   @Test
@@ -94,6 +106,7 @@ class SystemSettingsDtoContractTest {
             SystemSettingsToolDTO.PermissionRuleDTO.class,
             SystemSettingsAiRuntimeDTO.class,
             SystemSettingsEnvironmentDTO.class,
+            SystemSettingsNetworkDTO.class,
             SystemSettingsIntegrationsDTO.class,
             SystemSettingsIntegrationsDTO.ComfyuiDTO.class,
             SystemSettingsIntegrationsDTO.OpenCliHubDTO.class,
@@ -144,6 +157,31 @@ class SystemSettingsDtoContractTest {
         violations.isEmpty(), "DTOs must not expose secrets or bootstrap inputs: " + violations);
   }
 
+  @Test
+  void networkWirePreservesNullAndEmptyTextButRejectsScalarCoercion() throws Exception {
+    // 默认 ObjectMapper 也必须严格：网络字段不能把数字/布尔静默转换成可保存字符串。
+    SystemSettingsNetworkDTO dto =
+        objectMapper.readValue(
+            "{\"proxyUrl\":null,\"noProxyHosts\":\"\"}", SystemSettingsNetworkDTO.class);
+    assertNull(dto.getProxyUrl());
+    assertEquals("", dto.getNoProxyHosts());
+    SystemSettingsNetworkDTO proxy =
+        objectMapper.readValue(
+            "{\"proxyUrl\":\"http://proxy:3128\",\"noProxyHosts\":\"localhost,127.*,::1\"}",
+            SystemSettingsNetworkDTO.class);
+    assertEquals("http://proxy:3128", proxy.getProxyUrl());
+    assertEquals("localhost,127.*,::1", proxy.getNoProxyHosts());
+    for (String field : List.of("proxyUrl", "noProxyHosts")) {
+      for (String value : List.of("1", "1.5", "true", "[]", "{}")) {
+        assertThrows(
+            JsonMappingException.class,
+            () ->
+                objectMapper.readValue(
+                    "{\"" + field + "\":" + value + "}", SystemSettingsNetworkDTO.class));
+      }
+    }
+  }
+
   private static List<Field> allDeclaredFields(Class<?> type) {
     List<Field> fields = new ArrayList<>();
     Class<?> cursor = type;
@@ -168,6 +206,9 @@ class SystemSettingsDtoContractTest {
     tool.setToolGatewayBusyRetryMillis(1000L);
     tool.setToolGatewayOverloadRetryMillis(5000L);
     dto.setTool(tool);
+    SystemSettingsNetworkDTO network = new SystemSettingsNetworkDTO();
+    network.setNoProxyHosts("localhost,127.*,::1");
+    dto.setNetwork(network);
     return dto;
   }
 

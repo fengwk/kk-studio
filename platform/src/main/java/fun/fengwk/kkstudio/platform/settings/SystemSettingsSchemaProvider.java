@@ -227,6 +227,33 @@ public class SystemSettingsSchemaProvider {
                         1,
                         null))),
             section(
+                "network",
+                "settings.tabs.network",
+                "settings.section.network.description",
+                true,
+                group(
+                    "network.proxy",
+                    "settings.section.network.proxy.title",
+                    "settings.section.network.proxy.description",
+                    true,
+                    ApplyTiming.RESTART,
+                    field(
+                        "network.proxyUrl",
+                        "settings.field.network.proxyUrl",
+                        "settings.field.network.proxyUrl.hint",
+                        FieldType.TEXT,
+                        true,
+                        null,
+                        2048),
+                    field(
+                        "network.noProxyHosts",
+                        "settings.field.network.noProxyHosts",
+                        "settings.field.network.noProxyHosts.hint",
+                        FieldType.TEXT,
+                        false,
+                        null,
+                        4096))),
+            section(
                 "integrations",
                 "settings.tabs.integrations",
                 "settings.section.integrations.description",

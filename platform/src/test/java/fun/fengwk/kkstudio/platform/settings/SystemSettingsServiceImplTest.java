@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.AfterEach;
@@ -39,6 +40,7 @@ class SystemSettingsServiceImplTest {
               SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
               SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
           SystemSettings.Environment.DEFAULT,
+          SystemSettings.Network.DEFAULT,
           SystemSettings.Integrations.DEFAULT,
           SystemSettings.StorageMedia.DEFAULT,
           SystemSettings.Advanced.DEFAULT);
@@ -170,11 +172,42 @@ class SystemSettingsServiceImplTest {
 
   private SystemSettingsUpdateDTO update(String expectedVersion) {
     SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    return update(sections, expectedVersion);
+  }
+
+  /** 非法代理在任何仓库读写之前拒绝，快照保持原值，异常不回显凭据。 */
+  @Test
+  void invalidProxyFailsBeforeRepositoryAccess() {
+    SystemSettingsUpdateDTO request = update("0");
+    request.getNetwork().setProxyUrl("http://synthetic-user:synthetic-password@proxy:3128");
+    SystemSettingsValidationException error =
+        assertThrows(SystemSettingsValidationException.class, () -> service.update(request));
+    assertEquals("network.proxyUrl is invalid", error.getMessage());
+    verifyNoInteractions(repository);
+    assertEquals(SystemSettings.DEFAULT, snapshot.get());
+  }
+
+  /** GET 的显式 section 映射必须携带 network，不能因服务手动复制字段漏掉新契约。 */
+  @Test
+  void getIncludesPersistedNetworkSection() {
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    sections.getNetwork().setProxyUrl("http://proxy:3128");
+    sections.getNetwork().setNoProxyHosts("");
+    SystemSettings settings = codec.fromDto(sections);
+    when(repository.get())
+        .thenReturn(
+            new SystemSettingsRepository.SystemSettingsRecord(settings, 1, CREATED_AT, UPDATED_AT));
+    assertEquals(sections.getNetwork(), service.get().getNetwork());
+  }
+
+  private SystemSettingsUpdateDTO update(
+      SystemSettingsSectionsDTO sections, String expectedVersion) {
     SystemSettingsUpdateDTO update = new SystemSettingsUpdateDTO();
     update.setExpectedVersion(expectedVersion);
     update.setTool(sections.getTool());
     update.setAiRuntime(sections.getAiRuntime());
     update.setEnvironment(sections.getEnvironment());
+    update.setNetwork(sections.getNetwork());
     update.setIntegrations(sections.getIntegrations());
     update.setStorageMedia(sections.getStorageMedia());
     update.setAdvanced(sections.getAdvanced());

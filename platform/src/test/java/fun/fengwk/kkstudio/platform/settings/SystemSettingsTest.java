@@ -54,6 +54,8 @@ class SystemSettingsTest {
 
     assertEquals(16L * 1024 * 1024, defaults.environment().maxResourceBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
+    assertEquals(null, defaults.network().proxyUrl());
+    assertEquals("localhost,127.*,::1", defaults.network().noProxyHosts());
 
     SystemSettings.Integrations integrations = defaults.integrations();
     assertEquals(false, integrations.comfyui().enabled());
