@@ -27,7 +27,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 验证真实运行的 Boot 4 平台：内嵌容器必须提供 Servlet 6.1 能力，且 classpath 上所有 Netty 构件必须共享 Boot BOM 管理的同一个 4.2.x 版本。
+ * 验证真实运行的 Boot 4 平台：内嵌容器必须提供 Servlet 6.1 能力，且 classpath 上所有 Netty 构件必须共享同一个 4.2.x 安全修订版本。
  *
  * <p>根 POM 曾把四个 {@code tomcat-embed-*} 固定为 10.1.59（Servlet 6.0），并在 Boot BOM 之前导入 netty-bom {@code
  * 4.1.137.Final}，等于把 Boot 4 的受支持平台拆回上一代容器与网络栈。本测试只从活容器与已解析构件自带的版本清单读取平台 major/minor，因此不会因 patch
@@ -84,21 +84,21 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
   }
 
   /**
-   * 测试意图：Netty 只由 Boot BOM 拥有——AWS SDK 的 netty-nio-client、native epoll 等构件必须解析成同一个 4.2.x 版本。版本不一致会让
-   * transport 与 native transport 混用，而 4.1.x 则是被移除的上一代平台。
+   * 测试意图：AWS SDK 的 netty-nio-client、native epoll 等构件必须解析成同一个 4.2.x 版本。版本不一致会让 transport 与 native
+   * transport 混用，而 4.1.x 则是被移除的上一代平台。
    */
   @Test
   void resolvedNettyArtifactsShareBootManagedPlatformVersion() throws Exception {
     Map<String, String> artifactVersions = readResolvedNettyArtifactVersions();
     assertFalse(
         artifactVersions.isEmpty(),
-        "the Boot BOM must resolve Netty for its direct users (AWS SDK netty-nio-client);"
+        "dependency management must resolve Netty for its direct users (AWS SDK netty-nio-client);"
             + " delete this assertion with the last Netty consumer");
     Set<String> distinctVersions = new TreeSet<>(artifactVersions.values());
     assertEquals(
         1,
         distinctVersions.size(),
-        "every resolved Netty artifact must share the Boot-managed version, actual="
+        "every resolved Netty artifact must share the centrally managed version, actual="
             + artifactVersions);
     String nettyVersion = distinctVersions.iterator().next();
     assertTrue(

@@ -309,12 +309,9 @@ test('keeps online plugins inside the explicitly activated root-only profile', (
     assert.match(profile, /<phase>verify<\/phase>[\s\S]*<goal>aggregate<\/goal>/)
 })
 
-test('keeps the Boot BOM as the only owner of the servlet container and Netty platform', () => {
-    // Intent: Boot 4.x 的受支持平台是 Tomcat 11 / Servlet 6.1 与 Netty 4.2；根 POM 曾把四个 tomcat-embed-*
-    // 固定为 10.1.59（Servlet 6.0），并在 Boot BOM 之前导入 netty-bom 4.1.137.Final，等于把平台静默降回
-    // 上一代。该 guard 只禁止覆盖平台版本：任何重新引入的显式 version 都必须先改这里，因此 platform major
-    // （Tomcat 11 / Netty 4.2）不会被无评审地降级；将来直接声明 Netty/容器构件（不写版本，交给 Boot BOM 管理）
-    // 仍然合法。断言只看 major，不写死 patch 版本。
+test('centralizes security revisions without downgrading the Boot platform', () => {
+    // Intent: only the root dependencyManagement may override Boot's supported Tomcat 11 / Netty 4.2.
+    // Classpath regression tests separately verify the actual resolved revisions, not just these declarations.
     const pom = readFileSync(POM, 'utf8')
     const bootVersion = /<spring-boot\.version>(\d+)\.\d+/.exec(pom)?.[1]
     assert.equal(bootVersion, '4', 'Boot 4 is the platform owner that requires Tomcat 11 / Netty 4.2')
@@ -322,26 +319,50 @@ test('keeps the Boot BOM as the only owner of the servlet container and Netty pl
         pom,
         /<artifactId>spring-boot-dependencies<\/artifactId>[\s\S]*<scope>import<\/scope>/,
     )
+    assert.match(pom, /<tomcat\.version>11\.0\.26<\/tomcat\.version>/)
+    assert.match(pom, /<netty\.version>4\.2\.18\.Final<\/netty\.version>/)
+    const managementStart = pom.indexOf('<dependencyManagement>')
+    const managementEnd = pom.indexOf('</dependencyManagement>')
+    const management = pom.slice(managementStart, managementEnd)
+    const bootImport = management.indexOf('<artifactId>spring-boot-dependencies</artifactId>')
+    for (const [group, artifact, version] of [
+        ['io.netty', 'netty-bom', 'netty'],
+        ['org.jetbrains.kotlin', 'kotlin-bom', 'kotlin'],
+        ['com.fasterxml.jackson', 'jackson-bom', 'jackson'],
+        ['tools.jackson', 'jackson-bom', 'jackson3'],
+    ]) {
+        const declaration = `<groupId>${group}</groupId>`
+        const index = management.indexOf(declaration)
+        assert.ok(index >= 0 && index < bootImport, `${group}:${artifact} must precede Boot`)
+        assert.match(management.slice(index), new RegExp(
+            `<artifactId>${artifact}</artifactId>\\s*<version>\\$\\{${version}\\.version\\}</version>\\s*<type>pom</type>\\s*<scope>import</scope>`,
+        ))
+    }
 
     const poms = listRepositoryPoms()
     assert.ok(poms.length >= 8, `expected the Maven module POMs, found ${poms.length}`)
     for (const pomFile of poms) {
         const relativePath = path.relative(REPOSITORY_ROOT, pomFile)
         const content = readFileSync(pomFile, 'utf8')
-        assert.doesNotMatch(
-            content,
-            /<tomcat\.version>|<netty\.version>/,
-            `${relativePath} must not pin a servlet container or Netty platform version property`,
-        )
+        if (pomFile !== POM) {
+            assert.doesNotMatch(content, /<tomcat\.version>|<netty\.version>/,
+                `${relativePath} must inherit the centralized security revisions`)
+        }
         for (const dependency of content.matchAll(/<dependency>[\s\S]*?<\/dependency>/gu)) {
             const block = dependency[0]
             if (!/org\.apache\.tomcat\.embed|io\.netty/.test(block)) {
                 continue
             }
+            const index = dependency.index
+            if (pomFile === POM && index > managementStart && index < managementEnd) {
+                assert.match(block, /<artifactId>(?:tomcat-embed-(?:core|el|websocket)|netty-bom)<\/artifactId>/)
+                assert.match(block, /<version>\$\{(?:tomcat|netty)\.version\}<\/version>/)
+                continue
+            }
             assert.doesNotMatch(
                 block,
                 /<version>/,
-                `${relativePath} must let the Boot BOM own the servlet container and Netty platform: ${block}`,
+                `${relativePath} must inherit the centralized servlet container and Netty versions: ${block}`,
             )
         }
     }
@@ -355,11 +376,15 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     const webPom = readFileSync(WEB_POM, 'utf8')
     const script = readFileSync(SCRIPT, 'utf8')
     assert.match(pom, /<spring-boot\.version>4\.0\.8<\/spring-boot\.version>/)
-    assert.match(pom, /<jackson\.version>2\.22\.1<\/jackson\.version>/)
+    assert.match(pom, /<jackson\.version>2\.22\.3<\/jackson\.version>/)
+    assert.match(pom, /<jackson3\.version>3\.1\.7<\/jackson3\.version>/)
     assert.match(pom, /<log4j\.version>2\.26\.1<\/log4j\.version>/)
     assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
-    assert.match(pom, /<opennlp\.version>2\.5\.11<\/opennlp\.version>/)
-    assert.doesNotMatch(pom, /<kotlin\.version>|kotlin-bom|okio-jvm/)
+    assert.match(pom, /<opennlp\.version>2\.5\.12<\/opennlp\.version>/)
+    assert.match(pom, /<kotlin\.version>2\.4\.20<\/kotlin\.version>/)
+    assert.match(pom, /<httpclient5\.version>5\.6\.4<\/httpclient5\.version>/)
+    assert.match(pom, /<httpcore5\.version>5\.4\.4<\/httpcore5\.version>/)
+    assert.doesNotMatch(pom, /<artifactId>okio-jvm<\/artifactId>/)
     assert.doesNotMatch(platformPom, /org\.jetbrains\.kotlin|kotlin-stdlib-common/)
     assert.match(
         pom,

@@ -573,10 +573,15 @@ TERM 都执行 `down --volumes --remove-orphans`。
 `1.6` 的非 test-scope aggregate BOM；OWASP Dependency-Check `13.0.0` 输出 HTML/JSON/SARIF，
 `failBuildOnCVSS=0`、`failOnError=true`、关闭 OSS Index、启用 NVD update。
 
-Servlet 容器与 Netty 平台版本（Tomcat 11.0.x / Servlet 6.1、Netty 4.2.x）只由
-`spring-boot-dependencies` 拥有：根 POM 与各模块 POM 都不得覆盖这两族版本，`run.sh test` 的静态
-guard 与 [BootPlatformCompatibilityIntegrationTest](../../web/src/test/java/fun/fengwk/kkstudio/web/BootPlatformCompatibilityIntegrationTest.java)
-的真实启动断言共同守住该边界。
+Boot 保持 `4.0.8`，Servlet 容器与 Netty 仍在受支持的 Tomcat 11.0.x / Servlet 6.1、
+Netty 4.2.x 平台上。安全修订统一由根 POM 的 `dependencyManagement` 管理，模块不得另行覆盖；
+Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声明优先规则生效。
+`run.sh test` 的声明守卫、
+[ResolvedSecurityDependenciesTest](../../web/src/test/java/fun/fengwk/kkstudio/web/ResolvedSecurityDependenciesTest.java)
+的真实 classpath 版本回归与
+[BootPlatformCompatibilityIntegrationTest](../../web/src/test/java/fun/fengwk/kkstudio/web/BootPlatformCompatibilityIntegrationTest.java)
+的真实启动断言共同守住该边界。Kotlin BOM 统一运行时版本；现代 stdlib 已包含 common metadata，
+根 POM 的 OkHttp 管理项限定排除 legacy `kotlin-stdlib-common` 传递 JAR，不增加替代依赖。
 
 - `NVD_API_KEY` 可选。有 key 时脚本在临时目录创建 mode `600` 的 `settings.xml`（server id
   `kk-studio-supply-chain-nvd`），Maven 进程不继承 key，key 不进入 command line、POM、summary 或
