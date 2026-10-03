@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,11 +17,16 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** {@link SkillPackageInstaller} 的原子安装、回滚、自愈与安全隔离测试。 */
 class SkillPackageInstallerTest {
 
   @TempDir Path tempDir;
+
+  /** Git 取消观察使用测试自有的 executor；用完即关闭，模拟 runtime 生命周期。 */
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
   private Path remoteRepoDir;
   private Path skillsRoot;
@@ -36,7 +42,12 @@ class SkillPackageInstallerTest {
     cacheRoot = tempDir.resolve("cache");
     stagingRoot = tempDir.resolve("staging");
     backupRoot = tempDir.resolve("backup");
-    installer = new SkillPackageInstaller(skillsRoot, cacheRoot, stagingRoot, backupRoot);
+    installer = new SkillPackageInstaller(skillsRoot, cacheRoot, stagingRoot, backupRoot, executor);
+  }
+
+  @AfterEach
+  void tearDown() {
+    executor.shutdownNow();
   }
 
   /** 验证按精确 commit 安装能物化包含 SKILL.md 的目录树，写入 .kkstudio-commit 元数据，并返回规范化本地路径。 */

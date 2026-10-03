@@ -28,27 +28,37 @@ import java.security.SecureRandom;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 每次 Git 操作独立的 HTTP factory：连接与真实 socket 读取空闲分别保护，无整次 deadline。 Proxy 由 JGit 的默认 ProxySelector
- * 选择；关闭和线程中断都会断开本次操作的全部连接。
+ * 选择；关闭、发起线程中断与 executor 关闭都会断开本次操作的全部连接。取消观察任务提交到运行时注入的 executor，执行器生命周期由 runtime 独占，factory
+ * 不自行创建线程。
  */
 final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoCloseable {
   static final int CONNECT_MILLIS = 60_000;
   static final int READ_MILLIS = 180_000;
   private final int connectMillis;
   private final int readMillis;
+  private final ExecutorService executor;
+
+  /** 发起本次 Git 网络操作的线程；本 factory 与 fetch 同线程构造，其被中断即取消操作。 */
   private final Thread owner = Thread.currentThread();
+
   private final List<HttpURLConnection> connections = new CopyOnWriteArrayList<>();
-  private Thread cancellation;
+  private Future<?> cancellation;
   private volatile boolean closed;
 
-  GitHttpConnectionFactory() {
-    this(CONNECT_MILLIS, READ_MILLIS);
+  GitHttpConnectionFactory(ExecutorService executor) {
+    this(executor, CONNECT_MILLIS, READ_MILLIS);
   }
 
-  GitHttpConnectionFactory(int connectMillis, int readMillis) {
+  GitHttpConnectionFactory(ExecutorService executor, int connectMillis, int readMillis) {
+    this.executor = Objects.requireNonNull(executor, "executor");
     if (connectMillis <= 0 || readMillis <= 0) {
       throw new IllegalArgumentException("Git network timeouts must be positive");
     }
@@ -102,24 +112,43 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
       throw error;
     }
     if (cancellation == null) {
-      cancellation =
-          Thread.ofVirtual()
-              .name("git-network-cancellation")
-              .start(
-                  () -> {
-                    try {
-                      while (!closed && !owner.isInterrupted()) {
-                        Thread.sleep(20);
-                      }
-                      if (owner.isInterrupted()) {
-                        close();
-                      }
-                    } catch (InterruptedException ignored) {
-                      // 正常完成时停止观察；close 已释放连接。
-                    }
-                  });
+      startCancellation(connection);
     }
     return new Connection(connection);
+  }
+
+  /**
+   * 把取消观察任务提交到 runtime 注入的 executor，其线程生命周期由 runtime 拥有。
+   *
+   * <p>执行器已关闭意味着 runtime 正在关闭：本次操作被生命周期取消，必须在抛出前断开刚建立的连接，不能留下无人释放的挂起请求。
+   */
+  private void startCancellation(HttpURLConnection connection) throws IOException {
+    try {
+      cancellation = executor.submit(this::watchCancellation);
+    } catch (RejectedExecutionException error) {
+      connection.disconnect();
+      connections.remove(connection);
+      InterruptedIOException cancelled =
+          new InterruptedIOException("Git network operation cancelled");
+      cancelled.initCause(error);
+      throw cancelled;
+    }
+  }
+
+  /** 观察发起线程中断；观察任务自身被中断（executor 关闭或 factory close）时释放未完成的连接。 */
+  private void watchCancellation() {
+    try {
+      while (!closed && !owner.isInterrupted()) {
+        Thread.sleep(20);
+      }
+      if (owner.isInterrupted()) {
+        close();
+      }
+    } catch (InterruptedException ignored) {
+      if (!closed) {
+        close();
+      }
+    }
   }
 
   private void checkCancelled() throws InterruptedIOException {
@@ -135,8 +164,8 @@ final class GitHttpConnectionFactory implements HttpConnectionFactory, AutoClose
       connection.disconnect();
     }
     connections.clear();
-    if (cancellation != null && cancellation != Thread.currentThread()) {
-      cancellation.interrupt();
+    if (cancellation != null) {
+      cancellation.cancel(true);
     }
   }
 

@@ -35,6 +35,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 /**
@@ -55,16 +56,26 @@ public final class SkillPackageInstaller {
   private final Path backupRoot;
   private final int connectMillis;
   private final int readMillis;
+
+  /** Git 网络取消观察任务的执行器；由 runtime 拥有，本安装器不创建也不关闭线程。 */
+  private final ExecutorService executor;
+
   private final ConcurrentHashMap<String, Object> packageLocks = new ConcurrentHashMap<>();
 
-  public SkillPackageInstaller(Path skillsRoot, Path cacheRoot, Path stagingRoot, Path backupRoot) {
+  public SkillPackageInstaller(
+      Path skillsRoot,
+      Path cacheRoot,
+      Path stagingRoot,
+      Path backupRoot,
+      ExecutorService executor) {
     this(
         skillsRoot,
         cacheRoot,
         stagingRoot,
         backupRoot,
         GitHttpConnectionFactory.CONNECT_MILLIS,
-        GitHttpConnectionFactory.READ_MILLIS);
+        GitHttpConnectionFactory.READ_MILLIS,
+        executor);
   }
 
   SkillPackageInstaller(
@@ -73,9 +84,11 @@ public final class SkillPackageInstaller {
       Path stagingRoot,
       Path backupRoot,
       int connectMillis,
-      int readMillis) {
+      int readMillis,
+      ExecutorService executor) {
     this.connectMillis = connectMillis;
     this.readMillis = readMillis;
+    this.executor = Objects.requireNonNull(executor, "executor");
     this.skillsRoot = Objects.requireNonNull(skillsRoot, "skillsRoot").toAbsolutePath().normalize();
     this.cacheRoot = Objects.requireNonNull(cacheRoot, "cacheRoot").toAbsolutePath().normalize();
     this.stagingRoot =
@@ -99,13 +112,15 @@ public final class SkillPackageInstaller {
     recoverArtifacts();
   }
 
-  public static SkillPackageInstaller open(DaemonDataDirectory dataDirectory) {
+  public static SkillPackageInstaller open(
+      DaemonDataDirectory dataDirectory, ExecutorService executor) {
     Objects.requireNonNull(dataDirectory, "dataDirectory");
     return new SkillPackageInstaller(
         dataDirectory.skills(),
         dataDirectory.skillCache(),
         dataDirectory.skillStaging(),
-        dataDirectory.skillBackup());
+        dataDirectory.skillBackup(),
+        executor);
   }
 
   public Path skillsRoot() {
@@ -148,7 +163,7 @@ public final class SkillPackageInstaller {
       if (!repo.getObjectDatabase().has(commitId)) {
         try (Git git = new Git(repo);
             GitHttpConnectionFactory network =
-                new GitHttpConnectionFactory(connectMillis, readMillis)) {
+                new GitHttpConnectionFactory(executor, connectMillis, readMillis)) {
           boolean fetched = false;
           try {
             git.fetch()
