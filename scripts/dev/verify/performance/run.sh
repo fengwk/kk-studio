@@ -31,6 +31,7 @@ RUNNER_PID=
 
 usage() {
   node "$SCRIPT_DIR/runner.mjs" --help
+  printf '\n--skip-build skips only the application image; the shared MinIO client is still built.\n'
 }
 
 die() {
@@ -199,6 +200,9 @@ else
   printf '\n==> Reusing application image %s\n' "$APP_IMAGE"
   docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || die "application image not found for --skip-build: $APP_IMAGE"
 fi
+
+printf '\n==> Building shared MinIO client image (using cached layers)\n'
+"${COMPOSE[@]}" build minio-init
 
 printf '\n==> Starting isolated PostgreSQL/MinIO/mock/app stack\n'
 "${COMPOSE[@]}" --profile app up -d --wait --no-build
