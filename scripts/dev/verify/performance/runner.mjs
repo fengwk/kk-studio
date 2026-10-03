@@ -376,7 +376,6 @@ export function usage() {
     'Usage: scripts/dev/verify/performance/run.sh [options]',
     '',
     'Run the free, machine-local performance baseline in the isolated deploy/test stack.',
-    'The shell entrypoint owns Docker build/compose lifecycle; the Node runner uses Node built-in fetch.',
     '',
     'Options:',
     `  --duration-seconds N  Measurement duration per scenario (${MIN_DURATION_SECONDS}..${MAX_DURATION_SECONDS}, default: ${DEFAULT_DURATION_SECONDS}).`,

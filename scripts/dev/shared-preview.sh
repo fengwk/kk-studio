@@ -28,14 +28,16 @@ usage() {
   cat <<EOF
 Usage: $0 {start|stop|restart|status|logs|tail}
 
-与 scripts/dev/app.sh 相同的子命令，额外固定本机 preview 的执行归属：
+与 scripts/dev/app.sh 相同的子命令，并固定本机进程角色：
   SPRING_PROFILES_ACTIVE=prod
   SPRING_FLYWAY_ENABLED=false
   KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false
 
 Environment:
   SHARED_PREVIEW_ENV_FILE=/absolute/path/shared-preview.env   # 默认 \$HOME/.config/kk-studio/shared-preview.env
-  BACKEND_PORT / FRONTEND_PORT / BACKEND_HOST / FRONTEND_HOST / DEV_WORK_DIR / JAVA_OPTS ...
+    # 必须是 owner-only（无 group/other 权限位）的普通非符号链接文件；模板见
+    # scripts/dev/shared-preview.env.example
+  BACKEND_PORT / FRONTEND_PORT / BACKEND_HOST / FRONTEND_HOST / DEV_WORK_DIR / JAVA_OPTS
     # 未显式设置时由 scripts/dev/app.sh 决定（Backend 127.0.0.1:18080、Vite 127.0.0.1:5173）
 EOF
 }

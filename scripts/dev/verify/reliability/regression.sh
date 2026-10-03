@@ -89,6 +89,7 @@ Usage: scripts/dev/verify/reliability/regression.sh [options]
 
 Run the frozen Java reliability regression set repeatedly from the repository
 root with JDK 21. The default is three complete iterations.
+JAVA_HOME_21 must point to a JDK 21; JAVA_HOME is not used.
 
 Options:
   --iterations N       Run N iterations (1..100, default: 3).

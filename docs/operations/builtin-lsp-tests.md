@@ -44,7 +44,7 @@ Daemon 不自动选择 JDK、安装服务器或注入 jdtls `-data`；服务器�
 | --- | --- |
 | 绝对 path 不需要 workdir；相对 path 必须有显式绝对 workdir | `absolutePathsNeedNoWorkdir`、`relativePathsRequireAnExplicitWorkdir`，拒绝时不启动服务器 |
 | line 必填且正整数，character 缺省为 0、不可为负 | `argumentValidationRunsBeforeAnyServerProcess` |
-| symbol limit 不可为负或超过 500，target 不可空白 | 同上；`CodingCapabilitiesEdgeTest.lspCapabilitiesRequireValidAbsoluteWorkdirAndFile` 固定上界 |
+| symbol limit 不可为负或超过 500，target 不可空白 | `argumentValidationRunsBeforeAnyServerProcess`；`CodingCapabilitiesEdgeTest.lspCapabilitiesRequireValidAbsoluteWorkdirAndFile` 固定上界 |
 | 相对 class target 只按显式 workdir 解析，绝不回退 Daemon cwd | `workspaceSymbolsAndDecompileShareOneClient`、`LspClientProtocolTest.relativeClassTargetWithoutWorkdirIsRejected` |
 
 schema 的 required 不恒要求 workdir，但能力层仍校验相对路径所需的解析基准。
