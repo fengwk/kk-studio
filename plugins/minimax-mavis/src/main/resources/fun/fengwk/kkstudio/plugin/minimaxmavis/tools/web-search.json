@@ -19,7 +19,7 @@
       },
       "search_type": {
         "type": "string",
-        "description": "Kind of results; the underlying search source is routed by the server.",
+        "description": "Kind of results to return.",
         "enum": ["search", "videos", "places", "news", "shopping"]
       }
     },

@@ -66,7 +66,7 @@ class StudioDomainErrorAdviceTest {
     assertNotNull(validation.getBody());
     Result<Void> validationBody = validation.getBody();
     assertEquals("validation", validationBody.getCode());
-    assertEquals("Invalid agent_provider request.", validationBody.getMessage());
+    assertEquals("Invalid agent provider request.", validationBody.getMessage());
     assertEquals(
         Map.of("resource", "agent_provider", "detail", "invalid provider"),
         validationBody.getErrors());
@@ -78,7 +78,7 @@ class StudioDomainErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("agent_model 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("agent model 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",
