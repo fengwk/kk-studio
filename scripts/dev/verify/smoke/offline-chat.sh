@@ -222,13 +222,16 @@ import base64
 import hashlib
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
 from offline_chat_payload import build_offline_chat_batch_request
+from offline_canvas_contract import (
+    assert_completed_run, assert_function_definitions, assert_patch,
+    assert_run_revision, document_revision, function_batch, resource_batch,
+)
 
 base_url = os.environ["CANVAS_TEST_APP_URL"]
 image = Path(os.environ["CANVAS_TEST_IMAGE_FIXTURE"]).read_bytes()
@@ -253,11 +256,6 @@ def header(headers: dict, name: str) -> str:
     return next(value for key, value in headers.items() if key.lower() == name.lower())
 
 
-def decimal_version(value: object) -> int:
-    assert isinstance(value, str) and re.fullmatch(r"0|[1-9][0-9]*", value), value
-    return int(value)
-
-
 def upserted_node(patch: dict, node_id: str) -> dict:
     return next(
         item["node"]
@@ -268,8 +266,7 @@ def upserted_node(patch: dict, node_id: str) -> dict:
 
 canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
 assert uuid.UUID(canvas["id"]).version == 4
-assert decimal_version(canvas["version"]) == 0
-assert "threadId" not in canvas
+assert document_revision(canvas) == 0
 sha256 = hashlib.sha256(image).hexdigest()
 reservation = json_call(
     "POST",
@@ -337,25 +334,19 @@ assert completed["presignedPut"] is None
 assert uuid.UUID(completed["blobId"]).version == 4
 
 resource_node_id = new_id()
+resource_request = resource_batch(resource_node_id, completed["blobId"], new_id())
 resource_patch = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/commands",
-    {
-        "expectedVersion": "0",
-        "idempotencyKey": new_id(),
-        "commands": [
-            {
-                "type": "CREATE_RESOURCE_NODE",
-                "nodeId": resource_node_id,
-                "name": "uploaded",
-                "uploadIds": [reservation["id"]],
-                "transform": {"x": 0, "y": 0, "width": 320, "height": 260},
-            }
-        ],
-    },
+    resource_request,
 )
-assert decimal_version(resource_patch["baseVersion"]) == 0
-assert decimal_version(resource_patch["version"]) == 1
+assert_patch(resource_patch, 0)
+# 精确 replay 是空变化集，不再次创建资源或推进 revision。
+assert_patch(
+    json_call("POST", f"/api/canvases/{canvas['id']}/commands", resource_request),
+    1,
+    replay=True,
+)
 resource_node = upserted_node(resource_patch, resource_node_id)
 resource = resource_node["resources"][0]
 assert resource["blobId"] == completed["blobId"]
@@ -364,7 +355,8 @@ assert resource["width"] > 0 and resource["height"] > 0
 assert resource["sizeBytes"] == str(len(image))
 
 resource_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-assert decimal_version(resource_snapshot["document"]["version"]) == 1
+assert document_revision(resource_snapshot["document"]) == 1
+assert len(resource_snapshot["nodes"]) == 1
 snapshot_resource_node = next(
     node for node in resource_snapshot["nodes"] if node["id"] == resource_node_id
 )
@@ -392,33 +384,12 @@ function_node_id = new_id()
 function_patch = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/commands",
-    {
-        "expectedVersion": "1",
-        "idempotencyKey": new_id(),
-        "commands": [
-            {
-                "type": "CREATE_FUNCTION_NODE",
-                "nodeId": function_node_id,
-                "name": "generated",
-                "modelKey": "fake-image",
-                "configJson": json.dumps(
-                    {
-                        "prompt": {
-                            "segments": [
-                                {"type": "TEXT", "text": "free deterministic image"}
-                            ]
-                        },
-                        "parameters": {"ratio": "16:9"},
-                    },
-                    separators=(",", ":"),
-                ),
-                "transform": {"x": 100, "y": 100, "width": 320, "height": 260},
-            }
-        ],
-    },
+    function_batch(
+        function_node_id, "generated", "fake-image",
+        {"prompt": "free deterministic image", "ratio": "16:9"}, new_id(),
+    ),
 )
-assert decimal_version(function_patch["baseVersion"]) == 1
-assert decimal_version(function_patch["version"]) == 2
+assert_patch(function_patch, 1)
 function_node = upserted_node(function_patch, function_node_id)
 request_id = new_id()
 started = json_call(
@@ -437,14 +408,13 @@ for _ in range(120):
     time.sleep(0.25)
 else:
     raise AssertionError("fake-image FunctionRun did not reach terminal state")
-assert current["status"] == "SUCCEEDED", current
-assert "stateJson" not in current
+assert_completed_run(current, function_node_id, request_id)
 
 generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
 generated_node = next(
     node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
 )
-assert decimal_version(generated_snapshot["document"]["version"]) == 5
+assert assert_run_revision(generated_snapshot["document"], 2, 2) == 8
 assert len(generated_node["resources"]) == 1
 generated_resource = generated_node["resources"][0]
 assert generated_resource["kind"] == "IMAGE"
@@ -458,56 +428,24 @@ with urllib.request.urlopen(generated_preview["url"], timeout=30) as response:
     assert response.status == 200
     assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
 
-models = json_call("GET", "/api/canvas-function-models")
-for model_key in (
-    "gpt-image-2",
-    "seedance2.0",
-    "seedance2.0fast",
-    "seedance2.0_vip",
-    "seedance2.0fast_vip",
-):
-    model = next(item for item in models if item["key"] == model_key)
-    assert model["available"] is True, model
-assert all(item["key"] != "seedance2.0mini" for item in models)
+assert_function_definitions(json_call("GET", "/api/canvas-functions"))
 
 
 def create_and_run(
-    model_key: str, name: str, parameters: dict, expected_checkpoint_count: int
+    function_name: str, name: str, parameters: dict, expected_checkpoint_count: int
 ) -> dict:
     current = json_call("GET", f"/api/canvases/{canvas['id']}")
-    current_version = decimal_version(current["document"]["version"])
+    current_revision = document_revision(current["document"])
     node_id = new_id()
     patch = json_call(
         "POST",
         f"/api/canvases/{canvas['id']}/commands",
-        {
-            "expectedVersion": current["document"]["version"],
-            "idempotencyKey": new_id(),
-            "commands": [
-                {
-                    "type": "CREATE_FUNCTION_NODE",
-                    "nodeId": node_id,
-                    "name": name,
-                    "modelKey": model_key,
-                    "configJson": json.dumps(
-                        {
-                            "prompt": {
-                                "segments": [
-                                    {"type": "TEXT", "text": f"mock {model_key}"}
-                                ]
-                            },
-                            "parameters": parameters,
-                        },
-                        separators=(",", ":"),
-                    ),
-                    "transform": {"x": 100, "y": 100, "width": 320, "height": 260},
-                }
-            ],
-        },
+        function_batch(
+            node_id, name, function_name,
+            {"prompt": f"mock {function_name}", **parameters}, new_id(),
+        ),
     )
-    assert patch["baseVersion"] == current["document"]["version"]
-    patch_version = decimal_version(patch["version"])
-    assert patch_version == current_version + 1
+    patch_revision = assert_patch(patch, current_revision)
     node = upserted_node(patch, node_id)
     request_id = new_id()
     run = json_call(
@@ -522,16 +460,16 @@ def create_and_run(
         run = json_call(
             "GET", f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run"
         )
-    assert run["status"] == "SUCCEEDED", run
+    assert_completed_run(run, node_id, request_id)
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-    # start、每个 durable checkpoint 与 terminal success 都独立前进 Canvas version。
-    actual_version = decimal_version(snapshot["document"]["version"])
-    expected_version = patch_version + expected_checkpoint_count + 2
-    assert actual_version == expected_version, {
-        "modelKey": model_key,
-        "actualVersion": actual_version,
-        "expectedVersion": expected_version,
-    }
+    assert_run_revision(snapshot["document"], patch_revision, expected_checkpoint_count)
+    # 收尾后相同 requestId 重放不能启动新运行或改写资源。
+    replay = json_call(
+        "POST", f"/api/canvases/{canvas['id']}/nodes/{node_id}/function-run",
+        {"requestId": request_id},
+    )
+    assert replay == run, replay
+    assert json_call("GET", f"/api/canvases/{canvas['id']}") == snapshot
     return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
 
 
@@ -540,6 +478,7 @@ assert len(gpt_node["resources"]) == 1
 assert gpt_node["resources"][0]["kind"] == "IMAGE"
 
 seedance_node = create_and_run(
+    # 默认 routes 为空；fake Hub 的首次 status 即 ready，无 generating 重试。
     "seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}, 6
 )
 assert len(seedance_node["resources"]) == 1

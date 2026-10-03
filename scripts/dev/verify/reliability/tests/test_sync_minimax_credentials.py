@@ -1,4 +1,4 @@
-"""Tests for the reliability matrix's legacy MiniMax credential synchronization."""
+"""Tests for the reliability matrix's MiniMax credential synchronization."""
 
 import json
 import os
@@ -56,7 +56,7 @@ class TestReliabilityMiniMaxCredentialSync(unittest.TestCase):
         self.assertEqual([], calls)
 
     def test_complete_pair_updates_legacy_responses_provider(self):
-        # 意图：当提供完整的 MiniMax 凭据对时，通过共享原语更新 legacy openai_response provider，
+        # 意图：当提供完整的 MiniMax 凭据对时，通过共享原语更新 openai_response provider，
         # 并规范化 base URL 追加 /v1。
         calls = []
         rows = [

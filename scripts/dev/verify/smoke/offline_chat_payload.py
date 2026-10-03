@@ -21,7 +21,7 @@ def build_offline_chat_batch_request(
     Chat/root settings 不携带任何 workspace 字段。
     """
     return {
-        "owner": {"type": "CHAT", "id": chat_id},
+        "owner": {"type": "CHAT", "chatId": chat_id},
         "target": {
             "type": "NEW_SESSION",
             "sessionId": session_id,
