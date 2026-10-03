@@ -16,6 +16,17 @@ export interface EditProjectModalProps {
 }
 
 type TabKey = 'basic' | 'workflow'
+type ActiveSubmission = 'basic' | 'yolo' | 'workflow' | 'reload' | null
+
+function compareVersions(a: string, b: string): number {
+  try {
+    const ba = BigInt(a)
+    const bb = BigInt(b)
+    return ba < bb ? -1 : ba > bb ? 1 : 0
+  } catch {
+    return 0
+  }
+}
 
 export function EditProjectModal({
   isOpen,
@@ -24,89 +35,65 @@ export function EditProjectModal({
   onSuccess,
   api = projectsApi,
 }: EditProjectModalProps) {
+  if (!isOpen || !project) {
+    return null
+  }
+
+  return (
+    <EditProjectModalContent
+      key={project.id}
+      project={project}
+      onClose={onClose}
+      onSuccess={onSuccess}
+      api={api}
+    />
+  )
+}
+
+interface EditProjectModalContentProps {
+  project: ProjectDTO
+  onClose: () => void
+  onSuccess: (updated: ProjectDTO) => void
+  api: ProjectsApi
+}
+
+function EditProjectModalContent({
+  project,
+  onClose,
+  onSuccess,
+  api,
+}: EditProjectModalContentProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('basic')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [yoloEnabled, setYoloEnabled] = useState(true)
-  const [workflowJson, setWorkflowJson] = useState('')
-  const [currentVersion, setCurrentVersion] = useState('0')
+  const [title, setTitle] = useState(project.title)
+  const [description, setDescription] = useState(project.description)
+  const [yoloEnabled, setYoloEnabled] = useState(project.yoloEnabled)
+  const [workflowJson, setWorkflowJson] = useState(() => JSON.stringify(project.workflow, null, 2))
+  const [currentVersion, setCurrentVersion] = useState(project.version)
 
-  const [isReloading, setIsReloading] = useState(false)
+  const [activeSubmission, setActiveSubmission] = useState<ActiveSubmission>(null)
+  const activeSubmissionRef = useRef<ActiveSubmission>(null)
 
-  // 基础信息独立状态
-  const [isSubmittingBasic, setIsSubmittingBasic] = useState(false)
   const [basicErrorMessage, setBasicErrorMessage] = useState<string | null>(null)
   const [basicConflictDetail, setBasicConflictDetail] = useState<string | null>(null)
   const [basicSuccessMessage, setBasicSuccessMessage] = useState<string | null>(null)
 
-  // YOLO 独立状态
-  const [isSubmittingYolo, setIsSubmittingYolo] = useState(false)
   const [yoloErrorMessage, setYoloErrorMessage] = useState<string | null>(null)
   const [yoloConflictDetail, setYoloConflictDetail] = useState<string | null>(null)
   const [yoloSuccessMessage, setYoloSuccessMessage] = useState<string | null>(null)
 
-  // Workflow 独立状态
-  const [isSubmittingWorkflow, setIsSubmittingWorkflow] = useState(false)
   const [workflowErrorMessage, setWorkflowErrorMessage] = useState<string | null>(null)
   const [workflowConflictDetail, setWorkflowConflictDetail] = useState<string | null>(null)
   const [workflowSuccessMessage, setWorkflowSuccessMessage] = useState<string | null>(null)
 
-  const initializedProjectIdRef = useRef<string | null>(null)
-  const lastSyncedProjectRef = useRef<ProjectDTO | null>(null)
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
-    if (!isOpen || !project) {
-      initializedProjectIdRef.current = null
-      lastSyncedProjectRef.current = null
-      return
-    }
-
-    if (initializedProjectIdRef.current !== project.id) {
-      // 首次载入该项目：全新初始化
-      initializedProjectIdRef.current = project.id
-      lastSyncedProjectRef.current = project
-      setTitle(project.title)
-      setDescription(project.description)
-      setYoloEnabled(project.yoloEnabled)
-      setWorkflowJson(JSON.stringify(project.workflow, null, 2))
-      setCurrentVersion(project.version)
-
-      setBasicErrorMessage(null)
-      setBasicConflictDetail(null)
-      setBasicSuccessMessage(null)
-
-      setYoloErrorMessage(null)
-      setYoloConflictDetail(null)
-      setYoloSuccessMessage(null)
-
-      setWorkflowErrorMessage(null)
-      setWorkflowConflictDetail(null)
-      setWorkflowSuccessMessage(null)
-
-      setActiveTab('basic')
-      return
-    }
-
-    // 同一项目的后续 prop 变动（例如父组件根据 onSuccess 或外部刷新传回更新后的 project）
-    // 权威版本无条件对齐最新
-    setCurrentVersion(project.version)
-
-    const last = lastSyncedProjectRef.current
-    if (last) {
-      // 只有在字段未被用户编辑（clean）时才更新对应输入；若已被用户修改为草稿，严格保留草稿不予覆盖！
-      setTitle((prev) => (prev === last.title ? project.title : prev))
-      setDescription((prev) => (prev === last.description ? project.description : prev))
-      setYoloEnabled((prev) => (prev === last.yoloEnabled ? project.yoloEnabled : prev))
-      const lastWorkflowStr = JSON.stringify(last.workflow, null, 2)
-      setWorkflowJson((prev) => (prev === lastWorkflowStr ? JSON.stringify(project.workflow, null, 2) : prev))
-    }
-    lastSyncedProjectRef.current = project
-  }, [isOpen, project])
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
@@ -115,10 +102,10 @@ export function EditProjectModal({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  }, [onClose])
 
-  if (!isOpen || !project) {
-    return null
+  const advanceVersion = (newVersion: string) => {
+    setCurrentVersion((prev) => (compareVersions(newVersion, prev) > 0 ? newVersion : prev))
   }
 
   const handleFormatJson = () => {
@@ -131,35 +118,50 @@ export function EditProjectModal({
     }
   }
 
-  // 刷新版本号：从服务端获取最新版本号更新权威基准，完整保留用户在各个表单中已编辑的所有草稿
   const handleReloadVersionKeepDraft = async () => {
-    setIsReloading(true)
+    if (activeSubmissionRef.current !== null) {
+      return
+    }
+    activeSubmissionRef.current = 'reload'
+    setActiveSubmission('reload')
+
     setBasicErrorMessage(null)
     setBasicConflictDetail(null)
     setYoloErrorMessage(null)
     setYoloConflictDetail(null)
     setWorkflowErrorMessage(null)
     setWorkflowConflictDetail(null)
+
     try {
       const fresh = await api.getProject(project.id)
-      setCurrentVersion(fresh.version)
+      if (!isMountedRef.current) return
+      advanceVersion(fresh.version)
     } catch (err) {
+      if (!isMountedRef.current) return
       setBasicErrorMessage(err instanceof Error ? err.message : '重新加载最新版本失败')
     } finally {
-      setIsReloading(false)
+      if (isMountedRef.current) {
+        activeSubmissionRef.current = null
+        setActiveSubmission(null)
+      }
     }
   }
 
-  // 独立保存基础信息（名称 + 描述），CAS 成功立即更新权威版本
   const handleSaveBasic = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (activeSubmissionRef.current !== null) {
+      return
+    }
+
     const trimmedTitle = title.trim()
     if (!trimmedTitle) {
       setBasicErrorMessage('项目名称不能为空')
       return
     }
 
-    setIsSubmittingBasic(true)
+    activeSubmissionRef.current = 'basic'
+    setActiveSubmission('basic')
+
     setBasicErrorMessage(null)
     setBasicConflictDetail(null)
     setBasicSuccessMessage(null)
@@ -170,24 +172,34 @@ export function EditProjectModal({
         title: trimmedTitle,
         description: description.trim(),
       })
-      setCurrentVersion(updated.version)
+      if (!isMountedRef.current) return
+      advanceVersion(updated.version)
       setBasicSuccessMessage('基础信息保存成功')
       onSuccess(updated)
     } catch (err) {
+      if (!isMountedRef.current) return
       if (isConflictError(err)) {
         setBasicConflictDetail('项目配置已在别处发生更新 (409 冲突)。已为您保留编辑草稿，请点击刷新版本后重试。')
       } else {
         setBasicErrorMessage(err instanceof Error ? err.message : '更新基础信息失败')
       }
     } finally {
-      setIsSubmittingBasic(false)
+      if (isMountedRef.current) {
+        activeSubmissionRef.current = null
+        setActiveSubmission(null)
+      }
     }
   }
 
-  // 独立保存 YOLO 模式，CAS 成功立即更新权威版本
   const handleSaveYolo = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSubmittingYolo(true)
+    if (activeSubmissionRef.current !== null) {
+      return
+    }
+
+    activeSubmissionRef.current = 'yolo'
+    setActiveSubmission('yolo')
+
     setYoloErrorMessage(null)
     setYoloConflictDetail(null)
     setYoloSuccessMessage(null)
@@ -197,23 +209,31 @@ export function EditProjectModal({
         expectedVersion: currentVersion,
         yoloEnabled,
       })
-      setCurrentVersion(updated.version)
+      if (!isMountedRef.current) return
+      advanceVersion(updated.version)
       setYoloSuccessMessage('YOLO 模式保存成功')
       onSuccess(updated)
     } catch (err) {
+      if (!isMountedRef.current) return
       if (isConflictError(err)) {
         setYoloConflictDetail('YOLO 模式更新冲突 (409)。已为您保留设置，请点击刷新版本后重试。')
       } else {
         setYoloErrorMessage(err instanceof Error ? err.message : '更新 YOLO 模式失败')
       }
     } finally {
-      setIsSubmittingYolo(false)
+      if (isMountedRef.current) {
+        activeSubmissionRef.current = null
+        setActiveSubmission(null)
+      }
     }
   }
 
-  // 独立保存工作流 JSON，CAS 成功立即更新权威版本
   const handleSaveWorkflow = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (activeSubmissionRef.current !== null) {
+      return
+    }
+
     let parsedWorkflow: ProjectWorkflowDTO
     try {
       const raw = JSON.parse(workflowJson)
@@ -233,7 +253,9 @@ export function EditProjectModal({
       return
     }
 
-    setIsSubmittingWorkflow(true)
+    activeSubmissionRef.current = 'workflow'
+    setActiveSubmission('workflow')
+
     setWorkflowErrorMessage(null)
     setWorkflowConflictDetail(null)
     setWorkflowSuccessMessage(null)
@@ -243,17 +265,22 @@ export function EditProjectModal({
         expectedVersion: currentVersion,
         workflow: parsedWorkflow,
       })
-      setCurrentVersion(updated.version)
+      if (!isMountedRef.current) return
+      advanceVersion(updated.version)
       setWorkflowSuccessMessage('工作流配置保存成功')
       onSuccess(updated)
     } catch (err) {
+      if (!isMountedRef.current) return
       if (isConflictError(err)) {
         setWorkflowConflictDetail('工作流配置更新冲突 (409)。已为您保留编辑草稿，请点击刷新版本后重试。')
       } else {
         setWorkflowErrorMessage(err instanceof Error ? err.message : '更新工作流失败')
       }
     } finally {
-      setIsSubmittingWorkflow(false)
+      if (isMountedRef.current) {
+        activeSubmissionRef.current = null
+        setActiveSubmission(null)
+      }
     }
   }
 
@@ -289,7 +316,6 @@ export function EditProjectModal({
           </button>
         </div>
 
-        {/* 顶部权威版本号基线与刷新按钮 */}
         <div
           style={{
             display: 'flex',
@@ -308,12 +334,12 @@ export function EditProjectModal({
             type="button"
             className="ghost-btn"
             onClick={() => void handleReloadVersionKeepDraft()}
-            disabled={isReloading}
+            disabled={activeSubmission !== null}
             style={{ fontSize: '12px', padding: '2px 8px' }}
           >
             <RefreshCw
               size={12}
-              className={isReloading ? 'animate-spin' : ''}
+              className={activeSubmission === 'reload' ? 'animate-spin' : ''}
               aria-hidden="true"
             />
             <span>刷新版本</span>
@@ -340,7 +366,6 @@ export function EditProjectModal({
         <div className="modal-body" style={{ maxHeight: 'calc(80vh - 170px)', overflowY: 'auto' }}>
           {activeTab === 'basic' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* 表单 1：独立保存基础信息 */}
               <form
                 onSubmit={handleSaveBasic}
                 style={{
@@ -397,7 +422,7 @@ export function EditProjectModal({
                       setTitle(e.target.value)
                       setBasicSuccessMessage(null)
                     }}
-                    disabled={isSubmittingBasic}
+                    disabled={activeSubmission !== null}
                     autoFocus
                   />
                 </div>
@@ -415,7 +440,7 @@ export function EditProjectModal({
                       setDescription(e.target.value)
                       setBasicSuccessMessage(null)
                     }}
-                    disabled={isSubmittingBasic}
+                    disabled={activeSubmission !== null}
                   />
                 </div>
 
@@ -423,14 +448,13 @@ export function EditProjectModal({
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isSubmittingBasic}
+                    disabled={activeSubmission !== null}
                   >
-                    {isSubmittingBasic ? '保存中...' : '保存基础信息'}
+                    {activeSubmission === 'basic' ? '保存中...' : '保存基础信息'}
                   </button>
                 </div>
               </form>
 
-              {/* 表单 2：独立保存 YOLO 模式 */}
               <form
                 onSubmit={handleSaveYolo}
                 style={{
@@ -482,7 +506,7 @@ export function EditProjectModal({
                       setYoloSuccessMessage(null)
                     }}
                     label="启用 YOLO 执行策略 (自主执行，跳过人工交互门禁)"
-                    disabled={isSubmittingYolo}
+                    disabled={activeSubmission !== null}
                   />
                 </div>
 
@@ -490,9 +514,9 @@ export function EditProjectModal({
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isSubmittingYolo}
+                    disabled={activeSubmission !== null}
                   >
-                    {isSubmittingYolo ? '保存中...' : '保存 YOLO 模式'}
+                    {activeSubmission === 'yolo' ? '保存中...' : '保存 YOLO 模式'}
                   </button>
                 </div>
               </form>
@@ -500,7 +524,6 @@ export function EditProjectModal({
           )}
 
           {activeTab === 'workflow' && (
-            /* 表单 3：独立保存工作流 JSON */
             <form onSubmit={handleSaveWorkflow}>
               {workflowConflictDetail && (
                 <div className="form-error-banner" role="alert" style={{ marginBottom: '12px' }}>
@@ -542,6 +565,7 @@ export function EditProjectModal({
                   type="button"
                   className="ghost-btn"
                   onClick={handleFormatJson}
+                  disabled={activeSubmission !== null}
                   style={{ fontSize: '12px', padding: '2px 8px' }}
                 >
                   <Code size={12} aria-hidden="true" />
@@ -560,7 +584,7 @@ export function EditProjectModal({
                     setWorkflowJson(e.target.value)
                     setWorkflowSuccessMessage(null)
                   }}
-                  disabled={isSubmittingWorkflow}
+                  disabled={activeSubmission !== null}
                   placeholder="输入 workflow JSON 配置..."
                 />
               </div>
@@ -576,9 +600,9 @@ export function EditProjectModal({
                 <button
                   type="submit"
                   className="btn-primary"
-                  disabled={isSubmittingWorkflow}
+                  disabled={activeSubmission !== null}
                 >
-                  {isSubmittingWorkflow ? '保存中...' : '保存工作流'}
+                  {activeSubmission === 'workflow' ? '保存中...' : '保存工作流'}
                 </button>
               </div>
             </form>
