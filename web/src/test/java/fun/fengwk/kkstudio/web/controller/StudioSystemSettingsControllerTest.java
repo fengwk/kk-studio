@@ -321,6 +321,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
             update -> update.withObject("network").remove("noProxyHosts"),
             update -> update.withObject("network").putNull("noProxyHosts"),
             update -> update.withObject("network").put("proxyUrl", 1),
+            update -> update.withObject("network").put("proxyUrl", true),
+            update -> update.withObject("network").put("noProxyHosts", 1),
             update -> update.withObject("network").put("noProxyHosts", true),
             update -> update.withObject("network").put("enabled", true));
     for (Consumer<ObjectNode> invalid : invalidShapes) {

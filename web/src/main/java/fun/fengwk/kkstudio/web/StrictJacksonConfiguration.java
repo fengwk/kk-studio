@@ -18,6 +18,7 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 /** HTTP JSON 全局配置：严格拒绝重复键、默认省略 null、按 DTO 声明顺序输出、写 long 时间戳并将 Long 序列化为字符串。 */
 @Configuration(proxyBeanMethods = false)
@@ -41,6 +42,7 @@ public class StrictJacksonConfiguration {
       // 但 Web 的 HTTP mapper 是 Jackson 3，不识别该注解，会把数字/布尔 token 强制转换成 String。
       // 这里用 mixin 把同一约束装回真实 wire 路径，且只作用于该字段，不改变其它契约的默认 coercion。
       builder.addMixIn(AgentModelVariantDTO.class, ProtocolOptionsJsonMixin.class);
+      builder.addMixIn(SystemSettingsNetworkDTO.class, NetworkTextMixin.class);
     };
   }
 
@@ -49,6 +51,29 @@ public class StrictJacksonConfiguration {
 
     @JsonDeserialize(using = ProtocolOptionsJsonStrictDeserializer.class)
     String protocolOptionsJson;
+  }
+
+  /** 将 Share 的 Jackson 2 网络文本约束桥接到 HTTP Jackson 3；不影响其它 DTO 字段。 */
+  abstract static class NetworkTextMixin {
+
+    @JsonDeserialize(using = NetworkTextStrictDeserializer.class)
+    String proxyUrl;
+
+    @JsonDeserialize(using = NetworkTextStrictDeserializer.class)
+    String noProxyHosts;
+  }
+
+  /** 网络字段只接受字符串；null 的可空/必填约束继续由领域边界校验。 */
+  static final class NetworkTextStrictDeserializer extends ValueDeserializer<String> {
+
+    @Override
+    public String deserialize(JsonParser parser, DeserializationContext context)
+        throws JacksonException {
+      if (parser.currentToken() != JsonToken.VALUE_STRING) {
+        throw DatabindException.from(parser, "network text field must be a JSON string");
+      }
+      return parser.getText();
+    }
   }
 
   /** 数字/布尔/对象/数组 token 一律拒绝：string 字段绝不做标量强制转换。 */
