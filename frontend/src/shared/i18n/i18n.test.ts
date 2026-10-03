@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   getLocale,
   LOCALE_STORAGE_KEY,
+  messageCatalog,
   setLocale,
   translate,
   useI18n,
@@ -49,6 +50,37 @@ describe('i18n runtime', () => {
       expect(consoleError).toHaveBeenCalledWith('Missing i18n message: missing.example')
     } finally {
       consoleError.mockRestore()
+    }
+  })
+})
+
+/**
+ * 双语字典是同一份产品文案的两个 locale：任何 key 的 en-US / zh-CN 都必须同时存在，
+ * 且插值占位符名称集合完全一致（数量与名字），避免译文丢占位符导致运行时渲染出
+ * ⟦missing:name⟧ 或吞掉变量。
+ */
+describe('i18n catalog locale alignment', () => {
+  const catalog = messageCatalog as Record<string, Record<string, string>>
+  const locales = ['en-US', 'zh-CN'] as const
+  const placeholderPattern = /\{\{\s*([\w.-]+)\s*\}\}/gu
+
+  function placeholderNames(text: string): string[] {
+    return [...text.matchAll(placeholderPattern)].map((match) => match[1]!).sort()
+  }
+
+  it('defines a non-empty message for both locales under every key', () => {
+    for (const [key, messages] of Object.entries(catalog)) {
+      for (const locale of locales) {
+        const message = messages[locale]
+        expect(typeof message, `${key} ${locale}`).toBe('string')
+        expect(message.trim(), `${key} ${locale}`).not.toBe('')
+      }
+    }
+  })
+
+  it('keeps the same placeholder names in both locales', () => {
+    for (const [key, messages] of Object.entries(catalog)) {
+      expect(placeholderNames(messages['zh-CN']), key).toEqual(placeholderNames(messages['en-US']))
     }
   })
 })

@@ -64,7 +64,7 @@ export function CanvasLibraryView() {
           {canvasesQuery.isError ? (
             <div className="state-block danger" role="alert">
               {t('canvas.library.loadError', { message: (canvasesQuery.error as Error).message })}
-              <button type="button" onClick={() => void canvasesQuery.refetch()}>重试</button>
+              <button type="button" onClick={() => void canvasesQuery.refetch()}>{t('shared.retry')}</button>
             </div>
           ) : null}
 
@@ -74,7 +74,7 @@ export function CanvasLibraryView() {
               className="project-card create-card"
               aria-label={t('canvas.library.createAria')}
               disabled={createMutation.isPending}
-              onClick={() => createMutation.mutate('未命名画布')}
+              onClick={() => createMutation.mutate(t('canvas.library.untitled'))}
             >
               <div className="project-preview create-preview">
                 <span className="create-plus">+</span>
@@ -113,8 +113,8 @@ export function CanvasLibraryView() {
           </div>
           {!canvasesQuery.isLoading && !canvasesQuery.isError && canvases.length === 0 ? (
             <div className="canvas-empty-state">
-              <strong>还没有画布</strong>
-              <p>创建一个空白画布，开始组织资源与 Function。</p>
+              <strong>{t('canvas.library.emptyTitle')}</strong>
+              <p>{t('canvas.library.emptyDescription')}</p>
             </div>
           ) : null}
         </section>

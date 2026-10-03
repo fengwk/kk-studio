@@ -160,7 +160,7 @@ export function ProjectsPage({
       <div className="cards-grid">
         <CreateCard
           title="新建项目"
-          subtitle="支持动态工作流 JSON、状态自然 token 看板与稳定 AgentThread 编排"
+          subtitle="自定义工作流、Issue 看板与 Agent 执行"
           onClick={() => setIsCreateOpen(true)}
         />
 

@@ -303,14 +303,14 @@ describe('EnvironmentsPage', () => {
     )
     renderPage()
 
-    expect(screen.getByText('正在加载 Environments')).toBeInTheDocument()
+    expect(screen.getByText('正在加载 Environment')).toBeInTheDocument()
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
 
     await act(async () => {
       resolveListing?.([environment({ name: 'box-a' })])
     })
     expect(await screen.findByText('box-a')).toBeInTheDocument()
-    expect(screen.queryByText('正在加载 Environments')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在加载 Environment')).not.toBeInTheDocument()
   })
 
   it('renders the query error message with the danger tone', async () => {
@@ -389,13 +389,13 @@ describe('EnvironmentsPage', () => {
     )
     await user.click(confirmBtn)
 
-    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    const conflictModal = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
     expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
     await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+      expect(screen.queryByRole('alertdialog', { name: '数据已发生变化' })).toBeNull()
     })
   })
 
@@ -426,13 +426,13 @@ describe('EnvironmentsPage', () => {
     )
     await user.click(confirmBtn)
 
-    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
+    const conflictModal = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
     expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '删除环境' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
     await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
+      expect(screen.queryByRole('alertdialog', { name: '数据已发生变化' })).toBeNull()
     })
   })
 

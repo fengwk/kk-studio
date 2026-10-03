@@ -104,7 +104,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByText('task widget')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Inline picker')).toBeInTheDocument()
     expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
-    expect(screen.getByLabelText('会话状态')).toHaveTextContent('none env')
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('未选择环境')
   })
 
   it('renders localized WAITING_CHILDREN status label alongside interaction panel without interference', () => {

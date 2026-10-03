@@ -1499,7 +1499,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('renders localized WAITING_CHILDREN status label when bound thread is waiting for child threads', async () => {
-    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子线程”。
+    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子 Thread”。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'WAITING_CHILDREN', processing: false })),
     )
@@ -1509,7 +1509,7 @@ describe('AgentPane orchestration', () => {
     )
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() => {
-      expect(screen.getByText('等待子线程')).toBeInTheDocument()
+      expect(screen.getByText('等待子 Thread')).toBeInTheDocument()
     })
   })
 
@@ -2699,7 +2699,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       act(() => {
         result.current.selectAgent('assistant')
       })
-      expect(result.current.error).toBe('当前受控模式不支持切换 Agent')
+      expect(result.current.error).toBe('当前模式不支持切换 Agent')
 
       // 4. 分支切换与导航尝试
       act(() => {
@@ -2712,7 +2712,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           createTime: null,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       act(() => {
         result.current.selectSession({
@@ -2724,7 +2724,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           threadCount: 1,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       act(() => {
         result.current.selectThread({
@@ -2737,7 +2737,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           headMessagePreview: null,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       // 5. 目标切换与重命名尝试
       expect(result.current.target.kind).toBe('BOUND_THREAD')

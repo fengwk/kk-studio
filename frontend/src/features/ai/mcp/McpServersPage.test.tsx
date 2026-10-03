@@ -189,7 +189,7 @@ describe('McpServersPage', () => {
     await user.click(within(modal).getByRole('button', { name: '确认' }))
 
     // 冲突弹窗出现
-    expect(await screen.findByText('持久状态已变化')).toBeInTheDocument()
+    expect(await screen.findByText('数据已发生变化')).toBeInTheDocument()
   })
 
   it('opens edit modal, fetches config, displays immutable name, and submits full replacement PUT', async () => {

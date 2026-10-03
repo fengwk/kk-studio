@@ -238,7 +238,7 @@ describe('system settings server editor', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('持久状态已变化')
+    expect(dialog).toHaveTextContent('数据已发生变化')
     expect(dialog).toHaveTextContent('原因：VERSION_CONFLICT')
     expect(dialog).toHaveTextContent('expected=0 actual=1')
     // 用户确认前不 refetch、不刷新、不覆盖 draft。
@@ -287,7 +287,7 @@ describe('system settings server editor', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
 
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('持久状态已变化')
+    expect(dialog).toHaveTextContent('数据已发生变化')
     expect(dialog).toHaveTextContent('原因：VERSION_CONFLICT')
     expect(mocks.update).toHaveBeenCalledTimes(1)
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
@@ -326,7 +326,7 @@ describe('system settings server editor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('存在为空的其他必需数值字段')
+    expect(alert).toHaveTextContent('存在为空的必需数值字段')
     expect(mocks.update).not.toHaveBeenCalled()
   })
 

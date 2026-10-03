@@ -2,6 +2,7 @@ import type {
   PaneTarget,
   PaneTargetKind,
 } from '@/features/ai/runtime/agent-pane/pane-target'
+import { translate } from '@/shared/i18n'
 
 interface ManualCompactionAvailability {
   available: boolean
@@ -158,15 +159,15 @@ export function threadCommandsForTarget(
     const disabled = !targetEnabled || compactDisabled || readOnlyDisabled || newDisabled || agentDisabled || branchingDisabled
     let disabledReason: string | undefined
     if (readOnlyDisabled) {
-      disabledReason = '只读模式'
+      disabledReason = translate('ai.runtime.command.disabled.readOnly')
     } else if (compactDisabled) {
       disabledReason = manualCompaction?.disabledReason ?? undefined
     } else if (newDisabled) {
-      disabledReason = '当前项目仅支持单会话'
+      disabledReason = translate('ai.runtime.command.disabled.singleSession')
     } else if (agentDisabled) {
-      disabledReason = '当前受控模式不支持切换 Agent'
+      disabledReason = translate('ai.runtime.action.agentSwitchDisabled')
     } else if (branchingDisabled) {
-      disabledReason = '当前受控模式不支持分支切换或分叉'
+      disabledReason = translate('ai.runtime.action.branchingDisabled')
     }
 
     return {
