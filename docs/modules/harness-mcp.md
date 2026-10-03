@@ -1,8 +1,8 @@
 # Harness MCP
 
-MCP 工具要接进 Harness，关键风险只有一条：一次远端调用把 Backend 线程挂死，或者取消与超时互相覆盖，让「已发出的请求」和「已放弃的等待」产生两种事实。本模块把底层 LangChain4j MCP SDK 收敛在一处，对调用方只暴露稳定的配置、工具定义、调用结果、总预算与取消契约，因此产品侧的发现与执行可以共用同一份超时、取消与清理语义。
+`harness-mcp` 将 LangChain4j Streamable HTTP client 适配为模块自有的配置、工具定义和结果，供 Platform 的发现与执行共用。每次操作显式接收总 deadline 与取消令牌，client 所有者负责关闭连接与 worker。
 
-本模块把配置收敛为不可变值对象，提供远端工具发现、单次调用与结果映射，并用覆盖初始化与执行的总预算及调用级取消约束每次调用。client 实例持有连接与 worker 池，须显式关闭；模块不保存产品持久化事实。传输只有 Streamable HTTP 一种，调用发生在 Backend 进程内；产品侧的 MCP Server/Tool 持久化、名称寻址、工具身份与 per-call 生命周期由 [`platform`](platform.md) 拥有。
+调用在 Backend 内执行，初始化和后续操作从同一份剩余预算扣除。产品 Server/Tool 的配置、名称寻址与持久目录见 [`Platform`](platform.md#mcp-server-与运行时工具目录)；本模块提供可独立使用的 client 生命周期与 wire 结果映射。
 
 ## 包架构
 
@@ -20,7 +20,7 @@ MCP 工具要接进 Harness，关键风险只有一条：一次远端调用把 B
 
 初始化在独立的 daemon 线程完成，调用方只等待同一份剩余预算。超时、构建失败或交接竞态都不会留下半开的连接：[`ClientHandoff`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/ClientHandoff.java) 用监视器保护的状态保证「交付」与「放弃」互斥，已构建的 client 要么恰好交付给调用方一次，要么当场回收；底层 transport 的关闭是幂等兜底动作，可能被重复调用，绝不依赖其次数。
 
-配置对象本身也不承担泄漏面：[`RemoteMcpConfig`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/RemoteMcpConfig.java) 的 `toString` 只输出 URL 长度与 header 数量——URL 可能内嵌凭证，只有显式调用 `url()` 才读取完整值。
+[`RemoteMcpConfig`](../../harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/RemoteMcpConfig.java) 的 toString 输出 URL 长度与 header 数量；完整 URL 仅通过显式 url() 读取，因为它可能内嵌凭证。
 
 ## 总预算与调用级取消
 

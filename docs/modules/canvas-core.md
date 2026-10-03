@@ -1,6 +1,6 @@
 # Canvas Core 模块
 
-`canvas-core` 定义 Canvas 的不可变 graph 聚合、typed command、命令规划与冲突语义，以及 Function SPI 与执行边界，全部只用 JDK 类型表达。它不连接 PostgreSQL、不装配 Spring、不认识 HTTP DTO；[canvas-infra](canvas-infra.md) 实现持久化端口与应用服务，[platform](platform.md) 提供宿主 Storage 适配，Platform 或构建期插件提供 Function adapter，[web](web.md) 负责 HTTP/DTO 映射。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
+`canvas-core` 用 JDK 类型定义 Canvas 的不可变 graph、typed command、命令规划与冲突语义，以及 Function SPI。持久化端口和应用服务由 [Canvas Infra](canvas-infra.md) 实现；[Platform](platform.md) 提供 Storage 适配，Platform 或构建期插件提供 Function adapter，[Web](web.md) 完成 HTTP/DTO 映射。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
 
 模块的生产依赖为空，只有 JUnit 在 test scope（见 [`canvas/core/pom.xml`](../../canvas/core/pom.xml)）。[`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 扫描全部主源码，禁止 `java.sql`、`javax.sql`、`jakarta.persistence`、Spring、MyBatis 以及 Harness、Platform、Share、Web 包前缀，并断言 Catalog 只有一处事实源。
 
@@ -30,7 +30,7 @@ CanvasDocument
 
 [`CanvasCommand`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommand.java) 是 sealed interface，共 11 个原子命令子类型：`CreateNode`、`RenameNode`、`SetNodeResources`、`SetNodeFunction`、`SetNodeGroup`、`DeleteNode`、`UpdateNodeTransform`、`CreateGroup`、`RenameGroup`、`UpdateGroupTransform`、`DeleteGroup`。每条命令只修改一个语义组，并在构造期校验非空集合、无重复 ID 与有限坐标。
 
-并发编辑不是整图 CAS。每条命令携带自己语义组在编辑起点的前置条件：
+并发编辑按语义组校验前置条件。每条命令携带该组在编辑起点的基线：
 - **名称**：前置条件为旧名称（`expectedName` / `expectedTitle`）；
 - **资源数组**：前置条件为有序 Resource ID 列表（`expectedResourceIds`），槽位意图由 [`CanvasResourceInput`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java)（`Keep`、`Text`、`Blob`）表达；
 - **Function**：前置条件为编辑起点的完整 [`CanvasFunction`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)（`{name,args}`，由 [`CanvasJson.JsonObject.equals`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasJson.java) 做严格 JSON 语义比较）；
@@ -88,14 +88,14 @@ Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始
 - `revision >= 0` 且每次成功命令批（产生变化时）或 Run 状态前进恰好 +1；冲突或命令非法时整批不写入，不产生部分 Patch。
 - Resource 内容 XOR（`blobId` 与 `textContent` 恰好一个非空）、owner/index 成对必须成立；节点内资源同属一个 Canvas、owner 指向本节点、槽位从 0 连续递增、内容类型一致。
 - Function Run 的状态与 available/lease/error 字段组合必须匹配上表；终态 Run 允许被新的 requestId 取代，活跃 Run 不允许被第二个 requestId 覆盖。
-- Catalog 是启动期冻结快照，运行期函数能力与可用性不再变化；args/state codec 对未知字段、重复字段与版本漂移一律 fail closed。
+- Catalog 的函数能力与可用性取自启动期冻结快照；args/state codec 对未知字段、重复字段与版本漂移一律 fail closed。
 - Core 只表达领域值、规划与可验证的 transition。锁协议、lease、heartbeat、PostgreSQL 短事务与迟到回调的围栏由 [canvas-infra](canvas-infra.md) 负责。
 
 ## 从哪里改
 
 - 领域类型与命令：[`CanvasDocument.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasDocument.java)、[`CanvasResourceNode.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceNode.java)、[`CanvasResource.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResource.java)、[`CanvasGroup.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasGroup.java)、[`CanvasReference.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasReference.java)、[`CanvasResourceReference.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceReference.java)、[`CanvasCommand.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommand.java)、[`CanvasCommandPlanner.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlanner.java)、[`CanvasCommandPlan.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandPlan.java)、[`CanvasCommandResult.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandResult.java)、[`CanvasConflict.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflict.java)、[`CanvasConflictException.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflictException.java)、[`CanvasPatch.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasPatch.java)。
 - 端口：[`CanvasStore.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasStore.java)、[`CanvasCommandService.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasCommandService.java)、[`CanvasQueryService.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasQueryService.java)、[`CanvasResourceRepository.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceRepository.java)、[`CanvasResourceLifecycle.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceLifecycle.java)、[`CanvasResourceMaterializer.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceMaterializer.java)（输出物化，由宿主实现）、[`CanvasFunctionRunRepository.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunRepository.java)、[`CanvasFunctionResourcePinRepository.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePinRepository.java)、[`CanvasBlobReleaser.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasBlobReleaser.java)、[`CanvasFunctionService.java`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionService.java)。
-- Function 能力：[`function` 目录](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/)；新增 Provider 能力时在 [platform](platform.md) 或插件模块实现 adapter 并让 Catalog 在启动时冻结，而不是在 Core 内加注册表。
+- Function 能力：[`function` 目录](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/) 定义 SPI；新增能力在 [Platform](platform.md) 或插件模块实现 adapter，由 Catalog 启动冻结。
 
 测试入口：
 

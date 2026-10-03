@@ -1,8 +1,8 @@
 # Harness Contributor API
 
-Harness 的工具、分支自定义状态和模型上下文都来自受信任的 Java 代码——内置工具是其中一个 Contributor，团队自己的 JAR 也可以是。这类扩展的危险不在于写得慢，而在于启动后才发现两个 Contributor 抢了同一个工具名、依赖成环、工具偷偷写了别人的状态、或者模型看到的两份定义其实并不一致。本模块把扩展约束全部前移到启动装配期：Contributor 只声明自己能贡献什么，`HarnessCatalog.from` 收集、校验依赖图并按确定性顺序调用一次，冻结出一份全局唯一、不可变的目录；此后运行期只读这份目录。
+`harness-contributor-api` 是受信任 Java 扩展的接入契约。Contributor 声明工具、分支自定义状态与上下文投影；`HarnessCatalog.from` 校验身份和依赖图，按确定性顺序调用 contribute 并冻结目录。工具身份冲突、依赖缺失/成环和状态 ownership 错误在装配期失败。
 
-模块是纯 Java SPI，不含 store、gateway、transaction 或锁（见 [`HarnessRegistrar`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java) 的接口注释）。生产依赖只有 [`harness-common`](harness-common.md)、[`harness-tool`](harness-tool.md) 与 [`harness-environment`](harness-environment.md) 的值契约（见 [`pom.xml`](../../harness/contributor-api/pom.xml)），由 [`ContributorApiModuleArchitectureTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/ContributorApiModuleArchitectureTest.java) 守卫；持久化、事务、网关路由、类加载与 Spring 装配分别在 [`harness-runtime`](harness-runtime.md)、[`platform`](platform.md) 与 [`web`](web.md) 侧。
+模块是纯 Java SPI，生产依赖为 [`harness-common`](harness-common.md)、[`harness-tool`](harness-tool.md) 与 [`harness-environment`](harness-environment.md) 的值契约。接口使用方式见 [`HarnessRegistrar`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java)，依赖声明见 [`pom.xml`](../../harness/contributor-api/pom.xml)。Runtime 执行状态与事务，Platform 适配网关，Web 收集 bean 完成组合。
 
 ## 包架构
 
@@ -139,7 +139,7 @@ durable 事实。
   threadId 时引用会话资源的调用必须确定性失败（如 Mavis 映射为 `MAVIS_RESOURCE_UNAVAILABLE`），
   不允许退化为未鉴权访问或跳过资源解析后发送。
 
-Plugin 是否存在由 `web` 的 Maven runtime dependency 决定，运行中不安装、卸载或刷新代码，也不扫描外部 jar 目录。`EnvironmentSupport.NONE` 的远端 API 工具不会因未选择 Environment 被过滤。
+Plugin 安装集合由 Web runtime dependency 和发行物构建确定，步骤见 [Platform 新增 Plugin](platform.md#新增-plugin)。`EnvironmentSupport.NONE` 的远端 API 工具具备独立于 Environment 的执行位置。
 
 ## 源码与测试
 

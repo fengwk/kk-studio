@@ -7,12 +7,12 @@
 的统一 SPI 注册 13 个工具与 `goal.progress` 自定义条目类型；模型可见的工具集合因此由
 目录与本轮 Agent 配置共同确定，不依赖容器装配顺序。
 
-模块只负责「这些工具做什么」：实现委托、参数与领域校验、以及要追加什么分支状态。目标
-正文的写入权限在用户输入面，不在本模块。校验
+模块定义工具行为、参数与领域校验，以及分支状态追加意图。Goal 正文
+由用户输入面维护。校验
 ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](harness-runtime.md)
 与 Contributor 目录承担；环境能力的网络传输与子进程执行由
 [`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md) 承担。
-Skill 没有专用加载工具：System Prompt 提供稳定路径，读取统一交给
+Skill 由 System Prompt 提供稳定路径，读取统一交给
 `read`。生产依赖见 [`pom.xml`](../../harness/builtin/pom.xml)，由
 [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java)
 守卫。
@@ -48,9 +48,9 @@ Skill 没有专用加载工具：System Prompt 提供稳定路径，读取统一
 | `goal.get` | `get_goal` | READ(`goal.progress`) | SELECTABLE | 读取当前用户 Goal 与其进度声明，`READ_ONLY` |
 | `goal.update` | `update_goal` | WRITE(`goal.progress`) | SELECTABLE | 声明当前 Goal 的终态进度，`IDEMPOTENT` |
 
-`localName` 是 contributor 内的 scoped 贡献标识；Agent 侧的唯一身份是模型可见 name，配置、权限键与 catalog 条目都只用它。name 的字面值由 [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定。此外注册 Custom Entry Type `goal.progress-type`（customType 为 `goal.progress`），priority 为 0。Goal 没有创建工具、也没有任何 Context Projector：目标正文由用户维护，绝不注入 `systemInstruction`。
+`localName` 是 contributor 内的贡献标识；Agent 配置、权限键与 catalog 使用模型可见 name。[`BuiltinHarnessContributorTest`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 验证字面值。此外注册 Custom Entry Type `goal.progress-type`（customType 为 `goal.progress`），priority 为 0。Goal 正文保存在用户控制的 branch settings，Agent 经 get_goal 读取。
 
-注册目录不是每次请求的最终工具面。Platform 只在 Agent 的 subagents allowlist 非空时自动加入内部 `task`，不能把它作为 SELECTABLE 工具配置；Issue Agent Thread 会移除 `get_goal` / `update_goal`，普通分支保留配置的 Goal 工具。未选择 Environment 时，八个 REQUIRED 宿主工具从模型工具面过滤，OPTIONAL 的 `read` 仍可用于 Platform 资源。
+每次请求的工具面由 Platform 从目录与 Agent 配置解析：subagents allowlist 非空时加入 INTERNAL task；Issue Agent Thread 过滤 get_goal/update_goal，普通分支保留配置的 Goal 工具。未选 Environment 时过滤八个 REQUIRED 宿主工具，OPTIONAL read 保留 Platform 资源读取能力。
 
 八个 Environment-only 工具把 [`EnvironmentCapabilityTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java)
 绑定到一个 catalog capability。统一 `read` 则先识别稳定的 `kkstudio:` URI，再把本地路径
@@ -63,13 +63,13 @@ Skill 没有专用加载工具：System Prompt 提供稳定路径，读取统一
 
 ## Goal：用户拥有的目标与 Agent 进度声明
 
-Goal 不建独立表，也**不是**模型工具可以创建或改写的状态：目标正文由用户经 typed
+Goal 正文由用户经 typed
 `GOAL` 输入命令写入 branch settings（[`BranchSettings.goal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)，
 nullable 不可变 `GoalSetting{id, text}`）。typed `GOAL` 在同一个 `TURN_START` 中冻结新
 settings，并追加对应的 USER 消息；它本身是末尾 user-like 输入，不可与普通 `USER_MESSAGE` 同批。
 每次设置都分配新 id，即使正文相同；正文必须非空白、无首尾空白且不超过 2000 个 Unicode 码点。
-显式 `null` 表示清除，空字符串不是清除。目标正文因此属于用户，分支历史中的目标快照不可被 Agent 篡改，
-也绝不提升为 `systemInstruction`。
+显式 null 表示清除，空字符串校验失败。目标正文保留为用户输入与 branch settings 快照，
+其信任级别始终为用户内容。
 
 Agent 只能做两件事：读取当前目标，以及对自己正在处理的目标声明终态进度。
 
@@ -86,8 +86,8 @@ reportedAt: 毫秒截断
 
 [`GoalProgressCodec`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgressCodec.java)
 要求精确字段集合：未知字段、缺失字段、重复键、尾随 token、非终态枚举与时间戳格式错误一律拒绝。
-声明只绑定 `goalId`，不复制目标正文、不删除 Goal、也不改变任何业务状态——它是「Agent
-报告」，不是系统验收。
+声明通过 goalId 绑定用户目标，表示 Agent 的终态进度报告；Goal 本身与业务验收
+分别由用户输入和业务流程维护。
 
 两个工具都先经 [`GoalToolSupport`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalToolSupport.java)
 做 schema 校验与强类型解析，并通过限定在 `builtin` 作用域的 `BranchView.goal()` 读取当前
@@ -121,13 +121,13 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 路径委托当前 Daemon，相对本地路径另需绝对 `workdir`。`kkstudio:/resources/<blobId>`
 通过本次执行 context 的 `threadId` 解析 Session，并检查该 Session 是否引用 Blob；拿到另一
 Session 的 UUID 不授予读取权限，缺少 context 直接失败。`kkstudio:` URI 不接受 `workdir`，
-其他远端 URI scheme 不提供通用抓取。Skill 没有专用 Tool、运行时 binding 或独立超时。
+URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由、权限与超时。
 
 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 以 `INTERNAL` 注册，本身不携带环境需求。它把 arguments 解析为 [`SubagentTaskRequest`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 后交给 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)：`subagent_type` 与 `prompt` 必填非空白（`subagent_type` 禁止首尾空格），`max_turns` 若给出必须为正整数，`thread_id` 若给出必须是规范 UUID 文本（用于在既有子 Thread 上继续）。缺少 durable context 直接抛 `IllegalArgumentException`；取得 context 后的参数拒绝与 Runner `RuntimeException` 收敛为错误 ToolResult。
 
 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java) 是只有「接受」没有「等待」的端口：实现必须在同一事务内完成子 Thread 的命令接受与 join 凭据写入，然后立即返回子身份，绝不能阻塞到子执行结束。Platform 的实现把请求组装为 [`ThreadJoinRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinRequest.java) 并调用 `acceptCommandsAndJoin`，深度与并发限额也在该事务内由 Runtime 校验。Runner 以 [`SubagentTaskRequest.invocationId`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 为幂等键：同一次 Tool 调用重试返回同一个子 Thread，不会重复开启执行。
 
-接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即用一次成功 `tool_result` 回执唯一 JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)），不重复 prompt，也不提供 XML 或别名形状；结果不经过工具返回，而是由 Runtime 在子执行首次 Idle 匹配 join 后作为父 Thread 的一条独立消息交付，完成消息的 XML 编码与转义由 `runtime.join` 的纯函数负责（见 [Harness Runtime](harness-runtime.md)）。
+接受成功后 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 立即返回成功 tool_result JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)）。执行结果在子首次 Idle 匹配 join 后，由 Runtime 作为父 Thread 独立消息交付；完成消息的 XML 编码与转义由 runtime.join 纯函数处理，见 [Harness Runtime](harness-runtime.md)。
 
 [`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。全局额度跨所有执行树按非空闲子 Thread 计数，根 Thread 不计入，同一忙碌子上的多个 join 不重复占额；判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
