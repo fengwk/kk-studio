@@ -57,6 +57,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -67,7 +68,6 @@ import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
-import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnFacts;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnRejection;

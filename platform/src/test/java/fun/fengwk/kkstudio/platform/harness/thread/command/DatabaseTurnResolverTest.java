@@ -117,6 +117,9 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.tool.CompositeRuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
@@ -129,9 +132,6 @@ import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionServ
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
-import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;

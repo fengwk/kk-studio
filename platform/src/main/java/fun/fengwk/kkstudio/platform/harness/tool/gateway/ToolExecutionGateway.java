@@ -58,9 +58,9 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
-import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 
 import java.time.Clock;
 import java.time.Duration;
