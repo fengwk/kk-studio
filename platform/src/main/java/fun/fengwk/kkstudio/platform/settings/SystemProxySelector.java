@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.network;
+package fun.fengwk.kkstudio.platform.settings;
 
 import java.io.IOException;
 import java.net.Proxy;
