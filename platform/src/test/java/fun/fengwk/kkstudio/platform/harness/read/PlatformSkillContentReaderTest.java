@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -8,10 +10,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
@@ -172,5 +179,88 @@ class PlatformSkillContentReaderTest {
     assertArrayEquals(expectedBytes, actualBytes);
     verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
     verify(gitCache).readFile("my-pkg", "c1", "dev/SKILL.md");
+  }
+
+  /** 同名子目录是合法的相对路径，不得吞掉一级后误读根文件。 */
+  @Test
+  void sameNamedSubdirectoryReadsExactFile() {
+    publishedPackage();
+    byte[] root = "root".getBytes(StandardCharsets.UTF_8);
+    byte[] nested = "nested".getBytes(StandardCharsets.UTF_8);
+    when(gitCache.readFile("my-pkg", "c1", "dev/SKILL.md")).thenReturn(root);
+    when(gitCache.readFile("my-pkg", "c1", "dev/dev/SKILL.md")).thenReturn(nested);
+
+    assertArrayEquals(nested, reader.readSkillFile("my-pkg", "dev", "dev/SKILL.md"));
+    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).readFile("my-pkg", "c1", "dev/dev/SKILL.md");
+    verifyNoMoreInteractions(gitCache);
+  }
+
+  /** 所有无效入参在查询或访问 Git 之前拒绝，包括空段和尾斜杠。 */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {" ", "/SKILL.md", "sub\\file", "sub\nfile", ".", "..", "a//b", "a/"})
+  void invalidRelativePathsHaveNoSideEffects(String path) {
+    assertThrows(PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", path));
+    verifyNoInteractions(queryService, gitCache);
+  }
+
+  /** Package 和 Skill 名称的空值与空白校验不能触发下游调用。 */
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {" "})
+  void invalidNamesHaveNoSideEffects(String name) {
+    assertThrows(PlatformReadException.class, () -> reader.readSkillFile(name, "dev", "SKILL.md"));
+    assertThrows(
+        PlatformReadException.class, () -> reader.readSkillFile("my-pkg", name, "SKILL.md"));
+    verifyNoInteractions(queryService, gitCache);
+  }
+
+  /** 空白 commit 与未发布 commit 一致，不尝试访问 Git。 */
+  @Test
+  void blankCommitHasNoGitSideEffects() {
+    SkillPackage pkg = publishedPackage();
+    pkg.setCurrentCommit(" ");
+    assertThrows(
+        PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", "SKILL.md"));
+    verifyNoInteractions(gitCache);
+  }
+
+  /** 非 SkillGitException 也保持相同错误映射与 cause；ensure 失败后不继续读文件。 */
+  @Test
+  void unexpectedEnsureFailurePreservesCauseAndStopsRead() {
+    publishedPackage();
+    IllegalStateException cause = new IllegalStateException("cache unavailable");
+    doThrow(cause).when(gitCache).ensureCommit(any(), any(), any());
+    PlatformReadException error =
+        assertThrows(
+            PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", "SKILL.md"));
+    assertEquals("skill content is unavailable: cache unavailable", error.getMessage());
+    assertSame(cause, error.getCause());
+    verify(gitCache).ensureCommit("my-pkg", "https://example.com/repo.git", "c1");
+    verifyNoMoreInteractions(gitCache);
+  }
+
+  /** 普通读取异常仍保留原始 cause，不依赖 Git 专用异常类型。 */
+  @Test
+  void unexpectedReadFailurePreservesCause() {
+    publishedPackage();
+    IllegalStateException cause = new IllegalStateException("read unavailable");
+    when(gitCache.readFile("my-pkg", "c1", "dev/SKILL.md")).thenThrow(cause);
+    PlatformReadException error =
+        assertThrows(
+            PlatformReadException.class, () -> reader.readSkillFile("my-pkg", "dev", "SKILL.md"));
+    assertEquals("failed to read skill file: read unavailable", error.getMessage());
+    assertSame(cause, error.getCause());
+  }
+
+  private SkillPackage publishedPackage() {
+    SkillPackage pkg = new SkillPackage();
+    pkg.setPackageName("my-pkg");
+    pkg.setRepositoryUrl("https://example.com/repo.git");
+    pkg.setCurrentCommit("c1");
+    pkg.setSkills(List.of(new SkillManifestEntry("dev", "desc")));
+    when(queryService.getPackage("my-pkg")).thenReturn(pkg);
+    return pkg;
   }
 }

@@ -41,9 +41,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
   private static final Pattern WINDOWS_DRIVE_PATTERN = Pattern.compile("^[A-Za-z]:[\\\\/].*");
 
   private static final String KKSTUDIO_SKILLS_PREFIX = "kkstudio:/skills/";
-  private static final String KKSTUDIO_SKILLS_DOUBLE_SLASH_PREFIX = "kkstudio://skills/";
   private static final String KKSTUDIO_RESOURCES_PREFIX = "kkstudio:/resources/";
-  private static final String KKSTUDIO_RESOURCES_DOUBLE_SLASH_PREFIX = "kkstudio://resources/";
 
   private final PlatformSkillContentReader skillReader;
   private final PlatformResourceContentReader resourceReader;
@@ -138,13 +136,11 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       return CompletedToolExecutionHandle.INSTANCE;
     }
 
-    if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)
-        || path.startsWith(KKSTUDIO_SKILLS_DOUBLE_SLASH_PREFIX)) {
+    if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)) {
       return handleSkillUri(callId, path, offset, limit, columnOffset, listener);
     }
 
-    if (path.startsWith(KKSTUDIO_RESOURCES_PREFIX)
-        || path.startsWith(KKSTUDIO_RESOURCES_DOUBLE_SLASH_PREFIX)) {
+    if (path.startsWith(KKSTUDIO_RESOURCES_PREFIX)) {
       return handleResourceUri(callId, path, offset, limit, columnOffset, request, listener);
     }
 
@@ -159,10 +155,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer limit,
       Integer columnOffset,
       ToolExecutionListener listener) {
-    String sub =
-        path.startsWith(KKSTUDIO_SKILLS_DOUBLE_SLASH_PREFIX)
-            ? path.substring(KKSTUDIO_SKILLS_DOUBLE_SLASH_PREFIX.length())
-            : path.substring(KKSTUDIO_SKILLS_PREFIX.length());
+    String sub = path.substring(KKSTUDIO_SKILLS_PREFIX.length());
 
     int firstSlash = sub.indexOf('/');
     if (firstSlash <= 0) {
@@ -208,10 +201,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer columnOffset,
       ToolExecutionRequest request,
       ToolExecutionListener listener) {
-    String blobIdStr =
-        path.startsWith(KKSTUDIO_RESOURCES_DOUBLE_SLASH_PREFIX)
-            ? path.substring(KKSTUDIO_RESOURCES_DOUBLE_SLASH_PREFIX.length())
-            : path.substring(KKSTUDIO_RESOURCES_PREFIX.length());
+    String blobIdStr = path.substring(KKSTUDIO_RESOURCES_PREFIX.length());
 
     if (blobIdStr.isBlank() || blobIdStr.contains("/")) {
       listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
