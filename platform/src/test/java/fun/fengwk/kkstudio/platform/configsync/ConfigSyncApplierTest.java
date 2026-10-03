@@ -19,12 +19,15 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -37,6 +40,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
@@ -44,6 +48,7 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -232,5 +237,80 @@ class ConfigSyncApplierTest {
     properties.setModel("p/m");
     properties.setConfig(config);
     return properties;
+  }
+
+  /** 意图：Skill 与 MCP 导入按计划直接委托，携带 exact commit manifest 与已发现的工具行。 */
+  @Test
+  void skillAndMcpImportsAreDelegatedWithPreparedPayloads() {
+    SkillManifestEntry manifest = new SkillManifestEntry("s", "desc");
+    ConfigSyncPlan.SkillImport skill =
+        new ConfigSyncPlan.SkillImport(
+            "pkg", "d", "https://example.com/pkg.git", "main", "a".repeat(40), List.of(manifest));
+    McpTool tool = ConfigSyncFixtures.mcpTool("tool_x", "mcp");
+    ConfigSyncPlan.McpImport mcp =
+        new ConfigSyncPlan.McpImport(
+            "mcp",
+            "https://mcp.example.com/mcp",
+            Map.of("Authorization", "secret"),
+            Boolean.TRUE,
+            30_000L,
+            List.of(tool));
+
+    applier.apply(
+        plan(List.of(), List.of(), List.of(skill), List.of(mcp), List.of(), List.of(), null));
+
+    verify(skillCatalogService)
+        .importPackage(
+            "pkg", "d", "https://example.com/pkg.git", "main", "a".repeat(40), List.of(manifest));
+    verify(mcpServerService)
+        .importServer(
+            "mcp",
+            "https://mcp.example.com/mcp",
+            Map.of("Authorization", "secret"),
+            Boolean.TRUE,
+            30_000L,
+            List.of(tool));
+  }
+
+  /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
+  @Test
+  void existingModelIsUpdatedWithExistingVersionCas() {
+    AgentModel existing = new AgentModel();
+    existing.setProviderName("p");
+    existing.setName("m");
+    existing.setVersion(4L);
+    when(modelRepository.getByProviderNameAndName("p", "m")).thenReturn(existing);
+    AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
+    properties.setName("m");
+    properties.setModelId("gpt");
+    properties.setConfig(ConfigSyncFixtures.modelConfig());
+    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("p", "m", properties);
+
+    applier.apply(plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null));
+
+    ArgumentCaptor<AgentModelUpdateDTO> captor = ArgumentCaptor.forClass(AgentModelUpdateDTO.class);
+    verify(modelService).updateModel(eq("p"), eq("m"), captor.capture());
+    assertEquals("4", captor.getValue().getExpectedVersion());
+    verify(modelService, never()).createModel(any());
+  }
+
+  /** 意图：已存在的 Agent 不再创建，直接进入第二阶段用既有版本 CAS 更新完整配置。 */
+  @Test
+  void existingAgentIsUpdatedWithoutCreate() {
+    AgentDefinition existing = new AgentDefinition();
+    existing.setName("a");
+    existing.setVersion(7L);
+    when(definitionRepository.getByName("a")).thenReturn(existing);
+    ConfigSyncParser.AgentSpec spec =
+        new ConfigSyncParser.AgentSpec(
+            "a", "p", "m", agentProperties(agentConfig(List.of(), List.of(), List.of())));
+
+    applier.apply(plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(spec), null));
+
+    verify(definitionService, never()).createAgent(any());
+    ArgumentCaptor<AgentDefinitionUpdateDTO> captor =
+        ArgumentCaptor.forClass(AgentDefinitionUpdateDTO.class);
+    verify(definitionService).updateAgent(eq("a"), captor.capture());
+    assertEquals("7", captor.getValue().getExpectedVersion());
   }
 }

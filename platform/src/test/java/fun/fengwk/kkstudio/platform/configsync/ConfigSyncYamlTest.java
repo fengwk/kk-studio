@@ -196,6 +196,26 @@ class ConfigSyncYamlTest {
     assertFalse(result.containsKey("bogus"));
   }
 
+  /** 意图：空白输入与 null 节点是边界错误，不能进入解析或强类型转换路径。 */
+  @Test
+  void blankYamlAndNullConversionAreRejected() {
+    assertThrows(AiValidationException.class, () -> yaml.parse(null));
+    assertThrows(AiValidationException.class, () -> yaml.parse("   "));
+    assertThrows(AiValidationException.class, () -> yaml.convert(null, Sample.class, "sample"));
+  }
+
+  /** 意图：嵌套 map 的非字符串键在解析期即被拒绝，不能进入强类型转换。 */
+  @Test
+  void nestedNonStringKeyIsRejected() {
+    assertThrows(AiValidationException.class, () -> yaml.parse("providers:\n  - 1: a\n"));
+  }
+
+  /** 意图：六十进制浮点虽被 SnakeYAML 识别为 float，但 BigDecimal 无法表达，必须作为非法 YAML 拒绝而非静默失真。 */
+  @Test
+  void sexagesimalFloatIsRejected() {
+    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: 1:20:30.5\n"));
+  }
+
   /** 严格类型测试用的最小 DTO：公开字段足以让 Jackson introspection 识别。 */
   public static class Sample {
 
