@@ -6,7 +6,7 @@
 
 [`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是规范 UUID 路由身份：构造与解析只接受 `UUID#toString()` 的小写 canonical 文本，空白、大小写变体与其它形状一律拒绝，`toString()` 也只输出该形式。
 
-Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个身份。展示名称不替代路由 UUID。产品侧历史如何冻结名称由 [Platform](platform.md)维护，本模块不推断会话或目录。
+Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 亲和性共用这个 UUID。产品展示名与历史名称的冻结由 [Platform](platform.md)维护；调用目录在具体 capability arguments 中显式给出。
 
 ## 原子能力目录
 
@@ -35,10 +35,9 @@ id / version / inputSchema / defaultTimeout
 | `lsp.java-decompile` | 2 分钟 | 相对 path 或 target 时需要 | `lsp_java_decompile` |
 | `skill.sync` | 5 分钟 | 无 | 内部控制面 |
 
-`skill.sync` 只由 Platform 调用，其余 9 项由 Contributor 映射为模型工具；底层 catalog
-本身不承担模型可见性。MCP 是 Platform 在 Backend 进程内通过 Streamable HTTP 承载的
-能力，不进入本目录。[`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
-固化这些标识。
+`skill.sync` 由 Platform 内部调用，其余 9 项由 Contributor 映射为模型工具。
+[`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
+固化标识；Contributor 的 visibility 决定模型选择面。
 
 capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityId.java)
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
@@ -62,7 +61,7 @@ EnvironmentCapabilityExecutionHandle execute(
     EnvironmentCapabilityExecutionListener listener);
 ```
 
-[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 只组合 `descriptor`、`call`（调用标识与 arguments）与 `timeout`，构造时按 descriptor schema 归一化并严格校验。它不携带 `workdir`：目录只存在于具体能力的 arguments 中。`timeout` 是上游已解析完成的唯一有效执行超时，`0` 表示没有 execution deadline；执行层不再回落 descriptor 默认值，也不做 min clamp。
+[`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）和 timeout，构造时按 descriptor schema 归一化并严格校验。workdir 属于具体 arguments；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：
 
@@ -115,7 +114,7 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 
 `environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR` 外的全部消息都必须携带非空的 `invocationId`，资源上传控制消息也以它关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
 
-协议没有全局序号，也没有 ACK：消息可靠性来自 `invocationId` 与 Daemon invocation journal，而不是传输层确认，因此编解码与运行时都不做跨消息顺序校验。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 采用严格策略，未知字段、重复键、尾随字符、非 canonical scope 或错误 `protocolVersion` 都直接作为协议异常拒绝。
+重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
 握手与调用时序：
 

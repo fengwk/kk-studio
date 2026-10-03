@@ -2,7 +2,7 @@
 
 模型说「调用 read」，Runtime 要用同一句话定位到持久化配置里的工具、做权限判定、把参数交给实现、把结果写回会话树，而 Provider 只认识工具名与 JSON Schema。这些环节必须共享同一份工具身份与数据契约，否则模型可见的名称、持久化配置与 durable 记录会各说各话。本模块就是这份契约：与执行位置无关的工具身份、定义、调用与结果值对象，以及它们的严格 JSON 编解码器。
 
-模块是纯 Java 值契约，不依赖 Environment、Contributor、Session、Runtime、Spring 或持久化框架；生产依赖只有 [`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/tool/pom.xml)），[`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java) 扫描主源码 import 守卫该方向。工具执行 SPI、权限、调度与 durable 状态由 [`harness-contributor-api`](harness-contributor-api.md) 与 [`harness-runtime`](harness-runtime.md) 承担。
+模块提供纯 Java 值契约，生产依赖为 [`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/tool/pom.xml)）。[`ToolModuleArchitectureTest`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java) 校验依赖方向；执行 SPI 见 [`harness-contributor-api`](harness-contributor-api.md)，权限、调度与持久状态见 [`harness-runtime`](harness-runtime.md)。
 
 ## 包架构
 
@@ -25,7 +25,7 @@
 ToolCall normalized = call.validateFor(descriptor);
 ```
 
-该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 `inputSchema` 做数字字符串与可缺省 `null` 的通用容错改写，最后由 `InputValidator` 严格校验。参数名及其 required、类型、附加属性规则只由 descriptor schema 决定，不因 `read`、`write` 等工具名获得隐式别名或字段搬运；schema 声明 `file` 时 `file` 就是有效字段，schema 只声明 `path` 时 `file`、`filePath`、`file_path` 都不会替代它。已有 canonical 参数不会被重命名。参数被改动时返回新的 `ToolCall`，执行路径只能使用这个返回值，不得回头读原始 JSON。
+该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 inputSchema 归一化数字字符串与可缺省 null，最后由 `InputValidator` 严格校验。参数名、required、类型和附加属性规则均取自 schema。参数改变时返回新的 ToolCall，执行、审批与历史动作渲染使用该返回值；原始 function call 保存在模型结果中供 wire replay。
 
 同一入口在主源码的五个边界各调用一次，因为各处看到的参数必须一致：Planner 校验 Provider wire 上那条 raw call 可按 schema 归一化，历史动作渲染按同一份归一化参数生成语义动作，durable `ToolInvocation` 入库时校验一次，transient `ToolInvocationRequest` 在权限 preflight、审批预览与执行之前固化归一化副本，Contributor SPI 的 `ToolExecutionRequest` 构造时再校验一次。原始 function call 仍原样保存在模型结果与 assistant history 中，供审计与 wire replay。
 

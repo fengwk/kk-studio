@@ -1,6 +1,6 @@
 # Canvas Infra 模块
 
-[canvas-core](canvas-core.md) 定义了 graph 聚合、typed command、命令规划与 Function 执行边界，但 domain 不碰 PostgreSQL。`canvas-infra` 是这些端口的实现侧，也是整套系统里**唯一**的 Function durable queue：它把命令批事务、Snapshot 一致性读、Resource 生命周期与 Run 状态机落到 `canvas_*` 行上，并用 claim / lease / fencing / 短事务 CAS 让「用户点一次生成」在进程崩溃、节点重启、通知丢失之后仍然收敛。Web 负责把 Infra 装进组合根，Platform 提供宿主 Storage 与 Function adapter 适配。
+`canvas-infra` 实现 [Canvas Core](canvas-core.md) 的持久化与应用服务端口，将命令批、Snapshot 一致性读、资源生命周期和 Function Run 保存为 `canvas_*` 行。Run 行承担 durable queue；claim、lease 与短事务 CAS 支持多节点执行和崩溃恢复，提交结果不确定时转为 UNKNOWN 等待人工核对。Web 装配 Infra，Platform 提供 Storage 与 Function adapter。
 
 生产依赖固定为 Core、`convention4j-spring-boot-starter`、`spring-boot-starter-aspectj`、`mybatis-spring-boot-starter` 与 `jackson-databind`（见 [`canvas/infra/pom.xml`](../../canvas/infra/pom.xml)）；PostgreSQL、Flyway、Testcontainers 只在 test scope。[`CanvasInfraArchitectureTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraArchitectureTest.java) 同时扫描 import 前缀与 POM，禁止反向依赖 Platform/Harness/Web。自动配置入口是 [`CanvasInfraAutoConfiguration.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)，[`AutoConfiguration.imports`](../../canvas/infra/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports) 指向它，并显式启用 `CanvasFunctionRuntimeProperties`。
 
@@ -122,7 +122,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 mapper 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。
 - 改命令写路径与读模型：[`PostgresqlCanvasCommandService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java)、[`PostgresqlCanvasQueryService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java)、[`PostgresqlCanvasStore.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 与 [`PostgresqlCanvasResourceLifecycle.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceLifecycle.java)。
 - 改 Runtime：[`function` 目录](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 下的 dispatcher、worker、transactions、properties、codec 是一个整体；改动 lease 语义时同步检查 `claimNext` 的 `where` 与 `CanvasFunctionRunTransactions` 的 lock order。
-- 新增模型能力：不要改 Infra；在 [Platform](platform.md) 或独立插件模块实现 `CanvasFunctionAdapter`，由 Catalog 在启动时冻结。
+- 新增模型能力：在 [Platform](platform.md) 或插件模块实现 `CanvasFunctionAdapter`，由 Catalog 启动冻结。
 
 测试入口（标出「纯 JUnit」的不需要数据库，其余使用 Testcontainers PostgreSQL）：
 
@@ -133,7 +133,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - [`CanvasFunctionRuntimeServiceTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeServiceTest.java)（纯 JUnit）覆盖取消/人工决议的 adapter 钩子路由。
 - [`PostgresqlCanvasStoreIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStoreIntegrationTest.java)（含 `FOR UPDATE` 真实阻塞与 CAS 失败）、[`PostgresqlCanvasCommandServiceIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandServiceIntegrationTest.java)、[`PostgresqlCanvasQueryServiceIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryServiceIntegrationTest.java) 与 [`PostgresqlCanvasResourceRepositoryIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceRepositoryIntegrationTest.java) 覆盖四个持久化与应用服务端口契约。
 - codec 与属性（纯 JUnit）：[`CanvasFunctionArgsCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionArgsCodecTest.java)、[`CanvasFunctionRunStateCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunStateCodecTest.java)、[`CanvasFunctionRuntimePropertiesTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimePropertiesTest.java)。
-- 测试基座 [`PostgresCanvasInfraTestSupport.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java) 使用 `postgres:17-alpine` 进程级容器与 schema 模块的 Flyway baseline，并在每个测试前 drop/recreate public schema；Docker 不可用时测试直接失败，不用 mock 掩盖适配器问题。
+- 测试基座 [`PostgresCanvasInfraTestSupport.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java) 使用 `postgres:17-alpine` 进程级容器与 Schema 的 Flyway baseline，每个测试前重建 public schema；运行需要 Docker，环境不可用即失败。
 
 ---
 

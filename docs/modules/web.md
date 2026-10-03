@@ -1,483 +1,145 @@
 # Web 模块
 
-## 组合根与唯一生产入口
+[`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
+是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness infra、Runtime、
+Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
+Controller 解析 DTO、调用用例、映射结果；领域行为与事务由相应模块持有。
 
-`web` 是 kk-studio 唯一的生产 Spring Boot composition root：它把 Platform application
-services、Canvas/Harness infra、纯 Java `harness-runtime`、第一方
-`BuiltinHarnessContributor` 与可选 classpath Plugin 的 Spring bean 组合成一个可运行的
-HTTP/WebSocket 进程，并把浏览器 REST、静态 SPA、浏览器 Application Event WebSocket
-与 Environment Daemon WebSocket 一起暴露给外部；领域规则由被组合的模块持有，
-Controller 只做 DTO 解析、调用 application service 和结果投影。
+## 组合与生命周期
 
-生产入口只有 [WebApplication](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)：
-`SpringApplication.run(WebApplication.class, args)`。
-[WebTestApplication](../../web/src/test/java/fun/fengwk/kkstudio/web/WebTestApplication.java)
-只用于 Spring integration test，不是第二个生产 root。
+[`web/pom.xml`](../../web/pom.xml) 声明应用模块、Web transport、Flyway 和 runtime Plugin。
+Builtin/Common 经 Platform compile 依赖传递进入发行物。
+Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
+ContributorCatalogConfiguration 收集 HarnessContributor，冻结 HarnessCatalog；
+Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
 
-## 依赖边界与组合结构
+[`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
+将 datasource/transaction manager 接入 PostgresqlHarnessStore，
+装配 ResourceStore、realtime source/sink、三个 Processor 与 Work dispatcher。
+timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 执行 checkpoint 提交。
+该组合根还装配 Skill 同步和 PluginResourceGateway，因为它们需要 Harness 会话能力。
 
-[`web/pom.xml`](../../web/pom.xml) 直接声明：
-
-| 方向 | 依赖 |
+| 生命周期 owner | 启停职责 |
 | --- | --- |
-| Application/domain | `kk-studio-platform`、`kk-studio-share`、`kk-studio-canvas-core`、`kk-studio-canvas-infra`、`kk-studio-project` |
-| Harness composition | `kk-studio-harness-environment`、`kk-studio-harness-environment-server`、`kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
-| Web transport | `convention4j-spring-boot-starter-web`、`spring-boot-starter-websocket`、`spring-boot-starter-actuator`、`convention4j-agent`（runtime） |
-| Database bootstrap | `kk-studio-schema`（runtime）、`spring-boot-starter-flyway`、`flyway-database-postgresql` |
-| Optional Plugins | 选中的 `kk-studio-plugin-*`（runtime）；没有 dependency 就不进入 Fat JAR |
-| Integration tests | convention test starter、`spring-boot-starter-webmvc-test`、Testcontainers PostgreSQL/JUnit、JSONPath、OkHttp |
+| HarnessRuntimeLifecycle、IssueControllerRuntimeLifecycle | workers-enabled 控制 dispatcher 启动，控制/查询 bean 仍可用 |
+| CanvasFunctionDispatcher | 启动 wake，周期 poll，stop 关闭 drain；独立于 Harness worker 开关 |
+| PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
+| ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
+| StorageMaintenance、PluginCredentialRefreshDispatcher | 各自持有调度器与在途任务的收尾责任 |
 
-[WebModuleArchitectureTest](../../web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java)
-同时守护 import 与 POM：main source 只允许 `harness.runtime`、`harness.infra`、
-`harness.contributor.api`、`harness.environment` 前缀（`harness.tool` 只放行
-`codec.ToolResultJsonCodec`），禁止引用 Platform 的 `EnvironmentDaemonGateway`、
-`EnvironmentRegistry`、`EnvironmentConnection`；POM 必须直接声明 Platform、Canvas Core、Canvas Infra、
-Harness Infra、Harness Environment、Contributor API，并禁止以任何 scope 声明
-`kk-studio-harness-tool`、`kk-studio-harness-daemon`、`kk-studio-harness-builtin`、
-`kk-studio-harness-common`。后两者的原因很具体：Builtin 与 Common 由 Platform 的
-compile-scope 依赖传递进入组合根，web 一旦声明更近的 test-scope 依赖就会遮蔽它，使
-Spring Boot repackage 把这些 jar 从 Fat JAR 的 `BOOT-INF/lib` 中剔除。测试还禁止
-`web.controller` 包导入 `harness.runtime.processor`，禁止 web main source 出现
-`TrustedJarContributorLoader`、`URLClassLoader`、`ServiceLoader` 与
-`kk-studio.harness.contributors.directory`、`KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY` 等动态加载残留
-（这些扫描只作用于 main source），并要求 `application.yml` 逐字保留 Plugin 的环境变量占位符。
-可选 `kk-studio-plugin-*` 只能是 runtime dependency，Web main source 不得 import 其 implementation package。
+## HTTP 入口
 
-```text
-WebApplication
-  -> Spring Boot / MVC / WebSocket / Flyway
-  -> PlatformAutoConfiguration -> Platform application services and adapters
-  -> selected Plugin AutoConfigurations -> StudioPlugin + HarnessContributor
-  -> Canvas infra -> canvas-core
-  -> HarnessRuntimeConfiguration -> harness-infra -> harness-runtime -> harness-tool / harness-environment
-       -> Platform PluginResourceGateway
-  -> ContributorCatalogConfiguration -> Spring HarnessContributor beans（Builtin + 已安装 Plugin）-> HarnessCatalog
-  -> RuntimeToolCatalogConfiguration -> HarnessToolCatalogAdapter + DB-backed McpToolCatalog -> CompositeRuntimeToolCatalog
-  -> IssueControllerRuntimeConfiguration -> bounded Issue dispatcher + worker + poll
-  -> HTTP Controllers / DTO mappers / error advice
-  -> Application Event WebSocket + Environment Daemon WebSocket
-```
+JSON Controller 使用 ResultEnvelope，status 与业务结果对齐；
+health、资源下载和 WebSocket 使用各自传输形式。公开路由如下：
 
-[HarnessRuntimeConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
-是 Harness 的 application composition 子根：
-
-- `PostgresqlHarnessStore` 把 `HarnessStore` 绑定到 Web datasource 与 transaction manager；
-- `LocalFileResourceStore` 以 `kk-studio.harness.runtime.resource-root` 为 content-addressed
-  root，单对象上限取 `SystemSettings.Advanced.resourceMaxBytes`；
-- `PostgresqlRealtimeEventSink` 与 `PostgresqlRealtimeEventSource` 把 Model/Tool realtime
-  接到 PostgreSQL；
-- `ThreadProcessor`、`ModelProcessor`、`ToolProcessor` 共享 lease/heartbeat 配置；
-  `harnessProcessorScheduler` 只执行 timer 检查、合并与非阻塞分派，
-  `harnessHeartbeatWorkerExecutor` 以独立命名虚拟线程执行续租事务与所有权丢失回调，
-  Model checkpoint timer 只复用 scheduler 计时，实际批次 DB flush 与通知发布由
-  `harnessModelFlushExecutor` 执行；
-- `HarnessWorkDispatcher` 使用单线程 drain、bounded worker executor、poll scheduler 与
-  `harness_work` claim；
-- `EnvironmentSkillSyncOrchestrator` 与它的 bounded `environmentSkillSyncExecutor`
-  在这里装配：它依赖 Environment 会话核心提供的 `EnvironmentCapabilityTransport`，因此
-  Platform 自动配置不持有这个组合，Platform-only 上下文不会因为缺少该传输而启动失败；
-- `HarnessRuntimeLifecycle` 只控制 dispatcher 是否启动，Runtime control/query、store、
-  processor 与 realtime bean 始终由 context 持有。
-
-[ContributorCatalogConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogConfiguration.java)
-收集 Spring bean 形式的 `HarnessContributor`（含 Platform 暴露的
-`BuiltinHarnessContributor` 和已安装 Plugin），调用 `HarnessCatalog.from` 冻结为单一不可变
-`HarnessCatalog`；Contributor 是启动期静态扩展，不提供运行时安装或热刷新，也不存在外部
-jar 目录或隔离 classloader 这条路径。
-[RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
-进一步把静态目录与 DB-backed `McpToolCatalog` 聚合成 `@Primary` 的
-`CompositeRuntimeToolCatalog`。
-
-[ApplicationEventConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
-是 composition seam：它直接 import `CanvasFunctionDispatcher`，把
-`canvas_function_work` notification 接到 Canvas dispatcher；这不是 Platform 对 Canvas
-Infra implementation 的反向依赖。
-
-数据库是唯一 durable database；HTTP 认证/TLS 由部署边界承担，Environment Daemon
-的连接身份由 PostgreSQL 中的 Environment `registration_token` 在 gateway HELLO 协议中校验。
-部署不通过目录或 classloader 发现 Contributor：Contributor 只有 Spring bean 这一条来源。
-
-## Controller、DTO 与错误边界
-
-除 `/healthz`、Harness resource 下载与 Daemon WebSocket 外，所有 JSON Controller 使用 convention4j `Result<T>`；`Results.created`、`Results.accepted`、
-`Results.ok`、`Results.noContent` 表达业务状态，response advice 负责让 HTTP status 与
-result status 对齐。
-
-| family | path | 职责 |
+| family | 路径 | 用途 |
 | --- | --- | --- |
-| Health | `GET /healthz` | 进程存活探针，不读取业务外部资源 |
-| Agent Provider | `/api/ai/catalog/providers` | page、create、update、expectedVersion delete |
-| Agent Model | `/api/ai/catalog/models` | page、create、update、expectedVersion delete；路径参数复合 `(providerName, modelNameHead, *modelNameTail)` 承载可含 `/` 的 model name |
-| Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
-| Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
-| Git Skill Package | `/api/ai/catalog/skill-packages`、`/{packageName}`、`/{packageName}/check`、`/{packageName}/update` | Package list/get/create/update/delete；check 只刷新候选 HEAD，update 以 exact commit 发布 |
-| Plugin | `/api/plugins`、`/{pluginId}`、`/{pluginId}/auth/prepare|complete`、`DELETE /{pluginId}/auth` | 已安装 classpath Plugin、安全状态与固定 deep-link 认证动作；认证响应 `no-store` |
-| MCP Server | `/api/ai/mcp-servers`、`/{name}`、`/{name}/config`、`/{name}/discover` | name-keyed 显式 HTTP CRUD（name 不可变、无改名端点、删除必须带 `expectedVersion`）；显式配置查询附带 `Cache-Control: no-store`；发现同步返回 200 |
-| Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
-| Harness command | `POST /api/harness/command-batches` | Chat 用户 command write path（202 accepted）；Issue 输入走工作流 |
-| Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/provider-request-preview`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、草稿协议请求预览、命名、运行控制与人工审批；属于 Issue Agent Branch 时改名、压缩、YOLO 与 stop 均在严格校验后 409，不经公开入口触达 Runtime（由 Issue/Project 工作流维护）；审批操作者只取自服务端认证主体 |
-| Interaction | `GET /api/interactions`、`POST /api/interactions/{interactionId}/input` | 问卷等待与审批等待合并的待处理列表（`(createTime, interactionId)` 稳定升序，`limit` 默认 50、上限 100）与唯一人工提交入口；`interactionId` 就是待处理列表给出的 Tool invocation ID，actor 取自服务端认证主体（无认证时回退固定 `local-user`） |
-| Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
-| Canvas document | `/api/canvases`、`/{canvasId}`、`POST /{canvasId}/commands` | document snapshot/list/create/delete 与 typed command batch；Canvas 不持有 Session |
-| Canvas resource | `POST /api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign；TEXT Resource 请求这两个端点显式 400 |
-| Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/outputs/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
-| Storage | `POST /api/storage/uploads`、`POST /api/storage/uploads/{uploadId}/complete`、`DELETE /api/storage/uploads/{uploadId}`、`POST /api/storage/blobs/{blobId}/download-url\|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
-| Project | `/api/projects`、`/{projectId}`、`/{projectId}/workflow|yolo`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、workflow 整体配置与 YOLO 启动策略、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
-| Issue | `POST /api/projects/{projectId}/issues`、`GET|PUT /api/issues/{issueId}`、`GET|POST /{issueId}/activities`、`GET|POST /{issueId}/evidence`、`/{issueId}/transition|block|recover|pause|resume|stop|resolve-unknown|reopen|budget-reset|archive|unarchive`、`DELETE /{issueId}` | Issue CRUD/CAS、workflow 合法转移与人工阻塞/恢复、控制暂停/继续、阶段额度重置与人工核对解除 `UNKNOWN`、Activity 事实流与分页、人工上传转为公开证据与深删除；`resolve-unknown` 必须携带 `verification` 核对说明 |
-| SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
+| Health | `/healthz` | 存活探针 |
+| Catalog | `/api/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD、工具候选；变更使用 expectedVersion |
+| Skill | `/api/ai/catalog/skill-packages` | CRUD、check、exact commit update |
+| MCP | `/api/ai/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
+| Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth |
+| Chat | `/api/ai/chats` | CRUD 与归属 Session |
+| Harness command | `/api/harness/command-batches` | Chat 命令持久接受，返回 202 |
+| Session | `/api/harness/sessions/{sessionId}` | threads、entries、name |
+| Thread | `/api/harness/threads/{threadId}` | Snapshot、name、Debug、协议预览、compact、yolo、stop、tool approval |
+| Interaction | `/api/interactions` | 等待分页与 `/{interactionId}/input` 人工提交 |
+| Harness resource | `/api/harness/resources/{sha256}` | 内容寻址 Resource 下载 |
+| Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
+| Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
+| Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
+| Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
+| Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
+| Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、运维 events |
 
-[StudioHarnessCommandBatchController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchController.java)
-返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
-progression 由 Work dispatcher 异步完成。Canvas
-command 返回带新 `revision` 的 Patch，实时收敛另走 `/api/events/v1`。
-公开 `command-batches` 仅接纳 Chat owner；Issue Agent 的用户输入、分叉和停止不能绕过 Issue Activity、Run 权限与交互提交入口。
-`POST /api/harness/threads/{threadId}/provider-request-preview` 接收与发送相同的 command batch，
-仅支持 Chat 的已有空闲 Thread，以及「设置命令前缀 + 末尾 USER_MESSAGE」。
-返回当前快照的 Provider 协议请求体 JSON、字节数与模型标识，不包含认证 Header；
-草稿、历史和已 READY 的附件参与规划与内联编码，但不提交命令、不消费上传、不调用模型。
-游标漂移、队列未清空、下一步需压缩或附件尚未就绪时返回 409；预览与随后发送不具备原子性。
-`POST /api/issues/{issueId}/evidence` 只接收已 READY 的 `uploadId`（浏览器先经 `/api/storage/uploads`
-reserve/PUT/complete），服务端在单个事务内转移引用并返回规范 `kkstudio:/resources/<blobId>`；请求与响应
-都不接受/不暴露客户端声明的文件名、bucket 或对象 key；Issue 证据与其它受管资源一样只以规范
-`kkstudio:/resources/<blobId>` 暴露，字节读取仍走 Harness 受管资源入口，不存在客户端自报的对象身份。
-Session/Thread `name` 是独立控制面：`PUT .../name` 只更新命名元数据（可含规范化同名
-no-op），不产生 Command、Entry 或 Work。
+命令 202 表示数据库已接受，执行由 dispatcher 异步推进。公开 command-batches 接纳 Chat；
+Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
+审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
-边界输入由单一 mapper 校验：
+Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
+以及 NEW_SESSION/NEW_THREAD/THREAD 各自互斥字段。
+产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL。
+附件在接受事务转为 Resource，图片档位随消息冻结。
+Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
+完整执行语义见 [Harness Runtime](harness-runtime.md)。
 
-- [HarnessRuntimeRequestMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java)
-  要求 UUID 经 `UUID.fromString` 往返 canonical，version/cursor/sequence 使用 canonical
-  decimal（拒绝符号、前导零和超出 long）；owner discriminator 只允许 `CHAT`/`ISSUE_AGENT`，公开命令与预览入口拒绝 `ISSUE_AGENT`；
-  target 只允许 `NEW_SESSION`、`NEW_THREAD`、`THREAD` 且每种 target 的字段集严格互斥
-  （`NEW_SESSION` 携带 `{sessionId, threadId, rootSettings, yoloEnabled}`，`NEW_THREAD`
-  携带 `{sessionId, startEntryId, threadId, yoloEnabled}`，二者都不接 name 输入；
-  `THREAD` 只携带 `{threadId, expectedHeadEntryId, expectedNextCommandSequence}`（正十进制），
-  禁止 sessionId/startEntryId/rootSettings/yoloEnabled；
-  Session 名由服务端从首个非空白用户文本派生，root Thread 名固定 `main`，新 Thread 名
-  固定 `branch-<threadId 前 8 位>`）；`rootSettings` 必须显式携带可空 `environmentName`
-  且不携带 `goal`；product HTTP command 只允许
-  `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT` 前缀加恰好一条位于末尾的用户输入
-  （`USER_MESSAGE` 或 typed `GOAL`），`CUSTOM_MESSAGE` 不开放
-  到 product HTTP surface；`SET_ENVIRONMENT` 必须显式携带可空 `environmentName`（null 表示清除），
-  其余命令禁止携带该字段；user content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，
-  Attachment 由 Platform acceptance transaction 转成 durable Resource。`ATTACHMENT` 与
-  `RESOURCE` 可携带 `imageTier`（`720P` / `1080P` / `ORIGINAL`，缺省即平台默认 `720P`，
-  `TEXT` 禁止携带），该值随命令冻结并进入 durable 历史；非图片媒体在消费 upload / 复用
-  resource 时按权威 MIME 收敛为无档位。
-- [HarnessRuntimeResponseMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper.java)
-  把 Runtime snapshot 投影为严格 DTO，Entry/Command/AgentMessage/Model result/Model
-  error/Tool approval/Tool result 各经对应 JSON codec 编码，Thread status 直接取
-  snapshot 的 `runtimeStatus()`，不在 HTTP 层重新分类。
-- [WebDtoMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)
-  负责 Canvas domain 到 share DTO 的映射；媒体 Resource 的 kind、mediaType、size、
-  width、height、duration 来自 `StorageBlob` 权威行，TEXT Resource 没有 Blob，
-  bucket/object key 不进入 DTO。
-- [ProjectDtoMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectDtoMapper.java)
-  是 Project/Issue domain 与 share DTO 的权威双向转换器，作为 `@Component` 由构造注入
-  `ProjectWorkflowJsonCodec` 与 `ObjectMapper`，并提供 `parseUuid` / `parseNonNegativeLong`
-  两个 HTTP 边界解析器。
-- [ProjectSnapshotAssembler](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssembler.java)
-  在只读 `REPEATABLE_READ` 事务里聚合 Project、未归档 Issues 与当前/最近 Run 摘要，
-  并对每条跨表归属 fail closed。
-- [StrictJacksonConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
-  配置 HTTP 的 Jackson 3 mapper：启用 `STRICT_DUPLICATE_DETECTION`、把日期写为时间戳、省略 null
-  并保持 DTO 声明顺序、把 `Long` 写为字符串，并给 `AgentModelVariantDTO.protocolOptionsJson`
-  补一个严格的 String 反序列化 mixin。它**不**开启 unknown-field 拒绝——未知字段由 share DTO
-  自己的 `@JsonAnySetter` 拒绝（写成 `IllegalArgumentException`），HTTP wire 也不启用
-  `FAIL_ON_TRAILING_TOKENS`。
+### 请求诊断与预览
 
-六个 `@Order(HIGHEST_PRECEDENCE)`、按 `assignableTypes` 限定范围的 advice 保持稳定
-error envelope（Health、Tool catalog 与 Harness resource 不属于任何 advice 范围）：
+GET model-request-debug 返回下一次结构化预览与可空的活动冻结请求，排除 credential 和 Base64。
+POST provider-request-preview 使用已有空闲 Chat Thread 的精确 head/sequence，
+只读检查 READY 附件后规划并编码当前请求体。它保留命令、游标和上传未消费状态，
+且不调用 transport；可能包含内联媒体的 JSON 仅代表点击时快照。
+PREVIEW_* reason 区分 stale cursor、queued、busy、compaction、attachment、planning、
+provider、unsupported 与 encoding 拒绝；客户端按 reason 恢复。
 
-| advice | controller 范围 | HTTP 映射 |
-| --- | --- | --- |
-| [StudioDomainErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java) | Agent Provider/Model/Definition、Chat、MCP、Environment、Skill Catalog | validation 400、not found 404、version conflict/duplicate/in-use 409 |
-| [StudioResponseStatusErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioResponseStatusErrorAdvice.java) | Canvas、Canvas Function、Canvas Resource、Chat、Harness、Interaction | `ResponseStatusException` 按 status 输出，不可读请求体 400 |
-| [StudioStorageErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioStorageErrorAdvice.java) | Storage | validation 400、not found 404、verification/conflict 409 |
-| [StudioSystemSettingsErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioSystemSettingsErrorAdvice.java) | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
-| [StudioProjectErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdvice.java) | Project、Issue | validation 400、duplicate 409、not found 404、version/runtime conflict 409、`IllegalStateException` 500；不回显 Issue Activity 正文、幂等键或认证数据 |
-| [StudioPluginErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/plugin/StudioPluginErrorAdvice.java) | Plugin | validation 400、not found 404、主密钥缺失 503、不可读请求体 400 |
+Canvas commands 返回 patch，Function start 返回 202。
+UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
+Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
 
-用户可见 message 由 [StudioMessageService](../../web/src/main/java/fun/fengwk/kkstudio/web/i18n/StudioMessageService.java)
-按请求 locale 解析，支持 `en-US`、`zh-CN`，其它 locale fallback 到英文；Platform
-domain error 不持有 locale 和 HTTP status。
+## JSON、错误与信任边界
 
-## 启动、Flyway 与静态分发
+[`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
+启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null；
+required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
+领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
-[`application.yml`](../../web/src/main/resources/application.yml) 提供 application name
-`kk-studio`、默认 `dev` profile、PostgreSQL datasource placeholder、8080 port、gzip
-compression 与 `health,prometheus,offline,online` actuator exposure；
-[`application-prod.yml`](../../web/src/main/resources/application-prod.yml) 追加
-`server.forward-headers-strategy: framework`，数据源三项全部来自
-`KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD` 且无默认值，缺失时启动
-失败而不是回退到开发数据库。数据源设置 Hikari `connection-timeout` 5 秒、JDBC
-`connectTimeout` 5 秒与 `socketTimeout` 5 秒三个超时边界，使 PostgreSQL 不可达时在预算
-内 fail closed 并映射 `ENVIRONMENT_UNAVAILABLE`，绝不回退到内存 route。
+advice 按 Controller 范围映射 validation 400、not found 404、version/duplicate/in-use 409，
+以及设施不可用/不变量异常；Project 不变量异常为 500，Plugin 主密钥不可用为 503。
+locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
 
-Flyway 只有一个完整声明当前结构的 canonical baseline：
+用户认证、TLS 和 ingress 访问控制由部署边界提供。
+Daemon registration token 在 HELLO 中绑定 Environment，通用 Card 只返回安全投影。
+Plugin auth 请求 no-store，数据库保存认证密文，主密钥缺失时凭据读写失败关闭。
+Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
+Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；
+处理边界见 [Harness Provider](harness-provider.md#上游错误原样透传)。
 
-```text
-schema/src/main/resources/db/migration/V1__schema.sql
-```
+## 通知与浏览器事件
 
-profile locations：
+[`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
+共享一个 PostgreSQL LISTEN 连接，路由 Work、Thread/Canvas version、Project changed、
+Settings、realtime 与 Skill 通知。建立/重连后通知每个 handler resync；
+单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 
-| profile | Flyway locations |
-| --- | --- |
-| dev | `classpath:db/migration` + `classpath:db/seed/dev` |
-| e2e | `classpath:db/migration` + `classpath:db/seed/e2e` |
-| canvas-test | migration + dev seed + `db/seed/canvas-test` |
-| prod | 只用 `classpath:db/migration` |
+`/api/events/v1` 采用严格 version 1 帧。
+资源为 `{kind:thread|canvas,id}` 或全局 `{kind:projects}`；
+version/revision 携 cursor，Thread realtime 和 Project changed 使用各自负载。
+订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，
+过滤陈旧版本；缓冲溢出折叠为 resync。
+非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
 
-[FlywayBootstrapArchitectureTest](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)
-守护不存在 `spring.sql.init`、`schema-locations` 和 `docker-entrypoint-initdb.d` 竞争
-入口。
+AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
+完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。
 
-`distribution` profile 定义在 `web/pom.xml`，只在显式激活时于 `prepare-package` 阶段
-执行 Node `v24.14.0` / npm `11.9.0` 的 `npm ci` 与 Vite build，先清理
-`web/target/classes/static/`，把输出写入 `web/target/frontend-dist`，再复制到
-`${project.build.outputDirectory}/static`，最后由 `spring-boot-maven-plugin:repackage`
-放进 Fat JAR。该 profile 不写回 frontend source 或 Web 的静态资源源码目录，普通
-`mvn test/package` 不触发 Node toolchain。
+## Daemon WebSocket
 
-[SpaFallbackConfig](../../web/src/main/java/fun/fengwk/kkstudio/web/SpaFallbackConfig.java)
-把 `classpath:/static/` 接到 `/**`，真实 asset 与已映射 Controller 优先；只有 `GET`、
-非 `/api/`、非 `/actuator/`、且末段无扩展名的路径才 fallback 到 `static/index.html`。
+`/api/harness/environment-daemon/v1` 的 handler 适配 Spring/native session，
+委托 DaemonEndpoint 管理会话。DaemonOutboundSender 每连接一个发送线程，
+非阻塞递交返回 ACCEPTED/BUSY/CLOSED，限制 frame、bytes 和 send timeout。
+必须协商 permessage-deflate，缺失以 1010 关闭。
+协议与会话裁决分别见 [Harness Environment](harness-environment.md)、
+[Harness Environment Server](harness-environment-server.md)。
 
-## 通知、事件与 WebSocket
+## 启动与静态分发
 
-### PostgresqlNotificationLoop：单连接、多 channel
+默认 profile 为 dev；prod datasource 全部来自部署变量，缺失直接启动失败。
+连接池与 driver 超时约束数据库不可达时的等待。S3 配置和 bucket 可访问性在启动验证。
+Flyway 加载 Schema 的 canonical baseline，各 profile 选择受控 seed，见 [Schema](schema.md)。
 
-[ApplicationEventConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
-注册唯一 [PostgresqlNotificationLoop](../../web/src/main/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoop.java)，
-固定监听：
+Web 的 distribution profile 在 prepare-package 执行 npm ci/Vite build，将产物写入 target
+再复制到 classes/static，由 Boot repackage 嵌入 Fat JAR。
+SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径；真实 asset/Controller 优先。
 
-```text
-harness_runtime_work
-project_issue_work_due
-canvas_function_work
-harness_thread_version
-canvas_revision
-project_issue_changed
-system_settings_changed
-harness_realtime
-skill_package_changed
-```
-
-Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread：连接建立后一次性
-`LISTEN` 全部 channel，再对每个 handler 调 `onResync`，随后用
-`PGConnection.getNotifications(pollMillis)` 拉取通知。驱动的 `getNotifications` 在拉取时
-临时以 poll timeout 覆盖并恢复底层 SO_TIMEOUT，因此 driver 的 5 秒 `socketTimeout` 不会
-破坏 LISTEN 循环，空闲无通知时不会触发意外断连与额外 resync。某个 handler 抛错只隔离
-该 handler，不终止 loop；连接断开按 backoff 重连，重连成功再次 resync。关闭顺序是
-`connection.abort` → interrupt loop thread → 最多 5s join，`SmartLifecycle.close` 幂等。
-前三个 channel 只做 dispatcher wake，version、realtime、settings、Project 与 Skill Package
-handler 负责各自的 snapshot/resync 逻辑，NOTIFY 本身不是 durable event log；
-`project_issue_changed` 由 Project 持久化仓库在写事务中发送 Project id，提交后才投递，
-不依赖 HTTP controller 或数据库 trigger；
-`skill_package_changed` 的 payload 是 package 名，resync 对本节点全部 READY Environment
-做全量对账。
-
-### Application Event WebSocket
-
-[ApplicationEventWebSocketConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventWebSocketConfiguration.java)
-注册端点 `/api/events/v1`，客户端帧是严格 version 1：
-
-```json
-{"version":1,"type":"subscribe","resource":{"kind":"thread","id":"<canonical UUID>"}}
-{"version":1,"type":"unsubscribe","resource":{"kind":"canvas","id":"<canonical UUID>"}}
-{"version":1,"type":"subscribe","resource":{"kind":"projects"}}
-```
-
-[EventFrameCodec](../../web/src/main/java/fun/fengwk/kkstudio/web/events/EventFrameCodec.java)
-严格校验字段集与组合：Thread/Canvas resource 精确包含 `kind,id`，全局 `projects`
-resource 精确只包含 `kind`；`subscribed.cursor` 是建立订阅瞬间的 durable Thread/Canvas
-version，全局资源使用 `0` 作为连接代际 ack cursor；version event 的 cursor 与 data 负载必须相等
-（Thread 用 `data.version`，Canvas 用与 `canvas_document.revision` 同名的 `data.revision`）；Thread realtime event 携带 Runtime realtime JSON 且不带
-cursor；Projects 的 `changed` event 携带单一 canonical `projectId` 且不带 cursor；
-`resync` 只表示客户端重新读取对应 REST snapshot；heartbeat 不携带 resource/cursor/data。
-
-[ApplicationEventHub](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventHub.java)
-按 resource key 维护共享上游：Thread 使用 version source + realtime source，Canvas 只用
-version source，Projects 连接数据库失效 Hub。建立上游时先注册 consumer 再读取 cursor；
-fan-out 与 cursor/consumer registration 在 resource lock 内互斥；WebSocket handler 先把
-`subscribed` ack 入 `AsyncTextSender`，再 `subscription.activate()`，因此事件帧不会早于
-ack；`version <= ack cursor` 的陈旧信号被过滤。
-
-上游建立期与 ack 前缓冲都有界，溢出清空并折叠为一个 `resync`。资源不存在只发送资源级
-`RESOURCE_NOT_FOUND` 并保持连接；非法帧发送 `INVALID_FRAME` 后以 1002 关闭；队列过载
-发送 `BACKPRESSURE` 后以 1013 关闭；应用关闭发送 `SEND_FAILED` 后以 1012 关闭。
-
-[AsyncTextSender](../../web/src/main/java/fun/fengwk/kkstudio/web/events/AsyncTextSender.java)
-使用 jakarta `AsyncRemote.sendText(SendHandler)`，同一 session 只有一个 in-flight
-frame，完成回调驱动下一帧；frame count 与 UTF-8 bytes 双限都包含 in-flight frame。
-锁内只做计数与队列转移，网络 I/O 在锁外；发送失败清空队列并关闭 session。所有浏览器
-连接共享一个 heartbeat scheduler，heartbeat 只入既有发送队列。
-
-### Environment Daemon WebSocket：有界发送
-
-[EnvironmentDaemonWebSocketConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketConfiguration.java)
-注册端点 `/api/harness/environment-daemon/v1`。
-[EnvironmentDaemonWebSocketHandler](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/EnvironmentDaemonWebSocketHandler.java)
-只做 transport adapter：在 Spring WebSocket 与 native JSR-356 session 两侧设置
-`kk-studio.harness.environment-gateway.max-message-bytes`；创建
-`SpringWebSocketConnection` 与每连接 [DaemonOutboundSender](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/DaemonOutboundSender.java)；
-把 open/receive/close 委托给会话核心的 `DaemonEndpoint`；断开时先由核心解绑 registry、
-在途 invocation 与 pending request，再关闭 sender。web 层不解释协议，也不保存任何会话
-状态。
-
-`DaemonOutboundSender` 使用每连接一个 virtual-thread sender，独占帧串行化、frame count
-与 UTF-8 bytes 双限（均含 in-flight frame）以及 send timeout，不叠加 Spring 并发装饰器。
-递交非阻塞并返回确定性结果：容量/字节预算拒绝为 `BUSY`（帧未发送、连接保持可用），
-围栏已关闭为 `CLOSED`；按入队顺序调用 `sendMessage`。超时或异常会关闭入队围栏、通知
-会话核心做 uncertain/unavailable cleanup，再关闭 transport；慢连接不会占住 receive、
-会话核心锁或其它连接。
-
-端点强制本次握手协商 `permessage-deflate`：扩展缺失或不含该 token 时以 RFC 6455
-close code `1010` 关闭，且不向会话核心暴露通道。非 servlet Spring context（MockMvc、
-`WebEnvironment.MOCK`）中 `EnvironmentDaemonWebSocketContainerFactoryBean` 检测不到
-`ServerContainer` 时 no-op，因此测试 context 不需要真实 JSR-356 container。
-
-[HarnessRuntimeConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
-声明组合 `EnvironmentSessionListener`，通过 `ObjectProvider` 弱引用做两件事：唤醒可选的
-`HarnessWorkDispatcher`，并在 Environment READY 后触发可选的 `EnvironmentSkillSyncOrchestrator` 全量 Skill 同步；
-这解除了与 `EnvironmentDaemonServer` 的循环依赖并隔离异常。
-
-### Plugin 组合边界
-
-Contributor 只有一条来源：Spring 容器中的 bean。`ContributorCatalogConfiguration` 用
-`ObjectProvider<HarnessContributor>` 收集它们并冻结为单一 `HarnessCatalog`，重复
-contributor id 在启动期失败。构建期 Plugin 由自己的 `AutoConfiguration.imports` 随应用
-启动，可使用 Platform 的凭据、Storage、调度和管理端口；它是否进入发行物只由
-`web/pom.xml` 的 runtime dependency 决定，因此删除该 dependency 后应用不残留任何 Plugin
-语义，web 也不需要任何插件目录、classloader 或热刷新代码。
-
-Plugin 自己的管理面由 [StudioPluginController](../../web/src/main/java/fun/fengwk/kkstudio/web/plugin/StudioPluginController.java)
-暴露，装配入口是 Platform 的 `PluginConfiguration`。Platform 自带的 `PluginResourceGateway` 生产实现
-（`StoragePluginResourceGateway`，会话资源受控下载与远端媒体暂存）由 web 组合根的
-[`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java) 装配，
-因为它依赖 Platform 的 Harness/Storage bean，与具体 Plugin 无关。
-
-## 生命周期与配置
-
-| 生命周期 | phase / owner | 关闭语义 |
-| --- | --- | --- |
-| Harness workers | `HarnessRuntimeLifecycle`，`MAX_VALUE - 1` | `workers-enabled=false` 不启动 dispatcher；store、processor 与 realtime bean 仍可用；start 失败回滚 dispatcher，stop 幂等 |
-| Issue Controller | `IssueControllerRuntimeLifecycle`，`MAX_VALUE - 1` | 与 Harness workers 共用 `workers-enabled`；不启动时仍保留 REST 与 notification loop |
-| Canvas Function | `CanvasFunctionDispatcher`，`MAX_VALUE - 1` | 启动立即 wake，stop 取消 poll 并关闭 drain 入口；不受 Harness `workers-enabled` 控制 |
-| Browser heartbeat | `applicationEventHeartbeatScheduler` | destroy `shutdown`；handler `@PreDestroy` 先发 1012 `SEND_FAILED` |
-| Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
-| PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
-| Harness processors / RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` 等 | Spring destroy `close`；heartbeat timer 用 `shutdown`，heartbeat worker 与 model flush executor 用 `close` |
-| Plugin credential refresh | `PluginCredentialRefreshDispatcher`（phase `MAX_VALUE`） | 启动立即 scan，按最早到期行安排下一次扫描，默认每小时是最慢兜底；stop 取消调度并等待在途 scan，finalize 受 lease token 与 version 围栏 |
-| Storage maintenance | `StorageMaintenance`，`MAX_VALUE` | 启动 wake 与 fixed-delay poll；stop 暂停、close 关闭专用 executor，清理失败隔离 |
-| Daemon send deadline | `environmentDaemonSendDeadlineTimer` | 单线程 daemon timer，destroy `shutdown`；`removeOnCancelPolicy` 与不保留延迟任务 |
-| Dispatcher executors | `harnessDispatcherDrainExecutor`、`harnessDispatcherWorkerExecutor`、`harnessDispatcherPollScheduler`、`environmentSkillSyncExecutor` | destroy `shutdown`；`harnessModelFlushExecutor` 用 `close` |
-
-Web context 自身持有的部署配置：
-
-| 配置 | 职责 |
-| --- | --- |
-| `spring.application.name` / `spring.profiles.active` | 应用名 `kk-studio`，默认 `dev` |
-| `spring.datasource` | 唯一 durable database；Hikari `connection-timeout: 5000`、driver `connectTimeout: "5"`、`socketTimeout: "5"` |
-| `spring.flyway.locations` | 按 profile 选择 canonical baseline 与 seed |
-| `server.port` / `server.compression.enabled` / `server.forward-headers-strategy` | 默认 `8080`、gzip；prod 用 `framework` 按 `X-Forwarded-*` 还原外部 scheme/host |
-| `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
-| `spring.mvc.converters.preferred-json-mapper` | `jackson`，并排除 convention4j 的 `WebErrorAutoConfiguration` |
-| `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher 与 Issue Controller；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与本机 preview 显式关闭 |
-| `kk-studio.harness.environment-gateway.*` | Daemon WebSocket 入站 frame 与出站 queue/bytes/send timeout |
-| `kk-studio.plugins.credential-key-file` | Plugin 凭据主密钥的 owner-only 绝对路径；空值表示本部署不提供凭据能力并 fail closed，多节点必须挂载同一内容 |
-| `kk-studio.plugins.refresh.poll-delay` / `lease-duration` | 凭据刷新扫描间隔与跨节点互斥 lease；由 `KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY` / `..._LEASE_DURATION` 提供，默认 `1h` / `2m` |
-| `kk-studio.plugins.resource.*` | Plugin 资源端口边界：`connect-timeout`、`request-timeout`、`upload-timeout`、`max-bytes`（默认 `256MiB`，硬上限 `1GiB`）与 `temp-directory`（留空即 `java.io.tmpdir`）；由 `KK_STUDIO_PLUGINS_RESOURCE_*` 提供 |
-
-其余 `kk-studio.*` 键（dispatcher、execution-admission、runtime resource root、project
-controller、storage、Plugin credential、canvas、plugin）由 Platform、Plugin 与 Canvas Infra 的
-`@ConfigurationProperties` 定义，完整清单见 [Platform 模块配置](platform.md#配置)。
-
-### 安全边界
-
-- 代码没有 `spring-boot-starter-security`、`SecurityFilterChain` 或 Spring Security auth
-  filter；HTTP TLS、用户认证和 ingress policy 属部署边界，不由当前 Web context 伪造。
-- Daemon WebSocket 的 registration token 是 deployment secret，保存在
-  `environment.registration_token`，不进 SystemSettings、通用 Card DTO 或日志；gateway 在 HELLO
-  认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state；令牌仅经显式创建/读取/轮换响应交给管理端，不出现在通用 Card DTO。
-- 系统不开放公开 S3 预签名端点；Blob 原始与预览访问统一由 Storage/Canvas 签发有限
-  expiry 的 presigned URL；构建期 Plugin 的文件输入直接使用 blobId。
-- Plugin auth callback、明文 credential 与 renewal 参数只在 `no-store` 请求内短暂存在；
-  PostgreSQL 只存认证密文。未配置部署级主密钥时认证写入与已存在凭据读取 fail closed，
-  但未连接的可选 Plugin 不阻止应用启动。
-- `StrictJacksonConfiguration` 拒绝重复键，share DTO 的 `@JsonAnySetter` 拒绝未知字段，
-  各 domain codec 再各自拒绝 duplicate/unknown/trailing fields；Controller 不把上游异常、
-  credential、bucket 或任意宿主执行路径作为公开字段；明确声明的 Daemon 用户与 HOME 宿主事实除外。
-
-## 事务、并发与失败恢复不变量
-
-1. `WebApplication` 是唯一生产 Spring Boot root；Controller 只调用 Platform/Runtime/Core
-   port，不复制领域事务或状态机。
-2. Plugin 是否安装只由 `web` 的 runtime dependency 决定；数据库行或前端开关不能加载
-   一个 classpath 中不存在的 Plugin。
-3. `V1__schema.sql` 是全仓唯一 baseline，profile seed 只由 Flyway locations 选择；没有
-   第二份 SQL bootstrap。
-4. REST snapshot 是 durable truth 的读取入口；Application Event WebSocket 只发送
-   Thread/Canvas version、Thread realtime、Project changed 与全局 resync signal，
-   不保存事件记录、不替代 REST command/query。
-5. Event subscription 的上游注册先于 cursor 读取，ack 先于 activation，陈旧 version 按
-   cursor 过滤；buffer 溢出必然折叠成一个 resync，内存有界且可恢复。
-6. WebSocket 每连接只保留单一 in-flight frame，并有 frame count + UTF-8 bytes 双限与
-   有限 send timeout；失败先停止入队，再清理订阅/registry，最后关闭 transport。
-7. PostgreSQL notification loop 的一个 handler 失败不影响其它 channel；连接丢失由
-   reconnect + resync 恢复，通知丢失不改变 PostgreSQL durable truth。Project 的跨节点/
-   浏览器 invalidation 只来自持久化仓库在写事务内提交的 `project_issue_changed`，不在 Controller 额外广播。
-8. Harness dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确
-   owner；Environment WebSocket 的等待链路在 DB 连接与 send timeout 预算内 fail closed，
-   control-plane 不存在目录 round trip。
-9. `HarnessCatalog` 在启动时由 Spring bean 冻结后不可变；Contributor 只有 bean 这一条来源，
-   不存在 jar 目录、隔离 classloader 或热刷新路径。
-10. canonical UUID、canonical decimal、DTO discriminator、duplicate key 与 DTO 级
-   unknown-field 拒绝在 Web boundary 拒绝不确定输入；error advice 不改领域事实，只映射 status、
-   stable code、context 与 locale message。
-11. S3 是应用必配基础设施，启动时严格验证 properties 与 bucket 可访问性；Canvas
-    Function 目录与执行只暴露函数名、args schema 与冻结引用，未安装插件的函数不出现在
-    目录，非法 args 返回 400。
+部署参数、secret 与启动操作见 [部署与运行](../operations/deployment.md)，
+跨模块配置归属见 [Platform 配置](platform.md#配置)。
 
 ## 测试入口
 
-组合、架构与 bootstrap：
+[`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
+HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
+通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL；
+执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
-- [`WebModuleArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java)、
-  [`FlywayBootstrapArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)、
-  [`NoRedisArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/NoRedisArchitectureTest.java)、
-  [`StudioApiRouteTopologyTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StudioApiRouteTopologyTest.java)。
-- [`WebTestApplication.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebTestApplication.java)、
-  [`WebPostgresTestSupport.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebPostgresTestSupport.java)、
-  [`PostgresqlDataSourceConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/PostgresqlDataSourceConfigurationTest.java)、
-  [`FlywayAutoConfigurationIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java)、
-  [`SpaFallbackTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java)、
-  [`StrictJacksonConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StrictJacksonConfigurationTest.java)。
-
-HTTP boundary 按目录定位：
-
-| 范围 | 测试目录 | 代表测试 |
-| --- | --- | --- |
-| Controller 与 DTO 解析 | [controller/](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) | [`StudioHarnessCommandBatchControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchControllerTest.java)、[`StudioInteractionControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioInteractionControllerTest.java)、[`StudioMcpRuntimeToolIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioMcpRuntimeToolIntegrationTest.java) |
-| Error advice 与 i18n | [advice/](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、[i18n/](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/) | [`StudioProjectErrorAdviceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdviceTest.java)、[`StudioMessageServiceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/StudioMessageServiceTest.java) |
-| Project snapshot 与 invalidation | [project/](../../web/src/test/java/fun/fengwk/kkstudio/web/project/) | [`ProjectSnapshotAssemblerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssemblerTest.java)、[`ProjectInvalidationHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectInvalidationHubTest.java) |
-| Harness/Issue 组合与 mapper | [runtime/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/) | [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、[`HarnessRuntimeRequestMapperTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapperTest.java)、[`HarnessRuntimePostgresqlLifecycleIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimePostgresqlLifecycleIntegrationTest.java) |
-| Contributor 装配与 Plugin 管理面 | [runtime/contributor/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/)、[plugin/](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/) | [`ContributorCatalogWiringTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogWiringTest.java)、[`StudioPluginControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/StudioPluginControllerTest.java) |
-| 通知、Application Event 与 Daemon WebSocket | [events/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/)、[events/postgresql/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/)、[environment/](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/) | [`PostgresqlNotificationLoopTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoopTest.java)、[`ApplicationEventHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java)、[`DaemonOutboundSenderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonOutboundSenderTest.java) |
-| 跨 owner 事务 orchestration | [orchestration/](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/) | [`HarnessCommandAcceptanceOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/HarnessCommandAcceptanceOrchestratorIntegrationTest.java)、[`SessionDeletionOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/SessionDeletionOrchestratorIntegrationTest.java) |
-
-这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single
-baseline、PostgreSQL notification reconnect/resync、Harness/Issue worker NOTIFY+poll
-唤醒、Project trigger invalidation、ack-before-event、bounded sender、Environment large
-READY frame、synchronous MCP discovery/execution、strict DTO、Plugin 管理面 no-store 与
-去敏、locale fallback 与静态 SPA fallback。
-
----
-
-上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、
-[Canvas Infra](canvas-infra.md)、[Harness Infra](harness-infra.md)、
-[Harness Builtin](harness-builtin.md)、[Harness Contributor API](harness-contributor-api.md)、
-[部署与运行](../operations/deployment.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
+[Harness Infra](harness-infra.md)、[Canvas Infra](canvas-infra.md)、[Frontend](frontend.md)。
