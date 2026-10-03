@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -325,16 +326,21 @@ public class JGitSkillCache implements SkillGitCache {
     if (repositoryUrl == null || repositoryUrl.isBlank()) {
       throw new SkillGitException("repositoryUrl must not be blank");
     }
-    String scheme = schemeOf(repositoryUrl);
+    URI uri;
+    try {
+      uri = URI.create(repositoryUrl);
+    } catch (IllegalArgumentException error) {
+      throw new SkillGitException("repositoryUrl must be a valid URL without userinfo");
+    }
+    if (uri.getRawUserInfo() != null
+        || (uri.getRawAuthority() != null && uri.getRawAuthority().contains("@"))) {
+      throw new SkillGitException("repositoryUrl must not contain userinfo");
+    }
+    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
     if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
       throw new SkillGitException(
           "UNSUPPORTED_REPOSITORY_SCHEME: unsupported repository scheme: " + scheme);
     }
-  }
-
-  private static String schemeOf(String repositoryUrl) {
-    int index = repositoryUrl.indexOf(':');
-    return index <= 0 ? "" : repositoryUrl.substring(0, index).toLowerCase(Locale.ROOT);
   }
 
   private static void validatePackageName(String packageName) {
