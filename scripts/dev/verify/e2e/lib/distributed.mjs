@@ -1,9 +1,12 @@
 /** 双节点 distributed capability 的最小上下文工具（Node 原生，无依赖）。 */
 
 import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
+import { redactSecrets } from './redact.mjs'
 
 export const NODE_IDS = ['a', 'b']
 
@@ -68,4 +71,41 @@ export function runDistributedCommand(command, options = {}) {
     timeout: options.timeout || 30_000,
     stdio: options.stdio || ['ignore', 'pipe', 'pipe'],
   })
+}
+
+/**
+ * App 的文件日志不在 docker logs 中；在销毁前复制 /app/logs，只把脱敏后的文本写入报告。
+ * 原始文件在临时目录中暂存并始终删除；缺失容器/目录不阻断其他节点的日志采集。
+ */
+export function copyDistributedAppLogs(runDir, options = {}) {
+  const exec = options.exec || execFileSync
+  const composeFile = path.join(options.repoRoot || REPO_ROOT, 'deploy/distributed/compose.yaml')
+  for (const service of ['app-a', 'app-b']) {
+    const staging = mkdtempSync(path.join(tmpdir(), 'kk-studio-app-logs-'))
+    try {
+      const commandOptions = { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] }
+      const container = exec('docker', ['compose', '-f', composeFile, 'ps', '-q', service],
+        commandOptions).trim()
+      if (!container) continue
+      exec('docker', ['cp', `${container}:/app/logs/.`, staging], commandOptions)
+      copyRedactedLogs(staging, path.join(runDir, 'logs', `distributed-${service}`))
+    } catch {
+      // 尽力采集：某个节点已销毁或没有日志目录时仍继续另一个节点。
+    } finally {
+      rmSync(staging, { recursive: true, force: true })
+    }
+  }
+}
+
+function copyRedactedLogs(source, dest) {
+  mkdirSync(dest, { recursive: true })
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const src = path.join(source, entry.name)
+    const target = path.join(dest, entry.name)
+    if (entry.isDirectory()) copyRedactedLogs(src, target)
+    // 不跟随 symlink；二进制压缩归档不能直接按文本脱敏，不复制进报告。
+    else if (entry.isFile() && entry.name.endsWith('.log')) {
+      writeFileSync(target, redactSecrets(readFileSync(src, 'utf8')), 'utf8')
+    }
+  }
 }
