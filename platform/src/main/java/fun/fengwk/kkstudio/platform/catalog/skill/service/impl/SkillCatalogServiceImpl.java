@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -47,8 +49,14 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   /** 40 或 64 位小写 hex object id，与 {@code skill_package} 的列约束一致。 */
   private static final Pattern COMMIT = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
 
-  /** Git repository URL：必须带 scheme、无环绕空白、无控制字符、≤2048、不得内嵌 userinfo。 */
+  /** Git repository URL：必须带受支持 scheme、无环绕空白、无控制字符、≤2048、不得内嵌 userinfo。 */
   private static final Pattern REPOSITORY_URL = Pattern.compile("^[a-z][a-z0-9+.-]*://[^\\s]+$");
+
+  /** 本地 file 仓库可由 {@code File#toURI()} 产生单斜杠形式：{@code file:/path}。 */
+  private static final Pattern FILE_URL = Pattern.compile("^file:/[^\\s]*$");
+
+  /** 只有受网络保护覆盖的 http/https 与本地直读 file 允许进入 Git 网络层。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
   private static final Pattern USERINFO = Pattern.compile("://[^/\\s]*@");
 
@@ -61,6 +69,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   private final SkillCatalogConverter converter;
   private final SkillPackageGuard guard;
   private final AgentEditableSupport editableSupport;
+  private final SkillCatalogWrites writes;
 
   @Override
   public List<SkillPackageDTO> listPackages() {
@@ -77,7 +86,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO createPackage(SkillPackageCreateDTO createDTO) {
     if (createDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
@@ -113,15 +122,18 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     created.setHeadCheckError(null);
     created.setSkills(skills);
     created.setVersion(0L);
-    try {
-      if (!skillPackageRepository.insertPackage(created)) {
-        throw new IllegalStateException("create skill package failed");
-      }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          SkillPackageGuard.RESOURCE, "skill package already exists: " + packageName, error);
-    }
-    return getPackage(packageName);
+    return writes.execute(
+        () -> {
+          try {
+            if (!skillPackageRepository.insertPackage(created)) {
+              throw new IllegalStateException("create skill package failed");
+            }
+          } catch (DuplicateKeyException error) {
+            throw new AiDuplicateException(
+                SkillPackageGuard.RESOURCE, "skill package already exists: " + packageName, error);
+          }
+          return getPackage(packageName);
+        });
   }
 
   @Override
@@ -160,14 +172,14 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO checkPackage(String packageName, SkillPackageCheckDTO checkDTO) {
     if (checkDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
     }
     String rawExpected = checkDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
-    SkillPackage current = guard.requirePackageForUpdate(packageName);
+    SkillPackage current = requirePackage(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     String observedHeadCommit;
     String headCheckError;
@@ -180,20 +192,26 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       observedHeadCommit = current.getObservedHeadCommit();
       headCheckError = boundCheckError(error);
     }
-    // 观察结果未变化时既不写行也不推进 version，避免只读检查造成写放大；
-    // 因此在同一观察结果下反复 Check 不会让 Card 失效。
-    if (Objects.equals(observedHeadCommit, current.getObservedHeadCommit())
-        && Objects.equals(headCheckError, current.getHeadCheckError())) {
-      return converter.convert(current);
-    }
-    current.setObservedHeadCommit(observedHeadCommit);
-    current.setHeadCheckError(headCheckError);
-    casUpdate(current, expected);
-    return getPackage(packageName);
+    String preparedHead = observedHeadCommit;
+    String preparedError = headCheckError;
+    return writes.execute(
+        () -> {
+          SkillPackage locked = recheck(current, rawExpected, expected);
+          // 观察结果未变化时既不写行也不推进 version，避免只读检查造成写放大；
+          // 因此在同一观察结果下反复 Check 不会让 Card 失效。
+          if (Objects.equals(preparedHead, locked.getObservedHeadCommit())
+              && Objects.equals(preparedError, locked.getHeadCheckError())) {
+            return converter.convert(locked);
+          }
+          locked.setObservedHeadCommit(preparedHead);
+          locked.setHeadCheckError(preparedError);
+          casUpdate(locked, expected);
+          return getPackage(packageName);
+        });
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO updatePackage(String packageName, SkillPackagePublishDTO publishDTO) {
     if (publishDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
@@ -201,7 +219,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     String rawExpected = publishDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
     String targetCommit = requireCommit(publishDTO.getTargetCommit(), "targetCommit");
-    SkillPackage current = guard.requirePackageForUpdate(packageName);
+    SkillPackage current = requirePackage(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     // 只接受该 CAS 快照展示过的 exact commit：branch 在检查之后又前进也不会暗中切换发布内容。
     if (!targetCommit.equals(current.getObservedHeadCommit())) {
@@ -217,22 +235,47 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
               return skillGitCache.scanManifest(packageName, targetCommit);
             },
             "cannot publish commit: " + targetCommit);
-    Set<String> published = new LinkedHashSet<>(SkillPackageGuard.manifestNames(skills));
-    List<String> removed =
-        SkillPackageGuard.manifestNames(current.getSkills()).stream()
-            .filter(name -> !published.contains(name))
-            .toList();
-    guard.ensureSkillsRemovable(packageName, removed);
-    if (targetCommit.equals(current.getCurrentCommit())
-        && Objects.equals(skills, current.getSkills())) {
-      return converter.convert(current);
+    return writes.execute(
+        () -> {
+          SkillPackage locked = recheck(current, rawExpected, expected);
+          Set<String> published = new LinkedHashSet<>(SkillPackageGuard.manifestNames(skills));
+          List<String> removed =
+              SkillPackageGuard.manifestNames(locked.getSkills()).stream()
+                  .filter(name -> !published.contains(name))
+                  .toList();
+          guard.ensureSkillsRemovable(packageName, removed);
+          if (targetCommit.equals(locked.getCurrentCommit())
+              && Objects.equals(skills, locked.getSkills())) {
+            return converter.convert(locked);
+          }
+          locked.setCurrentCommit(targetCommit);
+          locked.setSkills(skills);
+          locked.setObservedHeadCommit(targetCommit);
+          locked.setHeadCheckError(null);
+          casUpdate(locked, expected);
+          return getPackage(packageName);
+        });
+  }
+
+  private SkillPackage requirePackage(String packageName) {
+    SkillPackage current = skillPackageRepository.getPackage(packageName);
+    if (current == null) {
+      throw new AiResourceNotFoundException(SkillPackageGuard.RESOURCE);
     }
-    current.setCurrentCommit(targetCommit);
-    current.setSkills(skills);
-    current.setObservedHeadCommit(targetCommit);
-    current.setHeadCheckError(null);
-    casUpdate(current, expected);
-    return getPackage(packageName);
+    return current;
+  }
+
+  /** 网络准备没有行锁：短事务中重检决定准备内容的全部提案事实。 */
+  private SkillPackage recheck(SkillPackage observed, String rawExpected, long expected) {
+    SkillPackage current = guard.requirePackageForUpdate(observed.getPackageName());
+    requireCurrentVersion(current, rawExpected, expected);
+    if (!Objects.equals(current.getBranch(), observed.getBranch())
+        || !Objects.equals(current.getRepositoryUrl(), observed.getRepositoryUrl())
+        || !Objects.equals(current.getObservedHeadCommit(), observed.getObservedHeadCommit())) {
+      throw new AiVersionConflictException(
+          SkillPackageGuard.RESOURCE, rawExpected, CatalogVersions.format(current.getVersion()));
+    }
+    return current;
   }
 
   /** 以锁定时读到的 {@code expected} 为条件整体更新事实；影响行数为 0 时重读判定 404 或 version conflict。 */
@@ -304,17 +347,27 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
           SkillPackageGuard.RESOURCE, "repositoryUrl must be a non-blank, unpadded URL");
     }
     if (raw.length() > MAX_REPOSITORY_URL_CHARS
-        || !REPOSITORY_URL.matcher(raw).matches()
+        || !(REPOSITORY_URL.matcher(raw).matches() || FILE_URL.matcher(raw).matches())
         || USERINFO.matcher(raw).find()
         || raw.codePoints().anyMatch(SkillCatalogServiceImpl::isControl)) {
+      // 非法输入可能内嵌凭据，诊断不得回显原始 URL。
       throw new AiValidationException(
           SkillPackageGuard.RESOURCE,
-          "repositoryUrl must carry a scheme, contain no userinfo and be at most "
+          "repositoryUrl must be a supported http/https/file URL without userinfo and be at most "
               + MAX_REPOSITORY_URL_CHARS
-              + " characters: "
-              + raw);
+              + " characters");
+    }
+    String scheme = schemeOf(raw);
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
+      throw new AiValidationException(
+          SkillPackageGuard.RESOURCE, "unsupported repositoryUrl scheme: " + scheme);
     }
     return raw;
+  }
+
+  private static String schemeOf(String raw) {
+    int index = raw.indexOf(':');
+    return index <= 0 ? "" : raw.substring(0, index).toLowerCase(Locale.ROOT);
   }
 
   private static String requireBranch(String raw) {

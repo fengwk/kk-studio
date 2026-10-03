@@ -157,6 +157,38 @@ export const settingsCatalog = {
     'en-US': 'Integrations',
     'zh-CN': '集成',
   },
+  'settings.tabs.network': {
+    'en-US': 'Network',
+    'zh-CN': '网络',
+  },
+  'settings.section.network.description': {
+    'en-US': 'Configure the single global default HTTP proxy for Backend.',
+    'zh-CN': '配置 Backend 单一全局默认 HTTP 代理。',
+  },
+  'settings.section.network.proxy.title': {
+    'en-US': 'Global HTTP proxy',
+    'zh-CN': '全局 HTTP 代理',
+  },
+  'settings.section.network.proxy.description': {
+    'en-US': 'Restart Backend after saving. This does not control daemon, browser, or internal requests of services such as Hub.',
+    'zh-CN': '保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+  },
+  'settings.field.network.proxyUrl': {
+    'en-US': 'Proxy URL',
+    'zh-CN': '代理地址',
+  },
+  'settings.field.network.proxyUrl.hint': {
+    'en-US': 'Backend global default HTTP proxy. Supports http://host:port without authentication; HTTPS targets use CONNECT. Leave blank to force direct connections. Restart Backend after saving; this does not control daemon, browser, or internal requests of services such as Hub.',
+    'zh-CN': 'Backend 全局默认 HTTP 代理，支持无认证的 http://host:port，HTTPS 目标通过 CONNECT；留空强制直连。保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+  },
+  'settings.field.network.noProxyHosts': {
+    'en-US': 'Proxy bypass rules',
+    'zh-CN': '代理绕过规则',
+  },
+  'settings.field.network.noProxyHosts.hint': {
+    'en-US': 'Comma-separated rules, e.g. localhost,127.*,::1,minio,*.internal.',
+    'zh-CN': '绕过规则以逗号分隔，例如 localhost,127.*,::1,minio,*.internal。',
+  },
   'settings.tabs.storageMedia': {
     'en-US': 'Storage & Media',
     'zh-CN': '存储与媒体',

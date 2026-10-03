@@ -13,6 +13,7 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -51,6 +52,7 @@ public final class StandardComfyuiClient {
         requestTimeout,
         objectMapper,
         HttpClient.newBuilder()
+            .proxy(ProxySelector.getDefault())
             .connectTimeout(requirePositive(connectTimeout, "connectTimeout"))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build());

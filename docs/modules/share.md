@@ -44,7 +44,7 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 
 Storage DTO 不提供独立的 S3 bucket 与对象 key 配置字段，只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，Canvas 的预签名端点同理；客户端按签发 URL 访问，不自行拼接存储地址。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；[`EnvironmentRegistrationTokenDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentRegistrationTokenDTO.java) 仅用于创建、显式读取与轮换令牌的响应，不进通用 Card 投影，响应禁止缓存。
 
-[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` 包 15 个 DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；`compactionKeepRecentTokens` 是预算计数，显式豁免。
+[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描 `systemsettings` DTO 的字段名，拒绝 secret / bootstrap 名称（`token`、`credential`、`secret`、`apikey`、`accesskey`、`secretkey`、`bearer`、`instanceId`、`endpoint`、`region`、`bucket`、`workdir`、`environmentRoot`、`tempDir`、`binary`、`prefix`、`username`、`password`）；`compactionKeepRecentTokens` 是预算计数，显式豁免。
 
 Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界错误；[`PluginAuthCompleteRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/PluginAuthCompleteRequestDTO.java) 的 `callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
 
@@ -65,9 +65,9 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project](../../share/src/main/java/fun/fengwk/kkstudio/share/project/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
-| [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 六个 settings section、schema 与 update request |
+| [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 七个 settings section、schema 与 update request |
 
-只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
+只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整七 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
 

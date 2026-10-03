@@ -30,10 +30,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 /**
@@ -45,13 +47,48 @@ public final class SkillPackageInstaller {
 
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
 
+  /** 只有受网络保护覆盖的 http/https 与本地直读 file 允许进入 Git 网络层。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
+
   private final Path skillsRoot;
   private final Path cacheRoot;
   private final Path stagingRoot;
   private final Path backupRoot;
+  private final int connectMillis;
+  private final int readMillis;
+
+  /** Git 网络取消观察任务的执行器；由 runtime 拥有，本安装器不创建也不关闭线程。 */
+  private final ExecutorService executor;
+
   private final ConcurrentHashMap<String, Object> packageLocks = new ConcurrentHashMap<>();
 
-  public SkillPackageInstaller(Path skillsRoot, Path cacheRoot, Path stagingRoot, Path backupRoot) {
+  public SkillPackageInstaller(
+      Path skillsRoot,
+      Path cacheRoot,
+      Path stagingRoot,
+      Path backupRoot,
+      ExecutorService executor) {
+    this(
+        skillsRoot,
+        cacheRoot,
+        stagingRoot,
+        backupRoot,
+        GitHttpConnectionFactory.CONNECT_MILLIS,
+        GitHttpConnectionFactory.READ_MILLIS,
+        executor);
+  }
+
+  SkillPackageInstaller(
+      Path skillsRoot,
+      Path cacheRoot,
+      Path stagingRoot,
+      Path backupRoot,
+      int connectMillis,
+      int readMillis,
+      ExecutorService executor) {
+    this.connectMillis = connectMillis;
+    this.readMillis = readMillis;
+    this.executor = Objects.requireNonNull(executor, "executor");
     this.skillsRoot = Objects.requireNonNull(skillsRoot, "skillsRoot").toAbsolutePath().normalize();
     this.cacheRoot = Objects.requireNonNull(cacheRoot, "cacheRoot").toAbsolutePath().normalize();
     this.stagingRoot =
@@ -75,13 +112,15 @@ public final class SkillPackageInstaller {
     recoverArtifacts();
   }
 
-  public static SkillPackageInstaller open(DaemonDataDirectory dataDirectory) {
+  public static SkillPackageInstaller open(
+      DaemonDataDirectory dataDirectory, ExecutorService executor) {
     Objects.requireNonNull(dataDirectory, "dataDirectory");
     return new SkillPackageInstaller(
         dataDirectory.skills(),
         dataDirectory.skillCache(),
         dataDirectory.skillStaging(),
-        dataDirectory.skillBackup());
+        dataDirectory.skillBackup(),
+        executor);
   }
 
   public Path skillsRoot() {
@@ -122,23 +161,35 @@ public final class SkillPackageInstaller {
         new FileRepositoryBuilder().setGitDir(cacheGitDir.toFile()).setMustExist(true).build()) {
       ObjectId commitId = ObjectId.fromString(targetCommit);
       if (!repo.getObjectDatabase().has(commitId)) {
-        try (Git git = new Git(repo)) {
+        try (Git git = new Git(repo);
+            GitHttpConnectionFactory network =
+                new GitHttpConnectionFactory(executor, connectMillis, readMillis)) {
           boolean fetched = false;
           try {
-            git.fetch().setRemote(repositoryUrl).setRefSpecs(new RefSpec(targetCommit)).call();
+            git.fetch()
+                .setRemote(repositoryUrl)
+                .setTransportConfigCallback(network.callback())
+                .setRefSpecs(new RefSpec(targetCommit))
+                .call();
             fetched = repo.getObjectDatabase().has(commitId);
-          } catch (Exception ignored) {
-            // 回退到按分支拉取
+          } catch (Exception error) {
+            if (!GitHttpConnectionFactory.canFallback(error)) {
+              throw new SkillSyncException(
+                  GitHttpConnectionFactory.failureCode(error), "Git remote fetch failed", error);
+            }
+            // 仅远端不接受 exact object 请求时回退到按分支拉取。
           }
           if (!fetched) {
             try {
               git.fetch()
                   .setRemote(repositoryUrl)
+                  .setTransportConfigCallback(network.callback())
                   .setRefSpecs(
                       new RefSpec("+refs/heads/" + branch + ":refs/remotes/origin/" + branch))
                   .call();
-            } catch (Exception ignored) {
-              // 在下方统一检查 commitId 是否存在
+            } catch (Exception error) {
+              throw new SkillSyncException(
+                  GitHttpConnectionFactory.failureCode(error), "Git branch fetch failed", error);
             }
           }
         }
@@ -394,6 +445,10 @@ public final class SkillPackageInstaller {
     if (rawAuthority != null && rawAuthority.contains("@")) {
       throw new SkillSyncException(
           "INVALID_REPOSITORY_URL", "Repository URL must not contain user info");
+    }
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(uri.getScheme().toLowerCase(Locale.ROOT))) {
+      throw new SkillSyncException(
+          "INVALID_REPOSITORY_URL", "Repository URL must use a supported http/https/file scheme");
     }
   }
 

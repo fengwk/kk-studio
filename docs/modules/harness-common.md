@@ -1,6 +1,6 @@
 # Harness Common
 
-`harness-common` 为 Runtime、Tool、MCP、Daemon 与 Platform 提供共享的基础契约：prompt 模板、严格 JSON、规范 Resource 引用、结果内容、输入 schema 与文本窗口。值对象与校验工具不保存业务状态；[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 只缓存 classpath 模板。
+`harness-common` 为 Runtime、Tool、MCP、Daemon 与 Platform 提供共享的基础契约：prompt 模板、严格 JSON、规范 Resource 引用、结果内容、输入 schema、文本窗口与 HTTP 代理选择。值对象与校验工具不保存业务状态；[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 只缓存 classpath 模板。
 
 这些类型在调用边界完成校验，再交给执行模块使用。构造约束通常以 `IllegalArgumentException` 表达，编码阶段的不可恢复失败为 `IllegalStateException`；null 的拒绝或缺省处理以具体入口为准。生产依赖为 JDK 与 Jackson（见 [`pom.xml`](../../harness/common/pom.xml)），[`CommonModuleArchitectureTest`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 校验依赖方向。资源打开与关闭由调用方负责，Common 消费已经提供的值或字符流。
 
@@ -10,6 +10,7 @@
 | --- | --- | --- |
 | `fun.fengwk.kkstudio.harness.common.prompt` | classpath prompt 模板的严格解析、缓存与精确变量渲染 | 只支持 `${name}`，要求变量集合精确相等；表达式求值与业务编排由调用方承接 |
 | `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
+| `fun.fengwk.kkstudio.harness.common.network` | 固定与环境变量 HTTP 代理选择、主机绕过规则 | 只构造不可变选择器；配置来源、JVM 全局安装和客户端生命周期由调用方负责 |
 | `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 六类 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |

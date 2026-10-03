@@ -84,7 +84,7 @@ import java.util.function.UnaryOperator;
  * <p>每次连接尝试由独立的 {@code connectionGeneration} 标识，隔离跨连接事件干扰；wire 协议没有序号，入站消息不做跨消息顺序校验。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
- * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
+ * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用与 Git 网络取消观察。transport/JDK 内部线程不在该生命周期内。
  */
 public final class DaemonRuntime implements AutoCloseable {
 
@@ -144,10 +144,12 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonConfig config, CodingToolsConfig toolsConfig, DaemonDataDirectory dataDirectory) {
     Objects.requireNonNull(toolsConfig, "toolsConfig");
     Objects.requireNonNull(dataDirectory, "dataDirectory");
-    SkillPackageInstaller skillInstaller = SkillPackageInstaller.open(dataDirectory);
     return create(
         config,
         (registry, executor, scheduler, lspExecutor) -> {
+          // 先打开 Git 安装器（无持有资源），再创建 LSP：任一环节失败都不会留下需要 LSP 收尾的半成品。
+          SkillPackageInstaller skillInstaller =
+              SkillPackageInstaller.open(dataDirectory, executor);
           LspService lspService = LspService.create(toolsConfig.lsp(), lspExecutor, scheduler);
           CodingCapabilities.registerAll(
               registry, toolsConfig, lspService, skillInstaller, executor, scheduler);

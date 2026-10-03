@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.contains;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -47,6 +49,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").value("16777216"))
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
+        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"))
         .andExpect(jsonPath("$.data.integrations.openCliHub.baseUrl").doesNotExist())
         .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.data.createTime").exists())
@@ -58,14 +62,15 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/settings/schema"))
         .andExpect(status().isOk())
-        // section 顺序沿用原 tabs/cards：aiRuntime -> tool -> environment -> integrations
+        // section 顺序：aiRuntime -> tool -> environment -> network -> integrations
         // -> storageMedia -> advanced（General 是前端本地 tab，不在 server schema）。
         .andExpect(jsonPath("$.data.sections[0].key").value("aiRuntime"))
         .andExpect(jsonPath("$.data.sections[1].key").value("tool"))
         .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
-        .andExpect(jsonPath("$.data.sections[3].key").value("integrations"))
-        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[5].key").value("advanced"))
+        .andExpect(jsonPath("$.data.sections[3].key").value("network"))
+        .andExpect(jsonPath("$.data.sections[4].key").value("integrations"))
+        .andExpect(jsonPath("$.data.sections[5].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[6].key").value("advanced"))
         // 精确顺序断言：每个 section 的完整 key 序列必须与基线 tabs 完全一致。
         .andExpect(
             jsonPath("$.data.sections[*].key")
@@ -74,6 +79,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                         "aiRuntime",
                         "tool",
                         "environment",
+                        "network",
                         "integrations",
                         "storageMedia",
                         "advanced")))
@@ -85,9 +91,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].type").value("INTEGER"))
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(1))
-        .andExpect(jsonPath("$.data.sections[3].groups[1].fields[3].max").value(1800000))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[3].max").value(1800000))
         // 领域上界映射：promptAgentName 受 MAX_LENGTH=64 约束。
-        .andExpect(jsonPath("$.data.sections[3].groups[4].fields[1].max").value(64))
+        .andExpect(jsonPath("$.data.sections[4].groups[4].fields[1].max").value(64))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(
@@ -126,10 +132,19 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[2].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[2].groups[0].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[2].groups.length()").value(1))
-        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
+        // network 唯一全局分组，重启生效，不暴露模块覆盖。
+        .andExpect(jsonPath("$.data.sections[3].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[3].groups.length()").value(1))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].key").value("network.proxy"))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].restartRequired").value(true))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].applyTiming").value("RESTART"))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].fields.length()").value(2))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].fields[0].max").value(2048))
+        .andExpect(jsonPath("$.data.sections[3].groups[0].fields[1].max").value(4096))
+        .andExpect(jsonPath("$.data.sections[5].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[5].groups[1].key").value("storageMedia.canvasMedia"))
+        .andExpect(jsonPath("$.data.sections[5].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[5].groups[1].applyTiming").value("NEXT_INVOCATION"));
   }
 
   @Test
@@ -224,6 +239,107 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"));
+  }
+
+  /** PUT/GET 验证代理持久化与明确直连；空 bypass 不能被折叠成默认值。 */
+  @Test
+  public void networkRoundTripsAndCanReturnToDirect() throws Exception {
+    String proxy =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "0");
+              update.withObject("network").put("proxyUrl", "http://proxy:3128");
+              update.withObject("network").put("noProxyHosts", "");
+            });
+    mockMvc
+        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(proxy))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("1"))
+        .andExpect(jsonPath("$.data.network.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+    mockMvc
+        .perform(get("/api/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.network.proxyUrl").value("http://proxy:3128"))
+        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+    String direct =
+        bodyFromGet(
+            update -> {
+              update.put("expectedVersion", "1");
+              update.withObject("network").putNull("proxyUrl");
+            });
+    mockMvc
+        .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(direct))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("2"))
+        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.data.network.noProxyHosts").value(""));
+  }
+
+  /** 非法代理/凭据 fail-closed：400 消息不含敏感输入，默认行与 CAS 版本均不变。 */
+  @Test
+  public void invalidNetworkNeverWritesOrEchoesCredentials() throws Exception {
+    for (String url :
+        List.of(
+            "http://proxy",
+            "https://proxy:3128",
+            "socks5://proxy:1080",
+            "http://synthetic-user:synthetic-password@proxy:3128",
+            "http://proxy:3128/path")) {
+      String body =
+          bodyFromGet(
+              update -> {
+                update.put("expectedVersion", "0");
+                update.withObject("network").put("proxyUrl", url);
+              });
+      MvcResult result =
+          mockMvc
+              .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+              .andExpect(status().isBadRequest())
+              .andExpect(jsonPath("$.code").value("validation"))
+              .andReturn();
+      String response = result.getResponse().getContentAsString();
+      assertFalse(response.contains("synthetic-user"));
+      assertFalse(response.contains("synthetic-password"));
+      assertFalse(response.contains(url));
+    }
+    mockMvc
+        .perform(get("/api/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("0"))
+        .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
+        .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"));
+  }
+
+  /** 完整 wire 请求严格拒绝缺 network、缺 bypass、错误类型和额外运行期开关。 */
+  @Test
+  public void rejectsMissingAndMalformedNetworkWireFields() throws Exception {
+    List<Consumer<ObjectNode>> invalidShapes =
+        List.of(
+            update -> update.remove("network"),
+            update -> update.putNull("network"),
+            update -> update.withObject("network").remove("noProxyHosts"),
+            update -> update.withObject("network").putNull("noProxyHosts"),
+            update -> update.withObject("network").put("proxyUrl", 1),
+            update -> update.withObject("network").put("proxyUrl", true),
+            update -> update.withObject("network").put("noProxyHosts", 1),
+            update -> update.withObject("network").put("noProxyHosts", true),
+            update -> update.withObject("network").put("enabled", true));
+    for (Consumer<ObjectNode> invalid : invalidShapes) {
+      String body =
+          bodyFromGet(
+              update -> {
+                update.put("expectedVersion", "0");
+                invalid.accept(update);
+              });
+      mockMvc
+          .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isBadRequest());
+    }
+    mockMvc
+        .perform(get("/api/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("0"));
   }
 
   private String bodyFromGet(Consumer<ObjectNode> mutator) throws Exception {

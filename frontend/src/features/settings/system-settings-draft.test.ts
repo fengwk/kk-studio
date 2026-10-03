@@ -13,6 +13,27 @@ import {
 } from '@/test-support/settings-test-fixtures'
 
 describe('system settings draft codec', () => {
+  // 默认关闭和清空代理都必须明确发送 null；绕过列表保留为字符串，不能产生模块覆盖。
+  it('round-trips direct connections and serializes only the two global proxy fields', () => {
+    const dto = makeSettingsDto()
+    const draft = settingsSectionsToDraft(dto)
+    expect(draft.network).toEqual({ proxyUrl: '', noProxyHosts: 'localhost,127.*,::1' })
+    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual(dto.network)
+
+    draft.network.proxyUrl = '  http://proxy.internal:8080  '
+    draft.network.noProxyHosts = 'localhost,127.*,::1,minio,*.internal'
+    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual({
+      proxyUrl: 'http://proxy.internal:8080',
+      noProxyHosts: 'localhost,127.*,::1,minio,*.internal',
+    })
+    draft.network.proxyUrl = '   '
+    draft.network.noProxyHosts = ''
+    expect(assembleSettingsUpdate(draft, dto.version).network).toEqual({
+      proxyUrl: null,
+      noProxyHosts: '',
+    })
+  })
+
   it('derives a string-value draft from the wire aggregate (Long stays string, Integer becomes string)', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     expect(draft.tool.permission).toEqual([
@@ -42,9 +63,9 @@ describe('system settings draft codec', () => {
     expect(update.aiRuntime.retryMaxDelayMillis).toBe('60000')
     expect(update.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(update.advanced.processorLeaseDurationMillis).toBe('30000')
-    // 六个 section 全部完整存在于请求体。
+    // 七个 section 全部完整存在于请求体。
     expect(Object.keys(update).sort()).toEqual(
-      ['advanced', 'aiRuntime', 'environment', 'expectedVersion', 'integrations', 'storageMedia', 'tool'].sort(),
+      ['advanced', 'aiRuntime', 'environment', 'network', 'expectedVersion', 'integrations', 'storageMedia', 'tool'].sort(),
     )
   })
 
@@ -57,6 +78,7 @@ describe('system settings draft codec', () => {
       tool: dto.tool,
       aiRuntime: dto.aiRuntime,
       environment: dto.environment,
+      network: dto.network,
       integrations: dto.integrations,
       storageMedia: dto.storageMedia,
       advanced: dto.advanced,

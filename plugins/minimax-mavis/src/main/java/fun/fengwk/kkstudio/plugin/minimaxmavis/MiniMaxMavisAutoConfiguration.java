@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -32,6 +33,7 @@ public class MiniMaxMavisAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  @DependsOn("systemProxySelector")
   public MavisHttpTransport mavisHttpTransport() {
     return new JdkMavisHttpTransport();
   }

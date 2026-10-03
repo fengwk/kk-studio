@@ -66,6 +66,24 @@ Unix token 文件为 0600，新建凭证目录为 0700；现存父目录须由�
 
 Daemon 有当前用户的文件与命令权限，**没有文件系统沙箱**。只把 Environment 开放给可信的 Studio 用户和 Agent；`workdir` 是调用目录，不是权限边界，HOME 也不是默认工作目录。
 
+### 本机代理
+
+Daemon 不接收 Backend 的代理设置。启动时分别读取 `http_proxy`、`https_proxy`，
+兼容大写变量，小写存在时优先；空值明确直连，未设置的协议才委托 JDK 的操作系统代理。
+`no_proxy`/`NO_PROXY` 的逗号分隔绕过规则同样作用于操作系统回退结果。
+环境代理地址只接受无认证的 `http://host:port`；HTTPS/WSS 通过 CONNECT，
+不支持 SOCKS、CIDR 绕过规则、代理认证或 TLS 到代理，非法配置在启动时拒绝。
+
+macOS 的回退来源是网络设置；Linux 的桌面代理取决于宿主支持，服务器/容器通常应显式
+传入环境变量。Windows 读取当前运行用户的系统代理（含系统自动代理能力），不是
+`netsh winhttp` 的独立服务配置，也不会继承另一个登录用户的代理。未显式指定时
+Daemon 开启 `java.net.useSystemProxies`；显式 JVM 代理属性仍参与 JDK 回退。
+
+环境变量必须进入 Daemon 进程：终端 `export` 不会改变已经运行的服务。安装器不保存
+代理配置文件；Linux systemd user service、macOS LaunchAgent 或 Windows 计划任务
+需要由对应的用户环境/服务管理器提供变量，修改后重新启动 Daemon。将 gateway 和
+对象存储的内网地址加入绕过规则，避免控制连接与预签名上传误走外部代理。
+
 ## 验证
 
 安装器默认最多等待 30 秒，再检查运行状态持续保持 3 秒。它验证的是服务或任务存活，**不是 gateway 注册成功**。

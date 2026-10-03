@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -15,6 +16,7 @@ import java.time.Clock;
 public class OpenCliCanvasFunctionConfiguration {
 
   @Bean
+  @DependsOn("systemProxySelector")
   OpenCliHubClient openCliHubClient(
       OpenCliHubProperties properties, SystemSettingsSnapshot snapshot, ObjectMapper objectMapper) {
     return new OpenCliHubClient(properties, snapshot, objectMapper);

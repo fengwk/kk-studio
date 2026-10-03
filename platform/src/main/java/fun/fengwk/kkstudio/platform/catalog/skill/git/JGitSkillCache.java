@@ -14,17 +14,21 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
@@ -35,11 +39,17 @@ import java.util.regex.Pattern;
  * <p>底层在 {@code <cacheRoot>/<packageName>.git} 维护 bare repository，严格按 exact commit 补齐与读取对象。
  */
 @Slf4j
+@DependsOn("systemProxySelector")
 public class JGitSkillCache implements SkillGitCache {
 
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
 
+  /** 受网络保护覆盖或本地直读的仓库 scheme；其他 scheme 在直接入口 fail-closed。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
+
   private final Path cacheRoot;
+  private final int connectMillis;
+  private final int readMillis;
   private final ConcurrentMap<String, Object> packageLocks = new ConcurrentHashMap<>();
 
   /**
@@ -48,7 +58,13 @@ public class JGitSkillCache implements SkillGitCache {
    * @param cacheRoot bare 仓库的根缓存目录
    */
   public JGitSkillCache(Path cacheRoot) {
+    this(cacheRoot, GitHttpConnectionFactory.CONNECT_MILLIS, GitHttpConnectionFactory.READ_MILLIS);
+  }
+
+  JGitSkillCache(Path cacheRoot, int connectMillis, int readMillis) {
     Objects.requireNonNull(cacheRoot, "cacheRoot");
+    this.connectMillis = connectMillis;
+    this.readMillis = readMillis;
     this.cacheRoot = cacheRoot.toAbsolutePath().normalize();
     try {
       Files.createDirectories(this.cacheRoot);
@@ -59,9 +75,7 @@ public class JGitSkillCache implements SkillGitCache {
 
   @Override
   public String resolveBranchHead(String repositoryUrl, String branch) {
-    if (repositoryUrl == null || repositoryUrl.isBlank()) {
-      throw new SkillGitException("repositoryUrl must not be blank");
-    }
+    validateRepositoryUrl(repositoryUrl);
     if (branch == null || branch.isBlank()) {
       throw new SkillGitException("branch must not be blank");
     }
@@ -70,8 +84,13 @@ public class JGitSkillCache implements SkillGitCache {
     }
 
     String targetRefName = "refs/heads/" + branch;
-    try {
-      Map<String, Ref> refMap = Git.lsRemoteRepository().setRemote(repositoryUrl).callAsMap();
+    try (GitHttpConnectionFactory network =
+        new GitHttpConnectionFactory(connectMillis, readMillis)) {
+      Map<String, Ref> refMap =
+          Git.lsRemoteRepository()
+              .setRemote(repositoryUrl)
+              .setTransportConfigCallback(network.callback())
+              .callAsMap();
 
       Ref ref = refMap.get(targetRefName);
       if (ref == null || ref.getObjectId() == null) {
@@ -94,7 +113,8 @@ public class JGitSkillCache implements SkillGitCache {
       throw e;
     } catch (Exception e) {
       throw new SkillGitException(
-          "Failed to resolve branch head for "
+          GitHttpConnectionFactory.failureCode(e)
+              + ": Failed to resolve branch head for "
               + repositoryUrl
               + " branch "
               + branch
@@ -108,9 +128,7 @@ public class JGitSkillCache implements SkillGitCache {
   public void ensureCommit(String packageName, String repositoryUrl, String commit) {
     validateCommit(commit);
     validatePackageName(packageName);
-    if (repositoryUrl == null || repositoryUrl.isBlank()) {
-      throw new SkillGitException("repositoryUrl must not be blank");
-    }
+    validateRepositoryUrl(repositoryUrl);
 
     Object lock = packageLocks.computeIfAbsent(packageName, k -> new Object());
     synchronized (lock) {
@@ -143,14 +161,23 @@ public class JGitSkillCache implements SkillGitCache {
           return;
         }
 
-        try (Git git = new Git(repo)) {
+        try (Git git = new Git(repo);
+            GitHttpConnectionFactory network =
+                new GitHttpConnectionFactory(connectMillis, readMillis)) {
           boolean fetched = false;
           try {
-            git.fetch().setRemote(repositoryUrl).setRefSpecs(new RefSpec(commit)).call();
+            git.fetch()
+                .setRemote(repositoryUrl)
+                .setTransportConfigCallback(network.callback())
+                .setRefSpecs(new RefSpec(commit))
+                .call();
             if (repo.getObjectDatabase().has(commitId)) {
               fetched = true;
             }
           } catch (Exception e) {
+            if (!GitHttpConnectionFactory.canFallback(e)) {
+              throw new SkillGitException(GitHttpConnectionFactory.failureCode(e), e);
+            }
             log.debug(
                 "Direct commit fetch failed for {}, falling back to branch fetch: {}",
                 commit,
@@ -161,11 +188,15 @@ public class JGitSkillCache implements SkillGitCache {
             try {
               git.fetch()
                   .setRemote(repositoryUrl)
+                  .setTransportConfigCallback(network.callback())
                   .setRefSpecs(new RefSpec("+refs/heads/*:refs/remotes/origin/*"))
                   .call();
             } catch (Exception e) {
               throw new SkillGitException(
-                  "Failed to fetch branches from " + repositoryUrl + ": " + e.getMessage(), e);
+                  GitHttpConnectionFactory.failureCode(e)
+                      + ": Failed to fetch branches from "
+                      + repositoryUrl,
+                  e);
             }
           }
 
@@ -287,6 +318,28 @@ public class JGitSkillCache implements SkillGitCache {
   private static void validateCommit(String commit) {
     if (commit == null || !COMMIT_PATTERN.matcher(commit).matches()) {
       throw new SkillGitException("Invalid commit format: " + commit);
+    }
+  }
+
+  /** 直接入口同样 fail-closed：只接受受保护 HTTP(S) 或本地 file 仓库。 */
+  private static void validateRepositoryUrl(String repositoryUrl) {
+    if (repositoryUrl == null || repositoryUrl.isBlank()) {
+      throw new SkillGitException("repositoryUrl must not be blank");
+    }
+    URI uri;
+    try {
+      uri = URI.create(repositoryUrl);
+    } catch (IllegalArgumentException error) {
+      throw new SkillGitException("repositoryUrl must be a valid URL without userinfo");
+    }
+    if (uri.getRawUserInfo() != null
+        || (uri.getRawAuthority() != null && uri.getRawAuthority().contains("@"))) {
+      throw new SkillGitException("repositoryUrl must not contain userinfo");
+    }
+    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(scheme)) {
+      throw new SkillGitException(
+          "UNSUPPORTED_REPOSITORY_SCHEME: unsupported repository scheme: " + scheme);
     }
   }
 

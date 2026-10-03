@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -39,6 +40,7 @@ public class MiniMaxH3Configuration {
   }
 
   @Bean
+  @DependsOn("systemProxySelector")
   public StandardComfyuiClient standardH3ComfyuiClient(
       MiniMaxH3Properties properties, SystemSettingsSnapshot snapshot, ObjectMapper objectMapper) {
     SystemSettings.MiniMaxH3 settings = snapshot.get().integrations().minimaxH3();

@@ -43,6 +43,10 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
       heartbeatTimeoutMillis: '60000',
     },
+    network: {
+      proxyUrl: null,
+      noProxyHosts: 'localhost,127.*,::1',
+    },
     integrations: {
       comfyui: {
         enabled: false,
@@ -383,6 +387,43 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 nullable: false,
                 min: 1,
                 max: null,
+                options: null,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'network',
+        labelKey: 'settings.tabs.network',
+        descriptionKey: 'settings.section.network.description',
+        restartRequired: true,
+        groups: [
+          {
+            key: 'network.proxy',
+            labelKey: 'settings.section.network.proxy.title',
+            descriptionKey: 'settings.section.network.proxy.description',
+            restartRequired: true,
+            applyTiming: 'RESTART',
+            fields: [
+              {
+                path: 'network.proxyUrl',
+                labelKey: 'settings.field.network.proxyUrl',
+                hintKey: 'settings.field.network.proxyUrl.hint',
+                type: 'TEXT',
+                nullable: true,
+                min: null,
+                max: 2048,
+                options: null,
+              },
+              {
+                path: 'network.noProxyHosts',
+                labelKey: 'settings.field.network.noProxyHosts',
+                hintKey: 'settings.field.network.noProxyHosts.hint',
+                type: 'TEXT',
+                nullable: false,
+                min: null,
+                max: 4096,
                 options: null,
               },
             ],

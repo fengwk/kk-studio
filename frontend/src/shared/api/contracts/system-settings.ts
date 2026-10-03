@@ -7,7 +7,7 @@ import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime
  * - Java {@code Long}/{@code long} 字段在 wire 上是 canonical 非负十进制字符串（{@link DecimalLong}）；
  * - Java {@code Integer}/{@code boolean} 字段是 JSON 数字 / 布尔；
  * - {@code version} 是字符串（非负十进制乐观锁 token）；
- * - 六个 section 全部必填；PUT 必须回传完整聚合。
+ * - 七个 section 全部必填；PUT 必须回传完整聚合。
  */
 
 /** {@code tool.permission} 单条规则；数组顺序即求值顺序，必须保持。 */
@@ -46,6 +46,13 @@ export interface SystemSettingsAiRuntimeDTO {
 export interface SystemSettingsEnvironmentDTO {
   maxResourceBytes: DecimalLong
   heartbeatTimeoutMillis: DecimalLong
+}
+
+export interface SystemSettingsNetworkDTO {
+  /** null 表示 Backend 强制直连；非空仅支持无认证的 http://host:port。 */
+  proxyUrl: string | null
+  /** 逗号分隔的代理绕过规则。 */
+  noProxyHosts: string
 }
 
 export interface ComfyuiIntegrationDTO {
@@ -129,17 +136,18 @@ export interface SystemSettingsAdvancedDTO {
   postgresqlWorkReconnectBackoffMillis: DecimalLong
 }
 
-/** GET/PUT 的公共 section 载体（tool / aiRuntime / environment / integrations / storageMedia / advanced）。 */
+/** GET/PUT 的公共 section 载体（tool / aiRuntime / environment / network / integrations / storageMedia / advanced）。 */
 export interface SystemSettingsSectionsDTO {
   tool: SystemSettingsToolDTO
   aiRuntime: SystemSettingsAiRuntimeDTO
   environment: SystemSettingsEnvironmentDTO
+  network: SystemSettingsNetworkDTO
   integrations: SystemSettingsIntegrationsDTO
   storageMedia: SystemSettingsStorageMediaDTO
   advanced: SystemSettingsAdvancedDTO
 }
 
-/** GET {@code /api/settings} 完整聚合：六个 section + 乐观锁版本与只读时戳。 */
+/** GET {@code /api/settings} 完整聚合：七个 section + 乐观锁版本与只读时戳。 */
 export interface SystemSettingsDTO extends SystemSettingsSectionsDTO {
   version: string
   createTime: InstantTimestamp

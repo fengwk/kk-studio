@@ -67,7 +67,8 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ofMinutes(5)));
+        // 内部 Git 同步由 connect/read 空闲保护，不设整次执行 deadline。
+        descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ZERO));
   }
 
   /** 全部已注册 descriptor。 */

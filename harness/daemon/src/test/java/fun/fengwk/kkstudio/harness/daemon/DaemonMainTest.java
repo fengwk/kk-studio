@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.parallel.Resources;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -123,17 +125,22 @@ class DaemonMainTest {
   @Test
   @ResourceLock(Resources.SYSTEM_OUT)
   @ResourceLock(Resources.SYSTEM_PROPERTIES)
+  @ResourceLock("defaultProxySelector")
   void encodedInformationCommandsReturnBeforeOpeningDataOrConnecting(@TempDir Path root)
       throws Exception {
     Path home = Files.writeString(root.resolve("not-a-directory"), "unchanged");
     String previousHome = System.getProperty("user.home");
     PrintStream previousOut = System.out;
+    ProxySelector previousSelector = ProxySelector.getDefault();
+    String previousProxyProperty = System.getProperty("java.net.useSystemProxies");
     try {
       System.setProperty("user.home", home.toString());
       for (String flag : new String[] {"--version", "--help", "-h"}) {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
         DaemonMain.main(DaemonArgumentsTest.encoded(flag));
+        assertSame(previousSelector, ProxySelector.getDefault());
+        assertEquals(previousProxyProperty, System.getProperty("java.net.useSystemProxies"));
         assertEquals(
             flag.equals("--version")
                 ? "kk-studio-daemon development" + System.lineSeparator()
@@ -143,6 +150,12 @@ class DaemonMainTest {
       assertEquals("unchanged", Files.readString(home));
       assertFalse(Files.exists(root.resolve(".kk-studio")));
     } finally {
+      ProxySelector.setDefault(previousSelector);
+      if (previousProxyProperty == null) {
+        System.clearProperty("java.net.useSystemProxies");
+      } else {
+        System.setProperty("java.net.useSystemProxies", previousProxyProperty);
+      }
       System.setOut(previousOut);
       if (previousHome == null) {
         System.clearProperty("user.home");

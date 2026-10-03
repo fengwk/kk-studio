@@ -69,6 +69,7 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
       tool: update.tool,
       aiRuntime: update.aiRuntime,
       environment: update.environment,
+      network: update.network,
       integrations: update.integrations,
       storageMedia: update.storageMedia,
       advanced: update.advanced,
@@ -98,6 +99,65 @@ async function serverTab(name: string) {
 }
 
 describe('system settings server editor', () => {
+  // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、重启提示、保存与清空不丢其他段。
+  it('edits and clears the global proxy while preserving every other section', async () => {
+    const initial = makeSettingsDto()
+    initial.tool.defaultYolo = true
+    initial.integrations.comfyui.baseUrl = 'http://comfy.internal:8188'
+    const backend = createBackend(initial)
+    mocks.get.mockImplementation(backend.get)
+    mocks.update.mockImplementation(backend.update)
+    renderSettings()
+
+    await userEvent.click(await serverTab('网络'))
+    const panel = screen.getByRole('tabpanel')
+    expect(within(panel).getAllByRole('textbox')).toHaveLength(2)
+    expect(within(panel).queryByRole('switch')).not.toBeInTheDocument()
+    expect(within(panel).getByText('重启后生效')).toBeInTheDocument()
+    expect(within(panel).getByText(/HTTPS 目标通过 CONNECT/)).toHaveTextContent(
+      '保存后重启 Backend 生效，不控制 daemon、浏览器或 Hub 等服务内部请求。',
+    )
+    const proxy = within(panel).getByLabelText('代理地址')
+    const bypass = within(panel).getByLabelText('代理绕过规则')
+    expect(proxy).toHaveValue('')
+    expect(proxy).toHaveAttribute('maxlength', '2048')
+    expect(bypass).toHaveValue('localhost,127.*,::1')
+    expect(bypass).toHaveAttribute('maxlength', '4096')
+
+    await userEvent.type(proxy, 'http://proxy.internal:8080')
+    await userEvent.clear(bypass)
+    await userEvent.type(bypass, 'localhost,127.*,::1,minio,*.internal')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    const sections = {
+      tool: initial.tool,
+      aiRuntime: initial.aiRuntime,
+      environment: initial.environment,
+      integrations: initial.integrations,
+      storageMedia: initial.storageMedia,
+      advanced: initial.advanced,
+    }
+    expect(mocks.update.mock.calls[0]![0]).toEqual({
+      ...sections,
+      network: {
+        proxyUrl: 'http://proxy.internal:8080',
+        noProxyHosts: 'localhost,127.*,::1,minio,*.internal',
+      },
+      expectedVersion: initial.version,
+    })
+
+    await userEvent.clear(screen.getByLabelText('代理地址'))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    expect(mocks.update.mock.calls[1]![0]).toEqual({
+      ...sections,
+      network: { proxyUrl: null, noProxyHosts: 'localhost,127.*,::1,minio,*.internal' },
+      expectedVersion: '1',
+    })
+    expect(screen.getByText('重启后生效')).toBeInTheDocument()
+    expect(screen.getByLabelText('代理地址')).toHaveValue('')
+  })
+
   beforeEach(() => {
     mocks.get.mockReset()
     mocks.getSchema.mockReset()
@@ -188,10 +248,11 @@ describe('system settings server editor', () => {
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.expectedVersion).toBe('0')
     expect(sent.aiRuntime.retryBaseDelayMillis).toBe('3000')
-    // 完整聚合：六个 section 全部在请求体中。
+    // 完整聚合：七个 section 全部在请求体中。
     expect(sent.tool).toBeDefined()
     expect(sent.aiRuntime).toBeDefined()
     expect(sent.environment).toBeDefined()
+    expect(sent.network).toBeDefined()
     expect(sent.integrations).toBeDefined()
     expect(sent.storageMedia).toBeDefined()
     expect(sent.advanced).toBeDefined()

@@ -21,6 +21,7 @@ class SkillCatalogConfigurationTest {
     // 意图：新部署 key 必须绑定到 catalog 并驱动实际 cache 根目录，而非仅绑定一个未被消费的字段。
     Path cacheRoot = tempDir.resolve("cache");
     new ApplicationContextRunner()
+        .withBean("systemProxySelector", Object.class, Object::new)
         .withUserConfiguration(SkillCatalogConfiguration.class)
         .withPropertyValues("kk-studio.catalog.skill.cache-root=" + cacheRoot)
         .run(

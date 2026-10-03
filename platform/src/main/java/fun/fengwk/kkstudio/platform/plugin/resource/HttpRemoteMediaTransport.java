@@ -18,6 +18,7 @@ import java.io.FileNotFoundException;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -34,10 +35,8 @@ import java.util.Objects;
  * HTTP 媒体传输的生产实现：下载与预签名上传使用互不干扰的两条客户端路径。
  *
  * <ul>
- *   <li><b>GET</b>：使用 Apache HttpClient5，并把 {@link DnsResolver} 固定为 {@link
- *       PublicAddressDnsResolver}。地址准入发生在客户端解析 socket 目标的时刻，校验通过的那批地址就是随后建连使用的地址，
- *       不存在「先校验、再第二次系统解析」的 DNS rebinding 窗口；固定禁用自动重定向与自动重试（3xx 作为普通响应交回网关判定），
- *       连接超时与响应空闲超时由配置给出，整次下载的总期限由网关的流式复制看门狗施加。SNI 与证书主机名校验仍按原始 {@code HttpHost} 用 JDK 默认策略执行。
+ *   <li><b>GET</b>：使用 Apache HttpClient5，路由阶段通过 {@link PublicAddressDnsResolver} 单次解析并校验全部地址， 直连和代理
+ *       CONNECT 都固定到已校验 IP，TLS/HTTP 名称保留原域名。代理自身使用普通系统 DNS； 禁用自动重定向与重试，连接/响应空闲超时由配置给出，总期限仍由网关看门狗施加。
  *   <li><b>PUT</b>：使用 JDK {@link HttpClient} 直传预签名地址。该地址由本部署的 Storage 签发，可信且可能位于内网，因此这里不施加公网地址策略；
  *       请求体直接从临时文件流式发出，不把内容读进内存。
  * </ul>
@@ -48,16 +47,23 @@ final class HttpRemoteMediaTransport implements RemoteMediaTransport {
   private final HttpClient uploadClient;
 
   HttpRemoteMediaTransport(Duration connectTimeout, DnsResolver dnsResolver) {
-    this(connectTimeout, dnsResolver, null);
+    this(connectTimeout, dnsResolver, null, ProxySelector.getDefault());
   }
 
   /** 测试装配：可额外注入只面向本地测试服务器的 socket 策略，生产装配不注入并使用 JDK 默认信任与主机名校验。 */
   HttpRemoteMediaTransport(
       Duration connectTimeout, DnsResolver dnsResolver, TlsSocketStrategy tlsStrategy) {
+    this(connectTimeout, dnsResolver, tlsStrategy, ProxySelector.getDefault());
+  }
+
+  HttpRemoteMediaTransport(
+      Duration connectTimeout,
+      DnsResolver dnsResolver,
+      TlsSocketStrategy tlsStrategy,
+      ProxySelector proxySelector) {
     Objects.requireNonNull(connectTimeout, "connectTimeout");
     PoolingHttpClientConnectionManagerBuilder connections =
         PoolingHttpClientConnectionManagerBuilder.create()
-            .setDnsResolver(Objects.requireNonNull(dnsResolver, "dnsResolver"))
             .setDefaultConnectionConfig(
                 ConnectionConfig.custom().setConnectTimeout(Timeout.of(connectTimeout)).build());
     if (tlsStrategy != null) {
@@ -66,11 +72,13 @@ final class HttpRemoteMediaTransport implements RemoteMediaTransport {
     this.downloadClient =
         HttpClients.custom()
             .setConnectionManager(connections.build())
+            .setRoutePlanner(new PinnedMediaRoutePlanner(dnsResolver, proxySelector))
             .disableRedirectHandling()
             .disableAutomaticRetries()
             .build();
     this.uploadClient =
         HttpClient.newBuilder()
+            .proxy(proxySelector)
             .connectTimeout(connectTimeout)
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
@@ -79,7 +87,7 @@ final class HttpRemoteMediaTransport implements RemoteMediaTransport {
   /**
    * 发起一次 GET。
    *
-   * <p>地址解析与校验都由注入的 {@link DnsResolver} 在建连前完成，私网地址、DNS rebinding 与解析失败都会在发出请求之前收敛为 {@link
+   * <p>地址解析与校验都由路由器使用注入的 {@link DnsResolver} 在选代理及建连前完成，私网地址、DNS rebinding 与解析失败都会在发出请求之前收敛为 {@link
    * PluginResourceUnavailableException}；响应不可读时 response 会在本次调用内立即关闭。
    *
    * <p>{@code responseTimeout} 只是响应空闲超时，不是整次下载的总期限；总期限由网关的看门狗施加，因此响应体被关闭时必须立刻中止仍在阻塞的读取。

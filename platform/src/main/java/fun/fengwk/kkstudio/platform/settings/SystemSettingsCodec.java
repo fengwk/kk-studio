@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsIntegrationsDTO;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
@@ -159,7 +160,7 @@ public class SystemSettingsCodec {
     }
   }
 
-  /** 校验并转换 PUT 请求的六个 section 为领域聚合；缺失字段给出 field 级错误。 */
+  /** 校验并转换 PUT 请求的七个 section 为领域聚合；缺失字段给出 field 级错误。 */
   public SystemSettings fromDto(SystemSettingsSectionsDTO sections) {
     if (sections == null) {
       throw new IllegalArgumentException("system settings are required");
@@ -168,18 +169,20 @@ public class SystemSettingsCodec {
         toTool(sections.getTool()),
         toAiRuntime(sections.getAiRuntime()),
         toEnvironment(sections.getEnvironment()),
+        toNetwork(sections.getNetwork()),
         toIntegrations(sections.getIntegrations()),
         toStorageMedia(sections.getStorageMedia()),
         toAdvanced(sections.getAdvanced()));
   }
 
-  /** 把领域聚合六个 section 映射为 DTO 载体（GET 响应 / 测试对比）。 */
+  /** 把领域聚合七个 section 映射为 DTO 载体（GET 响应 / 测试对比）。 */
   public SystemSettingsSectionsDTO toSections(SystemSettings settings) {
     Objects.requireNonNull(settings, "settings");
     SystemSettingsSectionsDTO dto = new SystemSettingsSectionsDTO();
     dto.setTool(fromTool(settings.tool()));
     dto.setAiRuntime(fromAiRuntime(settings.aiRuntime()));
     dto.setEnvironment(fromEnvironment(settings.environment()));
+    dto.setNetwork(fromNetwork(settings.network()));
     dto.setIntegrations(fromIntegrations(settings.integrations()));
     dto.setStorageMedia(fromStorageMedia(settings.storageMedia()));
     dto.setAdvanced(fromAdvanced(settings.advanced()));
@@ -226,6 +229,20 @@ public class SystemSettingsCodec {
     return new SystemSettings.Environment(
         requiredMillis(dto.getMaxResourceBytes(), "environment.maxResourceBytes"),
         requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
+  }
+
+  private static SystemSettings.Network toNetwork(SystemSettingsNetworkDTO dto) {
+    if (dto == null) {
+      throw new IllegalArgumentException("network is required");
+    }
+    return new SystemSettings.Network(dto.getProxyUrl(), dto.getNoProxyHosts());
+  }
+
+  private static SystemSettingsNetworkDTO fromNetwork(SystemSettings.Network network) {
+    SystemSettingsNetworkDTO dto = new SystemSettingsNetworkDTO();
+    dto.setProxyUrl(network.proxyUrl());
+    dto.setNoProxyHosts(network.noProxyHosts());
+    return dto;
   }
 
   private static SystemSettings.Integrations toIntegrations(SystemSettingsIntegrationsDTO dto) {

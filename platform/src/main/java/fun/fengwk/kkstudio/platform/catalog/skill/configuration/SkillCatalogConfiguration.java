@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill.configuration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.git.JGitSkillCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 public class SkillCatalogConfiguration {
 
   @Bean
+  @DependsOn("systemProxySelector")
   public SkillGitCache skillGitCache(SkillCatalogProperties properties) {
     return new JGitSkillCache(properties.resolvedCacheRoot());
   }

@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.platform.catalog.skill.git;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.eclipse.jgit.api.Git;
@@ -79,6 +81,57 @@ public class JGitSkillCacheTest {
 
     assertThrows(
         SkillGitException.class, () -> cache.resolveBranchHead(repoUrl, "non-existent-branch"));
+  }
+
+  @Test
+  public void unsupportedSchemeRejectedAtEntry(@TempDir Path tempDir) throws Exception {
+    // 测试意图：直接入口对未受网络保护覆盖的 scheme fail-closed；file 通过门禁交由 JGit 处理。
+    JGitSkillCache cache = new JGitSkillCache(tempDir.resolve("cache"));
+
+    SkillGitException gitHead =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.resolveBranchHead("git://example.com/repo.git", "main"));
+    assertEquals(
+        "UNSUPPORTED_REPOSITORY_SCHEME: unsupported repository scheme: git", gitHead.getMessage());
+
+    SkillGitException sshEnsure =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.ensureCommit("pkg", "ssh://example.com/repo.git", "0".repeat(40)));
+    assertEquals(
+        "UNSUPPORTED_REPOSITORY_SCHEME: unsupported repository scheme: ssh",
+        sshEnsure.getMessage());
+
+    SkillGitException fileHead =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.resolveBranchHead(tempDir.toUri().toString(), "main"));
+    assertFalse(fileHead.getMessage().contains("UNSUPPORTED_REPOSITORY_SCHEME"));
+  }
+
+  @Test
+  public void directEntriesRejectCredentialsBeforeNetwork(@TempDir Path tempDir) {
+    // 测试意图：非 Web 调用同样在网络前拒绝凭据，错误及 cause 不泄漏原始 URL。
+    JGitSkillCache cache = new JGitSkillCache(tempDir.resolve("cache"));
+    String repositoryUrl = "https://user:private-value@example.invalid/repo.git";
+    SkillGitException head =
+        assertThrows(SkillGitException.class, () -> cache.resolveBranchHead(repositoryUrl, "main"));
+    SkillGitException fetch =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.ensureCommit("pkg", repositoryUrl, "0".repeat(40)));
+    assertEquals("repositoryUrl must not contain userinfo", head.getMessage());
+    assertEquals(head.getMessage(), fetch.getMessage());
+    assertNull(head.getCause());
+    assertNull(fetch.getCause());
+    assertFalse(Files.exists(tempDir.resolve("cache/pkg.git")));
+    SkillGitException malformed =
+        assertThrows(
+            SkillGitException.class,
+            () -> cache.resolveBranchHead("https://user:private value@example.invalid", "main"));
+    assertEquals("repositoryUrl must be a valid URL without userinfo", malformed.getMessage());
+    assertNull(malformed.getCause());
   }
 
   @Test

@@ -13,6 +13,14 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
@@ -33,6 +41,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -343,6 +352,171 @@ public class SkillCatalogServiceImplTest {
     assertEquals(created.getVersion(), fixture.service.getPackage("dev-package").getVersion());
   }
 
+  /** 测试意图：Git 准备期间可并发编辑；短写事务重检版本后拒绝陈旧检查/发布而不覆盖新事实。 */
+  @Test
+  void shouldRejectVersionChangedDuringNetworkPreparation() {
+    Fixture fixture = new Fixture();
+    fixture.createPublished("dev-package");
+    fixture.git.resolveHead(REPOSITORY_URL, "main", NEW_COMMIT);
+    fixture.git.onNetwork =
+        () -> {
+          SkillPackageEditDTO edit = new SkillPackageEditDTO();
+          edit.setExpectedVersion("0");
+          edit.setBranch("release");
+          edit.setDescription("concurrent");
+          fixture.service.editPackage("dev-package", edit);
+        };
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> fixture.service.checkPackage("dev-package", check("0")));
+    assertEquals("release", fixture.service.getPackage("dev-package").getBranch());
+    assertEquals(OLD_COMMIT, fixture.service.getPackage("dev-package").getObservedHeadCommit());
+
+    Fixture publish = new Fixture();
+    publish.createPublished("dev-package");
+    publish.git.onNetwork =
+        () -> {
+          SkillPackageEditDTO edit = new SkillPackageEditDTO();
+          edit.setExpectedVersion("0");
+          edit.setBranch("release");
+          edit.setDescription("concurrent");
+          publish.service.editPackage("dev-package", edit);
+        };
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> publish.service.updatePackage("dev-package", publish("0", OLD_COMMIT)));
+    assertEquals("1", publish.service.getPackage("dev-package").getVersion());
+  }
+
+  /** 意图：网络准备的身份/branch/观察值必须重新核对，即使底层错误地未推进版本也不得发布准备结果。 */
+  @Test
+  void shouldRecheckPreparedFactsAndMissingRows() {
+    for (String changed : List.of("branch", "repository", "observed", "deleted")) {
+      Fixture fixture = new Fixture();
+      fixture.createPublished("dev-package");
+      fixture.git.onNetwork =
+          () -> {
+            SkillPackage concurrent = fixture.repository.getPackage("dev-package");
+            switch (changed) {
+              case "branch" -> concurrent.setBranch("release");
+              case "repository" -> concurrent.setRepositoryUrl("https://other.invalid/repo");
+              case "observed" -> concurrent.setObservedHeadCommit(NEW_COMMIT);
+              default -> fixture.repository.packages.remove("dev-package");
+            }
+            if (!changed.equals("deleted")) {
+              fixture.repository.seed(concurrent);
+            }
+          };
+      Class<? extends RuntimeException> expectedError =
+          changed.equals("deleted")
+              ? AiResourceNotFoundException.class
+              : AiVersionConflictException.class;
+      assertThrows(
+          expectedError,
+          () -> fixture.service.updatePackage("dev-package", publish("0", OLD_COMMIT)));
+    }
+    Fixture missing = new Fixture();
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> missing.service.checkPackage("missing", check("0")));
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> missing.service.updatePackage("missing", publish("0", OLD_COMMIT)));
+  }
+
+  /** 意图：Create 准备期间同名插入由数据库唯一性收敛为 duplicate，CAS 失败仍区分丢失与版本冲突。 */
+  @Test
+  void shouldPreserveDuplicateAndCasFailureClassification() {
+    Fixture duplicate = new Fixture();
+    duplicate.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    duplicate.git.manifest(OLD_COMMIT, List.of(entry("dev", "developer skill")));
+    duplicate.git.onNetwork = () -> duplicate.repository.seed(unchecked("dev-package"));
+    assertThrows(
+        AiDuplicateException.class, () -> duplicate.service.createPackage(create("dev-package")));
+    Fixture emptyInsert = new Fixture();
+    emptyInsert.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    emptyInsert.git.manifest(OLD_COMMIT, List.of());
+    emptyInsert.repository.failInsert = true;
+    assertThrows(
+        IllegalStateException.class,
+        () -> emptyInsert.service.createPackage(create("dev-package")));
+    for (boolean disappear : List.of(false, true)) {
+      Fixture fixture = new Fixture();
+      fixture.createPublished("dev-package");
+      fixture.repository.failUpdate = true;
+      fixture.repository.disappearOnUpdate = disappear;
+      fixture.git.resolveHead(REPOSITORY_URL, "main", NEW_COMMIT);
+      Class<? extends RuntimeException> expectedError =
+          disappear ? AiResourceNotFoundException.class : AiVersionConflictException.class;
+      assertThrows(expectedError, () -> fixture.service.checkPackage("dev-package", check("0")));
+    }
+  }
+
+  /** 意图：所有 Git 写入口在网络开始前拒绝空请求与非法身份、URL、branch、commit，并保留可空描述语义。 */
+  @Test
+  void shouldValidateBeforeNetworkPreparation() {
+    Fixture fixture = new Fixture();
+    assertThrows(AiValidationException.class, () -> fixture.service.createPackage(null));
+    assertThrows(AiValidationException.class, () -> fixture.service.checkPackage("pkg", null));
+    assertThrows(AiValidationException.class, () -> fixture.service.updatePackage("pkg", null));
+    assertThrows(AiValidationException.class, () -> fixture.service.editPackage("pkg", null));
+    assertThrows(
+        AiValidationException.class, () -> fixture.service.createPackage(create("../invalid")));
+    for (String url :
+        List.of(
+            "",
+            " https://example.invalid/repo",
+            "https://example.invalid/\u0001",
+            "git://example.invalid/repo",
+            "ssh://example.invalid/repo",
+            "https://" + "a".repeat(2048))) {
+      assertThrows(
+          AiValidationException.class, () -> fixture.service.createPackage(createWithUrl(url)));
+    }
+    AiValidationException credential =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                fixture.service.createPackage(
+                    createWithUrl("https://user:secret@example.com/s.git")));
+    assertFalse(credential.getMessage().contains("secret"));
+    assertFalse(credential.getMessage().contains("example.com"));
+    for (String branch : List.of(" main", "a".repeat(256), "main\ninvalid")) {
+      SkillPackageCreateDTO request = create("pkg");
+      request.setBranch(branch);
+      assertThrows(AiValidationException.class, () -> fixture.service.createPackage(request));
+    }
+    SkillPackageCreateDTO invalidDescription = create("pkg");
+    invalidDescription.setDescription("invalid\u0001description");
+    assertThrows(
+        AiValidationException.class, () -> fixture.service.createPackage(invalidDescription));
+    for (String commit : new String[] {null, "not-a-commit"}) {
+      assertThrows(
+          AiValidationException.class,
+          () -> fixture.service.updatePackage("pkg", publish("0", commit)));
+    }
+    fixture.git.resolveHead(REPOSITORY_URL, "main", OLD_COMMIT);
+    fixture.git.manifest(OLD_COMMIT, List.of());
+    SkillPackageCreateDTO nullable = create("pkg");
+    nullable.setDescription(" ");
+    assertNull(fixture.service.createPackage(nullable).getDescription());
+  }
+
+  /** 意图：Check 的网络错误摘要在 null、控制字符及多字节超长边界上仍非空且有界，不改变已发布事实。 */
+  @Test
+  void shouldBoundCheckFailuresWithoutLosingPublishedFacts() {
+    for (String message : new String[] {null, "\n", "界".repeat(1500)}) {
+      Fixture fixture = new Fixture();
+      fixture.createPublished("dev-package");
+      fixture.git.failHead(new SkillGitException(message));
+      SkillPackageDTO result = fixture.service.checkPackage("dev-package", check("0"));
+      assertFalse(result.getHeadCheckError().isBlank());
+      assertTrue(result.getHeadCheckError().getBytes(StandardCharsets.UTF_8).length <= 4096);
+      assertEquals(OLD_COMMIT, result.getCurrentCommit());
+      assertEquals(OLD_COMMIT, result.getObservedHeadCommit());
+    }
+  }
+
   private static SkillPackageCreateDTO create(String packageName) {
     return createWithUrl(REPOSITORY_URL, packageName);
   }
@@ -398,13 +572,40 @@ public class SkillCatalogServiceImplTest {
     private final SkillCatalogServiceImpl service;
 
     private Fixture() {
+      AbstractPlatformTransactionManager transactions =
+          new AbstractPlatformTransactionManager() {
+            @Override
+            protected Object doGetTransaction() {
+              return new Object();
+            }
+
+            @Override
+            protected void doBegin(Object transaction, TransactionDefinition definition) {}
+
+            @Override
+            protected void doCommit(DefaultTransactionStatus status) {}
+
+            @Override
+            protected void doRollback(DefaultTransactionStatus status) {}
+          };
       this.service =
-          new SkillCatalogServiceImpl(
-              repository,
-              git,
-              new SkillCatalogConverter(),
-              new SkillPackageGuard(repository, agentDefinitionRepository),
-              new AgentEditableSupport(new ObjectMapper()));
+          transactional(
+              new SkillCatalogServiceImpl(
+                  repository,
+                  git,
+                  new SkillCatalogConverter(),
+                  new SkillPackageGuard(repository, agentDefinitionRepository),
+                  new AgentEditableSupport(new ObjectMapper()),
+                  transactional(new SkillCatalogWrites(), transactions)),
+              transactions);
+    }
+
+    private static <T> T transactional(T bean, AbstractPlatformTransactionManager manager) {
+      ProxyFactory proxy = new ProxyFactory(bean);
+      proxy.setProxyTargetClass(true);
+      proxy.addAdvice(
+          new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
+      return (T) proxy.getProxy();
     }
 
     private SkillPackageDTO createPublished(String packageName) {
@@ -423,6 +624,9 @@ public class SkillCatalogServiceImplTest {
   private static final class FakeRepository implements SkillPackageRepository {
 
     private final Map<String, SkillPackage> packages = new LinkedHashMap<>();
+    private boolean failInsert;
+    private boolean failUpdate;
+    private boolean disappearOnUpdate;
 
     private void seed(SkillPackage skillPackage) {
       packages.put(skillPackage.getPackageName(), skillPackage);
@@ -438,7 +642,8 @@ public class SkillCatalogServiceImplTest {
 
     @Override
     public SkillPackage getPackage(String packageName) {
-      return packages.get(packageName);
+      SkillPackage current = packages.get(packageName);
+      return current == null ? null : copy(current);
     }
 
     @Override
@@ -448,12 +653,19 @@ public class SkillCatalogServiceImplTest {
 
     @Override
     public SkillPackage lockPackage(String packageName) {
-      return packages.get(packageName);
+      assertTrue(
+          TransactionSynchronizationManager.isActualTransactionActive(),
+          "row lock must only be acquired in the short write transaction");
+      return getPackage(packageName);
     }
 
     @Override
     public boolean insertPackage(SkillPackage skillPackage) {
+      assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
       if (packages.containsKey(skillPackage.getPackageName())) {
+        throw new DuplicateKeyException("duplicate package");
+      }
+      if (failInsert) {
         return false;
       }
       skillPackage.setCreateTime(Instant.EPOCH);
@@ -464,6 +676,12 @@ public class SkillCatalogServiceImplTest {
 
     @Override
     public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
+      if (failUpdate) {
+        if (disappearOnUpdate) {
+          packages.remove(skillPackage.getPackageName());
+        }
+        return false;
+      }
       SkillPackage current = packages.get(skillPackage.getPackageName());
       if (current == null || current.getVersion() != expectedVersion) {
         return false;
@@ -509,6 +727,16 @@ public class SkillCatalogServiceImplTest {
     private final Map<String, List<SkillManifestEntry>> manifests = new LinkedHashMap<>();
     private SkillGitException headFailure;
     private SkillGitException manifestFailure;
+    private Runnable onNetwork = () -> {};
+
+    private void network() {
+      assertFalse(
+          TransactionSynchronizationManager.isActualTransactionActive(),
+          "Git preparation must not hold a database transaction or its row locks");
+      Runnable action = onNetwork;
+      onNetwork = () -> {};
+      action.run();
+    }
 
     private void resolveHead(String repositoryUrl, String branch, String commit) {
       heads.put(repositoryUrl + "#" + branch, commit);
@@ -530,6 +758,7 @@ public class SkillCatalogServiceImplTest {
 
     @Override
     public String resolveBranchHead(String repositoryUrl, String branch) {
+      network();
       if (headFailure != null) {
         throw headFailure;
       }
@@ -542,11 +771,13 @@ public class SkillCatalogServiceImplTest {
 
     @Override
     public void ensureCommit(String packageName, String repositoryUrl, String commit) {
+      network();
       ensuredCommits.add(commit);
     }
 
     @Override
     public List<SkillManifestEntry> scanManifest(String packageName, String commit) {
+      assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
       if (manifestFailure != null) {
         throw manifestFailure;
       }
