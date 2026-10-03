@@ -163,9 +163,7 @@ describe('system settings server editor', () => {
     expect(await screen.findByRole('tab', { name: '常规' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'AI 运行时' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '工具与权限' })).not.toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      '设置表单元数据无效，无法渲染编辑器。',
-    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法加载设置表单。')
     expect(screen.getByRole('tabpanel')).toHaveTextContent('键盘快捷键')
   })
 

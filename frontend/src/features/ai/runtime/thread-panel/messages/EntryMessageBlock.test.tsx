@@ -41,7 +41,7 @@ describe('EntryMessageBlock', () => {
     expect(screen.getByText('会话开始')).toBeInTheDocument()
     expect(screen.getByText('无法识别消息 Entry')).toBeInTheDocument()
     expect(screen.getByText('未识别 Entry')).toBeInTheDocument()
-    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(2)
+    expect(screen.getAllByText('查看原始数据')).toHaveLength(2)
     expect(container.querySelector('[data-entry-kind="root"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unsupported_message"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unknown_entry"] svg')).toBeInTheDocument()

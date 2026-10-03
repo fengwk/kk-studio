@@ -701,7 +701,7 @@ describe('AgentPane orchestration', () => {
       kind: 'BOUND_THREAD',
       threadId: THREAD_ID,
     })
-    expect(hook.result.current.error).toContain('等待完成或精确重试')
+    expect(hook.result.current.error).toContain('等待完成或重试原操作')
 
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBeNull()
@@ -1388,7 +1388,7 @@ describe('AgentPane orchestration', () => {
 
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBeNull()
-    expect(hook.result.current.error).toContain('等待完成或精确重试')
+    expect(hook.result.current.error).toContain('等待完成或重试原操作')
 
     act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
     await waitFor(() =>
@@ -2986,7 +2986,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
         // 出现明确的存储失败可重试错误提示
         await waitFor(() => {
-          expect(screen.getByText(/无法安全记录请求状态/)).toBeInTheDocument()
+          expect(screen.getByText(/无法保存发送记录/)).toBeInTheDocument()
         })
       } finally {
         storageSpy.mockRestore()
@@ -3223,7 +3223,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await act(async () => {
         await controller2.current.composer.onSubmit()
       })
-      expect(controller2.current.error).toMatch(/无法安全记录请求状态/)
+      expect(controller2.current.error).toMatch(/无法保存发送记录/)
       expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
       expect(localStorage.getItem(pendingKey)).toBe(pane1Stored)
       expect(controller2.current.pendingMessage).toBeNull()
