@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -137,8 +138,9 @@ public class HarnessRuntimeConfiguration {
     return new ManagedResourceDownloadService(resourceStore);
   }
 
-  /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建。 */
+  /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建；媒体传输构造前先安装统一代理。 */
   @Bean
+  @DependsOn("systemProxySelector")
   public PluginResourceGateway pluginResourceGateway(
       HarnessStore harnessStore,
       SessionBlobRefManager sessionBlobRefManager,
