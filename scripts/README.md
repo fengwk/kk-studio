@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemo
 curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
 ```
 
-Windows 下载脚本为临时或明确的用户文件，再用 `powershell -File` 执行，不使用 `iex`。PowerShell 5.1 的 TLS 1.2、Unicode、token 权限、可复制安装/更新命令与三平台排错统一见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。可保留脚本日常管理，但要重新下载才能获取新版安装器。升级不自动回滚，也不接管 legacy unmanaged 服务。
+Windows 下载脚本为临时或明确的用户文件，再用 `powershell -File` 执行。PowerShell 5.1 的 TLS 1.2、Unicode、token 权限、可复制安装/更新命令与三平台排错统一见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。可保留脚本日常管理，但要重新下载才能获取新版安装器。下载/预检失败保留现有安装，替换与重启阶段失败不自动回滚；同名服务的所有权标记不匹配时拒绝管理。
 
 ## 日常开发
 
@@ -46,7 +46,7 @@ Windows 下载脚本为临时或明确的用户文件，再用 `powershell -File
 | 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、python3；snapshot 需 `PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree，创建/删除隔离栈与数据卷 |
 | Agent 可靠性矩阵 | [dev/verify/reliability/run-agent-matrix.mjs](dev/verify/reliability/run-agent-matrix.mjs) | Node、Docker、可靠性栈与 `TEST_MINIMAX_*`；真实付费模型调用 |
 | SBOM、依赖与镜像漏洞检查 | [dev/verify/supply-chain/run.sh](dev/verify/supply-chain/run.sh) `sbom` / `audit` / `image` / `all` | 按子命令需 JDK 21/Maven、Node/npm、Docker、git 与网络；访问 registry、NVD/漏洞库，报告在 `reports/supply-chain`；`test` 只运行脚本测试 |
-| 隔离栈端到端 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 python3；创建/删除栈与数据卷 |
+| 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 python3，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
 | Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
 | Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1、检查 16 张目标表与 SQL 探针，不访问部署库 |
@@ -60,7 +60,7 @@ E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
 | 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、JDK 21、git、sha256sum、已构建 shaded JAR；校验后替换 `harness/daemon/target/release`，生成 JAR、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
-| 导出 V1 Agent catalog | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | psql、python3、数据库连接；只读当前 V1 的 Provider/Model/Agent 三张表，旧结构拒绝，包写仓库外 owner-only 目录；SQL 包含 Provider 凭据 |
+| 导出 Agent catalog | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | psql、python3、数据库连接；只读 Provider/Model/Agent 三张表，列集合须与当前 schema 精确匹配；包写仓库外 owner-only 目录，SQL 包含 Provider 凭据 |
 | 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
 | 回灌 catalog | [ops/import-agent-catalog.sh](ops/import-agent-catalog.sh) `--package PATH` | psql、python3；目标已初始化当前 Flyway V1，三张表为空且 checksum 匹配；单事务加锁、COPY 与指纹核对，事务失败整体回滚，失败日志只含安全类别/SQLSTATE |
 
@@ -68,7 +68,7 @@ E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行
 
 ## 目录与维护边界
 
-- `dev/`、`daemon/`、`ops/` 是三个领域，没有兼容 wrapper 或符号链接。
+- `dev/`、`daemon/`、`ops/` 分别持有开发验证、Daemon 安装发布与数据库维护入口。
 - `dev/verify/<capability>/tests` 放对应脚本测试和资源；CI 发现 `scripts/*/tests` 与 `scripts/dev/verify/*/tests`。测试目录不是公开操作入口。
 - [dev/lib](dev/lib/) 共享开发自动化实现；[ops/lib](ops/lib/) 与 [ops/agent_catalog.py](ops/agent_catalog.py) 共享数据库维护实现。同目录的 `cases`、`ui`、`fixtures`、`lib` 属于实现细节，不把它们单独承诺为用户命令。
 - 新增入口时维护这里的用途、前置条件与副作用；参数细节放入口帮助和对应操作文档，不在索引重复源码流程。

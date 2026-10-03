@@ -10,12 +10,13 @@ Environment Daemon 把 Studio 的文件、命令、检索与 LSP 工具调用执
 wss://studio.example.com/api/harness/environment-daemon/v1
 ```
 
-主机需要 **JDK 21 与 Bash**。安装器会检查 Java 版本为 21，并要求 Java home 中同时有 `java` 与 `javac`；不是只装一个 JRE。Java home 按 `JAVA_HOME_21` → `JAVA_HOME` → PATH 查找，也可以用安装参数指定。gateway 仅支持 `ws://` / `wss://`；公网使用 `wss://`，每个终止 WebSocket 的代理层都须支持 `permessage-deflate` 压缩。
+主机需要 **JDK 21 与 Bash**。安装器检查 Java 版本为 21，并要求 Java home 中同时有 `java` 与 `javac`。Java home 按 `JAVA_HOME_21` → `JAVA_HOME` → PATH 查找，也可以用安装参数指定。gateway 仅支持 `ws://` / `wss://`；公网使用 `wss://`，每个终止 WebSocket 的代理层都须支持 `permessage-deflate` 压缩。
+Studio 没有内置登录鉴权，入口须配置外部认证；只有可信的用户与 Agent 才应取得 Environment 的宿主权限。
 
 | 平台 | 额外条件 | 常驻方式 |
 | --- | --- | --- |
 | Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
-| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
+| macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `sha256sum` 或 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
 | Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、PATH 上的 `bash.exe` | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
 
 Windows 的 Bash 可来自 Git for Windows 或兼容实现；这是命令工具的解释器要求，并不要求使用 Git 克隆源码。macOS 纯 SSH 会话如果没有桌面登录域，不能安装 LaunchAgent。Linux 若需注销后继续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不会代为开启。
@@ -77,6 +78,20 @@ Daemon 有当前用户的文件与命令权限，**没有文件系统沙箱**。
 
 最后必须在 Studio 的 Environment 页面确认 **`READY`**。之后可在 Chat 分支中选择该 Environment，并给 Agent 配置所需的 Environment Tools。READY 后 Platform 会异步同步已发布的 Skill Package；同步失败不撤销 READY，其它宿主能力仍可用，技能引用可退回 Platform Skill URI。
 
+## 管理身份
+
+安装器只管理当前用户且带所有权标记的服务定义：
+
+| 平台 | 所有权检查 |
+| --- | --- |
+| Linux | unit 首行必须是 `# Managed by scripts/daemon/install.sh` |
+| macOS | plist 第二行必须是 `<!-- Managed by scripts/daemon/install.sh -->` |
+| Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; schema=1; ownerSid=<当前 SID>` |
+
+同名服务存在但标记不匹配时，安装、升级或卸载会拒绝覆盖/删除。先由该服务的管理者确认
+JAR、配置、token 与数据位置，停止并妥善移开服务定义，再安装受管服务。
+标记用于识别管理归属，不能通过手工补标记授权接管。
+
 ## 一键更新
 
 更新时不必重复填写 gateway、token 或其它配置，也不需要 `git pull`。
@@ -107,8 +122,6 @@ try {
 重启会中断在途工具调用；进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。更新后重新确认 Studio `READY`。
 
 需要固定版本时，把实际 release tag 传给 `upgrade --version vX.Y.Z`（Unix）或 `upgrade -Version vX.Y.Z`（Windows）；`install` 也接受该参数。不带版本的下一次更新仍取 latest，pin 不是永久更新策略。
-
-旧版或手工维护的 **legacy unmanaged** unit、plist、同名任务不能自动接管。安装器按服务定义的所有权标记拒绝覆盖或删除；先确认配置、token 与数据位置，手动停止并迁移旧服务，再执行 `install`。不要仅补标记来绕过检查。
 
 ## 日常管理
 
@@ -271,7 +284,7 @@ Java 可声明 `command: ["/opt/jdtls/bin/jdtls"]`、`extensions: [".java"]`、`
 | --- | --- |
 | Java 版本或 home 预检失败 | 指定真正的 JDK 21 home，检查 `bin/java` 与 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
 | GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验。upgrade 仍保留旧服务 |
-| `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 手动迁移旧服务，不伪造所有权标记；Linux 标记是 unit 首行，macOS 是 plist 第二行，Windows 是精确任务 Description |
+| `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 按[管理身份](#管理身份)确认归属，停止并移开非受管定义；不要伪造所有权标记 |
 | token 父目录权限失败 | Unix 确认共享需求后去掉 group/other 写权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存目录，不自动放宽规则 |
 | `environment registration is rejected` | 从目标 Environment 重新复制 token，安全更新文件并重启 |
 | WebSocket close code 1010 | 所有终止 WebSocket 的代理层启用 `permessage-deflate` |
