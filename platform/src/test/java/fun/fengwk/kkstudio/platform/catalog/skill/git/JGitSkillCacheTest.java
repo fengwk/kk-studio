@@ -116,8 +116,7 @@ public class JGitSkillCacheTest {
     JGitSkillCache cache = new JGitSkillCache(tempDir.resolve("cache"));
     String repositoryUrl = "https://user:private-value@example.invalid/repo.git";
     SkillGitException head =
-        assertThrows(
-            SkillGitException.class, () -> cache.resolveBranchHead(repositoryUrl, "main"));
+        assertThrows(SkillGitException.class, () -> cache.resolveBranchHead(repositoryUrl, "main"));
     SkillGitException fetch =
         assertThrows(
             SkillGitException.class,
