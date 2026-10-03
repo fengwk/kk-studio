@@ -50,7 +50,7 @@ RUN --mount=type=cache,id=kk-studio-maven,target=/root/.m2/repository,sharing=lo
          "$(command -v jar)" /build/app.jar /build/convention4j-agent/convention4j-agent.jar
 
 # ---------- runtime ----------
-FROM eclipse-temurin:21.0.8_9-jre-jammy
+FROM eclipse-temurin:21.0.12.1_1-jre-jammy
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
