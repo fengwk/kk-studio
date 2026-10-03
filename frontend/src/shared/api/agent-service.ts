@@ -83,7 +83,7 @@ export function createAgentService(client: HttpClient = apiClient) {
     listSkillPackages: (): Promise<SkillPackageDTO[]> => client.get('/ai/catalog/skill-packages'),
 
     createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDTO> =>
-      client.post('/ai/catalog/skill-packages', data),
+      client.post('/ai/catalog/skill-packages', data, { timeout: 0 }),
 
     editSkillPackage: (
       name: string,
@@ -95,13 +95,13 @@ export function createAgentService(client: HttpClient = apiClient) {
       name: string,
       data: SkillPackageCheckDTO,
     ): Promise<SkillPackageDTO> =>
-      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/check`, data),
+      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/check`, data, { timeout: 0 }),
 
     publishSkillPackage: (
       name: string,
       data: SkillPackagePublishDTO,
     ): Promise<SkillPackageDTO> =>
-      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/update`, data),
+      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/update`, data, { timeout: 0 }),
 
     deleteSkillPackage: (
       name: string,

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
@@ -61,6 +62,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   private final SkillCatalogConverter converter;
   private final SkillPackageGuard guard;
   private final AgentEditableSupport editableSupport;
+  private final SkillCatalogWrites writes;
 
   @Override
   public List<SkillPackageDTO> listPackages() {
@@ -77,7 +79,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO createPackage(SkillPackageCreateDTO createDTO) {
     if (createDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
@@ -113,15 +115,18 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     created.setHeadCheckError(null);
     created.setSkills(skills);
     created.setVersion(0L);
-    try {
-      if (!skillPackageRepository.insertPackage(created)) {
-        throw new IllegalStateException("create skill package failed");
-      }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          SkillPackageGuard.RESOURCE, "skill package already exists: " + packageName, error);
-    }
-    return getPackage(packageName);
+    return writes.execute(
+        () -> {
+          try {
+            if (!skillPackageRepository.insertPackage(created)) {
+              throw new IllegalStateException("create skill package failed");
+            }
+          } catch (DuplicateKeyException error) {
+            throw new AiDuplicateException(
+                SkillPackageGuard.RESOURCE, "skill package already exists: " + packageName, error);
+          }
+          return getPackage(packageName);
+        });
   }
 
   @Override
@@ -160,14 +165,14 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO checkPackage(String packageName, SkillPackageCheckDTO checkDTO) {
     if (checkDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
     }
     String rawExpected = checkDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
-    SkillPackage current = guard.requirePackageForUpdate(packageName);
+    SkillPackage current = requirePackage(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     String observedHeadCommit;
     String headCheckError;
@@ -180,20 +185,26 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       observedHeadCommit = current.getObservedHeadCommit();
       headCheckError = boundCheckError(error);
     }
-    // 观察结果未变化时既不写行也不推进 version，避免只读检查造成写放大；
-    // 因此在同一观察结果下反复 Check 不会让 Card 失效。
-    if (Objects.equals(observedHeadCommit, current.getObservedHeadCommit())
-        && Objects.equals(headCheckError, current.getHeadCheckError())) {
-      return converter.convert(current);
-    }
-    current.setObservedHeadCommit(observedHeadCommit);
-    current.setHeadCheckError(headCheckError);
-    casUpdate(current, expected);
-    return getPackage(packageName);
+    String preparedHead = observedHeadCommit;
+    String preparedError = headCheckError;
+    return writes.execute(
+        () -> {
+          SkillPackage locked = recheck(current, rawExpected, expected);
+          // 观察结果未变化时既不写行也不推进 version，避免只读检查造成写放大；
+          // 因此在同一观察结果下反复 Check 不会让 Card 失效。
+          if (Objects.equals(preparedHead, locked.getObservedHeadCommit())
+              && Objects.equals(preparedError, locked.getHeadCheckError())) {
+            return converter.convert(locked);
+          }
+          locked.setObservedHeadCommit(preparedHead);
+          locked.setHeadCheckError(preparedError);
+          casUpdate(locked, expected);
+          return getPackage(packageName);
+        });
   }
 
   @Override
-  @Transactional
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public SkillPackageDTO updatePackage(String packageName, SkillPackagePublishDTO publishDTO) {
     if (publishDTO == null) {
       throw new AiValidationException(SkillPackageGuard.RESOURCE, "request body must not be null");
@@ -201,7 +212,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     String rawExpected = publishDTO.getExpectedVersion();
     long expected = requireExpectedVersion(rawExpected);
     String targetCommit = requireCommit(publishDTO.getTargetCommit(), "targetCommit");
-    SkillPackage current = guard.requirePackageForUpdate(packageName);
+    SkillPackage current = requirePackage(packageName);
     requireCurrentVersion(current, rawExpected, expected);
     // 只接受该 CAS 快照展示过的 exact commit：branch 在检查之后又前进也不会暗中切换发布内容。
     if (!targetCommit.equals(current.getObservedHeadCommit())) {
@@ -217,22 +228,47 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
               return skillGitCache.scanManifest(packageName, targetCommit);
             },
             "cannot publish commit: " + targetCommit);
-    Set<String> published = new LinkedHashSet<>(SkillPackageGuard.manifestNames(skills));
-    List<String> removed =
-        SkillPackageGuard.manifestNames(current.getSkills()).stream()
-            .filter(name -> !published.contains(name))
-            .toList();
-    guard.ensureSkillsRemovable(packageName, removed);
-    if (targetCommit.equals(current.getCurrentCommit())
-        && Objects.equals(skills, current.getSkills())) {
-      return converter.convert(current);
+    return writes.execute(
+        () -> {
+          SkillPackage locked = recheck(current, rawExpected, expected);
+          Set<String> published = new LinkedHashSet<>(SkillPackageGuard.manifestNames(skills));
+          List<String> removed =
+              SkillPackageGuard.manifestNames(locked.getSkills()).stream()
+                  .filter(name -> !published.contains(name))
+                  .toList();
+          guard.ensureSkillsRemovable(packageName, removed);
+          if (targetCommit.equals(locked.getCurrentCommit())
+              && Objects.equals(skills, locked.getSkills())) {
+            return converter.convert(locked);
+          }
+          locked.setCurrentCommit(targetCommit);
+          locked.setSkills(skills);
+          locked.setObservedHeadCommit(targetCommit);
+          locked.setHeadCheckError(null);
+          casUpdate(locked, expected);
+          return getPackage(packageName);
+        });
+  }
+
+  private SkillPackage requirePackage(String packageName) {
+    SkillPackage current = skillPackageRepository.getPackage(packageName);
+    if (current == null) {
+      throw new AiResourceNotFoundException(SkillPackageGuard.RESOURCE);
     }
-    current.setCurrentCommit(targetCommit);
-    current.setSkills(skills);
-    current.setObservedHeadCommit(targetCommit);
-    current.setHeadCheckError(null);
-    casUpdate(current, expected);
-    return getPackage(packageName);
+    return current;
+  }
+
+  /** 网络准备没有行锁：短事务中重检决定准备内容的全部提案事实。 */
+  private SkillPackage recheck(SkillPackage observed, String rawExpected, long expected) {
+    SkillPackage current = guard.requirePackageForUpdate(observed.getPackageName());
+    requireCurrentVersion(current, rawExpected, expected);
+    if (!Objects.equals(current.getBranch(), observed.getBranch())
+        || !Objects.equals(current.getRepositoryUrl(), observed.getRepositoryUrl())
+        || !Objects.equals(current.getObservedHeadCommit(), observed.getObservedHeadCommit())) {
+      throw new AiVersionConflictException(
+          SkillPackageGuard.RESOURCE, rawExpected, CatalogVersions.format(current.getVersion()));
+    }
+    return current;
   }
 
   /** 以锁定时读到的 {@code expected} 为条件整体更新事实；影响行数为 0 时重读判定 404 或 version conflict。 */
