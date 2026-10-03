@@ -119,10 +119,10 @@ class SystemNetworkConfigurationTest {
         defaults.tool(),
         defaults.aiRuntime(),
         defaults.environment(),
+        new SystemSettings.Network(proxyUrl, bypass),
         defaults.integrations(),
         defaults.storageMedia(),
-        defaults.advanced(),
-        new SystemSettings.Network(proxyUrl, bypass));
+        defaults.advanced());
   }
 
   private static String send(HttpClient client, URI uri) {
