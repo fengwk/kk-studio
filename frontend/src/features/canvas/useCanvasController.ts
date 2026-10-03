@@ -206,7 +206,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       setState((current) => ({
         ...current,
         storageError: err instanceof Error ? err.message : String(err),
-        toast: '本地草稿保存失败，数据未持久化落盘',
+        toast: '保存草稿失败，数据未保存',
       }))
     })
     return () => {
@@ -219,7 +219,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     return onCanvasStorageError((error) => {
       const toast = error instanceof CanvasStorageUnavailableError
         ? error.message
-        : '本地草稿保存失败，数据未持久化落盘'
+        : '保存草稿失败，数据未保存'
       setState((current) => ({
         ...current,
         storageError: error.message,
@@ -298,7 +298,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
             setState((cur) => ({
               ...cur,
               storageError: message,
-              toast: '本地草稿保存失败，数据未持久化落盘',
+              toast: '保存草稿失败，数据未保存',
             }))
           }
           break
@@ -324,7 +324,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
               setState((cur) => ({
                 ...cur,
                 storageError: message,
-                toast: '本地草稿保存失败，数据未持久化落盘',
+                toast: '保存草稿失败，数据未保存',
               }))
             }
             break
