@@ -7,14 +7,35 @@ const root = new URL('../../../../../', import.meta.url)
 const docker = readFileSync(new URL('.github/workflows/docker-publish.yml', root), 'utf8')
 const release = readFileSync(new URL('.github/workflows/daemon-release.yml', root), 'utf8')
 
-function jobCondition(name) {
+function jobBlock(name) {
   const block = docker.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\w+:|$(?![\\s\\S]))`, 'm'))?.[1]
   assert.ok(block, `missing job ${name}`)
+  return block
+}
+
+function jobCondition(name) {
+  const block = jobBlock(name)
   const condition = block.match(/^    if: (.+)$/m)?.[1]
   assert.ok(condition, `missing condition ${name}`)
   return condition === '>-'
     ? block.match(/\$\{\{([\s\S]*?)\}\}/)?.[1].trim()
     : condition
+}
+
+function validationSteps() {
+  // Parse actual step boundaries, not command mentions in comments or other jobs.
+  return [...jobBlock('validate').matchAll(/^      - ([\s\S]*?)(?=^      - |$(?![\s\S]))/gm)]
+    .map((match) => match[1])
+}
+
+function stepField(step, field, indent = 8) {
+  const value = step.match(new RegExp(`^ {${indent}}${field}: (.+)$`, 'm'))?.[1]
+  if (value !== '|') {
+    return value
+  }
+  const lines = step.match(new RegExp(`^ {${indent}}${field}: \\|\\n((?: {${indent + 2}}.+\\n)+)`, 'm'))?.[1]
+  assert.ok(lines, `missing block value for ${field}`)
+  return lines.trim().split('\n').map((line) => line.trim()).join('\n')
 }
 
 function evaluate(expression, branch, event, validateOnly, status = {}) {
@@ -79,6 +100,56 @@ test('manual validation and image publishing have separate concurrency groups', 
   const group = docker.match(/^  group: (.+)$/m)?.[1]
   assert.ok(group?.includes('${{ github.ref }}'))
   assert.ok(group?.includes("${{ inputs.validate_only && 'validate' || 'publish' }}"))
+})
+
+test('frontend coverage and offline layout are required gates using the locked browser', () => {
+  // Coverage replaces the unit-test run; every preparation/gate must fail the job on error.
+  const steps = validationSteps()
+  const commands = [
+    'npm --prefix frontend ci',
+    'npm --prefix frontend run lint',
+    'npm --prefix frontend run coverage',
+    'npm --prefix frontend run build',
+    'npx --no-install playwright install --with-deps chromium',
+    'npm --prefix frontend run test:layout',
+  ]
+  let previous = -1
+  for (const command of commands) {
+    const matching = steps.filter((step) => stepField(step, 'run') === command)
+    assert.equal(matching.length, 1, `expected exactly one required step: ${command}`)
+    const step = matching[0]
+    const index = steps.indexOf(step)
+    assert.ok(index > previous, `incorrect frontend gate order: ${command}`)
+    previous = index
+    assert.equal(stepField(step, 'if'), undefined, `${command} must not be conditional`)
+    assert.doesNotMatch(step, /continue-on-error:|(?:\|\||&&)\s*true|--passWithNoTests/u)
+  }
+  assert.ok(!steps.some((step) => stepField(step, 'run') === 'npm --prefix frontend run test'))
+  const browser = steps.find((step) => stepField(step, 'run') === commands[4])
+  assert.equal(stepField(browser, 'working-directory'), 'frontend')
+  const lock = JSON.parse(readFileSync(new URL('frontend/package-lock.json', root), 'utf8'))
+  const playwright = lock.packages['node_modules/playwright']
+  assert.ok(playwright?.version)
+  assert.equal(playwright.bin.playwright, 'cli.js')
+  assert.equal(lock.packages['node_modules/@playwright/test'].dependencies.playwright, playwright.version)
+  assert.doesNotMatch(jobBlock('validate'), /continue-on-error:/u)
+})
+
+test('frontend diagnostics survive failed gates and upload only report directories', () => {
+  // Exact report paths prevent accidental source/secret uploads; always preserves failure evidence.
+  const steps = validationSteps()
+  const uploads = steps.filter((step) => stepField(step, 'uses')?.startsWith('actions/upload-artifact@'))
+  assert.equal(uploads.length, 1)
+  const upload = uploads[0]
+  assert.equal(stepField(upload, 'uses'), 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4')
+  assert.equal(stepField(upload, 'if'), '${{ always() }}')
+  assert.equal(stepField(upload, 'name', 10), 'frontend-diagnostics')
+  assert.equal(stepField(upload, 'path', 10), 'frontend/coverage/\nreports/layout/')
+  assert.equal(stepField(upload, 'retention-days', 10), '7')
+  assert.equal(stepField(upload, 'if-no-files-found', 10), 'ignore')
+  const layout = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix frontend run test:layout')
+  assert.ok(layout >= 0 && steps.indexOf(upload) > layout)
+  assert.match(jobBlock('publish'), /needs:\n      - validate\n/u)
 })
 
 test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
