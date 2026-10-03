@@ -15,6 +15,9 @@ fallback；`postgres` 保存全部 durable 数据；`minio` 提供 S3 兼容对�
 - 首次构建需要拉取镜像并下载 Maven 与 npm 依赖；本机不需要 JDK 或 Node。
 - 默认宿主端口 `8080`、`5432`、`9000` 未被占用。
 
+MinIO server 的平台限制、mc 本地构建与源码许可见
+[开发栈 MinIO 依赖](../dependencies/minio-client/README.md)；ARM 宿主需要 amd64 模拟能力。
+
 ## 启动并验证
 
 ```bash
@@ -79,9 +82,9 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 
 [compose.yaml](compose.yaml) 还接受进程级的容量与调度参数，本地启动通常不需要覆盖：dispatcher
 与 admission 上限的默认值和语义由
-[Platform 配置](../../docs/modules/platform.md#部署级-configurationproperties)持有，
+[Platform 配置](../../docs/modules/platform.md#配置)持有，
 `KK_STUDIO_ENVIRONMENT_GATEWAY_*` 的 Daemon WebSocket 边界由
-[Web 配置](../../docs/modules/web.md#生命周期与配置)持有；subagent 并发上限不经环境变量配置，
+[Web 配置](../../docs/modules/web.md#组合与生命周期)持有；subagent 并发上限不经环境变量配置，
 只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有。
 
 把宿主绑定改成 `0.0.0.0` 等非 loopback 地址时，必须同时覆盖上面所有 PostgreSQL 与 MinIO
