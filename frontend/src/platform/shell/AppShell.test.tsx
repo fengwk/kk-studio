@@ -1,24 +1,90 @@
 import userEvent from '@testing-library/user-event'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Bot, FolderKanban, Grid2X2, Inbox, Settings } from 'lucide-react'
+import { describe, expect, it, vi } from 'vitest'
 import { createApplicationExtensionHost } from '@/app/extension-host'
 import { AppShell } from '@/platform/shell/AppShell'
+import type { PrimaryNavItem } from '@/platform/shell/types'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { interactionService } from '@/shared/api/interaction-service'
 import { setLocale } from '@/shared/i18n'
 
-function renderShell(initialEntry: string, children: ReactNode = <div>Content</div>) {
+const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
+  {
+    id: 'ai',
+    groupId: 'ai',
+    to: '/chats',
+    labelKey: 'platform.nav.ai',
+    ariaKey: 'platform.nav.aiAria',
+    shortLabel: 'AI',
+    icon: Bot,
+  },
+  {
+    id: 'interactions',
+    groupId: 'interactions',
+    to: '/interactions',
+    labelKey: 'ai.nav.interactions',
+    ariaKey: 'ai.nav.interactionsAria',
+    shortLabel: 'Pending',
+    icon: Inbox,
+  },
+  {
+    id: 'projects',
+    groupId: 'projects',
+    to: '/projects',
+    labelKey: 'platform.nav.projects',
+    ariaKey: 'platform.nav.projectsAria',
+    shortLabel: 'Projects',
+    icon: FolderKanban,
+  },
+  {
+    id: 'canvas',
+    groupId: 'canvas',
+    to: '/canvas',
+    labelKey: 'platform.nav.canvas',
+    ariaKey: 'platform.nav.canvasAria',
+    shortLabel: 'Canvas',
+    icon: Grid2X2,
+  },
+  {
+    id: 'settings',
+    groupId: 'settings',
+    to: '/settings',
+    labelKey: 'platform.nav.settings',
+    ariaKey: 'platform.nav.settingsAria',
+    shortLabel: 'Settings',
+    icon: Settings,
+  },
+]
+
+function renderShell(
+  initialEntry: string,
+  children: ReactNode = <div>Content</div>,
+  options?: {
+    navItems?: readonly PrimaryNavItem[]
+    queryClient?: QueryClient
+    pages?: []
+  },
+) {
   const host = createApplicationExtensionHost()
+  const queryClient = options?.queryClient ?? new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const navItems = options?.navItems ?? FIXTURE_NAV_ITEMS
   return render(
-    <ExtensionHostProvider host={host}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <AppShell>
-          {children}
-        </AppShell>
-      </MemoryRouter>
-    </ExtensionHostProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ExtensionHostProvider host={host}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <AppShell navItems={navItems} pages={options?.pages}>
+            {children}
+          </AppShell>
+        </MemoryRouter>
+      </ExtensionHostProvider>
+    </QueryClientProvider>,
   )
 }
 
@@ -308,5 +374,71 @@ describe('AppShell locale selector', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('listbox', { name: 'Language' })).not.toBeInTheDocument()
     expect(document.activeElement).toBe(englishTriggers[1])
+  })
+})
+
+describe('AppShell interactions pending badge and navigation behaviors', () => {
+  it('renders pending count badge when interaction items exist in QueryClient', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValueOnce({
+      items: [
+        {
+          id: 'int-1',
+          threadId: 'th-1',
+          type: 'CONFIRMATION',
+          status: 'PENDING',
+          title: 'Confirm',
+          prompt: 'Please confirm',
+          owner: { type: 'CHAT', chatId: 'c-1' },
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'int-2',
+          threadId: 'th-1',
+          type: 'CONFIRMATION',
+          status: 'PENDING',
+          title: 'Confirm 2',
+          prompt: 'Please confirm 2',
+          owner: { type: 'CHAT', chatId: 'c-1' },
+          createdAt: '2026-01-01T00:00:00Z',
+        },
+      ] as never,
+      nextCursor: null,
+    })
+
+    renderShell('/chats')
+    await waitFor(() => {
+      const badge = screen.getByLabelText('2 pending')
+      expect(badge).toBeInTheDocument()
+      expect(badge).toHaveTextContent('2')
+    })
+  })
+
+  it('closes navigation drawer on brand link click and nav item click', async () => {
+    const user = userEvent.setup()
+    renderShell('/chats')
+
+    const toggle = screen.getByRole('button', { name: '打开导航' })
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    const brand = screen.getByRole('link', { name: 'KK Studio' })
+    await user.click(brand)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
+
+    await user.click(toggle)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
+
+    const aiLink = screen.getByRole('link', { name: '智能 AI' })
+    await user.click(aiLink)
+    expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
+  })
+
+  it('handles root path / and unmatched routes gracefully', () => {
+    renderShell('/')
+    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+
+    // Empty pages fallback route matching
+    renderShell('/unknown-nonexistent-path', <div>404</div>, { pages: [] })
+    expect(screen.getByText('404')).toBeInTheDocument()
   })
 })

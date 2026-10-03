@@ -35,24 +35,14 @@ interface PendingItem extends PendingFunctionConfig {
 /**
  * Function config 的 debounce/flush 专用 hook。
  *
- * 依据 docs/canvas-project.md 与 I05：
+ * 依据 docs/canvas-project.md：
  * - 每次编辑瞬间立即写入持久草稿层并推进世代，即使在 320ms 防抖窗口内硬刷新也绝不丢失；
  * - 防抖仅控制网络发送，不控制本地持久化；
  * - flush 时携带 { nodeId, field: 'function', generation } ACK，通过同一事实源精确确认与清理。
  */
 export function useFunctionConfigSync(
-  executeCommandsOrOptions:
-    | ((commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>)
-    | FunctionConfigSyncOptions,
-  legacyGetSnapshot?: () => CanvasSnapshotDTO | undefined,
+  options: FunctionConfigSyncOptions,
 ): FunctionConfigSync {
-  const options: FunctionConfigSyncOptions = typeof executeCommandsOrOptions === 'function'
-    ? {
-      executeCommands: executeCommandsOrOptions,
-      getSnapshot: legacyGetSnapshot,
-    }
-    : executeCommandsOrOptions
-
   const { executeCommands, getSnapshot, getModel, onImmediateDraft, getDraftGeneration } = options
 
   const executeCommandsRef = useRef(executeCommands)

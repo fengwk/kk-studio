@@ -898,6 +898,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const openLibrary = useCallback(() => {
     resetTransformBatch()
     resetUploads()
+    resetFunctionConfigDrafts()
     reservedNodeAliasesRef.current.clear()
     setInitialFitPending(false)
     canvasEpochRef.current += 1
@@ -921,7 +922,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       textEditor: null,
       conflictMessage: null,
     }))
-  }, [resetTransformBatch, resetUploads])
+  }, [resetFunctionConfigDrafts, resetTransformBatch, resetUploads])
 
   const setViewport = useCallback((viewport: StoredCanvasViewport) => {
     setState((current) => {
