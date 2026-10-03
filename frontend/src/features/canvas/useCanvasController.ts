@@ -1091,23 +1091,18 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     }
   }, [])
 
-  const renameNode = useCallback((nodeId: UUIDString, name: string) => {
+  const renameNode = useCallback((nodeId: UUIDString, name: string, expectedName: string) => {
     const normalized = name.trim()
-    if (!normalized) {
-      return
-    }
-    const current = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
-    const node = current?.nodes.find((item) => item.id === nodeId)
-    if (!node || node.name === normalized) {
+    if (!normalized || normalized === expectedName) {
       return
     }
     void executeCommands([{
       type: 'RENAME_NODE',
       nodeId,
-      expectedName: node.name,
+      expectedName,
       name: normalized,
     }]).catch(() => undefined)
-  }, [executeCommands, snapshotQuery.data])
+  }, [executeCommands])
 
   const editTextNode = useCallback((node: ResourceNode) => {
     const resource = node.resources[0]
@@ -1327,22 +1322,18 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     ).catch(() => undefined)
   }, [executeCommands, setToast, snapshotQuery.data?.nodes])
 
-  const renameGroup = useCallback((groupId: UUIDString, title: string) => {
+  const renameGroup = useCallback((groupId: UUIDString, title: string, expectedTitle: string) => {
     const normalized = title.trim()
-    if (!normalized) {
-      return
-    }
-    const group = snapshotQuery.data?.groups.find((g) => g.id === groupId)
-    if (!group) {
+    if (!normalized || normalized === expectedTitle) {
       return
     }
     void executeCommands([{
       type: 'RENAME_GROUP',
       groupId,
-      expectedTitle: group.title,
+      expectedTitle,
       title: normalized,
     }]).catch(() => undefined)
-  }, [executeCommands, snapshotQuery.data?.groups])
+  }, [executeCommands])
 
   const deleteGroup = useCallback((groupId: UUIDString) => {
     const memberIds = (snapshotQuery.data?.nodes ?? [])

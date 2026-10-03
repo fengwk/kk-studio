@@ -123,9 +123,9 @@ export function CanvasContextMenu({
       return
     }
     if (state.target.kind === 'resource') {
-      runtime.renameNode(state.target.node.id, value)
+      runtime.renameNode(state.target.node.id, value, state.target.node.name)
     } else if (state.target.kind === 'group') {
-      runtime.renameGroup(state.target.group.id, value)
+      runtime.renameGroup(state.target.group.id, value, state.target.group.title)
     }
     onClose()
   }
