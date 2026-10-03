@@ -21,8 +21,6 @@ const RUNNER_SOURCE = readFileSync(RUNNER, 'utf8')
 const TARGET_CLASSES = [...RUNNER_SOURCE.matchAll(
   /^\s+(fun\.fengwk\.kkstudio\.[\w.]+Test)\s*$/gm,
 )].map((match) => match[1])
-const TARGET_MODULES = ['web', 'canvas/infra', 'harness/infra', 'platform']
-
 assert.equal(TARGET_CLASSES.length, 17)
 
 function runRunner(args, extraEnv = {}) {
@@ -47,15 +45,6 @@ function moduleOf(fqcn) {
     return 'platform'
   }
   throw new Error(`unknown target module: ${fqcn}`)
-}
-
-function removeTargetReports() {
-  for (const module of TARGET_MODULES) {
-    rmSync(path.join(REPO_ROOT, module, 'target', 'surefire-reports'), {
-      force: true,
-      recursive: true,
-    })
-  }
 }
 
 function createFakeToolchain(root, mode, invalidClass) {
@@ -153,10 +142,15 @@ done
 function withFixture(mode, invalidClass, callback) {
   const root = mkdtempSync(path.join(tmpdir(), 'kk-studio-regression-'))
   try {
-    const env = createFakeToolchain(root, mode, invalidClass)
+    // Fake Maven must write and clean reports only inside its disposable repository.
+    const repoRoot = path.join(root, 'repo')
+    mkdirSync(repoRoot)
+    const env = {
+      ...createFakeToolchain(root, mode, invalidClass),
+      KK_STUDIO_REPO_ROOT: repoRoot,
+    }
     return callback(root, env)
   } finally {
-    removeTargetReports()
     rmSync(root, { force: true, recursive: true })
   }
 }
@@ -273,6 +267,13 @@ test('regression fixture accepts all 17 targets only with real Surefire evidence
     assert.equal(iteration.matchedClasses.length, 17)
     assert.deepEqual(iteration.missingClasses, [])
     assert.deepEqual(iteration.invalidClasses, [])
+    for (const fqcn of TARGET_CLASSES) {
+      assert.equal(
+        existsSync(path.join(env.KK_STUDIO_REPO_ROOT, moduleOf(fqcn), 'target', 'surefire-reports', `TEST-${fqcn}.xml`)),
+        true,
+        `fixture report must stay in its temporary repository: ${fqcn}`,
+      )
+    }
   })
 })
 
