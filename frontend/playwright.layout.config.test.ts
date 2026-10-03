@@ -28,11 +28,19 @@ describe('playwright layout config', () => {
     expect(layoutConfig.workers).toBeUndefined()
 
     expect(layoutConfig.webServer).toEqual({
-      command: 'npm run build:layout && npm run preview:layout',
+      command: 'npm run preview:layout',
       url: 'http://127.0.0.1:5174/browser-tests/chat-layout-harness.html',
       reuseExistingServer: false,
       timeout: 15000,
     })
+  })
+
+  it('builds fresh assets before starting the browser server readiness budget', () => {
+    // 编译是测试准备步骤，不应占用静态服务器的启动预算或复用旧产物。
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'))
+    expect(manifest.scripts['test:layout']).toBe(
+      'npm run build:layout && playwright test --config playwright.layout.config.ts',
+    )
   })
 
   // 在 Node 子进程通过 loadConfigFromFile 验证 vite.layout.config 生效配置，避免 jsdom realm 限制
