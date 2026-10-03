@@ -10,6 +10,9 @@
 下的定位，不重复其步骤。开发、质量检查和 NAS 自迭代流程见
 [开发与测试](development-and-testing.md)。
 
+local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc 构建事实统一见
+[开发栈 MinIO 依赖](../../deploy/dependencies/minio-client/README.md)，这些依赖只用于开发和隔离验证。
+
 ## 首次安装
 
 1. 准备 PostgreSQL 与可访问的私有 S3 bucket，确认数据库角色、对象存储凭据和备份策略。

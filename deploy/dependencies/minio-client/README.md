@@ -1,13 +1,14 @@
 # 开发栈 MinIO 依赖
 
-四套开发/隔离 Compose 使用同一个可核验 server digest 和本地构建的 mc 镜像，
-不依赖本机旧镜像缓存，也不将自建镜像标记为官方镜像。
+local、test、reliability、distributed 四套开发/隔离 Compose 使用同一个 server digest，
+并从共享的 `deploy/dependencies/minio-client` 目录本地构建 mc 镜像。
+首次启动需要网络拉取基础镜像和 mc Release 二进制，并具备本地镜像构建能力。
 
 ## Server
 
 镜像：`fengwk/minio@sha256:ea0a48a13c701cf2c4397b3a9c0fe9e10ed65b2f58f056bf07e2ce7308123535`。
 它是 [fengwk/minio 社区源码构建](https://github.com/fengwk/minio)，不是官方发行镜像。
-已拉取核验的 OCI `source` 为该仓库，`revision` 为
+OCI `source` 为该仓库，`revision` 为
 `10d2f5bfeb6d3b0661a394a0017db67f44ad3c5d`，许可为 `AGPL-3.0-or-later`；
 `minio --version` 输出 `DEVELOPMENT.2026-09-25T15-59-29Z`，commit-id 与 revision 相同。
 [对应源码及 Dockerfile](https://github.com/fengwk/minio/tree/10d2f5bfeb6d3b0661a394a0017db67f44ad3c5d)
@@ -30,7 +31,6 @@ amd64 模拟能力，不代表 server 支持原生多架构。这些依赖仅用
 | amd64 | `ac90da87a35641be5a0ac75d49de5161ddb47d629b5ba01261b0ae9e00aea15f` |
 | arm64 | `61bb88e7435919834478ddd4d405a6de6d2c227079da5e8ee9655147398819a0` |
 
-两者均已下载本体，与官方同名 `.sha256sum` 资产及 GitHub Release API digest 比对一致。
 构建只下载二进制，以仓库内固定 SHA256 离线比对，不在线下载 checksum 作为信任依据。
 升级必须同时审核版本、两架构本体和 hash、源码 revision、LICENSE/NOTICE 及合同测试，
 然后运行 `docker build --pull --platform linux/amd64 -t kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z .`
