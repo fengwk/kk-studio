@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -30,9 +31,12 @@ import java.sql.SQLException;
  * <p>禁用自动 Flyway；本类在静态初始化阶段即执行 baseline 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经
  * 存在（SystemSettingsSnapshot 在上下文启动时读取权威配置）。{@link #resetAndApplySchema} 在每个测试前再次重置并迁移，保持测试隔离。
  *
+ * <p>共享 schema 重置要求每类结束后关闭上下文，释放连接池和后台维护后再运行下一类；数据库容器仍保持单例。
+ *
  * <p>Docker 必须可用——不可用时容器启动失败，本测试也失败而非静默跳过。
  */
 @SpringBootTest(classes = PlatformTestApplication.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class PostgresSpringTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
