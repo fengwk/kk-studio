@@ -94,9 +94,17 @@ Refused before any change:
   rename the target (the database owner or a superuser is required), cannot create a database
   (CREATEDB) or cannot hand the new database to the original owner.
 
+Workflow:
+  1. In the product, configure the connection and the agents, then export the settings with
+     the product's settings sync.
+  2. Stop application writes for the whole reset.
+  3. Run this script to back up the target and replace it with an empty database.
+  4. Apply the current schema with the external schema/Flyway initialization.
+  5. Start the product and sync the settings back in.
+
   Providers that forbid renaming or creating a database (some managed services) cannot run this
-  script: export-agent-catalog.sh and import-agent-catalog.sh remain usable there, but the reset
-  step has to be done with whatever lifecycle feature the provider offers.
+  script; use whatever lifecycle feature the provider offers, then apply the current schema and
+  sync the settings back in.
 
 Environment:
   VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME, VPS_POSTGRES_PASSWORD,
@@ -297,7 +305,8 @@ show_plan() {
   echo "  2. Rename the target to $SNAPSHOT_DB and disable connections to it."
   echo "  3. Create the empty database as $PARTIAL_DB, apply the metadata, then rename it"
   echo "     to $TARGET_DB; a failure here drops it and restores $TARGET_DB."
-  echo "  4. Apply the V1 schema with the external schema/Flyway initialization."
+  echo "  4. Apply the current schema with the external schema/Flyway initialization, then start"
+  echo "     the product and sync the settings back in."
 }
 
 confirm_operation() {
@@ -305,7 +314,9 @@ confirm_operation() {
     return
   fi
   echo
-  echo "Everything in $TARGET_DB outside the exported catalog package will be removed."
+  echo "Everything in $TARGET_DB is removed and replaced by an empty database that keeps its metadata."
+  echo "Export the product settings before continuing; only the full backup and the frozen snapshot"
+  echo "keep the current data."
   local confirmation
   if ! read -r -p "Type the database name to continue: " confirmation; then
     fail "confirmation input was not available"
@@ -534,8 +545,9 @@ main() {
   echo "  backup checksum: $CHECKSUM_FILE"
   echo "  frozen snapshot: $SNAPSHOT_DB"
   echo
-  echo "Next: apply the V1 schema with the external schema/Flyway initialization, then import"
-  echo "      the catalog package."
+  echo "Next:"
+  echo "  1. Apply the current schema with the external schema/Flyway initialization."
+  echo "  2. Start the product and sync the settings back in."
 }
 
 trap on_exit EXIT
