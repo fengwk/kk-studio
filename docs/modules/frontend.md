@@ -13,9 +13,12 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 QueryClient → ExtensionHost → BrowserPreferences → ApplicationEvent → BrowserRouter。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
-[`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 承载问卷与审批，
+[`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
+[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批，
 其余交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
-AppShell 从 PageContribution 的 navGroup/workspace 决定导航和沉浸布局，
+AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
+[`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。
+PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
 合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
 
 四个内置扩展提供 AI、Projects、Canvas、Settings 页面。
@@ -73,6 +76,10 @@ provider-request-preview。成功展示点击时协议 JSON（可能包含内联
 
 ## Chat 提交与控制
 
+Chat 局部组件树以 `chat.id` 为 key，切换 Chat 时重建局部状态。
+Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A，旧绑定的迟到结果
+也不能改写当前 UI 或清除新 pending 记录，原 Thread 的草稿持久化仍按自身身份处理。
+
 Pane target 与布局独立：NEW_SESSION_DRAFT 携 root settings 创建 Session；
 NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequence 提交。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
@@ -95,6 +102,7 @@ Stop 复用 stopRequestId 处理未知结果，取消的排队消息回到 Compo
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
 网络未知结果保留原 key/body 阻塞队列。
+重命名的 `expectedName`/`expectedTitle` 基线在打开菜单时冻结，保存时不以最新远端值替换。
 
 编辑 scope 按 userId/canvasId/editingSessionId 隔离，当前 userId 为固定 anonymous。
 IndexedDB 草稿 ACK 物理完成后才删除持久 operation，草稿保存与 ACK 共用序列化链；
@@ -122,6 +130,9 @@ Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列�
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
 Issue Agent Pane 复用 Harness 时间线；UNKNOWN 核查与阶段状态分别展示。
 ProjectsInvalidationBridge 经 ExtensionHost overlay 失效 Query，重连全量对账。
+Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
+Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
+共用单一提交互斥。版本基线仅在成功写入或显式 reload 后推进，409 保留草稿与原版本。
 
 Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动，
 完整聚合携 expectedVersion 提交。权限与 apply timing 按封闭类型渲染。

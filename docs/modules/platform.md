@@ -15,10 +15,11 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | --- | --- |
 | [catalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog) | Provider/Model/Agent、Git Skill Package、MCP Server/Tool 的名称寻址与 CAS |
 | [harness/model](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
-| [harness/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，执行网关校验冻结绑定并终态化结果 |
+| [catalog/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
+| [harness/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
 | [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` 按当前 Agent、Model、Environment 和产品归属规划 live turn |
 | [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
-| [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill Git cache、Session 授权 Blob 文本与本地路径路由 |
+| [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本与本地路径路由 |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat、Issue+Agent owner 的命令接受、Session 查询与深删除 |
 | [interaction](../../platform/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 等待问卷/审批的产品投影与人工提交 |
 | [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | Project 宿主端口、Issue Agent 角色解析与 `issue_transition` |
@@ -55,6 +56,8 @@ Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inh
 `UPDATE_AVAILABLE` 或 `CHECK_FAILED`。
 
 稳定路径为 `kkstudio:/skills/<package>/<skill>/...`，每次读取 Package 当前 commit。
+Git cache 由 Catalog 拥有，根目录通过 `kk-studio.catalog.skill.cache-root` 配置，
+默认是进程当前目录下的 `.kkstudio/skills`。
 发布后的通知唤醒各节点回读、补齐 exact commit cache，并同步本节点在线 Daemon；
 listener 建连/重连全量对账。Daemon installed commit 与 current commit 一致时，Prompt
 使用其本地稳定路径，否则使用 Platform URI。
@@ -66,7 +69,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 发现先在事务外完成 HTTP 握手、`tools/list` 与 schema 校验，再锁 server、校验版本、
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
-[`RuntimeToolCatalogConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
+[`RuntimeToolCatalogConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)
 组合静态 `HarnessToolCatalogAdapter` 与现读数据库的 `McpToolCatalog`。
 重复模型可见工具名使查询失败关闭。MCP 可选面要求 server enabled 且 AVAILABLE；
 查找面按已持久化工具行返回定义，调用前再复验 server 状态与归属。
@@ -121,6 +124,10 @@ requirements 复验目录；有效超时仅经 `Tool.resolveTimeout` 解析一�
 结果与随后发送之间仍可能发生历史或配置变化；入口和冲突契约见 [Web](web.md)。
 
 ## Storage、Blob 与 Resource
+
+[`HarnessResourceConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessResourceConfiguration.java)
+在 Harness 边界装配 Provider 与 Tool history 的资源物化器，消费全局 Storage 服务；
+Storage 不 import Harness，存储设施与执行资源边界各自装配。
 
 `storage_blob` 按 ACTIVE 内容的 `(sha256, size_bytes)` 去重；
 upload、Session、Canvas 和 Issue Evidence 通过各自 owner 边持有引用。
@@ -202,13 +209,23 @@ MiniMax Mavis 使用固定 CN/EN origin，以 capability catalog 验证 callback
 ## Canvas 媒体与 Function 适配
 
 Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放适配。
-媒体输出经 `stage` 准备，在短事务复验 Run、幂等插入无 owner Resource、写 OUTPUT pin、
-转移 upload 引用。TEXT 输出内联且有长度上限。整组成功挂接、pin 生命周期和 UNKNOWN
+媒体输出在 `stage` 前后分别执行短事务，按 document → run 加锁，复验
+`canvasId/nodeId/requestId/leaseToken` 对应当前 RUNNING owner，且租约在取得行锁后
+按数据库 `clock_timestamp()` 判定未过期。读流与 S3 stage 不持有数据库锁；
+幂等查询也必须先通过 owner 校验。后置事务插入无 owner Resource、写 OUTPUT pin、
+转移 upload 引用；旧 attempt 或事务失败会 best-effort 清理未消费 staged upload，
+上传过期回收作为兜底。TEXT 输出内联且有长度上限。整组成功挂接、pin 生命周期和 UNKNOWN
 决议见 [Canvas Infra](canvas-infra.md)。
 
 Platform 提供 fake/opencli adapter；本地 image.crop 和 ComfyUI/H3 由构建期 Plugin 提供。
 Function Catalog 在启动时冻结，adapter 的 submit 记录外部任务身份，
 execute 查询同一任务并物化预分配槽位。
+
+OpenCLI 每次 HTTP send 前冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
+不会随 read 重置。资源响应要求正数 Content-Length 与 metadata size 一致，并在读流时
+拒绝短读和超长。响应体 watchdog 到期主动关闭流，关闭在独立线程执行以免阻塞共享调度器；
+EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关闭；JDK 若在交付响应前
+拒绝非法 header，此路径无客户端可关闭的流，只返回不回显 header 原值的安全错误。
 
 ## 配置
 
@@ -224,7 +241,8 @@ aiRuntime 包含重试策略、压缩保留量、可空 `compactionFallbackModel
 | --- | --- |
 | `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll、拒绝与准入延迟 |
 | `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
-| `kk-studio.harness.runtime` | worker 开关、Resource 与 Skill cache 根 |
+| `kk-studio.harness.runtime` | worker 开关与 Resource 根 |
+| `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
 | `kk-studio.project.controller` | Issue dispatcher、worker、预算和调谐节奏 |
 | `kk-studio.storage` | S3 端点/凭据/bucket、maintenance 与对象清理 |
 | `kk-studio.plugins` | 主密钥文件、refresh 与远端媒体预算 |

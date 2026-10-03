@@ -16,6 +16,9 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 - Compose 中的账号都是固定、可丢弃的测试值，不要替换成生产凭据。默认流程不配置也不调用
   远端环境、真实模型或付费接口。
 
+MinIO server 的平台限制、mc 首次联网构建与源码许可见
+[开发栈 MinIO 依赖](../dependencies/minio-client/README.md)；ARM 宿主需要 amd64 模拟能力。
+
 ## 一键验证
 
 ```bash
