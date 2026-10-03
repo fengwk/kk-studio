@@ -3,8 +3,8 @@
 # 两个分支发布同一个已打包应用镜像 `deploy/local/Dockerfile`（Fat JAR + 内嵌前端），
 # 镜像仓库同为 `kk-studio`：`main` 先跑仓库质量门禁再发布用户使用的 `:main`，`dev`
 # 的检查在提交前完成，push 后直接发布 NAS 自迭代使用的 `:dev`。两者都以 linux/amd64
-# 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag；真实模型 E2E、UI E2E 等付费/长耗时检查
-# 不在本文工作流内。
+# 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag。质量门禁包含前端覆盖率与离线浏览器
+# 布局回归（不访问后端或模型）；真实模型 E2E、真实端到端 UI E2E 不在本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
 # 或 build log。
@@ -160,10 +160,25 @@ jobs:
         run: npm --prefix frontend ci
       - name: Lint frontend
         run: npm --prefix frontend run lint
-      - name: Test frontend
-        run: npm --prefix frontend run test
+      - name: Verify frontend coverage
+        run: npm --prefix frontend run coverage
       - name: Build frontend
         run: npm --prefix frontend run build
+      - name: Install layout browser
+        working-directory: frontend
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Test frontend layout
+        run: npm --prefix frontend run test:layout
+      - name: Upload frontend diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: frontend-diagnostics
+          path: |
+            frontend/coverage/
+            reports/layout/
+          retention-days: 7
+          if-no-files-found: ignore
 
   publish:
     name: build and push image
