@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.tool;
+package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

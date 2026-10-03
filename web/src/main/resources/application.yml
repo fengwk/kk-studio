@@ -76,6 +76,9 @@ convention:
       locale: ${convention.i18n.locale}
 
 kk-studio:
+  catalog:
+    skill:
+      cache-root: ${KK_STUDIO_CATALOG_SKILL_CACHE_ROOT:${user.dir}/.kkstudio/skills}
   storage:
     maintenance:
       # Durable storage cleanup worker deployment controls; not mutable SystemSettings.

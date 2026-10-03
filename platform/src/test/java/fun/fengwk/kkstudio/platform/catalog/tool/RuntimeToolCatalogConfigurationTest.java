@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.tool;
+package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;

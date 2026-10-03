@@ -80,8 +80,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
   @DynamicPropertySource
   static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {
     // bare cache 根必须在测试临时目录，避免把 cache 写进模块目录。
-    registry.add(
-        "kk-studio.harness.runtime.skill-cache-root", () -> TEST_ROOT.resolve("cache").toString());
+    registry.add("kk-studio.catalog.skill.cache-root", () -> TEST_ROOT.resolve("cache").toString());
   }
 
   /** 测试意图：完整生命周期——创建发布 branch HEAD、检查只更新观察值、发布 exact observed commit、CAS 删除。 */

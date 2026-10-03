@@ -15,8 +15,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
-import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
 import fun.fengwk.kkstudio.platform.storage.S3PresignServiceImpl;
@@ -242,30 +240,6 @@ public class S3StorageConfiguration {
   public SessionBlobRefManager sessionBlobRefManager(
       SessionBlobRefRepository refRepository, StorageBlobManager blobManager) {
     return new PostgresqlSessionBlobRefManager(refRepository, blobManager);
-  }
-
-  /** Provider attempt 的 Resource 物化端口（支持的媒体有界内联为 Base64，绝不产生 URL，瞬时 source 绝不持久化）。 */
-  @Bean
-  public ProviderResourceMaterializer providerResourceMaterializer(
-      StorageBlobManager storageBlobManager, StorageBlobContentService blobContentService) {
-    return new ProviderResourceMaterializer(storageBlobManager, blobContentService);
-  }
-
-  /**
-   * Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history，Daemon 直传的 {@code
-   * blob-upload} 引用则在同一事务内原子转移为 Session 引用。
-   */
-  @Bean
-  public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
-      StorageUploadService uploadService,
-      SessionBlobRefManager refManager,
-      StorageBlobManager blobManager,
-      SystemSettingsSnapshot snapshot) {
-    return new GlobalStorageToolResultHistoryMaterializer(
-        uploadService,
-        blobManager,
-        refManager,
-        Math.toIntExact(snapshot.get().advanced().resourceMaxBytes()));
   }
 
   private S3Configuration newS3Configuration() {
