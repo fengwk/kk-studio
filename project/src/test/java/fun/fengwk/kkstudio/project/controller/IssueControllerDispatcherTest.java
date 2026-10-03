@@ -81,8 +81,13 @@ class IssueControllerDispatcherTest {
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
-    IssueWork work = IssueWork.builder().issueId(issueId).wakeVersion(3L).build();
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
+    IssueWork work =
+        IssueWork.builder()
+            .issueId(issueId)
+            .wakeVersion(3L)
+            .leaseUntil(Instant.parse("2026-09-27T11:00:00Z"))
+            .build();
+    when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
     when(reconciler.apply(any(IssueWorkClaim.class)))
         .thenReturn(IssueReconcileOutcome.RUN_ACCEPTED);
@@ -99,14 +104,13 @@ class IssueControllerDispatcherTest {
     IssueWorkClaim passedClaim = claimCaptor.getValue();
     assertEquals(issueId, passedClaim.issueId());
     assertEquals(3L, passedClaim.wakeVersion());
-    assertEquals(fixedClock.instant().plus(Duration.ofSeconds(30)), passedClaim.leaseUntil());
+    assertEquals(work.getLeaseUntil(), passedClaim.leaseUntil());
     assertNotNull(passedClaim.leaseToken());
 
     // 触发定时轮询回调，验证周期 poll 正确调用 wake() 触发 drain
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
-        .thenReturn(Optional.empty());
+    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.empty());
     pollCaptor.getValue().run();
-    verify(workStore, atLeast(2)).claimNext(any(Instant.class), anyString(), any(Instant.class));
+    verify(workStore, atLeast(2)).claimNext(anyString(), any(Duration.class));
   }
 
   /** 测试意图：wake() 在 start 前和 stop 后均为 no-op；start() 幂等；已 stop 再次 start 抛出异常。 */
@@ -140,7 +144,7 @@ class IssueControllerDispatcherTest {
     dispatcher.start();
     verify(pollScheduler, times(1))
         .scheduleWithFixedDelay(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class));
-    verify(workStore, times(1)).claimNext(any(Instant.class), anyString(), any(Instant.class));
+    verify(workStore, times(1)).claimNext(anyString(), any(Duration.class));
 
     // start 幂等，不会重复注册
     dispatcher.start();
@@ -191,7 +195,7 @@ class IssueControllerDispatcherTest {
             Runnable::run,
             pollScheduler);
 
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
+    when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
             inv -> {
               int c = drainCount.incrementAndGet();
@@ -201,7 +205,11 @@ class IssueControllerDispatcherTest {
                 dispatcher.wake();
                 dispatcher.wake();
                 return Optional.of(
-                    IssueWork.builder().issueId(UUID.randomUUID()).wakeVersion(1L).build());
+                    IssueWork.builder()
+                        .issueId(UUID.randomUUID())
+                        .wakeVersion(1L)
+                        .leaseUntil(fixedClock.instant().plusSeconds(30))
+                        .build());
               }
               return Optional.empty();
             });
@@ -250,17 +258,19 @@ class IssueControllerDispatcherTest {
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
-    IssueWork work = IssueWork.builder().issueId(issueId).wakeVersion(1L).build();
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
-        .thenReturn(Optional.of(work));
+    IssueWork work =
+        IssueWork.builder()
+            .issueId(issueId)
+            .wakeVersion(1L)
+            .leaseUntil(fixedClock.instant().plusSeconds(30))
+            .build();
+    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
 
     dispatcher.start();
 
     // 只领了一次 claim 就立即退出 drain，没有陷入紧密循环
-    verify(workStore, times(1)).claimNext(any(Instant.class), anyString(), any(Instant.class));
-    verify(workStore)
-        .rescheduleWork(
-            eq(issueId), anyString(), eq(fixedClock.instant().plus(Duration.ofSeconds(3))));
+    verify(workStore, times(1)).claimNext(anyString(), any(Duration.class));
+    verify(workStore).rescheduleWork(eq(issueId), anyString(), eq(1L), eq(Duration.ofSeconds(3)));
     verifyNoInteractions(reconciler);
   }
 
@@ -291,17 +301,20 @@ class IssueControllerDispatcherTest {
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
-    IssueWork work = IssueWork.builder().issueId(issueId).wakeVersion(1L).build();
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
+    IssueWork work =
+        IssueWork.builder()
+            .issueId(issueId)
+            .wakeVersion(1L)
+            .leaseUntil(fixedClock.instant().plusSeconds(30))
+            .build();
+    when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
-    when(workStore.rescheduleWork(any(UUID.class), anyString(), any(Instant.class)))
+    when(workStore.rescheduleWork(any(UUID.class), anyString(), anyLong(), any(Duration.class)))
         .thenThrow(new RuntimeException("store connection down"));
 
     assertDoesNotThrow(dispatcher::start);
 
-    verify(workStore)
-        .rescheduleWork(
-            eq(issueId), anyString(), eq(fixedClock.instant().plus(Duration.ofSeconds(5))));
+    verify(workStore).rescheduleWork(eq(issueId), anyString(), eq(1L), eq(Duration.ofSeconds(5)));
   }
 
   /** 测试意图：严格控制并发投递不超过 maxDispatchTasks，且 dispatchCapacity() 实时准确反映在途任务量。 */
@@ -343,11 +356,15 @@ class IssueControllerDispatcherTest {
             workerExecutor,
             pollScheduler);
 
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
+    when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
             inv ->
                 Optional.of(
-                    IssueWork.builder().issueId(UUID.randomUUID()).wakeVersion(1L).build()));
+                    IssueWork.builder()
+                        .issueId(UUID.randomUUID())
+                        .wakeVersion(1L)
+                        .leaseUntil(fixedClock.instant().plusSeconds(30))
+                        .build()));
 
     try {
       dispatcher.start();
@@ -388,9 +405,14 @@ class IssueControllerDispatcherTest {
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
-    IssueWork work = IssueWork.builder().issueId(issueId).wakeVersion(1L).build();
+    IssueWork work =
+        IssueWork.builder()
+            .issueId(issueId)
+            .wakeVersion(1L)
+            .leaseUntil(fixedClock.instant().plusSeconds(30))
+            .build();
 
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
+    when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
             inv -> {
               dispatcher.stop();
@@ -400,9 +422,7 @@ class IssueControllerDispatcherTest {
     dispatcher.start();
 
     // claim 被领取后发现已 stop，立即通过 rescheduleWork 归还
-    verify(workStore)
-        .rescheduleWork(
-            eq(issueId), anyString(), eq(fixedClock.instant().plus(Duration.ofSeconds(1))));
+    verify(workStore).rescheduleWork(eq(issueId), anyString(), eq(1L), eq(Duration.ofSeconds(1)));
     verifyNoInteractions(reconciler);
   }
 
@@ -539,13 +559,17 @@ class IssueControllerDispatcherTest {
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
-    IssueWork work = IssueWork.builder().issueId(issueId).wakeVersion(1L).build();
-    when(workStore.claimNext(any(Instant.class), anyString(), any(Instant.class)))
-        .thenReturn(Optional.of(work));
+    IssueWork work =
+        IssueWork.builder()
+            .issueId(issueId)
+            .wakeVersion(1L)
+            .leaseUntil(fixedClock.instant().plusSeconds(30))
+            .build();
+    when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
 
     assertThrows(AssertionError.class, dispatcher::start);
     assertEquals(0, dispatcher.dispatchCapacity());
-    verify(workStore).rescheduleWork(eq(issueId), anyString(), any(Instant.class));
+    verify(workStore).rescheduleWork(eq(issueId), anyString(), eq(1L), any(Duration.class));
   }
 
   /** 测试意图：生产构造函数正确委托并完成初始化。 */
