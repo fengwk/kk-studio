@@ -13,7 +13,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run build:layout && npm run preview:layout',
+    command: 'npm run preview:layout',
     url: 'http://127.0.0.1:5174/browser-tests/chat-layout-harness.html',
     reuseExistingServer: false,
     timeout: 15000,

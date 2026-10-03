@@ -234,7 +234,8 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
 布局基座采用独立静态构建与预览机制（[`vite.layout.config.ts`](../../frontend/vite.layout.config.ts)），
 通过 Rollup 多页（MPA）模式将真实 React 组件与 8 个测试 harness 预编译至 `reports/layout-site/`。
-Playwright 自动执行 `npm run build:layout && npm run preview:layout`，在 loopback 5174 端口启动静态预览
+`npm run test:layout` 先执行 `build:layout`，成功后启动 Playwright；编译不占用服务器的启动预算。
+Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
 （`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
 消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:layout`
 和 `npm run preview:layout`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
@@ -635,10 +636,12 @@ docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
 
 供应链报告保留 `image/npm-cache-probe.json` 与独立 stderr `logs/npm-cache-probe.log`。
 JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 和 Set-Cookie 回放。7 个 case 分为：
+
 - 同认证 fresh cache 正对照；两个认证/Cookie 变更的 Vary case 与响应 no-store 必须回源。
   这四项及 `shared=false` 断言失败均非零退出。
 - 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
   `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
+
 实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
 `ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
 **不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
