@@ -819,6 +819,65 @@ EOF
         record_failure "$name image smoke failed (exit $rc); inspect $log"
     else
         set_image_smoke_status "$name" PASS
+        if [[ "$name" == daemon ]]; then
+            run_npm_cache_probe "$image"
+        fi
+    fi
+}
+
+run_npm_cache_probe() {
+    local image=$1
+    local report="$RUN_DIR/image/npm-cache-probe.json"
+    local log="$RUN_DIR/logs/npm-cache-probe.log"
+    local rc=0
+    echo "==> Observing daemon npm cache boundaries (not a vulnerability clearance)"
+    docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
+        "$image" --input-type=module <"$SCRIPT_DIR/npm-cache-probe.mjs" \
+        >"$report" 2>"$log" || rc=$?
+    if ((rc != 0)); then
+        DAEMON_IMAGE_SMOKE_STATUS=FAIL
+        record_failure "daemon npm cache probe failed (exit $rc); inspect $report and $log"
+    elif ! node --input-type=module - "$report" >>"$log" 2>&1 <<'NODE'
+import { readFileSync } from 'node:fs'
+
+const report = JSON.parse(readFileSync(process.argv[2], 'utf8'))
+const expected = [
+    ['same-auth-fresh', 'control'],
+    ['auth-change-no-vary', 'observation'],
+    ['auth-vary', 'protection'],
+    ['cookie-vary', 'protection'],
+    ['no-store', 'protection'],
+    ['no-cache-max-stale', 'observation'],
+    ['set-cookie-no-public', 'header-observation'],
+]
+if (report.status !== 'ASSERTIONS_SATISFIED' ||
+    report.runtime?.shared !== false || report.runtime?.uid !== 10001 ||
+    !['node', 'npm', 'makeFetchHappen', 'httpCacheSemantics'].every(
+        key => typeof report.runtime?.[key] === 'string' && report.runtime[key].length > 0) ||
+    report.assertions?.sharedFalse !== true ||
+    !Array.isArray(report.errors) || report.errors.length !== 0 ||
+    !Array.isArray(report.cases) || report.cases.length !== expected.length ||
+    !expected.every(([id, kind]) => {
+        const result = report.cases.find(item => item.id === id && item.kind === kind)
+        return result && Number.isInteger(result.originHits) && result.originHits >= 1 &&
+            ['A', 'B'].includes(result.source) && typeof result.secondBody === 'string' &&
+            typeof result.setCookieReplayed === 'boolean' &&
+            (result.setCookie === null || typeof result.setCookie === 'string') &&
+            ['first', 'second'].every(key => result.cacheStatus &&
+                (result.cacheStatus[key] === null || typeof result.cacheStatus[key] === 'string')) &&
+            (kind === 'control' || kind === 'protection'
+                ? result.status === 'SATISFIED' &&
+                    result.originHits === (kind === 'control' ? 1 : 2) &&
+                    result.source === (kind === 'control' ? 'A' : 'B') &&
+                    (kind !== 'control' || result.cacheStatus.second === 'hit')
+                : ['OBSERVED', 'NOT_OBSERVED'].includes(result.status))
+    })) {
+    throw new Error('npm cache probe expected report is missing or invalid')
+}
+NODE
+    then
+        DAEMON_IMAGE_SMOKE_STATUS=FAIL
+        record_failure "daemon npm cache probe JSON is missing, empty, or invalid; inspect $report and $log"
     fi
 }
 
