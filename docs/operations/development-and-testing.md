@@ -613,8 +613,31 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 `v22.23.3`、npm `11.21.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
 Daemon 使用 Java 21 / Jammy，并将 npm bundle 的 `brace-expansion`、`ip-address`、`undici`
 分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm 自带的 `7.5.22`。
-`http-cache-semantics@4.2.0` 的 HIGH `CVE-2026-93748` 尚无上游补丁，保持原包并报告未解决风险，
+`http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
 不能据此宣称镜像扫描通过。
+
+Daemon 原有 smoke 成功后，通过 stdin 注入
+[`npm-cache-probe.mjs`](../../scripts/dev/verify/supply-chain/npm-cache-probe.mjs)，无需重建镜像。
+它使用默认 UID `10001`、真实 npm bundle、loopback HTTP 与 synthetic marker，不挂载宿主目录、
+不传用户环境/代理/密钥；请求有界且无 retry，完整消费 body 后关闭 server、删除本次临时 cache：
+
+```bash
+docker run --rm -i --network none --read-only --tmpfs /tmp --entrypoint node \
+  "$DAEMON_IMAGE" --input-type=module \
+  < scripts/dev/verify/supply-chain/npm-cache-probe.mjs
+```
+
+供应链报告保留 `image/npm-cache-probe.json` 与独立 stderr `logs/npm-cache-probe.log`。
+JSON 记录 runtime/shared、origin hits、第二次 body 来源、cache status 和 Set-Cookie 回放。7 个 case 分为：
+- 同认证 fresh cache 正对照；两个认证/Cookie 变更的 Vary case 与响应 no-store 必须回源。
+  这四项及 `shared=false` 断言失败均非零退出。
+- 无 Vary 的认证变更、响应 `no-cache` + `Age: 120` 后请求 `max-stale` 只记录
+  `OBSERVED` / `NOT_OBSERVED`；无 public 的 Set-Cookie case 观察头剥离，不证明 body 隔离。
+实测 `shared=false` 下无 Vary 仍复用 A body，`no-cache` 回源保护仍被 `max-stale` 绕过。
+`ASSERTIONS_SATISFIED` 不证明安全、漏洞修复或不受影响；同 OS 用户 cache 不是跨租户隔离，
+**不要跨互不信任主体共享 npm cache**，认证响应需正确配置 Vary，禁止存储用响应 no-store。
+退出非零、JSON 空/非法或预期报告缺失使 Daemon smoke 失败，随后仍运行 Trivy；
+观测不改变漏洞 gate、不提供 suppression，不能将 `shared=false` 视为修复。
 
 ## 本机 preview 与 NAS 自迭代
 

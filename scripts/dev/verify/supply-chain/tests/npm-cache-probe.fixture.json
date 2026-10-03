@@ -1,0 +1,115 @@
+{
+  "status": "ASSERTIONS_SATISFIED",
+  "runtime": {
+    "node": "v22.23.3",
+    "npm": "11.21.0",
+    "makeFetchHappen": "15.0.6",
+    "httpCacheSemantics": "4.2.0",
+    "uid": 10001,
+    "shared": false
+  },
+  "assertions": {
+    "sharedFalse": true
+  },
+  "cases": [
+    {
+      "id": "same-auth-fresh",
+      "kind": "control",
+      "originHits": 1,
+      "secondBody": "SYNTHETIC_BODY_A_same-auth-fresh",
+      "source": "A",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "hit"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "SATISFIED"
+    },
+    {
+      "id": "auth-change-no-vary",
+      "kind": "observation",
+      "originHits": 1,
+      "secondBody": "SYNTHETIC_BODY_A_auth-change-no-vary",
+      "source": "A",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "hit"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "OBSERVED"
+    },
+    {
+      "id": "auth-vary",
+      "kind": "protection",
+      "originHits": 2,
+      "secondBody": "SYNTHETIC_BODY_B_auth-vary",
+      "source": "B",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "updated"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "SATISFIED"
+    },
+    {
+      "id": "cookie-vary",
+      "kind": "protection",
+      "originHits": 2,
+      "secondBody": "SYNTHETIC_BODY_B_cookie-vary",
+      "source": "B",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "updated"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "SATISFIED"
+    },
+    {
+      "id": "no-store",
+      "kind": "protection",
+      "originHits": 2,
+      "secondBody": "SYNTHETIC_BODY_B_no-store",
+      "source": "B",
+      "cacheStatus": {
+        "first": "skip",
+        "second": "skip"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "SATISFIED"
+    },
+    {
+      "id": "no-cache-max-stale",
+      "kind": "observation",
+      "originHits": 1,
+      "secondBody": "SYNTHETIC_BODY_A_no-cache-max-stale",
+      "source": "A",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "hit"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "OBSERVED"
+    },
+    {
+      "id": "set-cookie-no-public",
+      "kind": "header-observation",
+      "originHits": 1,
+      "secondBody": "SYNTHETIC_BODY_A_set-cookie-no-public",
+      "source": "A",
+      "cacheStatus": {
+        "first": "miss",
+        "second": "hit"
+      },
+      "setCookie": null,
+      "setCookieReplayed": false,
+      "status": "OBSERVED"
+    }
+  ],
+  "errors": []
+}
