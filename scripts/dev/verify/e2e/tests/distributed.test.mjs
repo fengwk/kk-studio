@@ -12,6 +12,8 @@ import {
   runDistributedCommand,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
+import { HttpError } from '../lib/http.mjs'
+import { ALL_CASES } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
 test('createBaseUrls requires both node URLs and normalizes trailing slashes', () => {
@@ -178,6 +180,54 @@ test('matrix collects app file logs before publishing reports and shell teardown
   assert.ok(collectAt < runner.lastIndexOf('publishLatest('), 'collect before publishing')
   const shell = fs.readFileSync(path.join(REPO_ROOT, 'scripts/dev/verify/e2e/run.sh'), 'utf8')
   assert.match(shell, /trap cleanup_distributed EXIT/)
+})
+
+test('DB loss case keeps one 10s fault request and restores both READY projections', async () => {
+  // Intent: record HTTP timing without retrying a failed operation or changing its budget.
+  await import('../cases/distributed.mjs')
+  const faultCase = ALL_CASES.find((entry) => entry.id === 'distributed.db_loss_fail_closed')
+  for (const transportTimeout of [false, true]) {
+    const commands = []
+    const recoveredNodes = []
+    let disconnected = false
+    let faultRequests = 0
+    let summary
+    const ctx = {
+      baseUrls: { a: 'http://a', b: 'http://b' },
+      runDistributedCommand(command) {
+        commands.push(command)
+        disconnected = command === 'disconnect-db-a'
+      },
+      async callNode(node, method, requestPath, body, timeoutMs) {
+        if (disconnected) {
+          faultRequests++
+          assert.equal(node, 'a')
+          assert.equal(timeoutMs, 10_000)
+          if (transportTimeout) throw new Error('timeout GET')
+          throw new HttpError(500, 'database disconnected', requestPath)
+        }
+        if (commands.length) recoveredNodes.push(node)
+        return { json: { data: { ready: true, status: 'READY', homeDirectory: '/home/test' } } }
+      },
+      writeArtifact(name, data) {
+        assert.equal(name, 'recovery-summary.json')
+        summary = JSON.parse(data)
+      },
+    }
+    if (transportTimeout) {
+      await assert.rejects(() => faultCase.run(ctx), /expected HttpError/)
+      assert.equal(summary, undefined)
+    } else {
+      await faultCase.run(ctx)
+      assert.equal(summary.dbLossStatus, 500)
+      assert.ok(summary.dbLossDurationMs >= 0)
+      assert.deepEqual(recoveredNodes, ['a', 'b'])
+      assert.equal(summary.recoveredOnA.status, 'READY')
+      assert.equal(summary.recoveredOnB.status, 'READY')
+    }
+    assert.equal(faultRequests, 1, 'never retry the fault request')
+    assert.deepEqual(commands, ['disconnect-db-a', 'reconnect-db-a'])
+  }
 })
 
 test('runDistributedCommand forwards whitelisted commands with exact arguments and repoRoot', () => {
