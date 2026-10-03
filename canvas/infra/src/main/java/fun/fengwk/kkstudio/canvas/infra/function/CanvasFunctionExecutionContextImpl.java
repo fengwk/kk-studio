@@ -123,6 +123,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
             frozen.canvasId(),
             frozen.nodeId(),
             frozen.requestId(),
+            claim.leaseToken(),
             output.resourceId(),
             output.name(),
             content);
@@ -146,6 +147,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
             frozen.canvasId(),
             frozen.nodeId(),
             frozen.requestId(),
+            claim.leaseToken(),
             output.resourceId(),
             output.name(),
             text);
