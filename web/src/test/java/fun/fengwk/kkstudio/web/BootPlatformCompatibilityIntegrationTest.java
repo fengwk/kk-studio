@@ -29,9 +29,7 @@ import java.util.regex.Pattern;
 /**
  * 验证真实运行的 Boot 4 平台：内嵌容器必须提供 Servlet 6.1 能力，且 classpath 上所有 Netty 构件必须共享同一个 4.2.x 安全修订版本。
  *
- * <p>根 POM 曾把四个 {@code tomcat-embed-*} 固定为 10.1.59（Servlet 6.0），并在 Boot BOM 之前导入 netty-bom {@code
- * 4.1.137.Final}，等于把 Boot 4 的受支持平台拆回上一代容器与网络栈。本测试只从活容器与已解析构件自带的版本清单读取平台 major/minor，因此不会因 patch
- * 或小版本升级失效，但会捕捉任何把平台降级回 Tomcat 10 / Servlet 6.0 / Netty 4.1 的改动。
+ * <p>从活容器与已解析构件自带的版本清单读取平台 major/minor，验证安全补丁升级后平台契约与构件版本一致性。
  */
 class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
 
@@ -49,10 +47,10 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
 
   /**
    * 测试意图：Boot 4.0.x 只支持 Servlet 6.1 容器（Tomcat 11.0.x）。真实 HTTP 往返证明端口上确实有一个按 Servlet 6.1 提供服务的
-   * Tomcat 11，而不是仅类路径里存在 API；一旦根 POM 再次固定 Tomcat 10.1 就会在此失败。
+   * Tomcat 11，而不是仅类路径里存在 API。
    */
   @Test
-  void embeddedContainerServesServlet61OnBootManagedTomcat11() throws Exception {
+  void embeddedContainerServesServlet61OnTomcat11() throws Exception {
     assertTrue(port > 0, "the embedded container must listen on a real port");
     ServletContext servletContext =
         ((ServletWebServerApplicationContext) applicationContext).getServletContext();
@@ -85,10 +83,10 @@ class BootPlatformCompatibilityIntegrationTest extends WebPostgresTestSupport {
 
   /**
    * 测试意图：AWS SDK 的 netty-nio-client、native epoll 等构件必须解析成同一个 4.2.x 版本。版本不一致会让 transport 与 native
-   * transport 混用，而 4.1.x 则是被移除的上一代平台。
+   * transport 混用。
    */
   @Test
-  void resolvedNettyArtifactsShareBootManagedPlatformVersion() throws Exception {
+  void resolvedNettyArtifactsShareCentralPlatformVersion() throws Exception {
     Map<String, String> artifactVersions = readResolvedNettyArtifactVersions();
     assertFalse(
         artifactVersions.isEmpty(),
