@@ -162,7 +162,7 @@ class SkillPackageInstallerTest {
     assertDirectoryEmpty(backupRoot);
   }
 
-  /** 验证未知 commit 或拉取失败时保留已有安装，且不在 staging 或 backup 目录下遗留任何临时产物。 */
+  /** 验证未知 commit 与缺失分支的回退失败保留已有安装、返回稳定错误，且 staging/backup 不遗留临时产物。 */
   @Test
   void fetchFailurePreservesPreviousInstallAndLeavesNoArtifacts() throws Exception {
     String validCommitId;
@@ -185,6 +185,14 @@ class SkillPackageInstallerTest {
             SkillSyncException.class,
             () -> installer.install("persist-pkg", remoteUrl, "master", unknownCommit));
     assertEquals("COMMIT_NOT_FOUND", error.code());
+
+    // 精确对象未广告时允许回退；回退分支缺失仍须稳定分类并保持原安装。
+    SkillSyncException fallback =
+        assertThrows(
+            SkillSyncException.class,
+            () -> installer.install("persist-pkg", remoteUrl, "missing", unknownCommit));
+    assertEquals("GIT_FETCH_FAILED", fallback.code());
+    assertEquals("Git branch fetch failed", fallback.getMessage());
 
     // 验证已有安装完好无损
     assertTrue(Files.exists(pkgDir.resolve("persist-skill/SKILL.md")));
