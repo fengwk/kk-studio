@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixture'
 
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 

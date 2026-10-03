@@ -232,6 +232,12 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 
 布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
 用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
+布局基座采用独立静态构建与预览机制（[`vite.layout.config.ts`](../../frontend/vite.layout.config.ts)），
+通过 Rollup 多页（MPA）模式将真实 React 组件与 8 个测试 harness 预编译至 `reports/layout-site/`。
+Playwright 自动执行 `npm run build:layout && npm run preview:layout`，在 loopback 5174 端口启动静态预览
+（`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
+消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:layout`
+和 `npm run preview:layout`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
 首轮失败时，`reports/layout/` 下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。

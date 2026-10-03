@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixture'
 
 test.describe('Composer Focus Menu Real React Browser Regression', () => {
   test.beforeEach(async ({ page }) => {

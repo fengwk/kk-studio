@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixture'
 
 test.describe('Canvas Generation Panel Real Browser Layout Regression', () => {
   test('Standard desktop layout: renders prompt textarea, attached reference chips, candidate buttons, parameter controls, and expansion toggle', async ({
