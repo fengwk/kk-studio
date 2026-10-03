@@ -294,9 +294,10 @@ export function useAgentThreadController(
       if (isStillBound(variables.operationBindingThreadId, variables.operationEpoch)) {
         setConflict(null)
       }
-      decisionIdByInvocation.current.delete(
-        `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`,
-      )
+      const key = `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`
+      if (decisionIdByInvocation.current.get(key) === variables.decisionId) {
+        decisionIdByInvocation.current.delete(key)
+      }
       await Promise.all([
         // 决策落在哪个 Thread 就刷新哪个 Thread 的 snapshot（子 Thread 审批
         // 会投影到其自己的 ToolInvocation）；Chat 列表总需要刷新。
@@ -325,8 +326,7 @@ export function useAgentThreadController(
     setConflict(null)
     const operationBindingThreadId = threadId
     const operationEpoch = bindingEpochRef.current
-    // 回放键必须包含 targetThreadId：不同子 Thread 可能复用相同的 invocationId，
-    // 绝不能把 A 子 Thread 的幂等键复用给 B 子 Thread。
+    // 子 Thread 的审批独立寻址，未知结果重试复用同一个 decisionId。
     const key = `${targetThreadId}:${invocationId}:${decision}`
     const decisionId = decisionIdByInvocation.current.get(key) ?? createDecisionId()
     decisionIdByInvocation.current.set(key, decisionId)
@@ -361,12 +361,14 @@ export function useAgentThreadController(
     mutationFn: ({
       operationThreadId,
       expectedVersion,
+      operationEpoch: _operationEpoch,
     }: {
       operationThreadId: string
       expectedVersion: string
+      operationEpoch: number
     }) => harnessService.compactThread(operationThreadId, { expectedVersion }),
     onSuccess: async (_result, variables) => {
-      if (boundThreadIdRef.current === variables.operationThreadId) {
+      if (isStillBound(variables.operationThreadId, variables.operationEpoch)) {
         setConflict(null)
       }
       await queryClient.invalidateQueries({
@@ -818,7 +820,11 @@ export function useAgentThreadController(
     const operationThreadId = threadId
     const operationEpoch = bindingEpochRef.current
     return compactMutation
-      .mutateAsync({ operationThreadId, expectedVersion: thread.version })
+      .mutateAsync({
+        operationThreadId,
+        expectedVersion: thread.version,
+        operationEpoch,
+      })
       .then(() => undefined)
       .catch((error: unknown) => {
         if (isStillBound(operationThreadId, operationEpoch)) {
