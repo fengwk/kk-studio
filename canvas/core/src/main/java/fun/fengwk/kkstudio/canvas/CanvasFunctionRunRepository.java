@@ -12,6 +12,12 @@ public interface CanvasFunctionRunRepository {
 
   Optional<CanvasFunctionRun> findByNodeIdForUpdate(UUID nodeId);
 
+  /**
+   * 在已持有 document → run 行锁的短事务内检查输出 ownership，包含节点所属 canvas、request、RUNNING、token 与租约。
+   * 租约必须使用数据库当前时间判定；不得缓存结果或使用事务开始时间。
+   */
+  boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken);
+
   List<CanvasFunctionRun> findByCanvasId(UUID canvasId);
 
   void insertReady(CanvasFunctionRun run);
