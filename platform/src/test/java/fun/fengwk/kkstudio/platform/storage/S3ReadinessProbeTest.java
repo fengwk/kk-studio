@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageConfiguration;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 
@@ -103,7 +104,9 @@ class S3ReadinessProbeTest {
     S3StorageConfiguration configuration = new S3StorageConfiguration();
 
     IllegalStateException clientError =
-        assertThrows(IllegalStateException.class, () -> configuration.s3Client(properties));
+        assertThrows(
+            IllegalStateException.class,
+            () -> configuration.s3Client(properties, HttpProxySelector.fixed(null, "")));
     IllegalStateException presignerError =
         assertThrows(IllegalStateException.class, () -> configuration.s3Presigner(properties));
 

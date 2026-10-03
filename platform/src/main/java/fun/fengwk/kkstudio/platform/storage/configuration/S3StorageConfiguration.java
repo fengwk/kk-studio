@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.storage.configuration;
 
+import org.apache.http.impl.conn.SystemDefaultRoutePlanner;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.jdbc.autoconfigure.JdbcConnectionDetails;
 import org.springframework.context.annotation.Bean;
@@ -10,6 +12,7 @@ import org.springframework.util.Assert;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.http.apache.ProxyConfiguration;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUpload
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
 
+import java.net.ProxySelector;
 import java.net.URI;
 import java.sql.DriverManager;
 import java.time.Clock;
@@ -65,7 +69,9 @@ public class S3StorageConfiguration {
   private static final Duration UPLOAD_LOCK_ACQUIRE_TIMEOUT = Duration.ofSeconds(10);
 
   @Bean(destroyMethod = "close")
-  public S3Client s3Client(S3StorageProperties properties) {
+  public S3Client s3Client(
+      S3StorageProperties properties,
+      @Qualifier("systemProxySelector") ProxySelector proxySelector) {
     S3ReadinessProbe.validateProperties(properties);
     try {
       return S3Client.builder()
@@ -75,7 +81,14 @@ public class S3StorageConfiguration {
               StaticCredentialsProvider.create(
                   AwsBasicCredentials.create(properties.getAccessKey(), properties.getSecretKey())))
           .serviceConfiguration(newS3Configuration())
-          .httpClientBuilder(ApacheHttpClient.builder())
+          .httpClientBuilder(
+              ApacheHttpClient.builder()
+                  .proxyConfiguration(
+                      ProxyConfiguration.builder()
+                          .useSystemPropertyValues(false)
+                          .useEnvironmentVariableValues(false)
+                          .build())
+                  .httpRoutePlanner(new SystemDefaultRoutePlanner(proxySelector)))
           .build();
     } catch (RuntimeException ignored) {
       throw new IllegalStateException("S3 client configuration is invalid");

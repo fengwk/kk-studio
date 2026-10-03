@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
 import java.io.IOException;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -23,6 +24,7 @@ public final class JdkMavisHttpTransport implements MavisHttpTransport {
   public JdkMavisHttpTransport() {
     this(
         HttpClient.newBuilder()
+            .proxy(ProxySelector.getDefault())
             .version(HttpClient.Version.HTTP_1_1)
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(CONNECT_TIMEOUT)

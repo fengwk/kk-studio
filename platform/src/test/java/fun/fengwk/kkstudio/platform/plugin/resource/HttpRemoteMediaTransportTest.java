@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
@@ -19,6 +23,9 @@ import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
+
+import fun.fengwk.kkstudio.platform.plugin.resource.testfixtures.LocalConnectProxy;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SNIHostName;
@@ -34,6 +41,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -61,6 +69,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>生产地址准入只放行公网地址，因此这里注入「只额外放行回环地址」的测试策略：测试服务器可达，但 DNS rebinding 与私网地址仍按生产规则被拒绝。
  */
+@ResourceLock("jvm-proxy-selector")
 class HttpRemoteMediaTransportTest {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(10);
@@ -80,6 +89,140 @@ class HttpRemoteMediaTransportTest {
   // =========================================================================
   // 1. DNS pinning 与 TLS
   // =========================================================================
+
+  /** 代理只能收到校验后的 IP；HTTPS 端仍观察到原域名 SNI/Host 与完整媒体字节，媒体 DNS 只解析一次。 */
+  @Test
+  void proxyConnectsToPinnedIpWhilePreservingTlsAndHttpNames() throws Exception {
+    SSLContext tls = createTestTlsContext();
+    List<String> names = new ArrayList<>();
+    Endpoint endpoint = new Endpoint();
+    HttpsServer server = startHttpsServer(tls, names, mediaHandler(endpoint));
+    SequencedHostResolver resolver = new SequencedHostResolver();
+    resolver.enqueue(MEDIA_HOST, List.of(InetAddress.getByName(LOOPBACK)));
+    try (LocalConnectProxy proxy = new LocalConnectProxy();
+        HttpRemoteMediaTransport transport =
+            new HttpRemoteMediaTransport(
+                TIMEOUT,
+                new PublicAddressDnsResolver(loopbackPolicy(resolver)),
+                new DefaultClientTlsStrategy(tls),
+                proxy.selector())) {
+      int port = server.getAddress().getPort();
+      RemoteMediaTransport.MediaResponse response =
+          transport.get(URI.create("https://" + MEDIA_HOST + ":" + port + "/media"), TIMEOUT);
+      assertEquals(200, response.status());
+      assertArrayEquals(PNG, readAll(response.body()));
+      assertEquals(LOOPBACK + ":" + port, proxy.authority());
+      assertEquals(1, proxy.connections());
+      assertEquals(List.of(MEDIA_HOST), names);
+      assertEquals(MEDIA_HOST + ":" + port, endpoint.headers.getFirst("Host"));
+      assertEquals(1, resolver.callCount());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  /** 私网及混合 DNS 答案必须整体拒绝，不能因首个答案可用就联系代理。 */
+  @Test
+  void proxyIsNotContactedForPrivateOrMixedDnsAnswers() throws Exception {
+    try (LocalConnectProxy proxy = new LocalConnectProxy()) {
+      ProxySelector selector = spy(proxy.selector());
+      for (List<InetAddress> addresses :
+          List.of(
+              List.of(InetAddress.getByName("10.0.0.1")),
+              List.of(InetAddress.getByName("8.8.8.8"), InetAddress.getByName("10.0.0.1")))) {
+        SequencedHostResolver resolver = new SequencedHostResolver();
+        resolver.enqueue(MEDIA_HOST, addresses);
+        try (HttpRemoteMediaTransport transport =
+            new HttpRemoteMediaTransport(
+                TIMEOUT,
+                new PublicAddressDnsResolver(new PublicAddressPolicy(resolver)),
+                null,
+                selector)) {
+          PluginResourceUnavailableException failure =
+              assertThrows(
+                  PluginResourceUnavailableException.class,
+                  () -> transport.get(URI.create("https://" + MEDIA_HOST + "/media"), TIMEOUT));
+          assertTrue(failure.getMessage().contains("non-public address"));
+          assertEquals(1, resolver.callCount());
+          // 同步断言尚未选代理，避免仅依赖异步 accept 计数而产生假绿。
+          verify(selector, never()).select(any(URI.class));
+          assertEquals(0, proxy.connections());
+        }
+      }
+    }
+  }
+
+  /** CONNECT 不得削弱证书信任或主机名校验：自签但不信任、信任但域名不符都失败且不发送 HTTP。 */
+  @Test
+  void proxyKeepsCertificateTrustAndHostnameVerification() throws Exception {
+    SSLContext tls = createTestTlsContext();
+    Endpoint endpoint = new Endpoint();
+    HttpsServer server = startHttpsServer(tls, new ArrayList<>(), mediaHandler(endpoint));
+    try {
+      for (boolean trusted : List.of(false, true)) {
+        String host = trusted ? "wrong.example.com" : MEDIA_HOST;
+        SequencedHostResolver resolver = new SequencedHostResolver();
+        resolver.enqueue(host, List.of(InetAddress.getByName(LOOPBACK)));
+        try (LocalConnectProxy proxy = new LocalConnectProxy();
+            HttpRemoteMediaTransport transport =
+                new HttpRemoteMediaTransport(
+                    TIMEOUT,
+                    new PublicAddressDnsResolver(loopbackPolicy(resolver)),
+                    trusted ? new DefaultClientTlsStrategy(tls) : null,
+                    proxy.selector())) {
+          PluginResourceUnavailableException failure =
+              assertThrows(
+                  PluginResourceUnavailableException.class,
+                  () ->
+                      transport.get(
+                          URI.create(
+                              "https://" + host + ":" + server.getAddress().getPort() + "/media"),
+                          TIMEOUT));
+          assertInstanceOf(SSLException.class, failure.getCause());
+          assertEquals(LOOPBACK + ":" + server.getAddress().getPort(), proxy.authority());
+          assertEquals(1, proxy.connections());
+          assertEquals(0, endpoint.requests.get());
+        }
+      }
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  /** 可信预签名 PUT 与 GET 共用 selector，但不调用公网准入；代理接收完整文件及 signed headers。 */
+  @Test
+  void putUsesTheSameProxyWithoutApplyingPublicAddressPolicy() throws Exception {
+    Endpoint endpoint = new Endpoint();
+    HttpServer proxy =
+        startPlainServer(
+            exchange -> {
+              endpoint.record(exchange);
+              respond(exchange, 200, new byte[0], null);
+            });
+    Path file = tempDir.resolve("proxy-upload.bin");
+    Files.write(file, PNG);
+    SequencedHostResolver resolver = new SequencedHostResolver();
+    try (HttpRemoteMediaTransport transport =
+        new HttpRemoteMediaTransport(
+            TIMEOUT,
+            new PublicAddressDnsResolver(new PublicAddressPolicy(resolver)),
+            null,
+            LocalConnectProxy.httpSelector(proxy.getAddress().getPort()))) {
+      assertEquals(
+          200,
+          transport.put(
+              URI.create("http://10.0.0.1/upload"),
+              Map.of("x-amz-signature", "signed-value"),
+              file,
+              TIMEOUT));
+      assertArrayEquals(PNG, endpoint.body);
+      assertEquals("10.0.0.1", endpoint.headers.getFirst("Host"));
+      assertEquals("signed-value", endpoint.headers.getFirst("x-amz-signature"));
+      assertEquals(0, resolver.callCount());
+    } finally {
+      proxy.stop(0);
+    }
+  }
 
   /** 校验地址与实际连接一致：解析只发生一次，返回的回环地址就是真正建连的地址；TLS 仍按原始主机名做 SNI 与证书校验。 */
   @Test
