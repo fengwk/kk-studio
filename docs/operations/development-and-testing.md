@@ -584,9 +584,13 @@ guard 与 [BootPlatformCompatibilityIntegrationTest](../../web/src/test/java/fun
 - 在线源、Maven Central、npm registry、NVD 或 report generation 不可用时保持 `FAIL`；缺失数据
   不能生成 `PASS`。策略是零 suppression 与零漏洞，Dependency-Check 与 npm audit 都不配置白名单。
 - Trivy image 固定为脚本中的 immutable digest，并校验版本 `0.74.0`；扫描过滤 `HIGH,CRITICAL`
-  且忽略无修复版本的条目。cache volume 默认 `kk-studio-trivy-cache`，可用
+  且包含无修复版本的条目，不使用 suppression 或 `--ignore-unfixed`。cache volume 默认 `kk-studio-trivy-cache`，可用
   `SUPPLY_CHAIN_TRIVY_CACHE_VOLUME` 覆盖；已有完整 cache 时设置 `TRIVY_SKIP_DB_UPDATE=true`，
   cache 不完整仍失败。
+- `SUPPLY_CHAIN_TRIVY_NETWORK` 可显式指定 Docker network 名称或 ID（字母/数字开头，后续仅允许
+  字母、数字、`_`、`.`、`-`），例如 `SUPPLY_CHAIN_TRIVY_NETWORK=host ./scripts/dev/verify/supply-chain/run.sh image`。
+  空值保持自动行为：loopback proxy 使用 host，其他情况使用 Docker 默认网络；该选项仅影响 Trivy，
+  不修改 DNS、不依赖特定机器 hostname，代理值不进入 scanner argv。
 - Trivy 非零、JSON 缺失或不可解析、二次解析发现任一 HIGH/CRITICAL、镜像 smoke 失败或默认 user
   为 root，都保持 `FAIL`。
 
@@ -598,7 +602,11 @@ guard 与 [BootPlatformCompatibilityIntegrationTest](../../web/src/test/java/fun
 | Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
 App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon 额外检查 Node
-`v22.19.x`、npm `11.19.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
+`v22.23.3`、npm `11.21.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
+Daemon 使用 Java 21 / Jammy，并将 npm bundle 的 `brace-expansion`、`ip-address`、`undici`
+分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm 自带的 `7.5.22`。
+`http-cache-semantics@4.2.0` 的 HIGH `CVE-2026-93748` 尚无上游补丁，保持原包并报告未解决风险，
+不能据此宣称镜像扫描通过。
 
 ## 本机 preview 与 NAS 自迭代
 

@@ -218,13 +218,15 @@ case "\${1:-}" in
             fi
             printf '%s\\n' \
                 'uid=10001 user=kkdaemon' \
-                'v22.19.0' \
-                '11.19.0' \
+                'v22.23.3' \
+                '11.21.0' \
                 '/usr/bin/bash' \
                 '/usr/bin/git' \
                 'package-lock.json contains lodash@4.17.21'
         elif [[ "\${FAKE_DOCKER_REPORT_VULNERABILITY:-false}" == true ]]; then
             printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[{"Target":"ubuntu","Vulnerabilities":[{"VulnerabilityID":"CVE-2099-0002","PkgName":"fake-package","Severity":"HIGH","FixedVersion":"1.2.3"}]}]}'
+        elif [[ "\${FAKE_DOCKER_REPORT_UNFIXED:-false}" == true ]]; then
+            printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[{"Target":"npm","Vulnerabilities":[{"VulnerabilityID":"CVE-2026-93748","PkgName":"http-cache-semantics","Severity":"HIGH"}]}]}'
         else
             printf '%s\\n' '{"SchemaVersion":2,"ArtifactName":"fake-image","Results":[]}'
         fi
@@ -685,7 +687,7 @@ test('builds both current images and constructs a pinned proxy-aware Trivy scan'
         assert.match(runCalls, /--env HTTP_PROXY/)
         assert.doesNotMatch(runCalls, /127\.0\.0\.1:7890/)
         assert.match(runCalls, /--scanners vuln/)
-        assert.match(runCalls, /--ignore-unfixed/)
+        assert.doesNotMatch(runCalls, /--ignore-unfixed/)
 
         const summary = JSON.parse(
             readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'),
@@ -859,4 +861,93 @@ test('keeps runtime apt upgrade before install in both image Dockerfiles', () =>
         assert.match(runtime, /rm -rf \/var\/lib\/apt\/lists\/\*/)
         assert.match(runtime, /Ubuntu security updates/)
     }
+})
+
+test('supports explicit Trivy networks without exposing proxy credentials', () => {
+    // Intent: explicit networks override automatic selection for version and both scans, not image builds.
+    for (const network of ['host', 'bridge', 'none', 'quality_net-1.2']) {
+        const toolchain = createFakeDockerToolchain()
+        try {
+            const result = runScript(['image'], {
+                ...toolchain.env,
+                SUPPLY_CHAIN_REPORT_ROOT: path.join(toolchain.root, 'reports'),
+                SUPPLY_CHAIN_TRIVY_NETWORK: network,
+                HTTP_PROXY: network === 'host'
+                    ? 'http://user:secret@proxy.example:7890'
+                    : 'http://user:secret@127.0.0.1:7890',
+            })
+            assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
+            const calls = readFileSync(toolchain.callsFile, 'utf8')
+            const scans = calls.split('\n').filter(line => line.includes('aquasec/trivy@'))
+            assert.equal(scans.length, 3)
+            for (const scan of scans) {
+                assert.ok(scan.includes(`--network ${network} `), scan)
+                assert.doesNotMatch(scan, /user:secret/)
+            }
+            assert.doesNotMatch(result.stdout + result.stderr, /user:secret/)
+        } finally {
+            rmSync(toolchain.root, { recursive: true, force: true })
+        }
+    }
+})
+
+test('rejects invalid Trivy networks before any build or report side effects', () => {
+    // Intent: reject flags, whitespace and shell fragments without echoing untrusted values.
+    for (const network of ['--privileged', 'host --env X=Y', 'host;touch /tmp/x', '$(id)', 'a\nb']) {
+        const toolchain = createFakeDockerToolchain()
+        try {
+            const reportRoot = path.join(toolchain.root, 'reports')
+            const result = runScript(['image'], {
+                ...toolchain.env,
+                SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+                SUPPLY_CHAIN_TRIVY_NETWORK: network,
+            })
+            assert.equal(result.status, 2)
+            assert.match(result.stderr, /must be a Docker network name\/id/)
+            assert.equal(result.stderr.includes(network), false)
+            assert.equal(existsSync(toolchain.callsFile), false)
+            assert.equal(existsSync(reportRoot), false)
+        } finally {
+            rmSync(toolchain.root, { recursive: true, force: true })
+        }
+    }
+})
+
+test('fails closed on an unfixed HIGH vulnerability', () => {
+    // Intent: an upstream package without a patch must remain a blocking finding, not a false zero.
+    const toolchain = createFakeDockerToolchain()
+    try {
+        const reportRoot = path.join(toolchain.root, 'reports')
+        const result = runScript(['image'], {
+            ...toolchain.env,
+            SUPPLY_CHAIN_REPORT_ROOT: reportRoot,
+            FAKE_DOCKER_REPORT_UNFIXED: 'true',
+        })
+        assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`)
+        const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
+        for (const name of ['app-image-scan', 'daemon-image-scan']) {
+            assert.equal(summary.checks.find(check => check.name === name).status, 'FAIL')
+        }
+        assert.match(readFileSync(path.join(reportRoot, 'latest/logs/daemon-image-scan.log'), 'utf8'),
+            /http-cache-semantics: CVE-2026-93748 \(no fixed version\)/)
+    } finally {
+        rmSync(toolchain.root, { recursive: true, force: true })
+    }
+})
+
+test('pins runtime versions and only overrides vulnerable npm bundles with upstream fixes', () => {
+    // Intent: keep Java21/Node22/Jammy and non-root identities while avoiding unnecessary or private patches.
+    const app = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'), 'utf8')
+    const daemon = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'), 'utf8')
+    assert.match(app, /FROM eclipse-temurin:21\.0\.12\.1_1-jre-jammy/)
+    assert.match(app, /--uid 10001/)
+    assert.match(daemon, /FROM eclipse-temurin:21\.0\.12\.1_1-jdk-jammy/)
+    assert.match(daemon, /FROM node:22\.23\.3-bookworm-slim AS node-runtime/)
+    assert.match(daemon, /npm install --global npm@11\.21\.0/)
+    for (const dependency of ['brace-expansion@5.0.12', 'ip-address@10.7.3', 'undici@6.28.1']) {
+        assert.ok(daemon.includes(`npm pack ${dependency} `))
+    }
+    assert.doesNotMatch(daemon, /npm pack (tar|http-cache-semantics)@/)
+    assert.match(daemon, /USER 10001:10001/)
+    assert.match(runScript(['help']).stdout, /SUPPLY_CHAIN_TRIVY_NETWORK/)
 })
