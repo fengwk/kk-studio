@@ -21,6 +21,7 @@ import {
   clearBoundPendingMessage,
   loadBoundPendingMessage,
   saveBoundPendingMessage,
+  sameBatchRequestIdentity,
   type BoundPendingMessage,
 } from '@/features/ai/runtime/agent-pane/pane-target'
 import { isDefiniteAcceptanceFailure } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
@@ -152,7 +153,14 @@ export function useAgentThreadController(
 ) {
   const { t } = useI18n()
   const boundThreadIdRef = useRef(threadId)
-  boundThreadIdRef.current = threadId
+  const bindingEpochRef = useRef(0)
+  if (boundThreadIdRef.current !== threadId) {
+    boundThreadIdRef.current = threadId
+    bindingEpochRef.current += 1
+  }
+  const isStillBound = (originThreadId: string, originEpoch: number) =>
+    boundThreadIdRef.current === originThreadId && bindingEpochRef.current === originEpoch
+
   const draftStorageScope = `thread:${threadId}`
   const [draft, setDraftState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(draftStorageScope, initialParts),
@@ -160,9 +168,12 @@ export function useAgentThreadController(
   const draftRef = useRef<ComposerPart[]>(draft)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
-  // 维护局部的 in-flight 计数，保证重叠 mutateAsync 调用下 pending 状态依旧准确。
+  // 维护局部的 in-flight 计数与按绑定隔离的在途标识，保证跨 Thread 与重叠调用下状态准确。
   const [inFlightSubmissions, setInFlightSubmissions] = useState(0)
-  const isInFlightRef = useRef(false)
+  const inFlightBindingsRef = useRef(new Set<string>())
+  function isCurrentBindingInFlight(): boolean {
+    return inFlightBindingsRef.current.has(`${boundThreadIdRef.current}:${bindingEpochRef.current}`)
+  }
 
   // Bound thread 持久化 pending 消息：发送前先写入 storage，网络未知结果后保留，
   // reload/remount 后恢复，支持逐字节 retry 与明确放弃。
@@ -247,6 +258,9 @@ export function useAgentThreadController(
     setPendingMessage(restoredPending)
 
     initializedReplayThreadRef.current = threadId
+    setInFlightSubmissions(0)
+    setActionError(null)
+    setConflict(null)
     // Pending Stop 按 Thread 持久化；重新绑定时只加载当前 Thread 的精确 identity。
     const restoredStop = loadPendingStop(threadId)
     pendingStopRef.current = restoredStop
@@ -261,11 +275,15 @@ export function useAgentThreadController(
       invocationId,
       decision,
       decisionId,
+      operationBindingThreadId: _bindingThreadId,
+      operationEpoch: _operationEpoch,
     }: {
       targetThreadId: string
       invocationId: string
       decision: 'ALLOW' | 'DENY'
       decisionId: string
+      operationBindingThreadId: string
+      operationEpoch: number
     }) =>
       harnessService.decideApproval(targetThreadId, invocationId, {
         decision,
@@ -273,7 +291,9 @@ export function useAgentThreadController(
         reason: null,
       }),
     onSuccess: async (_result, variables) => {
-      setConflict(null)
+      if (isStillBound(variables.operationBindingThreadId, variables.operationEpoch)) {
+        setConflict(null)
+      }
       decisionIdByInvocation.current.delete(
         `${variables.targetThreadId}:${variables.invocationId}:${variables.decision}`,
       )
@@ -303,31 +323,54 @@ export function useAgentThreadController(
   ): Promise<void> {
     setActionError(null)
     setConflict(null)
+    const operationBindingThreadId = threadId
+    const operationEpoch = bindingEpochRef.current
     // 回放键必须包含 targetThreadId：不同子 Thread 可能复用相同的 invocationId，
     // 绝不能把 A 子 Thread 的幂等键复用给 B 子 Thread。
     const key = `${targetThreadId}:${invocationId}:${decision}`
     const decisionId = decisionIdByInvocation.current.get(key) ?? createDecisionId()
     decisionIdByInvocation.current.set(key, decisionId)
     return approvalMutation
-      .mutateAsync({ targetThreadId, invocationId, decision, decisionId })
+      .mutateAsync({
+        targetThreadId,
+        invocationId,
+        decision,
+        decisionId,
+        operationBindingThreadId,
+        operationEpoch,
+      })
       .then(() => undefined)
       .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.approvalFailed', targetThreadId)
+        if (isStillBound(operationBindingThreadId, operationEpoch)) {
+          reportMutationError(error, 'ai.runtime.action.approvalFailed', targetThreadId)
+        }
       })
   }
 
   const stopMutation = useMutation({
-    mutationFn: (body: { stopRequestId: string; expectedVersion: string }) =>
-      harnessService.stopThread(threadId, body),
+    mutationFn: ({
+      operationThreadId,
+      body,
+    }: {
+      operationThreadId: string
+      body: { stopRequestId: string; expectedVersion: string }
+    }) => harnessService.stopThread(operationThreadId, body),
   })
 
   const compactMutation = useMutation({
-    mutationFn: (expectedVersion: string) =>
-      harnessService.compactThread(threadId, { expectedVersion }),
-    onSuccess: async () => {
-      setConflict(null)
+    mutationFn: ({
+      operationThreadId,
+      expectedVersion,
+    }: {
+      operationThreadId: string
+      expectedVersion: string
+    }) => harnessService.compactThread(operationThreadId, { expectedVersion }),
+    onSuccess: async (_result, variables) => {
+      if (boundThreadIdRef.current === variables.operationThreadId) {
+        setConflict(null)
+      }
       await queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(threadId),
+        queryKey: queryKeys.threads.snapshot(variables.operationThreadId),
       })
     },
   })
@@ -370,23 +413,35 @@ export function useAgentThreadController(
   }
 
   async function executePendingMessage(initialPending: BoundPendingMessage): Promise<void> {
+    const originThreadId = threadId
+    const originEpoch = bindingEpochRef.current
+    const originBindingKey = `${originThreadId}:${originEpoch}`
+    const originScope = `thread:${originThreadId}`
     let currentPending = initialPending
     let currentRequest = initialPending.request
-    isInFlightRef.current = true
+
+    inFlightBindingsRef.current.add(originBindingKey)
     setInFlightSubmissions((count) => count + 1)
+
+    const isCurrentBound = () => isStillBound(originThreadId, originEpoch)
 
     try {
       for (let retryCount = 0; ; retryCount += 1) {
         try {
           await harnessService.acceptCommandBatch(currentRequest)
-          setConflict(null)
-          clearBoundPendingMessage(threadId, currentRequest)
-          pendingMessageRef.current = null
-          setPendingMessage(null)
+          clearBoundPendingMessage(originThreadId, currentRequest)
+          if (isCurrentBound()) {
+            const existingStored = loadBoundPendingMessage(originThreadId)
+            if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
+              setConflict(null)
+              pendingMessageRef.current = null
+              setPendingMessage(null)
+            }
+          }
           // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
           await Promise.all([
             queryClient.invalidateQueries({
-              queryKey: queryKeys.threads.snapshot(threadId),
+              queryKey: queryKeys.threads.snapshot(originThreadId),
             }),
             queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
           ])
@@ -396,25 +451,32 @@ export function useAgentThreadController(
             retryCount < MAX_STALE_MESSAGE_CURSOR_RETRIES
             && isConflictReason(error, 'STALE_COMMAND_CURSOR')
           ) {
+            // retry stale cursor 每次 await 后也 guard 当前 binding，避免跨 binding 自动重发
+            if (!isCurrentBound()) {
+              throw error
+            }
             let latest: HarnessThreadSnapshotDTO
             try {
-              latest = await harnessService.getThreadSnapshot(threadId)
+              latest = await harnessService.getThreadSnapshot(originThreadId)
             } catch {
               throw error
             }
+            if (!isCurrentBound()) {
+              throw error
+            }
             if (
-              latest.thread.threadId === threadId
+              latest.thread.threadId === originThreadId
               && canRetryStaleMessageBatch(
                 { request: currentRequest, targetDraft: currentPending.targetDraft },
                 latest,
               )
             ) {
-              queryClient.setQueryData(queryKeys.threads.snapshot(threadId), latest)
+              queryClient.setQueryData(queryKeys.threads.snapshot(originThreadId), latest)
               currentRequest = {
                 ...currentRequest,
                 target: {
                   type: 'THREAD',
-                  threadId,
+                  threadId: originThreadId,
                   expectedHeadEntryId: latest.thread.headEntryId,
                   expectedNextCommandSequence: latest.thread.nextCommandSequence,
                 },
@@ -424,10 +486,12 @@ export function useAgentThreadController(
                 request: currentRequest,
               }
               // stale 恢复 save 失败不能 best-effort 继续 POST，必须 fail-closed 抛错
-              saveBoundPendingMessage(threadId, updatedPending)
+              saveBoundPendingMessage(originThreadId, updatedPending)
               currentPending = updatedPending
-              pendingMessageRef.current = updatedPending
-              setPendingMessage(updatedPending)
+              if (isCurrentBound()) {
+                pendingMessageRef.current = updatedPending
+                setPendingMessage(updatedPending)
+              }
               continue
             }
           }
@@ -436,42 +500,76 @@ export function useAgentThreadController(
       }
     } catch (error: unknown) {
       // 确切已发 request / currentPending 贯穿错误处理，绝不使用旧闭包覆盖
-      reportMutationError(error, 'ai.runtime.action.sendFailed')
+      const stillBound = isCurrentBound()
+      if (stillBound) {
+        reportMutationError(error, 'ai.runtime.action.sendFailed', originThreadId)
+      } else {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.threads.snapshot(originThreadId),
+        })
+      }
       if (isDefiniteAcceptanceFailure(error)) {
-        clearBoundPendingMessage(threadId, currentRequest)
-        pendingMessageRef.current = null
-        setPendingMessage(null)
-        if (!hasMessageContent(draftRef.current)) {
-          storeComposerDraft(draftStorageScope, currentPending.localDraft)
-          draftRef.current = currentPending.localDraft
-          setDraftState(currentPending.localDraft)
+        clearBoundPendingMessage(originThreadId, currentRequest)
+        if (stillBound) {
+          const existingStored = loadBoundPendingMessage(originThreadId)
+          if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
+            pendingMessageRef.current = null
+            setPendingMessage(null)
+          }
+          if (!hasMessageContent(draftRef.current)) {
+            storeComposerDraft(originScope, currentPending.localDraft)
+            draftRef.current = currentPending.localDraft
+            setDraftState(currentPending.localDraft)
+          }
+        } else {
+          // 不在当前 binding：绝不可修改当前 UI/ref，原 Thread 失败草稿安全持久化
+          const originDraft = restoreComposerDraft(originScope, [])
+          if (!hasMessageContent(originDraft)) {
+            storeComposerDraft(originScope, currentPending.localDraft)
+          }
         }
       } else {
         const unknownPending: BoundPendingMessage = {
           ...currentPending,
           unknownOutcome: true,
         }
-        try {
-          saveBoundPendingMessage(threadId, unknownPending)
-        } catch {
-          // best-effort writeback for unknown mark
+        // 关键防护：仅当 storage 中的 pending 仍匹配本次 request（或为空）时，才持久化 unknown sidecar
+        // 绝不覆盖同 Thread 后续新发起的 sidecar
+        const existingStored = loadBoundPendingMessage(originThreadId)
+        if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
+          try {
+            saveBoundPendingMessage(originThreadId, unknownPending)
+          } catch {
+            // best-effort writeback for unknown mark
+          }
         }
-        pendingMessageRef.current = unknownPending
-        setPendingMessage(unknownPending)
-        if (!hasMessageContent(draftRef.current)) {
-          storeComposerDraft(draftStorageScope, currentPending.localDraft)
-          draftRef.current = currentPending.localDraft
-          setDraftState(currentPending.localDraft)
+        if (stillBound) {
+          if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
+            pendingMessageRef.current = unknownPending
+            setPendingMessage(unknownPending)
+          }
+          if (!hasMessageContent(draftRef.current)) {
+            storeComposerDraft(originScope, currentPending.localDraft)
+            draftRef.current = currentPending.localDraft
+            setDraftState(currentPending.localDraft)
+          }
+        } else {
+          const originDraft = restoreComposerDraft(originScope, [])
+          if (!hasMessageContent(originDraft)) {
+            storeComposerDraft(originScope, currentPending.localDraft)
+          }
         }
       }
     } finally {
-      isInFlightRef.current = false
-      setInFlightSubmissions((count) => Math.max(0, count - 1))
+      inFlightBindingsRef.current.delete(originBindingKey)
+      if (isCurrentBound()) {
+        setInFlightSubmissions((count) => Math.max(0, count - 1))
+      }
     }
   }
 
   function submitMessage(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]): Promise<void> {
-    if (isInFlightRef.current) {
+    if (isCurrentBindingInFlight()) {
       return Promise.resolve()
     }
     const trimmed = trimMessageParts(payloadParts ?? draftRef.current)
@@ -525,7 +623,7 @@ export function useAgentThreadController(
   }
 
   function retryPendingMessage(): Promise<void> {
-    if (isInFlightRef.current) {
+    if (isCurrentBindingInFlight()) {
       return Promise.resolve()
     }
     const pending = pendingMessageRef.current ?? (threadId ? loadBoundPendingMessage(threadId) : null)
@@ -556,7 +654,7 @@ export function useAgentThreadController(
   }
 
   function abandonPendingMessage(): void {
-    if (isInFlightRef.current) {
+    if (isCurrentBindingInFlight()) {
       return
     }
     const current = pendingMessageRef.current
@@ -612,6 +710,8 @@ export function useAgentThreadController(
     setActionError(null)
     setConflict(null)
     const operationThreadId = threadId
+    const operationEpoch = bindingEpochRef.current
+    const isCurrentBound = () => isStillBound(operationThreadId, operationEpoch)
     // 同步 basis 栅栏：绝不复用 basis 已不再匹配「当前」渲染 snapshot 的待决操作
     //（head/version 已移动 => 旧 Turn 已结束或 Thread 已前进）。在这里——而不仅仅在
     // 被动清理 effect 中——退役，可以关闭「snapshot 已前进但 effect 尚未 flush」时
@@ -638,11 +738,14 @@ export function useAgentThreadController(
     }
     return stopMutation
       .mutateAsync({
-        stopRequestId: operation.stopRequestId,
-        expectedVersion: operation.expectedVersion,
+        operationThreadId,
+        body: {
+          stopRequestId: operation.stopRequestId,
+          expectedVersion: operation.expectedVersion,
+        },
       })
       .then(async (result) => {
-        if (boundThreadIdRef.current !== operationThreadId) {
+        if (!isCurrentBound()) {
           // 导航门控正常情况下不会发生；若宿主强制重绑，保留旧 Thread sidecar，
           // 让用户返回后用同一 id replay 并把 cancelled messages 恢复到正确 Composer。
           await Promise.all([
@@ -668,7 +771,7 @@ export function useAgentThreadController(
         pendingStopRef.current = null
         setStopReplayPending(false)
         clearPendingStop(operationThreadId)
-        if (pendingMessageRef.current != null) {
+        if (isCurrentBound() && pendingMessageRef.current != null) {
           clearBoundPendingMessage(operationThreadId, pendingMessageRef.current.request)
           pendingMessageRef.current = null
           setPendingMessage(null)
@@ -681,7 +784,7 @@ export function useAgentThreadController(
         ])
       })
       .catch((error: unknown) => {
-        const stillBound = boundThreadIdRef.current === operationThreadId
+        const stillBound = isCurrentBound()
         if (isConflictError(error)) {
           // 已知 409：操作未被接受（version 过期 / 未静默 /
           // 终态 apply 待处理 / id 被复用）。清除它；下一次 stop 会针对
@@ -712,11 +815,15 @@ export function useAgentThreadController(
     }
     setActionError(null)
     setConflict(null)
+    const operationThreadId = threadId
+    const operationEpoch = bindingEpochRef.current
     return compactMutation
-      .mutateAsync(thread.version)
+      .mutateAsync({ operationThreadId, expectedVersion: thread.version })
       .then(() => undefined)
       .catch((error: unknown) => {
-        reportMutationError(error, 'ai.runtime.action.compactFailed')
+        if (isStillBound(operationThreadId, operationEpoch)) {
+          reportMutationError(error, 'ai.runtime.action.compactFailed', operationThreadId)
+        }
       })
   }
 
