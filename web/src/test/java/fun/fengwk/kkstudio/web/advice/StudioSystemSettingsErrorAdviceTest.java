@@ -48,7 +48,7 @@ class StudioSystemSettingsErrorAdviceTest {
     assertNotNull(validation.getBody());
     Result<Void> validationBody = validation.getBody();
     assertEquals("validation", validationBody.getCode());
-    assertEquals("Invalid system_settings request.", validationBody.getMessage());
+    assertEquals("Invalid system settings request.", validationBody.getMessage());
     assertEquals(
         Map.of("resource", "system_settings", "detail", "tool is required"),
         validationBody.getErrors());
@@ -67,7 +67,7 @@ class StudioSystemSettingsErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("system_settings 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("system settings 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",

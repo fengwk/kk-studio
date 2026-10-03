@@ -67,7 +67,7 @@ public class StudioSystemSettingsErrorAdvice {
     String message =
         messageService.message(
             "studio.error.domain." + error.code().code() + ".message",
-            Map.of("resource", error.resource()));
+            Map.of("resource", messageService.resourceDisplayName(error.resource())));
     ImmutableResolvedConventionErrorCode code =
         new ImmutableResolvedConventionErrorCode(
             status.getStatus(), error.code().code(), message, errorContext);

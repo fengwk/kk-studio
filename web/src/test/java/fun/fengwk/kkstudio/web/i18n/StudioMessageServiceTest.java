@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.i18n;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +38,7 @@ class StudioMessageServiceTest {
   void resolvesDomainAndHttpMessagesForSupportedLocales() {
     LocaleContextHolder.setLocale(Locale.US);
     assertEquals(
-        "The agent_model was modified by another request.",
+        "The agent model was modified by another request.",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
@@ -45,7 +46,7 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
-        "agent_model 已被其他请求修改。",
+        "agent model 已被其他请求修改。",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));
@@ -78,6 +79,17 @@ class StudioMessageServiceTest {
     assertEquals("HTTP error (status 599).", messageService.httpMessage(599));
     assertEquals("HTTP Error", messageService.httpTitle(599));
     assertFalse(messageService.httpMessage(599).isBlank());
+  }
+
+  /** 展示层把内部 resource 标识替换为可读名称；未登记的标识回退为空格分隔，空值原样返回。 */
+  @Test
+  void mapsResourceCodesToDisplayNames() {
+    assertEquals("system settings", messageService.resourceDisplayName("system_settings"));
+    assertEquals("MCP server", messageService.resourceDisplayName("mcp_server"));
+    assertEquals("chat", messageService.resourceDisplayName("chat"));
+    assertEquals(
+        "some future resource", messageService.resourceDisplayName("some_future_resource"));
+    assertNull(messageService.resourceDisplayName(null));
   }
 
   @Test

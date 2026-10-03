@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -20,6 +21,10 @@ import java.util.ResourceBundle;
  *
  * <p>convention starter 只暴露单一启动 locale 的 manager。本服务有意为每个受支持的请求 locale 各持有一个
  * manager，使请求可以选择自己的语言，而无需改动 platform 错误模型或进程级 convention 配置。
+ *
+ * <p>{@code resource} 在错误模型里是稳定的内部标识（如 {@code system_settings}）。它进入 {@code errors.resource}
+ * 诊断字段时必须保持原样，进入用户可见 message 时则经 {@link #resourceDisplayName(String)} 转换为可读名称；
+ * 两者由本服务分开处理，从而在不改变诊断协议的前提下改善展示文案。
  */
 @Component
 public class StudioMessageService {
@@ -29,6 +34,18 @@ public class StudioMessageService {
   private static final Locale ZH_CN = Locale.SIMPLIFIED_CHINESE;
   private static final String DOMAIN_PREFIX = "studio.error.domain.";
   private static final String HTTP_PREFIX = "studio.error.http.";
+
+  /** 仅用于展示的 resource 名称映射；未被列出的内部标识回退为把下划线替换为空格。 */
+  private static final Map<String, String> RESOURCE_DISPLAY_NAMES =
+      Map.of(
+          "agent_definition", "agent definition",
+          "agent_model", "agent model",
+          "agent_provider", "agent provider",
+          "issue_agent_thread", "issue agent thread",
+          "issue_run", "issue run",
+          "mcp_server", "MCP server",
+          "skill_package", "skill package",
+          "system_settings", "system settings");
 
   private final Map<Locale, StringManager> stringManagers;
 
@@ -79,7 +96,28 @@ public class StudioMessageService {
 
   public String domainMessage(DomainErrorCode code, Map<String, ?> context) {
     Objects.requireNonNull(code, "code");
-    return message(DOMAIN_PREFIX + code.code() + ".message", context);
+    return message(DOMAIN_PREFIX + code.code() + ".message", withResourceDisplayName(context));
+  }
+
+  /**
+   * 把内部 resource 标识转换为用户可见名称，例如 {@code system_settings} → {@code system settings}。
+   *
+   * <p>只用于展示层 message；{@code errors.resource} 中的稳定标识必须另行原样保留。
+   */
+  public String resourceDisplayName(String resource) {
+    if (resource == null || resource.isBlank()) {
+      return resource;
+    }
+    return RESOURCE_DISPLAY_NAMES.getOrDefault(resource, resource.replace('_', ' '));
+  }
+
+  private Map<String, ?> withResourceDisplayName(Map<String, ?> context) {
+    if (context == null || !(context.get("resource") instanceof String resource)) {
+      return context;
+    }
+    Map<String, Object> display = new LinkedHashMap<>(context);
+    display.put("resource", resourceDisplayName(resource));
+    return display;
   }
 
   public String validationRequired(String resource) {

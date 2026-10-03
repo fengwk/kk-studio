@@ -167,9 +167,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
 
   @Override
   public String unavailableReason() {
-    return settings.enabled()
-        ? null
-        : "MiniMax-H3 Ref2VA is disabled by kk-studio SystemSettings.integrations.minimaxH3";
+    return settings.enabled() ? null : "MiniMax-H3 Ref2VA is disabled";
   }
 
   @Override
