@@ -113,13 +113,15 @@ claim、bounded handoff 与 poll 生命周期，
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
 提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
 
-Work 请求在冲突时用 SQL least 保留较早 due_at 并增加 wake_version。
-Dispatcher 在 Java 中用 Clock 计算重排目标时刻，IssueWorkStore 将该 Instant 传给
-lease-token 围栏更新；SQL 用 least 保留现有 due_at 与目标时刻的较早值，并清空租约。
+Work 请求、claim、续租、完成与重排统一以数据库 `statement_timestamp()` 为权威时间，
+截断到毫秒；调用方传相对 `Duration`，Dispatcher 不持有 Clock。
+请求在冲突时用 SQL least 保留较早 due_at 并增加 wake_version。
+重排同时校验 lease token 与有效租约、清空租约：wake_version 未变时采用数据库当前时间
+加延迟，不保留本次 claim 的旧 past-due；有新 wake 时才取现有 due_at 与目标时刻的较早值。
 实现见 [`IssueControllerDispatcher`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueControllerDispatcher.java)、
 [`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
 及 [`IssueWorkMapper`](../../project/src/main/java/fun/fengwk/kkstudio/project/repo/impl/mapper/IssueWorkMapper.java)。
-此处的 JVM 时间计算与 [Harness Infra](harness-infra.md#work-的-claim--lease--wake) 的数据库时间域各有自己的契约。
+Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
 
 ## 错误映射
 
