@@ -22,7 +22,7 @@ SYNC_TOOL = "sync_minimax_credentials.py"
 
 
 class TestReliabilityCredentialSync(unittest.TestCase):
-    """The reliability stack owns its legacy MiniMax pair through the dedicated sync tool."""
+    """The reliability stack owns its MiniMax pair through the dedicated sync tool."""
 
     def test_stack_synchronizes_minimax_credentials_through_the_sync_tool(self):
         """Credential values must be passed to the tool, never inlined into the stack script."""

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize the reliability matrix's legacy MiniMax Responses provider."""
+"""Synchronize the reliability matrix's MiniMax Responses provider."""
 
 import argparse
 import os
