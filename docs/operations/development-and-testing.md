@@ -232,8 +232,9 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 
 布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
 用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
-失败时 Playwright 会在 `reports/layout/` 下留存现场产物，包括保留首轮失败现场的追踪文件 `trace.zip` 以及失败快照 `test-failed-*.png`。
-排查时可使用 `npx playwright show-trace <trace-file-path>`（例如 `npx playwright show-trace reports/layout/.../trace.zip`）检查时间线、DOM 快照、网络请求与控制台报错。
+首轮失败时，`reports/layout/` 下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
+在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
+网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
 
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
