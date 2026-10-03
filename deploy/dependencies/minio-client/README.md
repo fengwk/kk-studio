@@ -32,9 +32,13 @@ amd64 模拟能力，不代表 server 支持原生多架构。这些依赖仅用
 | arm64 | `61bb88e7435919834478ddd4d405a6de6d2c227079da5e8ee9655147398819a0` |
 
 构建只下载二进制，以仓库内固定 SHA256 离线比对，不在线下载 checksum 作为信任依据。
-升级必须同时审核版本、两架构本体和 hash、源码 revision、LICENSE/NOTICE 及合同测试，
+升级必须同时审核版本、两架构本体和 hash、源码 revision、LICENSE/NOTICE，并运行契约测试
+[`minio-dependencies.test.mjs`](../../../scripts/dev/verify/repository/tests/minio-dependencies.test.mjs)
+（固定四套栈的 server digest、本地 client 构建与 mc 版本/校验和/许可）。
 然后在本目录执行 `docker build --pull --platform linux/amd64 -t kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z .`，
-arm64 镜像改用 `--platform linux/arm64` 另行构建验证，并运行隔离栈 bucket 私有性验证。
+arm64 镜像改用 `--platform linux/arm64` 另行构建验证。
+bucket 私有性由 `minio-init` 的 `mc anonymous set none` 设置，并由上述契约测试固定该初始化命令；
+仓库当前不自动发起匿名访问来断言访问被拒。
 
 mc 使用 GNU AGPL v3 或后续版本，不需要 AIStor 许可。对应源码：
 [tag](https://github.com/minio/mc/tree/RELEASE.2025-04-16T18-13-26Z)

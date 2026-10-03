@@ -31,7 +31,7 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
 1. `docker compose config --quiet` 校验默认与 `--profile app` 配置；
 2. 无确认提示地销毁同名隔离栈及其 PostgreSQL/MinIO volumes，从空数据启动；
 3. 用显式 `docker build` 构建当前应用 Dockerfile（不委托 Compose 构建），更新本机同名镜像 tag；
-4. `docker compose build minio-init` 构建共享 MinIO client 镜像（复用缓存层）；
+4. `docker compose build minio-init` 构建共享 MinIO client 镜像；
 5. 启动依赖并等待 healthcheck；
 6. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的 `ffmpeg` / `ffprobe`；
 7. 执行 PostgreSQL `SELECT 1`，检查 MinIO bucket 与 HTTP mock（health、确定性 OpenAI SSE）；
