@@ -342,6 +342,49 @@ class OpenCliHubClientContractTest {
     assertThrows(IllegalArgumentException.class, () -> client.getExecution("exec-1", -1));
   }
 
+  @Test
+  void invalidResourceLengthClosesOwnedBodyWithoutEchoingHeader() {
+    // 合成响应覆盖 JDK 传输层通常先拦截的 firstValueAsLong 异常路径及 header 清理。
+    for (String length : List.of("credential-secret", "99999999999999999999999", "0", "-1")) {
+      TrackingInputStream input = new TrackingInputStream(new byte[] {1});
+      HttpHeaders headers =
+          HttpHeaders.of(
+              Map.of("Content-Length", List.of(length), "Content-Type", List.of("image/png")),
+              (name, value) -> true);
+      OpenCliHubClient client = clientReturning(new StubHttpResponse(200, headers, input));
+      var error =
+          assertThrows(
+              OpenCliHubException.class,
+              () ->
+                  client.openResource(
+                      new ExecutionResource(
+                          "a.png", "image/png", 0, null, "/api/resources/a.png")));
+      assertTrue(input.closed);
+      assertFalse(messageChain(error).contains(length));
+      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+    }
+  }
+
+  @Test
+  void pollingUsesExistingRequestOrLongPollBudget() {
+    // deadline 直接取 request.timeout，因此同时固定普通轮询和长轮询预算选择契约。
+    for (int waitSeconds : List.of(0, 5)) {
+      var client =
+          new OpenCliHubClient(
+              properties(),
+              snapshot(),
+              MAPPER,
+              new StubHttpClient(
+                  request -> {
+                    assertEquals(
+                        Duration.ofMillis(waitSeconds == 0 ? 120_000 : 130_000),
+                        request.timeout().orElseThrow());
+                    return jsonResponse(200, envelope(executionData("\"resources\":[]")));
+                  }));
+      assertEquals(ExecutionStatus.SUCCEEDED, client.getExecution("exec-1", waitSeconds).status());
+    }
+  }
+
   private static void assertExecutionFailure(String fields) {
     OpenCliHubClient client = clientReturning(jsonResponse(200, envelope(executionData(fields))));
     assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
