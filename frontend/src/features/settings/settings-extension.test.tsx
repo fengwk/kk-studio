@@ -45,7 +45,7 @@ describe('settings extension architecture', () => {
           <BrowserPreferencesProvider>
             <MemoryRouter initialEntries={['/settings']}>
               <Routes>
-                <Route path="/*" element={<WorkbenchShell />} />
+                <Route path="/*" element={<WorkbenchShell navItems={[]} />} />
               </Routes>
             </MemoryRouter>
           </BrowserPreferencesProvider>

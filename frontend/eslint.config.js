@@ -111,6 +111,72 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/platform/**/*.{ts,tsx}'],
+    ignores: ['src/platform/**/*.test.{ts,tsx}', 'src/platform/**/__tests__/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@/app',
+                '@/app/*',
+                '@/features',
+                '@/features/*',
+                '../*/app',
+                '../*/app/*',
+                '../*/features',
+                '../*/features/*',
+                '../app',
+                '../app/*',
+                '../features',
+                '../features/*',
+                '../../app',
+                '../../app/*',
+                '../../features',
+                '../../features/*',
+                '../../../app',
+                '../../../app/*',
+                '../../../features',
+                '../../../features/*',
+              ],
+              message: 'Production platform code must not depend on app or features.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/features/ai/**/*.{ts,tsx}'],
+    ignores: ['src/features/ai/**/*.test.{ts,tsx}', 'src/features/ai/**/__tests__/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@/features/projects',
+                '@/features/projects/*',
+                '../projects',
+                '../projects/*',
+                '../../projects',
+                '../../projects/*',
+                '../../../projects',
+                '../../../projects/*',
+                '../*/projects',
+                '../*/projects/*',
+              ],
+              message: 'AI feature must not depend on projects feature.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['src/shared/api/**/*.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
