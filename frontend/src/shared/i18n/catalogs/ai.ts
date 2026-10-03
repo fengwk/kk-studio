@@ -1580,8 +1580,8 @@ export const aiCatalog = {
     'zh-CN': '无文本输出',
   },
   'ai.runtime.message.rawEntry': {
-    'en-US': 'View raw Entry',
-    'zh-CN': '查看原始 Entry',
+    'en-US': 'View raw data',
+    'zh-CN': '查看原始数据',
   },
   'ai.runtime.message.attachment': {
     'en-US': '{{type}} attachment',
@@ -1724,8 +1724,8 @@ export const aiCatalog = {
     'zh-CN': '会话开始',
   },
   'ai.runtime.entry.rootText': {
-    'en-US': 'The conversation tree root was created.',
-    'zh-CN': '已创建会话树根节点。',
+    'en-US': 'The conversation was created.',
+    'zh-CN': '会话已创建。',
   },
   'ai.runtime.entry.rootSettings': {
     'en-US': 'Conversation started · Agent: {{agent}} · Model: {{model}} · Environment: {{environment}}',
@@ -1772,24 +1772,24 @@ export const aiCatalog = {
     'zh-CN': '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
   },
   'ai.runtime.entry.unsupportedTitle': {
-    'en-US': 'Unrecognized message Entry',
-    'zh-CN': '无法识别消息 Entry',
+    'en-US': 'Unrecognized message',
+    'zh-CN': '无法识别消息',
   },
   'ai.runtime.entry.unsupportedRoleText': {
-    'en-US': 'Message role not supported: {{role}}. Expand the raw payload to inspect it.',
-    'zh-CN': '暂不支持的消息角色：{{role}}。原始 payload 可展开查看。',
+    'en-US': 'Message role not supported: {{role}}. Expand the raw data to inspect it.',
+    'zh-CN': '暂不支持的消息角色：{{role}}。可展开原始数据查看。',
   },
   'ai.runtime.entry.unsupportedText': {
-    'en-US': 'Message role or payload is invalid. Expand the raw payload to inspect it.',
-    'zh-CN': '消息角色或 payload 无效。原始 payload 可展开查看。',
+    'en-US': 'Message role or data is invalid. Expand the raw data to inspect it.',
+    'zh-CN': '消息角色或数据无效，可展开原始数据查看。',
   },
   'ai.runtime.entry.unknownTitle': {
     'en-US': 'Unrecognized Entry: {{type}}',
     'zh-CN': '未识别 Entry：{{type}}',
   },
   'ai.runtime.entry.unknownText': {
-    'en-US': 'This Entry type has no dedicated renderer yet. Expand the raw payload to inspect it.',
-    'zh-CN': '该 Entry 类型尚无专用渲染器，原始 payload 可展开查看。',
+    'en-US': 'This entry type cannot be displayed. Expand the raw data to inspect it.',
+    'zh-CN': '无法显示此类型的记录，可展开原始数据查看。',
   },
   'ai.runtime.event.list': {
     'en-US': 'Events',
@@ -2496,20 +2496,20 @@ export const aiCatalog = {
     'zh-CN': '上一条接受请求仍在等待确定结果',
   },
   'ai.runtime.action.abandonedPendingNotice': {
-    'en-US': 'Pending message was discarded locally. Note: this does not cancel any command that may have already been accepted by the server, and will not auto-resend.',
-    'zh-CN': '已放弃未决消息。请注意：此操作仅清除本地未决状态，不会取消服务端可能已接受的命令，也不会自动重发。',
+    'en-US': 'The pending message was discarded locally. Commands already accepted by the server are not cancelled, and the message will not be resent automatically.',
+    'zh-CN': '已放弃未决消息。这不会取消服务端可能已接受的命令，也不会自动重发。',
   },
   'ai.runtime.action.storageFailed': {
-    'en-US': 'Failed to safely persist request state; send aborted to prevent state loss. Please retry.',
-    'zh-CN': '无法安全记录请求状态，发送已中止以防状态丢失，请重试。',
+    'en-US': 'Could not save the send record; the message was not sent. Please retry.',
+    'zh-CN': '无法保存发送记录，未发送消息；请重试。',
   },
   'ai.runtime.action.storageClearFailed': {
-    'en-US': 'Failed to clear local pending state. Please retry.',
-    'zh-CN': '清除本地未决状态失败，请重试。',
+    'en-US': 'Could not clear the pending message record. Please retry.',
+    'zh-CN': '清除未确认的消息记录失败，请重试。',
   },
   'ai.runtime.action.operationPending': {
-    'en-US': 'The current Thread still has an operation awaiting completion or exact replay',
-    'zh-CN': '当前 Thread 仍有操作等待完成或精确重试',
+    'en-US': 'This Thread has a pending operation; wait for it to finish or retry the original operation',
+    'zh-CN': '当前 Thread 仍有未完成的操作，请等待完成或重试原操作',
   },
   'ai.common.loadingMcpServer': {
     'en-US': 'Loading MCP Servers',

@@ -606,13 +606,8 @@ export function useAgentThreadController(
     }
     try {
       saveBoundPendingMessage(threadId, boundPending)
-    } catch (storageError) {
-      setActionError(
-        t('ai.runtime.action.storageFailed', {
-          defaultValue: '无法安全记录请求状态，发送已中止，请重试。',
-          error: errorMessage(storageError),
-        }),
-      )
+    } catch {
+      setActionError(t('ai.runtime.action.storageFailed'))
       return Promise.resolve()
     }
     pendingMessageRef.current = boundPending
@@ -640,13 +635,8 @@ export function useAgentThreadController(
     }
     try {
       saveBoundPendingMessage(threadId, retryingPending)
-    } catch (storageError) {
-      setActionError(
-        t('ai.runtime.action.storageFailed', {
-          defaultValue: '无法安全记录请求状态，发送已中止，请重试。',
-          error: errorMessage(storageError),
-        }),
-      )
+    } catch {
+      setActionError(t('ai.runtime.action.storageFailed'))
       return Promise.resolve()
     }
     pendingMessageRef.current = retryingPending
@@ -665,20 +655,12 @@ export function useAgentThreadController(
     }
     const success = clearBoundPendingMessage(threadId, current.request)
     if (!success) {
-      setActionError(
-        t('ai.runtime.action.storageClearFailed', {
-          defaultValue: '清除本地未决状态失败，请重试。',
-        }),
-      )
+      setActionError(t('ai.runtime.action.storageClearFailed'))
       return
     }
     pendingMessageRef.current = null
     setPendingMessage(null)
-    setActionError(
-      t('ai.runtime.action.abandonedPendingNotice', {
-        defaultValue: '已放弃未决消息。请注意：此操作仅清除本地未决状态，不会取消服务端可能已接受的命令，也不会自动重发。',
-      }),
-    )
+    setActionError(t('ai.runtime.action.abandonedPendingNotice'))
     setConflict(null)
   }
 

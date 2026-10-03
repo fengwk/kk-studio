@@ -190,8 +190,8 @@ export const settingsCatalog = {
     'zh-CN': '设置保存失败。',
   },
   'settings.error.schema': {
-    'en-US': 'The settings form metadata is invalid; cannot render the editor.',
-    'zh-CN': '设置表单元数据无效，无法渲染编辑器。',
+    'en-US': 'Unable to load the settings form.',
+    'zh-CN': '无法加载设置表单。',
   },
   'settings.error.permissionToolNameRequired': {
     'en-US': 'Tool name is required.',

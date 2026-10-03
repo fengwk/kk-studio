@@ -753,8 +753,8 @@ describe('thread timeline edge branches', () => {
       {
         role: 'entry',
         kind: 'unsupported_message',
-        title: '无法识别消息 Entry',
-        text: '暂不支持的消息角色：HUMAN。原始 payload 可展开查看。',
+        title: '无法识别消息',
+        text: '暂不支持的消息角色：HUMAN。可展开原始数据查看。',
         rawPayloadJson: JSON.stringify({
           message: { role: 'HUMAN', contents: [{ type: 'text', text: 'x' }] },
         }),
@@ -762,8 +762,8 @@ describe('thread timeline edge branches', () => {
       {
         role: 'entry',
         kind: 'unsupported_message',
-        title: '无法识别消息 Entry',
-        text: '暂不支持的消息角色：SYSTEM。原始 payload 可展开查看。',
+        title: '无法识别消息',
+        text: '暂不支持的消息角色：SYSTEM。可展开原始数据查看。',
         rawPayloadJson: JSON.stringify({
           message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'y' }] },
         }),
@@ -779,7 +779,7 @@ describe('thread timeline edge branches', () => {
       {
         role: 'entry',
         kind: 'unsupported_message',
-        text: '消息角色或 payload 无效。原始 payload 可展开查看。',
+        text: '消息角色或数据无效，可展开原始数据查看。',
       },
     ])
   })
