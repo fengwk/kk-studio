@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router'
+import { useLocation, useSearchParams } from 'react-router'
 import {
   AlertTriangle,
   Archive,
@@ -54,6 +54,7 @@ export function ProjectDetailPage({
   onBack,
   api = projectsApi,
 }: ProjectDetailPageProps) {
+  const location = useLocation()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -77,16 +78,18 @@ export function ProjectDetailPage({
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
-  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
   const [isManualModalOpen, setIsManualModalOpen] = useState(false)
 
-  const effectiveIssueId = queryIssueId || selectedIssueId
+  // 路由或参数变化时关闭 manualModal，避免前进后退复活弹窗
+  useEffect(() => {
+    setIsManualModalOpen(false)
+  }, [location.key, queryIssueId, queryThreadId])
 
   // Issue 详情查询（用于受控 AgentPane 门禁验证与元数据）
   const issueQuery = useQuery({
-    queryKey: queryKeys.projects.issue(projectId, effectiveIssueId ?? ''),
-    queryFn: () => api.getIssue(effectiveIssueId!),
-    enabled: Boolean(effectiveIssueId),
+    queryKey: queryKeys.projects.issue(projectId, queryIssueId ?? ''),
+    queryFn: () => api.getIssue(queryIssueId!),
+    enabled: Boolean(queryIssueId),
   })
   const issueDetail = issueQuery.data
 
@@ -109,7 +112,6 @@ export function ProjectDetailPage({
   const isThreadValid = Boolean((matchedAgentThread || matchedRun) && matchedAgentName)
 
   const handleSelectIssue = (id: string | null) => {
-    setSelectedIssueId(id)
     setIsManualModalOpen(false)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -127,8 +129,8 @@ export function ProjectDetailPage({
     setIsManualModalOpen(false)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      if (effectiveIssueId) {
-        next.set('issue', effectiveIssueId)
+      if (queryIssueId) {
+        next.set('issue', queryIssueId)
       }
       next.set('thread', threadId)
       return next
@@ -136,11 +138,20 @@ export function ProjectDetailPage({
   }
 
   const handleCloseThread = () => {
+    setIsManualModalOpen(false)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
       next.delete('thread')
+      next.delete('issue')
       return next
     })
+  }
+
+  const handleCloseIssueDetail = () => {
+    setIsManualModalOpen(false)
+    if (!queryThreadId) {
+      handleSelectIssue(null)
+    }
   }
 
   const pendingInstructionRef = useRef<PendingInstructionAttempt | null>(null)
@@ -403,7 +414,7 @@ export function ProjectDetailPage({
 
   const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
 
-  const isIssueDetailModalOpen = Boolean(effectiveIssueId && (!queryThreadId || isManualModalOpen))
+  const isIssueDetailModalOpen = Boolean(queryIssueId && (!queryThreadId || isManualModalOpen))
 
   if (isLoading && !snapshot) {
     return (
@@ -655,12 +666,12 @@ export function ProjectDetailPage({
       />
 
       <IssueDetailModal
-        key={effectiveIssueId ?? 'none'}
+        key={queryIssueId ?? 'none'}
         isOpen={isIssueDetailModalOpen}
         projectId={projectId}
-        issueId={effectiveIssueId}
+        issueId={queryIssueId}
         workflow={project.workflow}
-        onClose={() => handleSelectIssue(null)}
+        onClose={handleCloseIssueDetail}
         onUpdated={() => void invalidateSnapshot()}
         onOpenThread={handleOpenThread}
         api={api}

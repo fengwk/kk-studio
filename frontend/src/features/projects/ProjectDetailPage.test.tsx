@@ -1,7 +1,8 @@
+import { useEffect } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router'
 import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
@@ -61,7 +62,24 @@ vi.mock('@/features/ai/runtime/AgentPane', () => ({
   },
 }))
 
+interface NavController {
+  navigate: ReturnType<typeof useNavigate>
+  location: ReturnType<typeof useLocation>
+}
+
+let latestNav: NavController | undefined
+
+function NavigationProbe() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  useEffect(() => {
+    latestNav = { navigate, location }
+  }, [navigate, location])
+  return null
+}
+
 function renderPage(ui: React.ReactElement, client?: QueryClient, initialEntries: string[] = ['/']) {
+  latestNav = undefined
   const queryClient = client ?? new QueryClient({
     defaultOptions: {
       queries: {
@@ -73,11 +91,12 @@ function renderPage(ui: React.ReactElement, client?: QueryClient, initialEntries
   const rendered = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={initialEntries}>
+        <NavigationProbe />
         {ui}
       </MemoryRouter>
     </QueryClientProvider>,
   )
-  return { ...rendered, queryClient }
+  return { ...rendered, queryClient, getNav: () => latestNav! }
 }
 
 describe('ProjectDetailPage', () => {
@@ -680,5 +699,103 @@ describe('ProjectDetailPage', () => {
     expect(stopMock).toHaveBeenCalledTimes(1)
 
     clearPendingAction(targetIssue.id)
+  })
+
+  it('navigates with MemoryRouter: Back removes issue parameter and closes detail modal without state residue', async () => {
+    // 测试意图：验证单一 URL 事实源；点击卡片打开 Issue 详情后，浏览器真实 Back 使 URL 移除 issue 参数，弹窗彻底关闭而不是残留；Forward 重新打开
+    const api = createMockApi()
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}`],
+    )
+
+    await screen.findByText('Design DB schema')
+    expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+
+    // 1. 点击卡片，打开详情弹窗
+    fireEvent.click(screen.getByText('Design DB schema'))
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+    expect(getNav().location.search).toContain('issue=b0000000-0000-0000-0000-000000000001')
+
+    // 2. 真实浏览器后退：URL 变为无 issue 参数，弹窗必须彻底关闭
+    act(() => {
+      getNav().navigate(-1)
+    })
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+      expect(getNav().location.search).not.toContain('issue=')
+    })
+
+    // 3. 真实浏览器前进：URL 恢复 issue 参数，弹窗重新打开
+    act(() => {
+      getNav().navigate(1)
+    })
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+    expect(getNav().location.search).toContain('issue=b0000000-0000-0000-0000-000000000001')
+  })
+
+  it('navigates with MemoryRouter in dock mode: Back closes manual modal and Forward does not resurrect it', async () => {
+    // 测试意图：验证 Dock 场景下点击“Issue 详情”打开 manual modal 后，浏览器真实 Back 导航关闭弹窗；Forward 重新前进时 dock 渲染但 manual modal 不复活
+    const api = createMockApi()
+    const targetIssueId = mockSnapshot.issues[0].issue.id
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}`, `/projects/${projectId}?issue=${targetIssueId}&thread=th-valid-101`],
+    )
+
+    // 初始进入包含合法 thread，dock 挂载，弹窗默认未打开
+    await screen.findByTestId('controlled-agent-pane')
+    expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+
+    // 点击 Dock 头部按钮手动打开 Issue 详情
+    fireEvent.click(screen.getByRole('button', { name: '查看完整 Issue 详情' }))
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+
+    // 真实浏览器后退：退回看板无参数页
+    act(() => {
+      getNav().navigate(-1)
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+    })
+
+    // 真实浏览器前进：回到 Dock 页，Dock 存在但旧 manual modal 绝不复活
+    act(() => {
+      getNav().navigate(1)
+    })
+    await screen.findByTestId('controlled-agent-pane')
+    expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+  })
+
+  it('closes dock: removes thread and issue to return to board without implicit modal and retains other query filters', async () => {
+    // 测试意图：验证关闭 Dock 默认清除 issue 与 thread 返回看板，避免隐式弹出详情弹窗，同时完整保留其他 query filters（如 filter=active）
+    const api = createMockApi()
+    const targetIssueId = mockSnapshot.issues[0].issue.id
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}?filter=active&issue=${targetIssueId}&thread=th-valid-101`],
+    )
+
+    await screen.findByTestId('controlled-agent-pane')
+    expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+
+    // 点击 Dock 头部关闭按钮
+    fireEvent.click(screen.getByRole('button', { name: '关闭 Agent 视图' }))
+
+    await waitFor(() => {
+      // Dock 卸载
+      expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+      // 绝对不隐式弹出 IssueDetailModal
+      expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+      // URL 中 issue 和 thread 被清除，但 filter=active 得到完整保留
+      const search = getNav().location.search
+      expect(search).toContain('filter=active')
+      expect(search).not.toContain('issue=')
+      expect(search).not.toContain('thread=')
+    })
   })
 })
