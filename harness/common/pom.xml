@@ -53,6 +53,7 @@
                                         <include>fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter</include>
                                         <include>fun/fengwk/kkstudio/harness/common/json/BoundedOutputStream</include>
                                         <include>fun/fengwk/kkstudio/harness/common/text/TextReadWindow</include>
+                                        <include>fun/fengwk/kkstudio/harness/common/network/HttpProxySelector*</include>
                                     </includes>
                                     <limits>
                                         <limit>
