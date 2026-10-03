@@ -157,7 +157,13 @@ class CanvasFunctionExecutionContextImplTest {
   @Test
   void materializesOnlyFrozenTargetAndOutputKind() {
     when(materializer.materializeBlob(
-            eq(CANVAS), eq(NODE), eq(REQUEST), eq(TARGET), anyString(), any(InputStream.class)))
+            eq(CANVAS),
+            eq(NODE),
+            eq(REQUEST),
+            eq(LEASE),
+            eq(TARGET),
+            anyString(),
+            any(InputStream.class)))
         .thenReturn(
             new CanvasResource(
                 TARGET, CANVAS, null, null, BLOB, "output.png", null, Instant.EPOCH));
@@ -181,6 +187,7 @@ class CanvasFunctionExecutionContextImplTest {
             eq(CANVAS),
             eq(NODE),
             eq(REQUEST),
+            eq(LEASE),
             eq(TARGET),
             eq("output.png"),
             any(InputStream.class));
@@ -188,6 +195,36 @@ class CanvasFunctionExecutionContextImplTest {
     // TEXT 槽位入口调用媒体槽位抛异常
     assertThrows(
         IllegalArgumentException.class, () -> context.materializeTextOutput(plannedOutput, "text"));
+  }
+
+  /** TEXT 路径与 Blob 一样透传本次 lease token，而不是只传可跨 attempt 复用的 requestId。 */
+  @Test
+  void textMaterializationPassesLeaseToken() {
+    CanvasFunctionFrozenOutput output =
+        new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.TEXT, "report");
+    frozen =
+        new CanvasFunctionFrozenRun(
+            CANVAS,
+            NODE,
+            "output",
+            REQUEST,
+            CanvasFunctionDefinition.of(
+                "test.text",
+                "Text",
+                frozen.definition().argsSchema(),
+                CanvasResourceKind.TEXT,
+                new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of())),
+            frozen.args(),
+            frozen.manifest(),
+            List.of(output),
+            frozen.submitState(),
+            frozen.stage(),
+            frozen.adapterState());
+    when(materializer.materializeText(CANVAS, NODE, REQUEST, LEASE, TARGET, "report", "text"))
+        .thenReturn(
+            new CanvasResource(TARGET, CANVAS, null, null, null, "report", "text", Instant.EPOCH));
+    assertEquals(TARGET, context().materializeTextOutput(output, "text"));
+    verify(materializer).materializeText(CANVAS, NODE, REQUEST, LEASE, TARGET, "report", "text");
   }
 
   /** 只有在 Run 处于 RUNNING 且租约有效时才允许预签名原图 URL。 */

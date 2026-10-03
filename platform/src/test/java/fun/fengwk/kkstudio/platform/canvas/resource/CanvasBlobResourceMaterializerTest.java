@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +85,8 @@ class CanvasBlobResourceMaterializerTest {
             Instant.now(),
             Instant.now());
     when(runRepository.findByNodeIdForUpdate(nodeId)).thenReturn(Optional.of(run));
+    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, "lease-token-1"))
+        .thenReturn(true);
     when(uploadService.lockReady(uploadId))
         .thenReturn(new StorageUploadService.ReadyUpload(blobId, "stored.bin"));
     when(resourceRepository.addIfAbsent(any())).thenReturn(true);
@@ -133,7 +135,7 @@ class CanvasBlobResourceMaterializerTest {
     when(canvasStore.lockDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
     when(runRepository.findByNodeIdForUpdate(nodeId)).thenReturn(Optional.empty());
     assertThrows(IllegalStateException.class, this::materialize);
-    verify(uploadService, times(2)).delete(uploadId);
+    verify(uploadService, never()).stage(any(), any(), any(), anyLong());
   }
 
   @Test
@@ -142,7 +144,7 @@ class CanvasBlobResourceMaterializerTest {
         new CanvasResource(resourceId, canvasId, null, null, blobId, "winner", null, Instant.now());
     when(resourceRepository.addIfAbsent(any())).thenReturn(false);
     when(resourceRepository.findById(canvasId, resourceId))
-        .thenReturn(Optional.empty(), Optional.of(winner));
+        .thenReturn(Optional.empty(), Optional.empty(), Optional.of(winner));
 
     assertSame(winner, materialize());
     verify(blobManager, never()).retain(any());
@@ -159,7 +161,7 @@ class CanvasBlobResourceMaterializerTest {
   void materializesInlineTextWithoutBlobOrStaging() {
     CanvasResource resource =
         materializer.materializeText(
-            canvasId, nodeId, requestId, resourceId, "report.txt", "summary text");
+            canvasId, nodeId, requestId, "lease-token-1", resourceId, "report.txt", "summary text");
 
     assertEquals("summary text", resource.textContent());
     assertTrue(resource.isText());
@@ -187,8 +189,69 @@ class CanvasBlobResourceMaterializerTest {
     assertSame(
         existing,
         materializer.materializeText(
-            canvasId, nodeId, requestId, resourceId, "report.txt", "cached"));
+            canvasId, nodeId, requestId, "lease-token-1", resourceId, "report.txt", "cached"));
     verify(resourceRepository, never()).addIfAbsent(any());
+  }
+
+  /** stage 后出现同 request winner 时仍需 fence，临时 upload 被消费但不新增引用。 */
+  @Test
+  void winnerAppearingDuringStageIsReturnedWithoutRetain() {
+    CanvasResource winner =
+        new CanvasResource(resourceId, canvasId, null, null, blobId, "winner", null, Instant.now());
+    when(resourceRepository.findById(canvasId, resourceId))
+        .thenReturn(Optional.empty(), Optional.of(winner));
+    assertSame(winner, materialize());
+    verify(uploadService).delete(uploadId);
+    verify(blobManager, never()).retain(any());
+  }
+
+  /** 围栏在 stage 后失败时必清理；清理失败不能掩盖原始 ownership 异常。 */
+  @Test
+  void postStageFenceFailureDiscardsBestEffort() {
+    when(runRepository.ownsRunningRequest(canvasId, nodeId, requestId, "lease-token-1"))
+        .thenReturn(true, false);
+    doThrow(new IllegalStateException("cleanup failed")).when(uploadService).delete(uploadId);
+    IllegalStateException failure = assertThrows(IllegalStateException.class, this::materialize);
+    assertTrue(failure.getMessage().contains("live lease owner"));
+    verify(resourceRepository, never()).addIfAbsent(any());
+    verify(pinRepository, never()).addAll(any());
+    verify(blobManager, never()).retain(any());
+  }
+
+  /** TEXT 边界校验不触碰 DB；insert 冲突只使用真实 winner，无 winner 则回滚失败。 */
+  @Test
+  void textValidationAndInsertRace() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            materializer.materializeText(
+                canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            materializer.materializeText(
+                canvasId,
+                nodeId,
+                requestId,
+                "lease-token-1",
+                resourceId,
+                "text",
+                "x".repeat(1024 * 1024 + 1)));
+    CanvasResource winner =
+        new CanvasResource(resourceId, canvasId, null, null, null, "winner", "", Instant.now());
+    when(resourceRepository.addIfAbsent(any())).thenReturn(false);
+    when(resourceRepository.findById(canvasId, resourceId))
+        .thenReturn(Optional.empty(), Optional.of(winner));
+    assertSame(
+        winner,
+        materializer.materializeText(
+            canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", ""));
+    when(resourceRepository.findById(canvasId, resourceId)).thenReturn(Optional.empty());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            materializer.materializeText(
+                canvasId, nodeId, requestId, "lease-token-1", resourceId, "text", ""));
   }
 
   private CanvasResource materialize() {
@@ -196,6 +259,7 @@ class CanvasBlobResourceMaterializerTest {
         canvasId,
         nodeId,
         requestId,
+        "lease-token-1",
         resourceId,
         "output.bin",
         new ByteArrayInputStream(new byte[] {1}));

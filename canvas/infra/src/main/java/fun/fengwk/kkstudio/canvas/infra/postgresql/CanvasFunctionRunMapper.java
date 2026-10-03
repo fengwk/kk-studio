@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -55,6 +56,23 @@ public interface CanvasFunctionRunMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from canvas_function_run where node_id = #{nodeId} for update")
   @ResultMap("canvasFunctionRunMap")
   CanvasFunctionRunDO getByNodeIdForUpdate(@Param("nodeId") UUID nodeId);
+
+  @Select(
+      """
+      select exists (
+        select 1 from canvas_function_run r
+        join canvas_node n on n.id = r.node_id
+        where n.canvas_id = #{canvasId} and r.node_id = #{nodeId}
+          and r.request_id = #{requestId} and r.status = 'RUNNING'
+          and r.lease_token = #{leaseToken} and r.lease_until > clock_timestamp()
+      )
+      """)
+  @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
+  boolean ownsRunningRequest(
+      @Param("canvasId") UUID canvasId,
+      @Param("nodeId") UUID nodeId,
+      @Param("requestId") UUID requestId,
+      @Param("leaseToken") String leaseToken);
 
   @Select(
       """

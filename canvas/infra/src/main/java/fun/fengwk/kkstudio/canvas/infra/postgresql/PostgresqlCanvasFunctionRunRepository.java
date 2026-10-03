@@ -40,6 +40,11 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   }
 
   @Override
+  public boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken) {
+    return runMapper.ownsRunningRequest(canvasId, nodeId, requestId, leaseToken);
+  }
+
+  @Override
   public List<CanvasFunctionRun> findByCanvasId(UUID canvasId) {
     List<CanvasFunctionRun> runs = new ArrayList<>();
     for (CanvasFunctionRunDO run : runMapper.listByCanvas(canvasId)) {
