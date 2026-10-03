@@ -54,6 +54,6 @@ public record ConfigSyncPlan(
       Long timeoutMillis,
       List<McpTool> discoveredTools) {}
 
-  /** 已合并并校验的 settings 更新；版本在写事务内读取。 */
-  public record SettingsUpdate(SystemSettingsSectionsDTO sections) {}
+  /** 已合并并校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
+  public record SettingsUpdate(SystemSettingsSectionsDTO sections, String expectedVersion) {}
 }

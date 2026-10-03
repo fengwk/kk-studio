@@ -12,7 +12,9 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -26,8 +28,8 @@ import java.util.regex.Pattern;
 /**
  * 把 YAML 文档预校验为强类型候选集合。
  *
- * <p>未知顶层类别与被识别对象上的未知字段作为条目级 skip 上报（路径不含字段值）；结构错误、错误类型、非法有效值、缺必填与文件内重复业务名
- * 作为导入错误抛出。密钥字段的（解密）值绝不进入错误文本。
+ * <p>未知顶层类别、不支持的 Provider 协议、条目级未知字段与嵌套 config 未知字段都作为条目级 skip 上报（路径不含字段值）；结构错误、错误类型、
+ * 非法有效值、缺必填与文件内重复业务名（含被 skip 的条目）作为导入错误抛出。密钥字段的值绝不进入错误文本。
  */
 @Component
 public final class ConfigSyncParser {
@@ -44,9 +46,6 @@ public final class ConfigSyncParser {
           ConfigSyncKind.ENVIRONMENTS.wireValue(),
           ConfigSyncKind.MCP_SERVERS.wireValue(),
           ConfigSyncKind.SETTINGS.wireValue());
-
-  private static final Set<String> SETTINGS_SECTIONS =
-      Set.of("tool", "aiRuntime", "environment", "integrations", "storageMedia", "advanced");
 
   private final ConfigSyncYaml yaml;
 
@@ -65,59 +64,65 @@ public final class ConfigSyncParser {
       }
     }
 
+    List<String> providerNames = new ArrayList<>();
     List<ProviderSpec> providers = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.PROVIDERS)) {
-      ProviderSpec spec = parseProvider(entry, skipped);
+      ProviderSpec spec = parseProvider(entry, skipped, providerNames);
       if (spec != null) {
         providers.add(spec);
       }
     }
+    requireDistinct(providerNames, ConfigSyncKind.PROVIDERS);
+
+    List<String> modelNames = new ArrayList<>();
     List<ModelSpec> models = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.MODELS)) {
-      ModelSpec spec = parseModel(entry, skipped);
+      ModelSpec spec = parseModel(entry, skipped, modelNames);
       if (spec != null) {
         models.add(spec);
       }
     }
+    requireDistinct(modelNames, ConfigSyncKind.MODELS);
+
+    List<String> agentNames = new ArrayList<>();
     List<AgentSpec> agents = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.AGENTS)) {
-      AgentSpec spec = parseAgent(entry, skipped);
+      AgentSpec spec = parseAgent(entry, skipped, agentNames);
       if (spec != null) {
         agents.add(spec);
       }
     }
+    requireDistinct(agentNames, ConfigSyncKind.AGENTS);
+
+    List<String> skillNames = new ArrayList<>();
     List<SkillSpec> skillPackages = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.SKILL_PACKAGES)) {
-      SkillSpec spec = parseSkillPackage(entry, skipped);
+      SkillSpec spec = parseSkillPackage(entry, skipped, skillNames);
       if (spec != null) {
         skillPackages.add(spec);
       }
     }
+    requireDistinct(skillNames, ConfigSyncKind.SKILL_PACKAGES);
+
+    List<String> environmentNames = new ArrayList<>();
     List<EnvironmentSpec> environments = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.ENVIRONMENTS)) {
-      EnvironmentSpec spec = parseEnvironment(entry, skipped);
+      EnvironmentSpec spec = parseEnvironment(entry, skipped, environmentNames);
       if (spec != null) {
         environments.add(spec);
       }
     }
+    requireDistinct(environmentNames, ConfigSyncKind.ENVIRONMENTS);
+
+    List<String> mcpNames = new ArrayList<>();
     List<McpSpec> mcpServers = new ArrayList<>();
     for (Entry entry : entries(document, ConfigSyncKind.MCP_SERVERS)) {
-      McpSpec spec = parseMcpServer(entry, skipped);
+      McpSpec spec = parseMcpServer(entry, skipped, mcpNames);
       if (spec != null) {
         mcpServers.add(spec);
       }
     }
-
-    requireDistinct(providers.stream().map(ProviderSpec::name).toList(), ConfigSyncKind.PROVIDERS);
-    requireDistinct(
-        models.stream().map(spec -> ConfigSyncRefs.modelName(spec.providerName(), spec.name())).toList(),
-        ConfigSyncKind.MODELS);
-    requireDistinct(agents.stream().map(AgentSpec::name).toList(), ConfigSyncKind.AGENTS);
-    requireDistinct(
-        skillPackages.stream().map(SkillSpec::packageName).toList(), ConfigSyncKind.SKILL_PACKAGES);
-    requireDistinct(
-        environments.stream().map(EnvironmentSpec::name).toList(), ConfigSyncKind.ENVIRONMENTS);
-    requireDistinct(mcpServers.stream().map(McpSpec::name).toList(), ConfigSyncKind.MCP_SERVERS);
+    requireDistinct(mcpNames, ConfigSyncKind.MCP_SERVERS);
 
     Map<String, Object> settings = parseSettings(document, skipped);
     return new ParsedDocument(
@@ -125,17 +130,21 @@ public final class ConfigSyncParser {
   }
 
   private List<Entry> entries(Map<String, Object> document, ConfigSyncKind kind) {
-    Object node = document.get(kind.wireValue());
-    if (node == null) {
+    String key = kind.wireValue();
+    if (!document.containsKey(key)) {
       return List.of();
     }
+    Object node = document.get(key);
+    if (node == null) {
+      throw new AiValidationException(RESOURCE, key + " must be a list");
+    }
     if (!(node instanceof List<?> list)) {
-      throw new AiValidationException(RESOURCE, kind.wireValue() + " must be a list");
+      throw new AiValidationException(RESOURCE, key + " must be a list");
     }
     List<Entry> entries = new ArrayList<>(list.size());
     for (int index = 0; index < list.size(); index++) {
       Object element = list.get(index);
-      String path = kind.wireValue() + "[" + index + "]";
+      String path = key + "[" + index + "]";
       if (!(element instanceof Map<?, ?> map)) {
         throw new AiValidationException(RESOURCE, path + " must be an object");
       }
@@ -148,17 +157,23 @@ public final class ConfigSyncParser {
     return entries;
   }
 
-  private ProviderSpec parseProvider(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private ProviderSpec parseProvider(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqString("name");
+    declared.add(name);
+    String providerType = entry.reqString("providerType");
+    ProviderType type;
+    try {
+      type = ProviderType.fromWireValue(providerType);
+    } catch (IllegalArgumentException error) {
+      skipped.add(
+          new ConfigSyncSkipped(
+              ConfigSyncKind.PROVIDERS.wireValue(), name, "unsupported provider protocol"));
+      return null;
+    }
     AgentProviderEditablePropertiesDTO properties = new AgentProviderEditablePropertiesDTO();
     properties.setDescription(entry.optString("description"));
-    String providerType = entry.reqString("providerType");
-    try {
-      properties.setProviderType(ProviderType.fromWireValue(providerType).wireValue());
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, entry.path + ".providerType is not a supported provider protocol");
-    }
+    properties.setProviderType(type.wireValue());
     properties.setBaseUrl(entry.optString("baseUrl"));
     properties.setCredential(entry.optString("credential"));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
@@ -169,54 +184,86 @@ public final class ConfigSyncParser {
     return new ProviderSpec(name, properties);
   }
 
-  private ModelSpec parseModel(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private ModelSpec parseModel(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String providerName = entry.reqString("providerName");
     String name = entry.reqString("name");
+    String key = ConfigSyncRefs.modelName(providerName, name);
+    declared.add(key);
     String modelId = entry.reqString("modelId");
+    String description = entry.optString("description");
+    Object configNode = requireObject(entry, "config");
+    if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
+      return null;
+    }
+    if (skipUnknownConfig(
+        configNode,
+        AgentModelConfigDTO.class,
+        entry.path + ".config",
+        ConfigSyncKind.MODELS,
+        key,
+        skipped)) {
+      return null;
+    }
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName(name);
     properties.setModelId(modelId);
-    properties.setDescription(entry.optString("description"));
+    properties.setDescription(description);
     properties.setConfig(
-        yaml.convert(requireObject(entry, "config"), AgentModelConfigDTO.class, entry.path + ".config"));
-    if (skipUnknown(entry, ConfigSyncKind.MODELS, ConfigSyncRefs.modelName(providerName, name), skipped)) {
-      return null;
-    }
+        yaml.convert(configNode, AgentModelConfigDTO.class, entry.path + ".config"));
     return new ModelSpec(providerName, name, properties);
   }
 
-  private AgentSpec parseAgent(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private AgentSpec parseAgent(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqString("name");
-    AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
-    properties.setDescription(entry.optString("description"));
-    properties.setSystemPrompt(entry.optString("systemPrompt"));
+    declared.add(name);
+    String description = entry.optString("description");
+    String systemPrompt = entry.optString("systemPrompt");
     String model = entry.reqString("model");
     ModelRef modelRef;
     try {
       modelRef = ModelRef.parse(model);
     } catch (IllegalArgumentException error) {
-      throw new AiValidationException(RESOURCE, entry.path + ".model must be providerName/modelName");
+      throw new AiValidationException(
+          RESOURCE, entry.path + ".model must be providerName/modelName");
     }
-    properties.setModel(model);
-    properties.setVariant(entry.optString("variant"));
-    properties.setConfig(
-        yaml.convert(
-            requireObject(entry, "config"), AgentDefinitionConfigDTO.class, entry.path + ".config"));
+    String variant = entry.optString("variant");
+    Object configNode = requireObject(entry, "config");
     if (skipUnknown(entry, ConfigSyncKind.AGENTS, name, skipped)) {
       return null;
     }
+    if (skipUnknownConfig(
+        configNode,
+        AgentDefinitionConfigDTO.class,
+        entry.path + ".config",
+        ConfigSyncKind.AGENTS,
+        name,
+        skipped)) {
+      return null;
+    }
+    AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
+    properties.setDescription(description);
+    properties.setSystemPrompt(systemPrompt);
+    properties.setModel(model);
+    properties.setVariant(variant);
+    properties.setConfig(
+        yaml.convert(configNode, AgentDefinitionConfigDTO.class, entry.path + ".config"));
     return new AgentSpec(name, modelRef.providerName(), modelRef.modelName(), properties);
   }
 
-  private SkillSpec parseSkillPackage(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private SkillSpec parseSkillPackage(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String packageName = entry.reqString("packageName");
+    declared.add(packageName);
     String description = entry.optString("description");
     String repositoryUrl = entry.reqString("repositoryUrl");
     String branch = entry.reqString("branch");
     String currentCommit = entry.reqString("currentCommit");
     if (!COMMIT.matcher(currentCommit).matches()) {
       throw new AiValidationException(
-          RESOURCE, entry.path + ".currentCommit must be a 40 or 64 characters lowercase hex object id");
+          RESOURCE,
+          entry.path + ".currentCommit must be a 40 or 64 characters lowercase hex object id");
     }
     if (skipUnknown(entry, ConfigSyncKind.SKILL_PACKAGES, packageName, skipped)) {
       return null;
@@ -224,8 +271,10 @@ public final class ConfigSyncParser {
     return new SkillSpec(packageName, description, repositoryUrl, branch, currentCommit);
   }
 
-  private EnvironmentSpec parseEnvironment(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private EnvironmentSpec parseEnvironment(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqString("name");
+    declared.add(name);
     String token = entry.reqString("registrationToken");
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
@@ -233,8 +282,10 @@ public final class ConfigSyncParser {
     return new EnvironmentSpec(name, token);
   }
 
-  private McpSpec parseMcpServer(Entry entry, List<ConfigSyncSkipped> skipped) {
+  private McpSpec parseMcpServer(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqString("name");
+    declared.add(name);
     String url = entry.reqString("url");
     Map<String, String> headers = entry.optStringMap("headers");
     Boolean enabled = entry.optBoolean("enabled");
@@ -248,26 +299,29 @@ public final class ConfigSyncParser {
   @SuppressWarnings("unchecked")
   private Map<String, Object> parseSettings(
       Map<String, Object> document, List<ConfigSyncSkipped> skipped) {
-    Object node = document.get(ConfigSyncKind.SETTINGS.wireValue());
-    if (node == null) {
+    String key = ConfigSyncKind.SETTINGS.wireValue();
+    if (!document.containsKey(key)) {
       return null;
+    }
+    Object node = document.get(key);
+    if (node == null) {
+      throw new AiValidationException(RESOURCE, "settings must be an object");
     }
     if (!(node instanceof Map<?, ?> rawMap)) {
       throw new AiValidationException(RESOURCE, "settings must be an object");
     }
-    Map<String, Object> settings = new LinkedHashMap<>();
+    Map<String, Object> raw = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
-      settings.put(String.valueOf(entry.getKey()), entry.getValue());
+      raw.put(String.valueOf(entry.getKey()), entry.getValue());
     }
-    for (String key : settings.keySet()) {
-      if (!SETTINGS_SECTIONS.contains(key)) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.SETTINGS.wireValue(), "settings", "unsupported field: settings." + key));
-        return null;
-      }
+    // 未知叶只被移除并报告，其余受支持字段继续合入当前设置。
+    List<String> removed = new ArrayList<>();
+    Object cleaned =
+        yaml.removeUnknownProperties(SystemSettingsSectionsDTO.class, raw, key, removed);
+    for (String path : removed) {
+      skipped.add(new ConfigSyncSkipped(key, "settings", "unsupported field: " + path));
     }
-    return settings;
+    return (Map<String, Object>) cleaned;
   }
 
   private Object requireObject(Entry entry, String key) {
@@ -276,6 +330,24 @@ public final class ConfigSyncParser {
       throw new AiValidationException(RESOURCE, entry.path + "." + key + " must be an object");
     }
     return node;
+  }
+
+  /** 嵌套 config 含未声明字段时整体跳过条目；路径可读但不回显字段值。 */
+  private boolean skipUnknownConfig(
+      Object node,
+      Class<?> type,
+      String path,
+      ConfigSyncKind kind,
+      String name,
+      List<ConfigSyncSkipped> skipped) {
+    List<String> removed = new ArrayList<>();
+    yaml.removeUnknownProperties(type, node, path, removed);
+    if (removed.isEmpty()) {
+      return false;
+    }
+    skipped.add(
+        new ConfigSyncSkipped(kind.wireValue(), name, "unsupported field: " + removed.get(0)));
+    return true;
   }
 
   private boolean skipUnknown(
@@ -347,10 +419,6 @@ public final class ConfigSyncParser {
       this.path = path;
     }
 
-    String getPath() {
-      return path;
-    }
-
     Object node(String key) {
       consumed.add(key);
       return raw.get(key);
@@ -382,7 +450,7 @@ public final class ConfigSyncParser {
       if (value == null) {
         return null;
       }
-      if (value instanceof Float || value instanceof Double) {
+      if (value instanceof BigDecimal || value instanceof Float || value instanceof Double) {
         throw new AiValidationException(RESOURCE, path + "." + key + " must be an integer");
       }
       if (value instanceof BigInteger bigInteger) {

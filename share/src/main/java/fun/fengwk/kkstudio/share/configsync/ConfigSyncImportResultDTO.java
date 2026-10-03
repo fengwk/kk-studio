@@ -14,8 +14,7 @@ public class ConfigSyncImportResultDTO {
 
   public ConfigSyncImportResultDTO() {}
 
-  public ConfigSyncImportResultDTO(
-      List<ConfigSyncRef> imported, List<ConfigSyncSkipped> skipped) {
+  public ConfigSyncImportResultDTO(List<ConfigSyncRef> imported, List<ConfigSyncSkipped> skipped) {
     this.imported = imported;
     this.skipped = skipped;
   }

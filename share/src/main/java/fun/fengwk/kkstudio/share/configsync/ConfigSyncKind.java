@@ -8,7 +8,7 @@ import java.util.Arrays;
 /**
  * 配置同步的七个可选配置集合。
  *
- * <p>wire 值固定为 CONTRACT.md 中的小驼峰集合名；YAML 顶层键、inventory、导出选择与导入结果都用同一个值，前后端共享。
+ * <p>wire 值固定为小驼峰集合名；YAML 顶层键、inventory、导出选择与导入结果都用同一个值，前后端共享。
  */
 public enum ConfigSyncKind {
   PROVIDERS("providers"),

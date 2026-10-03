@@ -1,28 +1,33 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
- * 测试意图：锁定配置同步 YAML 边界的关键不变量——纯标量往返不产生 Java tag、数值/布尔/JSON 字符串保持类型、重复键与非法 tag
- * 被拒绝、嵌套结构到强类型 DTO 的转换不会静默改写 protocolOptionsJson。
+ * 测试意图：锁定配置同步 YAML 边界的关键不变量——纯标量往返不产生 Java tag、高精度数值保持 BigDecimal、数值/布尔/字符串不互相宽松转换、重复 键与非法
+ * tag/别名/非有限浮点被拒绝、未声明字段按 introspection 检出且 Map 动态键不被误删。
  */
 class ConfigSyncYamlTest {
 
-  private final ConfigSyncYaml yaml = new ConfigSyncYaml(new ObjectMapper());
+  private final ConfigSyncYaml yaml = new ConfigSyncYaml();
 
   @Test
   void dumpAndParsePreservesScalarTypesWithoutJavaTags() {
@@ -35,27 +40,40 @@ class ConfigSyncYamlTest {
 
     String dumped = yaml.dump(document);
 
-    assertTrue(!dumped.contains("!!"), () -> "yaml must not contain java tags: " + dumped);
+    assertFalse(dumped.contains("!!"), () -> "yaml must not contain java tags: " + dumped);
     Map<String, Object> parsed = yaml.parse(dumped);
     assertInstanceOf(Number.class, parsed.get("count"));
     assertEquals(1800000L, ((Number) parsed.get("count")).longValue());
-    assertEquals(0, new BigDecimal(parsed.get("ratio").toString()).compareTo(new BigDecimal("1.25")));
+    assertEquals(
+        0, new BigDecimal(parsed.get("ratio").toString()).compareTo(new BigDecimal("1.25")));
     assertEquals(Boolean.TRUE, parsed.get("enabled"));
     assertEquals("{\"temperature\":0.5}", parsed.get("protocolOptionsJson"));
   }
 
   @Test
+  void highPrecisionDecimalRoundTripsWithoutDoubleLoss() {
+    BigDecimal precise = new BigDecimal("0.123456789012345678901234567890");
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("ratio", precise);
+
+    Map<String, Object> parsed = yaml.parse(yaml.dump(document));
+
+    Object ratio = parsed.get("ratio");
+    assertInstanceOf(BigDecimal.class, ratio);
+    assertEquals(0, ((BigDecimal) ratio).compareTo(precise));
+    assertEquals(precise.toString(), ratio.toString());
+  }
+
+  @Test
   void duplicateKeysAreRejected() {
-    assertThrows(
-        AiValidationException.class,
-        () -> yaml.parse("providers: []\nproviders: []\n"));
+    assertThrows(AiValidationException.class, () -> yaml.parse("providers: []\nproviders: []\n"));
   }
 
   @Test
   void javaSpecificTagIsRejected() {
     assertThrows(
         AiValidationException.class,
-        () -> yaml.parse("value: !!java.util.Date '2020-01-01'\n"));
+        () -> yaml.parse("value: !!" + Date.class.getName() + " '2020-01-01'\n"));
   }
 
   @Test
@@ -65,16 +83,66 @@ class ConfigSyncYamlTest {
   }
 
   @Test
+  void collectionAliasIsRejected() {
+    // 集合别名可构造递归结构导致 StackOverflow，必须在解析期安全拒绝。
+    assertThrows(AiValidationException.class, () -> yaml.parse("providers: &x []\nmodels: *x\n"));
+  }
+
+  @Test
+  void recursiveAliasIsRejected() {
+    assertThrows(AiValidationException.class, () -> yaml.parse("root: &x\n  self: *x\n"));
+  }
+
+  @Test
+  void nonFiniteFloatIsRejected() {
+    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: .inf\n"));
+    assertThrows(AiValidationException.class, () -> yaml.parse("ratio: .nan\n"));
+  }
+
+  @Test
+  void oversizedInputIsRejectedBeforeParsing() {
+    String huge = "providers: " + "[x]".repeat(8 * 1024 * 1024);
+    assertThrows(AiValidationException.class, () -> yaml.parse(huge));
+  }
+
+  @Test
+  void stringIsNotCoercedToNumber() {
+    Map<String, Object> node = Map.of("count", "5");
+    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+  }
+
+  @Test
+  void decimalStringIsNotCoercedToDecimal() {
+    Map<String, Object> node = Map.of("ratio", "1.5");
+    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+  }
+
+  @Test
+  void numberIsNotCoercedToString() {
+    Map<String, Object> node = Map.of("name", 7);
+    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+  }
+
+  @Test
+  void stringIsNotCoercedToBoolean() {
+    Map<String, Object> node = Map.of("enabled", "true");
+    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+  }
+
+  @Test
+  void enumOrdinalIsRejected() {
+    Map<String, Object> node = Map.of("modality", 0);
+    assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));
+  }
+
+  @Test
   void nestedConversionKeepsProtocolOptionsJsonAsString() {
     Map<String, Object> config = new LinkedHashMap<>();
     config.put("limit", Map.of("context", 1000, "output", 100));
     config.put(
-        "abilities",
-        Map.of("tools", true, "reasoning", false, "inputModalities", List.of("TEXT")));
+        "abilities", Map.of("tools", true, "reasoning", false, "inputModalities", List.of("TEXT")));
     config.put("defaultVariant", "default");
-    config.put(
-        "variants",
-        List.of(Map.of("id", "default", "protocolOptionsJson", "{\"a\":1}")));
+    config.put("variants", List.of(Map.of("id", "default", "protocolOptionsJson", "{\"a\":1}")));
     Map<String, Object> pricing = new LinkedHashMap<>();
     pricing.put("currency", "USD");
     pricing.put("pricingTier", "t");
@@ -92,5 +160,49 @@ class ConfigSyncYamlTest {
     AgentModelConfigDTO dto = yaml.convert(config, AgentModelConfigDTO.class, "model.config");
     assertEquals("{\"a\":1}", dto.getVariants().get(0).getProtocolOptionsJson());
     assertEquals(Integer.valueOf(1000), dto.getLimit().getContext());
+  }
+
+  @Test
+  void removeUnknownPropertiesDetectsNestedUnknownModelField() {
+    Map<String, Object> config = new LinkedHashMap<>();
+    config.put("limit", Map.of("context", 1000, "output", 100, "bogus", 1));
+    List<String> removed = new ArrayList<>();
+
+    Object cleaned =
+        yaml.removeUnknownProperties(AgentModelConfigDTO.class, config, "model.config", removed);
+
+    assertEquals(List.of("model.config.limit.bogus"), removed);
+    assertTrue(cleaned instanceof Map<?, ?>);
+  }
+
+  @Test
+  void removeUnknownPropertiesKeepsDynamicMapKeysAndPrunesOnlyUnknownLeaves() {
+    Map<String, Object> tool = new LinkedHashMap<>();
+    tool.put("defaultYolo", true);
+    tool.put("bogus", 1);
+    tool.put(
+        "permission",
+        Map.of("bash", List.of(Map.of("pattern", "*", "action", "allow", "extra", 1))));
+    List<String> removed = new ArrayList<>();
+
+    Object cleaned =
+        yaml.removeUnknownProperties(SystemSettingsToolDTO.class, tool, "settings.tool", removed);
+
+    assertEquals(List.of("settings.tool.bogus", "settings.tool.permission.bash[0].extra"), removed);
+    @SuppressWarnings("unchecked")
+    Map<String, Object> result = (Map<String, Object>) cleaned;
+    assertEquals(Boolean.TRUE, result.get("defaultYolo"));
+    assertNotNull(result.get("permission"));
+    assertFalse(result.containsKey("bogus"));
+  }
+
+  /** 严格类型测试用的最小 DTO：公开字段足以让 Jackson introspection 识别。 */
+  public static class Sample {
+
+    public Long count;
+    public BigDecimal ratio;
+    public String name;
+    public Boolean enabled;
+    public AgentModelInputModality modality;
   }
 }

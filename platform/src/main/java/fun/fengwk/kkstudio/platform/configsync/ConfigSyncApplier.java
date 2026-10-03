@@ -8,13 +8,13 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
@@ -40,8 +39,8 @@ import java.util.List;
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
  *
- * <p>写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server → Environment → Agent → Settings。新增 Agent 先以空
- * subagent allowlist 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不
+ * <p>写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server → Environment → Agent →
+ * Settings。新增 Agent 先以空 subagent allowlist 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不
  * 捕获后继续。
  */
 @AllArgsConstructor
@@ -76,7 +75,12 @@ public class ConfigSyncApplier {
     }
     for (ConfigSyncPlan.McpImport mcp : plan.mcpServers()) {
       mcpServerService.importServer(
-          mcp.name(), mcp.url(), mcp.headers(), mcp.enabled(), mcp.timeoutMillis(), mcp.discoveredTools());
+          mcp.name(),
+          mcp.url(),
+          mcp.headers(),
+          mcp.enabled(),
+          mcp.timeoutMillis(),
+          mcp.discoveredTools());
     }
     applyEnvironments(plan.environments());
     applyAgents(plan.agents());
@@ -152,7 +156,6 @@ public class ConfigSyncApplier {
   }
 
   private void applySettings(ConfigSyncPlan.SettingsUpdate update) {
-    SystemSettingsDTO current = systemSettingsService.get();
     SystemSettingsSectionsDTO sections = update.sections();
     SystemSettingsUpdateDTO dto = new SystemSettingsUpdateDTO();
     dto.setTool(sections.getTool());
@@ -161,7 +164,8 @@ public class ConfigSyncApplier {
     dto.setIntegrations(sections.getIntegrations());
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());
-    dto.setExpectedVersion(current.getVersion());
+    // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。
+    dto.setExpectedVersion(update.expectedVersion());
     systemSettingsService.update(dto);
   }
 

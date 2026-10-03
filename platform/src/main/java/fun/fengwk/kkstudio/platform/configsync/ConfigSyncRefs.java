@@ -19,9 +19,4 @@ public final class ConfigSyncRefs {
   public static String modelName(String providerName, String modelName) {
     return providerName + "/" + modelName;
   }
-
-  /** 该引用是否为给定 kind 下的指定 name。 */
-  public static boolean matches(ConfigSyncRef ref, ConfigSyncKind kind, String name) {
-    return ref != null && ref.getKind() == kind && name.equals(ref.getName());
-  }
 }

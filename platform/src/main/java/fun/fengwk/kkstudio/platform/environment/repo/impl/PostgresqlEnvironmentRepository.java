@@ -28,9 +28,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   @Override
   public List<Environment> listAll() {
-    return environmentMapper.listAll().stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+    return environmentMapper.listAll().stream().map(this::toModel).collect(Collectors.toList());
   }
 
   @Override

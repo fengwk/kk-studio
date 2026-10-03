@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsDomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -28,7 +29,8 @@ import java.util.Map;
  * 校验失败 → 400，行缺失 → 404，expectedVersion CAS 竞争 → 409。
  */
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = StudioSystemSettingsController.class)
+@RestControllerAdvice(
+    assignableTypes = {StudioSystemSettingsController.class, StudioConfigSyncController.class})
 public class StudioSystemSettingsErrorAdvice {
 
   private final StudioMessageService messageService;
