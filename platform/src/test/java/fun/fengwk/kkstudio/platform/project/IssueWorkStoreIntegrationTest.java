@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -215,50 +214,44 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     }
   }
 
-  /** dispatcher 的 JVM Clock 超前/落后一年，DB 仍能领取并返回真实 deadline，随后按相对 delay 重排。 */
+  /** 不注入应用 Clock：deadline 来自真实 PostgreSQL，续租与失败重排以数据库时间加相对 Duration 写入。 */
   @Test
-  void dispatcherClockSkewDoesNotAffectDatabaseLeaseOrDelay() {
-    for (Duration skew : List.of(Duration.ofDays(365), Duration.ofDays(-365))) {
-      UUID issueId = newIssueId();
-      issueWorkStore.requestWork(issueId, Duration.ZERO);
-      IssueControllerProperties properties = new IssueControllerProperties();
-      properties.setLeaseDuration(LEASE);
-      AtomicReference<IssueWorkClaim> handedOff = new AtomicReference<>();
-      IssueReconciler reconciler = mock(IssueReconciler.class);
-      doAnswer(
-              invocation -> {
-                IssueWorkClaim claim = invocation.getArgument(0);
-                handedOff.set(claim);
-                IssueWork leased = issueWorkStore.getWork(issueId);
-                assertEquals(leased.getLeaseUntil(), claim.leaseUntil());
-                assertEquals(leased.getUpdatedAt().plus(LEASE), claim.leaseUntil());
-                assertThrows(
-                    ProjectValidationException.class,
-                    () -> issueWorkStore.renewLease(issueId, "wrong", LEASE));
-                issueWorkStore.renewLease(issueId, claim.leaseToken(), LEASE);
-                throw new IllegalStateException("retry");
-              })
-          .when(reconciler)
-          .reconcile(any(IssueWorkClaim.class));
-      ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
-      try (IssueControllerDispatcher dispatcher =
-          new IssueControllerDispatcher(
-              issueWorkStore,
-              reconciler,
-              properties,
-              Clock.offset(Clock.systemUTC(), skew),
-              Runnable::run,
-              Runnable::run,
-              scheduler)) {
-        dispatcher.start();
-      }
-      assertNotNull(handedOff.get());
-      IssueWork delayed = issueWorkStore.getWork(issueId);
-      assertNull(delayed.getLeaseToken());
-      assertEquals(delayed.getUpdatedAt().plus(properties.getRetryDelay()), delayed.getDueAt());
-      assertTrue(issueWorkStore.claimNext("early", LEASE).isEmpty());
-      jdbc.update("delete from project_issue_work where issue_id = ?", issueId);
+  void dispatcherUsesDatabaseLeaseAndRelativeRetryDelay() {
+    UUID issueId = newIssueId();
+    issueWorkStore.requestWork(issueId, Duration.ZERO);
+    IssueControllerProperties properties = new IssueControllerProperties();
+    properties.setLeaseDuration(LEASE);
+    AtomicReference<IssueWorkClaim> handedOff = new AtomicReference<>();
+    IssueReconciler reconciler = mock(IssueReconciler.class);
+    doAnswer(
+            invocation -> {
+              IssueWorkClaim claim = invocation.getArgument(0);
+              handedOff.set(claim);
+              IssueWork leased = issueWorkStore.getWork(issueId);
+              assertEquals(leased.getLeaseUntil(), claim.leaseUntil());
+              assertEquals(leased.getUpdatedAt().plus(LEASE), claim.leaseUntil());
+              assertThrows(
+                  ProjectValidationException.class,
+                  () -> issueWorkStore.renewLease(issueId, "wrong", LEASE));
+              issueWorkStore.renewLease(issueId, claim.leaseToken(), LEASE);
+              IssueWork renewed = issueWorkStore.getWork(issueId);
+              assertEquals(renewed.getUpdatedAt().plus(LEASE), renewed.getLeaseUntil());
+              throw new IllegalStateException("retry");
+            })
+        .when(reconciler)
+        .reconcile(any(IssueWorkClaim.class));
+    ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+    try (IssueControllerDispatcher dispatcher =
+        new IssueControllerDispatcher(
+            issueWorkStore, reconciler, properties, Runnable::run, Runnable::run, scheduler)) {
+      dispatcher.start();
     }
+    assertNotNull(handedOff.get());
+    IssueWork delayed = issueWorkStore.getWork(issueId);
+    assertNull(delayed.getLeaseToken());
+    assertNull(delayed.getLeaseUntil());
+    assertEquals(delayed.getUpdatedAt().plus(properties.getRetryDelay()), delayed.getDueAt());
+    assertTrue(issueWorkStore.claimNext("early", LEASE).isEmpty());
   }
 
   private Optional<IssueWork> concurrentClaim(
