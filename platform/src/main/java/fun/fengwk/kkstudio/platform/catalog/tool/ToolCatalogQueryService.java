@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.tool;
+package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import org.springframework.stereotype.Service;
 

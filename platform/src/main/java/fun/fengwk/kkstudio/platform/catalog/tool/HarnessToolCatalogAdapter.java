@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.harness.tool;
+package fun.fengwk.kkstudio.platform.catalog.tool;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
