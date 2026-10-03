@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -543,6 +545,62 @@ class GeminiStreamAccumulatorTest {
     accumulator.handleEvent("message", chunk);
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+  }
+
+  /** 测试意图：UNSPECIFIED 大小写均为非终态，后续 STOP 接收新文本且保留前帧内容。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"FINISH_REASON_UNSPECIFIED", "finish_reason_unspecified"})
+  void unspecifiedFinishReasonPreservesTextUntilStop(String finishReason) throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Hello "}]},
+        "finishReason":"%s"}]}
+        """
+            .formatted(finishReason));
+    assertEquals(List.of(new ProviderStreamEvent.TextDelta("Hello ")), emittedEvents);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}]}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals("Hello world!", completion.response().text());
+    assertEquals("", completion.response().thinking());
+    assertTrue(completion.response().toolCalls().isEmpty());
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.TextDelta("Hello "),
+            new ProviderStreamEvent.TextDelta("world!")),
+        emittedEvents);
+    assertNotNull(completion.replayState());
+    assertEquals(
+        MAPPER.readTree("{\"role\":\"model\",\"parts\":[{\"text\":\"Hello world!\"}]}"),
+        completion.replayState().payload());
+  }
+
+  /** 测试意图：UNSPECIFIED 帧即使已交付文本，EOF 仍缺少终态，不能合成成功或多发增量。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"FINISH_REASON_UNSPECIFIED", "finish_reason_unspecified"})
+  void unspecifiedFinishReasonAtEofFailsWithoutAdditionalEvents(String finishReason) {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"partial"}]},
+        "finishReason":"%s"}]}
+        """
+            .formatted(finishReason));
+    assertEquals(List.of(new ProviderStreamEvent.TextDelta("partial")), emittedEvents);
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("Gemini stream completed without terminal finish reason", error.getMessage());
+    assertEquals(List.of(new ProviderStreamEvent.TextDelta("partial")), emittedEvents);
   }
 
   /** 验证 usageMetadata 规范化映射到 ModelUsage，互斥非负，rawUsageJson 无损保留全部字段。 */
