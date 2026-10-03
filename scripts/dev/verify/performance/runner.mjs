@@ -340,14 +340,18 @@ export function validateCanvasCreateResponse(response) {
   if (typeof canvas.id !== 'string' || !UUID_PATTERN.test(canvas.id)) {
     throw new BenchmarkError(`canvas create id must be a canonical UUID: ${JSON.stringify(canvas.id)}`)
   }
-  if (typeof canvas.version !== 'string' || !DECIMAL_PATTERN.test(canvas.version)) {
-    throw new BenchmarkError(`canvas create version must be a canonical decimal string`)
+  // CanvasDocumentDTO 的同步坐标系是 revision；version 是已废弃的整图前置版本字段。
+  if (typeof canvas.revision !== 'string' || !DECIMAL_PATTERN.test(canvas.revision)) {
+    throw new BenchmarkError(`canvas create revision must be a canonical decimal string`)
   }
   if (Object.prototype.hasOwnProperty.call(canvas, 'threadId')) {
     throw new BenchmarkError('canvas create response must not expose threadId')
   }
   if (Object.prototype.hasOwnProperty.call(canvas, 'graphVersion')) {
     throw new BenchmarkError('canvas create response must not expose graphVersion')
+  }
+  if (Object.prototype.hasOwnProperty.call(canvas, 'version')) {
+    throw new BenchmarkError('canvas create response must not expose version')
   }
   return canvas
 }

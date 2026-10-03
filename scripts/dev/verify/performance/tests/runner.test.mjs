@@ -166,17 +166,37 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
   assert.doesNotThrow(() =>
     validateCanvasCreateResponse({
       status: 201,
-      json: { data: { id, title: 'baseline', version: '0' } },
+      json: { data: { id, title: 'baseline', revision: '0' } },
     }),
   )
   assert.throws(
     () =>
       validateCanvasCreateResponse({
         status: 201,
-        json: { data: { id, title: 'baseline', version: '0', threadId: id } },
+        json: { data: { id, title: 'baseline', revision: '0', threadId: id } },
       }),
     /threadId/,
   )
+  // 新旧字段并存也属于契约漂移，不能因 revision 合法而放行。
+  assert.throws(
+    () =>
+      validateCanvasCreateResponse({
+        status: 201,
+        json: { data: { id, title: 'baseline', revision: '0', version: '0' } },
+      }),
+    /must not expose version/,
+  )
+  // 缺失、旧 version-only 或非规范 revision 都不能充当同步坐标系。
+  for (const fields of [{}, { version: '0' }, { revision: '01' }, { revision: 0 }]) {
+    assert.throws(
+      () =>
+        validateCanvasCreateResponse({
+          status: 201,
+          json: { data: { id, title: 'baseline', ...fields } },
+        }),
+      /revision/,
+    )
+  }
   assert.doesNotThrow(() => validateCanvasDeleteResponse({ status: 204 }))
 })
 
@@ -333,7 +353,7 @@ test(
       if (request.method === 'POST' && requestUrl.pathname === '/api/canvases') {
         const body = JSON.parse(await readRequestBody(request))
         const id = randomUUID()
-        const canvas = { id, title: body.title, version: '0' }
+        const canvas = { id, title: body.title, revision: '0' }
         canvases.set(id, canvas)
         sendJson(response, 201, { code: 'success', data: canvas })
         return
