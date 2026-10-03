@@ -149,7 +149,7 @@ Daemon 重连后才结束窗口。改变 Tool catalog 时整体切换 Worker，�
 
 Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_history` 或用 `repair` 伪造 checksum
 会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
-它是备份、冻结、建空库与 Catalog 回灌流程，不是自动迁移。
+它通过产品配置导出、数据库备份与重建、当前 Schema 初始化和产品导入恢复配置，不是自动迁移。
 
 ## 恢复与重建
 
@@ -163,9 +163,10 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 新库中的写入不会自动合并回冻结库，切换前由数据所有者决定其保护方式。
 
 若目标是建立新的空数据面，按[共享数据库重建](development-and-testing.md#共享数据库重建)
-先执行导出与 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，再批准停机和实际执行。
-重建后只回灌 Provider/Model/Agent Catalog；会话、项目、画布、运行历史与 Blob 引用保留在
-冻结库/备份中，新的入口无法直接访问它们。Environment/Daemon 与其它运行配置需要重新登记。
+先在“设置 → 同步”导出配置，执行 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，
+再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复七类配置及所需凭据。
+会话、项目、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
+Environment 注册令牌可恢复；Daemon 重连仍须验收，Plugin 认证和部署级配置需另行准备。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
 ## 生产部署与反向代理
@@ -461,7 +462,7 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制
 registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
 或报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现
 在 Daemon argv 或环境变量中。本机 preview 的配置文件同样留在仓库之外、只有 owner 可读，脚本
-只把它当作数据面输入，不打印其中的值。共享数据库维护流程（导出 Catalog、重建空库、Flyway V1 初始化与回灌）见
+只把它当作数据面输入，不打印其中的值。共享数据库维护流程（产品导出配置、重建空库、当前 Schema 初始化与产品导入）见
 [开发与测试](development-and-testing.md#共享数据库重建)。
 
 ---

@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
@@ -14,8 +15,10 @@ import org.eclipse.jgit.revwalk.RevCommit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -23,6 +26,7 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -50,6 +54,7 @@ import java.util.stream.Stream;
  * bare cache 重定向到进程临时目录，避免写入模块工作树。提供 MockMvc 便捷读写、YAML 结构解析与真实 JGit 临时仓库构造器。
  */
 @AutoConfigureMockMvc
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
 
   /** Git 仓库与 Platform bare cache 都落在进程临时目录。 */
@@ -57,6 +62,9 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
+
+  /** 插件凭据不参与配置同步；停用无关后台刷新，避免重建测试 Schema 时与后台查询竞争。 */
+  @MockitoBean private PluginCredentialRefreshDispatcher pluginCredentialRefreshDispatcher;
 
   @DynamicPropertySource
   static void overrideSkillCacheRoot(DynamicPropertyRegistry registry) {
@@ -102,7 +110,11 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   }
 
   protected JsonNode data(MvcResult result) throws Exception {
-    return objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+    return objectMapper
+        .reader()
+        .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .readTree(result.getResponse().getContentAsString())
+        .path("data");
   }
 
   protected JsonNode envelope(MvcResult result) throws Exception {

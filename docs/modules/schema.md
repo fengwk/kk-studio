@@ -69,6 +69,8 @@ Project 写库通知由 repository 发送。恢复依赖权威行、poll 和租�
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
+需要重建时，通过产品 YAML 同步保留配置，在空库应用当前 Schema 后导入；
+UUID、行版本、连接和执行状态不随配置文件恢复，完整运行数据恢复仍依赖数据库与对象存储备份。
 
 新增 seed 数据放入对应 repeatable SQL，保持幂等并使用公开占位值。
 并发或旁路写入可违反的不变量用 CHECK/unique/FK 兜底，策略校验保留在应用层。

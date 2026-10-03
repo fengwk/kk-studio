@@ -137,6 +137,15 @@ Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不
 Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动，
 完整聚合携 expectedVersion 提交。权限与 apply timing 按封闭类型渲染。
 
+### 配置同步
+
+“高级”之后的“同步”页签提供导入和导出，不使用系统设置的保存/重置按钮。
+导出默认全选，支持逐项选择并展示自动包含的依赖；请求只提交用户直接选择的条目，
+最终依赖由服务端按当前配置补齐。下载固定为 `kk-studio-config.yaml`，始终包含所需凭据。
+导入读取 YAML 文件、确认同名更新后展示已导入和跳过原因，不渲染文件内容。
+成功后刷新配置目录；已有未保存设置草稿时保留原样，由用户明确重新加载。
+完整范围与恢复操作见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
+
 ### Plugin 设置
 
 `/settings` 的静态 Plugins 页签挂载

@@ -160,8 +160,8 @@ function ImportResult({
         <div className="settings-sync-result-section" data-state="partial">
           <h3>{t('settings.sync.import.skippedHeading')}</h3>
           <ul className="settings-sync-result-list">
-            {result.skipped.map((entry) => (
-              <li key={`${entry.kind}:${entry.name}`}>
+            {result.skipped.map((entry, index) => (
+              <li key={`${entry.kind}:${entry.name}:${index}`}>
                 {kindLabel(entry.kind)}: {entry.name} — {entry.reason}
               </li>
             ))}

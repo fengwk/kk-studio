@@ -131,7 +131,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createAgentDescription': {
     'en-US': 'Combine Model, tools, skills, and policy',
-    'zh-CN': '组合 Model、工具、技能与策略',
+    'zh-CN': '组合模型、工具、技能与策略',
   },
   'ai.catalog.createModel': {
     'en-US': 'Create Model',
@@ -139,7 +139,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createModelDescription': {
     'en-US': 'Define model information and variants',
-    'zh-CN': '定义 Model 信息与 Variant',
+    'zh-CN': '定义模型信息与 Variant',
   },
   'ai.catalog.createProvider': {
     'en-US': 'Create Provider',
@@ -147,7 +147,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createProviderDescription': {
     'en-US': 'Configure provider and credentials',
-    'zh-CN': '配置 Provider 与凭据',
+    'zh-CN': '配置提供商与凭据',
   },
   'ai.catalog.action.createSession': {
     'en-US': 'Start session',
