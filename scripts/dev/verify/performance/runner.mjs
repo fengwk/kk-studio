@@ -301,6 +301,7 @@ export function validateCatalogResponse(response) {
     requireObject(model, `catalog result ${index}`)
     requireText(model.providerName, `catalog result ${index}.providerName`)
     requireText(model.name, `catalog result ${index}.name`)
+    requireText(model.modelId, `catalog result ${index}.modelId`)
     requireObject(model.config, `catalog result ${index}.config`)
     requireText(model.config.defaultVariant, `catalog result ${index}.config.defaultVariant`)
     if (!Array.isArray(model.config.variants) || model.config.variants.length === 0) {
@@ -314,7 +315,6 @@ export function validateCatalogResponse(response) {
     for (const forbidden of [
       'id',
       'providerId',
-      'modelId',
       'configJson',
       'capabilitiesJson',
       'threadId',
@@ -340,7 +340,7 @@ export function validateCanvasCreateResponse(response) {
   if (typeof canvas.id !== 'string' || !UUID_PATTERN.test(canvas.id)) {
     throw new BenchmarkError(`canvas create id must be a canonical UUID: ${JSON.stringify(canvas.id)}`)
   }
-  // CanvasDocumentDTO 的同步坐标系是 revision；version 是已废弃的整图前置版本字段。
+  // CanvasDocumentDTO 使用十进制字符串 revision 作为同步游标。
   if (typeof canvas.revision !== 'string' || !DECIMAL_PATTERN.test(canvas.revision)) {
     throw new BenchmarkError(`canvas create revision must be a canonical decimal string`)
   }

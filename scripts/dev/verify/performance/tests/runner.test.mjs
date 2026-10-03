@@ -138,6 +138,7 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
           {
             providerName: 'offline',
             name: 'acceptance-stub',
+            modelId: 'upstream-stub',
             config: {
               defaultVariant: 'default',
               variants: [{ id: 'default' }],
@@ -149,6 +150,12 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
     },
   }
   assert.equal(validateCatalogResponse(catalogResponse).length, 1)
+  // modelId 是上游模型名称，必须存在，不能被误当作数据库身份字段拒绝。
+  for (const modelId of [undefined, null, '', 123]) {
+    const invalid = structuredClone(catalogResponse)
+    invalid.json.data.results[0].modelId = modelId
+    assert.throws(() => validateCatalogResponse(invalid), /modelId/)
+  }
   assert.throws(
     () => validateCatalogResponse({ status: 200, json: { data: [] } }),
     /catalog data must be an object/,
@@ -157,7 +164,7 @@ test('response validators enforce health, catalog envelope, and canvas DTO contr
     () =>
       validateCatalogResponse({
         status: 200,
-        json: { data: { results: [{ providerName: 'offline', name: 'bad', config: {} }] } },
+        json: { data: { results: [{ providerName: 'offline', name: 'bad', modelId: 'upstream', config: {} }] } },
       }),
     /defaultVariant/,
   )
@@ -335,6 +342,7 @@ test(
               {
                 providerName: 'offline',
                 name: 'acceptance-stub',
+                modelId: 'upstream-stub',
                 config: {
                   defaultVariant: 'default',
                   variants: [{ id: 'default' }],
