@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixture'
 
 const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 

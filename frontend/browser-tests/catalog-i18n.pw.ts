@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './fixture'
 
 test.describe('Catalog & Skill Packages i18n Real React Browser Verification', () => {
   test('Model Form: Reasoning effort visible-disabled, responsive 2-col/stacked, preserved draft & aria hint', async ({
