@@ -67,7 +67,7 @@ class StudioSystemSettingsErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("system settings 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("系统设置 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",

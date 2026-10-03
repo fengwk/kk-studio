@@ -25,7 +25,7 @@ class StudioI18nIntegrationTest extends WebPostgresTestSupport {
   @Test
   void domainAdviceUsesRequestLocaleAndEnglishFallback() throws Exception {
     assertDomainMessage("en-US", "The chat was not found.");
-    assertDomainMessage("zh-CN", "未找到 chat。");
+    assertDomainMessage("zh-CN", "未找到 对话。");
     assertDomainMessage(null, "The chat was not found.");
     assertDomainMessage("fr-FR", "The chat was not found.");
   }
