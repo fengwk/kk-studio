@@ -18,7 +18,9 @@ services:
       - reliability
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    # Verified community fork; source/revision and platform: ../dependencies/minio-client/README.md.
+    image: fengwk/minio@sha256:ea0a48a13c701cf2c4397b3a9c0fe9e10ed65b2f58f056bf07e2ce7308123535
+    platform: linux/amd64
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: kk-studio-reliability
@@ -38,7 +40,10 @@ services:
   # 一次性 bucket 初始化：创建私有 bucket 后成功退出。没有 healthcheck；app 用
   # `service_completed_successfully` 等待它，也只有该条件能让 `up --wait` 接受已退出容器。
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    build:
+      context: ../dependencies/minio-client
+    image: kk-studio-minio-client:RELEASE.2025-04-16T18-13-26Z
+    pull_policy: build
     restart: "no"
     depends_on:
       minio:
