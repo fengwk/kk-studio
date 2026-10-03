@@ -46,6 +46,10 @@ public interface AgentProviderMapper extends BaseMapper {
       })
   List<AgentProviderDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
+  @Select("select " + COLUMNS + " from agent_provider order by name asc")
+  @ResultMap("agentProviderResultMap")
+  List<AgentProviderDO> listAll();
+
   @Select("select " + COLUMNS + " from agent_provider where name = #{name}")
   @ResultMap("agentProviderResultMap")
   AgentProviderDO getByName(@Param("name") String name);

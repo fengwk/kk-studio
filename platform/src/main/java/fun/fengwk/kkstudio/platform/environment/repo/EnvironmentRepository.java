@@ -10,6 +10,9 @@ public interface EnvironmentRepository {
 
   List<Environment> listNewestFirst();
 
+  /** 按 {@code name asc} 列出全部 Environment（含 registrationToken），用于一次性导出快照。 */
+  List<Environment> listAll();
+
   Environment getById(UUID id);
 
   Environment getByName(String name);

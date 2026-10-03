@@ -94,6 +94,67 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   @Override
+  @Transactional
+  public EnvironmentCardDTO importEnvironment(String name, String registrationToken) {
+    String canonicalName = validateName(name);
+    String token = validateRegistrationToken(registrationToken);
+    if (environmentRepository.existsByName(canonicalName)) {
+      throw new AiDuplicateException(
+          RESOURCE, "environment name already exists: " + canonicalName);
+    }
+    Environment env = new Environment();
+    env.setId(UUID.randomUUID());
+    env.setName(canonicalName);
+    env.setRegistrationToken(token);
+    try {
+      if (!environmentRepository.create(env)) {
+        throw new IllegalStateException("create environment failed");
+      }
+    } catch (DuplicateKeyException error) {
+      throw new AiDuplicateException(
+          RESOURCE, "environment name already exists: " + canonicalName, error);
+    }
+    Environment created = environmentRepository.getById(env.getId());
+    return toCardDto(created, true);
+  }
+
+  @Override
+  @Transactional
+  public EnvironmentCardDTO updateRegistrationToken(
+      EnvironmentId id, String registrationToken, String expectedVersion) {
+    Objects.requireNonNull(id, "id");
+    String token = validateRegistrationToken(registrationToken);
+    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
+    Environment env = environmentRepository.lockById(id.value());
+    if (env == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
+    if (env.getVersion() != expected) {
+      throw new AiVersionConflictException(
+          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    }
+    if (token.equals(env.getRegistrationToken())) {
+      return toCardDto(env, true);
+    }
+    env.setRegistrationToken(token);
+    try {
+      if (!environmentRepository.updateById(env, expected)) {
+        Environment reread = environmentRepository.getById(id.value());
+        if (reread == null) {
+          throw new AiResourceNotFoundException(RESOURCE);
+        }
+        throw new AiVersionConflictException(
+            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
+      }
+    } catch (DuplicateKeyException error) {
+      throw new AiDuplicateException(
+          RESOURCE, "environment registrationToken already in use", error);
+    }
+    Environment updated = environmentRepository.getById(id.value());
+    return toCardDto(updated, true);
+  }
+
+  @Override
   public List<EnvironmentEventDTO> listEvents(EnvironmentId id) {
     Objects.requireNonNull(id, "id");
     if (environmentRepository.getById(id.value()) == null) {
@@ -224,6 +285,18 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiValidationException(RESOURCE, "environment name must be <= 64 characters");
     }
     return trimmed;
+  }
+
+  /** 导入 token 与 register 行约束一致：非空白、无环绕空白、≤128。 */
+  private static String validateRegistrationToken(String raw) {
+    if (raw == null || raw.isBlank() || !raw.equals(raw.strip())) {
+      throw new AiValidationException(
+          RESOURCE, "registrationToken must be a non-blank, unpadded string");
+    }
+    if (raw.length() > 128) {
+      throw new AiValidationException(RESOURCE, "registrationToken must be <= 128 characters");
+    }
+    return raw;
   }
 
   private EnvironmentCardDTO toCardDto(Environment env, boolean exposeToken) {

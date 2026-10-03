@@ -235,6 +235,73 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     return getPackage(packageName);
   }
 
+  @Override
+  @Transactional
+  public SkillPackageDTO importPackage(
+      String packageName,
+      String description,
+      String repositoryUrl,
+      String branch,
+      String currentCommit,
+      List<SkillManifestEntry> skills) {
+    String name = requirePackageName(packageName);
+    String canonicalDescription = requireDescription(description);
+    String url = requireRepositoryUrl(repositoryUrl);
+    String canonicalBranch = requireBranch(branch);
+    String commit = requireCommit(currentCommit, "currentCommit");
+    if (skills == null) {
+      throw new AiValidationException(SkillPackageGuard.RESOURCE, "manifest must not be null");
+    }
+    List<SkillManifestEntry> manifest = List.copyOf(skills);
+    SkillPackage current = skillPackageRepository.lockPackage(name);
+    if (current == null) {
+      SkillPackage created = new SkillPackage();
+      created.setPackageName(name);
+      created.setDescription(canonicalDescription);
+      created.setRepositoryUrl(url);
+      created.setBranch(canonicalBranch);
+      created.setCurrentCommit(commit);
+      created.setObservedHeadCommit(commit);
+      created.setHeadCheckError(null);
+      created.setSkills(manifest);
+      created.setVersion(0L);
+      try {
+        if (!skillPackageRepository.insertPackage(created)) {
+          throw new IllegalStateException("create skill package failed");
+        }
+      } catch (DuplicateKeyException error) {
+        throw new AiDuplicateException(
+            SkillPackageGuard.RESOURCE, "skill package already exists: " + name, error);
+      }
+      return getPackage(name);
+    }
+    // repository URL 是不可变身份：同名换仓库不支持，调用方须在准备阶段跳过。
+    if (!url.equals(current.getRepositoryUrl())) {
+      throw new AiValidationException(
+          SkillPackageGuard.RESOURCE, "skill package repositoryUrl is immutable: " + name);
+    }
+    Set<String> published = new LinkedHashSet<>(SkillPackageGuard.manifestNames(manifest));
+    List<String> removed =
+        SkillPackageGuard.manifestNames(current.getSkills()).stream()
+            .filter(skillName -> !published.contains(skillName))
+            .toList();
+    guard.ensureSkillsRemovable(name, removed);
+    if (commit.equals(current.getCurrentCommit())
+        && Objects.equals(manifest, current.getSkills())
+        && Objects.equals(canonicalDescription, current.getDescription())
+        && Objects.equals(canonicalBranch, current.getBranch())) {
+      return converter.convert(current);
+    }
+    current.setDescription(canonicalDescription);
+    current.setBranch(canonicalBranch);
+    current.setCurrentCommit(commit);
+    current.setSkills(manifest);
+    current.setObservedHeadCommit(commit);
+    current.setHeadCheckError(null);
+    casUpdate(current, current.getVersion());
+    return getPackage(name);
+  }
+
   /** 以锁定时读到的 {@code expected} 为条件整体更新事实；影响行数为 0 时重读判定 404 或 version conflict。 */
   private void casUpdate(SkillPackage skillPackage, long expected) {
     if (!skillPackageRepository.updatePackage(skillPackage, expected)) {

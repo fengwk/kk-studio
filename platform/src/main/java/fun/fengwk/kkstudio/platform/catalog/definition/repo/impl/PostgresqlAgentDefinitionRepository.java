@@ -29,6 +29,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
+  public List<AgentDefinition> listAll() {
+    return agentDefinitionMapper.listAll().stream().map(this::convert).toList();
+  }
+
+  @Override
   public AgentDefinition getByName(String name) {
     return convert(agentDefinitionMapper.getByName(name));
   }
