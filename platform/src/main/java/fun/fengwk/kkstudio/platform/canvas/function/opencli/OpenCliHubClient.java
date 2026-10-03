@@ -192,51 +192,65 @@ public class OpenCliHubClient {
     URI uri = resolveResourceUri(firstText(resource.downloadUrl(), resource.contentUrl()));
     HttpRequest request = HttpRequest.newBuilder(uri).timeout(requestTimeout()).GET().build();
     HttpResponse<InputStream> response;
+    long deadline = System.nanoTime() + request.timeout().orElseThrow().toNanos();
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
       throw new OpenCliHubException("OpenCLI Hub resource request failed", exception);
+    } catch (IllegalArgumentException exception) {
+      // JDK 可能在返回 body 前解析非法 Content-Length；不回显 header 原值。
+      throw new OpenCliHubException("OpenCLI Hub resource response headers are invalid");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new OpenCliHubException("OpenCLI Hub resource request interrupted", exception);
     }
-    if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      try (InputStream body = response.body()) {
+    DeadlineResponseBody body = new DeadlineResponseBody(response.body(), deadline);
+    try {
+      if (response.statusCode() < 200 || response.statusCode() >= 300) {
         throw httpError(response.statusCode(), body);
-      } catch (IOException exception) {
-        throw new OpenCliHubException("failed to close OpenCLI Hub error response", exception);
       }
+      long contentLength;
+      try {
+        contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+      } catch (NumberFormatException exception) {
+        // NumberFormatException 的 message 包含远端原值，不传播到错误消息。
+        throw new OpenCliHubException("OpenCLI Hub resource Content-Length is invalid");
+      }
+      if (contentLength <= 0L) {
+        throw new OpenCliHubException(
+            "OpenCLI Hub resource response requires positive Content-Length");
+      }
+      if (resource.size() > 0L && resource.size() != contentLength) {
+        throw new OpenCliHubException(
+            "OpenCLI Hub resource Content-Length does not match metadata");
+      }
+      String mediaType = response.headers().firstValue("Content-Type").orElse(resource.mimeType());
+      if (mediaType == null || mediaType.isBlank()) {
+        throw new OpenCliHubException("OpenCLI Hub resource response requires Content-Type");
+      }
+      body.expectLength(contentLength);
+      return new HubResourceStream(body, contentLength, mediaType.strip());
+    } catch (RuntimeException exception) {
+      closeQuietly(body);
+      throw exception;
     }
-    long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
-    if (contentLength <= 0L) {
-      closeQuietly(response.body());
-      throw new OpenCliHubException(
-          "OpenCLI Hub resource response requires positive Content-Length");
-    }
-    if (resource.size() > 0L && resource.size() != contentLength) {
-      closeQuietly(response.body());
-      throw new OpenCliHubException("OpenCLI Hub resource Content-Length does not match metadata");
-    }
-    String mediaType = response.headers().firstValue("Content-Type").orElse(resource.mimeType());
-    if (mediaType == null || mediaType.isBlank()) {
-      closeQuietly(response.body());
-      throw new OpenCliHubException("OpenCLI Hub resource response requires Content-Type");
-    }
-    return new HubResourceStream(response.body(), contentLength, mediaType.strip());
   }
 
   /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
   private JsonNode sendEnvelope(HttpRequest request) {
     HttpResponse<InputStream> response;
+    long deadline = System.nanoTime() + request.timeout().orElseThrow().toNanos();
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
       throw new OpenCliHubException("OpenCLI Hub request failed", exception);
+    } catch (IllegalArgumentException exception) {
+      throw new OpenCliHubException("OpenCLI Hub response headers are invalid");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new OpenCliHubException("OpenCLI Hub request interrupted", exception);
     }
-    try (InputStream body = response.body()) {
+    try (InputStream body = new DeadlineResponseBody(response.body(), deadline)) {
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
         throw httpError(response.statusCode(), body);
       }
