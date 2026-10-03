@@ -5064,6 +5064,213 @@ select.settings-input option {
   gap: 10px;
 }
 
+/* --- Settings sync (import / export) --- */
+
+.settings-sync {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-sync-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-sync-file-input {
+  display: none;
+}
+
+.settings-sync-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--green-primary);
+}
+
+.settings-sync-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-sync-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.settings-sync-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-sync-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.settings-sync-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-sync-group-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.settings-sync-group-head .settings-sync-kind-toggle {
+  font-weight: 650;
+}
+
+.settings-sync-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-sync-kind-head {
+  display: flex;
+  align-items: center;
+}
+
+.settings-sync-kind-toggle,
+.settings-sync-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.settings-sync-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-sync-item-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-sync-dependency {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+}
+
+.settings-sync-kind-toggle input,
+.settings-sync-item-label input {
+  accent-color: var(--green-primary);
+}
+
+.settings-sync-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.settings-sync-scope-summary {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.settings-sync-scope-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.settings-sync-file-name {
+  margin: 0;
+  font-size: 13px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.settings-sync-result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-sync-result-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-sync-result-section h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--fg);
+}
+
+.settings-sync-result-section[data-state='partial'] h3 {
+  color: var(--orange);
+}
+
+.settings-sync-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-sync-result-dirty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--orange);
+  font-size: 12px;
+}
+
 /* --- Permission ordered editor --- */
 
 .permission-editor {
