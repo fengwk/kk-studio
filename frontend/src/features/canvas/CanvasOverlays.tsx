@@ -33,7 +33,7 @@ export function CanvasOverlays() {
       </div>
       {state.storageError ? (
         <div className="canvas-storage-error-banner" role="alert">
-          <span>本地草稿持久化落盘失败：{state.storageError}</span>
+          <span>保存草稿失败：{state.storageError}</span>
           <button
             type="button"
             className="canvas-conflict-action-retry"
@@ -67,7 +67,7 @@ export function CanvasOverlays() {
                     className="canvas-conflict-action-retry"
                     onClick={() => void retryDraft(nodeId)}
                   >
-                    以远端基线重试
+                    使用最新版本重试
                   </button>
                   <button
                     type="button"

@@ -394,11 +394,11 @@ describe('IssueDetailModal', () => {
     const resolveBtn = await screen.findByRole('button', { name: '人工核查' })
     fireEvent.click(resolveBtn)
 
-    expect(screen.getByRole('heading', { name: /解除 UNKNOWN 门禁/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /解除 UNKNOWN（人工核查）/i })).toBeInTheDocument()
     const verificationInput = screen.getByPlaceholderText(/说明已核实的内容与外部状态一致性保证/i)
     fireEvent.change(verificationInput, { target: { value: 'Manually verified as safe to continue.' } })
 
-    fireEvent.click(screen.getByRole('button', { name: '确认解除门禁' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认解除 UNKNOWN' }))
 
     await waitFor(() => {
       expect(api.resolveUnknown).toHaveBeenCalledWith(
@@ -587,8 +587,8 @@ describe('IssueDetailModal', () => {
     // 此时流转按钮应该被禁用，禁止开启新身份请求
     expect(transitionBtn).toBeDisabled()
 
-    // 点击精确重试未决操作
-    const retryBtn = screen.getByRole('button', { name: '精确重试未决操作' })
+    // 点击重试原操作
+    const retryBtn = screen.getByRole('button', { name: '重试原操作' })
     fireEvent.click(retryBtn)
 
     // 验证第二次调用使用的是完全相同的 requestKey 与 expectedVersion
@@ -710,7 +710,7 @@ describe('IssueDetailModal', () => {
     fireEvent.click(transitionBtn)
 
     // 提示错误且 API 零调用
-    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+    expect(await screen.findByText(/无法保存操作记录，未发送请求/i)).toBeInTheDocument()
     expect(api.transitionIssue).not.toHaveBeenCalled()
 
     setItemSpy.mockRestore()
@@ -771,7 +771,7 @@ describe('IssueDetailModal', () => {
 
     await screen.findByLabelText('Issue #12 详情')
     const banner = screen.getByRole('alert')
-    expect(banner).toHaveTextContent(/本地存储异常，为防止写操作状态失步已锁定当前 Issue/i)
+    expect(banner).toHaveTextContent(/本地存储异常，已锁定该 Issue 的写操作/i)
 
     const transitionBtn = screen.getByRole('button', { name: /流转至 REVIEW/i })
     expect(transitionBtn).toBeDisabled()

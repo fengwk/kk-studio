@@ -385,7 +385,7 @@ export function useCanvasFunctionRun(options: {
         savePendingFunctionRun(attempt)
       } catch (err) {
         console.error('[canvas] Failed to save pending function run attempt:', err)
-        setToast('本地运行状态持久化失败，无法发起生成')
+        setToast('无法保存运行记录，未启动生成')
         return
       }
 
