@@ -467,10 +467,20 @@ public class SkillCatalogServiceImplTest {
             "",
             " https://example.invalid/repo",
             "https://example.invalid/\u0001",
+            "git://example.invalid/repo",
+            "ssh://example.invalid/repo",
             "https://" + "a".repeat(2048))) {
       assertThrows(
           AiValidationException.class, () -> fixture.service.createPackage(createWithUrl(url)));
     }
+    AiValidationException credential =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                fixture.service.createPackage(
+                    createWithUrl("https://user:secret@example.com/s.git")));
+    assertFalse(credential.getMessage().contains("secret"));
+    assertFalse(credential.getMessage().contains("example.com"));
     for (String branch : List.of(" main", "a".repeat(256), "main\ninvalid")) {
       SkillPackageCreateDTO request = create("pkg");
       request.setBranch(branch);

@@ -5,6 +5,8 @@ import static org.mockito.Mockito.*;
 
 import com.sun.net.httpserver.HttpServer;
 import org.eclipse.jgit.api.errors.RefNotAdvertisedException;
+import org.eclipse.jgit.transport.Transport;
+import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.transport.http.HttpConnection;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -15,6 +17,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
@@ -128,7 +131,14 @@ class GitHttpConnectionFactoryTest {
           GitHttpConnectionFactory.canFallback(
               new IOException("want " + "a".repeat(40) + " not valid")));
       assertFalse(GitHttpConnectionFactory.canFallback(new IOException("authentication failed")));
+      assertFalse(
+          GitHttpConnectionFactory.canFallback(
+              new IOException("not our ref", new InterruptedIOException("cancelled"))));
       assertEquals("GIT_FETCH_FAILED", GitHttpConnectionFactory.failureCode(new IOException()));
+      assertEquals(
+          "UNSUPPORTED_REPOSITORY_SCHEME",
+          GitHttpConnectionFactory.failureCode(
+              new GitHttpConnectionFactory.UnsupportedTransportException("git://host/repo")));
       factory.close();
       assertThrows(IOException.class, () -> factory.create(url));
     }
@@ -294,6 +304,35 @@ class GitHttpConnectionFactoryTest {
       factory.close();
       assertThrows(IOException.class, connection::connect);
       verify(raw, never()).connect();
+    }
+  }
+
+  /** 意图：callback 只接受 http/https 与本地 file；其他 scheme 一律 fail-closed。 */
+  @Test
+  void callbackOnlyAcceptsHttpHttpsAndFileSchemes() throws Exception {
+    try (GitHttpConnectionFactory factory = new GitHttpConnectionFactory()) {
+      Transport http = mock(Transport.class);
+      when(http.getURI()).thenReturn(new URIish("https://example.test/repo.git"));
+      assertDoesNotThrow(() -> factory.callback().configure(http));
+
+      Transport file = mock(Transport.class);
+      when(file.getURI()).thenReturn(new URIish("file:///tmp/repo.git"));
+      assertDoesNotThrow(() -> factory.callback().configure(file));
+
+      for (String unsupported :
+          List.of("git://example.test/repo.git", "ssh://example.test/repo.git")) {
+        Transport transport = mock(Transport.class);
+        when(transport.getURI()).thenReturn(new URIish(unsupported));
+        assertThrows(
+            GitHttpConnectionFactory.UnsupportedTransportException.class,
+            () -> factory.callback().configure(transport));
+      }
+
+      Transport withoutUri = mock(Transport.class);
+      when(withoutUri.getURI()).thenReturn(null);
+      assertThrows(
+          GitHttpConnectionFactory.UnsupportedTransportException.class,
+          () -> factory.callback().configure(withoutUri));
     }
   }
 }

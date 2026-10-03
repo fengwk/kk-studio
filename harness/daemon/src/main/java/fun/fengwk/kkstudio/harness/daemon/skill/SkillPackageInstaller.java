@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -44,6 +45,9 @@ import java.util.regex.Pattern;
 public final class SkillPackageInstaller {
 
   private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
+
+  /** 只有受网络保护覆盖的 http/https 与本地直读 file 允许进入 Git 网络层。 */
+  private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
   private final Path skillsRoot;
   private final Path cacheRoot;
@@ -426,6 +430,10 @@ public final class SkillPackageInstaller {
     if (rawAuthority != null && rawAuthority.contains("@")) {
       throw new SkillSyncException(
           "INVALID_REPOSITORY_URL", "Repository URL must not contain user info");
+    }
+    if (!SUPPORTED_REPOSITORY_SCHEMES.contains(uri.getScheme().toLowerCase(Locale.ROOT))) {
+      throw new SkillSyncException(
+          "INVALID_REPOSITORY_URL", "Repository URL must use a supported http/https/file scheme");
     }
   }
 
