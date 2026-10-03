@@ -105,6 +105,7 @@ public class SystemSettingsServiceImpl implements SystemSettingsService {
     dto.setTool(sections.getTool());
     dto.setAiRuntime(sections.getAiRuntime());
     dto.setEnvironment(sections.getEnvironment());
+    dto.setNetwork(sections.getNetwork());
     dto.setIntegrations(sections.getIntegrations());
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());

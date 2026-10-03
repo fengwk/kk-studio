@@ -39,12 +39,16 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.getTool().setDefaultYolo(true);
     update.getAiRuntime().setCompactionKeepRecentTokens(8_192);
     update.getStorageMedia().setUploadExpiresSeconds(7200L);
+    // 配置只持久化；此测试不连接代理或重启任何运行实例。
+    update.getNetwork().setProxyUrl("http://proxy:3128");
+    update.getNetwork().setNoProxyHosts("localhost,*.example.test");
 
     SystemSettingsDTO updated = systemSettingsService.update(update);
     assertEquals("1", updated.getVersion());
     assertEquals(true, updated.getTool().getDefaultYolo());
     assertEquals(8_192, updated.getAiRuntime().getCompactionKeepRecentTokens());
     assertEquals(7200L, updated.getStorageMedia().getUploadExpiresSeconds());
+    assertEquals("http://proxy:3128", updated.getNetwork().getProxyUrl());
     // 未修改的 section 保持完整。
     assertEquals(
         systemSettingsCodec.toSections(SystemSettings.DEFAULT).getEnvironment(),
@@ -53,6 +57,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     // 再次读取与最新版本一致。
     SystemSettingsDTO reread = systemSettingsService.get();
     assertEquals("1", reread.getVersion());
+    assertEquals(updated.getNetwork(), reread.getNetwork());
   }
 
   /** PUT 成功后 live 快照必须在事务提交后替换为最新权威聚合；提交前仍是旧值。 */
@@ -115,6 +120,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.setTool(current.getTool());
     update.setAiRuntime(current.getAiRuntime());
     update.setEnvironment(current.getEnvironment());
+    update.setNetwork(current.getNetwork());
     update.setIntegrations(current.getIntegrations());
     update.setStorageMedia(current.getStorageMedia());
     update.setAdvanced(current.getAdvanced());
@@ -126,6 +132,7 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     sections.setTool(dto.getTool());
     sections.setAiRuntime(dto.getAiRuntime());
     sections.setEnvironment(dto.getEnvironment());
+    sections.setNetwork(dto.getNetwork());
     sections.setIntegrations(dto.getIntegrations());
     sections.setStorageMedia(dto.getStorageMedia());
     sections.setAdvanced(dto.getAdvanced());
