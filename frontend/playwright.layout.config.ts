@@ -9,6 +9,8 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:5174',
     browserName: 'chromium',
     headless: true,
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
   },
   webServer: {
     command: 'npx vite --port 5174',
