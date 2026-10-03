@@ -2533,4 +2533,160 @@ describe('useAgentThreadController', () => {
     expect(result.current.actionError).toBeNull()
     expect(result.current.conflict).toBeNull()
   })
+
+  it('A -> B -> A switching: stale compact success from epoch 0 does not clear current conflict in epoch 2', async () => {
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB, {
+        manualCompaction: { available: true, disabledReason: null },
+      })
+    })
+
+    let resolveCompactEpoch0!: (res: unknown) => void
+    const compactPromiseEpoch0 = new Promise((resolve) => {
+      resolveCompactEpoch0 = resolve
+    })
+
+    let compactCallCount = 0
+    vi.mocked(harnessService.compactThread).mockImplementation(async () => {
+      compactCallCount += 1
+      if (compactCallCount === 1) {
+        return compactPromiseEpoch0 as Promise<{
+          thread: typeof threadA
+          turnStartEntryId: string
+          modelInvocationId: string | null
+        }>
+      }
+      return {
+        thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
+        turnStartEntryId: 't1',
+        modelInvocationId: null,
+      }
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // 1. Thread A 在 epoch 0 触发 compactThread
+    let compactActionEpoch0!: Promise<void>
+    act(() => {
+      compactActionEpoch0 = result.current.compactThread()
+    })
+    await waitFor(() => expect(harnessService.compactThread).toHaveBeenCalledTimes(1))
+
+    // 2. 切换至 Thread B，再切回 Thread A（进入 epoch 2）
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+    rerender({ tid: THREAD_ID })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID))
+
+    // 3. 在 epoch 2 制造一个 conflict
+    vi.mocked(harnessService.decideApproval).mockRejectedValueOnce(
+      new ApiError('stale conflict', 409, 'CONFLICT', { reason: 'STALE_VERSION' }),
+    )
+    await act(async () => {
+      await result.current.decideApproval('inv-conflict', 'ALLOW').catch(() => undefined)
+    })
+    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
+
+    // 4. 此时 epoch 0 的 compact 请求迟到成功返回
+    await act(async () => {
+      resolveCompactEpoch0({
+        thread: threadFixture({ threadId: THREAD_ID, version: '1' }),
+        turnStartEntryId: 't1',
+        modelInvocationId: null,
+      })
+      await compactActionEpoch0
+    })
+
+    // 5. 关键断言：旧 epoch 0 的 compact success 绝不能清除 epoch 2 当前的 conflict
+    expect(result.current.conflict?.reason).toBe('STALE_VERSION')
+  })
+
+  it('A -> B -> A switching: stale approval success from epoch 0 does not delete decisionId for epoch 2, so epoch 2 retry retains decisionId2', async () => {
+    const threadA = threadFixture({ threadId: THREAD_ID })
+    const threadB = threadFixture({ threadId: THREAD_ID_2 })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (tid) => {
+      return snapshotOf(tid === THREAD_ID ? threadA : threadB)
+    })
+
+    let resolveApprovalEpoch0!: (res: ToolInvocationDTO) => void
+    const approvalPromiseEpoch0 = new Promise<ToolInvocationDTO>((resolve) => {
+      resolveApprovalEpoch0 = resolve
+    })
+
+    const decisionIdsPassed: string[] = []
+    let callIndex = 0
+    vi.mocked(harnessService.decideApproval).mockImplementation(async (_tid, _invId, body) => {
+      callIndex += 1
+      decisionIdsPassed.push(body.decisionId)
+      if (callIndex === 1) {
+        return approvalPromiseEpoch0
+      }
+      if (callIndex === 2) {
+        throw new TypeError('network failed in epoch 2')
+      }
+      return {
+        invocationId: 'inv-1',
+        toolName: 'test',
+        input: {},
+        output: null,
+        error: null,
+        approval: { decision: 'ALLOW', decisionId: body.decisionId, reason: null },
+      }
+    })
+
+    const { result, rerender } = renderHook(
+      ({ tid }: { tid: string }) => useAgentThreadController(tid),
+      { wrapper, initialProps: { tid: THREAD_ID } },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // 1. Thread A 在 epoch 0 发起审批
+    let approvalActionEpoch0!: Promise<void>
+    act(() => {
+      approvalActionEpoch0 = result.current.decideApproval('inv-1', 'ALLOW')
+    })
+    await waitFor(() => expect(decisionIdsPassed).toHaveLength(1))
+    const decisionIdEpoch0 = decisionIdsPassed[0]
+
+    // 2. 切换至 Thread B，再切回 Thread A（进入 epoch 2）
+    rerender({ tid: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID_2))
+    rerender({ tid: THREAD_ID })
+    await waitFor(() => expect(result.current.thread?.threadId).toBe(THREAD_ID))
+
+    // 3. 在 epoch 2 重新发起针对相同 invocation 的审批，遇到网络 unknown 失败
+    await act(async () => {
+      await result.current.decideApproval('inv-1', 'ALLOW').catch(() => undefined)
+    })
+    expect(decisionIdsPassed).toHaveLength(2)
+    const decisionIdEpoch2 = decisionIdsPassed[1]
+    expect(decisionIdEpoch2).not.toBe(decisionIdEpoch0)
+
+    // 4. 此时 epoch 0 的旧审批成功返回
+    await act(async () => {
+      resolveApprovalEpoch0({
+        invocationId: 'inv-1',
+        toolName: 'test',
+        input: {},
+        output: null,
+        error: null,
+        approval: { decision: 'ALLOW', decisionId: decisionIdEpoch0, reason: null },
+      })
+      await approvalActionEpoch0
+    })
+
+    // 5. 在 epoch 2 重试该审批
+    await act(async () => {
+      await result.current.decideApproval('inv-1', 'ALLOW')
+    })
+    expect(decisionIdsPassed).toHaveLength(3)
+    // 关键断言：epoch 2 重试仍然使用 decisionIdEpoch2，没有因为旧 success 误删导致生成新的 decisionId
+    expect(decisionIdsPassed[2]).toBe(decisionIdEpoch2)
+  })
 })
