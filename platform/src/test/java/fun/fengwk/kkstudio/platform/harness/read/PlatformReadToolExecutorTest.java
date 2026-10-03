@@ -7,13 +7,18 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
@@ -25,8 +30,14 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -296,6 +307,203 @@ class PlatformReadToolExecutorTest {
     ToolResult result = captor.getValue();
     assertTrue(result.error());
     assertTrue(firstText(result).contains("No environment bound in execution context"));
+  }
+
+  /** URI 到真实 reader 的链路必须保留同名目录和百分号字面量，不做隐式解码。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"dev/SKILL.md", "%2e%2e/literal%20.md"})
+  void skillUriReadsExactGitPath(String relativePath) throws Exception {
+    SkillCatalogQueryService queryService = mock(SkillCatalogQueryService.class);
+    SkillGitCache gitCache = mock(SkillGitCache.class);
+    SkillPackage pkg = new SkillPackage();
+    pkg.setRepositoryUrl("https://example.com/repo.git");
+    pkg.setCurrentCommit("c1");
+    pkg.setSkills(List.of(new SkillManifestEntry("dev", "desc")));
+    when(queryService.getPackage("pkg")).thenReturn(pkg);
+    when(gitCache.readFile("pkg", "c1", "dev/SKILL.md"))
+        .thenReturn("root".getBytes(StandardCharsets.UTF_8));
+    when(gitCache.readFile("pkg", "c1", "dev/" + relativePath))
+        .thenReturn("exact-file".getBytes(StandardCharsets.UTF_8));
+    executor =
+        new PlatformReadToolExecutor(
+            new PlatformSkillContentReader(queryService, gitCache), resourceReader, objectMapper);
+    String uri = "kkstudio:/skills/pkg/dev/" + relativePath;
+
+    executor.read(
+        mockRequest(objectMapper.writeValueAsString(Map.of("path", uri)), null), listener);
+
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    verifyNoMoreInteractions(listener);
+    assertFalse(captor.getValue().error());
+    assertTrue(firstText(captor.getValue()).contains("1|exact-file"));
+    assertFalse(firstText(captor.getValue()).contains("1|root"));
+    verify(gitCache).ensureCommit("pkg", "https://example.com/repo.git", "c1");
+    verify(gitCache).readFile("pkg", "c1", "dev/" + relativePath);
+    verifyNoMoreInteractions(gitCache);
+  }
+
+  /** 未声明的双斜杠 URI 必须只回调一次，且不读取 Skill、Resource 或委托 Environment。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "kkstudio://skills/pkg/dev/SKILL.md",
+        "kkstudio://resources/12345678-1234-1234-1234-123456789abc"
+      })
+  void doubleSlashUrisAreUnsupportedWithoutSideEffects(String uri) throws Exception {
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    ToolExecutionRequest request =
+        mockRequest(objectMapper.writeValueAsString(Map.of("path", uri)), context);
+
+    assertSame(CompletedToolExecutionHandle.INSTANCE, executor.read(request, listener));
+
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    verifyNoMoreInteractions(listener);
+    assertTrue(captor.getValue().error());
+    assertTrue(firstText(captor.getValue()).contains("unsupported kkstudio: URI: " + uri));
+    verifyNoInteractions(skillReader, resourceReader, context);
+  }
+
+  /** Windows 盘符和普通路径都按原 request 委托，不误判为远程 URI。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"C:/work/file.txt", "C:\\work\\file.txt", "/tmp/file.txt", "relative/file.txt"})
+  void localPathsDelegateUnchanged(String path) throws Exception {
+    BoundEnvironment environment = mock(BoundEnvironment.class);
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.environment()).thenReturn(Optional.of(environment));
+    ToolExecutionHandle expected = mock(ToolExecutionHandle.class);
+    ToolExecutionRequest request =
+        mockRequest(
+            objectMapper.writeValueAsString(Map.of("path", path, "workdir", "work")), context);
+    when(environment.execute(any(), eq(request), eq(listener))).thenReturn(expected);
+
+    assertSame(expected, executor.read(request, listener));
+    verify(environment).execute(any(), eq(request), eq(listener));
+    verifyNoInteractions(skillReader, resourceReader, listener);
+  }
+
+  /** Resource 缺失 threadId 时不得读取；授权错误应原样映射为一次失败回调。 */
+  @Test
+  void resourceContextAndAuthorizationArePreserved() {
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    UUID blobId = UUID.fromString("12345678-1234-1234-1234-123456789abc");
+    String uri = "kkstudio:/resources/" + blobId;
+    executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), listener);
+    verifyNoInteractions(resourceReader);
+    ArgumentCaptor<ToolResult> missing = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(missing.capture());
+    assertTrue(missing.getValue().error());
+    assertTrue(
+        firstText(missing.getValue()).contains("execution context with threadId is required"));
+    verifyNoMoreInteractions(listener);
+
+    UUID threadId = UUID.randomUUID();
+    when(context.threadId()).thenReturn(threadId);
+    when(resourceReader.readResourceText(threadId, blobId, null, null, null, uri))
+        .thenThrow(new PlatformReadException("resource not authorized"));
+    ToolExecutionListener deniedListener = mock(ToolExecutionListener.class);
+    executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), deniedListener);
+    ArgumentCaptor<ToolResult> denied = ArgumentCaptor.forClass(ToolResult.class);
+    verify(deniedListener).onComplete(denied.capture());
+    verifyNoMoreInteractions(deniedListener);
+    assertTrue(denied.getValue().error());
+    assertTrue(firstText(denied.getValue()).contains("resource not authorized"));
+    verify(resourceReader).readResourceText(threadId, blobId, null, null, null, uri);
+    verifyNoMoreInteractions(resourceReader);
+  }
+
+  /** 可达的参数类型和分页边界错误必须在调用下游之前返回一次失败。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"path\":12}",
+        "{\"path\":\" \"}",
+        "{\"path\":\"file\",\"workdir\":12}",
+        "{\"path\":\"file\",\"limit\":0}",
+        "{\"path\":\"file\",\"column_offset\":0}",
+        "{\"path\":\"file\",\"offset\":2147483648}",
+        "{\"path\":\"file\",\"offset\":1.5}"
+      })
+  void invalidArgumentsHaveNoSideEffects(String json) {
+    executor.read(mockRequest(json, null), listener);
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    verifyNoMoreInteractions(listener);
+    assertTrue(captor.getValue().error());
+    verifyNoInteractions(skillReader, resourceReader);
+  }
+
+  /** 单斜杠 URI 仍需完整非空段和规范 UUID，不能因删除兼容分支而放宽校验。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "kkstudio:/skills/pkg/dev",
+        "kkstudio:/skills/pkg/dev/",
+        "kkstudio:/skills/ /dev/SKILL.md",
+        "kkstudio:/resources/",
+        "kkstudio:/resources/id/extra",
+        "kkstudio:/resources/1-1-1-1-1"
+      })
+  void malformedCanonicalUrisHaveNoSideEffects(String uri) throws Exception {
+    executor.read(
+        mockRequest(objectMapper.writeValueAsString(Map.of("path", uri)), null), listener);
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    verifyNoMoreInteractions(listener);
+    assertTrue(captor.getValue().error());
+    verifyNoInteractions(skillReader, resourceReader);
+  }
+
+  /** Skill 读取的业务异常和意外异常都只回调一次，空消息保留既有 fallback。 */
+  @Test
+  void skillReaderFailuresCompleteOnce() {
+    List<RuntimeException> failures =
+        List.of(
+            new PlatformReadException("missing skill"),
+            new IllegalStateException("cache failure"),
+            new IllegalStateException());
+    for (RuntimeException failure : failures) {
+      doThrow(failure).when(skillReader).readSkillFile("pkg", "dev", "SKILL.md");
+      ToolExecutionListener completion = mock(ToolExecutionListener.class);
+      executor.read(
+          mockRequest("{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null), completion);
+      ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+      verify(completion).onComplete(captor.capture());
+      verifyNoMoreInteractions(completion);
+      assertTrue(captor.getValue().error());
+      assertTrue(
+          firstText(captor.getValue())
+              .contains(
+                  failure.getMessage() == null ? "failed to read skill" : failure.getMessage()));
+    }
+  }
+
+  /** Resource 的意外异常同样映射失败，保留有消息和无消息两种反馈。 */
+  @Test
+  void resourceUnexpectedFailuresCompleteOnce() {
+    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    String uri = "kkstudio:/resources/" + blobId;
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.threadId()).thenReturn(threadId);
+    for (RuntimeException failure :
+        List.of(new IllegalStateException("blob failure"), new IllegalStateException())) {
+      doThrow(failure)
+          .when(resourceReader)
+          .readResourceText(threadId, blobId, null, null, null, uri);
+      ToolExecutionListener completion = mock(ToolExecutionListener.class);
+      executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), completion);
+      ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+      verify(completion).onComplete(captor.capture());
+      verifyNoMoreInteractions(completion);
+      assertTrue(captor.getValue().error());
+      assertTrue(
+          firstText(captor.getValue())
+              .contains(
+                  failure.getMessage() == null ? "failed to read resource" : failure.getMessage()));
+    }
   }
 
   private static ToolExecutionRequest mockRequest(
