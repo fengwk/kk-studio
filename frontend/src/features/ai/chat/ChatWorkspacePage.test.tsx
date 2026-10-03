@@ -413,6 +413,100 @@ describe('ChatWorkspacePage', () => {
       resolveBatch()
     })
   })
+
+  it('isolates layout state across different chats during switching without polluting keys', async () => {
+    // 测试意图：验证 chat A 更改为非默认布局（split-2）后切换至预设了不同布局（grid-4）的 chat B，
+    // 再切回 chat A 时，两者的 localStorage 状态严格隔离，绝不将 chat A 的布局写入 chat B，也绝不反向污染
+    const user = userEvent.setup()
+    const CHAT_A = 'chat-A'
+    const CHAT_B = 'chat-B'
+
+    vi.mocked(chatService.getChat).mockImplementation(async (id: string) => ({
+      id,
+      title: `Workspace ${id}`,
+      agentName: 'assistant',
+      environment: null,
+      yoloEnabled: false,
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }))
+
+    // chat-B 预先存好 grid-4 布局
+    localStorage.setItem(
+      `kk-studio.chat-pane.${CHAT_B}`,
+      JSON.stringify({
+        layout: 'grid-4',
+        focusedPaneId: 'pane-2',
+        panes: Array.from({ length: 9 }, (_, i) => ({ id: `pane-${i + 1}` })),
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    let testNavigate!: (to: string) => void
+    function SwitchTestBridge() {
+      const nav = useNavigate()
+      useEffect(() => {
+        testNavigate = nav
+      }, [nav])
+      return <ChatWorkspacePage />
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/chats/${CHAT_A}`]}>
+          <Routes>
+            <Route path="/chats/:chatId" element={<SwitchTestBridge />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    // 确认 chat A 渲染
+    expect(await screen.findByRole('heading', { name: 'Workspace chat-A' })).toBeInTheDocument()
+    // chat A 默认是 single 布局，将其切换为 split-2
+    const trigger = screen.getByRole('button', { name: '布局' })
+    await user.click(trigger)
+    await user.click(screen.getByRole('option', { name: '2' }))
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+
+    // 检查 chat A 的持久化确实更新为 split-2
+    await waitFor(() => {
+      const savedA = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_A}`) || '{}')
+      expect(savedA.layout).toBe('split-2')
+    })
+
+    // 切换到 chat B
+    act(() => {
+      testNavigate(`/chats/${CHAT_B}`)
+    })
+
+    // 确认 chat B 渲染，并且应用预存的 grid-4 布局
+    expect(await screen.findByRole('heading', { name: 'Workspace chat-B' })).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-grid-4')).not.toBeNull()
+
+    // 关键断言：chat B 的持久化存储绝对不能被 chat A 的 split-2 覆盖，必须保持 grid-4
+    const savedB = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_B}`) || '{}')
+    expect(savedB.layout).toBe('grid-4')
+    expect(savedB.focusedPaneId).toBe('pane-2')
+
+    // 切回 chat A
+    act(() => {
+      testNavigate(`/chats/${CHAT_A}`)
+    })
+
+    expect(await screen.findByRole('heading', { name: 'Workspace chat-A' })).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+
+    // 再次断言两者的 key 绝未互相污染
+    const finalA = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_A}`) || '{}')
+    const finalB = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_B}`) || '{}')
+    expect(finalA.layout).toBe('split-2')
+    expect(finalB.layout).toBe('grid-4')
+  })
 })
 
 function renderWorkspace(chatId = CHAT_ID) {

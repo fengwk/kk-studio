@@ -17,6 +17,9 @@ import {
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
+import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/console/Select'
@@ -58,13 +61,25 @@ export function ChatLayoutSelector({
   )
 }
 
-export function ChatWorkspacePage() {
-  const { chatId = '' } = useParams()
+interface ChatWorkspaceContentProps {
+  chat: ChatDTO
+  agents: AgentDefinitionDTO[]
+  environments: EnvironmentCardDTO[]
+}
+
+function ChatWorkspaceContent({
+  chat,
+  agents,
+  environments,
+}: ChatWorkspaceContentProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const targetThreadId = searchParams.get('thread')
-  const navigate = useNavigate()
   const { t } = useI18n()
-  const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
+  const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
+
+  useEffect(() => {
+    saveChatPaneState(chat.id, paneState)
+  }, [chat.id, paneState])
 
   // 通过 callback 确认消费：目标 pane 成功消费（挂载初始化或无 pending 切换成功）后，通过 URL replace 消费掉参数
   const handleTargetConsumed = useCallback((consumed: PaneTarget) => {
@@ -76,45 +91,6 @@ export function ChatWorkspacePage() {
     }
   }, [searchParams, setSearchParams])
 
-  useEffect(() => {
-    setPaneState(loadChatPaneState(chatId))
-  }, [chatId])
-
-  useEffect(() => {
-    if (chatId) {
-      saveChatPaneState(chatId, paneState)
-    }
-  }, [chatId, paneState])
-
-  const chatQuery = useQuery({
-    queryKey: queryKeys.chats.detail(chatId),
-    queryFn: () => chatService.getChat(chatId),
-    enabled: Boolean(chatId),
-  })
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents.list,
-    queryFn: () => agentService.listAgents(),
-  })
-  const environmentsQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
-  })
-
-  if (chatQuery.isLoading || !chatId) {
-    return <div className="thread-state">{t('ai.chat.loading')}</div>
-  }
-  if (chatQuery.error || !chatQuery.data) {
-    return (
-      <div className="thread-state danger">
-        {t('ai.chat.loadFailed')}
-        <button type="button" onClick={() => navigate('/chats')}>
-          {t('ai.chat.backToList')}
-        </button>
-      </div>
-    )
-  }
-
-  const chat = chatQuery.data
   const visiblePanes = visibleChatPanes(paneState)
   return (
     <section className="chat-workspace screen active">
@@ -150,8 +126,8 @@ export function ChatWorkspacePage() {
             <ChatWorkspacePane
               key={`${chat.id}:${pane.id}`}
               chat={chat}
-              agents={agentsQuery.data?.results ?? []}
-              environments={environmentsQuery.data ?? []}
+              agents={agents}
+              environments={environments}
               pane={pane}
               focused={isFocused}
               onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
@@ -162,5 +138,49 @@ export function ChatWorkspacePage() {
         })}
       </div>
     </section>
+  )
+}
+
+export function ChatWorkspacePage() {
+  const { chatId = '' } = useParams()
+  const navigate = useNavigate()
+  const { t } = useI18n()
+
+  const chatQuery = useQuery({
+    queryKey: queryKeys.chats.detail(chatId),
+    queryFn: () => chatService.getChat(chatId),
+    enabled: Boolean(chatId),
+  })
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents.list,
+    queryFn: () => agentService.listAgents(),
+  })
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
+  })
+
+  if (chatQuery.isLoading || !chatId) {
+    return <div className="thread-state">{t('ai.chat.loading')}</div>
+  }
+  if (chatQuery.error || !chatQuery.data) {
+    return (
+      <div className="thread-state danger">
+        {t('ai.chat.loadFailed')}
+        <button type="button" onClick={() => navigate('/chats')}>
+          {t('ai.chat.backToList')}
+        </button>
+      </div>
+    )
+  }
+
+  const chat = chatQuery.data
+  return (
+    <ChatWorkspaceContent
+      key={chat.id}
+      chat={chat}
+      agents={agentsQuery.data?.results ?? []}
+      environments={environmentsQuery.data ?? []}
+    />
   )
 }
