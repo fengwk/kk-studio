@@ -60,13 +60,15 @@ function StudioRoutes() {
  * 由 shell 在根部提供唯一 OverlayHost；registered page 路径已由页面自身挂载，
  * 两条路径各自只挂载一次，不重复渲染。
  */
+export interface WorkbenchShellProps {
+  navItems: readonly PrimaryNavItem[]
+  children?: ReactNode
+}
+
 export function WorkbenchShell({
   navItems,
   children,
-}: {
-  navItems?: readonly PrimaryNavItem[]
-  children?: ReactNode
-} = {}) {
+}: WorkbenchShellProps) {
   return (
     <AppShell navItems={navItems}>
       {children ?? <StudioRoutes />}

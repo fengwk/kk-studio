@@ -474,7 +474,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.setSelection([NODE_NOTE])
-      result.current.renameNode(NODE_NOTE, ' Renamed ')
+      result.current.renameNode(NODE_NOTE, ' Renamed ', 'Note')
     })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_NODE'
@@ -637,7 +637,7 @@ describe('useCanvasController real snapshot runtime', () => {
       command.type === 'DELETE_GROUP'
     ))).toBe(false)
 
-    act(() => result.current.renameGroup(GROUP_A, '  新分组  '))
+    act(() => result.current.renameGroup(GROUP_A, '  新分组  ', 'Group'))
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_GROUP'
     ))).toBe(true))
@@ -645,10 +645,100 @@ describe('useCanvasController real snapshot runtime', () => {
       request.commands[0]?.type === 'RENAME_GROUP'
     ))?.commands).toEqual([{ type: 'RENAME_GROUP', groupId: GROUP_A, expectedTitle: 'Group', title: '新分组' }])
 
-    act(() => result.current.renameGroup(GROUP_A, '   '))
+    act(() => result.current.renameGroup(GROUP_A, '   ', 'Group'))
     expect(commands.filter((request) => (
       request.commands[0]?.type === 'RENAME_GROUP'
     ))).toHaveLength(1)
+  })
+
+  it('renameNode 发送冻结的 expectedName A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 基线名称为 'Note' (A)
+    const initialNode = result.current.snapshot?.nodes.find((n) => n.id === NODE_NOTE)
+    expect(initialNode?.name).toBe('Note')
+
+    // 2. 模拟远端更新到来，节点名称变为 'Remote Note B' (B)
+    const remoteSnapshot: CanvasSnapshotDTO = {
+      ...snapshot(2),
+      nodes: snapshot(2).nodes.map((n) => (n.id === NODE_NOTE ? { ...n, name: 'Remote Note B' } : n)),
+    }
+    vi.mocked(getCanvas).mockResolvedValue(remoteSnapshot)
+    emitCanvasRevision('2')
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes.find((n) => n.id === NODE_NOTE)?.name).toBe('Remote Note B')
+    })
+
+    const commandsCountBefore = commands.length
+
+    // 3. 同名 no-op：用户输入与编辑起点 baseline 'Note' 相同，即使与远端最新 'Remote Note B' 不同，也绝不发命令
+    act(() => {
+      result.current.renameNode(NODE_NOTE, '  Note  ', 'Note')
+    })
+    expect(commands).toHaveLength(commandsCountBefore)
+
+    // 4. 用户提交新名称：无论当前远端快照是 B，命令必须携带编辑起点 A 作为 expectedName
+    act(() => {
+      result.current.renameNode(NODE_NOTE, 'User Final Name', 'Note')
+    })
+
+    await waitFor(() => expect(commands.length).toBe(commandsCountBefore + 1))
+    const lastCommand = commands.at(-1)
+    expect(lastCommand?.commands).toEqual([
+      {
+        type: 'RENAME_NODE',
+        nodeId: NODE_NOTE,
+        expectedName: 'Note', // 严格为基线 A，绝非 'Remote Note B'
+        name: 'User Final Name',
+      },
+    ])
+  })
+
+  it('renameGroup 发送冻结的 expectedTitle A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 基线标题为 'Group' (A)
+    const initialGroup = result.current.snapshot?.groups.find((g) => g.id === GROUP_A)
+    expect(initialGroup?.title).toBe('Group')
+
+    // 2. 模拟远端更新到来，分组标题变为 'Remote Group B' (B)
+    const remoteSnapshot: CanvasSnapshotDTO = {
+      ...snapshot(3),
+      groups: snapshot(3).groups.map((g) => (g.id === GROUP_A ? { ...g, title: 'Remote Group B' } : g)),
+    }
+    vi.mocked(getCanvas).mockResolvedValue(remoteSnapshot)
+    emitCanvasRevision('3')
+    await waitFor(() => {
+      expect(result.current.snapshot?.groups.find((g) => g.id === GROUP_A)?.title).toBe('Remote Group B')
+    })
+
+    const commandsCountBefore = commands.length
+
+    // 3. 同名 no-op：输入与 baseline 'Group' 相同，不发命令
+    act(() => {
+      result.current.renameGroup(GROUP_A, '  Group  ', 'Group')
+    })
+    expect(commands).toHaveLength(commandsCountBefore)
+
+    // 4. 用户提交新标题：命令必须携带编辑起点 A 作为 expectedTitle
+    act(() => {
+      result.current.renameGroup(GROUP_A, 'User Final Group', 'Group')
+    })
+
+    await waitFor(() => expect(commands.length).toBe(commandsCountBefore + 1))
+    const lastCommand = commands.at(-1)
+    expect(lastCommand?.commands).toEqual([
+      {
+        type: 'RENAME_GROUP',
+        groupId: GROUP_A,
+        expectedTitle: 'Group', // 严格为基线 A，绝非 'Remote Group B'
+        title: 'User Final Group',
+      },
+    ])
   })
 
   it('ungroups a member only after its dragged bounds fully leave the Group body', async () => {
@@ -1559,7 +1649,7 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(result.current.state.positionDrafts[NODE_NOTE]).toEqual({ x: 110, y: 210 })
   })
 
-  it('I05 函数配置编辑立即持久化草稿，防抖冲刷前即使崩溃也保留最新输入', async () => {
+  it('函数配置编辑立即持久化草稿，防抖冲刷前即使崩溃也保留最新输入', async () => {
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
 
@@ -1643,6 +1733,87 @@ describe('useCanvasController real snapshot runtime', () => {
 
     const draftsCanvas2 = await loadCanvasDrafts(CANVAS_2)
     expect(draftsCanvas2[NODE_NOTE]).toBeUndefined()
+  })
+
+  it('定时器控制：退出库后不发旧配置：在函数配置防抖期间调用 openLibrary，定时器到期后绝不发送旧配置且保留持久草稿', async () => {
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'library-exit-draft',
+        references: [],
+        parameters: {},
+      })
+    })
+
+    // 确认内存草稿已就绪，并等待本地 IDB 草稿落盘
+    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+    await waitFor(async () => {
+      const stored = await loadCanvasDrafts(CANVAS_ID)
+      expect(stored[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+    })
+
+    // 在 320ms 网络防抖冲刷前调用 openLibrary 退出到库视图
+    act(() => {
+      result.current.openLibrary()
+    })
+
+    // 等待超过 320ms 防抖窗口（400ms）
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    // 绝不向网络发送旧配置命令
+    const functionCommands = commands.filter((req) =>
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function.args.prompt === 'library-exit-draft'),
+    )
+    expect(functionCommands).toHaveLength(0)
+
+    // 本地持久草稿完好保留在底层存储中
+    const stored = await loadCanvasDrafts(CANVAS_ID)
+    expect(stored[NODE_FN]?.function?.args.prompt).toBe('library-exit-draft')
+  })
+
+  it('定时器控制：切画布不污染：在画布 1 防抖期间切换至画布 2，定时器到期后绝不向画布 2 队列发送旧配置', async () => {
+    const CANVAS_2 = '88888888-8888-4000-8000-000000000088'
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'canvas-1-pending-config',
+        references: [],
+        parameters: {},
+      })
+    })
+
+    // 确认内存草稿就绪并等待本地 IDB 落盘
+    expect(result.current.state.drafts[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
+    await waitFor(async () => {
+      const drafts1 = await loadCanvasDrafts(CANVAS_ID)
+      expect(drafts1[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
+    })
+
+    // 在 320ms 网络防抖冲刷前立即切换至画布 2
+    act(() => {
+      result.current.openEditor(CANVAS_2)
+    })
+
+    // 等待超过 320ms 防抖周期
+    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    // 验证绝无向网络发送画布 1 的配置命令
+    const leakedCommands = commands.filter((req) =>
+      req.commands.some((c) => c.type === 'SET_NODE_FUNCTION' && c.function.args.prompt === 'canvas-1-pending-config'),
+    )
+    expect(leakedCommands).toHaveLength(0)
+
+    // 验证画布 2 的草稿未被污染
+    const draftsCanvas2 = await loadCanvasDrafts(CANVAS_2)
+    expect(draftsCanvas2[NODE_FN]).toBeUndefined()
+
+    // 验证画布 1 的持久草稿完好保留
+    const draftsCanvas1 = await loadCanvasDrafts(CANVAS_ID)
+    expect(draftsCanvas1[NODE_FN]?.function?.args.prompt).toBe('canvas-1-pending-config')
   })
 
   it('ACK 后紧接 persist 不复活：ACK 成功后同一边界更新权威草稿，后续 persist 绝不复活已确认草稿', async () => {

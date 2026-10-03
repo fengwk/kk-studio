@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
@@ -57,5 +59,131 @@ describe('Frontend architecture and entry contracts', () => {
     // 不包含已清理的 .comfyui-* 页面样式规则
     const comfyuiClassMatches = stylesContent.match(/\.comfyui-[\w-]+/g) ?? []
     expect(comfyuiClassMatches).toEqual([])
+  })
+
+  describe('Architectural boundary verification and violation detection', () => {
+    const srcRoot = path.resolve(process.cwd(), 'src')
+
+    interface BoundaryViolation {
+      file: string
+      specifier: string
+      reason: 'platform-depends-on-app' | 'platform-depends-on-features' | 'ai-depends-on-projects'
+    }
+
+    function checkImportBoundaries(filePath: string, fileContent?: string): BoundaryViolation[] {
+      const content = fileContent ?? readFileSync(filePath, 'utf8')
+      const imports = ts.preProcessFile(content).importedFiles.map((f) => f.fileName)
+      const violations: BoundaryViolation[] = []
+      const relFile = path.relative(srcRoot, filePath).replace(/\\/g, '/')
+      const isPlatform = relFile.startsWith('platform/')
+      const isAi = relFile.startsWith('features/ai/')
+
+      for (const imp of imports) {
+        let resolvedTarget: string | null = null
+        if (imp.startsWith('@/')) {
+          resolvedTarget = path.normalize(imp.slice(2)).replace(/\\/g, '/')
+        } else if (imp.startsWith('.')) {
+          const absTarget = path.resolve(path.dirname(filePath), imp)
+          const relToSrc = path.relative(srcRoot, absTarget).replace(/\\/g, '/')
+          if (!relToSrc.startsWith('..') && !path.isAbsolute(relToSrc)) {
+            resolvedTarget = path.normalize(relToSrc).replace(/\\/g, '/')
+          }
+        }
+        if (!resolvedTarget) {
+          continue
+        }
+
+        if (isPlatform) {
+          if (resolvedTarget === 'app' || resolvedTarget.startsWith('app/')) {
+            violations.push({ file: relFile, specifier: imp, reason: 'platform-depends-on-app' })
+          }
+          if (resolvedTarget === 'features' || resolvedTarget.startsWith('features/')) {
+            violations.push({ file: relFile, specifier: imp, reason: 'platform-depends-on-features' })
+          }
+        }
+        if (isAi) {
+          if (resolvedTarget === 'features/projects' || resolvedTarget.startsWith('features/projects/')) {
+            violations.push({ file: relFile, specifier: imp, reason: 'ai-depends-on-projects' })
+          }
+        }
+      }
+      return violations
+    }
+
+    function scanProductionFiles(dirPath: string): string[] {
+      const entries = readdirSync(dirPath, { withFileTypes: true })
+      const results: string[] = []
+      for (const entry of entries) {
+        const full = path.join(dirPath, entry.name)
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules' && entry.name !== '__tests__') {
+            results.push(...scanProductionFiles(full))
+          }
+        } else if (/\.(ts|tsx)$/.test(entry.name) && !entry.name.includes('.test.')) {
+          results.push(full)
+        }
+      }
+      return results
+    }
+
+    it('rigorously detects synthetic violation inputs for both alias and relative imports', () => {
+      // 测试意图：确保架构门禁能真实触发违规输入报错，而不是单纯扫当前文件树假通过。
+      const mockPlatformFile = path.join(srcRoot, 'platform/shell/MockShell.ts')
+      const mockAiFile = path.join(srcRoot, 'features/ai/runtime/MockAgent.ts')
+
+      // 1. Platform 不能依赖 app（alias 与 relative 均触发）
+      const p1 = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/app/navigation"')
+      expect(p1).toEqual([
+        { file: 'platform/shell/MockShell.ts', specifier: '@/app/navigation', reason: 'platform-depends-on-app' },
+      ])
+      const p2 = checkImportBoundaries(mockPlatformFile, 'import { x } from "../../app/navigation"')
+      expect(p2).toEqual([
+        { file: 'platform/shell/MockShell.ts', specifier: '../../app/navigation', reason: 'platform-depends-on-app' },
+      ])
+
+      // 2. Platform 不能依赖 features（alias 与 relative 均触发）
+      const p3 = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/features/ai"')
+      expect(p3).toEqual([
+        { file: 'platform/shell/MockShell.ts', specifier: '@/features/ai', reason: 'platform-depends-on-features' },
+      ])
+      const p4 = checkImportBoundaries(mockPlatformFile, 'import { x } from "../../features/ai"')
+      expect(p4).toEqual([
+        { file: 'platform/shell/MockShell.ts', specifier: '../../features/ai', reason: 'platform-depends-on-features' },
+      ])
+
+      // 3. AI feature 不能反向依赖 projects（alias 与 relative 均触发）
+      const a1 = checkImportBoundaries(mockAiFile, 'import { x } from "@/features/projects/projects-api"')
+      expect(a1).toEqual([
+        { file: 'features/ai/runtime/MockAgent.ts', specifier: '@/features/projects/projects-api', reason: 'ai-depends-on-projects' },
+      ])
+      const a2 = checkImportBoundaries(mockAiFile, 'import { x } from "../../projects/projects-api"')
+      expect(a2).toEqual([
+        { file: 'features/ai/runtime/MockAgent.ts', specifier: '../../projects/projects-api', reason: 'ai-depends-on-projects' },
+      ])
+
+      // 4. 合法导入（Platform 引用 shared 或同层 platform，AI 引用 shared 或同层 ai）零违规
+      const validPlatform = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/shared/api"; import { y } from "./types"')
+      expect(validPlatform).toEqual([])
+      const validAi = checkImportBoundaries(mockAiFile, 'import { x } from "@/shared/api"; import { y } from "@/features/ai/catalog"')
+      expect(validAi).toEqual([])
+    })
+
+    it('enforces production platform layer does not import app or features', () => {
+      // 测试意图：验证当前仓库生产 platform 代码严格无 @/app、@/features 及相对反向依赖
+      const platformFiles = scanProductionFiles(path.join(srcRoot, 'platform'))
+      expect(platformFiles.length).toBeGreaterThan(0)
+
+      const violations = platformFiles.flatMap((file) => checkImportBoundaries(file))
+      expect(violations).toEqual([])
+    })
+
+    it('enforces AI feature does not reversely import projects feature', () => {
+      // 测试意图：验证当前仓库生产 features/ai 代码完全与 features/projects 解耦
+      const aiFiles = scanProductionFiles(path.join(srcRoot, 'features/ai'))
+      expect(aiFiles.length).toBeGreaterThan(0)
+
+      const violations = aiFiles.flatMap((file) => checkImportBoundaries(file))
+      expect(violations).toEqual([])
+    })
   })
 })

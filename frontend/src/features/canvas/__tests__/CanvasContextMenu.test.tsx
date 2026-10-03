@@ -134,8 +134,26 @@ describe('CanvasContextMenu resource target', () => {
     await userEvent.type(input, '新名字')
     await userEvent.click(within(menu).getByRole('button', { name: '保存' }))
 
-    expect(controller.renameNode).toHaveBeenCalledWith(NODE_ID, '新名字')
+    expect(controller.renameNode).toHaveBeenCalledWith(NODE_ID, '新名字', 'Image')
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('interaction: 菜单打开时冻结名称 A，保存时必须将初始基线 A 作为 expectedName 传给 controller.renameNode', async () => {
+    const controller = makeController()
+    const onClose = vi.fn()
+    const { view } = renderMenu({
+      kind: 'resource',
+      node: resourceNode({ name: 'NodeA' }),
+      model: null,
+    }, onClose, controller)
+
+    const menu = view.container.querySelector('.canvas-context-menu') as HTMLElement
+    const input = await openRename(menu)
+    await userEvent.clear(input)
+    await userEvent.type(input, 'NewName')
+    await userEvent.click(within(menu).getByRole('button', { name: '保存' }))
+
+    expect(controller.renameNode).toHaveBeenCalledWith(NODE_ID, 'NewName', 'NodeA')
   })
 
   it('does not save an empty rename and keeps the menu open', async () => {
@@ -297,7 +315,7 @@ describe('CanvasContextMenu group and multi targets', () => {
     await userEvent.clear(input)
     await userEvent.type(input, '新组名')
     await userEvent.keyboard('{Enter}')
-    expect(controller.renameGroup).toHaveBeenCalledWith(GROUP_ID, '新组名')
+    expect(controller.renameGroup).toHaveBeenCalledWith(GROUP_ID, '新组名', 'Frame')
     expect(onClose).toHaveBeenCalled()
 
     // 重新打开菜单（重命名/删除确认后菜单已关闭）。
@@ -310,6 +328,23 @@ describe('CanvasContextMenu group and multi targets', () => {
     await userEvent.click(within(confirm).getByRole('button', { name: '确认删除' }))
     expect(controller.deleteGroup).toHaveBeenCalledWith(GROUP_ID)
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('interaction: 菜单打开时冻结标题 A，保存时必须将初始基线 A 作为 expectedTitle 传给 controller.renameGroup', async () => {
+    const controller = makeController()
+    const onClose = vi.fn()
+    const { view } = renderMenu({
+      kind: 'group',
+      group: group({ title: 'GroupA' }),
+    }, onClose, controller)
+
+    const menu = view.container.querySelector('.canvas-context-menu') as HTMLElement
+    const input = await openRename(menu)
+    await userEvent.clear(input)
+    await userEvent.type(input, 'NewGroup')
+    await userEvent.keyboard('{Enter}')
+
+    expect(controller.renameGroup).toHaveBeenCalledWith(GROUP_ID, 'NewGroup', 'GroupA')
   })
 
   it('groups from a multi target only when it contains ungrouped resources', async () => {

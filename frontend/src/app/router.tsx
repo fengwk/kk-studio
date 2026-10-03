@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
-import { InteractionsPage } from '@/features/ai/runtime/interactions/InteractionsPage'
+import { InteractionsPage } from '@/app/pages/InteractionsPage'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 
 export function AppRouter() {
