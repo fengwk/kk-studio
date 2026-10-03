@@ -6,21 +6,33 @@
 - Version: `1.20.0`
 - License: Apache-2.0
 
-## Inventory Scope & Summary
-- Test Sources: 51 Java test files under `langchain4j-google-ai-gemini/src/test/java`
-- Total Methods: 676 methods (including all declared active/parameterized methods across nested classes and inherited methods from core/common test bases)
-- Total Invocations: 676 invocations
-- In-Scope Ported: 145 invocations (`PORTED` / `PASSED`)
-- In-Scope Pending: 0 invocations (`PORT_PENDING` / `NOT_EXECUTED_PENDING_IMPLEMENTATION`)
-- Out-of-Scope: 531 invocations (`OUT_OF_SCOPE` / `NOT_EXECUTED_OUT_OF_SCOPE`)
-- Real Credential IT: 281 invocations (`realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`, independently tracked; each invocation separately remains `PORTED` or `OUT_OF_SCOPE` according to its wire-contract applicability)
+## Reading the inventory
 
-## Principles & Adaptation Rules
-1. **100% Comprehensive Coverage**: Enumerates all 51 test files in `langchain4j-google-ai-gemini/src/test/java` along with tracked inherited bases (`AbstractBaseChatModelIT`, `AbstractChatModelIT`, `AbstractStreamingChatModelIT`, `AbstractChatModelListenerIT`, `AbstractStreamingChatModelListenerIT`, `AbstractModelCatalogIT`, `AbstractAiServiceIT`, `AbstractAiServiceWithJsonSchemaIT`, `AbstractAiServiceWithToolsIT`, `AbstractStreamingAiServiceIT`, `AbstractEmbeddingModelIT`).
-2. **Honest Status Discipline & No False Equivalence**: Exactly 145 applicable invocations are `PORTED` and `PASSED`. Exactly 0 pending invocations remain; all 531 non-applicable invocations are strictly classified as `OUT_OF_SCOPE` with concrete architectural mismatch reasons. Tests asserting different contracts or incompatible facades are rejected or renamed rather than creating pseudo-passes or false equivalence.
-3. **Reflection-Backed Target Existence & JUnit-Annotation Validation**: Every `PORTED` invocation binds to a real local test target validated via JVM reflection in `UpstreamTestManifestTest`. Target classes must reside under `fun.fengwk.kkstudio.harness.provider.gemini.`, the referenced method must exist and carry JUnit `@Test` or `@ParameterizedTest`, and neither class nor method may have `@Disabled`.
-4. **Classpath Fixture Validation**: All `PORTED` fixtures are verified to be relative paths starting with `gemini/fixtures/`, free of path-traversal segments (`..`), resolvable under classpath `/fun/fengwk/kkstudio/harness/provider/`, non-empty, and valid JSON (when ending with `.json`) or valid SSE without trailing content. Representative audit fixture-family resources (`stream-incremental.sse`, `stream-snapshot.sse`, `stream-thinking.sse`, `stream-tool-call.sse`) provide deterministic offline payloads for wire protocol, request mapping, and SSE stream decoding without live credentials.
-5. **Native Thinking Adaptation**: Native provider adapts upstream `thinkingConfig` and reasoning effort to `thinkingLevel` and `includeThoughts` while strictly preserving deterministic replay and output semantics (thinking blocks and tool-use thinking verified in `GeminiThinkingTest`).
-6. **Explicit Architectural Mismatch (OOS Policy)**: Every `OUT_OF_SCOPE` invocation specifies an exact `capabilityMismatch` (e.g. Google AI Caching REST API, Files upload API, Embedding models, Batch API, Imagen models, AiServices facade, Model catalog, countTokens, listener, proprietary Grounding tools).
-7. **Orthogonal Credential Invariant**: 281 credential-bound integration tests (`@EnabledIfEnvironmentVariable(named = "GOOGLE_AI_GEMINI_API_KEY", ...)`) maintain their independent `realInteropStatus` marker of `NOT_EXECUTED_REQUIRES_CREDENTIAL`, tracked orthogonally to `mappingStatus`.
-8. **Security & Sanitization**: API key is exclusively passed via `x-goog-api-key` header and never in URI, request body, or exception traces.
+[`upstream-test-manifest.json`](upstream-test-manifest.json) maps tests from
+`langchain4j-google-ai-gemini/src/test/java` and tracked inherited methods to local
+wire-contract tests. The manifest contains 51 source files, 676 methods and 676 invocation records:
+145 `PORTED`, 0 `PORT_PENDING` and 531 `OUT_OF_SCOPE`. Independently, 281 records carry
+`realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
+
+`UpstreamTestManifestTest` recounts these manifest records and checks the summary. These counts
+describe the recorded inventory; checking its correspondence to the upstream test tree requires
+the pinned upstream commit.
+
+## Verifying a mapping
+
+For a `PORTED` record, the test resolves `targetTest` by reflection within
+`fun.fengwk.kkstudio.harness.provider.gemini`, checks the JUnit annotation and rejects disabled
+classes or methods. Fixtures must resolve to non-empty classpath resources under
+`gemini/fixtures/`, with relative paths free of traversal. The current declared fixtures are SSE
+resources, checked for existence and non-empty content. The fixture field is a manifest declaration;
+the manifest test checks the resource independently of how the target test consumes payloads.
+
+`executionStatus: PASSED` is checked metadata for a `PORTED` mapping. Run the target tests to
+establish their current result; the manifest test establishes target/fixture validity, rather
+than executing each target or proving all upstream assertions equivalent. `capabilityMismatch`
+explains each `OUT_OF_SCOPE` decision, and `PORT_PENDING` identifies unfinished local mappings.
+
+Credential status is independent of the mapping: an offline port can exist while the corresponding
+live integration remains `NOT_EXECUTED_REQUIRES_CREDENTIAL`. A local pass verifies the tested
+protocol behavior, not an authenticated request to Gemini. Keep mappings, fixtures and the
+summary in sync when changing tests.

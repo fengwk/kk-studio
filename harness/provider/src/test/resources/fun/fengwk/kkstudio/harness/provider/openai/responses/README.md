@@ -6,21 +6,34 @@
 - Version: `1.20.0`
 - License: Apache-2.0
 
-## Inventory Scope & Summary
-- Test Sources: 15 Java test files under `langchain4j-open-ai/src/test/java`
-- Total Methods: 165 methods (including all declared active methods and tracked inherited base class test methods)
-- Total Invocations: 165 invocations
-- In-Scope Ported: 45 invocations (`PORTED` / `PASSED`)
-- In-Scope Pending: 0 invocations (`PORT_PENDING`)
-- Out-of-Scope: 120 invocations (`OUT_OF_SCOPE` / `NOT_EXECUTED_OUT_OF_SCOPE`)
-- Real Credential IT: 93 invocations (`realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`, independently tracked)
+## Reading the inventory
 
-## Principles & Adaptation Rules
-1. **100% Comprehensive Coverage**: Enumerates all 15 test files under `langchain4j-open-ai/src/test/java` and tracked inherited bases (`AbstractChatModelIT`, `AbstractStreamingChatModelIT`, `AbstractBaseChatModelIT`, `AbstractChatModelListenerIT`, `AbstractStreamingChatModelListenerIT`, `AbstractChatModelNonBlockingIT`, `PublisherVerification`).
-2. **Honest Status Discipline & No False Equivalence**: Exactly 45 applicable invocations are `PORTED` and `PASSED`. Exactly 0 pending invocations remain; all 120 non-applicable invocations are strictly classified as `OUT_OF_SCOPE` with concrete architectural mismatch reasons.
-3. **Reflection-Backed Target Existence & JUnit-Annotation Validation**: Every `PORTED` invocation binds to a real local test target validated via JVM reflection in `UpstreamTestManifestTest`. Target classes reside under `fun.fengwk.kkstudio.harness.provider.openai.responses.`, and referenced methods exist and carry JUnit `@Test` or `@ParameterizedTest` without `@Disabled`.
-4. **Classpath Fixture Validation**: All `PORTED` fixtures are verified to be relative paths starting with `openai/responses/fixtures/`, free of path-traversal segments, resolvable under classpath `/fun/fengwk/kkstudio/harness/provider/`, non-empty, and valid JSON (when ending with `.json`).
-5. **Native Reasoning Adaptation**: Native provider adapts OpenAI reasoning/thinking summaries and encrypted reasoning contents while preserving deterministic replay and output semantics.
-6. **Explicit Architectural Mismatch (OOS Policy)**: Every `OUT_OF_SCOPE` invocation specifies an exact `capabilityMismatch` (e.g., Live credentials, BlockHound non-blocking thread checks, Reactive Streams TCK, Observability Listeners, Dynamic Tools, Custom Headers).
-7. **Orthogonal Credential Invariant**: 93 credential-bound integration tests maintain their independent `realInteropStatus` marker of `NOT_EXECUTED_REQUIRES_CREDENTIAL` orthogonally to `mappingStatus`.
-8. **Security & Sanitization**: Error bodies and sensitive credentials are scrubbed from exception logs to ensure no secret leakage.
+[`upstream-test-manifest.json`](upstream-test-manifest.json) records the Responses mapping from
+`langchain4j-open-ai/src/test/java` and tracked inherited methods. Its current inventory has
+15 source files, 165 methods and 165 invocation records: 45 `PORTED`, 0 `PORT_PENDING` and
+120 `OUT_OF_SCOPE`. Independently, 93 records carry
+`realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
+
+`UpstreamTestManifestTest` recounts these records and checks the summary. The counts describe
+this manifest; comparing them to the upstream test tree requires the pinned upstream commit.
+
+## Verifying a mapping
+
+For `PORTED` records, reflection checks that `targetTest` resolves within
+`fun.fengwk.kkstudio.harness.provider.openai.responses`, has `@Test` or `@ParameterizedTest`, and
+is enabled at both class and method level. Fixtures must be non-empty classpath resources under
+`openai/responses/fixtures/`, use traversal-free relative paths, and parse as strict JSON when
+they have a `.json` extension. The fixture field is a manifest declaration; the manifest test checks
+the resource independently of how the target test consumes payloads. Responses tests cover request
+encoding, stream completion and reasoning replay, including encrypted content and empty reasoning placeholders.
+
+`executionStatus: PASSED` is checked manifest metadata. Run the target tests to establish their
+current result; the manifest test establishes usable targets and fixtures, rather than executing
+all targets or proving upstream assertion equivalence. `OUT_OF_SCOPE` records explain their
+contract differences through `capabilityMismatch`, and `PORT_PENDING` identifies unfinished
+local mappings.
+
+`realInteropStatus` is orthogonal to `mappingStatus`: an offline port may exist while the
+corresponding live integration remains `NOT_EXECUTED_REQUIRES_CREDENTIAL`. A local pass verifies
+the tested protocol behavior, not a successful authenticated Responses request. Keep mappings,
+fixtures and the summary synchronized when changing tests.

@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约见 [Harness Environment](harness-environment.md)，服务端会话见 [Harness Environment Server](harness-environment-server.md)。
 
-模块只依赖 `harness-common`、`harness-environment` 及 Jackson、OkHttp、JGit、RE2/J、LSP4J、JNA，不依赖 Runtime、Platform 或 Web。官方发布物是含这些依赖和 LSP client 的 shaded JAR；语言服务器与 Bash 则由宿主提供。
+模块依赖 `harness-common`、`harness-environment` 及 Jackson、OkHttp、JGit、RE2/J、LSP4J、JNA。官方发布物将这些依赖和 LSP client 打成 shaded JAR；语言服务器与 Bash 由宿主提供。
 
 ## 启动与本地状态
 
@@ -57,7 +57,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 `daemonInstanceId` 在构造时随机生成，同进程所有 HELLO 复用。连接断开只重置绑定、资源预算与等待票据，不改执行事实。相同 invocationId 的重复 INVOKE：RUNNING 重放 `STARTED(replayed=true)`，已终结重放冻结终态，副作用不再执行。
 
-这不是跨进程持久化执行保证：重启换 instanceId，旧 journal 不可恢复；Gateway 将旧在途调用判为结果不确定，而不是让新进程自动重做。恢复还要求 Gateway 的在途目录仍在，不能把 Daemon 去重描述成跨 Backend 节点或进程的全局 journal。
+恢复范围是同一 Daemon 进程与仍持有在途目录的 Gateway。Daemon 重启生成新 instanceId，Gateway 将此前在途调用收敛为结果不确定，等待调用层处理；journal 的去重事实随进程生命周期保留。
 
 [`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java) 强制握手协商 `permessage-deflate`，缺失以 1010 关闭；只接收文本帧，二进制帧或单条文本超过 16 MiB 字符以 1008 关闭，不退化为另一种传输。
 
@@ -75,7 +75,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 ### workdir 与权限
 
-[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 只用本次 arguments 定位路径。相对 path 必须有绝对、现存、可读目录 workdir；绝对 path 无需 workdir，process.exec 始终需要它。目录不存在就失败，不 mkdir、不回落 HOME、不继承前一次调用的目录。
+[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 用本次 arguments 定位路径。相对 path 要求绝对、现存、可读 workdir；绝对 path 可直接定位，process.exec 始终要求 workdir。目录校验失败即拒绝本次调用，每次调用独立解析目录。
 
 workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME 和可信 note 仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，不是执行默认值。
 

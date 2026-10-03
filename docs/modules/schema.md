@@ -1,234 +1,86 @@
 # Schema 模块
 
-`schema` 模块保存当前 PostgreSQL 表、列、外键、索引与 CHECK 约束的权威声明：
-[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。生产 Web 与集成测试
-使用同一份 Flyway 资源。没有增量迁移链；修改已执行的 V1 涉及 checksum 与数据库维护，
-不能把更新源码当作已更新数据库，操作边界见[修改 V1 的代价](#修改-v1-的代价)。
+[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)
+是当前 PostgreSQL 表、列、外键、索引、CHECK 与通知 trigger 的权威声明。
+Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测试，
+依赖 scope 见 [`schema/pom.xml`](../../schema/pom.xml)。
 
-模块没有 Java 主源码与运行时依赖（见 [`schema/pom.xml`](../../schema/pom.xml)），另有 Java 契约测试；Flyway 资源入口只有四个文件：
+## 加载 baseline 与 seed
 
-```text
-schema/src/main/resources/db/migration/V1__schema.sql          唯一 versioned baseline
-schema/src/main/resources/db/seed/dev/R__dev_seed.sql          profile seed（repeatable）
-schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
-schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
-```
+versioned migration 为 V1，三个 repeatable seed 按 profile 加载：
 
-`V1__schema.sql` 是唯一的 versioned migration；`db/seed/**` 下只有三份受控 repeatable migration。Web 以 runtime scope 依赖 `kk-studio-schema`，Platform、Harness Infra 与 Canvas Infra 只在 test scope 使用它；schema 不反向依赖任何模块。Flyway 的装配位置：
-[`application-prod.yml`](../../web/src/main/resources/application-prod.yml) 只加载
-`classpath:db/migration`，dev 与 e2e 各追加一个 seed 目录，canvas-test 同时追加 dev 与 canvas-test 两个
-seed 目录（见 [Web](web.md) 的配置表）。
-
-## 一张图看表之间怎么连
-
-```mermaid
-erDiagram
-    AGENT_PROVIDER ||--o{ AGENT_MODEL : hosts
-    AGENT_MODEL ||--o{ AGENT_DEFINITION : binds
-    PLUGIN_CREDENTIAL {
-        varchar plugin_id PK
-        bytea encrypted_payload
-        timestamptz next_refresh_at
-    }
-    ENVIRONMENT ||--o| ENVIRONMENT_CONNECTION : leases
-    MCP_SERVER ||--o{ MCP_TOOL : exposes
-    HARNESS_SESSION ||--o{ HARNESS_ENTRY : trees
-    HARNESS_SESSION ||--o{ HARNESS_THREAD : owns
-    HARNESS_THREAD ||--o{ HARNESS_THREAD_COMMAND : mailboxes
-    HARNESS_THREAD ||--o{ HARNESS_MODEL_INVOCATION : attempts
-    HARNESS_MODEL_INVOCATION ||--o{ HARNESS_TOOL_INVOCATION : siblings
-    CHAT ||--o{ CHAT_SESSION : owns
-    CHAT_SESSION }o--|| HARNESS_SESSION : binds
-    CANVAS_DOCUMENT ||--o{ CANVAS_NODE : contains
-    CANVAS_DOCUMENT ||--o{ CANVAS_GROUP : contains
-    CANVAS_NODE ||--o{ CANVAS_RESOURCE : owns
-    CANVAS_NODE ||--o| CANVAS_FUNCTION_RUN : runs
-    CANVAS_NODE ||--o{ CANVAS_FUNCTION_RESOURCE_PIN : pins
-    STORAGE_BLOB ||--o{ CANVAS_RESOURCE : backs
-    STORAGE_BLOB ||--o{ STORAGE_UPLOAD : completes_to
-    STORAGE_BLOB ||--o{ SESSION_BLOB_REF : retained_by
-    STORAGE_BLOB ||--o{ PROJECT_ISSUE_EVIDENCE : published_as
-    PROJECT ||--o{ PROJECT_ISSUE : contains
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_AGENT_THREAD : binds
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_STAGE_BUDGET : limits
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_RUN : attempts
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_ACTIVITY : receives
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_EVIDENCE : publishes
-    PROJECT_ISSUE ||--o| PROJECT_ISSUE_WORK : schedules
-    PROJECT_ISSUE_AGENT_THREAD }o--|| HARNESS_THREAD : targets
-```
-
-`storage_upload.completes_to` 表达的是 PENDING → READY 的状态迁移（`blob_id` 由空变非空），不是级联关系：`blob_id` 是 RESTRICT 外键，而 PENDING 时预分配的 `candidate_blob_id` 故意不建外键，因为 blob 行要到 complete 时才创建。同理 `chat.agent_name` 也没有外键，理由写在列注释里。
-
-表按区域分组，边界可以这样记：
-
-| 区域 | durable 事实 |
+| profile | Flyway 资源 |
 | --- | --- |
-| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package` |
-| Plugin | `plugin_credential`（加密凭据、状态与跨节点 refresh lease） |
-| MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控；`mcp_tool.server_name` 是全库唯一 `ON DELETE CASCADE` 外键） |
-| Environment | `environment`、`environment_connection` |
-| Chat | `chat`、`chat_session` |
-| Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
-| Project / Issue | `project`、`project_issue`、`project_issue_agent_thread`、`project_issue_stage_budget`、`project_issue_run`、`project_issue_activity`、`project_issue_work`、`project_issue_evidence` |
-| Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work`（执行协议七表）与 `harness_thread_join`（异步委派） |
-| Global Storage | `storage_blob`、`storage_upload`、`storage_object_cleanup`、`session_blob_ref` |
-| Settings | 单行 `system_setting(id = 1)` |
+| prod | `classpath:db/migration` |
+| dev | migration + [dev seed](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql) |
+| e2e | migration + [e2e seed](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) |
+| canvas-test | migration + dev seed + [canvas-test seed](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) |
 
-`harness_` 前缀覆盖 Harness 执行与异步委派的八张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 39 张业务及基础设施表集合与这份清单完全相等，多一张少一张都失败）。
+dev seed 提供离线 stub Catalog，e2e seed 提供模型目录与受控审批规则，
+canvas-test seed 提供测试栈设置。seed 重复执行保持确定性，凭据从环境注入。
+V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契约由测试校验。
 
-## 关键表与约束
+## 数据区域与维护入口
 
-### Skill Package
-
-`skill_package` 每个 Package 只有一行，不再拆分独立 Skill 内容表：
-
-```text
-package_name          varchar(128) PK，不可变，禁止 : / @ 和反斜杠
-description           nullable text
-repository_url        text，不可变；要求 scheme、最多 2048 字符、无空白且禁止内嵌 userinfo
-branch                varchar(255)，非空白无环绕空白无控制字符，只用于检查候选更新
-current_commit        当前人工确认的 40/64 位小写 Git object id
-observed_head_commit  最近检查到的 branch HEAD，可空
-head_checked_at       最近检查时间，可空
-head_check_error      最近检查的有界错误，可空
-skills                当前 commit 派生的 JSON array
-version               非负 CAS
-create_time / update_time
-```
-
-`skills` 元素精确为 `{name, description}`，按 name 排序；Package 内 name 唯一，目录固定从
-`<repository>/<name>/SKILL.md` 推导。`current_commit` 与 `skills` 只能在同一次 CAS 中
-切换；`observed_head_commit` 与检查状态可以独立更新，但不改变 Agent 行为。Skill 正文、
-references、scripts 与 assets 全部保留在 Git，不写 PostgreSQL。
-
-`environment_connection` 在既有租约字段之外保存两个有界 JSON 投影：
-
-- `skill_state` 是当前 Daemon 对各 Package 的 installed commit、稳定 path、状态与有界
-  错误；新的 READY 先清空再全量同步，写回必须命中 owner/lease fence。
-- `recent_events` 保存最近 200 条连接与 Skill 同步运维事件；事件只有时间、级别、类型与
-  去敏消息，不保存 stdout、凭据、Git URL userinfo 或签名地址。
-
-两者都属于可重建运行投影，不是 Package 内容或执行历史；断线时保留供 Card 诊断，Daemon
-重新 READY 后按当前事实收敛。
-
-同一连接行的 `runtime_info` 保存最近一次已接受的 READY 宿主 metadata：READY 时必须为
-非空 JSON object，断线或回到 CONNECTING 时保留，从未 READY 时可为空。
-
-### Plugin credential
-
-`plugin_credential` 是所有构建期 Plugin 共用的一行一凭据存储，不给每个 Plugin 建专用表：
-
-| 列 | 约束与用途 |
-| --- | --- |
-| `plugin_id` | PK；全局唯一且不可变，与 classpath 中的 `StudioPlugin.pluginId` 对齐 |
-| `encrypted_payload` | 非空 `bytea`；AES-256-GCM 二进制 envelope，包含格式版本、随机 nonce 与 token/client identity 等 opaque JSON 的认证密文；AAD 绑定 `pluginId/region/formatVersion` |
-| `region` | 非秘密路由元数据；只允许 Plugin descriptor 声明的固定 region |
-| `expires_at` / `next_refresh_at` | token 失效时间与下一次 refresh claim 时间 |
-| `status` | `CONNECTED`、`REFRESH_FAILED`、`REFRESH_UNCERTAIN` 或 `REAUTH_REQUIRED`；断连以删除行表达 |
-| `last_refreshed_at` / `last_refresh_error` | 可空运维摘要；错误有长度上限且必须去敏 |
-| `refresh_lease_token` / `refresh_lease_until` | nullable 成对 lease；跨 App 节点唯一领取到期刷新 |
-| `create_time` / `update_time` / `version` | 审计时间与 CAS/fencing 版本 |
-
-加密主密钥来自所有 App 节点共享的 owner-only 部署文件，不写入本表。持久化层只接受
-Plugin opaque payload，不按 provider token 字段建列；管理查询永远不返回
-`encrypted_payload`。刷新 claim 只在 `next_refresh_at <= now()` 且 lease 为空或过期时
-成功；外部 HTTP 在事务外完成，finalize 必须同时匹配
-`plugin_id + refresh_lease_token + version`。删除认证与迟到 finalize 竞争时，删除获胜，
-迟到结果不得重建该行。`REFRESH_UNCERTAIN` 与 `REAUTH_REQUIRED` 不再自动 claim，必须由
-新的 `auth/complete` 覆盖；扫描到过期但未 finalize 的 refresh lease 时直接转为
-`REFRESH_UNCERTAIN`，不能假设前任 owner 尚未发送请求。
-
-### Canvas graph
-
-| 表 | 身份与关键约束 |
-| --- | --- |
-| `canvas_document` | `id` PK；`revision >= 0` 单调递增同步位置；标题规范化由应用负责，DB 侧只要求 `btrim(title) <> ''` |
-| `canvas_group` | `id` PK、`(canvas_id, id)` unique；几何 check 要求有限且宽高为正 |
-| `canvas_node` | `id` PK、`(canvas_id, id)` unique、`(canvas_id, name_key)` unique；`name_key` generated stored 折叠兼容空白与大小写；`group_id` FK 同画布 group；`function` 校验 `{name,args}` 结构 |
-| `canvas_resource` | `id` PK；`owner_node_id` 与 `resource_index` 同存同缺；`blob_id` 与 `text_content` 恰好一个非空（XOR）；`(canvas_id, owner_node_id, resource_index)` unique 槽位；`blob_id` → `storage_blob` RESTRICT |
-| `canvas_function_run` | **PK 是 `node_id`**，每个 Function 节点只有一行当前/最后 Run；`(node_id, request_id)` unique；status 六态（`READY`/`RUNNING`/`SUCCEEDED`/`FAILED`/`CANCELLED`/`UNKNOWN`）；`attempt >= 0`；lease token/until 成对；READY 必须有 `available_at` 且无 lease，RUNNING 必须无 `available_at` 且有 lease，终态两者皆空；FAILED/UNKNOWN 必须有非空 `error` |
-| `canvas_command_dedup` | PK `(canvas_id, idempotency_key)`；`request_hash` 是 64 位小写 hex；`accepted_revision >= 0` 记录首次接受位置 |
-| `canvas_function_resource_pin` | PK `(canvas_id, node_id, request_id, role, resource_id)`；`role in ('INPUT','OUTPUT')`；同画布 Node/Resource FK 与 Run 请求 FK；只保护真实存在资源的生命周期，不参与 blob refcount |
-
-这些约束和 [canvas-core](canvas-core.md) 里领域类型的构造期校验一一对应：领域负责给出清晰错误，数据库负责在并发与旁路写入下兜底。Canvas 的全部 ownership 外键都是 `ON DELETE RESTRICT`，删除顺序由应用显式编排（见 [canvas-infra](canvas-infra.md)），database 不会替应用级联删掉资源或 pin。配置引用限于 `{type: "resource", nodeId, index}`，连线是读取投影，数据库没有 `canvas_link` 表。
-
-### Session 归属与 Chat 关联
-
-Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` PK，`chat_id` FK RESTRICT）。
-`project_issue_agent_thread`（`(issue_id, agent_name)` PK，`thread_id` UK）将 Issue 与 Agent 的稳定工作上下文绑定至单一 Harness Thread。每个 Agent Thread 由应用受控创建独立 Session，不跨 Agent、Issue 或产品共享；绑定行不保存 `session_id` 指针，应用无法随意重绑。全局没有 `session_owner` 弧表。
-
-### Blob 生命周期
-
-`storage_blob` 是按 `(sha256, size_bytes)` 去重的不可变内容地址，字节在 S3，行只保存媒体事实与 `ref_count`/`state`。`uk_storage_blob_active_hash` 是部分唯一索引（`where state = 'ACTIVE'`），所以同一内容在 DELETING 期间可以重新上传；`ck_storage_blob_state_ref_count` 固定 ACTIVE 必须有正引用、DELETING 必须为零。`storage_upload.blob_id` 为空表示 PENDING（客户端 PUT 到 `uploads/{id}/original`）、非空表示 READY；`session_blob_ref` 让 Session 以显式边持有 blob。所有释放与 `ref_count` 变更都由应用事务完成，不依赖 cascade 或 trigger。
-
-`storage_object_cleanup` 是对象 key 的耐久删除记录（`key` PK、`next_attempt_at`）：凡是「该 key 的最后一个数据库事实即将消失」的路径，都与事实变更在同一事务内登记，记录永不按 TTL 清除，后台清扫用数据库时间认领到期批次、在事务外幂等删除、失败改到短重试。它保证迟到的浏览器直传 PUT、服务端 COPY 或预览写入最终被删除，但只提供「元数据永久保留 + 额外低频 delete」，当前**没有 finite TTL 清除**，也**不是真正的 S3 fencing**（不阻断写入，只在之后收敛）。
-
-### Project、Issue 与 Stage Budget
-
-| 表 | 身份与关键约束 |
-| --- | --- |
-| `project` | `id` PK；`title` 非空白且无环绕空白；`description` 最多 64 KiB；`workflow` 严格 JSON object 且携带 `states` array；`yolo_enabled`；`next_issue_number >= 1`；`version >= 0` CAS；`archived_at` 可空 |
-| `project_issue` | `id` PK；`project_id` FK；`number >= 1`、`(project_id, number)` unique；`state` 工作阶段；BLOCKED 状态必须成对记录 `blocked_from_state` 与 `block_reason`；控制暂停必须成对记录 `pause_reason`（USER/ERROR/UNKNOWN）与 `pause_detail`；`next_run_ordinal >= 1`；`next_activity_sequence >= 1`；`version >= 0`；`archived_at` 可空 |
-| `project_issue_agent_thread` | PK `(issue_id, agent_name)`；`thread_id` UK；`(issue_id, thread_id)` UK；FK 关联 `project_issue`、`agent_definition`、`harness_thread` |
-| `project_issue_stage_budget` | PK `(issue_id, state)`；`max_runs > 0`；`budget_after_ordinal >= 0`；保留态（INIT/BLOCKED/DONE）不允许建预算行；FK 关联 `project_issue` |
-| `project_issue_run` | `id` PK；`ordinal >= 1`；`(issue_id, ordinal)` unique；`(id, issue_id)` unique；`(issue_id, state)` FK 关联阶段预算；`(issue_id, thread_id)` FK 关联 Agent Thread；`(session_id, thread_id)` FK 关联 Thread；`(session_id, start_entry_id/end_entry_id/final_answer_entry_id)` FK 关联 Entry；status 六态；部分唯一索引 `uk_project_issue_run_active` 保证同 Issue 仅一个主 Run 处于 RUNNING/WAITING；时钟与终态区间约束 |
-| `project_issue_activity` | PK `(issue_id, sequence)`；`(issue_id, idempotency_key)` unique 幂等键；`kind` 六类（COMMENT、RUN、INSTRUCTION、SPEC_CHANGE、STATE_CHANGE、CONTROL）；`actor_type`（HUMAN、AGENT、SYSTEM）；部分唯一索引 `uk_project_activity_run` 保证每 Run 仅一条 RUN 活动 |
-| `project_issue_work` | PK `issue_id`；`wake_version > 0`；`due_at`；`lease_token`/`lease_until` 成对；单行 durable mailbox |
-| `project_issue_evidence` | PK `(issue_id, blob_id)`；`blob_id` FK RESTRICT；`run_id` 复合 FK `(run_id, issue_id)`；`actor_agent_name` FK；`name varchar(512)` not null；`check (run_id is null or actor_agent_name is not null)` |
-
-### Harness 交互与 ToolInvocation
-
-`harness_tool_invocation` 的 `WAITING_INPUT` 状态由 `ck_harness_tool_waiting_input` 限定形状：binding 非空，result 与 error 均为空；它与 `WAITING_APPROVAL` 并列表达挂起等待。可空 `input_receipt` jsonb 仅在 SUCCEEDED 且 result 非空时存在，携带 `submissionId`、`actor`、`acceptedAt` 字符串（`ck_harness_tool_input_receipt`）。部分索引 `idx_harness_tool_invocation_pending` 在 `(created_at, id)` 上覆盖 WAITING_APPROVAL 与 WAITING_INPUT，支持统一待处理分页。`harness_thread` 的 `(session_id, id)` unique 约束支持同 Session 复合 FK。
-
-### 应用拥有的版本与提示
-
-- `skill_package` 每个 package 只有一行：不可变 repository URL、用于检查的 branch、人工确认的 `current_commit`、最近观察的 branch HEAD 与从 current commit 派生的 `skills` JSON 组成当前发布快照。Skill 正文不进数据库，Package 更新以 `expectedVersion` CAS 原子替换 commit 与 JSON；branch 检查只更新观察字段。
-- Harness Entry 的 ROOT 唯一、parent shape 与 `entry_type` 由 check 与部分唯一索引固定；Thread head 必须属于同一 Session；Thread Command 以 `(thread_id, sequence)` 与 `(thread_id, idempotency_key)` 保证顺序与精确回放。
-- `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 调度事实，`wake_version` 为正，lease token 与 until 成对；`target_id` 是多态引用，刻意不建外键，因此 `required_environment_id` 非空时由 check 限定只能出现在 TOOL Work 上。
-- `system_setting` 恒为一行（`ck_system_setting_id` 要求 `id = 1`），`config` 必须是 JSON object，`version` 是非负 CAS 令牌。
-- 六个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`skill_package_changed`（package name）、`canvas_revision`（`id:revision`）、`canvas_function_work`（空 payload）、`system_settings_changed`（version 文本）、`project_issue_work_due`（issue id）、`harness_thread_version`（`id:version`）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
-- V1 全文没有 `IF NOT EXISTS`（文件开头的注释明确说明这一点），任何声明冲突都会让迁移直接失败，而不是留下一个 drift 过的库。业务实体 id 全部由应用生成：仓库里没有 `create sequence`、`serial` 或 generated identity，[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 对此有专门断言。
-
-## Profile seeds
-
-| profile | 资源 | 内容 |
+| 区域 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
-| dev | [`R__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql) | 先删除再插入确定性 stub Provider/Model/Agent（`stub` provider、`acceptance-stub` model、`default-assistant` agent），离线开发可直接跑通对话 |
-| e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、default-assistant；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
-| canvas-test | [`R__canvas_test_seed.sql`](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) | 只覆盖 Docker Canvas test stack 需要缩短或启用的设置：上传有效期（900s）、OpenCLI Hub、GPT Image 2、Seedance |
+| Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
+| Plugin | plugin_credential：认证密文、状态、refresh lease | [Plugin credential](platform.md#plugin-credential) |
+| MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
+| Environment | environment、environment_connection：注册与路由租约、宿主/Skill 投影 | [Environment](harness-environment.md) |
+| Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
+| Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
+| Project | project、project_issue 与 agent_thread/stage_budget/run/activity/work/evidence | [Project](project.md) |
+| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/work/thread_join | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
+| Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 
-三份都是 `R__` repeatable migration，可重复执行：seed 拥有的行按定义同步并显式处理冲突（先删后插；e2e 对 `environment` 用 `on conflict (id) do update`），因此重复执行结果确定。e2e seed **不含**任何真实凭据，密钥在运行时由环境注入；Provider 只有一个 `'stub'` 之类完全公开的占位值。`V1__schema.sql` 自身插入一行安全的 `system_setting` 默认聚合（`tool.permission` 默认只对 `write`/`edit`/`bash` 要求审批，`read` 不受限），[`E2eToolPermissionProfileTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/E2eToolPermissionProfileTest.java) 断言源码内默认值与代码中的 `SystemSettings` 默认完全一致。
+表、列的准确清单与约束名直接查 V1；跨域关系与事务职责见 [Canvas / Project](../canvas-project.md)。
+结构测试分别核对业务表与 Flyway 元数据表，计数口径以测试的 expected set 为准。
 
-## 修改 V1 的代价
+## 数据库兜底的不变量
 
-`V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库可能有多个客户端，所以这条路径有硬性安全要求：
+实体 UUID 和业务版本由应用生成。复合外键保持 Entry 父链、Thread head、
+Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
+所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
-- 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。`dev` 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 `main` 集成。
-- 重建只能在 Human 明确批准的维护窗口内执行。维护脚本不管理任何服务生命周期：reset 在存在其他数据库会话时只读拒绝，import 用事务锁、空表复查和指纹校验防止并发提交。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable Agent catalog 搬回去」：只有 `agent_provider`、`agent_model` 和 `agent_definition` 三张表会迁移回灌；`environment`、`skill_package` 与 `plugin_credential` 不在迁移域内（`environment` 行连同注册令牌一起丢失，因此已有 Daemon token 文件无法再认证：必须重新创建 Environment Card 并把新令牌写回各主机，Daemon 才能重连并重建 `environment_connection` 运行投影；`skill_package` 与 `plugin_credential` 在重建后需重新创建）；Platform MCP 配置（`mcp_server`/`mcp_tool`）在重建后按需重新创建或发现；`system_setting` 取 V1 默认聚合；全部运行时数据（会话/Harness/Canvas/Project/Issue/Storage）都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
-- 导出与回灌只承认和当前 V1 完全一致的三张 catalog 表列集合。额外列、缺失列和任何旧结构都在写产物或回灌前直接失败；常驻维护入口不判别旧 baseline，不投影旧 `environment_id` / `toolIds`，也不读取 `mcp_tool` 等非迁移域来补齐数据。历史迁移实现由 Git 保存，不作为当前数据库维护契约。
-- 导出的 catalog 包与全库冻结快照/备份含 Provider credential 等敏感数据，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储；维护完成且验证通过后，按部署侧备份策略安全清理或留存。
+Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
+Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
+INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待核查，具体恢复见 Canvas Infra。
+引用连线从 Function args 投影。
 
-就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：由 PostgreSQL 的 DDL lock 保证执行边界，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则后续 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
+Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
+阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
+Harness 命令按 sequence 与 idempotencyKey 唯一，Join 固定匹配回执与交付坐标。
+Work lease 成对，required_environment_id 非空仅适用于 TOOL。
 
-完整的执行步骤、脚本参数、失败处理和清理约定见 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建)。
+ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
+PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。
+对象清理记录与最后数据库事实消失同事务登记、永久保留，后台重复删除使迟到对象写入最终收敛；
+存储写入本身的阻断仍属于对象存储能力边界。
 
-## 从哪里改
+通知只作提交后回读/唤醒提示。Thread/Canvas 版本由应用推进，数据库 trigger 根据已变化事实发提示；
+Project 写库通知由 repository 发送。恢复依赖权威行、poll 和租约，而非通知保存。
 
-- 加表/加列/改约束：直接改 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，保持「按区域分组、cycle-closing 外键后置」的既有顺序；然后按上面的规则重建数据库，再同步 mapper 与领域校验。改完先跑结构测试，它会立刻指出列、约束与表集合的偏差。
-- 加 profile 数据：写进对应的 `R__*.sql`，使用 `on conflict` 或先删后插保证可重跑；不要放真实凭据。
-- 判断约束是否够用：如果一条不变量只写在 Java 里而并发写入可以绕过它，就应该在 SQL 里补 check / unique / FK；反之运行时校验的策略（如工作流配置合法性）不要硬塞进数据库。
+## 修改结构
 
-测试入口：
+修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
+已有数据库记录 Flyway checksum，源码变更须通过批准的数据库维护操作才能应用；
+共享环境的 Review、维护窗口、备份保密与恢复步骤以
+[共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
+本模块文档描述最终结构，操作指南负责数据库变更流程。
 
-- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 39 张业务及基础设施表、快照一致性、旧对象清除与 SQL 探针。
-- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 表集合精确相等、Harness 执行协议七表与 `harness_` 前缀允许集（含 `harness_thread_join`）限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
-- [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
-- [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联、对象清理记录的主键与非空约束。
-- [`PostgresqlSchemaSeedTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaSeedTest.java)：三份 seed 的幂等性、V1 默认 settings 解码、e2e seed 无凭据。
-- [`ProjectWorkflowServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectWorkflowServiceIntegrationTest.java)、[`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueRunAcceptanceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueRunAcceptanceIntegrationTest.java)、[`IssueStageBudgetIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueStageBudgetIntegrationTest.java)、[`IssueWorkStoreIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueWorkStoreIntegrationTest.java)：Project/Issue 工作流、生命周期、Run 接受、阶段预算与 Work 调度。
-- [`FlywayBootstrapArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java) 与 [`FlywayAutoConfigurationIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java)：唯一 V1、受控 seed 清单、各模块依赖 scope，以及在空库里真实执行迁移。
+新增 seed 数据放入对应 repeatable SQL，保持幂等并使用公开占位值。
+并发或旁路写入可违反的不变量用 CHECK/unique/FK 兜底，策略校验保留在应用层。
 
----
+## 测试入口
 
-上级：[系统设计](../system-design.md)。相关文档：[Canvas Infra](canvas-infra.md)、[Platform](platform.md)、[Web](web.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。
+[`FreshInstallSchemaContractTest`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)
+在隔离 PostgreSQL 执行 baseline，检查快照与 SQL 探针。
+[Platform schema 测试](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql)
+覆盖精确表/列/外键/trigger、非法事实、Blob 引用、删除语义和 seed 幂等；
+[Web bootstrap 测试](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)
+验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
+
+上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Web](web.md)、
+[Canvas Infra](canvas-infra.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。

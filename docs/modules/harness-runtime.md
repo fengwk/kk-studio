@@ -1,6 +1,6 @@
 # Harness Runtime
 
-Harness 要回答的是：用户这一句话说完之后，系统究竟记住了什么、还欠什么、正在做什么、接下来该谁做。这四个问题分别由四份持久化事实回答——Session 与 append-only Entry Tree 记录「说过什么」，命令邮箱记录「还欠什么」，Invocation 记录「正在做什么」，[`Work`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/work/Work.java) 记录「该由谁在哪台机器上做」。`harness-runtime` 就是把用户输入、模型流式输出、工具副作用、停止与审批全部折叠进这四份事实、并在进程崩溃或消息丢失后沿同一条路径重新推进的地方。
+`harness-runtime` 维护会话执行协议：Session 与 append-only Entry Tree 保存历史，命令邮箱保存已接受输入，Invocation 保存调用状态，Work 保存调度义务。用户输入、模型结果、工具副作用和控制操作沿这些持久事实推进，恢复复用同一状态转换路径。
 
 本模块是纯 Java：生产依赖只有 `harness-common`、`harness-tool`、`harness-environment`、`harness-contributor-api`（Tool SPI 与目录类型）、Jackson、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化实现与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，外部执行装配在 [Platform](platform.md) 与 [Web](web.md)。
 
@@ -24,12 +24,12 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 跨实体的多行事务必须按同一层级取锁，实现层负责在真正取锁前拒绝逆序：
 
 ```text
-task 准入（全局事务级 advisory lock，仅 task 接受路径）
-  -> tree（执行树的根 Thread，事务级 advisory lock）
-  -> Session -> Thread（UUID 升序）-> Commands（sequence 升序）
-  -> ModelInvocation -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
-  -> Work（type + UUID 升序）
+前置 advisory 围栏：task 准入（仅接受路径）-> tree（根 UUID 升序）
+行锁阶梯：Session -> Thread -> Command -> Model -> Tool -> Work
 ```
+
+这两组锁分别跟踪：行锁守卫维护六级 rank，advisory 围栏先于业务行锁。
+同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
 task 接受先取全局准入锁，跨所有执行树统计非空闲子 Thread，保证全局额度判定与创建原子；根 Thread 不计入子代理额度。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
@@ -121,7 +121,7 @@ systemInstruction / toolBindings / subagentBindings / cacheControl
 工具与 Subagent 名各自唯一；携带环境的 Tool binding 共享 Branch 冻结的
 `EnvironmentId` 与用户可见 `environmentName`，后者是历史投影判定 native 资格的
 durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
-`systemInstruction`，Runtime 不再维护第二份 Skill binding。完整历史、可由 bindings
+`systemInstruction`，Skill 读取复用普通工具路径。完整历史、可由 bindings
 派生的 Provider tools、Branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在
 各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)
 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`
@@ -131,9 +131,9 @@ durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
 [`ProviderMessageProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ProviderMessageProjector.java) 将语义 Context 投影为与 Provider SDK 无关的 `ProviderMessage`：
 
 - **会话角色**：`ProviderMessageRole` 仅有 `USER`、`ASSISTANT`、`TOOL`，系统指令由顶层 `systemInstruction` 单独承载，会话消息中绝不出现 SYSTEM 角色。
-- **动态工具降级**：历史工具调用的 native 资格按次判定。调用名必须在本次请求的工具绑定中，且该调用冻结时的 Environment 名必须与当前同名工具的 Environment 名一致；任一条件不满足（工具未绑定、Environment 已切换、未知工具）即降级——调用不再出现在 ASSISTANT wire 消息中，与其后续 ToolResult 配对后合并为单条 USER `Previous context:` 上下文，绝不产生 TOOL 消息，也不输出 toolCallId 或 `Tool call` / `Tool result` 伪协议。降级只发生在本次调用投影结果中，durable Entry 与 `callIndex` 永不被改写，也不存在 `historyText` 重写。
+- **动态工具降级**：native 资格按本次 toolBindings 与调用冻结的 Environment 名判断。工具未绑定、环境名变化或工具未知时，调用与结果配对为 USER `Previous context:` 语义上下文，省去协议身份与 TOOL 角色。投影只影响本次请求，durable Entry 与 callIndex 保持原事实。
 - **降级动作来源**：每个降级项形如 `<action>:`（失败时 `<action> failed:`）加该结果的可读内容。`<action>` 来自调用成功时冻结在 `ProviderToolCall.historyAction`（进而落入 durable `ToolCallMessageContent.historyAction`）的 Tool 语义动作；没有该动作时使用确定性中性回退 `external operation:`，逐字围栏保留全部 arguments，因此投影既不猜测第三方工具语义，也不需要重新调用 Tool 代码。未被任何结果配对的降级调用以 `No result provided` 表达，不合成 TOOL 结果。
-- **结果输出顺序**：同一 assistant 之后的 native TOOL 结果严格先于降级 USER 上下文输出，以保证 provider 要求的 tool-call adjacency，组内保持相对顺序。只有由降级调用组成的 assistant 消息整条不再输出（其语义已完整进入 USER 上下文）。
+- **结果输出顺序**：同一 assistant 后的 native TOOL 结果先于降级 USER 上下文，保持 tool-call adjacency 和组内顺序。仅含降级调用的 assistant 由 USER 语义上下文替代。
 - **动态无标签围栏**：降级内容中的逐字 payload 使用动态围栏（反引号数取 `max(3, 内容中最长反引号连续段 + 1)`，不带语言标识），防止逐字 payload 中的反引号与空白被误读。
 - **回放状态控制**：以上动态降级仅适用于没有 `ProviderReplayState` 的 assistant 消息。携带 replay 的消息若需降级，在改写前以 `INVALID_REQUEST` 拒绝；Runtime 不解析或丢弃不透明的 native payload。未被改写的消息保留 replay state。物化失败在 Gateway 启动前收敛为 FAILED；失去 claim 时不改写其他执行者的状态。恢复方式是还原原工具绑定/环境，或在新上下文中显式提供摘要。
 - **未配对调用处理**：对当前连续 Tool chain 中未配对的 native ToolCall，在角色切换或 Context 结束前合成 error ToolResult `No result provided`（仅存在于本次 ProviderRequest，不写 Session Entry）；降级调用只在 USER 上下文中体现，不合成结果。
@@ -279,7 +279,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |
 | `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；Environment name 进入 settings，内部路由 ID 与目录不进入分支历史 |
 | `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
-| `runtime.input` | `ask_user` 冻结问卷的值契约（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 纯值对象与校验：不访问 Store、不做 I/O；等待冻结与派发门禁归 `runtime.processor` |
+| `runtime.input` | `ask_user` 问卷值（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 提供纯值校验，等待冻结与派发门禁由 runtime.processor 承接 |
 | `runtime.interaction` | `PendingInteraction` 与 `PendingInteractionPage`：WAITING_INPUT / WAITING_APPROVAL 的只读投影与稳定分页 | 不新增持久化事实，也不持有产品归属；owner 与 Pane 跳转由上层按 Session/Thread 解析 |
 | `runtime.invocation.codec` | Model/Tool 持久化列的严格确定性 JSON 编解码 | 未知、缺失、重复或尾随字段直接拒绝 |
 | `runtime.invocation.model` | `ModelInvocation` 状态机、`ModelRequestSpec`、重试审计与 `ModelRequestMaterializer` | 调度租约归 `runtime.work`；请求使用供应商中立模型 |
@@ -293,7 +293,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
 | `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink`、`WorkDispatchAdmission` 与 `WorkDispatchRequest` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
-| `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码；Tool partial 携带逐条生成、重投递复用的 canonical `eventId` identity | 有损 live overlay，不持久化、不承担恢复或审计 |
+| `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码；Tool partial 携带重投递复用的 canonical eventId | 有损 live overlay，恢复与审计以 durable Snapshot/Entry 为准 |
 | `runtime.resource` | `ResourceStore` 内容寻址资源存取端口 | 基础设施能力，不参与 Agent Loop 正确性判定 |
 | `runtime.retry` | `InvocationRetryPolicy`、`InvocationRetryPolicyProvider`、退避策略 | 只计算重试可行性与延迟，不读时钟、不写状态 |
 | `runtime.session` | `Session` 实体与不可变消息内容块（Text、Image、Audio、Video、Resource、Thinking、ToolCall 等） | 与 `harness_session` 对齐；Entry 节点与 payload 在 `runtime.history` |

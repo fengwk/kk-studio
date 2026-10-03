@@ -1,6 +1,6 @@
 # Harness Infra
 
-Runtime 把「该由谁做什么」写成 `harness_work` 里的一行，把「说过什么」写成 append-only Entry 树；`harness-infra` 要回答的是这些事实究竟落在哪里、谁有权推进它们、以及节点挂掉之后系统怎么自己接回来。答案是同一份 PostgreSQL：行锁决定谁能写，`lease_token` / `lease_until` 决定谁还在拥有，LISTEN/NOTIFY 只是让发现更快、绝不承载状态。
+`harness-infra` 将 Runtime 的 Entry、命令、Invocation 与 Work 端口适配到 PostgreSQL。行锁协调写入，lease token/deadline 限定执行所有权，Work 行支持重启后的认领恢复；LISTEN/NOTIFY 降低发现延迟。
 
 模块把 Runtime 的强类型事务原语、Realtime 端口与 `ResourceStore` 端口适配到 PostgreSQL、PostgreSQL 通知通道与本地文件系统；生产依赖为 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC 与 PostgreSQL driver，测试通过 Flyway 与 Testcontainers 起真实数据库。边界见 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)，表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
 
@@ -13,13 +13,13 @@ Runtime 把「该由谁做什么」写成 `harness_work` 里的一行，把「�
 [`PostgresqlHarnessTransaction`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessTransaction.java) 实现 [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 的全部原语，并在句柄内记录当前达成的最高锁阶梯，实现层保证 Runtime 声明的锁序真的被遵守：
 
 ```text
-task 准入（全局事务级 advisory lock，仅 task 接受路径）
-  -> tree（执行树根 Thread 的事务级 advisory lock）
-  -> Session (KEY SHARE / FOR UPDATE) -> Thread（UUID 升序）
-  -> Commands（sequence 升序）-> ModelInvocation
-  -> ToolInvocation siblings（assistantEntryId + callIndex 升序）
-  -> Work（target type + UUID 升序）
+前置 advisory 围栏：task 准入（仅接受路径）-> tree（根 UUID 升序）
+行锁阶梯：Session -> Thread -> Command -> Model -> Tool -> Work
 ```
+
+advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 sequence、
+Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
+持有执行树锁时，生命周期交付允许回写同树 Command；其他逆序请求立即失败。
 
 执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。
 
@@ -63,7 +63,7 @@ conflict: available_at = least(current, statement_timestamp())
           lease_token / lease_until 保持不变
 ```
 
-需要把一次唤醒（重试）排到未来时由 `rescheduleWork` 用相对 `Duration` 表达，目标时刻为 `statement_timestamp() + delay`；`delay` 必须是非负整毫秒（零表示立即）。它总是清空租约、保留 `wake_version`：认领后没有新 wake 时采用目标时刻；已有新 wake 时取当前 `available_at` 与目标时刻的最小值，避免旧执行体延后新的唤醒。因此 JVM 时钟与数据库的偏差不会改变重试的相对延迟。
+`rescheduleWork` 接收非负整毫秒 Duration。实现读取数据库当前时刻，在 Java 中计算 databaseNow.plus(delay) 并调用 Work.reschedule，再更新行；零表示立即。它清空租约、保留 wake_version：认领后未产生新 wake 时采用目标时刻，已有新 wake 时保留较早 available_at。数据库时间域决定相对延迟，调用方 now 只校验精度。
 
 环境亲和性一旦绑定即冻结：upsert 的更新条件为 `harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null`，因此既有行绑定了 `required_environment_id` 时，后续传入不一致的非空环境 ID 会让 UPDATE 命中 0 行，实现层随即抛 `IllegalArgumentException` 拒绝，执行环境不会漂移。
 
