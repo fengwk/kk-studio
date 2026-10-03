@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { assert, assertDecimalVersion, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
 import { assertDistributedContext } from '../lib/distributed.mjs'
 import { registerCase } from '../lib/registry.mjs'
+import { createDurationTimer } from '../lib/time.mjs'
 
 const ENV_A_ID = '33333333-3333-3333-3333-333333333333'
 const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
@@ -287,9 +288,11 @@ registerCase({
 
     // 2. 故障注入：断开 node A DB 网络，验证 node A 不会用本机 websocket 绕过 DB 返回成功
     let dbLossError = null
+    let dbLossDurationMs = null
     try {
       ctx.runDistributedCommand('disconnect-db-a')
 
+      const elapsed = createDurationTimer()
       dbLossError = await expectHttpError(() =>
         ctx.callNode(
           'a',
@@ -299,6 +302,7 @@ registerCase({
           10_000,
         ),
       )
+      dbLossDurationMs = elapsed()
       // 只约束「必须失败」：具体 4xx/5xx 由应用错误映射决定，关键是绝不返回 200。
       assert(
         dbLossError.status >= 400,
@@ -329,6 +333,7 @@ registerCase({
       JSON.stringify(
         {
           dbLossStatus: dbLossError?.status ?? null,
+          dbLossDurationMs,
           recoveredOnA: { status: recoveredOnA.status, homeDirectory: recoveredOnA.homeDirectory },
           recoveredOnB: { status: recoveredOnB.status, homeDirectory: recoveredOnB.homeDirectory },
         },

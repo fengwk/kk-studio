@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
@@ -6,9 +8,12 @@ import {
   ALLOWED_DISTRIBUTED_COMMANDS,
   createBaseUrls,
   createNodeCall,
+  copyDistributedAppLogs,
   runDistributedCommand,
 } from '../lib/distributed.mjs'
 import { redactSecrets } from '../lib/redact.mjs'
+import { HttpError } from '../lib/http.mjs'
+import { ALL_CASES } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
 test('createBaseUrls requires both node URLs and normalizes trailing slashes', () => {
@@ -98,6 +103,131 @@ test('redactSecrets masks credential values and keeps ordinary text', () => {
     'plain text and baseUrl=https://host.example/v1 stay',
   )
   assert.equal(redactSecrets(null), null)
+})
+
+test('app file logs are copied before teardown, redacted, and raw staging is removed', () => {
+  // Intent: real filesystem copying covers logs absent from stdout without leaking raw credentials.
+  const runDir = mkdtempSync(path.join(tmpdir(), 'distributed-report-test-'))
+  const stagingDirs = []
+  const invocations = []
+  const exec = (cmd, args) => {
+    invocations.push({ cmd, args })
+    if (args[0] === 'compose') return `${args.at(-1)}-container\n`
+    assert.equal(args[0], 'cp')
+    assert.match(args[1], /^app-[ab]-container:\/app\/logs\/\.$/)
+    const staging = args[2]
+    stagingDirs.push(staging)
+    mkdirSync(path.join(staging, 'nested'))
+    writeFileSync(path.join(staging, 'kk-studio-all.log'), 'PgConnection.isValid\npassword=test-secret')
+    writeFileSync(path.join(staging, 'nested', 'trace.log'), 'Authorization: Bearer test-token')
+    writeFileSync(path.join(staging, 'archive.log.gz'), 'not safe to copy')
+    symlinkSync(path.join(staging, 'kk-studio-all.log'), path.join(staging, 'link.log'))
+    return ''
+  }
+  try {
+    copyDistributedAppLogs(runDir, { exec, repoRoot: '/test/repo' })
+    assert.equal(invocations.length, 4)
+    assert.deepEqual(invocations[0].args,
+      ['compose', '-f', '/test/repo/deploy/distributed/compose.yaml', 'ps', '-q', 'app-a'])
+    for (const service of ['app-a', 'app-b']) {
+      const dest = path.join(runDir, 'logs', `distributed-${service}`)
+      assert.equal(readFileSync(path.join(dest, 'kk-studio-all.log'), 'utf8'),
+        'PgConnection.isValid\npassword: [REDACTED]')
+      assert.equal(readFileSync(path.join(dest, 'nested', 'trace.log'), 'utf8'),
+        'Authorization: [REDACTED]')
+      assert.equal(existsSync(path.join(dest, 'archive.log.gz')), false)
+      assert.equal(existsSync(path.join(dest, 'link.log')), false)
+    }
+    assert.ok(stagingDirs.every((dir) => !existsSync(dir)))
+  } finally {
+    rmSync(runDir, { recursive: true, force: true })
+  }
+})
+
+test('app log collection cleans partial copies and continues after missing nodes', () => {
+  // Intent: docker cp can fail after writing raw files; cleanup must also cover this failure path.
+  const runDir = mkdtempSync(path.join(tmpdir(), 'distributed-report-test-'))
+  let staging
+  const services = []
+  try {
+    copyDistributedAppLogs(runDir, { exec: (cmd, args) => {
+      if (args[0] === 'compose') {
+        services.push(args.at(-1))
+        return args.at(-1) === 'app-a' ? 'app-a-container\n' : ''
+      }
+      staging = args[2]
+      writeFileSync(path.join(staging, 'partial.log'), 'password=test-secret')
+      throw new Error('container stopped during copy')
+    } })
+    assert.deepEqual(services, ['app-a', 'app-b'])
+    assert.equal(existsSync(staging), false)
+    assert.equal(existsSync(path.join(runDir, 'logs')), false)
+  } finally {
+    rmSync(runDir, { recursive: true, force: true })
+  }
+})
+
+test('matrix collects app file logs before publishing reports and shell teardown', async () => {
+  // Intent: guard production wiring, not merely the injectable copy helper.
+  const fs = await import('node:fs')
+  const runner = fs.readFileSync(path.join(REPO_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs'), 'utf8')
+  assert.match(runner, /copyDistributedAppLogs\(runDir\)/)
+  const collectAt = runner.indexOf(
+    'if (args.distributed) maybeCopyDistributedContainerLogs(runDir)',
+    runner.indexOf('async function main'),
+  )
+  assert.ok(collectAt >= 0, 'distributed collection must be wired in main')
+  assert.ok(collectAt < runner.lastIndexOf('publishLatest('), 'collect before publishing')
+  const shell = fs.readFileSync(path.join(REPO_ROOT, 'scripts/dev/verify/e2e/run.sh'), 'utf8')
+  assert.match(shell, /trap cleanup_distributed EXIT/)
+})
+
+test('DB loss case keeps one 10s fault request and restores both READY projections', async () => {
+  // Intent: record HTTP timing without retrying a failed operation or changing its budget.
+  await import('../cases/distributed.mjs')
+  const faultCase = ALL_CASES.find((entry) => entry.id === 'distributed.db_loss_fail_closed')
+  for (const transportTimeout of [false, true]) {
+    const commands = []
+    const recoveredNodes = []
+    let disconnected = false
+    let faultRequests = 0
+    let summary
+    const ctx = {
+      baseUrls: { a: 'http://a', b: 'http://b' },
+      runDistributedCommand(command) {
+        commands.push(command)
+        disconnected = command === 'disconnect-db-a'
+      },
+      async callNode(node, method, requestPath, body, timeoutMs) {
+        if (disconnected) {
+          faultRequests++
+          assert.equal(node, 'a')
+          assert.equal(timeoutMs, 10_000)
+          if (transportTimeout) throw new Error('timeout GET')
+          throw new HttpError(500, 'database disconnected', requestPath)
+        }
+        if (commands.length) recoveredNodes.push(node)
+        return { json: { data: { ready: true, status: 'READY', homeDirectory: '/home/test' } } }
+      },
+      writeArtifact(name, data) {
+        assert.equal(name, 'recovery-summary.json')
+        summary = JSON.parse(data)
+      },
+    }
+    if (transportTimeout) {
+      await assert.rejects(() => faultCase.run(ctx), /expected HttpError/)
+      assert.equal(summary, undefined)
+    } else {
+      await faultCase.run(ctx)
+      assert.equal(summary.dbLossStatus, 500)
+      assert.ok(summary.dbLossDurationMs >= 0)
+      assert.deepEqual(recoveredNodes, ['a', 'b'])
+      assert.equal(summary.recoveredOnA.status, 'READY')
+      assert.equal(summary.recoveredOnB.status, 'READY')
+    }
+    assert.equal(faultRequests, 1, 'never retry the fault request')
+    assert.deepEqual(commands, ['disconnect-db-a', 'reconnect-db-a'])
+  }
 })
 
 test('runDistributedCommand forwards whitelisted commands with exact arguments and repoRoot', () => {

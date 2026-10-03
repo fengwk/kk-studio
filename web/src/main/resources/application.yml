@@ -28,8 +28,10 @@ spring:
     # 替换为 PostgreSQL {password}
     password: {password}
     hikari:
-      # 边界 1（连接池获取）：从连接池借出连接的最长等待（毫秒），低于默认 10s directory budget
+      # 边界 1（连接池获取）：连接池等待预算（毫秒）；借出后的存活校验可能额外消耗 validation-timeout
       connection-timeout: 5000
+      # 借出临近等待截止时仍可执行存活校验，显式限制为 1s，避免默认 5s 校验耗尽 10s 客户端预算
+      validation-timeout: 1000
       data-source-properties:
         # 边界 2（TCP connect）：PostgreSQL JDBC 建立物理 TCP 连接上限（秒），防止断网时持续等待
         connectTimeout: "5"

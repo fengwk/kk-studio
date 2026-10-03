@@ -32,7 +32,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 import { httpJson, pageResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
-import { createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
+import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
 import { redactSecrets } from './lib/redact.mjs'
 import { ALL_CASES } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
@@ -306,6 +306,7 @@ function maybeCopyDistributedContainerLogs(runDir) {
     if (logs === null) continue
     writeFileSync(path.join(dest, `distributed-${service}.log`), redactSecrets(logs), 'utf8')
   }
+  copyDistributedAppLogs(runDir)
 }
 
 function distributedContainerLogs(service) {
