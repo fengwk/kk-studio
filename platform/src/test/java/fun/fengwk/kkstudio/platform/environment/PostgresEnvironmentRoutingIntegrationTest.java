@@ -121,6 +121,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           }
 
           @Override
+          public List<Environment> listAll() {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
           public Environment getById(UUID id) {
             List<Environment> list =
                 jdbcTemplate.query(

@@ -5,10 +5,15 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 
+import java.util.List;
+
 /** 全局 provider 仓库。 */
 public interface AgentProviderRepository {
 
   Page<AgentProvider> page(PageQuery pageQuery);
+
+  /** 按 {@code name asc} 列出全部 provider（含凭据），用于一次性导出快照。 */
+  List<AgentProvider> listAll();
 
   AgentProvider getByName(String name);
 

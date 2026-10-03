@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -196,6 +197,87 @@ public class McpServerServiceImpl implements McpServerService {
             });
 
     return McpServerConverter.convert(appliedServer, discovered.size());
+  }
+
+  @Override
+  public McpServerDTO importServer(
+      String name,
+      String url,
+      Map<String, String> headers,
+      Boolean enabled,
+      Long timeoutMillis,
+      List<McpTool> discoveredTools) {
+    String canonicalName = McpServerMutationValidator.requireName(name);
+    HttpConfig config =
+        McpServerMutationValidator.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
+    McpServer existing = repository.getForUpdate(canonicalName).orElse(null);
+    if (existing == null) {
+      McpServer server = new McpServer();
+      server.setName(canonicalName);
+      applyConfig(server, config);
+      server.setDiscoveryStatus(McpDiscoveryStatus.UNVERIFIED);
+      server.setVersion(0L);
+      try {
+        if (!repository.create(server)) {
+          throw new IllegalStateException("Failed to insert MCP server");
+        }
+      } catch (DuplicateKeyException error) {
+        throw new AiDuplicateException(
+            RESOURCE, "mcp server name already exists: " + canonicalName, error);
+      }
+      if (discoveredTools != null) {
+        for (McpTool tool : discoveredTools) {
+          repository.insertTool(tool);
+        }
+        repository.updateDiscoveryStatus(canonicalName, 0L, McpDiscoveryStatus.AVAILABLE);
+        server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+      }
+      return McpServerConverter.convert(
+          server, discoveredTools == null ? 0 : discoveredTools.size());
+    }
+
+    long expected = existing.getVersion();
+    applyConfig(existing, config);
+    existing.setDiscoveryStatus(McpDiscoveryStatus.UNVERIFIED);
+    if (!repository.update(existing, expected)) {
+      throw new AiVersionConflictException(
+          RESOURCE, CatalogVersions.format(expected), CatalogVersions.format(existing.getVersion()));
+    }
+    long updatedVersion = expected + 1;
+    if (discoveredTools != null) {
+      // 成功发现整体物理替换：被引用的旧工具名若将消失，则 fail closed 并完整保留旧快照。
+      Set<String> currentNames =
+          repository.listTools(canonicalName).stream()
+              .map(McpTool::getName)
+              .collect(Collectors.toSet());
+      Set<String> nextNames =
+          discoveredTools.stream().map(McpTool::getName).collect(Collectors.toSet());
+      Set<String> referencedNames = new HashSet<>(repository.selectReferencedToolNames());
+      for (String currentName : currentNames) {
+        if (!nextNames.contains(currentName) && referencedNames.contains(currentName)) {
+          throw new AiInUseException(
+              RESOURCE,
+              "mcp tool "
+                  + currentName
+                  + " is currently referenced by an agent and cannot be removed");
+        }
+      }
+      repository.deleteTools(canonicalName);
+      for (McpTool tool : discoveredTools) {
+        repository.insertTool(tool);
+      }
+      if (!repository.updateDiscoveryStatus(
+          canonicalName, updatedVersion, McpDiscoveryStatus.AVAILABLE)) {
+        throw new AiVersionConflictException(
+            RESOURCE, CatalogVersions.format(expected), CatalogVersions.format(updatedVersion));
+      }
+      existing.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    }
+    int toolCount =
+        discoveredTools == null
+            ? repository.listTools(canonicalName).size()
+            : discoveredTools.size();
+    return McpServerConverter.convert(existing, toolCount);
   }
 
   @Override

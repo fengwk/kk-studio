@@ -5,10 +5,15 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 
+import java.util.List;
+
 /** 全局 Agent definition 仓库。 */
 public interface AgentDefinitionRepository {
 
   Page<AgentDefinition> page(PageQuery pageQuery);
+
+  /** 按 {@code name asc} 列出全部 Agent definition，用于一次性导出快照。 */
+  List<AgentDefinition> listAll();
 
   AgentDefinition getByName(String name);
 

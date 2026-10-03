@@ -46,6 +46,10 @@ public interface AgentDefinitionMapper extends BaseMapper {
       })
   List<AgentDefinitionDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
+  @Select("select " + COLUMNS + " from agent_definition order by name asc")
+  @ResultMap("agentDefinitionResultMap")
+  List<AgentDefinitionDO> listAll();
+
   @Select("select " + COLUMNS + " from agent_definition where name = #{name}")
   @ResultMap("agentDefinitionResultMap")
   AgentDefinitionDO getByName(@Param("name") String name);
