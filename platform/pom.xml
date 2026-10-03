@@ -190,6 +190,7 @@
                                         <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressPolicy</include>
                                         <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressDnsResolver</include>
                                         <include>fun/fengwk/kkstudio/platform/plugin/resource/HttpRemoteMediaTransport</include>
+                                        <include>fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration</include>
                                     </includes>
                                     <limits>
                                         <limit>
