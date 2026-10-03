@@ -154,7 +154,7 @@ test('frontend diagnostics survive failed gates and upload only report directori
 
 test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
   // Installing a client alone is insufficient: PATH must select every binary from that major.
-  const fixture = readFileSync(new URL('scripts/ops/tests/test_agent_catalog_integration.py', root), 'utf8')
+  const fixture = readFileSync(new URL('scripts/ops/tests/test_reset_database_integration.py', root), 'utf8')
   const major = fixture.match(/^POSTGRES_MAJOR = (\d+)$/m)?.[1]
   assert.ok(major)
   assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)

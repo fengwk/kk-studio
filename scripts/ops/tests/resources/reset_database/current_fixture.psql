@@ -1,4 +1,8 @@
--- Deterministic current-V1 catalog fixture for maintenance lifecycle tests.
+-- Deterministic current-V1 catalog fixture for the database reset lifecycle tests.
+--
+-- It populates the three catalog tables so a test can prove reset keeps the data available for
+-- rollback (frozen snapshot / full backup) before the external schema initialization re-creates
+-- an empty database.
 insert into agent_provider (name, description, provider_type, base_url, credential, config,
     connection_generation_id, created_at, updated_at, version) values
     ('probe-provider', 'probe provider description', 'openai', 'https://probe.invalid/v1',
