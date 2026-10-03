@@ -22,6 +22,14 @@ public final class DaemonMain {
         --reconnect-initial <duration>   Initial reconnect backoff (default: PT1S)
         --reconnect-max <duration>       Maximum reconnect backoff (default: PT30S)
 
+      Local proxy:
+        http_proxy / https_proxy         Independent HTTP proxy URLs (http://host:port);
+                                         uppercase variants supported, lowercase wins.
+        no_proxy                        Comma-separated bypass hosts/domains/IPs; applies
+                                         to environment and OS proxies. Empty proxy means
+                                         DIRECT; unset proxy falls back to the JDK OS selector.
+                                         JVM java.net.useSystemProxies defaults to true.
+
       Host identity:
         --note <text>                    Single-line note shown to the model; at most once
         --data-dir <path>                Absolute daemon data directory holding the process lock
@@ -67,6 +75,7 @@ public final class DaemonMain {
       return;
     }
     DaemonConfig daemonConfig = DaemonConfig.fromArgs(args);
+    DaemonProxyInitializer.install(System.getenv());
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(daemonConfig.dataDir())) {
       CodingToolsConfig toolsConfig =
           CodingToolsConfig.fromCli(
