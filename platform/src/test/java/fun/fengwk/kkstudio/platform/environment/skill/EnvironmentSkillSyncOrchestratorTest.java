@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,7 +59,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 
@@ -81,7 +84,7 @@ class EnvironmentSkillSyncOrchestratorTest {
   private static final String COMMIT_B = "bbbbbbbbccccccccddddddddaaaaaaaabbbbbbbb";
   private static final String PREVIOUS_COMMIT = "ccccccccddddddddaaaaaaaabbbbbbbbcccccccc";
   private static final Instant NOW = Instant.parse("2026-09-21T06:00:00Z");
-  private static final Duration SYNC_TIMEOUT = Duration.ofMinutes(5);
+  private static final Duration SYNC_TIMEOUT = Duration.ZERO;
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
   private static final DaemonCapabilities CAPABILITIES =
       new DaemonCapabilities(
@@ -504,6 +507,80 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     assertEquals(List.of(), transport.requests);
     verify(registry, never()).replaceSkillState(any(), any(), any(), any());
+  }
+
+  /** 意图：无 deadline 的等待仍可通过 transport 断线错误或线程中断取消句柄，并提交唯一失败终态。 */
+  @Test
+  void unboundedWaitStillConvergesOnDisconnectAndInterruption() throws Exception {
+    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
+    for (boolean interrupt : List.of(false, true)) {
+      CountDownLatch invoked = new CountDownLatch(1);
+      AtomicReference<EnvironmentCapabilityExecutionListener> listener = new AtomicReference<>();
+      EnvironmentCapabilityExecutionHandle handle =
+          mock(EnvironmentCapabilityExecutionHandle.class);
+      EnvironmentCapabilityTransport pending =
+          (environment, request, callback) -> {
+            assertEquals(Duration.ZERO, request.timeout());
+            listener.set(callback);
+            invoked.countDown();
+            return handle;
+          };
+      ExecutorService executor = Executors.newSingleThreadExecutor();
+      try {
+        EnvironmentSkillSyncOrchestrator async =
+            new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
+        async.onEnvironmentReady(ENV);
+        assertTrue(invoked.await(2, TimeUnit.SECONDS));
+        if (interrupt) {
+          executor.shutdownNow();
+        } else {
+          listener.get().onError(new IllegalStateException("disconnected"));
+          executor.shutdown();
+        }
+        assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS));
+        verify(handle).cancel();
+      } finally {
+        executor.shutdownNow();
+      }
+    }
+    assertEquals(2, terminalEvents().size());
+    assertTrue(
+        terminalEvents().stream()
+            .allMatch(event -> EnvironmentEvent.TYPE_SKILL_SYNC_FAILED.equals(event.type())));
+  }
+
+  /** 意图：ZERO 是真正等待终态而非 get(0)；跨过短测试 budget 后仍接受成功结果，不提前取消。 */
+  @Test
+  void unboundedWaitAllowsDelayedSuccessfulTerminal() throws Exception {
+    catalog.put("aaa", skillPackage("aaa", COMMIT_A));
+    CountDownLatch invoked = new CountDownLatch(1);
+    AtomicReference<EnvironmentCapabilityExecutionListener> listener = new AtomicReference<>();
+    AtomicReference<EnvironmentCapabilityExecutionRequest> request = new AtomicReference<>();
+    EnvironmentCapabilityExecutionHandle handle = mock(EnvironmentCapabilityExecutionHandle.class);
+    EnvironmentCapabilityTransport pending =
+        (environment, call, callback) -> {
+          request.set(call);
+          listener.set(callback);
+          invoked.countDown();
+          return handle;
+        };
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      EnvironmentSkillSyncOrchestrator async =
+          new EnvironmentSkillSyncOrchestrator(registry, catalogQuery, pending, executor, CLOCK);
+      async.onEnvironmentReady(ENV);
+      assertTrue(invoked.await(2, TimeUnit.SECONDS));
+      assertEquals(Duration.ZERO, request.get().timeout());
+      var barrier = executor.submit(() -> {});
+      assertThrows(TimeoutException.class, () -> barrier.get(100, TimeUnit.MILLISECONDS));
+      verify(handle, never()).cancel();
+      listener.get().onComplete(success(request.get()));
+      barrier.get(2, TimeUnit.SECONDS);
+      assertEquals(COMMIT_A, rowSkillState.getFirst().installedCommit());
+      assertEquals(EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED, terminalEvents().getFirst().type());
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   /** 测试意图：onEnvironmentReady 绝不在会话核心线程上执行发送或数据库 IO，发送只在 executor 上发生。 */

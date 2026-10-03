@@ -4,8 +4,8 @@ import { getLocale, translate } from '@/shared/i18n'
 
 export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }): Promise<T>
-  post<T>(url: string, data?: unknown): Promise<T>
-  put<T>(url: string, data?: unknown): Promise<T>
+  post<T>(url: string, data?: unknown, config?: { timeout?: number }): Promise<T>
+  put<T>(url: string, data?: unknown, config?: { timeout?: number }): Promise<T>
   delete<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }): Promise<T>
 }
 
@@ -88,8 +88,10 @@ axiosClient.interceptors.response.use(
 export const apiClient: HttpClient = {
   get: <T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }) =>
     axiosClient.get(url, config) as Promise<T>,
-  post: <T>(url: string, data?: unknown) => axiosClient.post(url, data) as Promise<T>,
-  put: <T>(url: string, data?: unknown) => axiosClient.put(url, data) as Promise<T>,
+  post: <T>(url: string, data?: unknown, config?: { timeout?: number }) =>
+    (config ? axiosClient.post(url, data, config) : axiosClient.post(url, data)) as Promise<T>,
+  put: <T>(url: string, data?: unknown, config?: { timeout?: number }) =>
+    (config ? axiosClient.put(url, data, config) : axiosClient.put(url, data)) as Promise<T>,
   delete: <T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }) =>
     (config ? axiosClient.delete(url, config) : axiosClient.delete(url)) as Promise<T>,
 }

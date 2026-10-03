@@ -104,16 +104,19 @@ class EnvironmentCapabilityCatalogTest {
                 new EnvironmentCapabilityId("unknown.capability")));
   }
 
-  /** 每个模型可见能力都必须携带非空 object input schema 与正超时，且不接受额外属性。 */
+  /** 模型可见能力保持正超时，仅内部 skill.sync 无 deadline；所有 schema 均不接受额外属性。 */
   @Test
-  void everyDescriptorCarriesExecutableSchemaAndPositiveTimeout() {
+  void onlySkillSyncHasUnboundedDeadlineWithExecutableSchema() {
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
       String id = descriptor.id().value();
       InputSchema schema = descriptor.inputSchema();
       assertFalse(schema.additionalProperties(), id);
       assertFalse(schema.properties().isEmpty(), id);
-      assertFalse(
-          descriptor.defaultTimeout().isZero() || descriptor.defaultTimeout().isNegative(), id);
+      assertEquals(
+          descriptor.id().equals(EnvironmentCapabilityIds.SKILL_SYNC),
+          descriptor.defaultTimeout().isZero(),
+          id);
+      assertFalse(descriptor.defaultTimeout().isNegative(), id);
     }
   }
 }

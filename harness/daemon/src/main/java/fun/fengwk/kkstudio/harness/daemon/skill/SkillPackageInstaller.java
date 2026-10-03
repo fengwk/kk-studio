@@ -49,9 +49,29 @@ public final class SkillPackageInstaller {
   private final Path cacheRoot;
   private final Path stagingRoot;
   private final Path backupRoot;
+  private final int connectMillis;
+  private final int readMillis;
   private final ConcurrentHashMap<String, Object> packageLocks = new ConcurrentHashMap<>();
 
   public SkillPackageInstaller(Path skillsRoot, Path cacheRoot, Path stagingRoot, Path backupRoot) {
+    this(
+        skillsRoot,
+        cacheRoot,
+        stagingRoot,
+        backupRoot,
+        GitHttpConnectionFactory.CONNECT_MILLIS,
+        GitHttpConnectionFactory.READ_MILLIS);
+  }
+
+  SkillPackageInstaller(
+      Path skillsRoot,
+      Path cacheRoot,
+      Path stagingRoot,
+      Path backupRoot,
+      int connectMillis,
+      int readMillis) {
+    this.connectMillis = connectMillis;
+    this.readMillis = readMillis;
     this.skillsRoot = Objects.requireNonNull(skillsRoot, "skillsRoot").toAbsolutePath().normalize();
     this.cacheRoot = Objects.requireNonNull(cacheRoot, "cacheRoot").toAbsolutePath().normalize();
     this.stagingRoot =
@@ -122,23 +142,35 @@ public final class SkillPackageInstaller {
         new FileRepositoryBuilder().setGitDir(cacheGitDir.toFile()).setMustExist(true).build()) {
       ObjectId commitId = ObjectId.fromString(targetCommit);
       if (!repo.getObjectDatabase().has(commitId)) {
-        try (Git git = new Git(repo)) {
+        try (Git git = new Git(repo);
+            GitHttpConnectionFactory network =
+                new GitHttpConnectionFactory(connectMillis, readMillis)) {
           boolean fetched = false;
           try {
-            git.fetch().setRemote(repositoryUrl).setRefSpecs(new RefSpec(targetCommit)).call();
+            git.fetch()
+                .setRemote(repositoryUrl)
+                .setTransportConfigCallback(network.callback())
+                .setRefSpecs(new RefSpec(targetCommit))
+                .call();
             fetched = repo.getObjectDatabase().has(commitId);
-          } catch (Exception ignored) {
-            // 回退到按分支拉取
+          } catch (Exception error) {
+            if (!GitHttpConnectionFactory.canFallback(error)) {
+              throw new SkillSyncException(
+                  GitHttpConnectionFactory.failureCode(error), "Git remote fetch failed", error);
+            }
+            // 仅远端不接受 exact object 请求时回退到按分支拉取。
           }
           if (!fetched) {
             try {
               git.fetch()
                   .setRemote(repositoryUrl)
+                  .setTransportConfigCallback(network.callback())
                   .setRefSpecs(
                       new RefSpec("+refs/heads/" + branch + ":refs/remotes/origin/" + branch))
                   .call();
-            } catch (Exception ignored) {
-              // 在下方统一检查 commitId 是否存在
+            } catch (Exception error) {
+              throw new SkillSyncException(
+                  GitHttpConnectionFactory.failureCode(error), "Git branch fetch failed", error);
             }
           }
         }

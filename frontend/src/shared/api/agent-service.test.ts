@@ -151,7 +151,7 @@ describe('agentService', () => {
       branch: 'main',
     }
     await service.createSkillPackage(createPkg)
-    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages', createPkg)
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages', createPkg, { timeout: 0 })
 
     const editPkg = {
       expectedVersion: '1',
@@ -165,14 +165,14 @@ describe('agentService', () => {
       expectedVersion: '2',
     }
     await service.checkSkillPackage('core', checkPkg)
-    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/skill-packages/core/check', checkPkg)
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/skill-packages/core/check', checkPkg, { timeout: 0 })
 
     const publishPkg = {
       expectedVersion: '3',
       targetCommit: '0123456789012345678901234567890123456789',
     }
     await service.publishSkillPackage('core', publishPkg)
-    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/skill-packages/core/update', publishPkg)
+    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/skill-packages/core/update', publishPkg, { timeout: 0 })
 
     await service.deleteSkillPackage('core', '4')
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', {
