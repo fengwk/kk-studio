@@ -18,16 +18,6 @@ export interface EditProjectModalProps {
 type TabKey = 'basic' | 'workflow'
 type ActiveSubmission = 'basic' | 'yolo' | 'workflow' | 'reload' | null
 
-function compareVersions(a: string, b: string): number {
-  try {
-    const ba = BigInt(a)
-    const bb = BigInt(b)
-    return ba < bb ? -1 : ba > bb ? 1 : 0
-  } catch {
-    return 0
-  }
-}
-
 export function EditProjectModal({
   isOpen,
   project,
@@ -105,7 +95,7 @@ function EditProjectModalContent({
   }, [onClose])
 
   const advanceVersion = (newVersion: string) => {
-    setCurrentVersion((prev) => (compareVersions(newVersion, prev) > 0 ? newVersion : prev))
+    setCurrentVersion((prev) => (BigInt(newVersion) > BigInt(prev) ? newVersion : prev))
   }
 
   const handleFormatJson = () => {

@@ -737,6 +737,178 @@ describe('EditProjectModal', () => {
     await user.click(screen.getByRole('button', { name: '保存工作流' }))
     expect(await screen.findByText(/工作流配置更新冲突 \(409\)/i)).toBeInTheDocument()
   })
+
+  it('enforces mutual exclusion between reload and save actions in both directions', async () => {
+    // 测试意图：验证 reload 与保存操作双向互斥：reload 在途时禁止发起保存；保存发起在途时禁止触发 reload
+    const user = userEvent.setup()
+    let resolveReload: (value: ProjectDTO) => void = () => {}
+    let resolveBasic: (value: ProjectDTO) => void = () => {}
+
+    const mockApi = {
+      getProject: vi.fn().mockImplementation(() => new Promise((resolve) => { resolveReload = resolve })),
+      updateProject: vi.fn().mockImplementation(() => new Promise((resolve) => { resolveBasic = resolve })),
+    } as unknown as ProjectsApi
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    // 1. 发起 reload，在途期间保存按钮 disabled 且点击被拦截
+    await user.click(screen.getByRole('button', { name: '刷新版本' }))
+    expect(mockApi.getProject).toHaveBeenCalledTimes(1)
+    const saveBtn = screen.getByRole('button', { name: '保存基础信息' })
+    expect(saveBtn).toBeDisabled()
+    await user.click(saveBtn)
+    expect(mockApi.updateProject).not.toHaveBeenCalled()
+
+    // 完成 reload
+    resolveReload({ ...mockProject, version: '2' })
+    await waitFor(() => {
+      expect(screen.getByText('2')).toBeInTheDocument()
+      expect(saveBtn).not.toBeDisabled()
+    })
+
+    // 2. 发起保存，在途期间刷新版本按钮 disabled 且点击被拦截
+    await user.click(saveBtn)
+    expect(mockApi.updateProject).toHaveBeenCalledTimes(1)
+    const reloadBtn = screen.getByRole('button', { name: '刷新版本' })
+    expect(reloadBtn).toBeDisabled()
+    await user.click(reloadBtn)
+    expect(mockApi.getProject).toHaveBeenCalledTimes(1)
+
+    resolveBasic({ ...mockProject, version: '3' })
+    await waitFor(() => {
+      expect(screen.getByText('3')).toBeInTheDocument()
+    })
+  })
+
+  it('drops late rejection when modal closes and reopens, preventing error pollution in new modal instance', async () => {
+    // 测试意图：验证在途请求失败且遇到关闭重开时，迟到的 reject 被抛弃，不污染新打开的弹窗界面
+    const user = userEvent.setup()
+    let rejectBasic: (reason: unknown) => void = () => {}
+    const basicPromise = new Promise<ProjectDTO>((_, reject) => {
+      rejectBasic = reject
+    })
+    const mockApi = {
+      updateProject: vi.fn().mockImplementation(() => basicPromise),
+    } as unknown as ProjectsApi
+
+    const { rerender } = renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    // 发起保存后立即关闭
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+    expect(mockApi.updateProject).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <EditProjectModal
+          isOpen={false}
+          project={mockProject}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          api={mockApi}
+        />
+      </QueryClientProvider>,
+    )
+
+    // 重新打开弹窗
+    rerender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <EditProjectModal
+          isOpen={true}
+          project={mockProject}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+          api={mockApi}
+        />
+      </QueryClientProvider>,
+    )
+
+    // 迟到的旧请求 reject
+    rejectBasic(new Error('Delayed server error'))
+    await new Promise((r) => setTimeout(r, 20))
+
+    // 验证新弹窗干净无错误横幅
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText('Delayed server error')).not.toBeInTheDocument()
+  })
+
+  it('does not rollback expectedVersion when reload returns a lower version than current', async () => {
+    // 测试意图：验证当服务端因副本延迟返回较旧版本时，期望版本单调递增，不向后回退
+    const user = userEvent.setup()
+    const mockApi = {
+      getProject: vi.fn().mockResolvedValue({ ...mockProject, version: '1' }),
+      updateProject: vi.fn().mockResolvedValue({ ...mockProject, version: '5' }),
+    } as unknown as ProjectsApi
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    // 1. 保存成功将当前版本提升至 5
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+    await waitFor(() => {
+      expect(screen.getByText('5')).toBeInTheDocument()
+    })
+
+    // 2. 服务端返回旧版本 1，验证期望版本保持 5，不发生回退
+    await user.click(screen.getByRole('button', { name: '刷新版本' }))
+    await waitFor(() => {
+      expect(mockApi.getProject).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.getByText('5')).toBeInTheDocument()
+  })
+
+  it('keeps dirty draft and does not advance expectedVersion upon 409 conflict', async () => {
+    // 测试意图：验证 409 冲突时不推进 expectedVersion 且保留用户草稿，供用户核对后显式决定
+    const user = userEvent.setup()
+    const conflictError = new ApiError('Conflict 409', 409)
+    const mockApi = {
+      updateProject: vi.fn().mockRejectedValue(conflictError),
+    } as unknown as ProjectsApi
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    const titleInput = screen.getByLabelText(/项目名称/i) as HTMLInputElement
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Conflict Draft')
+    await user.click(screen.getByRole('button', { name: '保存基础信息' }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/409 冲突/i)).toBeInTheDocument()
+    })
+    // 版本仍为 1，草稿仍为 'Conflict Draft'
+    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(titleInput.value).toBe('Conflict Draft')
+  })
 })
 
 describe('DeleteProjectModal', () => {
