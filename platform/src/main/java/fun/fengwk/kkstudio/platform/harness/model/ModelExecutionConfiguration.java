@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
+import java.net.ProxySelector;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
@@ -63,8 +64,10 @@ public class ModelExecutionConfiguration {
   @Bean(name = "modelExecutionHttpClient", destroyMethod = "close")
   @ConditionalOnMissingBean(name = "modelExecutionHttpClient")
   public HttpClient modelExecutionHttpClient(
-      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor) {
+      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
+      @Qualifier("systemProxySelector") ProxySelector proxySelector) {
     return HttpClient.newBuilder()
+        .proxy(proxySelector)
         .version(HttpClient.Version.HTTP_1_1)
         .followRedirects(HttpClient.Redirect.NEVER)
         .executor(modelExecutionExecutor)

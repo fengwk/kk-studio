@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -16,11 +17,16 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** {@link SkillPackageInstaller} 的原子安装、回滚、自愈与安全隔离测试。 */
 class SkillPackageInstallerTest {
 
   @TempDir Path tempDir;
+
+  /** Git 取消观察使用测试自有的 executor；用完即关闭，模拟 runtime 生命周期。 */
+  private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
   private Path remoteRepoDir;
   private Path skillsRoot;
@@ -36,7 +42,12 @@ class SkillPackageInstallerTest {
     cacheRoot = tempDir.resolve("cache");
     stagingRoot = tempDir.resolve("staging");
     backupRoot = tempDir.resolve("backup");
-    installer = new SkillPackageInstaller(skillsRoot, cacheRoot, stagingRoot, backupRoot);
+    installer = new SkillPackageInstaller(skillsRoot, cacheRoot, stagingRoot, backupRoot, executor);
+  }
+
+  @AfterEach
+  void tearDown() {
+    executor.shutdownNow();
   }
 
   /** 验证按精确 commit 安装能物化包含 SKILL.md 的目录树，写入 .kkstudio-commit 元数据，并返回规范化本地路径。 */
@@ -151,7 +162,7 @@ class SkillPackageInstallerTest {
     assertDirectoryEmpty(backupRoot);
   }
 
-  /** 验证未知 commit 或拉取失败时保留已有安装，且不在 staging 或 backup 目录下遗留任何临时产物。 */
+  /** 验证未知 commit 与缺失分支的回退失败保留已有安装、返回稳定错误，且 staging/backup 不遗留临时产物。 */
   @Test
   void fetchFailurePreservesPreviousInstallAndLeavesNoArtifacts() throws Exception {
     String validCommitId;
@@ -174,6 +185,14 @@ class SkillPackageInstallerTest {
             SkillSyncException.class,
             () -> installer.install("persist-pkg", remoteUrl, "master", unknownCommit));
     assertEquals("COMMIT_NOT_FOUND", error.code());
+
+    // 精确对象未广告时允许回退；回退分支缺失仍须稳定分类并保持原安装。
+    SkillSyncException fallback =
+        assertThrows(
+            SkillSyncException.class,
+            () -> installer.install("persist-pkg", remoteUrl, "missing", unknownCommit));
+    assertEquals("GIT_FETCH_FAILED", fallback.code());
+    assertEquals("Git branch fetch failed", fallback.getMessage());
 
     // 验证已有安装完好无损
     assertTrue(Files.exists(pkgDir.resolve("persist-skill/SKILL.md")));
@@ -350,6 +369,22 @@ class SkillPackageInstallerTest {
               () -> installer.install("valid-pkg", badUrl, validBranch, validCommit),
               "rejected: " + badUrl);
       assertEquals("INVALID_REPOSITORY_URL", error.code());
+    }
+
+    // 非法 scheme 与含凭据的 URL：错误码稳定，且错误信息绝不回显原始输入或凭据。
+    for (String secretUrl :
+        new String[] {
+          "git://example.com/repo.git",
+          "ssh://example.com/repo.git",
+          "https://user:pass@example.com/repo.git"
+        }) {
+      SkillSyncException error =
+          assertThrows(
+              SkillSyncException.class,
+              () -> installer.install("valid-pkg", secretUrl, validBranch, validCommit));
+      assertEquals("INVALID_REPOSITORY_URL", error.code());
+      assertFalse(error.getMessage().contains(secretUrl));
+      assertFalse(error.getMessage().contains("user:pass"));
     }
 
     // 非法 branch

@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -85,6 +86,10 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
   private HttpClient modelExecutionHttpClient;
 
   @Autowired
+  @Qualifier("systemProxySelector")
+  private ProxySelector systemProxySelector;
+
+  @Autowired
   @Qualifier("modelExecutionWatchdogScheduler")
   private ScheduledExecutorService modelExecutionWatchdogScheduler;
 
@@ -103,6 +108,7 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertEquals(HttpClient.Version.HTTP_1_1, modelExecutionHttpClient.version());
     assertEquals(HttpClient.Redirect.NEVER, modelExecutionHttpClient.followRedirects());
     assertSame(modelExecutionExecutor, modelExecutionHttpClient.executor().orElseThrow());
+    assertSame(systemProxySelector, modelExecutionHttpClient.proxy().orElseThrow());
     assertNotNull(modelExecutionTransport);
     assertFalse(modelExecutionWatchdogScheduler.isShutdown());
   }

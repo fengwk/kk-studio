@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
@@ -16,9 +17,9 @@ import java.util.Objects;
 /**
  * 全局 system settings 的强类型聚合。
  *
- * <p>这是 {@code system_setting} 单行（{@code id=1}）中 {@code config} JSON 的唯一语义模型：六个必填 section （tool /
- * aiRuntime / environment / integrations / storageMedia / advanced）完整携带，任何一个 section 缺失都 失败。所有校验都在
- * canonical constructor 中执行：字段范围、跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
+ * <p>这是 {@code system_setting} 单行（{@code id=1}）中 {@code config} JSON 的唯一语义模型：七个必填 section （tool /
+ * aiRuntime / environment / network / integrations / storageMedia / advanced）完整携带，任何一个 section
+ * 缺失都失败。所有校验都在 canonical constructor 中执行：字段范围、跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
  * heartbeat&lt;lease、comfyPollInterval&lt;comfyMaxWait）以及「启用集成必须携带其身份 / 位置字段」。permission 规则数组保序；不依赖
  * JSON 对象键顺序。
  *
@@ -29,6 +30,7 @@ public record SystemSettings(
     Tool tool,
     AiRuntime aiRuntime,
     Environment environment,
+    Network network,
     Integrations integrations,
     StorageMedia storageMedia,
     Advanced advanced) {
@@ -39,6 +41,7 @@ public record SystemSettings(
           Tool.DEFAULT,
           AiRuntime.DEFAULT,
           Environment.DEFAULT,
+          Network.DEFAULT,
           Integrations.DEFAULT,
           StorageMedia.DEFAULT,
           Advanced.DEFAULT);
@@ -47,6 +50,7 @@ public record SystemSettings(
     tool = Objects.requireNonNull(tool, "tool");
     aiRuntime = Objects.requireNonNull(aiRuntime, "aiRuntime");
     environment = Objects.requireNonNull(environment, "environment");
+    network = Objects.requireNonNull(network, "network");
     integrations = Objects.requireNonNull(integrations, "integrations");
     storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     advanced = Objects.requireNonNull(advanced, "advanced");
@@ -163,6 +167,35 @@ public record SystemSettings(
           maxResourceBytes, "environment.maxResourceBytes");
       SystemSettingsValidation.requirePositiveMillis(
           heartbeatTimeoutMillis, "environment.heartbeatTimeoutMillis");
+    }
+  }
+
+  /** network section：Backend 唯一全局 HTTP 代理，重启生效；null 地址明确直连，不读取宿主代理。 */
+  public record Network(String proxyUrl, String noProxyHosts) {
+
+    public static final Network DEFAULT = new Network(null, "localhost,127.*,::1");
+
+    public Network {
+      if (proxyUrl != null && proxyUrl.length() > 2048) {
+        throw new IllegalArgumentException("network.proxyUrl must not exceed 2048 characters");
+      }
+      if (noProxyHosts == null) {
+        throw new IllegalArgumentException("network.noProxyHosts is required");
+      }
+      if (noProxyHosts.length() > 4096) {
+        throw new IllegalArgumentException("network.noProxyHosts must not exceed 4096 characters");
+      }
+      // 分步委托同一公共解析器，给出精确字段错误；绝不传播可能携带凭据的解析消息或 cause。
+      try {
+        HttpProxySelector.fixed(proxyUrl, "");
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException("network.proxyUrl is invalid");
+      }
+      try {
+        HttpProxySelector.fixed(proxyUrl, noProxyHosts);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException("network.noProxyHosts is invalid");
+      }
     }
   }
 

@@ -33,7 +33,7 @@ id / version / inputSchema / defaultTimeout
 | `lsp.goto-definition` | 2 分钟 | 相对 path 时需要 | `lsp_goto_definition` |
 | `lsp.workspace-symbols` | 2 分钟 | 相对 path 时需要 | `lsp_workspace_symbols` |
 | `lsp.java-decompile` | 2 分钟 | 相对 path 或 target 时需要 | `lsp_java_decompile` |
-| `skill.sync` | 5 分钟 | 无 | 内部控制面 |
+| `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
 `skill.sync` 由 Platform 内部调用，其余 9 项由 Contributor 映射为模型工具。
 [`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
@@ -193,6 +193,10 @@ COMMIT: transferId / uploadId
 arguments 只携带 Package、repository URL 与 Platform 当前确认的 exact commit；branch
 只能作为 fetch hint，Daemon 必须以 commit 校验安装结果。该 capability 不注册为模型
 Tool，READY 与 Package 发布后的同步由 Platform 发起。
+
+技能远程仓库只支持 HTTP/HTTPS；`file:` 保留本地仓库读取，不经代理。Git 连接超时 60 秒、
+网络读取空闲超时 180 秒；持续收到数据时不因累计时长终止。`skill.sync` 的 timeout 为 0，
+没有外层总期限，但断线、关闭和取消仍会收尾在途任务。其他 capability 的默认超时不变。
 
 ## workdir 词法契约
 

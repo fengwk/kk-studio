@@ -43,8 +43,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
@@ -318,14 +316,14 @@ public class EnvironmentSkillSyncOrchestrator {
     }
     try {
       return interpret(
-          terminal.get(descriptor.defaultTimeout().toMillis(), TimeUnit.MILLISECONDS),
+          terminal.get(),
           skillPackage,
           connection.daemonCapabilities().environment().operatingSystem());
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       handle.cancel();
       return SyncOutcome.failure(RESULT_FAILURE);
-    } catch (ExecutionException | TimeoutException | RuntimeException error) {
+    } catch (ExecutionException | RuntimeException error) {
       handle.cancel();
       return SyncOutcome.failure(RESULT_FAILURE);
     }

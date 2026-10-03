@@ -36,6 +36,14 @@ vi.mock('axios', () => ({
 }))
 
 describe('apiClient', () => {
+  // Git 请求显式关闭总时限，其余 API 仍继承 60s；POST/PUT 配置必须透传。
+  it('preserves default timeout and passes per-request timeout overrides', async () => {
+    expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: '/api', timeout: 60000 })
+    await apiClient.post('/git', {}, { timeout: 0 })
+    await apiClient.put('/git', {}, { timeout: 0 })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/git', {}, { timeout: 0 })
+    expect(axiosMock.client.put).toHaveBeenCalledWith('/git', {}, { timeout: 0 })
+  })
   it('adds the current locale to every request', () => {
     const [withLocale] = axiosMock.client.interceptors.request.use.mock.calls[0]
 

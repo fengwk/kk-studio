@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -208,6 +209,39 @@ class StrictJacksonConfigurationTest {
                 () -> mapper.readValue(json, AgentModelVariantDTO.class),
                 "non-string protocolOptionsJson token must be rejected: " + token);
           }
+        });
+  }
+
+  /** 测试意图：实际 HTTP Jackson 3 不能把网络字段的布尔/数字转换成合法主机名，同时保留 null 与空字符串语义。 */
+  @Test
+  void shouldRejectNonStringNetworkTokensAndUnknownFields() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+          SystemSettingsNetworkDTO direct =
+              mapper.readValue(
+                  "{\"proxyUrl\":null,\"noProxyHosts\":\"\"}", SystemSettingsNetworkDTO.class);
+          assertNull(direct.getProxyUrl());
+          assertEquals("", direct.getNoProxyHosts());
+          SystemSettingsNetworkDTO configured =
+              mapper.readValue(
+                  "{\"proxyUrl\":\"http://proxy:3128\",\"noProxyHosts\":\"localhost,127.*,::1\"}",
+                  SystemSettingsNetworkDTO.class);
+          assertEquals("http://proxy:3128", configured.getProxyUrl());
+          assertEquals("localhost,127.*,::1", configured.getNoProxyHosts());
+          for (String field : List.of("proxyUrl", "noProxyHosts")) {
+            for (String token : List.of("123", "1.5", "true", "false", "{}", "[]")) {
+              assertThrows(
+                  JacksonException.class,
+                  () ->
+                      mapper.readValue(
+                          "{\"" + field + "\":" + token + "}", SystemSettingsNetworkDTO.class),
+                  "non-string network token must be rejected: " + field);
+            }
+          }
+          assertThrows(
+              JacksonException.class,
+              () -> mapper.readValue("{\"enabled\":true}", SystemSettingsNetworkDTO.class));
         });
   }
 

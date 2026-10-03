@@ -320,6 +320,7 @@ class OpenCliResponseDeadlineTest {
               SystemSettings.Tool.DEFAULT,
               SystemSettings.AiRuntime.DEFAULT,
               SystemSettings.Environment.DEFAULT,
+              SystemSettings.Network.DEFAULT,
               new SystemSettings.Integrations(
                   SystemSettings.Comfyui.DEFAULT,
                   hub,

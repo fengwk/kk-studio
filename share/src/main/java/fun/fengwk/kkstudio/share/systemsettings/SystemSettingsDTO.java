@@ -5,7 +5,7 @@ import lombok.EqualsAndHashCode;
 
 import java.time.Instant;
 
-/** GET {@code /api/settings} 的完整聚合表示：六个 section + 当前乐观锁版本与时戳。 */
+/** GET {@code /api/settings} 的完整聚合表示：七个 section + 当前乐观锁版本与时戳。 */
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class SystemSettingsDTO extends SystemSettingsSectionsDTO {

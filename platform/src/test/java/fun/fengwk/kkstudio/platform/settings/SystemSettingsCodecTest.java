@@ -40,20 +40,70 @@ class SystemSettingsCodecTest {
   }
 
   @Test
+  void networkRoundTripsAndRejectsIncompleteOrNonTextCanonicalFields() throws Exception {
+    // proxyUrl 可省略/null；noProxyHosts 必须存在且为字符串，空字符串保留。
+    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettings.DEFAULT);
+    dto.getNetwork().setProxyUrl("http://proxy:3128");
+    dto.getNetwork().setNoProxyHosts("");
+    SystemSettings settings = codec.fromDto(dto);
+    assertEquals(dto, codec.toSections(codec.decode(codec.encode(settings))));
+    assertEquals("", settings.network().noProxyHosts());
+
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    ObjectNode network = (ObjectNode) root.get("network");
+    network.putNull("proxyUrl");
+    assertEquals(SystemSettings.DEFAULT, codec.decode(root.toString()));
+    network.remove("noProxyHosts");
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    network.putNull("noProxyHosts");
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    network.put("noProxyHosts", 1);
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    network.put("noProxyHosts", "");
+    network.put("proxyUrl", true);
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    network.remove("proxyUrl");
+    network.put("enabled", false);
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    root.remove("network");
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+    root.putNull("network");
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+  }
+
+  @Test
+  void networkDtoRequiresSectionAndBypassWithoutDefaulting() {
+    // 完整 PUT 不接受缺 section / 缺 required text；proxyUrl null 与 noProxyHosts 空串合法。
+    SystemSettingsSectionsDTO dto = codec.toSections(SystemSettings.DEFAULT);
+    dto.getNetwork().setNoProxyHosts(null);
+    assertEquals(
+        "network.noProxyHosts is required",
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(dto)).getMessage());
+    dto.setNetwork(null);
+    assertEquals(
+        "network is required",
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(dto)).getMessage());
+  }
+
+  @Test
   void canonicalJsonIsSortedAndOmitsNulls() {
     String canonical = codec.encode(SystemSettings.DEFAULT);
-    // 六个 section 按字母序输出。
+    // 七个 section 按字母序输出。
     int advanced = canonical.indexOf("\"advanced\"");
     int aiRuntime = canonical.indexOf("\"aiRuntime\"");
     int environment = canonical.indexOf("\"environment\"");
     int integrations = canonical.indexOf("\"integrations\"");
+    int network = canonical.indexOf("\"network\"");
     int storageMedia = canonical.indexOf("\"storageMedia\"");
     int tool = canonical.indexOf("\"tool\"");
     assertTrue(
         advanced >= 0 && aiRuntime > advanced && environment > aiRuntime,
         "sections must be sorted: " + canonical);
     assertTrue(
-        integrations > environment && storageMedia > integrations && tool > storageMedia,
+        integrations > environment
+            && network > integrations
+            && storageMedia > network
+            && tool > storageMedia,
         "sections must be sorted: " + canonical);
     // 规则对象键与工具名 key 也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
@@ -62,6 +112,7 @@ class SystemSettingsCodecTest {
     assertTrue(!canonical.contains("comfyui\":{\"baseUrl"), canonical);
     // null compactionFallbackModel 也在 canonical JSON 中省略。
     assertTrue(!canonical.contains("compactionFallbackModel"), canonical);
+    assertTrue(!canonical.contains("proxyUrl"), canonical);
   }
 
   @Test
@@ -81,6 +132,7 @@ class SystemSettingsCodecTest {
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
             SystemSettings.DEFAULT.environment(),
+            SystemSettings.DEFAULT.network(),
             SystemSettings.DEFAULT.integrations(),
             SystemSettings.DEFAULT.storageMedia(),
             SystemSettings.DEFAULT.advanced());
@@ -105,7 +157,7 @@ class SystemSettingsCodecTest {
   @Test
   void decodingDoesNotDependOnObjectKeyOrdering() throws Exception {
     String canonical = codec.encode(SystemSettings.DEFAULT);
-    // 反转六个 section 的声明顺序，解码结果必须与顺序无关。
+    // 反转七个 section 的声明顺序，解码结果必须与顺序无关。
     String reordered = reverseTopLevelKeys(canonical);
     assertEquals(SystemSettings.DEFAULT, codec.decode(reordered));
   }
@@ -239,6 +291,7 @@ class SystemSettingsCodecTest {
             SystemSettings.DEFAULT.tool(),
             SystemSettings.DEFAULT.aiRuntime(),
             SystemSettings.DEFAULT.environment(),
+            SystemSettings.DEFAULT.network(),
             new SystemSettings.Integrations(
                 new SystemSettings.Comfyui(
                     false, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024),
@@ -382,12 +435,13 @@ class SystemSettingsCodecTest {
             base.toolGatewayOverloadRetryMillis()),
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
+        SystemSettings.DEFAULT.network(),
         SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }
 
-  /** 反转顶层六个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
+  /** 反转顶层七个 section 的声明顺序（保持 JSON 合法），验证解码不依赖键序。 */
   private static String reverseTopLevelKeys(String json) throws Exception {
     ObjectMapper mapper = new ObjectMapper();
     ObjectNode root = (ObjectNode) mapper.readTree(json);

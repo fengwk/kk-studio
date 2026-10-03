@@ -71,6 +71,11 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       try (ResultSet rs = st.executeQuery("select config from system_setting")) {
         assertTrue(rs.next(), "default row must exist");
         String configJson = rs.getString(1);
+        // fresh-install 默认代理必须明确直连，required noProxyHosts 不能依靠运行期补齐。
+        JsonNode network = OBJECT_MAPPER.readTree(configJson).path("network");
+        assertTrue(network.isObject());
+        assertTrue(network.path("proxyUrl").isMissingNode());
+        assertEquals("localhost,127.*,::1", network.path("noProxyHosts").asText());
         assertEquals(
             SystemSettings.DEFAULT,
             new SystemSettingsCodec().decode(configJson),
@@ -212,6 +217,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           ResultSet rs = st.executeQuery("select config from system_setting where id = 1")) {
         assertTrue(rs.next(), "e2e database must carry the system_setting row");
         SystemSettings settings = new SystemSettingsCodec().decode(rs.getString(1));
+        assertEquals(SystemSettings.Network.DEFAULT, settings.network());
         assertEquals(
             List.of(new PermissionRule("*", PermissionAction.ASK)),
             settings.tool().permission().get("read"),
@@ -234,6 +240,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       }
 
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
+      assertEquals(SystemSettings.Network.DEFAULT, settings.network());
       assertTrue(settings.integrations().openCliHub().enabled());
       assertEquals("http://opencli-hub:8080", settings.integrations().openCliHub().baseUrl());
       assertTrue(settings.integrations().gptImage2().paidEnabled());

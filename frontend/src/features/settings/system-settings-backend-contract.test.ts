@@ -23,6 +23,7 @@ describe('settings backend field contract', () => {
       ['tool', 'Tool'],
       ['aiRuntime', 'AiRuntime'],
       ['environment', 'Environment'],
+      ['network', 'Network'],
       ['integrations', 'Integrations'],
       ['storageMedia', 'StorageMedia'],
       ['advanced', 'Advanced'],

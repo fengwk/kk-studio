@@ -96,7 +96,8 @@ class LspDaemonWiringTest {
             root.resolve("skills"),
             root.resolve("cache"),
             root.resolve("staging"),
-            root.resolve("backup")),
+            root.resolve("backup"),
+            executor),
         executor,
         scheduler);
     EnvironmentCapability gotoDefinition =

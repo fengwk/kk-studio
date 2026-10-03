@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpClient;
@@ -62,6 +63,7 @@ public class OpenCliHubClient {
         snapshot,
         objectMapper,
         HttpClient.newBuilder()
+            .proxy(ProxySelector.getDefault())
             .connectTimeout(
                 Duration.ofMillis(
                     snapshot.get().integrations().openCliHub().connectTimeoutMillis()))
