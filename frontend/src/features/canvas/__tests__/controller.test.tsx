@@ -474,7 +474,7 @@ describe('useCanvasController real snapshot runtime', () => {
 
     act(() => {
       result.current.setSelection([NODE_NOTE])
-      result.current.renameNode(NODE_NOTE, ' Renamed ')
+      result.current.renameNode(NODE_NOTE, ' Renamed ', 'Note')
     })
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_NODE'
@@ -637,7 +637,7 @@ describe('useCanvasController real snapshot runtime', () => {
       command.type === 'DELETE_GROUP'
     ))).toBe(false)
 
-    act(() => result.current.renameGroup(GROUP_A, '  新分组  '))
+    act(() => result.current.renameGroup(GROUP_A, '  新分组  ', 'Group'))
     await waitFor(() => expect(commands.some((request) => (
       request.commands[0]?.type === 'RENAME_GROUP'
     ))).toBe(true))
@@ -645,10 +645,100 @@ describe('useCanvasController real snapshot runtime', () => {
       request.commands[0]?.type === 'RENAME_GROUP'
     ))?.commands).toEqual([{ type: 'RENAME_GROUP', groupId: GROUP_A, expectedTitle: 'Group', title: '新分组' }])
 
-    act(() => result.current.renameGroup(GROUP_A, '   '))
+    act(() => result.current.renameGroup(GROUP_A, '   ', 'Group'))
     expect(commands.filter((request) => (
       request.commands[0]?.type === 'RENAME_GROUP'
     ))).toHaveLength(1)
+  })
+
+  it('renameNode 发送冻结的 expectedName A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 基线名称为 'Note' (A)
+    const initialNode = result.current.snapshot?.nodes.find((n) => n.id === NODE_NOTE)
+    expect(initialNode?.name).toBe('Note')
+
+    // 2. 模拟远端更新到来，节点名称变为 'Remote Note B' (B)
+    const remoteSnapshot: CanvasSnapshotDTO = {
+      ...snapshot(2),
+      nodes: snapshot(2).nodes.map((n) => (n.id === NODE_NOTE ? { ...n, name: 'Remote Note B' } : n)),
+    }
+    vi.mocked(getCanvas).mockResolvedValue(remoteSnapshot)
+    emitCanvasRevision('2')
+    await waitFor(() => {
+      expect(result.current.snapshot?.nodes.find((n) => n.id === NODE_NOTE)?.name).toBe('Remote Note B')
+    })
+
+    const commandsCountBefore = commands.length
+
+    // 3. 同名 no-op：用户输入与编辑起点 baseline 'Note' 相同，即使与远端最新 'Remote Note B' 不同，也绝不发命令
+    act(() => {
+      result.current.renameNode(NODE_NOTE, '  Note  ', 'Note')
+    })
+    expect(commands).toHaveLength(commandsCountBefore)
+
+    // 4. 用户提交新名称：无论当前远端快照是 B，命令必须携带编辑起点 A 作为 expectedName
+    act(() => {
+      result.current.renameNode(NODE_NOTE, 'User Final Name', 'Note')
+    })
+
+    await waitFor(() => expect(commands.length).toBe(commandsCountBefore + 1))
+    const lastCommand = commands.at(-1)
+    expect(lastCommand?.commands).toEqual([
+      {
+        type: 'RENAME_NODE',
+        nodeId: NODE_NOTE,
+        expectedName: 'Note', // 严格为基线 A，绝非 'Remote Note B'
+        name: 'User Final Name',
+      },
+    ])
+  })
+
+  it('renameGroup 发送冻结的 expectedTitle A 而非远端最新 B，且同名 no-op 仅对比 baseline', async () => {
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    // 1. 基线标题为 'Group' (A)
+    const initialGroup = result.current.snapshot?.groups.find((g) => g.id === GROUP_A)
+    expect(initialGroup?.title).toBe('Group')
+
+    // 2. 模拟远端更新到来，分组标题变为 'Remote Group B' (B)
+    const remoteSnapshot: CanvasSnapshotDTO = {
+      ...snapshot(3),
+      groups: snapshot(3).groups.map((g) => (g.id === GROUP_A ? { ...g, title: 'Remote Group B' } : g)),
+    }
+    vi.mocked(getCanvas).mockResolvedValue(remoteSnapshot)
+    emitCanvasRevision('3')
+    await waitFor(() => {
+      expect(result.current.snapshot?.groups.find((g) => g.id === GROUP_A)?.title).toBe('Remote Group B')
+    })
+
+    const commandsCountBefore = commands.length
+
+    // 3. 同名 no-op：输入与 baseline 'Group' 相同，不发命令
+    act(() => {
+      result.current.renameGroup(GROUP_A, '  Group  ', 'Group')
+    })
+    expect(commands).toHaveLength(commandsCountBefore)
+
+    // 4. 用户提交新标题：命令必须携带编辑起点 A 作为 expectedTitle
+    act(() => {
+      result.current.renameGroup(GROUP_A, 'User Final Group', 'Group')
+    })
+
+    await waitFor(() => expect(commands.length).toBe(commandsCountBefore + 1))
+    const lastCommand = commands.at(-1)
+    expect(lastCommand?.commands).toEqual([
+      {
+        type: 'RENAME_GROUP',
+        groupId: GROUP_A,
+        expectedTitle: 'Group', // 严格为基线 A，绝非 'Remote Group B'
+        title: 'User Final Group',
+      },
+    ])
   })
 
   it('ungroups a member only after its dragged bounds fully leave the Group body', async () => {
