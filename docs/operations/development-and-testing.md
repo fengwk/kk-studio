@@ -894,6 +894,10 @@ reports/supply-chain/
 `latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、npm audit、
 Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smoke log 和 summary。
 
+分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，
+`logs/distributed-app-a/` 和 `logs/distributed-app-b/` 是容器 `/app/logs` 中的文本 `.log` 文件。
+压缩归档和符号链接不复制；节点或日志目录不可用时继续采集其他节点。
+
 ## 清理与故障排查
 
 开发循环自己的清理是 `./scripts/dev/shared-preview.sh stop` 或 `./scripts/dev/app.sh stop`；本地与测试栈、
