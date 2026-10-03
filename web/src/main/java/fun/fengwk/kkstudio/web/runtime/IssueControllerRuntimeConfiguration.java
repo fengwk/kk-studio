@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import java.time.Clock;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,12 +67,11 @@ public class IssueControllerRuntimeConfiguration {
       IssueWorkStore workStore,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
-      Clock clock,
       @Qualifier("issueControllerDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueControllerDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("issueControllerDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
     return new IssueControllerDispatcher(
-        workStore, reconciler, properties, clock, drainExecutor, workerExecutor, pollScheduler);
+        workStore, reconciler, properties, drainExecutor, workerExecutor, pollScheduler);
   }
 
   @Bean

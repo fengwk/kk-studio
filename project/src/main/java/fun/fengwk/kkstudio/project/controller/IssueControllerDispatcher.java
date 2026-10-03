@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
-import java.time.Clock;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -51,7 +50,6 @@ public final class IssueControllerDispatcher implements AutoCloseable {
       IssueWorkStore workStore,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
@@ -59,7 +57,6 @@ public final class IssueControllerDispatcher implements AutoCloseable {
         workStore,
         Objects.requireNonNull(reconciler, "reconciler")::reconcile,
         properties,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler);
@@ -69,15 +66,12 @@ public final class IssueControllerDispatcher implements AutoCloseable {
       IssueWorkStore workStore,
       Function<IssueWorkClaim, IssueReconcileOutcome> reconciler,
       IssueControllerProperties properties,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
     this.workStore = Objects.requireNonNull(workStore, "workStore");
     this.reconciler = Objects.requireNonNull(reconciler, "reconciler");
     this.properties = Objects.requireNonNull(properties, "properties");
-    // 保留注入 hook 供偏移 Clock 回归使用；调度时间只由 PostgreSQL 决定。
-    Objects.requireNonNull(clock, "clock");
     this.drainExecutor = requireFailFastExecutor(drainExecutor, "drainExecutor");
     this.workerExecutor = requireFailFastExecutor(workerExecutor, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");

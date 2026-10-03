@@ -218,7 +218,7 @@ public class IssueReconciler {
     if (activeRun != null) {
       return reconcileActiveRun(project, issue, activeRun, claim, now);
     }
-    return reconcileIdle(project, issue, claim, now);
+    return reconcileIdle(project, issue, claim);
   }
 
   private IssueReconcileOutcome reconcileActiveRun(
@@ -236,7 +236,6 @@ public class IssueReconciler {
           snapshot.thread().headEntryId(),
           STALE_REASON,
           claim,
-          now,
           IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
     ProjectWorkflowState stage = workflowStage(project, run.getState());
@@ -263,7 +262,7 @@ public class IssueReconciler {
       }
       String staleUnknown = unknownToolReason(staleSnapshot);
       if (staleUnknown != null) {
-        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim, now);
+        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim);
       }
       if (hasProgress(run, staleSnapshot)) {
         UUID finalAnswerId =
@@ -287,7 +286,6 @@ public class IssueReconciler {
           staleSnapshot.thread().headEntryId(),
           STALE_REASON,
           claim,
-          now,
           IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
 
@@ -295,7 +293,7 @@ public class IssueReconciler {
     String unknownReason = isProcessing(snapshot) ? null : unknownToolReason(snapshot);
     if (unknownReason != null) {
       // 外部副作用结果未定优先于额度与静态收尾：按既有 UNKNOWN 入口收敛并保留人工核查。
-      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim, now);
+      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim);
     }
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
       if (isProcessing(snapshot)) {
@@ -313,7 +311,6 @@ public class IssueReconciler {
           snapshot.thread().headEntryId(),
           BUDGET_REASON,
           claim,
-          now,
           IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
     }
     if (run.getStatus() == IssueRunStatus.RUNNING) {
@@ -386,8 +383,7 @@ public class IssueReconciler {
     return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_IDLE);
   }
 
-  private IssueReconcileOutcome reconcileIdle(
-      Project project, Issue issue, IssueWorkClaim claim, Instant now) {
+  private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, IssueWorkClaim claim) {
     if (project.isArchived()
         || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
@@ -508,7 +504,6 @@ public class IssueReconciler {
       UUID endEntryId,
       String reason,
       IssueWorkClaim claim,
-      Instant now,
       IssueReconcileOutcome outcome) {
     issueRunService.failRun(
         run.getId(), run.getVersion(), failKey(run, endEntryId), endEntryId, reason);
@@ -518,7 +513,7 @@ public class IssueReconciler {
 
   /** 结果未定的工具调用走既有 UNKNOWN 收尾：不发布证据、不完成、不交接，人工核查后才能重试。 */
   private IssueReconcileOutcome unknownRun(
-      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim, Instant now) {
+      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim) {
     issueRunService.markUnknown(
         run.getId(), run.getVersion(), unknownKey(run, endEntryId), endEntryId, reason);
     return finish(claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.RUN_UNKNOWN);

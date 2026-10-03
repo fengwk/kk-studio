@@ -18,7 +18,8 @@ import java.util.UUID;
 /**
  * Issue 调度邮箱用例实现：lease/wake 围栏的薄业务边界。
  *
- * <p>只在内存层面校验 lease 与唤醒版本形状，真正的串行化由 {@code project_issue_work} 的行锁与条件更新保证。
+ * <p>入口校验 Issue 标识、lease token 和相对 Duration；调度时间、租约有效性与 wake 围栏由 PostgreSQL 决定。续租先获取 work
+ * 行锁，串行化与条件更新在调用方事务中完成。
  */
 @Service
 @AllArgsConstructor

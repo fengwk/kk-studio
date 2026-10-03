@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.project.controller;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -51,8 +51,26 @@ import java.util.function.Function;
  */
 class IssueControllerDispatcherTest {
 
-  private final Clock fixedClock =
-      Clock.fixed(Instant.parse("2026-09-27T10:00:00Z"), ZoneOffset.UTC);
+  private static final Instant LEASE_UNTIL = Instant.parse("2026-09-27T10:00:30Z");
+
+  /** 调度边界没有 Clock 依赖，也不向 store 传绝对时间，避免 JVM 时钟参与租约或 due 的计算。 */
+  @Test
+  void schedulingBoundaryHasNoApplicationClockDependency() {
+    for (var constructor : IssueControllerDispatcher.class.getDeclaredConstructors()) {
+      for (Class<?> parameter : constructor.getParameterTypes()) {
+        assertFalse(Clock.class.isAssignableFrom(parameter));
+      }
+    }
+    for (var field : IssueControllerDispatcher.class.getDeclaredFields()) {
+      assertFalse(Clock.class.isAssignableFrom(field.getType()));
+    }
+    for (var method : IssueWorkStore.class.getMethods()) {
+      for (Class<?> parameter : method.getParameterTypes()) {
+        assertFalse(Clock.class.isAssignableFrom(parameter));
+        assertFalse(Instant.class.isAssignableFrom(parameter));
+      }
+    }
+  }
 
   /** 测试意图：start() 注册固定间隔周期轮询并触发首次 drain，正确领取 claim 并投递给 reconciler。 */
   @Test
@@ -72,13 +90,7 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
     IssueWork work =
@@ -128,13 +140,7 @@ class IssueControllerDispatcherTest {
     IssueControllerProperties properties = new IssueControllerProperties();
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     // start 前 wake 是 no-op
     dispatcher.wake();
@@ -187,13 +193,7 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            drainExecutor,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, drainExecutor, Runnable::run, pollScheduler);
 
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
@@ -208,7 +208,7 @@ class IssueControllerDispatcherTest {
                     IssueWork.builder()
                         .issueId(UUID.randomUUID())
                         .wakeVersion(1L)
-                        .leaseUntil(fixedClock.instant().plusSeconds(30))
+                        .leaseUntil(LEASE_UNTIL)
                         .build());
               }
               return Optional.empty();
@@ -252,18 +252,13 @@ class IssueControllerDispatcherTest {
             workStore,
             reconciler,
             properties,
-            fixedClock,
             Runnable::run,
             rejectingWorkerExecutor,
             pollScheduler);
 
     UUID issueId = UUID.randomUUID();
     IssueWork work =
-        IssueWork.builder()
-            .issueId(issueId)
-            .wakeVersion(1L)
-            .leaseUntil(fixedClock.instant().plusSeconds(30))
-            .build();
+        IssueWork.builder().issueId(issueId).wakeVersion(1L).leaseUntil(LEASE_UNTIL).build();
     when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
 
     dispatcher.start();
@@ -292,21 +287,11 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            throwingReconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            Runnable::run,
-            pollScheduler);
+            workStore, throwingReconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
     IssueWork work =
-        IssueWork.builder()
-            .issueId(issueId)
-            .wakeVersion(1L)
-            .leaseUntil(fixedClock.instant().plusSeconds(30))
-            .build();
+        IssueWork.builder().issueId(issueId).wakeVersion(1L).leaseUntil(LEASE_UNTIL).build();
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
     when(workStore.rescheduleWork(any(UUID.class), anyString(), anyLong(), any(Duration.class)))
@@ -351,7 +336,6 @@ class IssueControllerDispatcherTest {
             workStore,
             blockingReconciler,
             properties,
-            fixedClock,
             drainExecutor,
             workerExecutor,
             pollScheduler);
@@ -363,7 +347,7 @@ class IssueControllerDispatcherTest {
                     IssueWork.builder()
                         .issueId(UUID.randomUUID())
                         .wakeVersion(1L)
-                        .leaseUntil(fixedClock.instant().plusSeconds(30))
+                        .leaseUntil(LEASE_UNTIL)
                         .build()));
 
     try {
@@ -396,21 +380,11 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
     IssueWork work =
-        IssueWork.builder()
-            .issueId(issueId)
-            .wakeVersion(1L)
-            .leaseUntil(fixedClock.instant().plusSeconds(30))
-            .build();
+        IssueWork.builder().issueId(issueId).wakeVersion(1L).leaseUntil(LEASE_UNTIL).build();
 
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
@@ -447,13 +421,7 @@ class IssueControllerDispatcherTest {
         IllegalArgumentException.class,
         () ->
             new IssueControllerDispatcher(
-                workStore,
-                reconciler,
-                properties,
-                fixedClock,
-                discardDrain,
-                Runnable::run,
-                pollScheduler));
+                workStore, reconciler, properties, discardDrain, Runnable::run, pollScheduler));
 
     ThreadPoolExecutor callerRunsWorker =
         new ThreadPoolExecutor(
@@ -467,13 +435,7 @@ class IssueControllerDispatcherTest {
         IllegalArgumentException.class,
         () ->
             new IssueControllerDispatcher(
-                workStore,
-                reconciler,
-                properties,
-                fixedClock,
-                Runnable::run,
-                callerRunsWorker,
-                pollScheduler));
+                workStore, reconciler, properties, Runnable::run, callerRunsWorker, pollScheduler));
 
     ThreadPoolExecutor discardOldestWorker =
         new ThreadPoolExecutor(
@@ -490,7 +452,6 @@ class IssueControllerDispatcherTest {
                 workStore,
                 reconciler,
                 properties,
-                fixedClock,
                 Runnable::run,
                 discardOldestWorker,
                 pollScheduler));
@@ -519,13 +480,7 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            rejectingDrain,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, rejectingDrain, Runnable::run, pollScheduler);
 
     assertDoesNotThrow(dispatcher::start);
     assertDoesNotThrow(dispatcher::wake);
@@ -550,21 +505,11 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            errorWorker,
-            pollScheduler);
+            workStore, reconciler, properties, Runnable::run, errorWorker, pollScheduler);
 
     UUID issueId = UUID.randomUUID();
     IssueWork work =
-        IssueWork.builder()
-            .issueId(issueId)
-            .wakeVersion(1L)
-            .leaseUntil(fixedClock.instant().plusSeconds(30))
-            .build();
+        IssueWork.builder().issueId(issueId).wakeVersion(1L).leaseUntil(LEASE_UNTIL).build();
     when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
 
     assertThrows(AssertionError.class, dispatcher::start);
@@ -582,13 +527,7 @@ class IssueControllerDispatcherTest {
 
     IssueControllerDispatcher dispatcher =
         new IssueControllerDispatcher(
-            workStore,
-            reconciler,
-            properties,
-            fixedClock,
-            Runnable::run,
-            Runnable::run,
-            pollScheduler);
+            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
     assertNotNull(dispatcher);
     assertEquals(0, dispatcher.dispatchCapacity());
   }
