@@ -12,7 +12,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -41,7 +40,6 @@ import java.util.concurrent.TimeUnit;
 
 /** 真实 PG/Storage 事务，仅 S3 使用内存假件；确定性交错 stage 与 lease 接管，验证输出围栏与引用守恒。 */
 @Import(StorageS3TestConfiguration.class)
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private CanvasResourceMaterializer materializer;
