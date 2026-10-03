@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.project.service;
 
 import fun.fengwk.kkstudio.project.model.IssueWork;
 
-import java.time.Instant;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -14,21 +14,23 @@ import java.util.UUID;
  */
 public interface IssueWorkStore {
 
-  IssueWork requestWork(UUID issueId, Instant dueAt);
+  /** delay 必须非 null、非负；所有调度与租约时间由数据库生成。 */
+  IssueWork requestWork(UUID issueId, Duration delay);
 
   IssueWork getWork(UUID issueId);
 
-  Optional<IssueWork> claimNext(Instant now, String leaseToken, Instant leaseUntil);
+  Optional<IssueWork> claimNext(String leaseToken, Duration leaseDuration);
 
-  void renewLease(UUID issueId, String leaseToken, Instant now, Instant newLeaseUntil);
+  void renewLease(UUID issueId, String leaseToken, Duration leaseDuration);
 
-  boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion, Instant now);
+  /** 有效租约且版本匹配时删除并返回 true；新 wake 则保留行、释放租约并返回 false。 */
+  boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion);
 
   /**
-   * 归还本次 claim 的 lease 并把下一次检查延后到 {@code dueAt}；mailbox 行保留。
+   * 归还本次有效 claim 的 lease 并把下一次检查延后 {@code delay}；mailbox 行保留。
    *
    * <p>与 {@link #completeWork} 的区别：完成表示「当前没有仍需自动重检的事实」，归还表示「仍需在未来某个时刻重新检查当前 Issue」。两者都以调用方自己的 lease
    * token 围栏，因此并发到达的新唤醒不会被旧 Worker 吞掉。
    */
-  boolean rescheduleWork(UUID issueId, String leaseToken, Instant dueAt);
+  boolean rescheduleWork(UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay);
 }

@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.repo.impl.mapper.IssueWorkMapper;
 import fun.fengwk.kkstudio.project.repo.impl.model.IssueWorkDO;
 
-import java.time.Instant;
+import java.time.Duration;
 import java.util.UUID;
 
 @AllArgsConstructor
@@ -28,29 +28,29 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   }
 
   @Override
-  public IssueWork requestWork(UUID issueId, Instant dueAt) {
-    return toModel(mapper.upsertRequest(issueId, dueAt));
+  public IssueWork requestWork(UUID issueId, Duration delay) {
+    return toModel(mapper.upsertRequest(issueId, delay));
   }
 
   @Override
-  public IssueWork claimNext(Instant now, String leaseToken, Instant leaseUntil) {
-    return toModel(mapper.claimNext(now, leaseToken, leaseUntil));
+  public IssueWork claimNext(String leaseToken, Duration leaseDuration) {
+    return toModel(mapper.claimNext(leaseToken, leaseDuration));
   }
 
   @Override
-  public boolean renewLease(UUID issueId, String leaseToken, Instant now, Instant newLeaseUntil) {
-    return mapper.renewLease(issueId, leaseToken, now, newLeaseUntil) == 1;
+  public boolean renewLease(UUID issueId, String leaseToken, Duration leaseDuration) {
+    return mapper.renewLease(issueId, leaseToken, leaseDuration) == 1;
   }
 
   @Override
-  public boolean deleteIfWakeMatches(
-      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
-    return mapper.deleteIfWakeMatches(issueId, leaseToken, claimedWakeVersion, now) == 1;
+  public boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion) {
+    return mapper.completeWork(issueId, leaseToken, claimedWakeVersion);
   }
 
   @Override
-  public boolean releaseLease(UUID issueId, String leaseToken, Instant dueAt) {
-    return mapper.releaseLease(issueId, leaseToken, dueAt) == 1;
+  public boolean rescheduleWork(
+      UUID issueId, String leaseToken, long claimedWakeVersion, Duration delay) {
+    return mapper.rescheduleWork(issueId, leaseToken, claimedWakeVersion, delay) == 1;
   }
 
   @Override
