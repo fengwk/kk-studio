@@ -1,0 +1,21 @@
+{
+  "domain": {
+    "status": 404,
+    "code": "resource_not_found",
+    "messages": { "en-US": "The chat was not found.", "zh-CN": "未找到 对话。" },
+    "errors": { "resource": "chat", "detail": "chat not found" }
+  },
+  "validation": {
+    "status": 400,
+    "code": "validation",
+    "messages": { "en-US": "The pageNumber parameter has an invalid value.", "zh-CN": "pageNumber 参数的值无效。" },
+    "errors": { "detail": "pageNumber has invalid value: abc" }
+  },
+  "responseStatus": {
+    "status": 400,
+    "code": "BAD_REQUEST",
+    "messages": { "en-US": "The request is invalid.", "zh-CN": "请求无效。" },
+    "titles": { "en-US": "Bad Request", "zh-CN": "请求错误" },
+    "errors": { "detail": "threadId must be a canonical UUID: not-a-number" }
+  }
+}
