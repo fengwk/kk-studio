@@ -6,15 +6,21 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
@@ -33,9 +39,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 导入计划：在事务外完成校验、依赖判定与外部准备（Git exact commit、MCP 发现、settings 合并）。
+ * 导入计划：在事务外完成校验、依赖判定与外部准备（Git exact commit、MCP 发现、settings 转换）。
  *
- * <p>只做确定性决策，不写数据库；未知/不支持项与依赖缺失在这里变为明确的 skip，真正写入交给事务内 {@link ConfigSyncApplier}。
+ * <p>先用与写入共用的校验器检查文件声明的每个条目：缺失/类型/有效值非法、Environment token 冲突、修改 Skill 不可变 repositoryUrl、 移除仍被引用的
+ * Skill/MCP 工具都是硬错误；不支持类别/协议/字段、依赖缺失与外部准备失败才是条目级 skip。settings 出现时按完整七节契约校验。
+ *
+ * <p>只做确定性决策，不写数据库；真正写入交给事务内 {@link ConfigSyncApplier}。
  *
  * <p>外部准备失败绝不降级为成功：MCP 发现失败时跳过该 Server 及其依赖 Agent，Git 失败时不使用最新 HEAD 兜底也不重试。文件内声明但
  * 被跳过（失败/不支持）的同名条目会被从可用依赖池中剔除，避免依赖借此绕过 skip；文件未声明的既有依赖仍可满足。
@@ -55,10 +64,20 @@ public final class ConfigSyncPlanner {
   private final McpServerRepository mcpServerRepository;
   private final SystemSettingsCodec systemSettingsCodec;
   private final RuntimeToolCatalog toolCatalog;
+  private final AgentProviderMutationFactory providerFactory;
+  private final AgentModelMutationFactory modelFactory;
+  private final AgentDefinitionMutationFactory agentFactory;
+  private final SkillCatalogService skillCatalogService;
 
-  /** 依 ParsedDocument 构建可写入计划。 */
+  /** 读取快照后按 ParsedDocument 构建可写入计划。 */
   public ConfigSyncPlan plan(ConfigSyncParser.ParsedDocument document) {
-    ConfigSyncSnapshot snapshot = snapshotReader.read();
+    return plan(document, snapshotReader.read());
+  }
+
+  /** 在给定快照上校验并构建可写入计划；预检查与执行复用同一套规则。 */
+  public ConfigSyncPlan plan(
+      ConfigSyncParser.ParsedDocument document, ConfigSyncSnapshot snapshot) {
+    validateInputs(document, snapshot);
     List<ConfigSyncSkipped> skipped = new ArrayList<>(document.skipped());
     List<ConfigSyncRef> imported = new ArrayList<>();
 
@@ -115,18 +134,11 @@ public final class ConfigSyncPlanner {
     }
     List<ConfigSyncPlan.SkillImport> skillImports = new ArrayList<>();
     for (ConfigSyncParser.SkillSpec spec : document.skillPackages()) {
-      if (!isCanonicalPackageName(spec.packageName())) {
-        throw new AiValidationException(RESOURCE, "invalid skill package name");
-      }
       SkillPackage existing = existingPackages.get(spec.packageName());
       if (existing != null && !existing.getRepositoryUrl().equals(spec.repositoryUrl())) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.SKILL_PACKAGES.wireValue(),
-                spec.packageName(),
-                "repositoryUrl is immutable for an existing package"));
-        skippedSkills.add(spec.packageName());
-        continue;
+        // repositoryUrl 是不可变身份：同名换仓库是硬冲突，不能通过部分导入规避，也不回显 URL。
+        throw new AiValidationException(
+            RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
       }
       List<SkillManifestEntry> manifest;
       try {
@@ -153,13 +165,9 @@ public final class ConfigSyncPlanner {
                 .sorted()
                 .toList();
         if (!referenced.isEmpty()) {
-          skipped.add(
-              new ConfigSyncSkipped(
-                  ConfigSyncKind.SKILL_PACKAGES.wireValue(),
-                  spec.packageName(),
-                  "skills are still referenced by agents: " + String.join(", ", referenced)));
-          skippedSkills.add(spec.packageName());
-          continue;
+          // 移除仍被 Agent 引用的 Skill 是硬冲突，不能通过部分导入规避。
+          throw new AiValidationException(
+              RESOURCE, "skill package would remove referenced skills: " + spec.packageName());
         }
       }
       skillImports.add(
@@ -252,14 +260,9 @@ public final class ConfigSyncPlanner {
               .sorted()
               .toList();
       if (!blocked.isEmpty()) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.MCP_SERVERS.wireValue(),
-                spec.name(),
-                "referenced mcp tool would be removed: " + String.join(", ", blocked)));
-        skippedMcp.add(spec.name());
-        availableMcpTools.remove(spec.name());
-        continue;
+        // 移除仍被引用的 MCP 工具是硬冲突，不能通过部分导入规避。
+        throw new AiValidationException(
+            RESOURCE, "mcp server would remove referenced tools: " + spec.name());
       }
       mcpImports.add(
           new ConfigSyncPlan.McpImport(
@@ -328,27 +331,24 @@ public final class ConfigSyncPlanner {
 
     ConfigSyncPlan.SettingsUpdate settingsUpdate = null;
     Map<String, Object> incoming = document.settings();
-    if (incoming != null && !incoming.isEmpty()) {
-      SystemSettingsSectionsDTO current =
-          systemSettingsCodec.toSections(snapshot.settings().settings());
-      Map<String, Object> base = yaml.toMap(current, SETTINGS_NAME);
-      deepMerge(base, incoming);
-      SystemSettingsSectionsDTO merged =
-          yaml.convert(base, SystemSettingsSectionsDTO.class, SETTINGS_NAME);
-      String reason = settingsUnsatisfiedReason(merged, availableModels, agentPool);
+    if (incoming != null) {
+      // settings 一旦出现就按当前完整七节契约直接校验，不做局部 patch 合并，缺节即硬失败。
+      SystemSettingsSectionsDTO sections =
+          yaml.convert(incoming, SystemSettingsSectionsDTO.class, SETTINGS_NAME);
+      try {
+        systemSettingsCodec.fromDto(sections);
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(RESOURCE, "settings are invalid");
+      }
+      String reason = settingsUnsatisfiedReason(sections, availableModels, agentPool);
       if (reason != null) {
         skipped.add(
             new ConfigSyncSkipped(ConfigSyncKind.SETTINGS.wireValue(), SETTINGS_NAME, reason));
       } else {
-        try {
-          systemSettingsCodec.fromDto(merged);
-        } catch (IllegalArgumentException error) {
-          throw new AiValidationException(RESOURCE, "settings are invalid");
-        }
         // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
         settingsUpdate =
             new ConfigSyncPlan.SettingsUpdate(
-                merged, SystemSettingsVersions.format(snapshot.settings().version()));
+                sections, SystemSettingsVersions.format(snapshot.settings().version()));
         imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, SETTINGS_NAME));
       }
     }
@@ -471,17 +471,78 @@ public final class ConfigSyncPlanner {
     return names;
   }
 
-  @SuppressWarnings("unchecked")
-  private static void deepMerge(Map<String, Object> base, Map<String, Object> override) {
-    for (Map.Entry<String, Object> entry : override.entrySet()) {
-      Object current = base.get(entry.getKey());
-      Object replacement = entry.getValue();
-      if (current instanceof Map<?, ?> currentMap
-          && replacement instanceof Map<?, ?> replacementMap) {
-        deepMerge((Map<String, Object>) currentMap, (Map<String, Object>) replacementMap);
-      } else {
-        base.put(entry.getKey(), replacement);
+  /** 在分类与外部准备之前，用与写入共用的校验器检查文件声明的每个条目；非法值硬失败，错误文本只含安全类别与条目名。 */
+  private void validateInputs(
+      ConfigSyncParser.ParsedDocument document, ConfigSyncSnapshot snapshot) {
+    for (ConfigSyncParser.ProviderSpec spec : document.providers()) {
+      validateEntry(
+          ConfigSyncKind.PROVIDERS,
+          spec.name(),
+          () -> providerFactory.validateImport(spec.name(), spec.properties()));
+    }
+    for (ConfigSyncParser.ModelSpec spec : document.models()) {
+      validateEntry(
+          ConfigSyncKind.MODELS,
+          ConfigSyncRefs.modelName(spec.providerName(), spec.name()),
+          () -> modelFactory.validateImport(spec.name(), spec.properties()));
+    }
+    for (ConfigSyncParser.AgentSpec spec : document.agents()) {
+      validateEntry(
+          ConfigSyncKind.AGENTS,
+          spec.name(),
+          () -> agentFactory.validateImport(spec.name(), spec.properties()));
+    }
+    for (ConfigSyncParser.SkillSpec spec : document.skillPackages()) {
+      if (!isCanonicalPackageName(spec.packageName())) {
+        throw new AiValidationException(RESOURCE, "invalid skill package name");
       }
+      validateEntry(
+          ConfigSyncKind.SKILL_PACKAGES,
+          spec.packageName(),
+          () ->
+              skillCatalogService.validateImport(
+                  spec.packageName(),
+                  spec.description(),
+                  spec.repositoryUrl(),
+                  spec.branch(),
+                  spec.currentCommit()));
+    }
+    validateEnvironments(document.environments(), snapshot);
+    for (ConfigSyncParser.McpSpec spec : document.mcpServers()) {
+      validateEntry(
+          ConfigSyncKind.MCP_SERVERS,
+          spec.name(),
+          () -> McpServerMutationValidator.requireName(spec.name()));
+    }
+  }
+
+  /** Environment 自校验并拒绝文件内或与快照不同身份之间的 registrationToken 冲突，不回显 token。 */
+  private static void validateEnvironments(
+      List<ConfigSyncParser.EnvironmentSpec> specs, ConfigSyncSnapshot snapshot) {
+    Map<String, String> ownerByToken = new LinkedHashMap<>();
+    for (ConfigSyncParser.EnvironmentSpec spec : specs) {
+      String name = EnvironmentServiceImpl.validateName(spec.name());
+      String token = EnvironmentServiceImpl.validateRegistrationToken(spec.registrationToken());
+      String owner = ownerByToken.putIfAbsent(token, name);
+      if (owner != null && !owner.equals(name)) {
+        throw new AiValidationException(
+            RESOURCE, "environment registrationToken is used by multiple entries");
+      }
+      for (Environment existing : snapshot.environments()) {
+        if (token.equals(existing.getRegistrationToken()) && !name.equals(existing.getName())) {
+          throw new AiValidationException(
+              RESOURCE, "environment registrationToken is already in use");
+        }
+      }
+    }
+  }
+
+  /** 用写入路径的校验器检查条目；底层消息可能含真实值，统一替换为安全的类别与条目名，不携带 cause。 */
+  private static void validateEntry(ConfigSyncKind kind, String name, Runnable validation) {
+    try {
+      validation.run();
+    } catch (AiValidationException error) {
+      throw new AiValidationException(RESOURCE, kind.wireValue() + " entry is invalid: " + name);
     }
   }
 }
