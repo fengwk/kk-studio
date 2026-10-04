@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
@@ -42,6 +41,7 @@ import fun.fengwk.kkstudio.web.controller.FakeStreamableHttpMcpServer;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -463,24 +463,54 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     // provider 更新走 PUT，expectedVersion 来自创建响应。
     updateProviderPut(name, providerDto.path("version").asText(), update);
     assertEquals("changed later", findProvider(name).path("description").asText());
+    assertTrue(
+        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            .path("yaml")
+            .asText()
+            .contains("credential: sk-updated"),
+        "the ordinary update fixture must actually change the credential");
 
     importYaml(yaml);
     assertEquals(
         "original description",
         findProvider(name).path("description").asText(),
         "exported value must win");
+    assertEquals(
+        parseYaml(yaml),
+        parseYaml(
+            postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+                .path("yaml")
+                .asText()),
+        "same-name import must restore all file facts, including the original credential");
     assertNotNull(findProvider(survivor), "configuration absent from the file must be preserved");
     assertNotNull(survivorDto);
   }
 
   // ---------------------------------------------------------------- settings
 
-  /** 导入恢复文件的凭据事实，不能把普通编辑的“空值保留旧凭据”语义带入同步。 */
+  /** 普通编辑保留缺失凭据，导入则清空或恢复文件中的凭据事实。 */
   @Test
   void sameNameProviderWithoutCredentialClearsTheTargetCredential() throws Exception {
     String name = "clear_credential_" + unique();
     JsonNode created = createProvider(name, "configured target");
     assertTrue(created.path("configured").asBoolean());
+    String originalYaml =
+        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            .path("yaml")
+            .asText();
+    putData(
+        "/api/ai/catalog/providers/" + name,
+        Map.of(
+            "providerType", "openai",
+            "baseUrl", "https://example.com/v1",
+            "expectedVersion", created.path("version").asText()));
+    assertTrue(findProvider(name).path("configured").asBoolean());
+    assertTrue(
+        postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+            .path("yaml")
+            .asText()
+            .contains("sk-configsync-" + name),
+        "ordinary editing without a credential must preserve the existing value");
 
     importYaml("providers:\n  - name: " + name + "\n    providerType: openai\n");
 
@@ -492,6 +522,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(
         exported.contains("credential:"),
         "an unconfigured provider must not retain the target credential");
+    importYaml(originalYaml);
+    assertTrue(findProvider(name).path("configured").asBoolean());
+    assertEquals(
+        parseYaml(originalYaml),
+        parseYaml(
+            postData("/api/settings/sync/export", exportRequest(providerRef(name)))
+                .path("yaml")
+                .asText()),
+        "importing the original file must restore the credential and other editable facts");
   }
 
   /** 准备期间出现并发设置写入时，旧计划必须 CAS 冲突，之前写入的 Provider 同事务回滚。 */
@@ -579,6 +618,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertBadImportDoesNotLeak("root: &anchor\n  child: *anchor\n", secret);
     assertBadImportDoesNotLeak("providers: 5\n", secret);
     assertBadImportDoesNotLeak("providers:\n  - name: 123\n    providerType: openai\n", secret);
+    assertBadImportDoesNotLeak("settings:\n  aiRuntime:\n    retryBaseDelayMillis: ''\n", secret);
+    assertBadImportDoesNotLeak(
+        "settings:\n  integrations:\n    openCliHub:\n      enabled: ''\n", secret);
 
     // 未知顶层类别是条目级 skip，而不是整份文档错误。
     JsonNode unknownCategory = importYaml("unknownThing: []\n");
@@ -786,14 +828,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private void updateProviderPut(String name, String expectedVersion, AgentProviderCreateDTO source)
       throws Exception {
-    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
-    update.setDescription(source.getDescription());
-    update.setProviderType(source.getProviderType());
-    update.setBaseUrl(source.getBaseUrl());
-    update.setCredential(source.getCredential());
-    update.setModelCallTimeoutMillis(source.getModelCallTimeoutMillis());
-    update.setModelCallIdleTimeoutMillis(source.getModelCallIdleTimeoutMillis());
-    update.setExpectedVersion(expectedVersion);
+    // WRITE_ONLY 凭据不会被 DTO 序列化，显式构造请求以命中真实的凭据更新。
+    Map<String, Object> update = new LinkedHashMap<>();
+    update.put("description", source.getDescription());
+    update.put("providerType", source.getProviderType());
+    update.put("baseUrl", source.getBaseUrl());
+    update.put("credential", source.getCredential());
+    update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
+    update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
+    update.put("expectedVersion", expectedVersion);
     putData("/api/ai/catalog/providers/" + name, update);
   }
 
