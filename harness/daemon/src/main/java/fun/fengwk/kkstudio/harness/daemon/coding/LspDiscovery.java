@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import fun.fengwk.kkstudio.share.ai.environment.DaemonLspConfiguration;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -13,7 +12,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
 /**
  * 预先配置的 LSP 服务器集合，以及从目标文件出发的服务器选择、可执行程序解析与项目根发现。
@@ -25,8 +23,6 @@ import java.util.regex.Pattern;
  * <p>{@link #support(Path)} 是 read header 的只读发现入口：只做配置匹配与可执行程序探测，绝不启动服务器。
  */
 public final class LspDiscovery {
-
-  private static final String DEFAULT_PATHEXT = ".EXE;.CMD;.BAT;.COM";
 
   private final List<LspServerConfig> servers;
   private final Map<String, Optional<String>> executables = new ConcurrentHashMap<>();
@@ -119,7 +115,8 @@ public final class LspDiscovery {
   public Optional<String> executable(LspServerConfig server) {
     Objects.requireNonNull(server, "server");
     return executables.computeIfAbsent(
-        server.command().getFirst(), ignored -> resolveCommand(server.command().getFirst()));
+        server.command().getFirst(),
+        ignored -> ExecutableResolver.resolve(server.command().getFirst()));
   }
 
   /**
@@ -204,85 +201,5 @@ public final class LspDiscovery {
       return null;
     }
     return value.substring(dot).toLowerCase(Locale.ROOT);
-  }
-
-  private static Optional<String> resolveCommand(String command) {
-    String expanded = expandHome(command);
-    if (expanded.indexOf('/') < 0 && expanded.indexOf('\\') < 0) {
-      return resolveOnPath(expanded);
-    }
-    Path path = Path.of(expanded);
-    if (!path.isAbsolute()) {
-      return Optional.empty();
-    }
-    return isRunnable(path) ? Optional.of(path.toString()) : Optional.empty();
-  }
-
-  private static Optional<String> resolveOnPath(String command) {
-    String path = System.getenv("PATH");
-    if (path == null || path.isBlank()) {
-      return Optional.empty();
-    }
-    boolean windows = isWindows();
-    for (String element : path.split(Pattern.quote(File.pathSeparator))) {
-      if (element.isBlank()) {
-        continue;
-      }
-      Path directory = Path.of(expandHome(element));
-      if (!windows) {
-        Path candidate = directory.resolve(command);
-        if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-          return Optional.of(candidate.toString());
-        }
-        continue;
-      }
-      for (String suffix : windowsExecutableSuffixes(System.getenv("PATHEXT"))) {
-        Path candidate = directory.resolve(command + suffix);
-        if (Files.isRegularFile(candidate)) {
-          return Optional.of(candidate.toString());
-        }
-      }
-    }
-    return Optional.empty();
-  }
-
-  /** Windows 上裸命令必须命中 {@code PATHEXT} 后缀，普通文本文件不算可执行程序。 */
-  static List<String> windowsExecutableSuffixes(String pathext) {
-    String value = pathext == null || pathext.isBlank() ? DEFAULT_PATHEXT : pathext;
-    List<String> suffixes = new ArrayList<>();
-    for (String suffix : value.split(";")) {
-      String trimmed = suffix.trim();
-      if (!trimmed.isEmpty()) {
-        suffixes.add(trimmed.startsWith(".") ? trimmed : "." + trimmed);
-      }
-    }
-    return suffixes;
-  }
-
-  private static boolean isRunnable(Path candidate) {
-    return Files.isRegularFile(candidate) && (isWindows() || Files.isExecutable(candidate));
-  }
-
-  static boolean isWindows() {
-    return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
-  }
-
-  /** 展开 {@code ~}、{@code ~/}、{@code $HOME/} 与 {@code ${HOME}/} 前缀。 */
-  static String expandHome(String value) {
-    Objects.requireNonNull(value, "value");
-    String home = System.getProperty("user.home", "");
-    if (value.equals("~")) {
-      return home;
-    }
-    if (value.startsWith("~/") || value.startsWith("~\\")) {
-      return home + value.substring(1);
-    }
-    if (value.startsWith("$HOME/") || value.startsWith("$HOME\\")) {
-      return home + value.substring("$HOME".length());
-    }
-    if (value.startsWith("${HOME}/") || value.startsWith("${HOME}\\")) {
-      return home + value.substring("${HOME}".length());
-    }
-    return value;
   }
 }

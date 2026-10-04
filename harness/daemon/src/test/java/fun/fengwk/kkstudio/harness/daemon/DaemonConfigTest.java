@@ -9,6 +9,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.ExecutableResolver;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
@@ -21,7 +22,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 
-/** 文件为唯一配置来源；派生路径、秘密保护与内部运行时不变量不能因 CLI 收敛而退化。 */
+/** 文件为唯一配置来源；派生路径、bash 解析、秘密保护与内部运行时不变量不能因 CLI 收敛而退化。 */
 class DaemonConfigTest {
   @TempDir Path root;
   private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -30,7 +31,7 @@ class DaemonConfigTest {
   void derivesRuntimeFromFileAndFixedSiblingLayout() throws Exception {
     Path file = writeConfig(root, "https://studio.example/");
     var json = (ObjectNode) MAPPER.readTree(file.toFile());
-    json.put("note", " Custom local environment. ").put("bashExecutable", "/usr/bin/bash");
+    json.put("note", " Custom local environment. ");
     var server = json.putObject("lsp").putObject("servers").putObject("java");
     server.putArray("command").add("/opt/jdtls/bin/jdtls");
     server.putArray("extensions").add(".JAVA");
@@ -45,7 +46,7 @@ class DaemonConfigTest {
     assertEquals(Duration.ofSeconds(1), config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(30), config.maxReconnectDelay());
     assertEquals("Custom local environment.", config.note());
-    assertEquals("/usr/bin/bash", config.bashExecutable());
+    assertEquals(defaultBash(), config.bashExecutable());
     assertEquals(List.of(".java"), config.lsp().servers().getFirst().extensions());
     assertEquals(List.of("daemon.json", "daemon.token"), entries(root));
   }
@@ -53,19 +54,19 @@ class DaemonConfigTest {
   @Test
   void decodedUnicodeConfigPathAndValuesArePreserved() throws Exception {
     Path dir = Files.createDirectory(root.resolve("中文数据 😀"));
+    Path bash = writeExecutable(dir, "中文工具/bash");
     Path file = writeConfig(dir, "http://localhost");
     var json =
         MAPPER.createObjectNode().put("studioUrl", "http://localhost").put("note", "中文说明 😀");
-    String bash = dir.resolve("中文工具/bash").toString();
-    json.put("bashExecutable", bash);
+    json.put("bashExecutable", bash.toString());
     MAPPER.writeValue(file.toFile(), json);
     DaemonConfig config =
         DaemonConfig.fromArgs(
             DaemonArguments.decode(DaemonArgumentsTest.encoded("--config", file.toString())));
     assertEquals(dir, config.dataDir());
     assertEquals("中文说明 😀", config.note());
-    assertEquals(bash, config.bashExecutable());
-    assertEquals(List.of("daemon.json", "daemon.token"), entries(dir));
+    assertEquals(bash.toString(), config.bashExecutable());
+    assertEquals(List.of("daemon.json", "daemon.token", "中文工具"), entries(dir));
   }
 
   @Test
@@ -131,6 +132,40 @@ class DaemonConfigTest {
     }
   }
 
+  /** 意图：配置覆盖与默认值都必须解析为宿主可执行程序；缺失、不可执行或 PATH 缺失都在启动期失败关闭， 且错误只含字段路径、不回显配置取值。 */
+  @Test
+  void configuredBashMustResolveToExecutable() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+
+    Path missing = root.resolve("absent-bash");
+    writeBash(file, missing.toString());
+    IllegalArgumentException missingError =
+        assertThrows(IllegalArgumentException.class, () -> load(file));
+    assertTrue(
+        missingError.getMessage().contains("daemon.bashExecutable"), missingError.getMessage());
+    assertFalse(missingError.getMessage().contains(missing.toString()), "错误信息不得回显配置取值");
+
+    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+      Path plain = Files.writeString(root.resolve("plain-bash"), "not executable");
+      Files.setPosixFilePermissions(
+          plain, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+      writeBash(file, plain.toString());
+      assertThrows(IllegalArgumentException.class, () -> load(file));
+    }
+
+    Path custom = writeExecutable(root.resolve("bin"), "acme-bash");
+    writeBash(file, custom.toString());
+    assertEquals(custom.toString(), load(file).bashExecutable());
+
+    writeBash(file, DaemonConfig.DEFAULT_BASH_EXECUTABLE);
+    assertEquals(defaultBash(), load(file).bashExecutable());
+
+    writeBash(file, "kk-studio-absent-command-" + System.nanoTime());
+    IllegalArgumentException absentError =
+        assertThrows(IllegalArgumentException.class, () -> load(file));
+    assertTrue(absentError.getMessage().contains("daemon.bashExecutable"));
+  }
+
   @Test
   void tokenRemainsOnDemandAndOutsideRecordSurfaces() throws Exception {
     DaemonConfig first = load(writeConfig(root, "http://localhost"));
@@ -175,7 +210,7 @@ class DaemonConfigTest {
     try {
       System.setProperty(key, "SECRET");
       DaemonConfig config = load(file);
-      assertEquals("bash", config.bashExecutable());
+      assertEquals(defaultBash(), config.bashExecutable());
       assertTrue(config.lsp().servers().isEmpty());
       assertNull(config.note());
     } finally {
@@ -255,10 +290,31 @@ class DaemonConfigTest {
     return file;
   }
 
+  /** 在给定目录下创建真实可执行脚本，模拟操作者提供的自定义 bash。 */
+  static Path writeExecutable(Path directory, String relative) throws IOException {
+    Path file = directory.resolve(relative);
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, "#!/bin/sh\nexit 0\n");
+    if (!file.toFile().setExecutable(true)) {
+      throw new IllegalStateException("cannot mark executable: " + file);
+    }
+    return file;
+  }
+
   static List<String> entries(Path dir) throws IOException {
     try (var files = Files.list(dir)) {
       return files.map(path -> path.getFileName().toString()).sorted().toList();
     }
+  }
+
+  private static void writeBash(Path file, String bash) throws IOException {
+    MAPPER.writeValue(
+        file.toFile(),
+        MAPPER.createObjectNode().put("studioUrl", "http://localhost").put("bashExecutable", bash));
+  }
+
+  private static String defaultBash() {
+    return ExecutableResolver.resolve(DaemonConfig.DEFAULT_BASH_EXECUTABLE).orElseThrow();
   }
 
   private static DaemonConfig load(Path file) {
