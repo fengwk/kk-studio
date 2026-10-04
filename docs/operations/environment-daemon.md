@@ -2,8 +2,8 @@
 
 Environment Daemon 把 Studio 的文件、命令、检索与 LSP 工具调用执行在你的主机上。每个
 OS 用户只运行**一个受管 Daemon**，固定根目录 `~/.kk-studio`（Windows 为
-`%USERPROFILE%\.kk-studio`），不同 Environment 共享同一个进程。Daemon 只做本机安装与运行，
-**不执行任何远程主机操作**。
+`%USERPROFILE%\.kk-studio`）；单个 Daemon 实例同一时刻只绑定一个 Environment，由
+`daemon.token` 里的注册凭据决定。Daemon 只做本机安装与运行，**不执行任何远程主机操作**。
 
 安装设置由 Studio 的 Environment 保存：在 Web 中填写并保存配置，复制生成的安装命令，再到
 目标主机执行；执行前配置只是数据库记录，不代表已经部署。默认安装官方 GitHub Release，
@@ -19,7 +19,7 @@ LSP client 已内嵌在 Daemon JAR 中。Studio 没有内置登录鉴权，入�
 | --- | --- | --- |
 | Linux | 可用的 `systemctl --user`，curl 与 `sha256sum` 或 `shasum` | 用户服务 `kk-studio-daemon.service` |
 | macOS | 已登录桌面，可用的 `gui/$(id -u)` 域；curl 与 `sha256sum` 或 `shasum` | LaunchAgent `fun.fengwk.kkstudio.environment-daemon` |
-| Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、PATH 上的 `bash.exe` | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
+| Windows 10/11 | PowerShell 5.1 或 7、ScheduledTasks 模块、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析） | 当前用户的 AtLogOn 计划任务，仅在该用户交互登录期间运行 |
 
 Linux 注销后要持续运行，由管理员开启 `loginctl enable-linger <用户名>`，安装器不代为开启。
 macOS 纯 SSH 会话如果没有图形登录域，不能安装 LaunchAgent。Windows 的 Bash 可来自 Git for
@@ -45,8 +45,9 @@ stdout/stderr。
 token 或复制失败时，提示会明确说明**配置已保存但命令未生成/复制，尚未部署**。CAS 版本冲突时
 只重基版本，保留你正在编辑的草稿。
 
-> 安装命令包含凭据，请勿分享；它可能进入剪贴板历史。**保存不代表已应用**；覆盖会重启并中断
-> 当前用户唯一的 Daemon（影响所有 Environment），但保留运行数据。
+> 安装命令包含凭据，请勿分享；它可能进入剪贴板历史。**保存不代表已应用**；覆盖只影响当前
+> OS 用户唯一的受管 Daemon，重启后它连接这次选择的 Environment，并中断原绑定 Environment
+> 的在途调用（结果不确定、已发生的命令副作用不回滚），但保留运行数据。
 
 命令本体是一个自包含脚本：它在私有临时目录里以 0600 写入 `daemon.json` 与 `daemon.token`
 （两个文件必须是同目录的兄弟文件，且分别命名为 `daemon.json` 与 `daemon.token`），下载
@@ -75,32 +76,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 status|uninstall
 `-TokenFile` 必须是同目录的 `daemon.json` / `daemon.token`，由当前 SID 拥有、禁用 ACL 继承、
 不含其它 SID 的 Allow ACE，且不是 reparse point。安装器只校验文件元数据，**不读取 token 内容**。
 
-Java home 发现顺序为 `--java-home` / `-JavaHome` → `JAVA_HOME_21` → `JAVA_HOME` → PATH
-（Windows 要求 Java home 同时含 `java` 与 `javac`）。`DAEMON_VERIFY_TIMEOUT_SECONDS`
+Java home 发现顺序为 `--java-home` / `-JavaHome` → `JAVA_HOME_21` → `JAVA_HOME` → PATH；
+所选 home 必须是 JDK 21，Unix 只要求可执行的 `bin/java`（安装器与程序都不编译），Windows
+还要求 `bin/javac`。`DAEMON_VERIFY_TIMEOUT_SECONDS`
 （默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖启动与稳定性验证窗口，均须十进制
 非负整数；0 表示立即检查，不等待对应窗口。
 
 ### 执行流程与预检
 
-安装器按固定顺序工作，任何一步失败都不会留下半成品：
+安装器按固定顺序工作，全部语义校验都发生在目标写入之前：
 
-1. 检查系统服务管理器是否可用，并确认目标服务是否属于本安装器（见[管理身份](#管理身份与冲突处理)）。
-   同名但非受管定义会在下载或写入前被拒绝。
-2. 核验输入文件、发布资产与 JAR，再校验暂存配置。
-3. 下载 latest 对应的 `kk-studio-daemon-<tag>.jar` 与 `.jar.sha256`，核对摘要，并确保 JAR 版本
-   与解析出的 tag 一致。
-4. 用下载的新 JAR 对暂存的 `daemon.json` 与兄弟 `daemon.token` 执行 `--check-config` 预检：它做
-   **结构与 token 文件校验**（配置结构/取值、token 文件存在且为普通文件），不建数据目录、不加锁、
-   不连接、不启动 LSP、不做服务变更，也**不探测** Bash 等可执行程序是否真的可运行。默认 Bash 的
-   就绪性由安装器另行预检，配置中显式 Bash 的解析发生在 Daemon 启动时。旧版 JAR 不认识该新参数
-   时给出可操作错误，**现有受管安装保持不变**。
+1. 检查系统服务管理器是否可用、目标服务是否属于本安装器（见[管理身份](#管理身份与冲突处理)），
+   并核验输入文件是私有、同目录、非符号链接且有界的 `daemon.json` / `daemon.token`。同名但非
+   受管定义会在下载或写入前被拒绝。
+2. 解析 latest 官方 release tag，下载对应的 `kk-studio-daemon-<tag>.jar` 与 `.jar.sha256`，
+   核对摘要，并确认 JAR 版本与解析出的 tag 一致。
+3. 把暂存配置与 token 复制为下载目录内的 0600 快照，后续只针对该快照做预检，避免校验与发布
+   之间被替换。
+4. 用下载的新 JAR 对快照执行 `--check-config` 预检：它读取配置与 token 文件，用共享 codec 校验
+   配置结构与取值，在本机只读文件系统中把配置的（缺省为 `bash`）Bash 解析为实际可执行路径，并
+   校验内联 LSP 的结构。它**不执行** Bash 或任何其它程序，不建数据目录、不加锁、不连接、不启动
+   LSP、不做服务变更；Bash 是否真能运行、语言服务器是否完整可用都不在这里判断。失败只输出固定
+   safe marker（字段路径与规则，不含原始取值），旧版 JAR 不认识该新参数时给出可操作错误。
 5. 预检全部通过后，先把现有的受管 JAR、`daemon.json`、`daemon.token` 复制到 `backups/` 下的
    唯一个人备份目录，再发布新文件并重启服务。
 
-**install 会整体替换程序、配置与 token，并重启服务**，保留数据目录与日志。发布之后的失败
-返回非零，**不承诺自动回滚**：安装器会输出备份路径、状态检查与恢复步骤，你可以按提示手动
-恢复，或修正暂存输入后重试。重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，
-已经发生的命令副作用不回滚。
+预检失败时现有受管安装保持不变。**install 会整体替换程序、配置与 token，并重启服务**，保留数据
+目录与日志。发布之后的失败返回非零，**不自动回滚**：安装器会输出备份路径、状态检查与恢复步骤，
+你可以按提示用备份手动恢复，或修正暂存输入后重试。重启会中断在途工具调用，进程内 invocation
+journal 不跨重启保留，已经发生的命令副作用不回滚。
 
 ## 固定布局与文件
 
@@ -367,7 +371,7 @@ HOME 也不是默认工作目录。
 
 | 现象 | 处理 |
 | --- | --- |
-| Java 版本或 home 预检失败 | 指定真正的 JDK 21 home，检查 `bin/java` 与 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
+| Java 版本或 home 预检失败 | 指定真正的 JDK 21 home；Unix 检查可执行的 `bin/java`，Windows 还要有 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
 | GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验，旧受管安装保持不动 |
 | `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 按[管理身份与冲突处理](#管理身份与冲突处理)确认归属，检查、导出、停止并移开非受管定义；不要伪造所有权标记 |
 | 配置或 token 文件权限失败 | Unix 确认属主与无 group/other 写权限；Windows 检查当前 SID、继承与其它 Allow ACE。安装器拒绝不安全现存文件，不自动放宽规则 |
