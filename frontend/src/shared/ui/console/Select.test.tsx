@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import { Select } from '@/shared/ui/console/Select'
 
@@ -11,6 +11,7 @@ const OPTIONS = [
 ]
 
 describe('Select', () => {
+  afterEach(() => vi.restoreAllMocks())
   it('renders a labelled listbox trigger rather than a native select', () => {
     render(
       <Select
@@ -128,7 +129,7 @@ describe('Select', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('closes when focus moves outside the control', async () => {
+  it('closes when focus moves outside the control and the portal menu', async () => {
     const user = userEvent.setup()
     render(
       <div>
@@ -137,8 +138,67 @@ describe('Select', () => {
       </div>,
     )
     await user.click(screen.getByLabelText('Choose'))
-    await user.tab()
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    act(() => screen.getByText('Outside').focus())
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByText('Outside')).toHaveFocus()
+  })
+
+  it.each([false, true])('restores trigger focus and leaves the Tab default action uncancelled (shift=%s)', async shiftKey => {
+    const user = userEvent.setup()
+    render(<Select aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />)
+    const trigger = screen.getByLabelText('Choose')
+    await user.click(trigger)
+    const option = screen.getByRole('option', { name: 'Alpha' })
+    expect(option).toHaveFocus()
+    // jsdom 没有原生 Tab 默认动作；邻接顺序由 Playwright 验证，此层只验证 handler 契约。
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true })
+    fireEvent(option, event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('renders the listbox as a body-level portal outside the control root', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <Select aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />,
+    )
+    await user.click(screen.getByLabelText('Choose'))
+    const listbox = screen.getByRole('listbox')
+    expect(container.contains(listbox)).toBe(false)
+    expect(document.body.contains(listbox)).toBe(true)
+  })
+
+  it('repositions the portal menu from the trigger rect when the viewport changes', async () => {
+    const user = userEvent.setup()
+    render(<Select aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />)
+    const trigger = screen.getByLabelText('Choose')
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { top: 100, bottom: 136, left: 40, right: 240, width: 200, height: 36, x: 40, y: 100 } as DOMRect,
+    )
+    await user.click(trigger)
+    const listbox = screen.getByRole('listbox')
+    expect(listbox).toHaveStyle({ position: 'fixed', left: '40px', top: '142px', minWidth: '200px' })
+    // 触发按钮上移后，菜单需随滚动事件重新贴合，而不是停留在旧坐标。
+    rectSpy.mockReturnValue(
+      { top: 20, bottom: 56, left: 40, right: 240, width: 200, height: 36, x: 40, y: 20 } as DOMRect,
+    )
+    window.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(listbox).toHaveStyle({ top: '62px' }))
+  })
+
+  it('flips the portal menu above the trigger when there is not enough room below', async () => {
+    const user = userEvent.setup()
+    render(<Select aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />)
+    const trigger = screen.getByLabelText('Choose')
+    // 视口高 768，触发按钮贴近底部：下方空间不足，菜单应改为贴上方定位。
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { top: 700, bottom: 740, left: 40, right: 240, width: 200, height: 40, x: 40, y: 700 } as DOMRect,
+    )
+    await user.click(trigger)
+    const listbox = screen.getByRole('listbox')
+    expect(listbox).toHaveStyle({ position: 'fixed', bottom: '74px' })
   })
 
   it('opens with Space and confirms the active option with Space', async () => {

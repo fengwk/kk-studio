@@ -190,7 +190,9 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
         position: style.position,
       }
     })
-    expect(menuStyle.position).toBe('absolute')
+    // Select 菜单已 portal 到 body，用 fixed 视口坐标避免滚动容器裁剪。
+    expect(menuStyle.position).toBe('fixed')
+    expect(await listbox.evaluate(element => element.parentElement === document.body)).toBe(true)
     expect(parseFloat(menuStyle.borderRadius)).toBeGreaterThan(0)
   })
 

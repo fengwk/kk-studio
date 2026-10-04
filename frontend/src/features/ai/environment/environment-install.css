@@ -1,4 +1,4 @@
-.environment-install-modal {
+.modal-card.environment-install-modal {
   width: min(560px, 100%);
   max-height: calc(100vh - 48px);
   display: flex;
@@ -8,6 +8,36 @@
 .environment-install-modal .modal-body {
   min-height: 0;
   overflow-y: auto;
+}
+
+.environment-install-modal > form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.environment-install-modal .modal-header,
+.environment-install-modal .modal-footer {
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.environment-install-modal .modal-header h2 {
+  overflow-wrap: anywhere;
+}
+
+.environment-install-modal .install-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.environment-install-modal details > .form-group,
+.environment-install-modal details > .ui-checkbox,
+.environment-install-modal details > .install-field {
+  margin-top: 16px;
 }
 
 .environment-install-modal details {
@@ -23,10 +53,14 @@
   margin-bottom: 16px;
 }
 
-.environment-install-modal textarea {
+.environment-install-modal .form-group textarea {
   width: 100%;
   min-width: 0;
-  font-family: monospace;
+  height: 180px;
+  min-height: 160px;
+  box-sizing: border-box;
+  font-family: var(--mono);
+  font-weight: 400;
   resize: vertical;
 }
 
@@ -35,7 +69,7 @@
 }
 
 .environment-install-modal .field-help {
-  margin: -8px 0 12px;
+  margin: 0;
   font-size: 12px;
   line-height: 1.5;
   color: var(--muted, #9ca3af);
@@ -51,4 +85,17 @@
 
 .environment-card .chat-card-foot {
   flex-wrap: wrap;
+}
+
+@media (max-width: 420px), (max-height: 500px) {
+  .environment-install-modal .modal-header,
+  .environment-install-modal .modal-body,
+  .environment-install-modal .modal-footer {
+    padding: 12px;
+  }
+
+  .environment-install-modal .modal-footer button {
+    white-space: normal;
+    min-height: 36px;
+  }
 }
