@@ -660,7 +660,14 @@ function Test-PrivatePublication {
         New-Item -ItemType Junction -Path $junction -Target $source | Out-Null
         Assert-Throws -Action { Assert-NoReparseAncestors -Path (Join-Path $junction "daemon.json") } `
             -ExpectedMessage "reparse point" -Message "reparse ancestor rejected"
-        Remove-Item -LiteralPath $junction -Force
+        # Delete only the junction; PS 5.1 Remove-Item prompts for its nonempty target.
+        [IO.Directory]::Delete($junction)
+        Assert-True -Condition (-not (Test-Path -LiteralPath $junction)) `
+            -Message "junction cleanup removes only the link"
+        Assert-True -Condition (Test-Path -LiteralPath $ConfigFile -PathType Leaf) `
+            -Message "junction cleanup preserves the source config"
+        Assert-True -Condition (Test-Path -LiteralPath $TokenFile -PathType Leaf) `
+            -Message "junction cleanup preserves the source token"
 
         $world = [System.Security.Principal.SecurityIdentifier]::new("S-1-1-0")
         $acl = Get-Acl -LiteralPath $destination
