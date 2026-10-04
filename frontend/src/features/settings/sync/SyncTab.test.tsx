@@ -2,12 +2,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ConfigSyncItem } from '@/shared/api/contracts/config-sync'
+import type {
+  ConfigSyncImportCheckDTO,
+  ConfigSyncItem,
+} from '@/shared/api/contracts/config-sync'
 import { SyncTab } from '@/features/settings/sync/SyncTab'
 
 const mocks = vi.hoisted(() => ({
   getInventory: vi.fn(),
   exportConfig: vi.fn(),
+  checkImport: vi.fn(),
   importConfig: vi.fn(),
 }))
 
@@ -15,11 +19,13 @@ vi.mock('@/shared/api/config-sync-service', () => ({
   configSyncService: {
     getInventory: mocks.getInventory,
     exportConfig: mocks.exportConfig,
+    checkImport: mocks.checkImport,
     importConfig: mocks.importConfig,
   },
   createConfigSyncService: () => ({
     getInventory: vi.fn(),
     exportConfig: vi.fn(),
+    checkImport: vi.fn(),
     importConfig: vi.fn(),
   }),
 }))
@@ -61,6 +67,16 @@ function deferred<T>() {
     reject = rej
   })
   return { promise, resolve, reject }
+}
+
+/** 预检查默认全量可导入；用例按需覆盖 created/updated/skipped 表达四种确认形态。 */
+function makePreview(overrides: Partial<ConfigSyncImportCheckDTO> = {}): ConfigSyncImportCheckDTO {
+  return {
+    created: [{ kind: 'providers', name: 'openai' }],
+    updated: [],
+    skipped: [],
+    ...overrides,
+  }
 }
 
 function renderSyncTab(
@@ -108,6 +124,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.getInventory.mockResolvedValue({ items: INVENTORY_ITEMS })
   mocks.exportConfig.mockResolvedValue({ yaml: 'providers: []' })
+  mocks.checkImport.mockResolvedValue(makePreview())
   mocks.importConfig.mockResolvedValue({ imported: [], skipped: [] })
 })
 
@@ -231,7 +248,7 @@ describe('SyncTab', () => {
     const { container } = renderSyncTab()
     await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
     // 正在导入时控件均禁用，Tab 仍留在弹窗而不是穿透到后台。
     await user.tab()
     expect(dialog).toHaveFocus()
@@ -351,10 +368,20 @@ describe('SyncTab', () => {
 })
 
 describe('SyncTab import', () => {
-  it('confirms, imports the file text and reports imported and skipped entries', async () => {
+  it('checks on selection, previews created/updated/skipped and imports only after explicit partial confirmation', async () => {
     const user = userEvent.setup()
+    mocks.checkImport.mockResolvedValue(
+      makePreview({
+        created: [{ kind: 'providers', name: 'openai' }],
+        updated: [{ kind: 'models', name: 'openai/gpt' }],
+        skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
+      }),
+    )
     mocks.importConfig.mockResolvedValue({
-      imported: [{ kind: 'providers', name: 'openai' }],
+      imported: [
+        { kind: 'providers', name: 'openai' },
+        { kind: 'models', name: 'openai/gpt' },
+      ],
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
     })
     const { container, queryClient, reloadSettings } = renderSyncTab()
@@ -363,12 +390,24 @@ describe('SyncTab import', () => {
 
     await user.upload(fileInput(container), file)
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
-    expect(within(dialog).getByText('导入将更新同名配置。')).toBeInTheDocument()
+    // 只读选择即预检查，尚未确认前绝不执行导入。
+    expect(mocks.checkImport).toHaveBeenCalledWith('providers: []')
+    expect(mocks.importConfig).not.toHaveBeenCalled()
+    expect(within(dialog).getByText('导入前请确认以下变更计划。')).toBeInTheDocument()
     expect(within(dialog).getByText('文件：kk.yaml')).toBeInTheDocument()
+    expect(within(dialog).getByText('将新增')).toBeInTheDocument()
+    expect(within(dialog).getByText('将覆盖')).toBeInTheDocument()
+    expect(within(dialog).getByText('将跳过')).toBeInTheDocument()
+    expect(within(dialog).getByText('Agent: broken — unsupported tool')).toBeInTheDocument()
+    // 存在跳过项时只提供部分导入入口，没有全量确认按钮。
+    expect(within(dialog).queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument()
+    // YAML 原文不渲染。
+    expect(dialog.textContent).not.toContain('providers: []')
 
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '仅导入可用配置' }))
 
-    expect(mocks.importConfig).toHaveBeenCalledWith('providers: []')
+    // 只有用户点击部分导入才显式授权 allowPartial。
+    expect(mocks.importConfig).toHaveBeenCalledWith('providers: []', true)
     expect(await within(dialog).findByText('已导入')).toBeInTheDocument()
     expect(within(dialog).getByText('提供商: openai')).toBeInTheDocument()
     expect(within(dialog).getByText('已跳过')).toBeInTheDocument()
@@ -402,7 +441,7 @@ describe('SyncTab import', () => {
 
     await user.upload(fileInput(container), file)
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('malformed yaml')
     expect(within(dialog).queryByText('已导入')).not.toBeInTheDocument()
@@ -428,7 +467,7 @@ describe('SyncTab import', () => {
     await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
 
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
     const importing = within(dialog).getByRole('button', { name: '导入中…' })
     expect(importing).toBeDisabled()
     expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
@@ -494,24 +533,107 @@ describe('SyncTab import', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('ignores a second file selected while the first is still being read', async () => {
+  it('ignores a second file selected while the first is still being checked', async () => {
     const { container } = renderSyncTab()
     const input = fileInput(container)
-    const firstRead = deferred<string>()
+    const checking = deferred<ConfigSyncImportCheckDTO>()
+    mocks.checkImport.mockReturnValueOnce(checking.promise)
     const secondText = vi.fn(async () => 'second: 1')
-    const firstFile = { name: 'first.yaml', text: () => firstRead.promise } as unknown as File
+    const firstFile = { name: 'first.yaml', text: async () => 'first: 1' } as unknown as File
     const secondFile = { name: 'second.yaml', text: secondText } as unknown as File
 
     fireEvent.change(input, { target: { files: [firstFile] } })
-    // 读取期间入口禁用，第二次选择被忽略，不会覆盖首个文件。
+    // 检查期间入口禁用，第二次选择被忽略，不会覆盖首个文件。
     expect(screen.getByRole('button', { name: '导入' })).toBeDisabled()
     fireEvent.change(input, { target: { files: [secondFile] } })
     expect(secondText).not.toHaveBeenCalled()
 
-    firstRead.resolve('first: 1')
+    checking.resolve(makePreview())
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
     expect(within(dialog).getByText('文件：first.yaml')).toBeInTheDocument()
     expect(fileInput(container)).toBeEnabled()
+  })
+
+  it('rejects the file when the precheck fails and can be retried with another file', async () => {
+    const user = userEvent.setup()
+    mocks.checkImport.mockRejectedValueOnce(new Error('unsupported file structure'))
+    const { container } = renderSyncTab()
+
+    await user.upload(fileInput(container), new File(['bad'], 'kk.yaml'))
+    // 检查失败走既有错误通知，不进入可导入确认状态。
+    expect(await screen.findByRole('alert')).toHaveTextContent('unsupported file structure')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(mocks.importConfig).not.toHaveBeenCalled()
+    expect(fileInput(container)).toBeEnabled()
+
+    // 重新选择可再次触发检查，成功后正常进入确认弹窗。
+    mocks.checkImport.mockResolvedValueOnce(makePreview())
+    await user.upload(fileInput(container), new File(['ok'], 'good.yaml'))
+    expect(await screen.findByRole('dialog', { name: '导入配置' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the local check-failure message when the rejection has no readable error', async () => {
+    const user = userEvent.setup()
+    mocks.checkImport.mockRejectedValueOnce('opaque')
+    const { container } = renderSyncTab()
+    await user.upload(fileInput(container), new File(['bad'], 'kk.yaml'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('配置检查失败。')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('offers no execute action when the precheck has nothing importable', async () => {
+    const user = userEvent.setup()
+    mocks.checkImport.mockResolvedValue(
+      makePreview({
+        created: [],
+        updated: [],
+        skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
+      }),
+    )
+    const { container } = renderSyncTab()
+    await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+
+    expect(within(dialog).getByText('此文件没有可导入的配置。')).toBeInTheDocument()
+    // 无可用项时既没有全量也没有部分执行按钮，只保留取消。
+    expect(within(dialog).queryByRole('button', { name: '确认导入' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: '仅导入可用配置' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeInTheDocument()
+    expect(within(dialog).getByText('Agent: broken — unsupported tool')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(mocks.importConfig).not.toHaveBeenCalled()
+  })
+
+  it('confirms a fully importable plan without partial authorization', async () => {
+    const user = userEvent.setup()
+    mocks.checkImport.mockResolvedValue(
+      makePreview({
+        created: [{ kind: 'providers', name: 'openai' }],
+        updated: [{ kind: 'models', name: 'openai/gpt' }],
+      }),
+    )
+    mocks.importConfig.mockResolvedValue({
+      imported: [
+        { kind: 'providers', name: 'openai' },
+        { kind: 'models', name: 'openai/gpt' },
+      ],
+      skipped: [],
+    })
+    const { container } = renderSyncTab()
+    await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+
+    // 无跳过项时使用全量确认按钮，部分导入入口不出现。
+    expect(within(dialog).queryByRole('button', { name: '仅导入可用配置' })).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
+
+    expect(mocks.importConfig).toHaveBeenCalledWith('a: 1', false)
+    expect(await within(dialog).findByText('已导入')).toBeInTheDocument()
+    expect(within(dialog).queryByText('已跳过')).not.toBeInTheDocument()
   })
 
   it('falls back to the local message when the backend rejects without a readable error', async () => {
@@ -520,7 +642,7 @@ describe('SyncTab import', () => {
     const { container } = renderSyncTab()
     await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent('导入失败。')
   })
@@ -533,7 +655,7 @@ describe('SyncTab import', () => {
     await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
     await screen.findByRole('dialog', { name: '导入配置' })
 
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '导入' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认导入' }))
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.getByRole('dialog', { name: '导入配置' })).toBeInTheDocument()
 
@@ -547,6 +669,9 @@ describe('SyncTab import', () => {
 
   it('keeps an unsaved settings draft and offers an explicit reload on request', async () => {
     const user = userEvent.setup()
+    mocks.checkImport.mockResolvedValue(
+      makePreview({ created: [{ kind: 'settings', name: 'settings' }] }),
+    )
     mocks.importConfig.mockResolvedValue({
       imported: [{ kind: 'settings', name: 'settings' }],
       skipped: [],
@@ -554,7 +679,7 @@ describe('SyncTab import', () => {
     const { container, reloadSettings } = renderSyncTab({ settingsDirty: true })
     await user.upload(fileInput(container), new File(['a: 1'], 'kk.yaml'))
     const dialog = await screen.findByRole('dialog', { name: '导入配置' })
-    await user.click(within(dialog).getByRole('button', { name: '导入' }))
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
 
     expect(await within(dialog).findByText('设置中有未保存的更改，将保持原样。')).toBeInTheDocument()
     // 存在 draft 时不自动刷新设置。

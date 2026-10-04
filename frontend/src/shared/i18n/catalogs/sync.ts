@@ -114,17 +114,37 @@ export const syncCatalog = {
     'en-US': 'Import configuration',
     'zh-CN': '导入配置',
   },
-  'settings.sync.import.confirmText': {
-    'en-US': 'Importing will update configuration with the same name.',
-    'zh-CN': '导入将更新同名配置。',
+  'settings.sync.import.previewHint': {
+    'en-US': 'Review the planned changes before importing.',
+    'zh-CN': '导入前请确认以下变更计划。',
   },
   'settings.sync.import.fileName': {
     'en-US': 'File: {{name}}',
     'zh-CN': '文件：{{name}}',
   },
+  'settings.sync.import.createdHeading': {
+    'en-US': 'Will be added',
+    'zh-CN': '将新增',
+  },
+  'settings.sync.import.updatedHeading': {
+    'en-US': 'Will be overwritten',
+    'zh-CN': '将覆盖',
+  },
+  'settings.sync.import.previewSkippedHeading': {
+    'en-US': 'Will be skipped',
+    'zh-CN': '将跳过',
+  },
+  'settings.sync.import.nothingUsable': {
+    'en-US': 'This file contains no configuration that can be imported.',
+    'zh-CN': '此文件没有可导入的配置。',
+  },
   'settings.sync.import.confirm': {
-    'en-US': 'Import',
-    'zh-CN': '导入',
+    'en-US': 'Confirm import',
+    'zh-CN': '确认导入',
+  },
+  'settings.sync.import.confirmPartial': {
+    'en-US': 'Import available only',
+    'zh-CN': '仅导入可用配置',
   },
   'settings.sync.import.importing': {
     'en-US': 'Importing…',
@@ -137,6 +157,10 @@ export const syncCatalog = {
   'settings.sync.import.readFailed': {
     'en-US': 'Failed to read the file.',
     'zh-CN': '文件读取失败。',
+  },
+  'settings.sync.import.checkFailed': {
+    'en-US': 'Failed to check the configuration.',
+    'zh-CN': '配置检查失败。',
   },
   'settings.sync.import.failed': {
     'en-US': 'Import failed.',

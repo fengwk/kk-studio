@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 
 /** 通过共享的类型化 config codec 规范化可变的 model 配置。 */
 @Component
-final class AgentModelMutationFactory {
+public final class AgentModelMutationFactory {
 
   private static final String RESOURCE = "agent_model";
   private static final int NAME_MAX_LENGTH = 128;
@@ -20,10 +20,15 @@ final class AgentModelMutationFactory {
   private final AgentEditableSupport editableSupport;
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
 
-  AgentModelMutationFactory(
+  public AgentModelMutationFactory(
       AgentEditableSupport editableSupport, AgentModelRuntimeConfigParser runtimeConfigParser) {
     this.editableSupport = editableSupport;
     this.runtimeConfigParser = runtimeConfigParser;
+  }
+
+  /** 与写入共用字段和 config 校验，不写数据库。 */
+  public void validateImport(String name, AgentModelEditablePropertiesDTO properties) {
+    newMutation(name, properties);
   }
 
   AgentModel newModel(

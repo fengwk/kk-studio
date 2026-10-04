@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { HttpError } from '../lib/http.mjs'
 
 import '../cases/config-sync.mjs'
 import { ALL_CASES, getCase } from '../lib/registry.mjs'
@@ -9,10 +10,11 @@ const CASE_IDS = [
   'config_sync.inventory_contract',
   'config_sync.provider_roundtrip_same_name',
   'config_sync.environment_identity_and_token',
+  'config_sync.import_precheck_and_partial_confirmation',
 ]
 
 test('config sync cases are registered as free L1 cases and run-matrix imports the module', () => {
-  // 测试意图：验证三个配置同步用例已成功注册为无需外部依赖的 L1 用例（requires 为空），且 run-matrix.mjs 源码包含 exact import 语句。
+  // 配置同步用例均无需模型或外部工具，且由矩阵入口注册。
   for (const id of CASE_IDS) {
     const caseDef = getCase(id)
     assert.ok(caseDef, `case ${id} should be found via getCase`)
@@ -123,4 +125,42 @@ test('config_sync.inventory_contract guards secret leakage and validates exact f
       /prohibited|fields/,
     )
   }
+})
+test('precheck case enforces read-only checking and explicit partial import before cleanup', async () => {
+  let provider = null
+  const writes = []
+  const ctx = {
+    async call(method, path, body) {
+      if (method === 'GET') {
+        assert.equal(path, '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
+        return { json: { data: { results: provider ? [provider] : [] } } }
+      }
+      if (method === 'DELETE') {
+        assert.ok(path.includes(encodeURIComponent(provider.name)))
+        provider = null
+        return { json: { data: null } }
+      }
+      const name = body.yaml.match(/name: (.+)/)[1]
+      if (!body.yaml.includes('providerType:')) {
+        throw new HttpError(400, 'providerType is required', path)
+      }
+      if (path.endsWith('/check')) {
+        return {
+          headers: new Headers({ 'cache-control': 'no-store' }),
+          json: { data: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } },
+        }
+      }
+      assert.equal(path, '/api/settings/sync/import')
+      if (!body.allowPartial) {
+        throw new HttpError(400, 'partial import requires explicit confirmation', path)
+      }
+      writes.push(body)
+      provider = { name, version: '0' }
+      return { json: { data: { imported: [{ kind: 'providers', name }], skipped: [{ kind: 'futureConfig', name: '', reason: 'unknown config category' }] } } }
+    },
+  }
+  await getCase('config_sync.import_precheck_and_partial_confirmation').run(ctx)
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].allowPartial, true)
+  assert.equal(provider, null, 'case must clean up its provider')
 })

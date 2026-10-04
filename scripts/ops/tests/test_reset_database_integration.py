@@ -11,14 +11,15 @@ container. These are behaviors that shell contracts cannot show:
   - PostgreSQL encoding, connection limit and owner preservation across reset;
   - The documented VPS_POSTGRES_*/PGSERVICE/CLI connection sources and credential non-disclosure.
 
-Product settings are exported and imported by the product's own settings sync; the reset script
-only backs up and replaces the database.
+Product settings are exported and imported by the product's own settings sync. Database maintenance
+backs up and replaces the database, or explicitly deletes frozen snapshots after acceptance.
 """
 
 import atexit
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import subprocess
 import tempfile
@@ -348,6 +349,10 @@ class TestResetDatabaseIntegration(unittest.TestCase):
         # Drop all test databases created during this test method.
         for db_name in set(self.created_databases):
             try:
+                if self.run_psql_command(
+                    "postgres", f"SELECT datistemplate FROM pg_database WHERE datname = '{db_name}'"
+                ) == "t":
+                    self.run_psql_command("postgres", f'ALTER DATABASE "{db_name}" IS_TEMPLATE false')
                 self.run_psql_command(
                     "postgres", f'DROP DATABASE IF EXISTS "{db_name}" WITH (FORCE)'
                 )
@@ -463,6 +468,7 @@ class TestResetDatabaseIntegration(unittest.TestCase):
         args: Sequence[str],
         env_override: Optional[Dict[str, str]] = None,
         timeout: int = 60,
+        input_text: str = "",
     ) -> subprocess.CompletedProcess:
         """Run an ops maintenance script and assert that no fixture value leaked into output."""
         env = dict(self.client_env)
@@ -476,6 +482,7 @@ class TestResetDatabaseIntegration(unittest.TestCase):
         res = subprocess.run(
             cmd,
             env=env,
+            input=input_text,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -484,6 +491,332 @@ class TestResetDatabaseIntegration(unittest.TestCase):
         self.assert_no_fixture_values(res.stdout, f"{script_path.name} stdout")
         self.assert_no_fixture_values(res.stderr, f"{script_path.name} stderr")
         return res
+
+    def create_snapshot(self, target, stamp="20260101T000000Z", *, template=False, frozen=True):
+        name = f"{target}_pre_{stamp}"
+        self.create_empty_db(name)
+        if template:
+            self.run_psql_command("postgres", f'ALTER DATABASE "{name}" IS_TEMPLATE true')
+        if frozen:
+            self.run_psql_command("postgres", f'ALTER DATABASE "{name}" ALLOW_CONNECTIONS false')
+        return name
+
+    def database_exists(self, name):
+        return self.run_psql_command(
+            "postgres", f"SELECT count(*) FROM pg_database WHERE datname = '{name}'"
+        ) == "1"
+
+    def test_cleanup_matches_only_exact_frozen_snapshots(self):
+        target = f"Probe_clean_{uuid.uuid4().hex[:8]}"
+        self.create_empty_db(target)
+        self.run_psql_command(target, "CREATE TABLE retained (id int); INSERT INTO retained VALUES (7)")
+        first = self.create_snapshot(target)
+        second = self.create_snapshot(target, "20260102T030405Z")
+        preserved = [
+            self.create_snapshot(target, "20260103T000000Z", frozen=False),
+            self.create_snapshot(target, "20260104T000000Z", template=True),
+            self.create_snapshot(target, "20260105T000000Z_extra"),
+            self.create_snapshot(target, "20260106T000000"),
+            self.create_snapshot(target, "20260107T000000z"),
+            self.create_snapshot(target.replace("_", "x")),
+            self.create_snapshot(target.lower()),
+            self.create_snapshot("other_" + target),
+            self.create_snapshot(target + "_pre"),
+        ]
+        backup = Path(self.test_dir.name) / "retained.dump"
+        backup.write_bytes(b"retained backup fixture")
+        dry = self.run_script(
+            RESET_SCRIPT,
+            ["--database", target, "--cleanup-snapshots", "--dry-run", "--work-dir", str(backup)],
+        )
+        self.assertEqual(0, dry.returncode, dry.stderr)
+        self.assertIn(first, dry.stdout)
+        self.assertIn(second, dry.stdout)
+        for name in preserved:
+            self.assertNotIn(name + " (", dry.stdout)
+        for name in [first, second, *preserved]:
+            self.assertTrue(self.database_exists(name))
+        result = self.run_script(
+            RESET_SCRIPT,
+            ["--database", target, "--cleanup-snapshots", "--work-dir", str(backup)],
+            input_text=target + "\n",
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("2 snapshot(s) deleted", result.stdout)
+        self.assertFalse(self.database_exists(first))
+        self.assertFalse(self.database_exists(second))
+        for name in preserved:
+            self.assertTrue(self.database_exists(name))
+        self.assertEqual("7", self.run_psql_command(target, "SELECT id FROM retained"))
+        self.assertEqual(b"retained backup fixture", backup.read_bytes())
+
+    def test_cleanup_confirmation_and_empty_selection(self):
+        target = f"probe_confirm_{uuid.uuid4().hex[:8]}"
+        # Explicit target selection needs only the maintenance connection, not an existing target.
+        empty = self.run_script(RESET_SCRIPT, ["--cleanup-snapshots", "--database", target])
+        self.assertEqual(0, empty.returncode, empty.stderr)
+        self.assertIn("No frozen snapshots matched", empty.stdout)
+        snapshot = self.create_snapshot(target)
+        for answer, message in [("", "input was not available"), ("wrong\n", "did not match")]:
+            with self.subTest(answer=answer):
+                refused = self.run_script(
+                    RESET_SCRIPT, ["--cleanup-snapshots", "--database", target], input_text=answer
+                )
+                self.assertNotEqual(0, refused.returncode)
+                self.assertIn(message, refused.stderr)
+                self.assertTrue(self.database_exists(snapshot))
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"],
+            env_override={"KK_STUDIO_RESET_DIR": str(WORKTREE_ROOT / "unused")},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(self.database_exists(snapshot))
+        self.assertFalse((WORKTREE_ROOT / "unused").exists())
+
+    def test_cleanup_needs_only_psql_not_backup_tools(self):
+        target = f"probe_tools_{uuid.uuid4().hex[:8]}"
+        snapshot = self.create_snapshot(target)
+        tools = Path(self.test_dir.name) / "tools"
+        tools.mkdir()
+        for tool in ("bash", "date", "dirname", "psql"):
+            (tools / tool).symlink_to(shutil.which(tool))
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--yes"],
+            {"PATH": str(tools), "VPS_POSTGRES_DATABASE": target},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(self.database_exists(snapshot))
+
+    def test_cleanup_preflights_all_permissions_and_needs_no_createdb(self):
+        target = f"probe_perm_{uuid.uuid4().hex[:8]}"
+        first = self.create_snapshot(target)
+        second = self.create_snapshot(target, "20260102T000000Z")
+        role = f"probe_clean_owner_{uuid.uuid4().hex[:8]}"
+        self.run_psql_command(
+            "postgres", f"CREATE ROLE {role} LOGIN NOCREATEDB PASSWORD '{FIXTURE_PASSWORD}'"
+        )
+        self.addCleanup(self.run_psql_command, "postgres", f"DROP ROLE {role}")
+        self.run_psql_command("postgres", f'ALTER DATABASE "{first}" OWNER TO {role}')
+        env = {"PGUSER": role, "PGPASSWORD": FIXTURE_PASSWORD, "PGPASSFILE": None}
+        refused = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"], env
+        )
+        self.assertNotEqual(0, refused.returncode)
+        self.assertIn("not the database owner or a superuser", refused.stderr)
+        self.assertTrue(self.database_exists(first))
+        self.assertTrue(self.database_exists(second))
+        self.run_psql_command("postgres", f'ALTER DATABASE "{second}" OWNER TO {role}')
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"], env
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(self.database_exists(first))
+        self.assertFalse(self.database_exists(second))
+
+    def test_cleanup_preserves_active_sessions(self):
+        target = f"probe_busy_{uuid.uuid4().hex[:8]}"
+        self.create_empty_db(target)
+        first = self.create_snapshot(target)
+        busy = self.create_snapshot(target, "20260102T000000Z", frozen=False)
+        sessions = []
+        try:
+            for db in [target, busy]:
+                proc = subprocess.Popen(
+                    ["psql", "-X", "-q", "-w", "-d", db, "-c", "SELECT pg_sleep(45)"],
+                    env=self.client_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                sessions.append(proc)
+                deadline = time.monotonic() + 10
+                while self.run_psql_command(
+                    "postgres", f"SELECT count(*) FROM pg_stat_activity WHERE datname = '{db}'"
+                ) != "1":
+                    if time.monotonic() > deadline:
+                        self.fail("fixture connection did not appear")
+                    time.sleep(0.05)
+            self.run_psql_command("postgres", f'ALTER DATABASE "{busy}" ALLOW_CONNECTIONS false')
+            result = self.run_script(
+                RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"]
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("active sessions exist", result.stderr)
+            self.assertTrue(self.database_exists(first))
+            self.assertTrue(self.database_exists(busy))
+            self.assertTrue(all(p.poll() is None for p in sessions))
+            # An online target is not a cleanup blocker; only the frozen snapshot's session is.
+            self.run_psql_command("postgres", f'ALTER DATABASE "{busy}" ALLOW_CONNECTIONS true')
+            result = self.run_script(
+                RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"]
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertFalse(self.database_exists(first))
+            self.assertTrue(all(p.poll() is None for p in sessions))
+        finally:
+            for proc in sessions:
+                proc.terminate()
+                proc.wait(timeout=10)
+
+    def cleanup_with_mutation(self, target, mutate):
+        """Change the catalog while the operator is at the confirmation boundary."""
+        proc = subprocess.Popen(
+            ["bash", str(RESET_SCRIPT), "--cleanup-snapshots", "--database", target],
+            env=self.client_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            output = b""
+            with selectors.DefaultSelector() as selector:
+                selector.register(proc.stdout, selectors.EVENT_READ)
+                deadline = time.monotonic() + 15
+                while b"The target database, backup files and object storage are not changed." not in output:
+                    remaining = deadline - time.monotonic()
+                    self.assertGreater(remaining, 0, "cleanup did not reach confirmation")
+                    self.assertTrue(selector.select(remaining), "cleanup confirmation timed out")
+                    chunk = os.read(proc.stdout.fileno(), 8192)
+                    self.assertTrue(chunk, "cleanup exited before confirmation")
+                    output += chunk
+            mutate()
+            stdout, stderr = proc.communicate((target + "\n").encode(), timeout=30)
+            output += stdout
+            text, errors = output.decode(), stderr.decode()
+            self.assert_no_fixture_values(text + errors)
+            return proc.returncode, text, errors
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            for stream in [proc.stdin, proc.stdout, proc.stderr]:
+                stream.close()
+
+    def test_cleanup_revalidates_identity_and_frozen_state_after_confirmation(self):
+        for change in ("unfreeze", "replace", "disappear", "template"):
+            with self.subTest(change=change):
+                target = f"probe_race_{uuid.uuid4().hex[:8]}"
+                first = self.create_snapshot(target)
+                second = self.create_snapshot(target, "20260102T000000Z")
+
+                def mutate():
+                    if change in ("unfreeze", "template"):
+                        setting = "ALLOW_CONNECTIONS true" if change == "unfreeze" else "IS_TEMPLATE true"
+                        self.run_psql_command(
+                            "postgres", f'ALTER DATABASE "{second}" {setting}'
+                        )
+                    else:
+                        self.run_psql_command("postgres", f'DROP DATABASE "{second}"')
+                        if change == "replace":
+                            self.create_snapshot(target, "20260102T000000Z")
+
+                status, _, errors = self.cleanup_with_mutation(target, mutate)
+                self.assertNotEqual(0, status)
+                self.assertIn("stopped after 0 deletion(s)", errors)
+                self.assertTrue(self.database_exists(first))
+                self.assertEqual(change != "disappear", self.database_exists(second))
+
+    def test_cleanup_does_not_sweep_snapshots_created_after_plan(self):
+        target = f"probe_arrival_{uuid.uuid4().hex[:8]}"
+        first = self.create_snapshot(target)
+        new_name = target + "_pre_20260102T000000Z"
+        status, text, errors = self.cleanup_with_mutation(
+            target, lambda: self.create_snapshot(target, "20260102T000000Z")
+        )
+        self.assertEqual(0, status, errors)
+        self.assertIn("1 snapshot(s) deleted", text)
+        self.assertFalse(self.database_exists(first))
+        self.assertTrue(self.database_exists(new_name))
+
+    def test_cleanup_late_drop_failure_reports_partial_completion(self):
+        target = f"probe_partial_{uuid.uuid4().hex[:8]}"
+        snapshots = [self.create_snapshot(target, f"2026010{i}T000000Z") for i in (1, 2, 3)]
+        stub_dir = Path(self.test_dir.name) / "drop_failure"
+        stub_dir.mkdir()
+        stub = stub_dir / "psql"
+        stub.write_text(
+            "#!/bin/sh\n"
+            'for arg in "$@"; do\n'
+            f'  if [ "$arg" = \'drop database "{snapshots[1]}"\' ]; then\n'
+            "    echo 'simulated drop failure' >&2; exit 1\n"
+            "  fi\n"
+            "done\n"
+            f'exec {shutil.which("psql")} "$@"\n'
+        )
+        stub.chmod(0o755)
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"],
+            {"PATH": f"{stub_dir}:{self.client_env['PATH']}"},
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("stopped after 1 deletion(s)", result.stderr)
+        self.assertIn(f"Deleted snapshot: {snapshots[0]}", result.stdout)
+        self.assertNotIn("cleanup complete", result.stdout)
+        self.assertFalse(self.database_exists(snapshots[0]))
+        self.assertTrue(self.database_exists(snapshots[1]))
+        self.assertTrue(self.database_exists(snapshots[2]))
+
+    def test_cleanup_rechecks_each_snapshot_during_deletion(self):
+        target = f"probe_midway_{uuid.uuid4().hex[:8]}"
+        first = self.create_snapshot(target)
+        second = self.create_snapshot(target, "20260102T000000Z")
+        stub_dir = Path(self.test_dir.name) / "unfreeze_during_drop"
+        stub_dir.mkdir()
+        stub = stub_dir / "psql"
+        real_psql = shutil.which("psql")
+        stub.write_text(
+            "#!/bin/sh\n"
+            'for arg in "$@"; do\n'
+            f'  if [ "$arg" = \'drop database "{first}"\' ]; then\n'
+            f'    {real_psql} -X -q -w -v ON_ERROR_STOP=1 -d postgres '
+            f'-c \'ALTER DATABASE "{second}" ALLOW_CONNECTIONS true\' || exit 1\n'
+            "  fi\n"
+            "done\n"
+            f'exec {real_psql} "$@"\n'
+        )
+        stub.chmod(0o755)
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"],
+            {"PATH": f"{stub_dir}:{self.client_env['PATH']}"},
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("not a frozen non-template database", result.stderr)
+        self.assertIn("stopped after 1 deletion(s)", result.stderr)
+        self.assertFalse(self.database_exists(first))
+        self.assertTrue(self.database_exists(second))
+
+    def test_cleanup_excludes_maintenance_database(self):
+        target = f"probe_maint_{uuid.uuid4().hex[:8]}"
+        maintenance = self.create_snapshot(target, frozen=False)
+        # A custom maintenance name can resemble a snapshot; it must remain available.
+        snapshot = self.create_snapshot(target, "20260102T000000Z")
+        result = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", target, "--yes"],
+            {"KK_STUDIO_MAINTENANCE_DB": maintenance},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(self.database_exists(maintenance))
+        self.assertFalse(self.database_exists(snapshot))
+        refused = self.run_script(
+            RESET_SCRIPT, ["--cleanup-snapshots", "--database", "postgres", "--yes"]
+        )
+        self.assertNotEqual(0, refused.returncode)
+        self.assertIn("must differ from the maintenance database", refused.stderr)
+
+    def test_default_reset_keeps_older_snapshots(self):
+        target = f"probe_retain_{uuid.uuid4().hex[:8]}"
+        self.create_empty_db(target)
+        old = self.create_snapshot(target)
+        result = self.run_script(
+            RESET_SCRIPT,
+            ["--database", target, "--yes", "--work-dir", str(Path(self.test_dir.name) / "backup")],
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(self.database_exists(old))
+        snapshots = self.run_psql_command(
+            "postgres",
+            f"SELECT datname FROM pg_database WHERE datname ~ '^{target}_pre_[0-9]{{8}}T[0-9]{{6}}Z$'",
+        ).splitlines()
+        self.assertEqual(2, len(snapshots))
+        for name in snapshots:
+            self.assertEqual("f", self.run_psql_command(
+                "postgres", f"SELECT datallowconn FROM pg_database WHERE datname = '{name}'"
+            ))
 
     # -------------------------------------------------------------------------
     # Test 5: Reset guards

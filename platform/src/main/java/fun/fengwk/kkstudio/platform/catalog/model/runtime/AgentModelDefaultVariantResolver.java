@@ -38,6 +38,21 @@ public class AgentModelDefaultVariantResolver {
       throw new IllegalArgumentException("unknown agent model: " + providerName + "/" + modelName);
     }
     AgentModelConfigDTO config = configParser.decode(model.getConfigJson());
+    return resolveConfiguredVariant(providerName, modelName, overrideVariant, config);
+  }
+
+  /**
+   * 纯 variant 解析：空 override 使用 {@code defaultVariant}，非空 override 与 defaultVariant 都必须由 {@code
+   * config} 声明。
+   *
+   * <p>这是运行时解析与配置同步预检查共用的唯一规则；调用方负责先取得 {@code config}（DB 或文件中将生效的模型配置）。
+   *
+   * @throws IllegalArgumentException override 指向 config 未声明的 variant
+   * @throws IllegalStateException override 为空且 config 未声明 defaultVariant
+   */
+  public static String resolveConfiguredVariant(
+      String providerName, String modelName, String overrideVariant, AgentModelConfigDTO config) {
+    Objects.requireNonNull(config, "config");
     String variant = trimToNull(overrideVariant);
     if (variant == null) {
       variant = config.getDefaultVariant();

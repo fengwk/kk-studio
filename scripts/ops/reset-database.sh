@@ -16,6 +16,8 @@
 # 之后由外部 schema/Flyway 初始化在空库上执行 V1：本脚本不启动、不检查、也不管理任何服务的
 # 生命周期。数据库访问全部走原生 libpq 客户端与继承的连接设置，脚本不会提示输入口令。
 #
+# --cleanup-snapshots 是独立的验收后清理模式：显式确认后删除目标库的冻结快照，不执行 reset。
+#
 # 连接来源按优先级合并：--host/--port/--username/--database > VPS_POSTGRES_* > 标准 libpq。
 
 set -euo pipefail
@@ -28,6 +30,9 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 WORK_DIR=${KK_STUDIO_RESET_DIR:-"$DEFAULT_MAINTENANCE_DIR/backup"}
 DRY_RUN=false
 ASSUME_YES=false
+CLEANUP_SNAPSHOTS=false
+CLEANUP_STARTED=false
+CLEANUP_DROPPED=0
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 
 TARGET_DB=
@@ -69,6 +74,8 @@ its owner, encoding, locale provider/settings, tablespace and connection limit. 
 is then applied by the external schema/Flyway initialization, not by this script.
 
 Options:
+  --cleanup-snapshots
+                   delete this target's frozen *_pre_<UTCstamp> databases instead of resetting
   --work-dir PATH  owner-only backup directory (default: ~/.local/state/kk-studio/maintenance/backup)
   --yes            skip the interactive database-name confirmation
   --dry-run        read-only preflight and plan; writes nothing and changes nothing
@@ -78,7 +85,7 @@ Connection (no password is ever taken from the command line):
   --host HOST      database host to connect to
   --port PORT      database port, 1-65535
   --username USER  role to connect as
-  --database NAME  plain database name to reset; the database libpq connects to when omitted
+  --database NAME  plain target database name; the database libpq connects to when omitted
 
   A flag wins over the matching VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME or
   VPS_POSTGRES_DATABASE variable; without any of them the standard libpq settings apply
@@ -87,7 +94,7 @@ Connection (no password is ever taken from the command line):
   psql/pg_dump/pg_restore/createdb always run with --no-password, so a missing credential fails
   instead of prompting.
 
-Refused before any change:
+Reset refused before any change:
   other sessions still connected to the target (nothing is killed), a template database,
   a database that does not allow connections, a target equal to the maintenance database,
   a custom database ACL or role setting, an existing snapshot name, and a role that cannot
@@ -105,6 +112,16 @@ Workflow:
   Providers that forbid renaming or creating a database (some managed services) cannot run this
   script; use whatever lifecycle feature the provider offers, then apply the current schema and
   sync the settings back in.
+
+Snapshot cleanup (only after import and recovery have been verified):
+  --cleanup-snapshots --dry-run lists this target's frozen snapshots without changing anything.
+  --cleanup-snapshots deletes that list after confirmation; --yes skips confirmation.
+  Only exact <target>_pre_YYYYMMDDTHHMMSSZ names with connections disabled are eligible.
+  Templates, the target and maintenance database are excluded. No age or newest-snapshot exemption.
+  Cleanup never runs as part of reset and does not touch backup files or object storage.
+  It needs psql and snapshot ownership (or superuser), not CREATEDB or backup tools.
+  The target may remain online. Do not concurrently reset, rename, unfreeze or replace snapshots.
+  No sessions are killed. A failed deletion stops the operation; earlier deletions cannot roll back.
 
 Environment:
   VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME, VPS_POSTGRES_PASSWORD,
@@ -134,6 +151,85 @@ require_maintenance_database() {
   require_identifier "$MAINTENANCE_DB" "KK_STUDIO_MAINTENANCE_DB"
   [ "$MAINTENANCE_DB" != "$TARGET_DB" ] \
     || fail "the target database must differ from the maintenance database: $MAINTENANCE_DB"
+}
+
+# 固定预览时的 OID 和名称；同名替换或状态变化必须停止，不能把新到的快照加入已确认范围。
+require_cleanup_candidate() {
+  local oid=$1
+  local name=$2
+  local state
+  state=$(database_scalar "$MAINTENANCE_DB" \
+    "select case
+       when datallowconn or datistemplate then 'not a frozen non-template database'
+       when not (datdba = (select oid from pg_roles where rolname = current_user)
+         or (select rolsuper from pg_roles where rolname = current_user)) then 'not the database owner or a superuser'
+       when exists (select 1 from pg_stat_activity where datid = d.oid) then 'active sessions exist'
+       else 'ready' end
+     from pg_database d where oid = '$oid'::oid and datname = '$name'
+       and datname not in ('$TARGET_DB', '$MAINTENANCE_DB')")
+  [ "$state" = ready ] \
+    || fail "cannot delete snapshot $name: ${state:-database identity changed or disappeared}"
+}
+
+cleanup_snapshots() {
+  require_maintenance_database
+  local candidates
+  candidates=$(database_scalar "$MAINTENANCE_DB" \
+    "select oid || '|' || datname from pg_database
+     where datname ~ '^${TARGET_DB}_pre_[0-9]{8}T[0-9]{6}Z$'
+       and not datallowconn and not datistemplate
+       and datname not in ('$TARGET_DB', '$MAINTENANCE_DB')
+     order by datname")
+
+  echo
+  echo "Snapshot cleanup:"
+  echo "  database:       $TARGET_DB"
+  echo "  maintenance db: $MAINTENANCE_DB"
+  if [ -z "$candidates" ]; then
+    echo "No frozen snapshots matched; nothing was changed."
+    return
+  fi
+
+  local oid name size count=0
+  # 先检查整个列表，避免第二个库的权限或会话问题在第一个库已删除后才被发现。
+  while IFS='|' read -r oid name; do
+    require_cleanup_candidate "$oid" "$name"
+  done <<< "$candidates"
+  while IFS='|' read -r oid name; do
+    size=$(database_scalar "$MAINTENANCE_DB" "select pg_database_size('$oid'::oid)")
+    echo "  snapshot:       $name ($size bytes)"
+    count=$((count + 1))
+  done <<< "$candidates"
+  echo "  snapshots:      $count"
+  echo
+  echo "All listed snapshots, including the newest, will be permanently deleted."
+  echo "Verify the configuration import and usable full backups before continuing."
+  echo "The target database, backup files and object storage are not changed."
+
+  if [ "$DRY_RUN" = true ]; then
+    echo "Dry-run complete: nothing was written and no snapshots were deleted."
+    return
+  fi
+  if [ "$ASSUME_YES" != true ]; then
+    local confirmation
+    if ! read -r -p "Type the target database name to delete these snapshots: " confirmation; then
+      fail "confirmation input was not available"
+    fi
+    [ "$confirmation" = "$TARGET_DB" ] || fail "confirmation did not match the database name"
+  fi
+
+  CLEANUP_STARTED=true
+  # 确认可能耗时：整批复查后仍在每次 DROP 前检查；DROP 本身拒绝活动连接，不使用 FORCE。
+  while IFS='|' read -r oid name; do
+    require_cleanup_candidate "$oid" "$name"
+  done <<< "$candidates"
+  while IFS='|' read -r oid name; do
+    require_cleanup_candidate "$oid" "$name"
+    psql_database "$MAINTENANCE_DB" -c "drop database \"$name\"" > /dev/null
+    CLEANUP_DROPPED=$((CLEANUP_DROPPED + 1))
+    echo "Deleted snapshot: $name"
+  done <<< "$candidates"
+  echo "Snapshot cleanup complete: $CLEANUP_DROPPED snapshot(s) deleted."
 }
 
 preflight() {
@@ -438,6 +534,12 @@ replace_database() {
 
 on_exit() {
   local status=$?
+  if [ "$CLEANUP_STARTED" = true ]; then
+    if [ "$status" -ne 0 ]; then
+      echo "ERROR: snapshot cleanup stopped after $CLEANUP_DROPPED deletion(s); completed deletions cannot be rolled back." >&2
+    fi
+    return
+  fi
   if [ "$status" -eq 0 ] || [ "$TARGET_REPLACED" = true ]; then
     if [ "$status" -ne 0 ]; then
       # 变更已经完成，只是后续步骤失败：不再回滚，只报告现状。
@@ -477,6 +579,10 @@ on_exit() {
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
+      --cleanup-snapshots)
+        CLEANUP_SNAPSHOTS=true
+        shift
+        ;;
       --dry-run)
         DRY_RUN=true
         shift
@@ -521,9 +627,15 @@ main() {
     esac
   done
 
-  WORK_DIR=$(resolve_absolute_path "$WORK_DIR")
+  require_command psql
   configure_connection "$CLI_HOST" "$CLI_PORT" "$CLI_USERNAME" "$CLI_DATABASE"
   resolve_target_database
+  if [ "$CLEANUP_SNAPSHOTS" = true ]; then
+    cleanup_snapshots
+    return
+  fi
+
+  WORK_DIR=$(resolve_absolute_path "$WORK_DIR")
   configure_paths
   preflight
   show_plan

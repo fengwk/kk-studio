@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
  * @author fengwk
  */
 @Component
-final class AgentDefinitionMutationFactory {
+public final class AgentDefinitionMutationFactory {
 
   private static final String RESOURCE = "agent_definition";
   private static final int NAME_MAX_LENGTH = 64;
@@ -25,10 +25,15 @@ final class AgentDefinitionMutationFactory {
   private final AgentEditableSupport editableSupport;
   private final AgentDefinitionConfigCodec configCodec;
 
-  AgentDefinitionMutationFactory(
+  public AgentDefinitionMutationFactory(
       AgentEditableSupport editableSupport, AgentDefinitionConfigCodec configCodec) {
     this.editableSupport = editableSupport;
     this.configCodec = configCodec;
+  }
+
+  /** 与写入共用字段和 config 校验，不写数据库。 */
+  public void validateImport(String name, AgentDefinitionEditablePropertiesDTO properties) {
+    newMutation(name, properties);
   }
 
   AgentDefinition newAgent(String name, AgentDefinitionEditablePropertiesDTO properties) {

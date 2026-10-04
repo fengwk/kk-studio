@@ -269,7 +269,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return dto;
   }
 
-  private String validateName(String raw) {
+  /** CRUD 与配置同步共用的纯输入校验。 */
+  public static String validateName(String raw) {
     if (raw == null) {
       throw new AiValidationException(RESOURCE, "environment name must not be blank");
     }
@@ -291,7 +292,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   /** 导入 token 与 register 行约束一致：非空白、无环绕空白、≤128。 */
-  private static String validateRegistrationToken(String raw) {
+  public static String validateRegistrationToken(String raw) {
     if (raw == null || raw.isBlank() || !raw.equals(raw.strip())) {
       throw new AiValidationException(
           RESOURCE, "registrationToken must be a non-blank, unpadded string");

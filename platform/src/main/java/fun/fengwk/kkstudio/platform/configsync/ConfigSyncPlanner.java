@@ -3,22 +3,24 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -33,9 +35,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * 导入计划：在事务外完成校验、依赖判定与外部准备（Git exact commit、MCP 发现、settings 合并）。
+ * 导入计划：在事务外完成依赖判定与外部准备（Git exact commit、MCP 发现）。
  *
- * <p>只做确定性决策，不写数据库；未知/不支持项与依赖缺失在这里变为明确的 skip，真正写入交给事务内 {@link ConfigSyncApplier}。
+ * <p>文件条目的静态输入校验（缺必填、类型、有效值、未知字段与 settings 完整七节）已在 {@link ConfigSyncParser} 解析期完成；Planner 只负责与快照
+ * 相关的判定：Environment token 冲突、修改 Skill 不可变 repositoryUrl、移除仍被引用的 Skill/MCP 工具都是硬错误；依赖缺失与外部准备失败才是条目级
+ * skip。
+ *
+ * <p>只做确定性决策，不写数据库；真正写入交给事务内 {@link ConfigSyncApplier}。
  *
  * <p>外部准备失败绝不降级为成功：MCP 发现失败时跳过该 Server 及其依赖 Agent，Git 失败时不使用最新 HEAD 兜底也不重试。文件内声明但
  * 被跳过（失败/不支持）的同名条目会被从可用依赖池中剔除，避免依赖借此绕过 skip；文件未声明的既有依赖仍可满足。
@@ -48,17 +54,22 @@ public final class ConfigSyncPlanner {
   private static final String SETTINGS_NAME = "settings";
 
   private final ConfigSyncSnapshotReader snapshotReader;
-  private final ConfigSyncYaml yaml;
   private final ConfigSyncMcpDiscovery mcpDiscovery;
   private final SkillGitCache skillGitCache;
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final McpServerRepository mcpServerRepository;
-  private final SystemSettingsCodec systemSettingsCodec;
   private final RuntimeToolCatalog toolCatalog;
+  private final AgentModelRuntimeConfigParser configParser;
 
-  /** 依 ParsedDocument 构建可写入计划。 */
+  /** 读取快照后按 ParsedDocument 构建可写入计划。 */
   public ConfigSyncPlan plan(ConfigSyncParser.ParsedDocument document) {
-    ConfigSyncSnapshot snapshot = snapshotReader.read();
+    return plan(document, snapshotReader.read());
+  }
+
+  /** 在给定快照上校验并构建可写入计划；预检查与执行复用同一套规则。 */
+  public ConfigSyncPlan plan(
+      ConfigSyncParser.ParsedDocument document, ConfigSyncSnapshot snapshot) {
+    rejectEnvironmentTokenConflicts(document.environments(), snapshot);
     List<ConfigSyncSkipped> skipped = new ArrayList<>(document.skipped());
     List<ConfigSyncRef> imported = new ArrayList<>();
 
@@ -79,11 +90,12 @@ public final class ConfigSyncPlanner {
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, spec.name()));
     }
 
-    Set<String> availableModels = new LinkedHashSet<>();
+    Map<String, AgentModelConfigDTO> availableModels = new LinkedHashMap<>();
     for (var model : snapshot.models()) {
       String key = ConfigSyncRefs.modelName(model.getProviderName(), model.getName());
       if (!skippedModels.contains(key) && availableProviders.contains(model.getProviderName())) {
-        availableModels.add(key);
+        // 快照中未被文件覆盖的 Model 以 DB config 为准；解码失败与写入路径一致地硬拒绝。
+        availableModels.put(key, configParser.decode(model.getConfigJson()));
       }
     }
     List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
@@ -99,10 +111,14 @@ public final class ConfigSyncPlanner {
         availableModels.remove(key);
         continue;
       }
-      availableModels.add(key);
+      // 文件内同名 Model 覆盖快照 config：预检查按导入后将生效的配置判定。
+      availableModels.put(key, spec.properties().getConfig());
       models.add(spec);
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.MODELS, key));
     }
+
+    // 模型池就绪后、外部准备前：Agent 显式 variant 必须由导入后将生效的 Model config 声明。
+    rejectUnknownAgentModelVariants(document.agents(), availableModels);
 
     Map<String, SkillPackage> existingPackages = new LinkedHashMap<>();
     Map<String, Set<String>> availableSkills = new LinkedHashMap<>();
@@ -115,18 +131,11 @@ public final class ConfigSyncPlanner {
     }
     List<ConfigSyncPlan.SkillImport> skillImports = new ArrayList<>();
     for (ConfigSyncParser.SkillSpec spec : document.skillPackages()) {
-      if (!isCanonicalPackageName(spec.packageName())) {
-        throw new AiValidationException(RESOURCE, "invalid skill package name");
-      }
       SkillPackage existing = existingPackages.get(spec.packageName());
       if (existing != null && !existing.getRepositoryUrl().equals(spec.repositoryUrl())) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.SKILL_PACKAGES.wireValue(),
-                spec.packageName(),
-                "repositoryUrl is immutable for an existing package"));
-        skippedSkills.add(spec.packageName());
-        continue;
+        // repositoryUrl 是不可变身份：同名换仓库是硬冲突，不能通过部分导入规避，也不回显 URL。
+        throw new AiValidationException(
+            RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
       }
       List<SkillManifestEntry> manifest;
       try {
@@ -153,13 +162,9 @@ public final class ConfigSyncPlanner {
                 .sorted()
                 .toList();
         if (!referenced.isEmpty()) {
-          skipped.add(
-              new ConfigSyncSkipped(
-                  ConfigSyncKind.SKILL_PACKAGES.wireValue(),
-                  spec.packageName(),
-                  "skills are still referenced by agents: " + String.join(", ", referenced)));
-          skippedSkills.add(spec.packageName());
-          continue;
+          // 移除仍被 Agent 引用的 Skill 是硬冲突，不能通过部分导入规避。
+          throw new AiValidationException(
+              RESOURCE, "skill package would remove referenced skills: " + spec.packageName());
         }
       }
       skillImports.add(
@@ -196,15 +201,7 @@ public final class ConfigSyncPlanner {
         new LinkedHashSet<>(mcpServerRepository.selectReferencedToolNames());
     List<ConfigSyncPlan.McpImport> mcpImports = new ArrayList<>();
     for (ConfigSyncParser.McpSpec spec : document.mcpServers()) {
-      McpServerMutationValidator.HttpConfig config;
-      try {
-        config =
-            McpServerMutationValidator.normalizeHttpConfig(
-                spec.url(), spec.headers(), spec.enabled(), spec.timeoutMillis());
-      } catch (AiValidationException error) {
-        throw new AiValidationException(
-            RESOURCE, "mcp server " + spec.name() + " has an invalid url, headers or timeout");
-      }
+      McpServerMutationValidator.HttpConfig config = spec.config();
       McpServer probe = new McpServer();
       probe.setName(spec.name());
       probe.setUrl(config.url());
@@ -252,14 +249,9 @@ public final class ConfigSyncPlanner {
               .sorted()
               .toList();
       if (!blocked.isEmpty()) {
-        skipped.add(
-            new ConfigSyncSkipped(
-                ConfigSyncKind.MCP_SERVERS.wireValue(),
-                spec.name(),
-                "referenced mcp tool would be removed: " + String.join(", ", blocked)));
-        skippedMcp.add(spec.name());
-        availableMcpTools.remove(spec.name());
-        continue;
+        // 移除仍被引用的 MCP 工具是硬冲突，不能通过部分导入规避。
+        throw new AiValidationException(
+            RESOURCE, "mcp server would remove referenced tools: " + spec.name());
       }
       mcpImports.add(
           new ConfigSyncPlan.McpImport(
@@ -296,7 +288,7 @@ public final class ConfigSyncPlanner {
         if (agentUnsatisfiedReason(
                 spec,
                 agentPool,
-                availableModels,
+                availableModels.keySet(),
                 availableSkills,
                 availableMcpTools,
                 knownMcpToolNames)
@@ -319,7 +311,7 @@ public final class ConfigSyncPlanner {
                 agentUnsatisfiedReason(
                     spec,
                     agentPool,
-                    availableModels,
+                    availableModels.keySet(),
                     availableSkills,
                     availableMcpTools,
                     knownMcpToolNames)));
@@ -327,28 +319,18 @@ public final class ConfigSyncPlanner {
     }
 
     ConfigSyncPlan.SettingsUpdate settingsUpdate = null;
-    Map<String, Object> incoming = document.settings();
-    if (incoming != null && !incoming.isEmpty()) {
-      SystemSettingsSectionsDTO current =
-          systemSettingsCodec.toSections(snapshot.settings().settings());
-      Map<String, Object> base = yaml.toMap(current, SETTINGS_NAME);
-      deepMerge(base, incoming);
-      SystemSettingsSectionsDTO merged =
-          yaml.convert(base, SystemSettingsSectionsDTO.class, SETTINGS_NAME);
-      String reason = settingsUnsatisfiedReason(merged, availableModels, agentPool);
+    SystemSettingsSectionsDTO sections = document.settings();
+    if (sections != null) {
+      // 完整七节契约已在解析期校验，这里只判定与当前可用依赖的引用关系。
+      String reason = settingsUnsatisfiedReason(sections, availableModels.keySet(), agentPool);
       if (reason != null) {
         skipped.add(
             new ConfigSyncSkipped(ConfigSyncKind.SETTINGS.wireValue(), SETTINGS_NAME, reason));
       } else {
-        try {
-          systemSettingsCodec.fromDto(merged);
-        } catch (IllegalArgumentException error) {
-          throw new AiValidationException(RESOURCE, "settings are invalid");
-        }
         // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
         settingsUpdate =
             new ConfigSyncPlan.SettingsUpdate(
-                merged, SystemSettingsVersions.format(snapshot.settings().version()));
+                sections, SystemSettingsVersions.format(snapshot.settings().version()));
         imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, SETTINGS_NAME));
       }
     }
@@ -365,6 +347,34 @@ public final class ConfigSyncPlanner {
         skipped);
   }
 
+  /**
+   * Agent 引用的显式 variant 必须由导入后将生效的 Model config 声明。仅校验引用可用 Model 且 variant 非空白的 Agent：缺 Model
+   * 仍按既有依赖 skip 政策处理；即使该 Agent 会因其它依赖被 skip，已知非法 variant 仍必须先硬拒绝。
+   *
+   * <p>错误消息只带安全条目名，不回显 raw variant、Model 配置或 cause。
+   */
+  private static void rejectUnknownAgentModelVariants(
+      List<ConfigSyncParser.AgentSpec> agents, Map<String, AgentModelConfigDTO> availableModels) {
+    for (ConfigSyncParser.AgentSpec spec : agents) {
+      String variant = spec.properties().getVariant();
+      if (variant == null || variant.isBlank()) {
+        continue;
+      }
+      AgentModelConfigDTO config =
+          availableModels.get(ConfigSyncRefs.modelName(spec.providerName(), spec.modelName()));
+      if (config == null) {
+        continue;
+      }
+      try {
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+            spec.providerName(), spec.modelName(), variant, config);
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(
+            RESOURCE, "agent references unknown model variant: " + spec.name());
+      }
+    }
+  }
+
   private static Set<String> skippedNames(List<ConfigSyncSkipped> skipped, ConfigSyncKind kind) {
     Set<String> names = new LinkedHashSet<>();
     for (ConfigSyncSkipped entry : skipped) {
@@ -375,15 +385,6 @@ public final class ConfigSyncPlanner {
       }
     }
     return names;
-  }
-
-  private static boolean isCanonicalPackageName(String packageName) {
-    try {
-      SkillNames.canonicalPackageName(packageName);
-      return true;
-    } catch (IllegalArgumentException error) {
-      return false;
-    }
   }
 
   private boolean toolAvailable(
@@ -471,16 +472,22 @@ public final class ConfigSyncPlanner {
     return names;
   }
 
-  @SuppressWarnings("unchecked")
-  private static void deepMerge(Map<String, Object> base, Map<String, Object> override) {
-    for (Map.Entry<String, Object> entry : override.entrySet()) {
-      Object current = base.get(entry.getKey());
-      Object replacement = entry.getValue();
-      if (current instanceof Map<?, ?> currentMap
-          && replacement instanceof Map<?, ?> replacementMap) {
-        deepMerge((Map<String, Object>) currentMap, (Map<String, Object>) replacementMap);
-      } else {
-        base.put(entry.getKey(), replacement);
+  /** Environment 只判定与快照身份相关的 registrationToken 冲突；token 格式已由解析期校验，不回显 token。 */
+  private static void rejectEnvironmentTokenConflicts(
+      List<ConfigSyncParser.EnvironmentSpec> specs, ConfigSyncSnapshot snapshot) {
+    Map<String, String> ownerByToken = new LinkedHashMap<>();
+    for (ConfigSyncParser.EnvironmentSpec spec : specs) {
+      String owner = ownerByToken.putIfAbsent(spec.registrationToken(), spec.name());
+      if (owner != null && !owner.equals(spec.name())) {
+        throw new AiValidationException(
+            RESOURCE, "environment registrationToken is used by multiple entries");
+      }
+      for (Environment existing : snapshot.environments()) {
+        if (spec.registrationToken().equals(existing.getRegistrationToken())
+            && !spec.name().equals(existing.getName())) {
+          throw new AiValidationException(
+              RESOURCE, "environment registrationToken is already in use");
+        }
       }
     }
   }

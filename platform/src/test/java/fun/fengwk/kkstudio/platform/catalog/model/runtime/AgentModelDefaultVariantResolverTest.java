@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.mapper.AgentModelMapper;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 /** Model Variant 覆盖必须引用当前的复合 Model 标识。 */
 class AgentModelDefaultVariantResolverTest {
@@ -41,6 +42,39 @@ class AgentModelDefaultVariantResolverTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> resolver.resolve("missing", "model", "default"))
+            .getMessage());
+  }
+
+  /** 纯入口只依赖传入 config：override 归一化、default 回退、未声明 variant 与缺失 default 的错误语义保持。 */
+  @Test
+  void resolvesConfiguredVariantAgainstProvidedConfig() {
+    AgentModelConfigDTO config = executableConfig();
+
+    assertEquals(
+        "default",
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+            "provider", "model", null, config));
+    assertEquals(
+        "default",
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+            "provider", "model", "  default  ", config));
+    assertEquals(
+        "unknown agent model variant: model=provider/model, variant=missing",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+                        "provider", "model", "missing", config))
+            .getMessage());
+    AgentModelConfigDTO noDefault = executableConfig();
+    noDefault.setDefaultVariant(null);
+    assertEquals(
+        "model defaultVariant missing: provider/model",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+                        "provider", "model", " ", noDefault))
             .getMessage());
   }
 }
