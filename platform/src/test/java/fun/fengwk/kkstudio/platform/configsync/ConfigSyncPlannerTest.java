@@ -28,11 +28,9 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -43,14 +41,14 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 测试意图：锁定 Planner 的外部准备与依赖判定——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
- * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过），Skill 名称先校验且 Git 错误不回显 URL，Skill re-import 只在 URL
- * 不变且不丢被引用技能时进行，Agent 未满足依赖逐条给出明确原因，settings 合并后缺依赖 skip / 非法字段拒绝。
+ * 测试意图：锁定 Planner 的依赖判定与外部准备——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
+ * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过）、Skill re-import 只在 URL 不变且不丢被引用技能时进行、Git 错误不回显 URL、 Agent
+ * 未满足依赖逐条给出明确原因、settings 缺依赖 skip。条目级静态校验（含 Skill 名称）已移入 Parser；这里用真实校验器 fixture 触发。
  */
 class ConfigSyncPlannerTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
-  private final ConfigSyncParser parser = new ConfigSyncParser(yaml);
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
   private final SkillGitCache skillGitCache = mock(SkillGitCache.class);
@@ -58,22 +56,15 @@ class ConfigSyncPlannerTest {
       mock(AgentDefinitionRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final RuntimeToolCatalog toolCatalog = mock(RuntimeToolCatalog.class);
-  private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
 
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
-          yaml,
           mcpDiscovery,
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          new SystemSettingsCodec(),
-          toolCatalog,
-          ConfigSyncFixtures.PROVIDER_MUTATION_FACTORY,
-          ConfigSyncFixtures.MODEL_MUTATION_FACTORY,
-          ConfigSyncFixtures.AGENT_MUTATION_FACTORY,
-          skillCatalogService);
+          toolCatalog);
 
   private ConfigSyncSnapshot emptySnapshot() {
     return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());

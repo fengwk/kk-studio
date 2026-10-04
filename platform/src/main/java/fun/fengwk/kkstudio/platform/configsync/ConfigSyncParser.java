@@ -3,7 +3,14 @@ package fun.fengwk.kkstudio.platform.configsync;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
+import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -23,19 +30,19 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * 把 YAML 文档预校验为强类型候选集合。
  *
- * <p>未知顶层类别、不支持的 Provider 协议、条目级未知字段与嵌套 config 未知字段都作为条目级 skip 上报（路径不含字段值）；结构错误、错误类型、
- * 非法有效值、缺必填与文件内重复业务名（含被 skip 的条目）作为导入错误抛出。密钥字段的值绝不进入错误文本。
+ * <p>读取每个受支持条目的已知字段后，立即用写入路径共用的校验器校验有效值，再决定是否因未知字段整体 skip。因此「未知字段」不能绕过缺必填或非法值的硬错误， 只有真正满足当前契约的条目才会被
+ * skip 上报。未知顶层类别、不支持的 Provider 协议仍是条目级 skip；结构错误、错误类型、非法有效值、缺必填与文件内重复业务名 （含被 skip
+ * 的条目）作为导入错误抛出。settings 出现时按完整七节契约在解析期校验。密钥字段的值绝不进入错误文本。
  */
 @Component
 public final class ConfigSyncParser {
 
   private static final String RESOURCE = "config_sync";
-  private static final Pattern COMMIT = Pattern.compile("^([0-9a-f]{40}|[0-9a-f]{64})$");
+  private static final String SETTINGS_ITEM_NAME = "settings";
 
   private static final Set<String> CATEGORIES =
       Set.of(
@@ -48,9 +55,25 @@ public final class ConfigSyncParser {
           ConfigSyncKind.SETTINGS.wireValue());
 
   private final ConfigSyncYaml yaml;
+  private final AgentProviderMutationFactory providerFactory;
+  private final AgentModelMutationFactory modelFactory;
+  private final AgentDefinitionMutationFactory agentFactory;
+  private final SkillCatalogService skillCatalogService;
+  private final SystemSettingsCodec systemSettingsCodec;
 
-  public ConfigSyncParser(ConfigSyncYaml yaml) {
+  public ConfigSyncParser(
+      ConfigSyncYaml yaml,
+      AgentProviderMutationFactory providerFactory,
+      AgentModelMutationFactory modelFactory,
+      AgentDefinitionMutationFactory agentFactory,
+      SkillCatalogService skillCatalogService,
+      SystemSettingsCodec systemSettingsCodec) {
     this.yaml = yaml;
+    this.providerFactory = providerFactory;
+    this.modelFactory = modelFactory;
+    this.agentFactory = agentFactory;
+    this.skillCatalogService = skillCatalogService;
+    this.systemSettingsCodec = systemSettingsCodec;
   }
 
   /** 解析并预校验；返回的候选已剔除被 skip 的条目，重复业务名在返回前判定。 */
@@ -124,7 +147,7 @@ public final class ConfigSyncParser {
     }
     requireDistinct(mcpNames, ConfigSyncKind.MCP_SERVERS);
 
-    Map<String, Object> settings = parseSettings(document, skipped);
+    SystemSettingsSectionsDTO settings = parseSettings(document, skipped);
     return new ParsedDocument(
         providers, models, agents, skillPackages, environments, mcpServers, settings, skipped);
   }
@@ -162,6 +185,9 @@ public final class ConfigSyncParser {
     String name = entry.reqName("name");
     declared.add(name);
     String providerType = entry.reqString("providerType");
+    if (providerType.isBlank()) {
+      throw new AiValidationException(RESOURCE, entry.path + ".providerType is required");
+    }
     ProviderType type;
     try {
       type = ProviderType.fromWireValue(providerType);
@@ -178,6 +204,9 @@ public final class ConfigSyncParser {
     properties.setCredential(entry.optString("credential"));
     properties.setModelCallTimeoutMillis(entry.optLong("modelCallTimeoutMillis"));
     properties.setModelCallIdleTimeoutMillis(entry.optLong("modelCallIdleTimeoutMillis"));
+    // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
+    validateEntry(
+        ConfigSyncKind.PROVIDERS, name, () -> providerFactory.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.PROVIDERS, name, skipped)) {
       return null;
     }
@@ -193,24 +222,24 @@ public final class ConfigSyncParser {
     String modelId = entry.reqString("modelId");
     String description = entry.optString("description");
     Object configNode = requireObject(entry, "config");
-    if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
-      return null;
-    }
-    if (skipUnknownConfig(
-        configNode,
-        AgentModelConfigDTO.class,
-        entry.path + ".config",
-        ConfigSyncKind.MODELS,
-        key,
-        skipped)) {
-      return null;
-    }
+    List<String> removed = new ArrayList<>();
+    Object cleanedConfig =
+        yaml.removeUnknownProperties(
+            AgentModelConfigDTO.class, configNode, entry.path + ".config", removed);
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName(name);
     properties.setModelId(modelId);
     properties.setDescription(description);
     properties.setConfig(
-        yaml.convert(configNode, AgentModelConfigDTO.class, entry.path + ".config"));
+        yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
+    // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
+    validateEntry(ConfigSyncKind.MODELS, key, () -> modelFactory.validateImport(name, properties));
+    if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
+      return null;
+    }
+    if (reportUnknownConfig(removed, ConfigSyncKind.MODELS, key, skipped)) {
+      return null;
+    }
     return new ModelSpec(providerName, name, properties);
   }
 
@@ -230,25 +259,25 @@ public final class ConfigSyncParser {
     }
     String variant = entry.optString("variant");
     Object configNode = requireObject(entry, "config");
-    if (skipUnknown(entry, ConfigSyncKind.AGENTS, name, skipped)) {
-      return null;
-    }
-    if (skipUnknownConfig(
-        configNode,
-        AgentDefinitionConfigDTO.class,
-        entry.path + ".config",
-        ConfigSyncKind.AGENTS,
-        name,
-        skipped)) {
-      return null;
-    }
+    List<String> removed = new ArrayList<>();
+    Object cleanedConfig =
+        yaml.removeUnknownProperties(
+            AgentDefinitionConfigDTO.class, configNode, entry.path + ".config", removed);
     AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
     properties.setDescription(description);
     properties.setSystemPrompt(systemPrompt);
     properties.setModel(model);
     properties.setVariant(variant);
     properties.setConfig(
-        yaml.convert(configNode, AgentDefinitionConfigDTO.class, entry.path + ".config"));
+        yaml.convert(cleanedConfig, AgentDefinitionConfigDTO.class, entry.path + ".config"));
+    // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
+    validateEntry(ConfigSyncKind.AGENTS, name, () -> agentFactory.validateImport(name, properties));
+    if (skipUnknown(entry, ConfigSyncKind.AGENTS, name, skipped)) {
+      return null;
+    }
+    if (reportUnknownConfig(removed, ConfigSyncKind.AGENTS, name, skipped)) {
+      return null;
+    }
     return new AgentSpec(name, modelRef.providerName(), modelRef.modelName(), properties);
   }
 
@@ -260,11 +289,13 @@ public final class ConfigSyncParser {
     String repositoryUrl = entry.reqString("repositoryUrl");
     String branch = entry.reqString("branch");
     String currentCommit = entry.reqString("currentCommit");
-    if (!COMMIT.matcher(currentCommit).matches()) {
-      throw new AiValidationException(
-          RESOURCE,
-          entry.path + ".currentCommit must be a 40 or 64 characters lowercase hex object id");
-    }
+    // 唯一业务校验入口：SkillCatalogService.validateImport 同时校验 canonical 包名、描述、URL、branch 与 commit。
+    validateEntry(
+        ConfigSyncKind.SKILL_PACKAGES,
+        packageName,
+        () ->
+            skillCatalogService.validateImport(
+                packageName, description, repositoryUrl, branch, currentCommit));
     if (skipUnknown(entry, ConfigSyncKind.SKILL_PACKAGES, packageName, skipped)) {
       return null;
     }
@@ -276,6 +307,9 @@ public final class ConfigSyncParser {
     String name = entry.reqName("name");
     declared.add(name);
     String token = entry.reqString("registrationToken");
+    // 与 register/update 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
+    EnvironmentServiceImpl.validateName(name);
+    EnvironmentServiceImpl.validateRegistrationToken(token);
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
     }
@@ -290,23 +324,35 @@ public final class ConfigSyncParser {
     Map<String, String> headers = entry.optStringMap("headers");
     Boolean enabled = entry.optBoolean("enabled");
     Long timeoutMillis = entry.optLong("timeoutMillis");
+    // 与 CRUD 共用校验并规范化；未知字段不能绕过 name/url/header/timeout 的硬错误。
+    validateEntry(
+        ConfigSyncKind.MCP_SERVERS, name, () -> McpServerMutationValidator.requireName(name));
+    McpServerMutationValidator.HttpConfig config =
+        normalizeMcpConfig(name, url, headers, enabled, timeoutMillis);
     if (skipUnknown(entry, ConfigSyncKind.MCP_SERVERS, name, skipped)) {
       return null;
     }
-    return new McpSpec(name, url, headers, enabled, timeoutMillis);
+    return new McpSpec(name, config);
   }
 
-  @SuppressWarnings("unchecked")
-  private Map<String, Object> parseSettings(
+  private static McpServerMutationValidator.HttpConfig normalizeMcpConfig(
+      String name, String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
+    try {
+      return McpServerMutationValidator.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
+    } catch (AiValidationException error) {
+      // 底层消息可能含 URL 或 header 值，统一替换为安全的类别与条目名，不携带 cause。
+      throw new AiValidationException(
+          RESOURCE, "mcp server " + name + " has an invalid url, headers or timeout");
+    }
+  }
+
+  private SystemSettingsSectionsDTO parseSettings(
       Map<String, Object> document, List<ConfigSyncSkipped> skipped) {
     String key = ConfigSyncKind.SETTINGS.wireValue();
     if (!document.containsKey(key)) {
       return null;
     }
     Object node = document.get(key);
-    if (node == null) {
-      throw new AiValidationException(RESOURCE, "settings must be an object");
-    }
     if (!(node instanceof Map<?, ?> rawMap)) {
       throw new AiValidationException(RESOURCE, "settings must be an object");
     }
@@ -314,14 +360,21 @@ public final class ConfigSyncParser {
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
       raw.put(String.valueOf(entry.getKey()), entry.getValue());
     }
-    // 未知字段移除并报告，剩余结构仍须满足当前完整 settings 契约。
+    // 未知字段移除并报告；剩余结构必须在解析期满足当前完整七节契约，避免对必然无效的文件做外部 Git/MCP 准备。
     List<String> removed = new ArrayList<>();
     Object cleaned =
         yaml.removeUnknownProperties(SystemSettingsSectionsDTO.class, raw, key, removed);
     for (String path : removed) {
-      skipped.add(new ConfigSyncSkipped(key, "settings", "unsupported field: " + path));
+      skipped.add(new ConfigSyncSkipped(key, SETTINGS_ITEM_NAME, "unsupported field: " + path));
     }
-    return (Map<String, Object>) cleaned;
+    SystemSettingsSectionsDTO sections =
+        yaml.convert(cleaned, SystemSettingsSectionsDTO.class, key);
+    try {
+      systemSettingsCodec.fromDto(sections);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, "settings are invalid");
+    }
+    return sections;
   }
 
   private Object requireObject(Entry entry, String key) {
@@ -333,15 +386,8 @@ public final class ConfigSyncParser {
   }
 
   /** 嵌套 config 含未声明字段时整体跳过条目；路径可读但不回显字段值。 */
-  private boolean skipUnknownConfig(
-      Object node,
-      Class<?> type,
-      String path,
-      ConfigSyncKind kind,
-      String name,
-      List<ConfigSyncSkipped> skipped) {
-    List<String> removed = new ArrayList<>();
-    yaml.removeUnknownProperties(type, node, path, removed);
+  private static boolean reportUnknownConfig(
+      List<String> removed, ConfigSyncKind kind, String name, List<ConfigSyncSkipped> skipped) {
     if (removed.isEmpty()) {
       return false;
     }
@@ -363,6 +409,15 @@ public final class ConfigSyncParser {
     return true;
   }
 
+  /** 用写入路径的校验器检查条目；底层消息可能含真实值，统一替换为安全的类别与条目名，不携带 cause。 */
+  private static void validateEntry(ConfigSyncKind kind, String name, Runnable validation) {
+    try {
+      validation.run();
+    } catch (AiValidationException error) {
+      throw new AiValidationException(RESOURCE, kind.wireValue() + " entry is invalid: " + name);
+    }
+  }
+
   private static void requireDistinct(List<String> names, ConfigSyncKind kind) {
     Set<String> seen = new HashSet<>();
     for (String name : names) {
@@ -381,7 +436,7 @@ public final class ConfigSyncParser {
       List<SkillSpec> skillPackages,
       List<EnvironmentSpec> environments,
       List<McpSpec> mcpServers,
-      Map<String, Object> settings,
+      SystemSettingsSectionsDTO settings,
       List<ConfigSyncSkipped> skipped) {}
 
   public record ProviderSpec(String name, AgentProviderEditablePropertiesDTO properties) {}
@@ -404,8 +459,7 @@ public final class ConfigSyncParser {
 
   public record EnvironmentSpec(String name, String registrationToken) {}
 
-  public record McpSpec(
-      String name, String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {}
+  public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
 
   /** 单条目字段读取器：跟踪已消费键，读取时严格校验类型且不回显值。 */
   private static final class Entry {

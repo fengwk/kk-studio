@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -53,7 +52,7 @@ class ConfigSyncServiceImplTest {
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
           yaml);
-  private final ConfigSyncParser parser = new ConfigSyncParser(yaml);
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
 
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncApplier applier = mock(ConfigSyncApplier.class);
@@ -63,21 +62,14 @@ class ConfigSyncServiceImplTest {
       mock(AgentDefinitionRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final RuntimeToolCatalog toolCatalog = mock(RuntimeToolCatalog.class);
-  private final SkillCatalogService skillCatalogService = mock(SkillCatalogService.class);
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
-          yaml,
           mcpDiscovery,
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          new SystemSettingsCodec(),
-          toolCatalog,
-          ConfigSyncFixtures.PROVIDER_MUTATION_FACTORY,
-          ConfigSyncFixtures.MODEL_MUTATION_FACTORY,
-          ConfigSyncFixtures.AGENT_MUTATION_FACTORY,
-          skillCatalogService);
+          toolCatalog);
 
   private final ConfigSyncServiceImpl service =
       new ConfigSyncServiceImpl(snapshotReader, graph, exporter, parser, planner, applier);

@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -64,7 +66,24 @@ final class ConfigSyncFixtures {
   static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
       new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
 
+  /**
+   * 真实 {@code SkillCatalogServiceImpl.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由
+   * {@link SkillCatalogTestFixtures} 以 mock 占位。
+   */
+  static final SkillCatalogService SKILL_CATALOG_SERVICE = SkillCatalogTestFixtures.realValidator();
+
   private ConfigSyncFixtures() {}
+
+  /** 构造注入了真实校验器的 Parser，供解析期硬校验测试使用。 */
+  static ConfigSyncParser parser(ConfigSyncYaml yaml) {
+    return new ConfigSyncParser(
+        yaml,
+        PROVIDER_MUTATION_FACTORY,
+        MODEL_MUTATION_FACTORY,
+        AGENT_MUTATION_FACTORY,
+        SKILL_CATALOG_SERVICE,
+        new SystemSettingsCodec());
+  }
 
   static AgentModelConfigDTO modelConfig() {
     AgentModelLimitDTO limit = new AgentModelLimitDTO();
