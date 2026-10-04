@@ -135,22 +135,14 @@ registerCase({
         { status: 409 },
       )
     } finally {
-      let versionToDelete = version
-      try {
-        const { json } = await ctx.call(
-          'GET',
-          `/api/harness/environments/${encodeURIComponent(environmentId)}`,
-        )
-        const current = envelopeData(json)
-        if (current?.version != null) {
-          versionToDelete = String(current.version)
-        }
-      } catch {
-        // fall back to the last known version
-      }
+      const { json } = await ctx.call(
+        'GET',
+        `/api/harness/environments/${encodeURIComponent(environmentId)}`,
+      )
+      const current = envelopeData(json)
       await ctx.call(
         'DELETE',
-        `/api/harness/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
+        `/api/harness/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
       )
     }
   },

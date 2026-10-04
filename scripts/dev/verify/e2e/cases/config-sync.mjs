@@ -285,7 +285,7 @@ registerCase({
     assert(envId && originalToken, `created environment must carry id and token: ${JSON.stringify(created)}`)
 
     try {
-      const { json: putJson } = await ctx.call(`${cardPath(envId)}/install-config`, 'PUT', {
+      const { json: putJson } = await ctx.call('PUT', `${cardPath(envId)}/install-config`, {
         expectedVersion: String(created.version),
         installConfig: linuxInstallConfig(),
       })
@@ -350,16 +350,12 @@ registerCase({
       )
     } finally {
       if (envId) {
-        try {
-          const { json } = await ctx.call('GET', cardPath(envId))
-          const current = envelopeData(json)
-          await ctx.call(
-            'DELETE',
-            `${cardPath(envId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
-          )
-        } catch {
-          // best-effort cleanup
-        }
+        const { json } = await ctx.call('GET', cardPath(envId))
+        const current = envelopeData(json)
+        await ctx.call(
+          'DELETE',
+          `${cardPath(envId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+        )
       }
     }
   },
