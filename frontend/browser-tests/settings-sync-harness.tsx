@@ -29,11 +29,9 @@ let previewMode: PreviewMode = 'partial'
 function buildPreview(): ConfigSyncImportCheckDTO {
   if (previewMode === 'full') {
     return {
-      created: [
-        { kind: 'providers', name: 'openai' },
-        { kind: 'settings', name: 'settings' },
-      ],
-      updated: [],
+      created: [{ kind: 'providers', name: 'openai' }],
+      // settings 已初始化，同一份文件只会覆盖而不会新增。
+      updated: [{ kind: 'settings', name: 'settings' }],
       skipped: [],
     }
   }

@@ -251,3 +251,41 @@ test('renders the English copy consistently when the locale switches', async ({ 
   await expect(dialog.getByText('The configuration file contains credentials; please keep it safe.')).toBeVisible()
   await expect(dialog.getByText('Agents, Models & Providers')).toBeVisible()
 })
+
+test('renders the English import preview, partial confirmation and result', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.getByRole('button', { name: /Locale: zh-CN/ }).click()
+  await expect(page.getByRole('button', { name: 'Import' })).toBeVisible()
+
+  // partial：预览三段与显式部分导入文案。
+  await page.locator('#preview-mode').selectOption('partial')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  let dialog = page.getByRole('dialog', { name: 'Import configuration' })
+  await expect(dialog.getByText('Review the planned changes before importing.')).toBeVisible()
+  await expect(dialog.getByText('File: kk.yaml')).toBeVisible()
+  await expect(dialog.getByText('Will be added')).toBeVisible()
+  await expect(dialog.getByText('Will be overwritten')).toBeVisible()
+  await expect(dialog.getByText('Will be skipped')).toBeVisible()
+  await expect(dialog.getByText('Agents: broken — unsupported tool')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Import available only' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Import available only' }).click()
+  await expect(dialog.getByText('Imported')).toBeVisible()
+  await expect(dialog.getByText('Skipped')).toBeVisible()
+  await dialog.locator('.modal-footer .btn-primary').click()
+
+  // full：同一个执行按钮改用全量确认文案。
+  await page.locator('#preview-mode').selectOption('full')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  dialog = page.getByRole('dialog', { name: 'Import configuration' })
+  await expect(dialog.getByText('Will be overwritten')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Confirm import' })).toBeVisible()
+})
