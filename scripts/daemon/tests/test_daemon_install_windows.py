@@ -80,10 +80,12 @@ class TestWindowsInstallerSurface(unittest.TestCase):
         text = function_body("Write-Usage")
         for value in ("install", "status", "uninstall", "help", "-ConfigFile", "-TokenFile", "-JavaHome",
                       "%USERPROFILE%\\.kk-studio", "AtLogOn", "Interactive", "Limited",
-                      "does not capture daemon stdout/stderr", "best effort settings", "compatible Bash"):
+                      "does not capture daemon stdout/stderr", "best effort settings",
+                      "configured (or default) Bash"):
             self.assertIn(value, text)
         for value in ("GatewayUri", "RegistrationToken", "FromSource", "$Version", "LspConfig", "Read-Host",
-                      "Invoke-Upgrade", "Invoke-DaemonBuild", "Resolve-RepositoryRoot"):
+                      "Invoke-Upgrade", "Invoke-DaemonBuild", "Resolve-RepositoryRoot",
+                      "Resolve-Executable", "Assert-BashReady"):
             self.assertNotIn(value, script_text())
 
     def test_functions_are_dot_sourceable_without_running_main(self):
@@ -138,6 +140,22 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertIn('Assert-PrivateFile -Path $ConfigFile', body)
         self.assertIn('Assert-PrivateFile -Path $TokenFile', body)
         self.assertIn('must be siblings named daemon.json and daemon.token', body)
+
+    def test_preflight_surfaces_only_the_bounded_trusted_config_marker(self):
+        """A config failure must expose the core field line, never raw output or the token."""
+        text = script_text()
+        self.assertIn('$script:ConfigFailureMarker = "Invalid daemon configuration: "', text)
+        self.assertIn("$script:ConfigFailureMaxLength", text)
+        helper = function_body("Get-TrustedConfigFailureDetail")
+        self.assertIn("StartsWith($script:ConfigFailureMarker", helper)
+        self.assertIn("$candidate.Length -gt $script:ConfigFailureMaxLength", helper)
+        self.assertIn("$candidate -match", helper)
+        staged = function_body("Prepare-StagedJar")
+        self.assertIn(
+            "Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr",
+            staged,
+        )
+        self.assertIn("unrecognized output", staged)
 
     def test_task_is_owned_by_an_exact_per_user_marker(self):
         """A SID-scoped name plus exact Description marker prevents cross-user clobbering."""
@@ -340,7 +358,9 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         assert_in_order(self, staged, "Get-ReleaseJar", "Assert-BuiltJar", "Copy-PrivateFile -Source $ConfigFile",
                         "Copy-PrivateFile -Source $TokenFile", '"--check-config"', "Invoke-NativeProcess")
         self.assertIn('"Daemon configuration is valid"', staged)
-        self.assertNotIn("$result.Stderr", staged)
+        # Raw stdout/stderr must never be interpolated into the user-visible failure.
+        self.assertNotIn("$($result.Stdout", staged)
+        self.assertNotIn("$($result.Stderr", staged)
         release = function_body("Get-ReleaseJar")
         for value in ("https://api.github.com/repos/fengwk/kk-studio/releases/latest",
                       "https://github.com/fengwk/kk-studio/releases/download/$tag",
