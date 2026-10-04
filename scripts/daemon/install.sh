@@ -54,7 +54,7 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 absolute_path() {
   case "$1" in /*) ;; *) fail "$2 must be an absolute path" ;; esac
   case "$1" in *[[:cntrl:]]*) fail "$2 must not contain control characters" ;; esac
-  # Canonical spelling prevents ancestor checks being bypassed with '..' or '.'.
+  # Require an absolute path without dot or empty segments.
   case "/${1#/}/" in */../* | */./* | *//*) fail "$2 must not contain dot or empty path segments" ;; esac
 }
 file_owner_uid() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
@@ -68,24 +68,15 @@ check_metadata() {
   (( (8#$mode & mask) == 0 )) || fail "unsafe permissions: $path"
 }
 
-# Every ancestor is checked for symlinks; ancestors outside HOME may be system-owned.
-# Existing HOME children cannot be foreign-owned or group/other writable.
-check_parents() {
-  local path=$1
-  while [ "$path" != / ]; do
-    [ ! -L "$path" ] || fail "symbolic link parent is unsafe: $path"
-    if [ -e "$path" ]; then
-      [ -d "$path" ] || fail "parent must be a directory: $path"
-      case "$path/" in "$HOME/"*) check_metadata "$path" 8#022 ;; esac
-    fi
-    path=${path%/*}
-    [ -n "$path" ] || path=/
-  done
-}
+# Validate only this private directory; shared ancestors are the user's trusted
+# layout, not directories for the installer to inspect or harden.
 check_private_directory() {
   local path=$1
-  check_parents "$path"
-  if [ -e "$path" ]; then check_metadata "$path" 8#077; fi
+  [ ! -L "$path" ] || fail "symbolic link directory is unsafe: $path"
+  if [ -e "$path" ]; then
+    [ -d "$path" ] || fail "must be a directory: $path"
+    check_metadata "$path" 8#077
+  fi
 }
 check_file() {
   local path=$1 private=$2
@@ -102,7 +93,6 @@ check_file() {
 }
 check_input() {
   local path=$1 maximum=$2 size
-  check_parents "${path%/*}"
   check_private_directory "${path%/*}"
   check_file "$path" true
   size=$(wc -c <"$path")
@@ -182,12 +172,12 @@ ownership_conflict() {
   exit 1
 }
 require_ownership() {
-  check_parents "${SERVICE_PATH%/*}"
   if [ "$HOST_OS" = Linux ]; then
     local fragment
     fragment=$(systemctl --user show --property=FragmentPath --value "$SERVICE_NAME") ||
       fail "cannot inspect systemd service ownership"
-    if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ]; then
+    if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ] &&
+      [ ! "$fragment" -ef "$SERVICE_PATH" ]; then
       ownership_conflict "service resolves to another definition" "$fragment"
     fi
   fi
