@@ -132,10 +132,11 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装脚本回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装与发布脚本契约。
-Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与终端交互，
-验证 latest/固定版本、预检失败保留安装、升级复用配置、受管身份与无 checkout 安装。
-测试不注册真实 systemd/launchd 服务。
+在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载与发布脚本契约。
+Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
+解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
+以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
+构建或直接运行安装器只是开发/CI fixture，不是用户安装路径。测试不注册真实 systemd/launchd 服务。
 Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
 
 ```powershell
@@ -144,6 +145,7 @@ pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_w
 ```
 
 该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
+Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
 应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
 验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
 
@@ -351,7 +353,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
   `config_sync.environment_identity_and_token` / `config_sync.import_precheck_and_partial_confirmation`：
   七类配置清单、凭据随 YAML 导出、导入前的新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、
-  同名 Provider 更新、Environment 身份与注册令牌恢复，以及同步响应的 `no-store`。
+  同名 Provider 更新、Environment 身份、注册令牌与保存的安装设置恢复，以及同步响应的 `no-store`。
   这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
@@ -719,9 +721,9 @@ install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared
 缺配置或不一致时在启动前失败。`SPRING_PROFILES_ACTIVE` 不是 `prod`、Flyway 没有关闭、或进程
 试图承担 Harness worker，都会直接报错，不会让本机进程成为第二个迁移执行者或第二个 worker。
 
-Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，按
-[Environment Daemon 安装与运行](environment-daemon.md)在该主机安装常驻服务，连接 NAS App 的
-gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。
+Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，通过 Studio 的
+安装弹窗保存配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
+`wss://<studio-origin>/api/harness/environment-daemon/v1`。
 
 ### 共享数据库重建
 
@@ -744,7 +746,8 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。
 文件始终包含配置所需的凭据和注册令牌，请保存在私密位置，不提交到 Git、不粘贴到日志。
 
 可导出 Provider、Model、Agent、Skill Package、Environment、MCP 服务与系统设置。
-Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
+Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationToken` 并列嵌套，缺失
+该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；系统设置包含其引用的备用模型和提示词 Agent。
 依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
 
@@ -769,6 +772,8 @@ Skill Package 文件保存仓库地址、分支和已发布的 exact commit，�
 并重新发现 MCP 工具，外部服务状态变化可能使实际结果与预览不同；
 发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
 Environment 保留注册令牌，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
+导入会深度校验 `installConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖安装设置，
+文件省略 `installConfig` 即清空，token 与安装设置在同一次原子更新中生效。
 
 配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
 连接租约和发现快照，也不包含部署级数据库/S3 参数、Plugin 认证或主密钥。

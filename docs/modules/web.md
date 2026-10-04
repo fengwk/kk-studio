@@ -52,7 +52,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、运维 events |
+| Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、安装设置保存、运维 events |
 
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。公开 command-batches 接纳 Chat；
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。

@@ -130,7 +130,7 @@ Daemon 不绑定 `jacoco:check`；Runtime 的固定核心类门禁不包含 `Bas
 报告中未覆盖行以当前运行产物为准，不把静态检查或未执行的平台测试称为覆盖率证据。
 
 跨平台入口是 [process-scope.yml](../../.github/workflows/process-scope.yml) 的 Linux/macOS/Windows 矩阵。
-Windows 必须用 `--bash-executable` 指定 Git Bash：裸名 `bash` 可能命中 `System32\bash.exe` 的 WSL 转发器。
+Windows 必须在 Daemon 配置的 `bashExecutable`（Web 安装设置或 `daemon.json`）指定 Git Bash：裸名 `bash` 可能命中 `System32\bash.exe` 的 WSL 转发器。
 `BashCapabilityTest` 找不到 Git Bash 会跳过；矩阵额外要求 stdin EOF 与超时溢出两条必须真跑。
 用裸名 bash 的 `CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest` 不参与 Windows 腿。
 本机单平台测试不能代替其他平台的原生证据。
