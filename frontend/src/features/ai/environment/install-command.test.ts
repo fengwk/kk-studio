@@ -280,6 +280,31 @@ describe('install command', () => {
       .toEqual({ command: ['x'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [] })
   })
 
+  it.each(['__proto__', 'constructor', 'toString'])(
+    'preserves the valid LSP server id %s as an own JSON field',
+    id => {
+      // server id 是外部键，不应改变对象原型或在写入 daemon.json 时丢失。
+      const input: EnvironmentInstallConfigDTO = {
+        operatingSystem: 'linux',
+        daemon: {
+          studioUrl: 'https://studio.example.com',
+          lsp: { servers: Object.fromEntries([[id, { command: ['server'], extensions: ['.ts'] }]]) },
+        },
+      }
+      const normalized = validateInstallConfig(input)
+      const servers = normalized.daemon.lsp!.servers
+      expect(Object.getPrototypeOf(servers)).toBeNull()
+      expect(Object.hasOwn(servers, id)).toBe(true)
+      expect(Object.keys(JSON.parse(JSON.stringify(servers)))).toEqual([id])
+      expect(servers[id]).toEqual({
+        command: ['server'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [],
+      })
+      expect(generateInstallCommand(input, 'private-prototype')).toContain(
+        JSON.stringify(normalized.daemon),
+      )
+    },
+  )
+
   it('bounds and validates LSP map and rejects heredoc/control injection', () => {
     const input = config()
     for (const lsp of [{ servers: {} }, { servers: [] }, { servers: { 'bad id': { command: ['x'], extensions: ['.a'] } } },
