@@ -239,17 +239,20 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 
 `ConfigSyncService` 提供条目清单、选择导出、导入检查与 YAML 导入。清单和检查结果不含配置值；
 导出在单一只读数据库快照中沿依赖边补齐选择，循环 Subagent 去重，不做反向扩展。
-YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌和 MCP headers。
+YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌与保存的安装设置，以及 MCP headers。
 运行态、数据库身份、版本和时间戳不进入文件。
 
 导入检查复用写入路径的字段与 codec 校验，在一次计划快照上分类新增、覆盖和跳过，不写数据库。
 未知或不支持内容、依赖不满足和外部准备失败可明确跳过；必填缺失、结构/类型/有效值错误、
 Environment 令牌身份冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
+Environment 的 `installConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
+条目级跳过；条目省略该键表示清空现有安装设置。
 Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`
-时拒绝写入。预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
+时拒绝写入。Environment 的注册令牌与安装设置在同一次 CAS 更新中生效，同名更新保持其 UUID 身份。
+预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
 系统设置按当前完整七节契约直接校验，不合并局部字段；以执行准备时版本 CAS，提交后沿现有通知刷新快照。
 产品操作、恢复范围与保密要求见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。

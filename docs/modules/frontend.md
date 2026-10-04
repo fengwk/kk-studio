@@ -124,7 +124,9 @@ attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas Inf
 AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作区。
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
-Environment 管理面展示宿主事实与有界运维事件窗口。
+Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
+保存安装设置后读取当前 token，用服务端返回的配置生成含凭据的安装/卸载命令并复制到剪贴板，
+保存只写设置、不代表已部署。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

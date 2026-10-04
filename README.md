@@ -91,32 +91,22 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 
 ## 让 Agent 使用本机工具
 
-1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment，并复制
-   registration token。
-2. 目标主机准备 JDK 21。Linux 使用 `systemd --user`，macOS 使用当前用户图形登录域的
-   LaunchAgent；Unix 安装还需要 Bash、curl 和 SHA256 工具，不需要 Git、Maven 或源码 checkout。
-3. 在 Linux/macOS 的交互终端执行：
+1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment。
+2. 目标主机准备 **JDK 21 与 Bash**。Linux 使用 `systemctl --user`，macOS 使用当前用户图形
+   登录域的 LaunchAgent，Windows 10/11 使用当前用户交互登录期间运行的 AtLogOn 计划任务。
+3. 在 Environment 卡片点击**“安装 / 覆盖”**，填写配置（Studio origin、可选的 Java home、
+   Bash、备注与 LSP servers JSON），再点击**“保存并复制安装命令”**。配置保存在 Studio，
+   命令包含凭据；到目标主机执行后才会部署。
+4. Studio 的 Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在 Chat
+   的 Branch 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
 
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash
-   ```
+每个 OS 用户只运行一个受管 Daemon，固定根目录 `~/.kk-studio`；重复安装会整体替换配置、token
+与程序并重启，但保留数据。卸载只移除受管服务与程序，保留本地配置、token 和数据，也不删除
+Studio 中的 Environment。LSP 使用你已在主机上安装的语言服务器，Daemon 不自动安装它们；保存的
+安装设置会随配置同步一起导出/导入。
 
-   脚本默认下载最新官方 Release 的 Daemon JAR 并校验 SHA256。按提示输入 gateway URI
-   （本地栈为 `ws://localhost:8080/api/harness/environment-daemon/v1`）和 registration token；
-   token 输入不回显，写入仅当前用户可读的文件，不必放进命令参数或 shell 历史。
-   Windows 10/11 的 PowerShell 安装与当前用户计划任务操作见
-   [Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
-4. Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在 Chat 的
-   Branch 设置中选择这个 Environment。Environment 不绑定在 Agent 定义上。
-
-后续升级复用已安装服务的配置：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
-```
-
-Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。Windows 与 macOS 的安装差异、
-升级、状态查询、可选参数、卸载和前台调试见
+Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。三平台的前置条件、安装设置字段、
+LSP 示例、参数、卸载与前台调试见
 [Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
 
 ## 停止与清理
