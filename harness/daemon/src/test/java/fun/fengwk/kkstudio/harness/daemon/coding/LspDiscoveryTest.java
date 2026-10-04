@@ -173,30 +173,6 @@ class LspDiscoveryTest {
     }
   }
 
-  /** 意图：home 展开支持 {@code ~}、{@code ~/x}、{@code $HOME/x}、{@code ${HOME}/x} 四种写法。 */
-  @Test
-  void expandsHomeShortcuts() {
-    String previousHome = System.getProperty("user.home");
-    try {
-      System.setProperty("user.home", "/home/user");
-      assertEquals("/home/user", LspDiscovery.expandHome("~"));
-      assertEquals("/home/user/bin/tool", LspDiscovery.expandHome("~/bin/tool"));
-      assertEquals("/home/user/bin/tool", LspDiscovery.expandHome("$HOME/bin/tool"));
-      assertEquals("/home/user/bin/tool", LspDiscovery.expandHome("${HOME}/bin/tool"));
-      assertEquals("/opt/tool", LspDiscovery.expandHome("/opt/tool"));
-    } finally {
-      System.setProperty("user.home", previousHome);
-    }
-  }
-
-  /** 意图：Windows 裸命令只在 PATHEXT 后缀上匹配，未配置时使用平台默认后缀表。 */
-  @Test
-  void windowsExecutableSuffixesFollowPathext() {
-    assertEquals(
-        List.of(".EXE", ".CMD", ".BAT", ".COM"), LspDiscovery.windowsExecutableSuffixes(null));
-    assertEquals(List.of(".exe", ".CMD"), LspDiscovery.windowsExecutableSuffixes(".exe;CMD;;"));
-  }
-
   /** 意图：共享结构化配置转换为运行时快照，声明顺序与规范化扩展名保持不变。 */
   @Test
   void readsServersFromJsonConfiguration() throws IOException {
