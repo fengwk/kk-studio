@@ -4,9 +4,20 @@ import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 
 import java.io.PrintStream;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /** Environment Daemon 独立进程入口。 */
 public final class DaemonMain {
+
+  /** 预检失败时 stderr 的稳定前缀；installer 只应解析该 marker 之后的安全诊断。 */
+  static final String INVALID_CONFIGURATION_MARKER = "Invalid daemon configuration";
+
+  /** 未知失败收敛后的固定规则，不含任何输入取值。 */
+  static final String INVALID_CONFIGURATION_FALLBACK = "configuration is invalid";
+
+  /** 共享 codec 与已知 bash 失败的安全形态：字段路径 + 规则，不含原始取值。 */
+  private static final Pattern SAFE_CONFIGURATION_ERROR =
+      Pattern.compile("daemon(?:\\.[A-Za-z0-9_.\\[\\]-]+)?: [^\\r\\n]+");
 
   /** {@code --help} / {@code -h} 的完整用法文本：列出全部 CLI 选项及其默认值。 */
   static final String USAGE =
@@ -53,8 +64,8 @@ public final class DaemonMain {
    * <p>数据目录在启动期以 owner-only 权限创建并持有 {@code daemon.lock}：同一目录上的第二个 Daemon
    * 立即失败，而不是并发写同一份本地数据；该锁在进程整个生命周期内持有。
    *
-   * <p>{@code --check-config} 只读取并校验配置、同目录凭证与配置的 bash 可执行程序，不打开数据目录、不建立连接也不启动进程；
-   * 正常运行前同样先完成同一解析，因此缺失或不可执行的 bash 在启动期即失败关闭。
+   * <p>{@code --check-config} 只读取并校验配置、同目录凭证与配置的 bash 可执行程序，不打开数据目录、不建立连接也不启动进程； 失败时只在 stderr
+   * 输出单行安全诊断（固定前缀 + 字段路径/规则或固定规则）并以非零状态退出， 正常运行前同样先完成同一解析，因此缺失或不可执行的 bash 在启动期即失败关闭。
    *
    * <p>单个 {@code --help}/{@code -h} 或 {@code --version} 是纯信息命令：在打开数据目录或建立连接之前输出并直接返回；其余情况（含
    * 混用与多余参数）一律交给 {@link DaemonConfig#fromArgs(String[])} 解析并失败关闭。
@@ -65,12 +76,9 @@ public final class DaemonMain {
       return;
     }
     if (args.length > 0 && "--check-config".equals(args[0])) {
-      if (args.length != 2) {
-        throw new IllegalArgumentException("expected exactly --check-config <absolute-path>");
+      if (!checkConfig(args, System.out, System.err)) {
+        System.exit(1);
       }
-      DaemonConfig checked = DaemonConfig.fromFile(DaemonConfig.configPath(args[1]));
-      checked.registrationToken();
-      System.out.println("Daemon configuration is valid");
       return;
     }
     DaemonConfig daemonConfig = DaemonConfig.fromArgs(args);
@@ -88,6 +96,46 @@ public final class DaemonMain {
         System.exit(1);
       }
     }
+  }
+
+  /**
+   * 运行配置预检并把结果写入调用方提供的输出流：成功打印固定成功文本，失败打印单行安全诊断。
+   *
+   * <p>本方法不调用 {@code System.exit}，便于测试注入输出流；进程退出码由 {@link #main(String[])} 承担。
+   *
+   * @return {@code true} 表示预检通过
+   */
+  static boolean checkConfig(String[] args, PrintStream out, PrintStream err) {
+    Objects.requireNonNull(args, "args");
+    Objects.requireNonNull(out, "out");
+    Objects.requireNonNull(err, "err");
+    try {
+      if (args.length != 2) {
+        throw new IllegalArgumentException("expected exactly --check-config <absolute-path>");
+      }
+      DaemonConfig checked = DaemonConfig.fromFile(DaemonConfig.configPath(args[1]));
+      checked.registrationToken();
+      out.println("Daemon configuration is valid");
+      return true;
+    } catch (RuntimeException error) {
+      err.println(invalidConfigurationLine(error));
+      return false;
+    }
+  }
+
+  /**
+   * 把预检失败映射为单行安全诊断。
+   *
+   * <p>共享 codec 与已知 bash 失败保留字段路径与规则；其余异常一律收敛为固定规则。输出不含堆栈、原始配置取值或换行， 供 installer 只解析 {@link
+   * #INVALID_CONFIGURATION_MARKER} 之后的内容。
+   */
+  static String invalidConfigurationLine(RuntimeException error) {
+    Objects.requireNonNull(error, "error");
+    String message = error.getMessage();
+    if (message != null && SAFE_CONFIGURATION_ERROR.matcher(message).matches()) {
+      return INVALID_CONFIGURATION_MARKER + ": " + message;
+    }
+    return INVALID_CONFIGURATION_MARKER + ": " + INVALID_CONFIGURATION_FALLBACK;
   }
 
   /**
