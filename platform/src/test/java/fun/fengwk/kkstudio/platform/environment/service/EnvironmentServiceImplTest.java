@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -805,6 +807,125 @@ class EnvironmentServiceImplTest {
     assertThrows(
         AiDuplicateException.class,
         () -> service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0"));
+  }
+
+  /** 意图：CRUD 与配置同步共用的静态校验覆盖全部拒绝分支。 */
+  @Test
+  void staticValidatorsRejectEveryInvalidShape() {
+    for (String invalid : new String[] {null, "", "   ", " x", "x ", "a/b", "x".repeat(65)}) {
+      assertThrows(AiValidationException.class, () -> EnvironmentServiceImpl.validateName(invalid));
+    }
+    assertEquals("ok", EnvironmentServiceImpl.validateName("ok"));
+    for (String invalid : new String[] {null, "", "   ", " t", "t ", "x".repeat(129)}) {
+      assertThrows(
+          AiValidationException.class,
+          () -> EnvironmentServiceImpl.validateRegistrationToken(invalid));
+    }
+    assertEquals("t", EnvironmentServiceImpl.validateRegistrationToken("t"));
+  }
+
+  /** 意图：create 拒绝 null 请求与重名，并把并发唯一约束竞争映射为重复错误。 */
+  @Test
+  void createValidatesRequestAndMapsDuplicateConstraints() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo, mock(EnvironmentRegistry.class), mock(JdbcTemplate.class), snapshot, CLOCK);
+
+    assertThrows(AiValidationException.class, () -> service.create(null));
+
+    when(repo.existsByName("dup")).thenReturn(true);
+    EnvironmentCreateDTO duplicate = new EnvironmentCreateDTO();
+    duplicate.setName("dup");
+    assertThrows(AiDuplicateException.class, () -> service.create(duplicate));
+
+    when(repo.existsByName("fresh")).thenReturn(false);
+    when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
+    EnvironmentCreateDTO fresh = new EnvironmentCreateDTO();
+    fresh.setName("fresh");
+    assertThrows(AiDuplicateException.class, () -> service.create(fresh));
+  }
+
+  /** 意图：详情查询未知 id 必须 404。 */
+  @Test
+  void getUnknownEnvironmentThrowsNotFound() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(AiResourceNotFoundException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
+  }
+
+  /** 意图：rotateToken 覆盖缺失行、过期版本与 CAS 丢失（行消失/版本前进）三条失败路径。 */
+  @Test
+  void rotateTokenFailurePaths() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(
+            repo,
+            mock(EnvironmentRegistry.class),
+            mock(JdbcTemplate.class),
+            mock(SystemSettingsSnapshot.class),
+            CLOCK);
+
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.lockById(ENV_ID)).thenReturn(environment("old", 2L));
+    assertThrows(
+        AiVersionConflictException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.lockById(ENV_ID)).thenReturn(environment("old", 0L));
+    when(repo.updateById(any(), eq(0L))).thenReturn(false);
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.getById(ENV_ID)).thenReturn(environment("newer", 3L));
+    assertThrows(
+        AiVersionConflictException.class, () -> service.rotateToken(EnvironmentId.of(ENV_ID), "0"));
+  }
+
+  /** 意图：delete 覆盖缺失行、过期版本、CAS 丢失与引用完整性冲突的拒绝路径。 */
+  @Test
+  void deleteFailurePaths() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, jdbc, mock(SystemSettingsSnapshot.class), CLOCK);
+
+    assertThrows(
+        AiResourceNotFoundException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.lockById(ENV_ID)).thenReturn(environment("token", 2L));
+    assertThrows(
+        AiVersionConflictException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.lockById(ENV_ID)).thenReturn(environment("token", 0L));
+    when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
+    when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(0);
+
+    when(repo.deleteById(ENV_ID, 0L)).thenReturn(false);
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.getById(ENV_ID)).thenReturn(environment("token", 5L));
+    assertThrows(
+        AiVersionConflictException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
+
+    when(repo.deleteById(ENV_ID, 0L)).thenThrow(new DataIntegrityViolationException("ref"));
+    assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
   }
 
   private static Environment environment(String registrationToken, long version) {
