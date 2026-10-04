@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from test_daemon_install import Fixture, REPOSITORY_ROOT
+from unix_release_fixture import Fixture, REPOSITORY_ROOT
 
 
 def job_block(workflow, name):
