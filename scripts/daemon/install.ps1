@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Installs (default), upgrades, inspects, or removes the kk-studio Environment Daemon
+Installs (default), inspects, or removes the kk-studio Environment Daemon
 for the current Windows user.
 
 .DESCRIPTION
@@ -12,29 +12,15 @@ PowerShell runner, wrapper script, environment file, or registry entry is create
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("install", "upgrade", "status", "uninstall")]
+    [ValidateSet("install", "status", "uninstall", "help")]
     [string] $Command = "install",
 
-    [switch] $Help,
-    [switch] $FromSource,
     [AllowEmptyString()]
-    [string] $Version,
+    [string] $ConfigFile,
     [AllowEmptyString()]
-    [string] $GatewayUri,
+    [string] $TokenFile,
     [AllowEmptyString()]
-    [string] $RegistrationTokenFile,
-    [AllowEmptyString()]
-    [string] $RegistrationToken,
-    [AllowEmptyString()]
-    [string] $JavaHome,
-    [AllowEmptyString()]
-    [string] $DataDir,
-    [AllowEmptyString()]
-    [string] $Note,
-    [AllowEmptyString()]
-    [string] $BashExecutable,
-    [AllowEmptyString()]
-    [string] $LspConfig
+    [string] $JavaHome
 )
 
 Set-StrictMode -Version Latest
@@ -46,111 +32,47 @@ foreach ($key in $PSBoundParameters.Keys) {
 }
 
 $script:ManagedBy = "scripts/daemon/install.ps1"
-$script:InstallParameterNames = @(
-    "GatewayUri",
-    "RegistrationTokenFile",
-    "RegistrationToken",
-    "JavaHome",
-    "DataDir",
-    "Note",
-    "BashExecutable",
-    "LspConfig"
-)
+$script:InstallParameterNames = @("ConfigFile", "TokenFile", "JavaHome")
 $script:VerifyTimeoutSeconds = 30
 $script:VerifyStableSeconds = 3
-$script:RepoRoot = $null
-$script:BuiltJar = $null
 $script:HomePath = $null
 $script:InstallRoot = $null
 $script:InstalledJar = $null
+$script:InstalledConfig = $null
+$script:InstalledToken = $null
 $script:CurrentSid = $null
 $script:TaskName = $null
 $script:TaskDescription = $null
 $script:SelectedJavaHome = $null
 $script:SelectedJava = $null
-$script:SelectedBash = $null
-$script:ResolvedTokenFile = $null
-$script:ResolvedDataDir = $null
-$script:ResolvedLspConfig = $null
-$script:StagedJar = $null
+$script:BuiltJar = $null
 $script:DownloadDirectory = $null
-$script:ConfigRoot = $null
-$script:PendingToken = $null
 $script:ResolvedReleaseTag = $null
+$script:BackupDirectory = $null
 
 function Write-Usage {
     @'
-Usage: .\install.ps1 [install|upgrade|status|uninstall] [options]
+Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-JavaHome <absolute JDK21>]
+       .\install.ps1 status|uninstall|help
 
-Install, upgrade, inspect, or remove the kk-studio Environment Daemon as a
-per-user Windows Scheduled Task. The default command is install. By default,
-download the latest official fengwk/kk-studio GitHub Release (no checkout needed).
+Only the latest official fengwk/kk-studio GitHub release is installed.
+Inputs must be sibling, nonempty regular files with current-user-only protected ACLs.
+Token bytes are copied only; they never enter task arguments or environment variables.
+JDK 21 discovery: JAVA_HOME_21, JAVA_HOME, PATH. Git for Windows or compatible Bash
+must be available on PATH; the daemon validates a configured Bash executable.
 
-Commands:
-  install    Download, verify, install/update the managed JAR and task,
-             start it, and verify the task stays Running.
-  upgrade    Require an existing managed task, replace only the JAR, then
-             restart and verify. Preserve all task arguments, token and data.
-  status     Print task state and recent Task Scheduler information.
-             Exit 0 when Running, 1 when not installed, 3 otherwise.
-  uninstall  Stop and unregister the managed task, then remove its JAR.
-             The registration token file and daemon data are preserved.
-  -Help      Print this help. `install -Help` is also accepted. Cannot be
-             combined with other options.
+Fixed layout: %USERPROFILE%\.kk-studio\daemon.json, daemon.token, lib, logs, backups.
+Task: kk-studio-environment-daemon-<current-user-SID>
+Install replaces program/config/token and restarts, preserving runtime data.
+Private backups precede replacement. Failures require manual restoration; no automatic rollback.
+Uninstall is idempotent and preserves config/token/data/backups.
+Status exits 0 when Running, 1 when absent, 3 otherwise.
 
-Install/upgrade options:
-  -Version <vTAG>                   Pin a release tag matching ^v[0-9A-Za-z._-]+$.
-                                    Otherwise resolve latest once for JAR + SHA.
-  -FromSource                      Explicitly build a local checkout with Maven.
-                                    Cannot be combined with -Version.
-
-Install options (not accepted by upgrade/status/uninstall):
-  -GatewayUri <uri>                 Absolute ws:// or wss:// URI; prompt if omitted.
-  -RegistrationToken <text>         Persist a private token file (never daemon argv).
-                                    Mutually exclusive with -RegistrationTokenFile.
-                                    If neither is given, prompt with AsSecureString.
-  -RegistrationTokenFile <path>     Absolute nonempty regular file.
-                                    The owner must be the current user, ACL
-                                    inheritance must be disabled, and no other
-                                    SID may have an Allow ACE. Token text is
-                                    never read or printed by this installer.
-                                    Inline/prompt tokens are written atomically to
-                                    %LOCALAPPDATA%\kk-studio\config\daemon.token,
-                                    owned by the current user with protected ACL.
-                                    Unsafe existing storage directories are rejected.
-  -JavaHome <dir>                   Optional JDK 21 home. Default order:
-                                    JAVA_HOME_21, JAVA_HOME, then PATH.
-  -DataDir <path>                   Optional absolute daemon data directory
-                                    (default: %USERPROFILE%\.kk-studio).
-  -Note <text>                      Optional trimmed single-line note, at most
-                                    512 characters.
-  -BashExecutable <path>            Optional bash.exe used by process.exec.
-                                    Defaults to bash.exe on PATH; Git for
-                                    Windows or a compatible Bash is required.
-  -LspConfig <path>                 Optional absolute path to a JSON file
-                                    declaring pre-installed language servers.
-                                    Omitted by default, which disables LSP.
-
-Environment:
-  DAEMON_VERIFY_TIMEOUT_SECONDS=30  Seconds to wait for task state changes.
-  DAEMON_VERIFY_STABLE_SECONDS=3    Seconds the task must remain Running.
-                                    Both values are non-negative integers.
-
-Managed layout:
-  %LOCALAPPDATA%\kk-studio\daemon\kk-studio-daemon.jar
-  Task: kk-studio-environment-daemon-<current-user-SID>
-  Management: re-download this same raw main install.ps1 and invoke upgrade,
-  status or uninstall; no installed management binary or repository is needed.
-
-Windows host semantics:
-  The task uses an AtLogOn trigger, Interactive logon, and Limited run level.
-  It runs only while that user has an interactive login.
-  It runs with its working directory at the managed install root, so the JAR is
-  named by its ASCII file name and every application argument is passed as one
-  Base64 token that only the daemon decodes.
-  Task Scheduler does not capture daemon stdout/stderr.
-  RestartCount/RestartInterval are best effort settings; this is not Windows
-  Service/systemd supervision.
+The task executes java.exe directly with only --config (UTF-8 Base64 machine encoding).
+It uses AtLogOn, Interactive logon and Limited run level: only while this user is logged in.
+Task Scheduler does not capture daemon stdout/stderr. Task state is not connection health.
+RestartCount/RestartInterval are best effort settings, not Windows Service/systemd supervision.
+DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 are nonnegative integers.
 '@ | Write-Host
 }
 
@@ -193,33 +115,6 @@ function Assert-AbsoluteWindowsPath {
     }
 }
 
-function Assert-GatewayUri {
-    param([AllowEmptyString()][string] $Value)
-    Assert-RequiredValue -Value $Value -Name "-GatewayUri"
-    if ($Value -match "\s") {
-        Throw-Failure "-GatewayUri must not contain whitespace"
-    }
-    $parsed = $null
-    if (-not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref] $parsed)) {
-        Throw-Failure "-GatewayUri must be an absolute ws/wss URI"
-    }
-    if (($parsed.Scheme -ne "ws" -and $parsed.Scheme -ne "wss") -or
-        [string]::IsNullOrWhiteSpace($parsed.Host)) {
-        Throw-Failure "-GatewayUri must use ws or wss and include a host"
-    }
-}
-
-function Assert-Note {
-    param([AllowEmptyString()][string] $Value)
-    Assert-RequiredValue -Value $Value -Name "-Note"
-    if ($Value.Trim() -ne $Value) {
-        Throw-Failure "-Note must not have surrounding whitespace"
-    }
-    if ($Value.Length -gt 512) {
-        Throw-Failure "-Note must not exceed 512 characters"
-    }
-}
-
 function Convert-AccountNameToSid {
     param([Parameter(Mandatory = $true)][string] $AccountName)
     if ($AccountName -match "^S-[0-9]+(?:-[0-9]+)+$") {
@@ -231,32 +126,35 @@ function Convert-AccountNameToSid {
     return $account.Translate([System.Security.Principal.SecurityIdentifier]).Value
 }
 
-function Assert-RegistrationTokenFile {
+function Assert-PrivateFile {
     param(
         [AllowEmptyString()][string] $Path,
-        [Parameter(Mandatory = $true)][string] $ExpectedOwnerSid
+        [Parameter(Mandatory = $true)][string] $ExpectedOwnerSid,
+        [string] $Name = "managed file",
+        [long] $MaximumBytes = 536870912
     )
-    Assert-AbsoluteWindowsPath -Value $Path -Name "-RegistrationTokenFile"
+    Assert-AbsoluteWindowsPath -Value $Path -Name "$Name"
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        Throw-Failure "-RegistrationTokenFile must be an existing regular file"
+        Throw-Failure "$Name must be an existing regular file"
     }
 
+    Assert-NoReparseAncestors -Path $Path
     $item = Get-Item -LiteralPath $Path -Force
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Throw-Failure "-RegistrationTokenFile must not be a reparse point"
+        Throw-Failure "$Name must not be a reparse point"
     }
-    if ($item.Length -le 0) {
-        Throw-Failure "-RegistrationTokenFile must not be empty"
+    if ($item.Length -le 0 -or $item.Length -gt $MaximumBytes) {
+        Throw-Failure "$Name must be nonempty and bounded"
     }
 
     # Metadata only: token bytes are never opened or read.
     $acl = Get-Acl -LiteralPath $item.FullName
     $ownerSid = Convert-AccountNameToSid -AccountName $acl.Owner
     if ($ownerSid -ne $ExpectedOwnerSid) {
-        Throw-Failure "-RegistrationTokenFile must be owned by the current user"
+        Throw-Failure "$Name must be owned by the current user"
     }
     if (-not $acl.AreAccessRulesProtected) {
-        Throw-Failure "-RegistrationTokenFile ACL inheritance must be disabled"
+        Throw-Failure "$Name ACL inheritance must be disabled"
     }
 
     $currentUserCanRead = $false
@@ -270,7 +168,7 @@ function Assert-RegistrationTokenFile {
         if ($rule.AccessControlType -eq
             [System.Security.AccessControl.AccessControlType]::Allow) {
             if ($ruleSid -ne $ExpectedOwnerSid) {
-                Throw-Failure "-RegistrationTokenFile must not grant access to another SID"
+                Throw-Failure "$Name must not grant access to another SID"
             }
             if (($rule.FileSystemRights -band
                 [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0) {
@@ -279,41 +177,13 @@ function Assert-RegistrationTokenFile {
         }
         elseif (($rule.FileSystemRights -band
             [System.Security.AccessControl.FileSystemRights]::ReadData) -ne 0) {
-            Throw-Failure "-RegistrationTokenFile must not contain a deny-read ACE"
+            Throw-Failure "$Name must not contain a deny-read ACE"
         }
     }
     if (-not $currentUserCanRead) {
-        Throw-Failure "-RegistrationTokenFile must be readable by its owner"
+        Throw-Failure "$Name must be readable by its owner"
     }
     return $item.FullName
-}
-
-function Assert-LspConfigFile {
-    param([AllowEmptyString()][string] $Path)
-    Assert-RequiredValue -Value $Path -Name "-LspConfig"
-    Assert-AbsoluteWindowsPath -Value $Path -Name "-LspConfig"
-    if ($Path -like "*~*") {
-        Throw-Failure "-LspConfig must not contain '~'"
-    }
-    if ($Path -match '[\$%]') {
-        Throw-Failure "-LspConfig must not contain environment-variable placeholders"
-    }
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        Throw-Failure "-LspConfig must be an existing readable regular file"
-    }
-    try {
-        $stream = [System.IO.File]::Open(
-            (Get-Item -LiteralPath $Path).FullName,
-            [System.IO.FileMode]::Open,
-            [System.IO.FileAccess]::Read,
-            [System.IO.FileShare]::ReadWrite
-        )
-        $stream.Dispose()
-    }
-    catch {
-        Throw-Failure "-LspConfig must be an existing readable regular file"
-    }
-    return (Get-Item -LiteralPath $Path).FullName
 }
 
 function Assert-NoReparseAncestors {
@@ -323,7 +193,7 @@ function Assert-NoReparseAncestors {
         if (Test-Path -LiteralPath $candidate) {
             $item = Get-Item -LiteralPath $candidate -Force
             if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-                Throw-Failure "token storage must not traverse a reparse point"
+                Throw-Failure "managed storage must not traverse a reparse point"
             }
         }
         $candidate = Split-Path -Parent $candidate
@@ -361,12 +231,12 @@ function Assert-PrivateDirectory {
     param([Parameter(Mandatory = $true)][string] $Path)
     Assert-NoReparseAncestors -Path $Path
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
-        Throw-Failure "token storage must be a directory"
+        Throw-Failure "managed storage must be a directory"
     }
     $acl = Get-Acl -LiteralPath $Path
     if ((Convert-AccountNameToSid -AccountName $acl.Owner) -ne $script:CurrentSid -or
         -not $acl.AreAccessRulesProtected) {
-        Throw-Failure "token directory must be current-user owned with protected ACL inheritance"
+        Throw-Failure "managed directory must be current-user owned with protected ACL inheritance"
     }
     $canWrite = $false
     foreach ($rule in $acl.GetAccessRules(
@@ -375,89 +245,130 @@ function Assert-PrivateDirectory {
         if ($rule.AccessControlType -eq
             [System.Security.AccessControl.AccessControlType]::Allow) {
             if ($rule.IdentityReference.Value -ne $script:CurrentSid) {
-                Throw-Failure "token directory must not grant access to another SID"
+                Throw-Failure "managed directory must not grant access to another SID"
             }
             if (($rule.FileSystemRights -band
                 [System.Security.AccessControl.FileSystemRights]::WriteData) -ne 0) {
                 $canWrite = $true
             }
         } else {
-            Throw-Failure "token directory must not contain deny ACEs"
+            Throw-Failure "managed directory must not contain deny ACEs"
         }
     }
     if (-not $canWrite) {
-        Throw-Failure "token directory must be writable by its owner"
+        Throw-Failure "managed directory must be writable by its owner"
     }
 }
 
-function Assert-SecureRegistrationToken {
-    param([Parameter(Mandatory = $true)][Security.SecureString] $Token)
-    $pointer = [IntPtr]::Zero
-    try {
-        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
-        Assert-RequiredValue `
-            -Value ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) `
-            -Name "registration token"
+function New-PrivateDirectory {
+    param([Parameter(Mandatory = $true)][string] $Path)
+    Assert-NoReparseAncestors -Path $Path
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path | Out-Null
+        Set-Acl -LiteralPath $Path -AclObject (New-PrivateAcl -Directory)
     }
-    finally {
-        if ($pointer -ne [IntPtr]::Zero) {
-            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
-        }
-    }
+    Assert-PrivateDirectory -Path $Path
 }
 
-function Save-RegistrationToken {
-    param([Parameter(Mandatory = $true)][Security.SecureString] $Token)
-    # No secret enters process arguments or diagnostics. The private directory is checked
-    # before creating a file, and publication replaces only an already validated target.
-    if ($Token.Length -eq 0) {
-        Throw-Failure "registration token must not be empty"
-    }
-    Assert-NoReparseAncestors -Path $script:ConfigRoot
-    foreach ($directory in @((Split-Path -Parent $script:ConfigRoot), $script:ConfigRoot)) {
-        if (-not (Test-Path -LiteralPath $directory)) {
-            New-Item -ItemType Directory -Path $directory | Out-Null
-            Set-Acl -LiteralPath $directory -AclObject (New-PrivateAcl -Directory)
-        }
-        Assert-PrivateDirectory -Path $directory
-    }
-    $target = Join-Path $script:ConfigRoot "daemon.token"
-    if (Test-Path -LiteralPath $target) {
-        $null = Assert-RegistrationTokenFile -Path $target -ExpectedOwnerSid $script:CurrentSid
-    }
-    $temporary = Join-Path $script:ConfigRoot ([Guid]::NewGuid().ToString("N") + ".tmp")
-    $pointer = [IntPtr]::Zero
-    $plain = $null
+function Copy-PrivateFile {
+    param([string] $Source, [string] $Destination)
+    Assert-PrivateDirectory -Path (Split-Path -Parent $Destination)
+    # CreateNew prevents accidental replacement. Set the private ACL before copying any bytes.
+    $stream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew)
+    $stream.Dispose()
+    Set-Acl -LiteralPath $Destination -AclObject (New-PrivateAcl)
+    [IO.File]::Copy($Source, $Destination, $true)
+    $null = Assert-PrivateFile -Path $Destination -ExpectedOwnerSid $script:CurrentSid
+}
+
+function Publish-PrivateFile {
+    param([string] $Source, [string] $Destination)
+    $parent = Split-Path -Parent $Destination
+    Assert-PrivateDirectory -Path $parent
+    $temporary = Join-Path $parent (".publish-" + [Guid]::NewGuid().ToString("N"))
     try {
-        $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew)
-        $stream.Dispose()
-        Set-Acl -LiteralPath $temporary -AclObject (New-PrivateAcl)
-        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
-        $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
-        Assert-RequiredValue -Value $plain -Name "registration token"
-        [IO.File]::WriteAllText($temporary, $plain, [Text.UTF8Encoding]::new($false))
-        $null = Assert-RegistrationTokenFile -Path $temporary -ExpectedOwnerSid $script:CurrentSid
-        Assert-PrivateDirectory -Path $script:ConfigRoot
-        if (Test-Path -LiteralPath $target) {
-            $null = Assert-RegistrationTokenFile -Path $target -ExpectedOwnerSid $script:CurrentSid
-            # A bare PowerShell $null binds to String.Empty here on both PS 5.1 and 7.
-            # NullString supplies a real .NET null: atomic replacement without a secret backup.
-            [IO.File]::Replace(
-                $temporary, $target, [System.Management.Automation.Language.NullString]::Value
-            )
+        Copy-PrivateFile -Source $Source -Destination $temporary
+        if (Test-Path -LiteralPath $Destination) {
+            $null = Assert-PrivateFile -Path $Destination -ExpectedOwnerSid $script:CurrentSid
+            [IO.File]::Replace($temporary, $Destination, [NullString]::Value)
         } else {
-            [IO.File]::Move($temporary, $target)
+            [IO.File]::Move($temporary, $Destination)
         }
-        return Assert-RegistrationTokenFile -Path $target -ExpectedOwnerSid $script:CurrentSid
+        $null = Assert-PrivateFile -Path $Destination -ExpectedOwnerSid $script:CurrentSid
     }
     finally {
-        $plain = $null
-        if ($pointer -ne [IntPtr]::Zero) {
-            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+
+function Assert-ManagedLayout {
+    param([bool] $HasTask)
+    if (-not $HasTask -and (Test-Path -LiteralPath $script:InstalledJar)) {
+        $path = ConvertTo-PowerShellLiteral -Value $script:InstalledJar
+        Throw-Failure ("Unowned program conflict: $($script:InstalledJar). No managed task exists.`n" +
+            "Inspect: Get-Item -LiteralPath $path; Get-FileHash -LiteralPath $path`n" +
+            (Get-ConflictBackupCommands) + "`n" +
+            "After inspection, preserve the unknown program: Move-Item -LiteralPath $path " +
+            "-Destination (Join-Path `$backup 'kk-studio-daemon.jar'). " +
+            "Do not delete unknown artifacts/data. Then retry install.")
+    }
+    foreach ($directory in @($script:InstallRoot, (Split-Path -Parent $script:InstalledJar),
+        (Join-Path $script:InstallRoot "logs"), (Join-Path $script:InstallRoot "backups"))) {
+        Assert-NoReparseAncestors -Path $directory
+        if (Test-Path -LiteralPath $directory) { Assert-PrivateDirectory -Path $directory }
+    }
+    foreach ($file in @($script:InstalledJar, $script:InstalledConfig, $script:InstalledToken)) {
+        if (Test-Path -LiteralPath $file) {
+            $null = Assert-PrivateFile -Path $file -ExpectedOwnerSid $script:CurrentSid
         }
-        if (Test-Path -LiteralPath $temporary) {
-            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function ConvertTo-PowerShellLiteral {
+    param([Parameter(Mandatory = $true)][string] $Value)
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Get-ConflictBackupCommands {
+    # Print executable recovery instructions, never execute them or export an unknown task.
+    return ("Create a unique owner-private backup before export/move:`n" +
+        "`$backup = Join-Path `$env:USERPROFILE ('kk-studio-conflict-' + [Guid]::NewGuid().ToString('N')); " +
+        "New-Item -ItemType Directory -Path `$backup; " +
+        "`$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User; " +
+        "`$acl = [Security.AccessControl.DirectorySecurity]::new(); " +
+        "`$acl.SetOwner(`$owner); `$acl.SetAccessRuleProtection(`$true, `$false); " +
+        "`$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(" +
+        "`$owner, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')); " +
+        "Set-Acl -LiteralPath `$backup -AclObject `$acl")
+}
+
+function Backup-ManagedFiles {
+    param([AllowNull()] $Task)
+    $files = @($script:InstalledJar, $script:InstalledConfig, $script:InstalledToken) |
+        Where-Object { Test-Path -LiteralPath $_ }
+    if (@($files).Count -eq 0 -and $null -eq $Task) { return }
+    $root = Join-Path $script:InstallRoot "backups"
+    New-PrivateDirectory -Path $root
+    $script:BackupDirectory = Join-Path $root (
+        (Get-Date -Format "yyyyMMddTHHmmss") + "-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        New-PrivateDirectory -Path $script:BackupDirectory
+        foreach ($file in $files) {
+            $null = Assert-PrivateFile -Path $file -ExpectedOwnerSid $script:CurrentSid
+            Copy-PrivateFile -Source $file -Destination (Join-Path $script:BackupDirectory (Split-Path -Leaf $file))
         }
+        if ($null -ne $Task) {
+            $null = Get-RequiredManagedTask
+            $xml = Export-ScheduledTask -TaskName $script:TaskName -TaskPath "\"
+            $path = Join-Path $script:BackupDirectory "task.xml"
+            $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew)
+            $stream.Dispose()
+            Set-Acl -LiteralPath $path -AclObject (New-PrivateAcl)
+            [IO.File]::WriteAllText($path, $xml, [Text.UTF8Encoding]::new($false))
+        }
+    }
+    catch {
+        Throw-Failure "Backup failed: $($_.Exception.Message). Partial backup: $($script:BackupDirectory). Live installation unchanged; inspect this directory before retrying."
     }
 }
 
@@ -480,27 +391,6 @@ function Get-NonnegativeEnvironmentInteger {
     return $parsed
 }
 
-function Resolve-RepositoryRoot {
-    if (-not [string]::IsNullOrEmpty($env:KK_STUDIO_REPO_ROOT)) {
-        Assert-AbsoluteWindowsPath -Value $env:KK_STUDIO_REPO_ROOT `
-            -Name "KK_STUDIO_REPO_ROOT"
-        $override = Get-Item -LiteralPath $env:KK_STUDIO_REPO_ROOT
-        if (-not $override.PSIsContainer) {
-            Throw-Failure "KK_STUDIO_REPO_ROOT must name a directory"
-        }
-        return $override.FullName
-    }
-
-    $candidate = Get-Item -LiteralPath $PSScriptRoot
-    while ($null -ne $candidate) {
-        if (Test-Path -LiteralPath (Join-Path $candidate.FullName ".git")) {
-            return $candidate.FullName
-        }
-        $candidate = $candidate.Parent
-    }
-    Throw-Failure "cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT"
-}
-
 function Assert-WindowsHost {
     if ($env:OS -ne "Windows_NT") {
         Throw-Failure "scripts/daemon/install.ps1 supports Windows only"
@@ -511,6 +401,7 @@ function Assert-ScheduledTasksAvailable {
     foreach ($name in @(
         "Get-ScheduledTask",
         "Get-ScheduledTaskInfo",
+        "Export-ScheduledTask",
         "New-ScheduledTask",
         "New-ScheduledTaskAction",
         "New-ScheduledTaskPrincipal",
@@ -545,13 +436,11 @@ function Initialize-HostContext {
 
     $script:HomePath =
         [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
-    $localAppData =
-        [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
     Assert-AbsoluteWindowsPath -Value $script:HomePath -Name "current user profile"
-    Assert-AbsoluteWindowsPath -Value $localAppData -Name "current LocalApplicationData"
-    $script:InstallRoot = Join-Path $localAppData "kk-studio\daemon"
-    $script:InstalledJar = Join-Path $script:InstallRoot "kk-studio-daemon.jar"
-    $script:ConfigRoot = Join-Path $localAppData "kk-studio\config"
+    $script:InstallRoot = Join-Path $script:HomePath ".kk-studio"
+    $script:InstalledJar = Join-Path $script:InstallRoot "lib\kk-studio-daemon.jar"
+    $script:InstalledConfig = Join-Path $script:InstallRoot "daemon.json"
+    $script:InstalledToken = Join-Path $script:InstallRoot "daemon.token"
     Assert-ScheduledTasksAvailable
 }
 
@@ -696,90 +585,29 @@ function Resolve-Executable {
 }
 
 function Resolve-InstallInputs {
-    if ($script:InvocationParameters.ContainsKey("RegistrationToken") -and
-        $script:InvocationParameters.ContainsKey("RegistrationTokenFile")) {
-        Throw-Failure "-RegistrationToken and -RegistrationTokenFile are mutually exclusive"
+    $config = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid `
+        -Name "-ConfigFile" -MaximumBytes 1048576
+    $token = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid `
+        -Name "-TokenFile" -MaximumBytes 65536
+    if (-not [string]::Equals((Split-Path -Parent $config), (Split-Path -Parent $token),
+        [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Leaf $config) -cne "daemon.json" -or
+        (Split-Path -Leaf $token) -cne "daemon.token") {
+        Throw-Failure "-ConfigFile and -TokenFile must be siblings named daemon.json and daemon.token"
     }
-    if (-not $script:InvocationParameters.ContainsKey("GatewayUri")) {
-        $script:GatewayUri = Read-Host "Gateway URI (ws:// or wss://)"
-    }
-    Assert-GatewayUri -Value $GatewayUri
     if ($script:InvocationParameters.ContainsKey("JavaHome")) {
         Assert-RequiredValue -Value $JavaHome -Name "-JavaHome"
     }
-    if ($script:InvocationParameters.ContainsKey("Note")) {
-        Assert-Note -Value $Note
-    }
-    if ($script:InvocationParameters.ContainsKey("BashExecutable")) {
-        Assert-RequiredValue -Value $BashExecutable -Name "-BashExecutable"
-    }
-    if ($script:InvocationParameters.ContainsKey("LspConfig")) {
-        $script:ResolvedLspConfig = Assert-LspConfigFile -Path $LspConfig
-    }
-
-    if ($script:InvocationParameters.ContainsKey("RegistrationTokenFile")) {
-        $script:ResolvedTokenFile = Assert-RegistrationTokenFile `
-            -Path $RegistrationTokenFile -ExpectedOwnerSid $script:CurrentSid
-    } else {
-        $script:PendingToken = if ($script:InvocationParameters.ContainsKey("RegistrationToken")) {
-            Assert-RequiredValue -Value $RegistrationToken -Name "registration token"
-            ConvertTo-SecureString -String $RegistrationToken -AsPlainText -Force
-        } else {
-            Read-Host "Registration token" -AsSecureString
-        }
-        $script:RegistrationToken = $null
-        $script:InvocationParameters.Remove("RegistrationToken")
-        $script:PSBoundParameters.Remove("RegistrationToken") | Out-Null
-        Assert-SecureRegistrationToken -Token $script:PendingToken
-        # Only the future path enters the task definition; credential bytes are not published
-        # until all preflight checks pass and the previous task has stopped.
-        $script:ResolvedTokenFile = Join-Path $script:ConfigRoot "daemon.token"
-    }
-    if ($script:InvocationParameters.ContainsKey("DataDir")) {
-        Assert-AbsoluteWindowsPath -Value $DataDir -Name "-DataDir"
-        $script:ResolvedDataDir = [IO.Path]::GetFullPath($DataDir)
-    }
-    else {
-        $script:ResolvedDataDir = Join-Path $script:HomePath ".kk-studio"
-    }
-
     $script:SelectedJavaHome = Resolve-JavaHome -ExplicitJavaHome $JavaHome
     $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
-    $script:SelectedBash = Resolve-Executable -Value $BashExecutable `
-        -DefaultName "bash.exe" -OptionName "-BashExecutable"
+    Assert-BashReady
 }
 
-function Invoke-DaemonBuild {
-    $maven = Get-Command "mvn.cmd" -CommandType Application `
-        -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $maven) {
-        Throw-Failure "missing command: mvn.cmd"
-    }
-    $savedJavaHome = [Environment]::GetEnvironmentVariable("JAVA_HOME", "Process")
-    Push-Location $script:RepoRoot
-    try {
-        [Environment]::SetEnvironmentVariable(
-            "JAVA_HOME",
-            $script:SelectedJavaHome,
-            "Process"
-        )
-        Write-Host (
-            "==> Cleaning and packaging harness/daemon " +
-            "(JAVA_HOME=$($script:SelectedJavaHome))"
-        )
-        & $maven.Source -B -ntp -pl harness/daemon -am clean package |
-            Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            Throw-Failure "Maven daemon build failed with exit code $LASTEXITCODE"
-        }
-    }
-    finally {
-        Pop-Location
-        [Environment]::SetEnvironmentVariable(
-            "JAVA_HOME",
-            $savedJavaHome,
-            "Process"
-        )
+function Assert-BashReady {
+    $bash = Resolve-Executable -Value "" -DefaultName "bash.exe" -OptionName "Bash on PATH"
+    $result = Invoke-NativeProcess -Executable $bash -Arguments @("--version")
+    if ($result.ExitCode -ne 0 -or $result.Stdout -notmatch "GNU bash") {
+        Throw-Failure "Bash on PATH is not ready; install Git for Windows or a compatible Bash before retrying"
     }
 }
 
@@ -812,38 +640,37 @@ function Assert-BuiltJar {
         "kk-studio-daemon ",
         [StringComparison]::Ordinal
     )) {
-        Throw-Failure "unexpected daemon --version output: $($output.Trim())"
+        Throw-Failure "unexpected daemon --version output"
     }
-}
-
-function Stage-BuiltJar {
-    if (-not (Test-Path -LiteralPath $script:InstallRoot -PathType Container)) {
-        New-Item -ItemType Directory -Path $script:InstallRoot -Force | Out-Null
-    }
-    $script:StagedJar = Join-Path $script:InstallRoot (
-        ".kk-studio-daemon.jar.tmp.$PID.$([Guid]::NewGuid().ToString('N'))"
-    )
-    Copy-Item -LiteralPath $script:BuiltJar -Destination $script:StagedJar
 }
 
 function Prepare-StagedJar {
-    if ($FromSource) {
-        $script:ResolvedReleaseTag = $null
-        $script:RepoRoot = Resolve-RepositoryRoot
-        $script:BuiltJar =
-            Join-Path $script:RepoRoot "harness\daemon\target\kk-studio-daemon.jar"
-        Invoke-DaemonBuild
-    } else {
-        Get-ReleaseJar
-    }
+    Get-ReleaseJar
     Assert-BuiltJar
-    Stage-BuiltJar
+    # Copy inputs to the private download directory, independent of any live installation.
+    # Revalidate after the download; never copy from a path that became unsafe during preflight.
+    $null = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 1048576
+    $null = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 65536
+    Copy-PrivateFile -Source $ConfigFile -Destination (Join-Path $script:DownloadDirectory "daemon.json")
+    Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
+    $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
+    $arguments = @("-jar", (Split-Path -Leaf $script:BuiltJar)) +
+        (ConvertTo-DaemonEncodedArguments -Arguments @("--check-config", $stagedConfig))
+    $result = Invoke-WithoutJavaOptionEnvironment {
+        Invoke-NativeProcess -Executable $script:SelectedJava -Arguments $arguments `
+            -WorkingDirectory $script:DownloadDirectory
+    }
+    if ($result.ExitCode -ne 0 -or
+        $result.Stdout.TrimEnd([char[]] @("`r", "`n")) -cne "Daemon configuration is valid") {
+        # Never echo runtime diagnostics: they could contain config or credential values.
+        Throw-Failure "release --check-config failed (exit code $($result.ExitCode)); use a release supporting --config and valid sibling inputs. Existing installation unchanged."
+    }
 }
 
 function Assert-ReleaseTag {
     param([AllowEmptyString()][string] $Tag)
     if ($Tag -cnotmatch "\Av[0-9A-Za-z._-]+\z") {
-        Throw-Failure "-Version/release tag must match ^v[0-9A-Za-z._-]+$"
+        Throw-Failure "release tag must match ^v[0-9A-Za-z._-]+$"
     }
 }
 
@@ -853,13 +680,10 @@ function Get-ReleaseJar {
     try {
         [Net.ServicePointManager]::SecurityProtocol =
             $savedProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $tag = $Version
-        if (-not $script:InvocationParameters.ContainsKey("Version")) {
-            $release = Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
-                -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" }
-            $tag = $release.tag_name
-        }
+        $release = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
+            -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" }
+        $tag = $release.tag_name
         Assert-ReleaseTag -Tag $tag
         $script:ResolvedReleaseTag = $tag
         $asset = "kk-studio-daemon-$tag.jar"
@@ -867,7 +691,7 @@ function Get-ReleaseJar {
         $script:DownloadDirectory = Join-Path ([IO.Path]::GetTempPath()) (
             "kk-studio-release-" + [Guid]::NewGuid().ToString("N")
         )
-        New-Item -ItemType Directory -Path $script:DownloadDirectory | Out-Null
+        New-PrivateDirectory -Path $script:DownloadDirectory
         $script:BuiltJar = Join-Path $script:DownloadDirectory $asset
         $checksumPath = "$($script:BuiltJar).sha256"
         Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset" `
@@ -888,12 +712,6 @@ function Get-ReleaseJar {
     finally {
         [Net.ServicePointManager]::SecurityProtocol = $savedProtocol
     }
-}
-
-function Publish-StagedJar {
-    Move-Item -LiteralPath $script:StagedJar `
-        -Destination $script:InstalledJar -Force
-    $script:StagedJar = $null
 }
 
 function ConvertTo-WindowsCommandLineArgument {
@@ -966,25 +784,8 @@ function ConvertTo-DaemonEncodedArguments {
 }
 
 function New-DaemonArgumentList {
-    $arguments = @(
-        "--gateway-uri",
-        $GatewayUri,
-        "--registration-token-file",
-        $script:ResolvedTokenFile,
-        "--data-dir",
-        $script:ResolvedDataDir
-    )
-    if ($script:InvocationParameters.ContainsKey("Note")) {
-        $arguments += @("--note", $Note)
-    }
-    $arguments += @("--bash-executable", $script:SelectedBash)
-    if ($script:InvocationParameters.ContainsKey("LspConfig")) {
-        $arguments += @("--lsp-config", $script:ResolvedLspConfig)
-    }
-    # The task runs with its working directory at InstallRoot, so the JAR is referenced by
-    # its fixed ASCII file name and the absolute install path never enters the command line.
     return @("-jar", "kk-studio-daemon.jar") +
-        (ConvertTo-DaemonEncodedArguments -Arguments $arguments)
+        (ConvertTo-DaemonEncodedArguments -Arguments @("--config", $script:InstalledConfig))
 }
 
 function New-DaemonScheduledTaskDefinition {
@@ -1026,10 +827,17 @@ function Find-DaemonTask {
 function Assert-ManagedTask {
     param([Parameter(Mandatory = $true)] $Task)
     if ($Task.Description -ne $script:TaskDescription) {
-        Throw-Failure (
-            "refusing to touch unmanaged Scheduled Task $($script:TaskName) " +
-            "(missing exact ownership marker)"
-        )
+        $name = ConvertTo-PowerShellLiteral -Value $script:TaskName
+        Throw-Failure ("refusing to touch unmanaged Scheduled Task \$($script:TaskName): " +
+            "missing exact ownership marker. Refusing automatic modification of this task.`n" +
+            "Inspect: Get-ScheduledTask -TaskName $name -TaskPath '\' | Format-List *`n" +
+            (Get-ConflictBackupCommands) + "`n" +
+            "Export-ScheduledTask -TaskName $name -TaskPath '\' | Set-Content (Join-Path `$backup 'task.xml')`n" +
+            "After reviewing the export, manually Stop-ScheduledTask -TaskName $name -TaskPath '\'; " +
+            "Disable-ScheduledTask -TaskName $name -TaskPath '\'; " +
+            "Unregister-ScheduledTask -TaskName $name -TaskPath '\' -Confirm:`$false. " +
+            "Do not delete its program/data or fabricate an ownership marker. " +
+            "Task Scheduler changes take effect immediately; retry install after the conflicting task is removed.")
     }
 }
 
@@ -1063,8 +871,8 @@ function Wait-TaskNotRunning {
 
 function Stop-DaemonTaskIfRunning {
     param([Parameter(Mandatory = $true)] $Task)
-    # Refresh after a potentially long Maven build. A task replaced by another owner during the
-    # build must never be stopped or overwritten based on the stale object passed by the caller.
+    # Refresh after potentially long preflight checks. A task replaced by another owner during the
+    # preflight must never be stopped or overwritten based on the stale object passed by the caller.
     $Task = Find-DaemonTask
     if ($null -eq $Task) {
         return
@@ -1091,6 +899,7 @@ function Start-AndVerifyDaemonTask {
                         "$($script:VerifyStableSeconds)s after start"
                     )
                 }
+                Assert-ManagedTask -Task $task
             }
             return
         }
@@ -1112,79 +921,61 @@ function Assert-NoInstallOptions {
 
 function Invoke-Install {
     Initialize-HostContext
-    Resolve-InstallInputs
-
+    $script:BackupDirectory = $null
     $existing = Find-DaemonTask
-    if ($null -ne $existing) {
-        Assert-ManagedTask -Task $existing
-    }
-
+    if ($null -ne $existing) { Assert-ManagedTask -Task $existing }
+    Assert-ManagedLayout -HasTask ($null -ne $existing)
+    Resolve-InstallInputs
     Prepare-StagedJar
     $definition = New-DaemonScheduledTaskDefinition `
-        -JavaExecutable $script:SelectedJava `
-        -DaemonArguments (New-DaemonArgumentList) `
-        -WorkingDirectory $script:InstallRoot `
-        -UserSid $script:CurrentSid `
-        -Description $script:TaskDescription
+        -JavaExecutable $script:SelectedJava -DaemonArguments (New-DaemonArgumentList) `
+        -WorkingDirectory (Split-Path -Parent $script:InstalledJar) `
+        -UserSid $script:CurrentSid -Description $script:TaskDescription
 
-    if ($null -ne $existing) {
-        Stop-DaemonTaskIfRunning -Task $existing
+    # Recheck ownership and target safety after all potentially long-running preflight work.
+    $existing = Find-DaemonTask
+    if ($null -ne $existing) { Assert-ManagedTask -Task $existing }
+    Assert-ManagedLayout -HasTask ($null -ne $existing)
+    foreach ($directory in @($script:InstallRoot, (Split-Path -Parent $script:InstalledJar),
+        (Join-Path $script:InstallRoot "logs"))) {
+        New-PrivateDirectory -Path $directory
     }
-    $managedBeforePublish = Find-DaemonTask
-    if ($null -ne $managedBeforePublish) {
-        Assert-ManagedTask -Task $managedBeforePublish
+    Backup-ManagedFiles -Task $existing
+    try {
+        if ($null -ne $existing) { Stop-DaemonTaskIfRunning -Task $existing }
+        $current = Find-DaemonTask
+        if ($null -ne $current) { Assert-ManagedTask -Task $current }
+        Publish-PrivateFile -Source $script:BuiltJar -Destination $script:InstalledJar
+        Publish-PrivateFile -Source (Join-Path $script:DownloadDirectory "daemon.json") -Destination $script:InstalledConfig
+        Publish-PrivateFile -Source (Join-Path $script:DownloadDirectory "daemon.token") -Destination $script:InstalledToken
+        $current = Find-DaemonTask
+        if ($null -ne $current) { Assert-ManagedTask -Task $current }
+        Register-ScheduledTask -TaskName $script:TaskName -TaskPath "\" -InputObject $definition -Force | Out-Null
+        Start-AndVerifyDaemonTask
     }
-    if ($null -ne $script:PendingToken) {
-        $null = Save-RegistrationToken -Token $script:PendingToken
+    catch {
+        $backup = if ($null -eq $script:BackupDirectory) { "none (first install)" } else { $script:BackupDirectory }
+        $recovery = if ($null -eq $script:BackupDirectory) {
+            "No previous files exist to restore. Inspect these targets and task first; " +
+            "use uninstall for a registered managed task, or preserve an unowned lib JAR " +
+            "in a unique private backup using the conflict instructions, then retry install."
+        } else {
+            "Stop the task, manually copy backed-up files to these targets and restore task.xml " +
+            "(if present) with Register-ScheduledTask -Xml (Get-Content -Raw -Encoding UTF8 -LiteralPath " +
+            (ConvertTo-PowerShellLiteral -Value (Join-Path $script:BackupDirectory "task.xml")) +
+            ") -TaskName '$($script:TaskName)' -TaskPath '\' -Force; " +
+            "Start-ScheduledTask -TaskName '$($script:TaskName)' -TaskPath '\'."
+        }
+        Throw-Failure ("Installation failed: $($_.Exception.Message)`nBackup: $backup`n" +
+            "Targets: $($script:InstalledJar), $($script:InstalledConfig), $($script:InstalledToken)`n" +
+            "Run .\install.ps1 status; inspect Get-ScheduledTaskInfo -TaskName '$($script:TaskName)'. " +
+            "Task Scheduler does not capture stdout/stderr. Inspect " +
+            "Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational if enabled. " +
+            "$recovery No automatic rollback was attempted.")
     }
-    Publish-StagedJar
-    $managedBeforeRegistration = Find-DaemonTask
-    if ($null -ne $managedBeforeRegistration) {
-        Assert-ManagedTask -Task $managedBeforeRegistration
-    }
-    Register-ScheduledTask -TaskName $script:TaskName `
-        -InputObject $definition -Force | Out-Null
-    Start-AndVerifyDaemonTask
-
     Write-Host "==> $($script:TaskName) is Running"
-    Write-Host "Task:      $($script:TaskName)"
-    Write-Host "JAR:       $($script:InstalledJar)"
-    Write-Host "Data dir:  $($script:ResolvedDataDir)"
-    Write-Host "Next:      .\install.ps1 status (re-download the same script if needed)"
-    return 0
-}
-
-function Invoke-Upgrade {
-    Assert-NoInstallOptions -ForCommand "upgrade"
-    Initialize-HostContext
-    $task = Get-RequiredManagedTask
-    $actions = @($task.Actions)
-    if ($actions.Count -ne 1 -or
-        [string]::IsNullOrEmpty($actions[0].Execute) -or
-        -not (Test-Path -LiteralPath $actions[0].Execute -PathType Leaf)) {
-        Throw-Failure "upgrade requires exactly one existing Java task action"
-    }
-    $script:SelectedJavaHome = Assert-Jdk21 -Candidate (
-        Split-Path -Parent (Split-Path -Parent $actions[0].Execute)
-    )
-    $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
-    if (-not [string]::Equals(
-        [IO.Path]::GetFullPath($actions[0].Execute),
-        [IO.Path]::GetFullPath($script:SelectedJava),
-        [StringComparison]::OrdinalIgnoreCase
-    )) {
-        Throw-Failure "task action must execute the validated JDK 21 bin\java.exe"
-    }
-
-    Prepare-StagedJar
-    Stop-DaemonTaskIfRunning -Task $task
-    $managedBeforePublish = Get-RequiredManagedTask
-    Publish-StagedJar
-    Start-AndVerifyDaemonTask
-
-    Write-Host "==> $($script:TaskName) is Running"
-    Write-Host "Task:      $($script:TaskName)"
-    Write-Host "JAR:       $($script:InstalledJar)"
+    Write-Host "Root: $($script:InstallRoot)"
+    if ($null -ne $script:BackupDirectory) { Write-Host "Backup: $($script:BackupDirectory)" }
     return 0
 }
 
@@ -1226,72 +1017,37 @@ function Invoke-Status {
 function Invoke-Uninstall {
     Assert-NoInstallOptions -ForCommand "uninstall"
     Initialize-HostContext
-    $task = Get-RequiredManagedTask
+    $task = Find-DaemonTask
+    if ($null -eq $task) {
+        Write-Host "Task absent; preserved all remaining files: $($script:InstallRoot)"
+        return 0
+    }
+    Assert-ManagedTask -Task $task
+    Assert-ManagedLayout -HasTask $true
     Stop-DaemonTaskIfRunning -Task $task
-    $task = Get-RequiredManagedTask
-    Unregister-ScheduledTask -TaskName $script:TaskName `
-        -TaskPath "\" -Confirm:$false
-    if (Test-Path -LiteralPath $script:InstalledJar -PathType Leaf) {
+    $null = Get-RequiredManagedTask
+    Unregister-ScheduledTask -TaskName $script:TaskName -TaskPath "\" -Confirm:$false
+    if (Test-Path -LiteralPath $script:InstalledJar) {
+        $null = Assert-PrivateFile -Path $script:InstalledJar -ExpectedOwnerSid $script:CurrentSid
         Remove-Item -LiteralPath $script:InstalledJar -Force
     }
-
-    Write-Host "Removed task: $($script:TaskName)"
-    Write-Host "Removed JAR:  $($script:InstalledJar)"
-    Write-Host (
-        "Preserved: the registration token file and daemon data directory " +
-        "(default %USERPROFILE%\.kk-studio)"
-    )
+    Write-Host "Removed managed task/program; preserved config/token/data/backups: $($script:InstallRoot)"
     return 0
 }
 
 function Invoke-Main {
     try {
-        if ($Help) {
-            foreach ($name in ($script:InstallParameterNames + @("Version", "FromSource"))) {
-                if ($script:InvocationParameters.ContainsKey($name)) {
-                    Throw-Failure "-Help cannot be combined with -$name"
-                }
-            }
-            Write-Usage
-            return 0
-        }
-        if ($FromSource -and $script:InvocationParameters.ContainsKey("Version")) {
-            Throw-Failure "-FromSource and -Version are mutually exclusive"
-        }
-        if ($script:InvocationParameters.ContainsKey("Version")) {
-            Assert-ReleaseTag -Tag $Version
-        }
-        if ($Command -in @("status", "uninstall") -and
-            ($script:InvocationParameters.ContainsKey("Version") -or
-             $script:InvocationParameters.ContainsKey("FromSource"))) {
-            Throw-Failure "$Command accepts neither -Version nor -FromSource"
-        }
-
         switch ($Command) {
             "install" { return (Invoke-Install) }
-            "upgrade" { return (Invoke-Upgrade) }
             "status" { return (Invoke-Status) }
             "uninstall" { return (Invoke-Uninstall) }
+            "help" { Assert-NoInstallOptions -ForCommand "help"; Write-Usage; return 0 }
         }
     }
     finally {
-        if ($null -ne $script:PendingToken) {
-            $script:PendingToken.Dispose()
-            $script:PendingToken = $null
-        }
-        $script:RegistrationToken = $null
-        $script:InvocationParameters.Remove("RegistrationToken")
-        $script:PSBoundParameters.Remove("RegistrationToken") | Out-Null
-        $script:ResolvedReleaseTag = $null
-        if (-not [string]::IsNullOrEmpty($script:StagedJar) -and
-            (Test-Path -LiteralPath $script:StagedJar)) {
-            Remove-Item -LiteralPath $script:StagedJar -Force `
-                -ErrorAction SilentlyContinue
-        }
         if (-not [string]::IsNullOrEmpty($script:DownloadDirectory) -and
             (Test-Path -LiteralPath $script:DownloadDirectory)) {
-            Remove-Item -LiteralPath $script:DownloadDirectory -Recurse -Force `
-                -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $script:DownloadDirectory -Recurse -Force
             $script:DownloadDirectory = $null
         }
     }
