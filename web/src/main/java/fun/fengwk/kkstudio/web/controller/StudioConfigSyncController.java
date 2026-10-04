@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncInventoryDTO;
@@ -32,6 +34,12 @@ public class StudioConfigSyncController {
   @PostMapping("/export")
   public Result<ConfigSyncExportDTO> export(@RequestBody ConfigSyncExportRequestDTO request) {
     return Results.ok(configSyncService.export(request));
+  }
+
+  @PostMapping("/import/check")
+  public Result<ConfigSyncImportCheckDTO> checkImport(
+      @RequestBody ConfigSyncImportCheckRequestDTO request) {
+    return Results.ok(configSyncService.checkImport(request));
   }
 
   @PostMapping("/import")

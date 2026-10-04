@@ -39,10 +39,14 @@ public interface SkillCatalogService {
   /** 发布等于当前观察值的 exact commit，并原子替换 current commit 与 manifest。 */
   SkillPackageDTO updatePackage(String packageName, SkillPackagePublishDTO publishDTO);
 
+  /** 只校验导入字段，不访问 Git 或写入数据库。 */
+  void validateImport(
+      String packageName, String description, String repositoryUrl, String branch, String commit);
+
   /**
    * 配置同步导入：按名称新增或更新 Package，并发布调用方在事务外按 exact commit 准备好的 manifest。
    *
-   * <p>repositoryUrl 是不可变身份：同名但 URL 不同视为不可满足，由调用方跳过。Git 对象补齐与 manifest 扫描必须已在事务外完成，
+   * <p>repositoryUrl 是不可变身份：同名但 URL 不同拒绝导入。Git 对象补齐与 manifest 扫描必须已在事务外完成，
    * 本方法只写数据库事实并复用既有名称/URL/branch/commit 校验与 Skill 引用保护。
    */
   SkillPackageDTO importPackage(

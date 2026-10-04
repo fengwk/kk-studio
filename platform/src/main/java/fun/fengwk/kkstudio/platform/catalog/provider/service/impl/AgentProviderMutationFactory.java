@@ -14,7 +14,7 @@ import java.util.UUID;
 
 /** 规范化可变的 provider 配置，同时保证公开 DTO 不携带凭据。 */
 @Component
-final class AgentProviderMutationFactory {
+public final class AgentProviderMutationFactory {
 
   private static final String RESOURCE = "agent_provider";
   private static final int NAME_MAX_LENGTH = 64;
@@ -24,10 +24,15 @@ final class AgentProviderMutationFactory {
   private final AgentEditableSupport editableSupport;
   private final AgentProviderConfigurationCodec configurationCodec;
 
-  AgentProviderMutationFactory(
+  public AgentProviderMutationFactory(
       AgentEditableSupport editableSupport, AgentProviderConfigurationCodec configurationCodec) {
     this.editableSupport = editableSupport;
     this.configurationCodec = configurationCodec;
+  }
+
+  /** 与导入写入共用静态校验，不生成连接身份或写入数据库。 */
+  public void validateImport(String name, AgentProviderEditablePropertiesDTO properties) {
+    newMutation(properties, name, null, null, false);
   }
 
   AgentProvider newProvider(String name, AgentProviderEditablePropertiesDTO properties) {

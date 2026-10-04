@@ -8,6 +8,8 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncInventoryDTO;
@@ -15,7 +17,9 @@ import fun.fengwk.kkstudio.share.configsync.ConfigSyncItem;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 设置同步编排：inventory / export 在单一只读快照上完成，确保跨集合一致；import 把校验与外部准备放在事务外，写事务委托给 {@link
@@ -57,10 +61,35 @@ public class ConfigSyncServiceImpl implements ConfigSyncService {
   }
 
   @Override
+  public ConfigSyncImportCheckDTO checkImport(ConfigSyncImportCheckRequestDTO request) {
+    ConfigSyncParser.ParsedDocument document =
+        parser.parse(request == null ? null : request.getYaml());
+    ConfigSyncSnapshot snapshot = snapshotReader.read();
+    ConfigSyncPlan plan = planner.plan(document, snapshot);
+    Set<ConfigSyncRef> existing = new HashSet<>(graph.allRefs(snapshot));
+    List<ConfigSyncRef> created = new ArrayList<>();
+    List<ConfigSyncRef> updated = new ArrayList<>();
+    for (ConfigSyncRef ref : plan.imported()) {
+      if (existing.contains(ref)) {
+        updated.add(ref);
+      } else {
+        created.add(ref);
+      }
+    }
+    return new ConfigSyncImportCheckDTO(created, updated, plan.skipped());
+  }
+
+  @Override
   public ConfigSyncImportResultDTO importYaml(ConfigSyncImportRequestDTO request) {
     String yaml = request == null ? null : request.getYaml();
     ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
     ConfigSyncPlan plan = planner.plan(document);
+    if (!plan.skipped().isEmpty() && !request.isAllowPartial()) {
+      throw new AiValidationException(RESOURCE, "partial import requires explicit confirmation");
+    }
+    if (plan.imported().isEmpty()) {
+      return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
+    }
     try {
       applier.apply(plan);
     } catch (AiValidationException error) {
