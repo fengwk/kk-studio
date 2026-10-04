@@ -48,11 +48,15 @@ public final class DaemonConfigurationCodec {
     config.setNote(text(node.get("note"), "daemon.note"));
     config.setBashExecutable(text(node.get("bashExecutable"), "daemon.bashExecutable"));
     JsonNode lsp = node.get("lsp");
-    config.setLsp(absent(lsp) ? null : parseLsp(lsp));
+    config.setLsp(absent(lsp) ? null : parseLspNode(lsp));
     return validate(config);
   }
 
   public static DaemonLspConfiguration parseLsp(JsonNode node) {
+    return validateLsp(parseLspNode(node));
+  }
+
+  private static DaemonLspConfiguration parseLspNode(JsonNode node) {
     object(node, "daemon.lsp", Set.of("servers"));
     JsonNode servers = node.get("servers");
     if (servers == null || !servers.isObject()) {
@@ -81,7 +85,7 @@ public final class DaemonConfigurationCodec {
             });
     DaemonLspConfiguration config = new DaemonLspConfiguration();
     config.setServers(parsed);
-    return validateLsp(config);
+    return config;
   }
 
   public static DaemonConfiguration validate(DaemonConfiguration config) {
@@ -93,7 +97,7 @@ public final class DaemonConfigurationCodec {
     String note = config.getNote();
     if (note != null) {
       noControls(note, "daemon.note");
-      note = note.trim();
+      note = note.strip();
       if (note.isEmpty() || note.length() > 512) {
         throw invalid("daemon.note", "must be a nonblank single line of at most 512 characters");
       }

@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、OkHttp（{@code okhttp3}/{@code okio}）、JGit（{@code
  * org.eclipse.jgit.*}）、LSP4J（{@code org.eclipse.lsp4j.*}，标准 LSP 客户端库）、{@code
  * com.google.re2j}、JNA（{@code com.sun.jna.*}，跨平台执行范围的原生边界）、{@code harness.common}、{@code
- * harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
+ * harness.environment}、共享 Environment 配置模型以及本模块自身包。 严禁直接依赖 {@code
  * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK 和 LangChain4j。
  */
 class DaemonModuleArchitectureTest {
@@ -140,10 +140,12 @@ class DaemonModuleArchitectureTest {
     Matcher matcher =
         Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(text);
     List<String> violations = new ArrayList<>();
+    boolean shareDependency = false;
     while (matcher.find()) {
       String dependency = matcher.group(1);
       String coordinate =
           requiredTag(dependency, "groupId") + ":" + requiredTag(dependency, "artifactId");
+      shareDependency |= "fun.fengwk.kk-studio:kk-studio-share".equals(coordinate);
       if ("fun.fengwk.kk-studio:kk-studio-harness-tool".equals(coordinate)) {
         violations.add("daemon pom must not directly depend on kk-studio-harness-tool");
       }
@@ -156,6 +158,7 @@ class DaemonModuleArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () -> "disallowed direct tool dependency in " + pom + ": " + violations);
+    assertTrue(shareDependency, "daemon must directly declare the shared configuration dependency");
   }
 
   private static List<String> scanViolations(Path main) throws IOException {
@@ -202,6 +205,7 @@ class DaemonModuleArchitectureTest {
         || imported.startsWith("com.google.re2j.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.common.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
+        || imported.startsWith("fun.fengwk.kkstudio.share.ai.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.mcp.")
         || imported.startsWith("org.eclipse.jgit.")

@@ -1,17 +1,14 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
 import java.io.IOException;
@@ -24,720 +21,247 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 
-/**
- * 配置契约用于阻止生产 Daemon 在缺少身份、gateway 凭证或本地数据目录时接入。
- *
- * <p>本测试同时冻结凭证的存在形态：CLI 只接受 {@code --registration-token-file}，凭证文本只存在于 owner-only 文件里，并且不进入 record
- * 的 {@code toString}/{@code equals}。
- */
+/** 文件为唯一配置来源；派生路径、秘密保护与内部运行时不变量不能因 CLI 收敛而退化。 */
 class DaemonConfigTest {
+  @TempDir Path root;
+  private static final ObjectMapper MAPPER = new ObjectMapper();
 
-  private static final String TOKEN_TEXT = "secret";
-
-  /** 所有显式连接输入都是必填且有界的：仅当全部合法时构造才成功。 */
   @Test
-  void validatesExplicitConnectionConfiguration(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-
-    // 前三个参数各自非法：非 ws/wss scheme、零值 heartbeat、零值初始重连延迟。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            config(
-                URI.create("http://localhost/gateway"),
-                Duration.ofSeconds(1),
-                Duration.ZERO,
-                Duration.ofSeconds(1),
-                tokenFile,
-                root.resolve("data-a")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            config(
-                URI.create("ws://localhost/gateway"),
-                Duration.ZERO,
-                Duration.ZERO,
-                Duration.ofSeconds(1),
-                tokenFile,
-                root.resolve("data-b")));
-
-    // 全部合法时必须成功，证明上面的失败确实来自被断言的那一项。
-    DaemonConfig valid =
-        config(
-            URI.create("ws://localhost/gateway"),
-            Duration.ofSeconds(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            tokenFile,
-            root.resolve("data-c"));
-    assertEquals(TOKEN_TEXT, valid.registrationToken());
-  }
-
-  /** CLI 是 daemon 连接、身份与本地数据目录的唯一配置来源。 */
-  @Test
-  void readsCliArguments(@TempDir Path root) throws Exception {
-    Path dataDir = root.resolve("data");
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    DaemonConfig config =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "wss://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--heartbeat",
-              "PT2S",
-              "--reconnect-initial",
-              "PT0S",
-              "--reconnect-max",
-              "PT3S",
-              "--note",
-              "Custom local environment.",
-              "--data-dir",
-              dataDir.toString()
-            });
-
-    assertEquals(URI.create("wss://gateway.example/daemon"), config.gatewayUri());
-    // 凭证文本按需从文件读取，而不是固化在配置里。
-    assertEquals(tokenFile.toAbsolutePath().normalize(), config.registrationTokenFile());
-    assertEquals(TOKEN_TEXT, config.registrationToken());
-    assertEquals(Duration.ofSeconds(2), config.heartbeatInterval());
-    assertEquals(Duration.ZERO, config.initialReconnectDelay());
-    assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
+  void derivesRuntimeFromFileAndFixedSiblingLayout() throws Exception {
+    Path file = writeConfig(root, "https://studio.example/");
+    var json = (ObjectNode) MAPPER.readTree(file.toFile());
+    json.put("note", " Custom local environment. ").put("bashExecutable", "/usr/bin/bash");
+    var server = json.putObject("lsp").putObject("servers").putObject("java");
+    server.putArray("command").add("/opt/jdtls/bin/jdtls");
+    server.putArray("extensions").add(".JAVA");
+    MAPPER.writeValue(file.toFile(), json);
+    DaemonConfig config = load(file);
+    assertEquals(
+        URI.create("wss://studio.example/api/harness/environment-daemon/v1"), config.gatewayUri());
+    assertEquals(root.resolve("daemon.token"), config.registrationTokenFile());
+    assertEquals(root, config.dataDir());
+    assertEquals("secret", config.registrationToken());
+    assertEquals(Duration.ofSeconds(15), config.heartbeatInterval());
+    assertEquals(Duration.ofSeconds(1), config.initialReconnectDelay());
+    assertEquals(Duration.ofSeconds(30), config.maxReconnectDelay());
     assertEquals("Custom local environment.", config.note());
-    assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
+    assertEquals("/usr/bin/bash", config.bashExecutable());
+    assertEquals(List.of(".java"), config.lsp().servers().getFirst().extensions());
+    assertEquals(List.of("daemon.json", "daemon.token"), entries(root));
   }
 
-  /** 意图：传输解码后中文路径和 emoji note 按普通 CLI 构造真实配置，不增加任何配置来源。 */
   @Test
-  void readsDecodedUnicodeArguments(@TempDir Path root) throws Exception {
-    Path token = ownerOnlyTokenFile(root.resolve("中文凭证"), TOKEN_TEXT);
-    Path data = root.resolve("中文数据 😀");
-    String bash = root.resolve("中文工具/bash").toString();
+  void decodedUnicodeConfigPathAndValuesArePreserved() throws Exception {
+    Path dir = Files.createDirectory(root.resolve("中文数据 😀"));
+    Path file = writeConfig(dir, "http://localhost");
+    var json =
+        MAPPER.createObjectNode().put("studioUrl", "http://localhost").put("note", "中文说明 😀");
+    String bash = dir.resolve("中文工具/bash").toString();
+    json.put("bashExecutable", bash);
+    MAPPER.writeValue(file.toFile(), json);
     DaemonConfig config =
         DaemonConfig.fromArgs(
-            DaemonArguments.decode(
-                DaemonArgumentsTest.encoded(
-                    "--gateway-uri",
-                    "ws://localhost/gateway",
-                    "--registration-token-file",
-                    token.toString(),
-                    "--data-dir",
-                    data.toString(),
-                    "--note",
-                    "中文说明 😀",
-                    "--bash-executable",
-                    bash)));
-    assertEquals(token.toAbsolutePath().normalize(), config.registrationTokenFile());
-    assertEquals(data.toAbsolutePath().normalize(), config.dataDir());
+            DaemonArguments.decode(DaemonArgumentsTest.encoded("--config", file.toString())));
+    assertEquals(dir, config.dataDir());
     assertEquals("中文说明 😀", config.note());
     assertEquals(bash, config.bashExecutable());
-    assertFalse(Files.exists(data), "configuration parsing must not open the data directory");
+    assertEquals(List.of("daemon.json", "daemon.token"), entries(dir));
   }
 
-  /** 已删除的配置参数必须作为未知参数 fail closed，不提供任何兼容回退。 */
   @Test
-  void rejectsRemovedEnvironmentRootArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String removedArg = "--environment-root";
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      removedArg,
-                      root.toString()
-                    }));
-    assertTrue(error.getMessage().contains("unknown argument: " + removedArg));
+  void onlySingleConfigPairIsAcceptedWithoutEchoingArguments() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    for (String[] args :
+        new String[][] {
+          {},
+          {"--config"},
+          {"--config", ""},
+          {"--config", "relative.json"},
+          {"--config", "--help"},
+          {"--config", file.toString(), "--config", file.toString()},
+          {"--check-config", file.toString()},
+          {"--help", "--config", file.toString()},
+          {"--config", file.toString(), "SECRET"},
+          {"--config", "SECRET\u0000"}
+        }) {
+      IllegalArgumentException error =
+          assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromArgs(args));
+      assertFalse(error.getMessage().contains("SECRET"));
+    }
+    for (String flag :
+        List.of(
+            "--gateway-uri",
+            "--registration-token-file",
+            "--registration-token",
+            "--heartbeat",
+            "--reconnect-initial",
+            "--reconnect-max",
+            "--note",
+            "--data-dir",
+            "--bash-executable",
+            "--lsp-config",
+            "--skill-dir",
+            "--tool-timeout",
+            "--environment-root")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> DaemonConfig.fromArgs(new String[] {flag, "SECRET"}));
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> DaemonConfig.fromArgs(new String[] {"--config", file.toString(), flag, "SECRET"}));
+    }
+    assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromFile(Path.of("relative")));
+    assertThrows(IllegalArgumentException.class, () -> load(root.resolve("missing.json")));
   }
 
-  /** 已删除的 {@code --registration-token} 必须作为未知参数 fail closed，不提供任何兼容回退。 */
   @Test
-  void rejectsRemovedRegistrationTokenArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token",
-                      TOKEN_TEXT,
-                      "--data-dir",
-                      root.resolve("data").toString()
-                    }));
-    assertTrue(error.getMessage().contains("unknown argument"), error.getMessage());
-    assertTrue(error.getMessage().contains("--registration-token"), error.getMessage());
-
-    // 新参数本身仍然可用，证明上面失败的原因确是被删除的旧参数。
-    assertEquals(
-        TOKEN_TEXT,
-        DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri",
-                  "ws://gateway.example/daemon",
-                  "--registration-token-file",
-                  tokenFile.toString(),
-                  "--data-dir",
-                  root.resolve("data").toString()
-                })
-            .registrationToken());
-  }
-
-  /** 凭证文本不得进入 record 的 toString/equals：日志与诊断输出不能扩散秘密。 */
-  @Test
-  void registrationTokenTextNeverLeaksThroughRecordSurfaces(@TempDir Path root) throws Exception {
-    Path tokenA = ownerOnlyTokenFile(root.resolve("a"), "token-alpha");
-    Path tokenB = ownerOnlyTokenFile(root.resolve("b"), "token-beta");
-    DaemonConfig first =
-        config(
-            URI.create("ws://localhost/gateway"),
-            Duration.ofSeconds(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            tokenA,
-            root.resolve("data"));
-    DaemonConfig second =
-        config(
-            URI.create("ws://localhost/gateway"),
-            Duration.ofSeconds(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            tokenB,
-            root.resolve("data"));
-
-    assertEquals("token-alpha", first.registrationToken());
-    assertEquals("token-beta", second.registrationToken());
-    assertFalse(first.toString().contains("token-alpha"), first.toString());
-    assertFalse(second.toString().contains("token-beta"), second.toString());
-    assertNotEquals(first, second, "不同凭证文件必须是不相等的配置");
-    assertNotEquals(first.hashCode(), second.hashCode());
-  }
-
-  /** 缺失凭证文件参数时启动失败关闭，而不是带着空凭证继续握手。 */
-  @Test
-  void rejectsMissingRegistrationTokenFile(@TempDir Path dataDir) {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri", "ws://gateway.example/daemon", "--data-dir", dataDir.toString()
-                }));
-  }
-
-  /** 凭证文件必须是绝对路径：相对路径会随 daemon 的启动目录漂移，因此明确拒绝。 */
-  @Test
-  void rejectsRelativeRegistrationTokenFile(@TempDir Path root) {
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      "relative/token",
-                      "--data-dir",
-                      root.resolve("data").toString()
-                    }));
-    assertTrue(error.getMessage().contains("absolute"), error.getMessage());
-  }
-
-  /** 凭证文件必须是现存普通文件：缺失路径在启动期就失败关闭。 */
-  @Test
-  void rejectsMissingRegistrationTokenFileOnDisk(@TempDir Path root) {
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      root.resolve("absent.token").toString(),
-                      "--data-dir",
-                      root.resolve("data").toString()
-                    }));
-    assertTrue(error.getMessage().contains("existing regular file"), error.getMessage());
-  }
-
-  /** 凭证文件必须 owner-only：group/other 可读的文件在 POSIX 上 fail closed。 */
-  @Test
-  void rejectsWorldReadableRegistrationTokenFile(@TempDir Path root) throws Exception {
-    assumeTrue(
-        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
-        "需要 POSIX 文件系统验证权限位");
-    Path tokenFile = root.resolve("token");
-    Files.writeString(tokenFile, TOKEN_TEXT);
-    Files.setPosixFilePermissions(
-        tokenFile,
-        Set.of(
-            PosixFilePermission.OWNER_READ,
-            PosixFilePermission.OWNER_WRITE,
-            PosixFilePermission.GROUP_READ));
-
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      "--data-dir",
-                      root.resolve("data").toString()
-                    }));
-    assertTrue(error.getMessage().contains("group/other"), error.getMessage());
-    assertFalse(error.getMessage().contains(TOKEN_TEXT), "错误信息不得回显凭证");
-  }
-
-  /** 空的凭证文件在按需读取时失败关闭，而不是把空串发给 Gateway。 */
-  @Test
-  void rejectsEmptyRegistrationTokenFileContent(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, "   \n");
-
-    DaemonConfig config =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              root.resolve("data").toString()
-            });
-    IllegalStateException error =
-        assertThrows(IllegalStateException.class, config::registrationToken);
-    assertTrue(error.getMessage().contains("must not be empty"), error.getMessage());
-    assertFalse(error.getMessage().contains(TOKEN_TEXT));
-  }
-
-  /** {@code --data-dir} 可省略，省略时回退到启动用户 HOME 下的 {@code .kk-studio}。 */
-  @Test
-  void defaultsDataDirToUserHomeKkStudio(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String oldHome = System.getProperty("user.home");
-    try {
-      Path home = Files.createDirectories(root.resolve("home"));
-      System.setProperty("user.home", home.toString());
-      DaemonConfig config =
-          DaemonConfig.fromArgs(
-              new String[] {
-                "--gateway-uri",
-                "ws://gateway.example/daemon",
-                "--registration-token-file",
-                tokenFile.toString()
-              });
-
-      assertEquals(home.resolve(".kk-studio").toAbsolutePath().normalize(), config.dataDir());
-      assertFalse(Files.exists(config.dataDir()), "解析配置本身不得创建数据目录");
-    } finally {
-      System.setProperty("user.home", oldHome);
+  void rejectsFileStructureAndDuplicateKeysThroughSharedCodec() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    for (String json :
+        List.of(
+            "{\"studioUrl\":\"http://localhost\",\"registrationToken\":\"SECRET\"}",
+            "{\"studioUrl\":\"http://localhost\",\"studioUrl\":\"SECRET\"}",
+            "{\"studioUrl\":\"http://localhost\",\"lsp\":{\"servers\":{}}}",
+            "{\"studioUrl\":\"http://localhost\",\"note\":\"SECRET\\n\"}")) {
+      Files.writeString(file, json);
+      IllegalArgumentException error =
+          assertThrows(IllegalArgumentException.class, () -> load(file));
+      assertFalse(error.getMessage().contains("SECRET"));
+      assertNull(error.getCause());
     }
   }
 
-  /** {@code --data-dir} 必须是绝对路径：相对路径会被解析为进程当前目录下的位置，因此明确拒绝。 */
   @Test
-  void rejectsRelativeDataDir(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      "--data-dir",
-                      "relative/data"
-                    }));
-    assertTrue(error.getMessage().contains("absolute"), error.getMessage());
+  void tokenRemainsOnDemandAndOutsideRecordSurfaces() throws Exception {
+    DaemonConfig first = load(writeConfig(root, "http://localhost"));
+    assertFalse(first.toString().contains("secret"));
+    Path other = Files.createDirectory(root.resolve("other"));
+    DaemonConfig second = load(writeConfig(other, "http://localhost"));
+    assertNotEquals(first, second);
+    Files.writeString(first.registrationTokenFile(), "rotated-secret");
+    assertEquals("rotated-secret", first.registrationToken());
+    assertFalse(first.toString().contains("rotated-secret"));
+    Files.writeString(first.registrationTokenFile(), "  \n");
+    assertThrows(IllegalStateException.class, first::registrationToken);
   }
 
-  /** {@code --data-dir} 只能出现一次，重复配置是操作者错误。 */
   @Test
-  void rejectsRepeatedDataDir(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String first = root.resolve("first").toString();
-    String second = root.resolve("second").toString();
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      "--data-dir",
-                      first,
-                      "--data-dir",
-                      second
-                    }));
-    assertTrue(error.getMessage().contains("only be specified once"), error.getMessage());
+  void tokenMustBeExistingRegularPrivateSibling() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    Path token = file.resolveSibling("daemon.token");
+    Files.delete(token);
+    assertThrows(IllegalArgumentException.class, () -> load(file));
+    Files.createDirectory(token);
+    assertThrows(IllegalArgumentException.class, () -> load(file));
+    Files.delete(token);
+    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+      Path target = Files.writeString(root.resolve("target"), "secret");
+      Files.createSymbolicLink(token, target);
+      assertThrows(IllegalArgumentException.class, () -> load(file));
+      Files.delete(token);
+      writeToken(root);
+      Files.setPosixFilePermissions(
+          token, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.GROUP_READ));
+      assertThrows(IllegalArgumentException.class, () -> load(file));
+    }
   }
 
-  /** {@code --registration-token-file} 也只能出现一次，避免后一个值静默覆盖前一个。 */
   @Test
-  void rejectsRepeatedRegistrationTokenFile(@TempDir Path root) throws Exception {
-    Path first = ownerOnlyTokenFile(root.resolve("first"), "token-one");
-    Path second = ownerOnlyTokenFile(root.resolve("second"), "token-two");
-
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      first.toString(),
-                      "--registration-token-file",
-                      second.toString(),
-                      "--data-dir",
-                      root.resolve("data").toString()
-                    }));
-    assertTrue(error.getMessage().contains("only be specified once"), error.getMessage());
-  }
-
-  /** 已删除的 {@code --skill-dir} 必须作为未知参数失败，避免操作者以为来源仍由 CLI 配置。 */
-  @Test
-  void rejectsRemovedSkillDirArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      "--data-dir",
-                      root.resolve("data").toString(),
-                      "--skill-dir",
-                      root.toString()
-                    }));
-    assertTrue(error.getMessage().contains("unknown argument"), error.getMessage());
-  }
-
-  /** 已删除的 {@code --tool-timeout} 必须作为未知参数失败：执行超时只由 definition 默认值与调用显式值决定。 */
-  @Test
-  void rejectsRemovedToolTimeoutArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri",
-                      "ws://gateway.example/daemon",
-                      "--registration-token-file",
-                      tokenFile.toString(),
-                      "--data-dir",
-                      root.resolve("data").toString(),
-                      "--tool-timeout",
-                      "PT5M"
-                    }));
-    assertTrue(error.getMessage().contains("unknown argument"), error.getMessage());
-    assertTrue(error.getMessage().contains("--tool-timeout"), error.getMessage());
-  }
-
-  /** 本地执行程序与 LSP 配置都有默认值，显式给出时覆盖默认值。 */
-  @Test
-  void resolvesLocalExecutableArguments(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String dataDir = root.resolve("data").toString();
-    Path lspConfig = root.resolve("lsp.json");
-    Files.writeString(
-        lspConfig,
-        "{\"servers\":{\"java\":{\"command\":[\"/opt/jdtls/bin/jdtls\"],\"extensions\":[\".java\"]}}}");
-
-    DaemonConfig defaults =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              dataDir
-            });
-    assertEquals(DaemonConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
-    assertTrue(defaults.lsp().servers().isEmpty(), "省略 --lsp-config 时必须没有 LSP 服务器");
-
-    DaemonConfig explicit =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              dataDir,
-              "--bash-executable",
-              "/usr/bin/bash",
-              "--lsp-config",
-              lspConfig.toString()
-            });
-    assertEquals("/usr/bin/bash", explicit.bashExecutable());
-    assertEquals("java", explicit.lsp().servers().getFirst().id());
-    assertEquals(List.of(".java"), explicit.lsp().servers().getFirst().extensions());
-  }
-
-  /** 意图：{@code --lsp-config} 最多出现一次，重复提供必须失败关闭。 */
-  @Test
-  void rejectsDuplicateLspConfigArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    Path lspConfig = root.resolve("lsp.json");
-    Files.writeString(
-        lspConfig,
-        "{\"servers\":{\"java\":{\"command\":[\"/opt/jdtls/bin/jdtls\"],\"extensions\":[\".java\"]}}}");
-
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                DaemonConfig.fromArgs(
-                    new String[] {
-                      "--gateway-uri", "ws://gateway.example/daemon",
-                      "--registration-token-file", tokenFile.toString(),
-                      "--data-dir", root.resolve("data").toString(),
-                      "--lsp-config", lspConfig.toString(),
-                      "--lsp-config", lspConfig.toString()
-                    }));
-    assertTrue(
-        error.getMessage().contains("--lsp-config may only be specified once"), error.getMessage());
-  }
-
-  /** 已删除的系统属性不再是配置来源：{@code kkstudio.daemon.*} 必须完全失效。 */
-  @Test
-  void systemPropertiesAreNoLongerAConfigurationSource(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String[] removed = {
-      "kkstudio.daemon.resource-directory",
-      "kkstudio.daemon.max-resource-bytes",
-      "kkstudio.daemon.bash"
-    };
-    String[] previous = new String[removed.length];
+  @ResourceLock(Resources.SYSTEM_PROPERTIES)
+  void removedPropertiesDoNotOverrideFile() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    String key = "kkstudio.daemon.bash";
+    String previous = System.getProperty(key);
     try {
-      for (int index = 0; index < removed.length; index++) {
-        previous[index] = System.getProperty(removed[index]);
-        System.setProperty(removed[index], "must-be-ignored");
-      }
-
-      DaemonConfig config =
-          DaemonConfig.fromArgs(
-              new String[] {
-                "--gateway-uri", "ws://gateway.example/daemon",
-                "--registration-token-file", tokenFile.toString(),
-                "--data-dir", root.resolve("data").toString()
-              });
-      // 唯一权威来源是 CLI：被删除的属性既不能改写 bash，也不能改写任何其它取值。
-      assertEquals(DaemonConfig.DEFAULT_BASH_EXECUTABLE, config.bashExecutable());
+      System.setProperty(key, "SECRET");
+      DaemonConfig config = load(file);
+      assertEquals("bash", config.bashExecutable());
+      assertTrue(config.lsp().servers().isEmpty());
+      assertNull(config.note());
     } finally {
-      for (int index = 0; index < removed.length; index++) {
-        if (previous[index] == null) {
-          System.clearProperty(removed[index]);
-        } else {
-          System.setProperty(removed[index], previous[index]);
-        }
+      if (previous == null) {
+        System.clearProperty(key);
+      } else {
+        System.setProperty(key, previous);
       }
     }
   }
 
-  /** 数据目录不必预先存在（Daemon 会创建它），但显式数据目录会被规范化。 */
   @Test
-  void acceptsNotYetExistingDataDir(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    Path dataDir = root.resolve("nested/data");
-    DaemonConfig config =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token-file", tokenFile.toString(),
-              "--data-dir", dataDir.toString()
-            });
-
-    assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
-  }
-
-  /** {@code --note} 可省略或显式覆盖默认值，但显式值必须唯一、单行、无控制、无首尾空白且有界。 */
-  @Test
-  void validatesOptionalNoteCli(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    DaemonConfig omitted =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token-file", tokenFile.toString(),
-              "--data-dir", root.resolve("data").toString()
-            });
-    assertNull(omitted.note());
-
-    assertInvalidNoteArgs(tokenFile, root, "--note", "first", "--note", "second");
-    assertInvalidNoteArgs(tokenFile, root, "--note", "");
-    assertInvalidNoteArgs(tokenFile, root, "--note", " ");
-    assertInvalidNoteArgs(tokenFile, root, "--note", " leading");
-    assertInvalidNoteArgs(tokenFile, root, "--note", "trailing ");
-    assertInvalidNoteArgs(tokenFile, root, "--note", "first\nsecond");
-    assertInvalidNoteArgs(tokenFile, root, "--note", "first\u2028second");
-    assertInvalidNoteArgs(tokenFile, root, "--note", "control\u0007value");
-    assertInvalidNoteArgs(
-        tokenFile, root, "--note", "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS + 1));
-
-    DaemonConfig maxLength =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              root.resolve("data").toString(),
-              "--note",
-              "x".repeat(DaemonEnvironmentInfo.MAX_NOTE_CHARS)
-            });
-    assertEquals(DaemonEnvironmentInfo.MAX_NOTE_CHARS, maxLength.note().length());
-  }
-
-  /** 省略 note 时按实测 OS 生成固定说明，显式值对所有 OS 都优先。 */
-  @Test
-  void resolvesExactDefaultNotesForEveryOperatingSystem(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String dataDir = root.resolve("data").toString();
-    DaemonConfig defaults =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              dataDir
-            });
+  void exactDefaultNotesAndExplicitNotePriority() throws Exception {
+    Path file = writeConfig(root, "http://localhost");
+    DaemonConfig defaults = load(file);
     assertEquals("Windows environment.", defaults.effectiveNote(DaemonOperatingSystem.WINDOWS));
     assertEquals(
-        "WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows"
-            + " commands may be invocable from WSL.",
+        "WSL environment. Windows files may be accessible under /mnt/<drive>, and some Windows commands may be invocable from WSL.",
         defaults.effectiveNote(DaemonOperatingSystem.WSL));
     assertEquals("Linux environment.", defaults.effectiveNote(DaemonOperatingSystem.LINUX));
     assertEquals("macOS environment.", defaults.effectiveNote(DaemonOperatingSystem.MACOS));
-
-    DaemonConfig explicit =
-        DaemonConfig.fromArgs(
-            new String[] {
-              "--gateway-uri",
-              "ws://gateway.example/daemon",
-              "--registration-token-file",
-              tokenFile.toString(),
-              "--data-dir",
-              dataDir,
-              "--note",
-              "Explicit environment."
-            });
-    for (DaemonOperatingSystem operatingSystem : DaemonOperatingSystem.values()) {
-      assertEquals("Explicit environment.", explicit.effectiveNote(operatingSystem));
+    Files.writeString(
+        file, "{\"studioUrl\":\"http://localhost\",\"note\":\"Explicit environment.\"}");
+    for (DaemonOperatingSystem os : DaemonOperatingSystem.values()) {
+      assertEquals("Explicit environment.", load(file).effectiveNote(os));
     }
   }
 
-  /** 未知的 CLI 参数立即失败，而不是被静默忽略。 */
   @Test
-  void rejectsUnknownCliArgument(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
+  void internalRuntimeConstructorsRetainInvariants() throws Exception {
+    Path token = writeToken(root);
+    URI gateway = URI.create("ws://localhost/gateway");
+    Duration positive = Duration.ofSeconds(1);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri",
-                  "ws://gateway.example/daemon",
-                  "--registration-token-file",
-                  tokenFile.toString(),
-                  "--data-dir",
-                  root.resolve("data").toString(),
-                  "--unexpected",
-                  "x"
-                }));
-  }
-
-  /** 缺少 flag 取值（其后直接是下一个 flag 或参数结束）失败，避免把 flag 名当值。 */
-  @Test
-  void rejectsMissingArgumentValue(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
+        () -> runtime(URI.create("http://host"), token, positive, Duration.ZERO, positive, root));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri",
-                  "ws://gateway.example/daemon",
-                  "--registration-token-file",
-                  tokenFile.toString(),
-                  "--data-dir",
-                  root.resolve("data").toString(),
-                  "--note"
-                }));
+        () -> runtime(gateway, token, Duration.ZERO, Duration.ZERO, positive, root));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime(gateway, token, positive, Duration.ofSeconds(-1), positive, root));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime(gateway, token, positive, Duration.ZERO, Duration.ZERO, root));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime(gateway, token, positive, Duration.ofSeconds(2), positive, root));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime(gateway, token, positive, Duration.ZERO, positive, Path.of("relative")));
+    assertEquals(
+        "secret",
+        runtime(gateway, token, positive, Duration.ZERO, positive, root.resolve("not-created"))
+            .registrationToken());
+    assertFalse(Files.exists(root.resolve("not-created")));
   }
 
-  private DaemonConfig config(
-      URI gatewayUri,
-      Duration heartbeatInterval,
-      Duration initialReconnectDelay,
-      Duration maxReconnectDelay,
-      Path registrationTokenFile,
-      Path dataDir) {
-    return new DaemonConfig(
-        gatewayUri,
-        registrationTokenFile,
-        heartbeatInterval,
-        initialReconnectDelay,
-        maxReconnectDelay,
-        null,
-        dataDir);
+  private static DaemonConfig runtime(
+      URI uri, Path token, Duration heartbeat, Duration initial, Duration max, Path data) {
+    return new DaemonConfig(uri, token, heartbeat, initial, max, null, data);
   }
 
-  /** 在给定目录下创建 owner-only 凭证文件，模拟真实的部署前准备步骤。 */
-  private static Path ownerOnlyTokenFile(Path directory, String token) throws IOException {
-    Files.createDirectories(directory);
-    Path tokenFile = directory.resolve("registration.token");
-    Files.writeString(tokenFile, token);
+  static Path writeConfig(Path directory, String url) throws IOException {
+    Path file = directory.resolve("daemon.json");
+    MAPPER.writeValue(file.toFile(), MAPPER.createObjectNode().put("studioUrl", url));
+    writeToken(directory);
+    return file;
+  }
+
+  static Path writeToken(Path directory) throws IOException {
+    Path file = Files.writeString(directory.resolve("daemon.token"), "secret");
     if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
       Files.setPosixFilePermissions(
-          tokenFile, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+          file, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
     }
-    return tokenFile;
+    return file;
   }
 
-  /** 构造携带合法必填参数的参数数组，仅让 note 相关参数成为失败原因。 */
-  private static void assertInvalidNoteArgs(Path tokenFile, Path root, String... noteArgs) {
-    String[] args = new String[6 + noteArgs.length];
-    args[0] = "--gateway-uri";
-    args[1] = "ws://gateway.example/daemon";
-    args[2] = "--registration-token-file";
-    args[3] = tokenFile.toString();
-    args[4] = "--data-dir";
-    args[5] = root.resolve("data").toString();
-    System.arraycopy(noteArgs, 0, args, 6, noteArgs.length);
-    assertThrows(IllegalArgumentException.class, () -> DaemonConfig.fromArgs(args));
+  static List<String> entries(Path dir) throws IOException {
+    try (var files = Files.list(dir)) {
+      return files.map(path -> path.getFileName().toString()).sorted().toList();
+    }
+  }
+
+  private static DaemonConfig load(Path file) {
+    return DaemonConfig.fromArgs(new String[] {"--config", file.toString()});
   }
 }
