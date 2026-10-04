@@ -1,6 +1,8 @@
 """Permanent guards for the reliability stack's daemon bootstrap and token boundary."""
 
+import json
 import os
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -24,20 +26,27 @@ RELIABILITY_ENTRYPOINT = REPOSITORY_ROOT / "deploy/reliability/daemon-entrypoint
 
 
 class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
-    """The reliability daemon must receive its token through an owner-only file and a durable data dir."""
+    """The reliability daemon must receive its token through an owner-only file and config via --config."""
 
-    def test_compose_streams_the_registration_token_file_and_data_directory(self):
-        """Compose only injects environment; the entrypoint materializes the token file."""
+    def test_compose_only_injects_environment(self):
+        """Compose injects only environment; the entrypoint materializes config and token and starts via --config."""
         rel_content = RELIABILITY_COMPOSE.read_text(encoding="utf-8")
 
         self.assertIn("KK_STUDIO_DAEMON_REGISTRATION_TOKEN", rel_content)
-        self.assertNotIn("--registration-token", rel_content)
-        self.assertIn("--data-dir", rel_content)
+        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080", rel_content)
         self.assertIn("e2e-token-reliability", rel_content)
-        self.assertNotIn("--environment-root", rel_content)
+        # 旧 CLI/启动参数必须保持删除状态；配置只经共享 daemon.json 文件。
+        for removed in (
+            "--gateway-uri",
+            "--data-dir",
+            "--note",
+            "--registration-token",
+            "--environment-root",
+        ):
+            self.assertNotIn(removed, rel_content, removed)
 
     def test_daemon_image_installs_the_token_file_entrypoint(self):
-        """Daemon 镜像入口必须是 token-file 迁移后的脚本，而不是直接 exec java。"""
+        """Daemon 镜像入口必须是 bootstrap 脚本，而不是直接 exec java。"""
         dockerfile = (REPOSITORY_ROOT / "deploy/reliability/daemon.Dockerfile").read_text(
             encoding="utf-8"
         )
@@ -51,15 +60,16 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotIn(
             'ENTRYPOINT ["java"',
             dockerfile,
-            "直接 exec java 会绕过 token 文件物化，凭证重新出现在 argv",
+            "直接 exec java 会绕过配置/凭证物化，凭证重新出现在 argv",
         )
 
-    def test_entrypoint_materializes_the_token_as_an_owner_only_file(self):
-        """入口必须把环境变量写成 0600 文件并从环境中清除，只把绝对路径交给 daemon argv。"""
-        with tempfile.TemporaryDirectory() as home:
-            probe_dir = Path(home)
-            argv_file = probe_dir / "argv.txt"
-            environ_file = probe_dir / "environ.txt"
+    def test_entrypoint_materializes_config_and_token_then_launches_with_config_only(self):
+        """入口必须物化共享 daemon.json/owner-only token，并只把 --config 交给 daemon。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            probe_dir = Path(temporary) / "bin"
+            probe_dir.mkdir()
+            argv_file = Path(temporary) / "argv.txt"
+            environ_file = Path(temporary) / "environ.txt"
             probe = probe_dir / "java"
             probe.write_text(
                 "#!/bin/bash\n"
@@ -68,18 +78,25 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             )
             probe.chmod(0o755)
 
+            root = Path(temporary) / "daemon-root"
+            secret = "probe-secret-token"
+            studio_url = "https://studio.example.com"
+            note = "Probe note — 日本語"
+
             environment = dict(os.environ)
             environment.update(
                 {
-                    "HOME": home,
-                    "PATH": f"{probe_dir}:{environment.get('PATH', '')}",
+                    "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
                     "PROBE_ARGV": str(argv_file),
                     "PROBE_ENVIRON": str(environ_file),
-                    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+                    "KK_STUDIO_DAEMON_ROOT": str(root),
+                    "KK_STUDIO_DAEMON_STUDIO_URL": studio_url,
+                    "KK_STUDIO_DAEMON_NOTE": note,
+                    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": secret,
                 }
             )
             result = subprocess.run(
-                ["bash", str(RELIABILITY_ENTRYPOINT), "--gateway-uri", "ws://app:8080/x"],
+                ["bash", str(RELIABILITY_ENTRYPOINT)],
                 text=True,
                 capture_output=True,
                 check=False,
@@ -88,19 +105,61 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
 
             self.assertEqual(0, result.returncode, result.stderr)
             argv = argv_file.read_text().splitlines()
-            # 入口自己插入 token 路径，再透传 Compose 提供的业务参数。
-            self.assertIn("--registration-token-file", argv)
-            self.assertIn("--gateway-uri", argv)
-            self.assertNotIn("--registration-token", argv)
-            self.assertNotIn("probe-secret-token", argv)
-            self.assertNotIn("probe-secret-token", environ_file.read_text())
-            self.assertNotIn("probe-secret-token", result.stderr + result.stdout)
+            self.assertIn("--config", argv)
+            config_path = Path(argv[argv.index("--config") + 1])
+            self.assertEqual(["-jar", "/opt/kk-studio/daemon.jar", "--config"], argv[:3])
+            self.assertTrue(config_path.is_absolute())
+            self.assertEqual(root / "daemon.json", config_path)
+            # 旧 CLI 双源配置必须不再存在。
+            for removed in ("--gateway-uri", "--data-dir", "--registration-token-file", "--note"):
+                self.assertNotIn(removed, argv)
+            self.assertNotIn(secret, argv)
+            self.assertNotIn(secret, environ_file.read_text())
+            self.assertNotIn(secret, result.stderr + result.stdout)
+            # 凭证从不进入配置 JSON。
+            self.assertNotIn(secret, config_path.read_text())
 
-            token_path = Path(argv[argv.index("--registration-token-file") + 1])
-            self.assertTrue(token_path.is_absolute())
-            self.assertEqual(0o700, token_path.parent.stat().st_mode & 0o777)
-            self.assertEqual(0o600, token_path.stat().st_mode & 0o777)
-            self.assertEqual("probe-secret-token", token_path.read_text().strip())
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual({"studioUrl", "note"}, set(config))
+            self.assertEqual(studio_url, config["studioUrl"])
+            self.assertEqual(note, config["note"])
+
+            token_path = root / "daemon.token"
+            self.assertEqual(0o700, root.stat().st_mode & 0o777)
+            self.assertEqual(0o600, stat.S_IMODE(config_path.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(token_path.stat().st_mode))
+            self.assertEqual(secret, token_path.read_text().strip())
+
+    def test_entrypoint_omits_note_when_unset(self):
+        """未设置 note 时配置 JSON 不得出现 note 字段。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            probe_dir = Path(temporary) / "bin"
+            probe_dir.mkdir()
+            probe = probe_dir / "java"
+            probe.write_text("#!/bin/bash\nexit 0\n")
+            probe.chmod(0o755)
+
+            root = Path(temporary) / "daemon-root"
+            environment = dict(os.environ)
+            environment.update(
+                {
+                    "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
+                    "KK_STUDIO_DAEMON_ROOT": str(root),
+                    "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
+                    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+                }
+            )
+            environment.pop("KK_STUDIO_DAEMON_NOTE", None)
+            result = subprocess.run(
+                ["bash", str(RELIABILITY_ENTRYPOINT)],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            config = json.loads((root / "daemon.json").read_text(encoding="utf-8"))
+            self.assertEqual({"studioUrl"}, set(config))
 
     def test_entrypoint_fails_closed_without_a_token(self):
         """缺少凭证时入口必须立即失败，而不是启动一个无法注册的 Daemon。"""
@@ -116,6 +175,22 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertIn("KK_STUDIO_DAEMON_REGISTRATION_TOKEN", result.stderr)
+
+    def test_entrypoint_fails_closed_without_a_studio_url(self):
+        """缺少 studio URL 时入口必须立即失败，不能写出不完整配置。"""
+        environment = dict(os.environ)
+        environment["KK_STUDIO_DAEMON_REGISTRATION_TOKEN"] = "probe-secret-token"
+        environment.pop("KK_STUDIO_DAEMON_STUDIO_URL", None)
+        result = subprocess.run(
+            ["bash", str(RELIABILITY_ENTRYPOINT)],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL", result.stderr)
 
 
 if __name__ == "__main__":

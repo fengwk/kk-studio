@@ -124,13 +124,9 @@ services:
         condition: service_completed_successfully
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
-    command:
-      - --gateway-uri
-      - ws://app:8080/api/harness/environment-daemon/v1
-      - --note
-      - Isolated Docker reliability environment.
-      - --data-dir
-      - /workspace/.kkstudio/daemon
+      # 非机密安装配置：入口据此物化共享 daemon.json，daemon 只接收 --config。
+      KK_STUDIO_DAEMON_STUDIO_URL: http://app:8080
+      KK_STUDIO_DAEMON_NOTE: Isolated Docker reliability environment.
     volumes:
       - daemon-workspace:/workspace
     networks:
