@@ -97,8 +97,8 @@ wait_http() {
   local url=$1
   local name=$2
   local attempts=${3:-90}
-  local i
-  for i in $(seq 1 "$attempts"); do
+  local _
+  for _ in $(seq 1 "$attempts"); do
     if curl -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
@@ -113,8 +113,8 @@ wait_http_process() {
   local pid=$3
   local log_file=$4
   local attempts=${5:-90}
-  local i
-  for i in $(seq 1 "$attempts"); do
+  local _
+  for _ in $(seq 1 "$attempts"); do
     if curl -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
@@ -283,9 +283,9 @@ start_daemon() {
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"
-  local i env_status=""
+  local _ env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
-  for i in $(seq 1 180); do
+  for _ in $(seq 1 180); do
     env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
