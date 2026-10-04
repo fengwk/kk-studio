@@ -27,6 +27,13 @@ if [ -z "$studio_url" ]; then
   echo "ERROR: KK_STUDIO_DAEMON_STUDIO_URL (http(s) origin) is required." >&2
   exit 1
 fi
+case "$root" in
+  /*) ;;
+  *)
+    echo "ERROR: KK_STUDIO_DAEMON_ROOT must be absolute: $root" >&2
+    exit 1
+    ;;
+esac
 
 mkdir -p "$root"
 chmod 700 "$root"
@@ -38,7 +45,8 @@ chmod 600 "$token_file"
 unset token
 
 # studioUrl/note 经环境变量交给 node；值不参与 shell 拼接，因此不存在注入面。
-KK_STUDIO_DAEMON_CONFIG_STUDIO_URL="$studio_url" \
+# umask 与显式 mode 保证配置文件创建时即 owner-only，而非先宽后 chmod。
+(umask 077 && KK_STUDIO_DAEMON_CONFIG_STUDIO_URL="$studio_url" \
   KK_STUDIO_DAEMON_CONFIG_NOTE="$note" \
   node -e 'const fs = require("fs");
 const target = process.argv[1];
@@ -47,7 +55,7 @@ const note = process.env.KK_STUDIO_DAEMON_CONFIG_NOTE;
 if (note) {
   config.note = note;
 }
-fs.writeFileSync(target, JSON.stringify(config) + "\n");' "$config_file"
+fs.writeFileSync(target, JSON.stringify(config) + "\n", { mode: 0o600 });' "$config_file")
 chmod 600 "$config_file"
 unset studio_url note
 

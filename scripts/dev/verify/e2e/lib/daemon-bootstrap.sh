@@ -42,7 +42,7 @@ token_file="$root/daemon.token"
 chmod 600 "$token_file"
 unset token
 
-DAEMON_CONFIG_STUDIO_URL="$studio_url" DAEMON_CONFIG_NOTE="$note" \
+(umask 077 && DAEMON_CONFIG_STUDIO_URL="$studio_url" DAEMON_CONFIG_NOTE="$note" \
   node -e 'const fs = require("fs");
 const target = process.argv[1];
 const config = { studioUrl: process.env.DAEMON_CONFIG_STUDIO_URL };
@@ -50,7 +50,7 @@ const note = process.env.DAEMON_CONFIG_NOTE;
 if (note) {
   config.note = note;
 }
-fs.writeFileSync(target, JSON.stringify(config) + "\n");' "$config_file"
+fs.writeFileSync(target, JSON.stringify(config) + "\n", { mode: 0o600 });' "$config_file")
 chmod 600 "$config_file"
 unset DAEMON_CONFIG_STUDIO_URL DAEMON_CONFIG_NOTE
 

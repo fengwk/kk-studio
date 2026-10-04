@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
@@ -191,6 +192,65 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
 
         self.assertNotEqual(0, result.returncode)
         self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL", result.stderr)
+
+    def test_entrypoint_rejects_a_relative_root(self):
+        """ROOT 必须为绝对路径，否则拒绝启动，避免把数据写到不可预期的工作目录。"""
+        environment = dict(os.environ)
+        environment.update(
+            {
+                "KK_STUDIO_DAEMON_ROOT": "relative/daemon-root",
+                "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
+                "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(RELIABILITY_ENTRYPOINT)],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("KK_STUDIO_DAEMON_ROOT", result.stderr)
+        self.assertIn("absolute", result.stderr)
+
+    def test_entrypoint_creates_config_owner_only_without_relying_on_chmod(self):
+        """配置文件必须写入时即 owner-only：桩掉 chmod 并把 umask 全开也不能出现 world-readable 窗口。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            probe_dir = Path(temporary) / "bin"
+            probe_dir.mkdir()
+            # chmod 桩为 no-op：只有 writeFileSync 的显式 mode 与 umask 能收敛权限。
+            (probe_dir / "chmod").write_text("#!/bin/bash\nexit 0\n")
+            (probe_dir / "chmod").chmod(0o755)
+            (probe_dir / "java").write_text("#!/bin/bash\nexit 0\n")
+            (probe_dir / "java").chmod(0o755)
+
+            root = Path(temporary) / "daemon-root"
+            environment = dict(os.environ)
+            environment.update(
+                {
+                    "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
+                    "KK_STUDIO_DAEMON_ROOT": str(root),
+                    "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
+                    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+                }
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"umask 000; exec bash {shlex.quote(str(RELIABILITY_ENTRYPOINT))}",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(0o600, stat.S_IMODE((root / "daemon.json").stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE((root / "daemon.token").stat().st_mode))
 
 
 if __name__ == "__main__":
