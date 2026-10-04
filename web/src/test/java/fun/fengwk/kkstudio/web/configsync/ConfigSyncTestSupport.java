@@ -45,6 +45,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -137,6 +138,22 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     LoaderOptions options = new LoaderOptions();
     options.setAllowDuplicateKeys(false);
     return (Map<String, Object>) new Yaml(new SafeConstructor(options)).load(yaml);
+  }
+
+  /** 导出当前完整 settings YAML，供必须完整七节的导入用例构造文件。 */
+  protected String exportedSettingsYaml() throws Exception {
+    return postData(
+            "/api/settings/sync/export",
+            Map.of("items", List.of(Map.of("kind", "settings", "name", "settings"))))
+        .path("yaml")
+        .asText();
+  }
+
+  /** 解析 YAML 后按需改写再回写为纯结构文本；避免手写完整七节。 */
+  protected static String mutateYaml(String yaml, Consumer<Map<String, Object>> mutator) {
+    Map<String, Object> document = parseYaml(yaml);
+    mutator.accept(document);
+    return new Yaml().dump(document);
   }
 
   /** 一个合法、带可辨识精度与 protocolOptionsJson 的 Model config。 */
