@@ -140,7 +140,7 @@ docker build \
   --build-arg "KK_STUDIO_MAVEN_BUILD_OPTS=${CANVAS_TEST_BUILD_MAVEN_OPTS:-}" \
   "$REPO_ROOT"
 
-step "Building the shared MinIO client image (using cached layers)"
+step "Building the shared MinIO client image"
 "${COMPOSE[@]}" build minio-init
 
 step "Starting isolated dependencies and waiting for health checks"

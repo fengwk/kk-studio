@@ -57,7 +57,7 @@ export function IssueCard({
             </span>
           )}
           {isUnknown && (
-            <span className="badge badge-unknown" title="存在未知副作用门禁，需人工核查">
+            <span className="badge badge-unknown" title="需人工核查，暂不能继续">
               <ShieldAlert size={12} aria-hidden="true" />
               UNKNOWN
             </span>
@@ -118,7 +118,7 @@ export function IssueCard({
             type="button"
             className="action-pill danger"
             onClick={onResolveUnknown}
-            title="核查外部副作用并解除 UNKNOWN 门禁"
+            title="核查外部副作用，解除 UNKNOWN"
           >
             <ShieldAlert size={12} aria-hidden="true" />
             <span>人工核查</span>

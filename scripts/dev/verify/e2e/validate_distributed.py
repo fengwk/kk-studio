@@ -116,8 +116,15 @@ def validate(config: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--compose-file", type=Path, required=True)
+    parser = argparse.ArgumentParser(
+        description="Validate the distributed Compose topology invariants without starting containers."
+    )
+    parser.add_argument(
+        "--compose-file",
+        type=Path,
+        required=True,
+        help="path to deploy/distributed/compose.yaml",
+    )
     args = parser.parse_args()
 
     config = expand_config(args.compose_file)

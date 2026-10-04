@@ -30,6 +30,11 @@ public class PostgresqlAgentProviderRepository implements AgentProviderRepositor
   }
 
   @Override
+  public List<AgentProvider> listAll() {
+    return agentProviderMapper.listAll().stream().map(this::convert).toList();
+  }
+
+  @Override
   public AgentProvider getByName(String name) {
     return convert(agentProviderMapper.getByName(name));
   }

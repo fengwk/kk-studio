@@ -167,7 +167,7 @@ cmd_up() {
     step "Skipping app/daemon image builds (--skip-build)"
   fi
 
-  step "Building shared MinIO client image (using cached layers)"
+  step "Building shared MinIO client image"
   "${COMPOSE[@]}" build minio-init
 
   step "Starting distributed stack"

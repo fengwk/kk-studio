@@ -217,7 +217,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
   })
 
   // 场景 4: 权限结果
-  it('Scenario 4: 权限结果 — WAITING_APPROVAL 卡片放行与拒绝正确调用 decideApproval', async () => {
+  it('Scenario 4: 权限结果 — WAITING_APPROVAL 卡片允许与拒绝正确调用 decideApproval', async () => {
     const decideSpy = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
       id: 'inv-app-1',
       modelInvocationId: 'm-1',
@@ -251,8 +251,8 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     expect(screen.getByText('bash')).toBeInTheDocument()
     expect(screen.getByText('高危操作确认')).toBeInTheDocument()
 
-    // 点击放行 (ALLOW)
-    const allowBtn = screen.getByRole('button', { name: '放行' })
+    // 点击允许 (ALLOW)
+    const allowBtn = screen.getByRole('button', { name: '允许' })
     fireEvent.click(allowBtn)
 
     await waitFor(() => {

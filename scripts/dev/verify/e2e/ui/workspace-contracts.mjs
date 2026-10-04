@@ -666,7 +666,7 @@ export async function runWorkspaceContractMatrix(ui) {
         await base.fill(staleDraft)
         await page.getByRole('button', { name: '保存', exact: true }).click()
         const conflictDialog = page.getByRole('alertdialog', {
-          name: '持久状态已变化',
+          name: '数据已发生变化',
         })
         await conflictDialog.waitFor({ state: 'visible', timeout: 15_000 })
         assert(

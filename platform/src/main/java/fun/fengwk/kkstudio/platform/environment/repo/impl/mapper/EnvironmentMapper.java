@@ -37,6 +37,10 @@ public interface EnvironmentMapper extends BaseMapper {
       })
   List<EnvironmentDO> listNewestFirst();
 
+  @Select("select " + COLUMNS + " from environment order by name asc")
+  @ResultMap("environmentResultMap")
+  List<EnvironmentDO> listAll();
+
   @Select("select " + COLUMNS + " from environment where id = #{id}")
   @ResultMap("environmentResultMap")
   EnvironmentDO getById(@Param("id") UUID id);

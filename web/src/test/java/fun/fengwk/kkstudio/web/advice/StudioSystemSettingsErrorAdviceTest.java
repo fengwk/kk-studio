@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -28,11 +29,13 @@ class StudioSystemSettingsErrorAdviceTest {
   }
 
   @Test
-  void scopesAdviceToSystemSettingsControllerOnly() {
+  void scopesAdviceToSettingsAndSyncControllers() {
+    // 同步中的 settings 写入使用相同错误模型，不影响无关控制器。
     RestControllerAdvice advice =
         StudioSystemSettingsErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
     assertArrayEquals(
-        new Class<?>[] {StudioSystemSettingsController.class}, advice.assignableTypes());
+        new Class<?>[] {StudioSystemSettingsController.class, StudioConfigSyncController.class},
+        advice.assignableTypes());
   }
 
   @Test
@@ -48,7 +51,7 @@ class StudioSystemSettingsErrorAdviceTest {
     assertNotNull(validation.getBody());
     Result<Void> validationBody = validation.getBody();
     assertEquals("validation", validationBody.getCode());
-    assertEquals("Invalid system_settings request.", validationBody.getMessage());
+    assertEquals("Invalid system settings request.", validationBody.getMessage());
     assertEquals(
         Map.of("resource", "system_settings", "detail", "tool is required"),
         validationBody.getErrors());
@@ -67,7 +70,7 @@ class StudioSystemSettingsErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("system_settings 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("系统设置 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",

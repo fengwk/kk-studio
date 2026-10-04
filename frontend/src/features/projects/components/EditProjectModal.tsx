@@ -318,7 +318,7 @@ function EditProjectModalContent({
           }}
         >
           <span style={{ color: 'var(--fg-muted)' }}>
-            期望版本: <code>{currentVersion}</code>
+            编辑版本: <code>{currentVersion}</code>
           </span>
           <button
             type="button"
@@ -549,7 +549,7 @@ function EditProjectModalContent({
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <label htmlFor="edit-project-workflow-json" className="form-label" style={{ margin: 0 }}>
-                  工作流配置 (JSON 严格校验)
+                  工作流 (JSON)
                 </label>
                 <button
                   type="button"

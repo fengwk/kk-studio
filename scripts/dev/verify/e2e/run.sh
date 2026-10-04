@@ -50,8 +50,8 @@ usage() {
 Usage: scripts/dev/verify/e2e/run.sh [options]
 
 Options:
-  --rebuild         Force clean package backend + restart backend/frontend (+daemon if tools)
-  --real            Enable real provider cases (requires all 8 TEST_*_BASE_URL/API_KEY credentials)
+  --rebuild         Force clean package backend + restart backend/frontend (and the daemon with --with-tools)
+  --real            Enable real provider cases (requires every TEST_*_BASE_URL/API_KEY credential)
   --with-tools      Enable daemon/tool cases (starts/reuses daemon)
   --with-branch     Enable branch usage cases (implies --real)
   --with-canvas-storage  Enable Canvas Resource/Blob storage contract (backend S3 config required; also a precondition of real tool.read_turn)
@@ -71,12 +71,11 @@ Env:
   TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
   TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY
   TEST_DEEPSEEK_BASE_URL / TEST_DEEPSEEK_API_KEY
-  # consumed only with --real; free modes never synchronize host credentials
-  # --real validates all 8 variables are non-empty before startup and synchronizes them to backend
+  # consumed only with --real: free modes never synchronize host credentials, and --real validates each pair non-empty before startup
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
-  DAEMON_ENV_ROOT=...     # optional tool-case work directory; default: $WORK_DIR/environment
+  DAEMON_ENV_ROOT=...     # optional tool-case work directory; default: $E2E_WORK_DIR/environment
 EOF
 }
 
@@ -128,7 +127,15 @@ DISTRIBUTED_RUNNER="$SCRIPT_DIR/distributed.sh"
 if [ "$DISTRIBUTED" = "true" ]; then
   for flag in REAL WITH_TOOLS WITH_BRANCH WITH_CANVAS_STORAGE WITH_CANVAS_FUNCTION WITH_UI; do
     if [ "${!flag}" = "true" ]; then
-      die "--distributed cannot be combined with --${flag} capability"
+      case "$flag" in
+        REAL) flag_name=--real ;;
+        WITH_TOOLS) flag_name=--with-tools ;;
+        WITH_BRANCH) flag_name=--with-branch ;;
+        WITH_CANVAS_STORAGE) flag_name=--with-canvas-storage ;;
+        WITH_CANVAS_FUNCTION) flag_name=--with-canvas-function ;;
+        WITH_UI) flag_name=--ui ;;
+      esac
+      die "--distributed cannot be combined with ${flag_name} capability"
     fi
   done
   command -v docker >/dev/null 2>&1 || die "docker is required for --distributed"
@@ -168,7 +175,7 @@ if [ "$REAL" = "true" ]; then
     fi
   done
   if [ ${#missing_vars[@]} -gt 0 ]; then
-    die "--real requires all 8 credential variables to be set non-empty; missing: ${missing_vars[*]}"
+    die "--real requires every TEST_*_BASE_URL / TEST_*_API_KEY credential pair to be set non-empty; missing: ${missing_vars[*]}"
   fi
 fi
 

@@ -34,7 +34,7 @@ registerCase({
     assert(englishDomain.code === 'resource_not_found', JSON.stringify(englishDomain))
     assert(englishDomain.message === 'The chat was not found.', JSON.stringify(englishDomain))
     assert(chineseDomain.code === 'resource_not_found', JSON.stringify(chineseDomain))
-    assert(chineseDomain.message === '未找到 chat。', JSON.stringify(chineseDomain))
+    assert(chineseDomain.message === '未找到 对话。', JSON.stringify(chineseDomain))
     assert(chineseDomain.errors?.resource === 'chat', JSON.stringify(chineseDomain))
     assert(chineseDomain.errors?.detail === 'chat not found', JSON.stringify(chineseDomain))
 

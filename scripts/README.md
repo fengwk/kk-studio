@@ -60,15 +60,14 @@ E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
 | 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、JDK 21、git、sha256sum、已构建 shaded JAR；校验后替换 `harness/daemon/target/release`，生成 JAR、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
-| 导出 Agent catalog | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | psql、python3、数据库连接；只读 Provider/Model/Agent 三张表，列集合须与当前 schema 精确匹配；包写仓库外 owner-only 目录，SQL 包含 Provider 凭据 |
 | 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
-| 回灌 catalog | [ops/import-agent-catalog.sh](ops/import-agent-catalog.sh) `--package PATH` | psql、python3；目标已初始化当前 Flyway V1，三张表为空且 checksum 匹配；单事务加锁、COPY 与指纹核对，事务失败整体回滚，失败日志只含安全类别/SQLSTATE |
 
-数据库入口不管理服务生命周期。连接参数优先级为 CLI → `VPS_POSTGRES_*` → 标准 libpq；不从命令行接收密码，不交互询问口令，缺凭据直接失败。先用各入口 `--dry-run` 看计划；reset 不执行 Flyway，空库 schema 初始化由外部流程完成。部署步骤见[部署与运行](../docs/operations/deployment.md)。
+配置导出与导入在产品的“设置 → 同步”完成，YAML 始终包含所需凭据，不属于数据库脚本。
+数据库入口不管理服务生命周期。连接参数优先级为 CLI → `VPS_POSTGRES_*` → 标准 libpq；不从命令行接收密码，不交互询问口令，缺凭据直接失败。先用 `--dry-run` 看重建计划；reset 不执行 Flyway，空库 Schema 初始化由外部流程完成。完整步骤见[共享数据库重建](../docs/operations/development-and-testing.md#共享数据库重建)。
 
 ## 目录与维护边界
 
 - `dev/`、`daemon/`、`ops/` 分别持有开发验证、Daemon 安装发布与数据库维护入口。
 - `dev/verify/<capability>/tests` 放对应脚本测试和资源；CI 发现 `scripts/*/tests` 与 `scripts/dev/verify/*/tests`。测试目录不是公开操作入口。
-- [dev/lib](dev/lib/) 共享开发自动化实现；[ops/lib](ops/lib/) 与 [ops/agent_catalog.py](ops/agent_catalog.py) 共享数据库维护实现。同目录的 `cases`、`ui`、`fixtures`、`lib` 属于实现细节，不把它们单独承诺为用户命令。
+- [dev/lib](dev/lib/) 共享开发自动化实现；[ops/lib](ops/lib/) 共享数据库维护实现。同目录的 `cases`、`ui`、`fixtures`、`lib` 属于实现细节，不把它们单独承诺为用户命令。
 - 新增入口时维护这里的用途、前置条件与副作用；参数细节放入口帮助和对应操作文档，不在索引重复源码流程。

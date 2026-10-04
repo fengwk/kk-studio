@@ -31,17 +31,18 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
 1. `docker compose config --quiet` 校验默认与 `--profile app` 配置；
 2. 无确认提示地销毁同名隔离栈及其 PostgreSQL/MinIO volumes，从空数据启动；
 3. 用显式 `docker build` 构建当前应用 Dockerfile（不委托 Compose 构建），更新本机同名镜像 tag；
-4. 启动依赖并等待 healthcheck；
-5. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的 `ffmpeg` / `ffprobe`；
-6. 执行 PostgreSQL `SELECT 1`，检查 MinIO bucket 与 HTTP mock（health、确定性 OpenAI SSE）；
-7. 无论成功或失败，都执行 `down --volumes --remove-orphans`，失败时先输出 compose 诊断。
+4. `docker compose build minio-init` 构建共享 MinIO client 镜像；
+5. 启动依赖并等待 healthcheck；
+6. 在应用 runtime image 中确认非 root `kkstudio` 用户以及 Canvas Resource 使用的 `ffmpeg` / `ffprobe`；
+7. 执行 PostgreSQL `SELECT 1`，检查 MinIO bucket 与 HTTP mock（health、确定性 OpenAI SSE）；
+8. 无论成功或失败，都执行 `down --volumes --remove-orphans`，失败时先输出 compose 诊断。
 
 两种执行模式都会在开始和退出时删除 `kk-studio-canvas-test` project 的数据卷，
 不能用于保留中的开发数据，更不能把生产凭据或健康的共享 PG/S3 接入该栈。
 默认应用镜像 tag 为 `kk-studio-app:canvas-test`；同名旧镜像 tag 会被本次构建更新。
 脚本只接受 `--with-app` 与 `-h` / `--help`，其它参数报错退出。
 
-`--with-app` 在步骤 6 之后用仓库内极小 PNG/MP4 fixture 检查应用契约：
+`--with-app` 在步骤 7 之后用仓库内极小 PNG/MP4 fixture 检查应用契约：
 
 - 全局 Blob `reserve -> checksummed create-only PUT -> complete`，验证首次写入成功、不同内容的
   重复写入被 MinIO 拒绝、original 字节不变、URL DTO 不暴露 bucket/key；
@@ -61,6 +62,8 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
 它定义要检查的范围，不是某次执行的通过记录；检查失败即非零退出并输出诊断。
 
 ## 手动使用
+
+以下命令均在仓库根目录执行。
 
 ```bash
 # 仅启动常驻依赖，再单独运行一次性 bucket 初始化
@@ -92,7 +95,7 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 | 可选 app | `http://127.0.0.1:18088` |
 
 宿主端口可分别用 `CANVAS_TEST_PG_PORT`、`CANVAS_TEST_MINIO_PORT`、`CANVAS_TEST_MOCK_PORT`、
-`CANVAS_TEST_APP_PORT` 覆盖；容器内端口固定。应用以 `dev,canvas-test` profile 启动，
+`CANVAS_TEST_APP_PORT` 覆盖，应用镜像 tag 用 `CANVAS_TEST_APP_IMAGE` 覆盖；容器内端口固定。应用以 `dev,canvas-test` profile 启动，
 `KK_STUDIO_STORAGE_S3_*` 指向容器内 `minio:9000`，public endpoint 指向
 `http://127.0.0.1:19000`，媒体进程使用容器内 `ffprobe`/`ffmpeg`，临时目录 `/tmp`。
 Compose 卷键为 `minio-data` 与 `postgres-data`；默认 Docker 卷名为

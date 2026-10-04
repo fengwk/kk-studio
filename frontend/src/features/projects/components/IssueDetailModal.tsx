@@ -349,7 +349,7 @@ export function IssueDetailModal({
   // 草稿修改检测：输入变更时旧 unknown 不能丢，修改 draft 时换用全新 requestKey 防同 key 换 payload
   const handleActivityBodyChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setActivityBody(value)
@@ -361,7 +361,7 @@ export function IssueDetailModal({
 
   const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的活动发布请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setActivityKind(kind)
@@ -373,7 +373,7 @@ export function IssueDetailModal({
 
   const handleBlockReasonChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'BLOCK') {
-      setActionError('存在未确认结果的阻塞请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的阻塞请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setBlockReason(value)
@@ -385,7 +385,7 @@ export function IssueDetailModal({
 
   const handleVerificationInputChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESOLVE_UNKNOWN') {
-      setActionError('存在未确认结果的人工核查请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的人工核查请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setVerificationInput(value)
@@ -397,7 +397,7 @@ export function IssueDetailModal({
 
   const handleStopDetailChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'STOP') {
-      setActionError('存在未确认结果的终止请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的终止请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setStopDetail(value)
@@ -409,7 +409,7 @@ export function IssueDetailModal({
 
   const handleBudgetStateChange = (value: string) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setResetBudgetState(value)
@@ -421,7 +421,7 @@ export function IssueDetailModal({
 
   const handleBudgetMaxRunsChange = (value: number) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先精确重试或明确放弃。')
+      setActionError('存在未确认结果的预算重置请求，不能直接修改输入。请先重试原操作或明确放弃。')
       return
     }
     setResetBudgetMaxRuns(value)
@@ -497,7 +497,7 @@ export function IssueDetailModal({
   ) => {
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的写操作记录，禁止新请求；请先处理或放弃')
+      setActionError('当前存在未确认结果或损坏的操作记录，暂不能继续；请先处理或放弃')
       return
     }
 
@@ -515,7 +515,7 @@ export function IssueDetailModal({
     try {
       storePendingAction(issue.id, pending)
     } catch (err) {
-      setActionError(`操作无法持久化侧车，已安全拦截: ${err instanceof Error ? err.message : String(err)}`)
+      setActionError(`无法保存操作记录，未发送请求: ${err instanceof Error ? err.message : String(err)}`)
       return
     }
 
@@ -559,7 +559,7 @@ export function IssueDetailModal({
     e.preventDefault()
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的写操作记录，禁止修改 Spec；请先处理或放弃')
+      setActionError('当前存在未确认结果或损坏的操作记录，暂不能修改需求；请先处理或放弃')
       return
     }
     const trimmedTitle = draftTitle.trim()
@@ -879,7 +879,7 @@ export function IssueDetailModal({
   const handleDeleteIssue = async () => {
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的写操作记录，禁止删除 Issue；请先处理或放弃')
+      setActionError('当前存在未确认结果或损坏的操作记录，暂不能删除 Issue；请先处理或放弃')
       return
     }
     isActionPendingRef.current = true
@@ -903,7 +903,7 @@ export function IssueDetailModal({
     const file = e.target.files?.[0]
     if (!file || !issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError('当前存在未确认结果或损坏的写操作记录，禁止上传证据')
+      setActionError('当前存在未确认结果或损坏的操作记录，暂不能上传证据')
       return
     }
     try {
@@ -979,7 +979,7 @@ export function IssueDetailModal({
             {isUnknown && (
               <span className="badge badge-unknown" title="待人工核查外部副作用">
                 <ShieldAlert size={12} aria-hidden="true" />
-                UNKNOWN 门禁
+                UNKNOWN
               </span>
             )}
             {issue?.pauseReason === 'USER' && (
@@ -1124,7 +1124,7 @@ export function IssueDetailModal({
             }}
           >
             <AlertTriangle size={16} color="#ef4444" aria-hidden="true" />
-            <span>本地存储异常，为防止写操作状态失步已锁定当前 Issue: {storageLoadError}</span>
+            <span>本地存储异常，已锁定该 Issue 的写操作: {storageLoadError}</span>
           </div>
         )}
 
@@ -1148,7 +1148,7 @@ export function IssueDetailModal({
               <strong style={{ color: '#eab308' }}>检测到损坏的本地未决操作记录（可能包含未确认副作用）</strong>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-              解析错误: {corruptActionInfo.error}。为防止直接覆盖外部在途操作已安全锁定写操作。
+              解析错误: {corruptActionInfo.error}。为避免覆盖外部在途操作，写操作已锁定。
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
               <button
@@ -1184,7 +1184,7 @@ export function IssueDetailModal({
               <strong style={{ color: '#eab308' }}>检测到未确认结果的写操作（可能已在服务端生效）</strong>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-              操作类型: <code>{pendingUnknownAction.kind}</code> | 冻结请求键: <code>{pendingUnknownAction.requestKey}</code> | 基准版本: <code>{pendingUnknownAction.expectedVersion}</code>
+              操作类型: <code>{pendingUnknownAction.kind}</code> | 请求标识: <code>{pendingUnknownAction.requestKey}</code> | 基准版本: <code>{pendingUnknownAction.expectedVersion}</code>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
               <button
@@ -1194,7 +1194,7 @@ export function IssueDetailModal({
                 disabled={isActionPending}
                 style={{ fontSize: '12px', padding: '4px 12px' }}
               >
-                {isActionPending ? '重试中...' : '精确重试未决操作'}
+                {isActionPending ? '重试中...' : '重试原操作'}
               </button>
               {!isDiscardConfirmOpen ? (
                 <button
@@ -1645,7 +1645,7 @@ export function IssueDetailModal({
                               </strong>
                             </div>
                             <div>
-                              <span>高水位序号:</span>
+                              <span>额度从此序号后起算:</span>
                               <code>#{b.budgetAfterOrdinal}</code>
                             </div>
                           </div>
@@ -1660,7 +1660,7 @@ export function IssueDetailModal({
               {activeTab === 'agentThreads' && (
                 <div className="tab-pane">
                   {(detail.agentThreads ?? []).length === 0 ? (
-                    <div className="empty-tip">当前 Issue 尚未绑定任何 Agent 线程（将在首次 Run 接受时创建）</div>
+                    <div className="empty-tip">暂无 Agent Thread</div>
                   ) : (
                     <div className="thread-list">
                       {(detail.agentThreads ?? []).map((t) => (
@@ -1789,7 +1789,7 @@ export function IssueDetailModal({
               <div className="modal-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <ShieldAlert size={16} className="text-danger" aria-hidden="true" />
-                  <h3>解除 UNKNOWN 门禁（人工核查）</h3>
+                  <h3>解除 UNKNOWN（人工核查）</h3>
                 </div>
                 <button type="button" className="modal-close-button" onClick={() => setIsResolveUnknownOpen(false)}>
                   <X size={16} aria-hidden="true" />
@@ -1798,7 +1798,7 @@ export function IssueDetailModal({
               <form onSubmit={handleResolveUnknownSubmit}>
                 <div className="modal-body">
                   <p style={{ fontSize: '13px', color: 'var(--fg-dim)', margin: '0 0 12px 0' }}>
-                    * 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除暂停门禁。
+                    * 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除 UNKNOWN 暂停。
                   </p>
                   <div className="form-group">
                     <label className="form-label required">核查结论与说明</label>
@@ -1821,7 +1821,7 @@ export function IssueDetailModal({
                     className="btn-primary"
                     disabled={isWriteBlocked}
                   >
-                    {isActionPending ? '解除中...' : '确认解除门禁'}
+                    {isActionPending ? '解除中...' : '确认解除 UNKNOWN'}
                   </button>
                 </div>
               </form>
@@ -1934,7 +1934,7 @@ export function IssueDetailModal({
               </div>
               <div className="modal-body">
                 <p style={{ margin: 0, color: 'var(--fg)' }}>
-                  确定要彻底删除该 Issue 吗？此操作将清理对应的全部 Work、Activity、Evidence、Run 及关联会话，无法恢复。
+                  确定要彻底删除该 Issue 吗？此操作将清理该 Issue 的执行记录、活动、证据和关联会话，无法恢复。
                 </p>
               </div>
               <div className="modal-footer">

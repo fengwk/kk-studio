@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,6 +33,12 @@ import java.util.Map;
     assignableTypes = {StudioProjectController.class, StudioIssueController.class})
 public class StudioProjectErrorAdvice {
 
+  private final StudioMessageService messageService;
+
+  public StudioProjectErrorAdvice(StudioMessageService messageService) {
+    this.messageService = messageService;
+  }
+
   @ExceptionHandler(ProjectVersionConflictException.class)
   public ResponseEntity<Result<Void>> handleVersionConflict(ProjectVersionConflictException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
@@ -41,7 +48,9 @@ public class StudioProjectErrorAdvice {
     return build(
         HttpStatus.CONFLICT,
         "PROJECT_VERSION_CONFLICT",
-        "Version conflict for " + error.resource(),
+        messageService.message(
+            "studio.error.project.version_conflict.message",
+            Map.of("resource", messageService.resourceDisplayName(error.resource()))),
         ctx);
   }
 
@@ -58,7 +67,10 @@ public class StudioProjectErrorAdvice {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Issue runtime conflict occurred");
     return build(
-        HttpStatus.CONFLICT, "PROJECT_RUNTIME_CONFLICT", "Issue runtime conflict occurred", ctx);
+        HttpStatus.CONFLICT,
+        "PROJECT_RUNTIME_CONFLICT",
+        messageService.message("studio.error.project.runtime_conflict.message", Map.of()),
+        ctx);
   }
 
   @ExceptionHandler(ProjectNotFoundException.class)
@@ -68,7 +80,9 @@ public class StudioProjectErrorAdvice {
     return build(
         HttpStatus.NOT_FOUND,
         "PROJECT_RESOURCE_NOT_FOUND",
-        "Resource not found: " + error.resource(),
+        messageService.message(
+            "studio.error.project.resource_not_found.message",
+            Map.of("resource", messageService.resourceDisplayName(error.resource()))),
         ctx);
   }
 
@@ -77,14 +91,21 @@ public class StudioProjectErrorAdvice {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Issue runtime resource not found");
     return build(
-        HttpStatus.NOT_FOUND, "PROJECT_RUNTIME_NOT_FOUND", "Issue runtime resource not found", ctx);
+        HttpStatus.NOT_FOUND,
+        "PROJECT_RUNTIME_NOT_FOUND",
+        messageService.message("studio.error.project.runtime_not_found.message", Map.of()),
+        ctx);
   }
 
   @ExceptionHandler({ProjectValidationException.class, IllegalArgumentException.class})
   public ResponseEntity<Result<Void>> handleValidation(RuntimeException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", error.getMessage());
-    return build(HttpStatus.BAD_REQUEST, "PROJECT_VALIDATION_ERROR", error.getMessage(), ctx);
+    return build(
+        HttpStatus.BAD_REQUEST,
+        "PROJECT_VALIDATION_ERROR",
+        messageService.httpMessage(HttpStatus.BAD_REQUEST.getStatus()),
+        ctx);
   }
 
   @ExceptionHandler(IllegalStateException.class)
@@ -94,7 +115,7 @@ public class StudioProjectErrorAdvice {
     return build(
         HttpStatus.INTERNAL_SERVER_ERROR,
         "PROJECT_INTERNAL_ERROR",
-        "Project operation failed",
+        messageService.message("studio.error.project.internal_error.message", Map.of()),
         ctx);
   }
 
@@ -103,7 +124,10 @@ public class StudioProjectErrorAdvice {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Request validation failed");
     return build(
-        HttpStatus.BAD_REQUEST, "PROJECT_VALIDATION_ERROR", "Request validation failed", ctx);
+        HttpStatus.BAD_REQUEST,
+        "PROJECT_VALIDATION_ERROR",
+        messageService.httpMessage(HttpStatus.BAD_REQUEST.getStatus()),
+        ctx);
   }
 
   private ResponseEntity<Result<Void>> build(

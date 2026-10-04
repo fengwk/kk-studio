@@ -286,7 +286,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     })
 
     expect(startSpy).toHaveBeenCalledTimes(0)
-    expect(setToast).toHaveBeenCalledWith('本地运行状态持久化失败，无法发起生成')
+    expect(setToast).toHaveBeenCalledWith('无法保存运行记录，未启动生成')
     setItemSpy.mockRestore()
   })
 

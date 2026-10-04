@@ -24,8 +24,8 @@
 1. 校验幂等性：同一 `idempotencyKey` 已存在且 `requestHash` 一致时直接返回记录的接受回执（`Accepted(CanvasPatch.receipt(acceptedRevision))`），指纹不一致时抛 `CanvasConflictException(IDEMPOTENCY_CONFLICT)`；
 2. 加载权威快照并调用 `CanvasCommandPlanner.plan` 规划；
 3. 若存在冲突则整体返回 `Conflicted(conflicts)`，不产生任何写入；
-4. 若无冲突且产生变化，按规划步骤依次执行 `CanvasMutation`，推进 `revision` 并写入 `CommandDedup`；
-5. 返回带完整实体变化的 `Accepted(patch)`。
+4. 若无冲突，按规划步骤依次执行 `CanvasMutation` 并推进 `revision`（无变化时不推进），无论是否产生变化都写入 `CommandDedup`；
+5. 返回 `Accepted(patch)`，产生变化时携带完整实体变化。
 
 删除画布先锁 Document：不存在时直接返回；存在 `READY`、`RUNNING` 或 `UNKNOWN` Run 时整体拒绝，不释放资源。通过后依次释放 pin（[`CanvasResourceLifecycle.releaseCanvasPins`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceLifecycle.java)）、删除终态 Run、删除 Resource 行并释放全局 Blob 引用（[`CanvasResourceLifecycle.deleteCanvasResources`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceLifecycle.java)）、删除 Node、Group、CommandDedup，最后删除 Document。Blob 引用释放失败会使整个删除事务回滚。
 
@@ -117,6 +117,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - 通知是可丢的提示。丢通知、listener 重连、进程重启都由 poll 加 lease 过期恢复；`findSnapshot` 的一致性由「读取窗口前后重读并全值比较 document 与 run 列表」保证。
 - 成功必须满足「输出计划的每个槽位都已物化、类型与冻结槽位一致、顺序等于计划顺序」，不满足时拒绝 success 而不是写入半成品输出。
 - 通过入口校验的同一槽位重复物化返回既有 Resource 行，不新增行、不重复 pin；当前宿主文本物化器先校验非 null 与最多 1,048,576 个 Java 字符，再查幂等结果。部分物化后崩溃（`RUNNING + SUBMITTED`）的 Run 由 lease 过期恢复后只补齐，不重新提交外部任务。
+
 ## 从哪里改
 
 - 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 mapper 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。

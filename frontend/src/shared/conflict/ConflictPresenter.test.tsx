@@ -16,7 +16,7 @@ describe('ConflictPresenter', () => {
       <ConflictPresenter conflict={conflict} onRefresh={vi.fn()} onClose={vi.fn()} />,
     )
 
-    expect(screen.getByRole('alertdialog', { name: '持久状态已变化' }))
+    expect(screen.getByRole('alertdialog', { name: '数据已发生变化' }))
       .toHaveTextContent('STALE_COMMAND_CURSOR')
   })
 
@@ -35,7 +35,7 @@ describe('ConflictPresenter', () => {
     )
 
     const dialog = screen.getByRole('alertdialog')
-    expect(dialog).toHaveTextContent('持久状态已变化')
+    expect(dialog).toHaveTextContent('数据已发生变化')
     expect(dialog).toHaveTextContent('expected=0 actual=1')
     await user.click(screen.getByRole('button', { name: '刷新' }))
     expect(onRefresh).toHaveBeenCalledTimes(1)

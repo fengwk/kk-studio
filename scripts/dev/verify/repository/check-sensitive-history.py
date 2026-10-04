@@ -1419,11 +1419,26 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Audit the full Git history and working tree for sensitive data (redacted)."
     )
-    parser.add_argument("--root", type=Path, default=BASE.REPOSITORY_ROOT)
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=BASE.REPOSITORY_ROOT,
+        help="repository root (defaults to the root containing this script)",
+    )
     parser.add_argument("--json", type=Path, help="write the redacted JSON report here")
     parser.add_argument("--markdown", type=Path, help="write the redacted markdown report here")
-    parser.add_argument("--max-blob-bytes", type=int, default=DEFAULT_MAX_BLOB_BYTES)
-    parser.add_argument("--string-limit", type=int, default=DEFAULT_STRING_LIMIT)
+    parser.add_argument(
+        "--max-blob-bytes",
+        type=int,
+        default=DEFAULT_MAX_BLOB_BYTES,
+        help="skip scanning blobs larger than this size",
+    )
+    parser.add_argument(
+        "--string-limit",
+        type=int,
+        default=DEFAULT_STRING_LIMIT,
+        help="maximum extracted string content per blob to scan",
+    )
     parser.add_argument("--no-worktree", action="store_true", help="skip the current-tree scan")
     parser.add_argument("--fetch", action="store_true", help="refresh origin heads/tags first")
     parser.add_argument(

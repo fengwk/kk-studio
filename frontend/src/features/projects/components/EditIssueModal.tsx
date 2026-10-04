@@ -204,7 +204,7 @@ export function EditIssueModal({
             </div>
 
             <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
-              <span>当前状态: <code>{issue.state}</code> · 期望版本: <code>{expectedVersion}</code></span>
+              <span>当前状态: <code>{issue.state}</code> · 编辑版本: <code>{expectedVersion}</code></span>
             </div>
           </div>
 

@@ -144,7 +144,8 @@ kkstudio:/resources/<blobId>
 
 本地相对路径要求显式绝对 `workdir`；本地读取要求绑定 Environment。Platform URI
 要求省略非空 `workdir`。Resource 读取从执行 Thread 解析 Session，再校验该 Session 的
-Blob 引用；未授权访问拒绝。网络获取使用独立网络工具的地址、响应预算和凭据约束。
+Blob 引用；未授权访问拒绝。`read` 不执行网络获取；网络访问由各自具备该能力的工具
+按自己的地址、响应预算与凭据约束承担。
 路径与读取契约见 [内置工具设计](modules/builtin-tools-design.md)。
 
 Skill 身份为 `(packageName, name)`。Package 保存仓库、branch、人工确认的
@@ -285,7 +286,7 @@ Thread version 与 Canvas revision 事件带 cursor；Model delta、Tool partial
 终态从数据库读取。Canvas 展示由确认快照、待确认操作和本地草稿组成，回读保留未保存
 输入。合并与恢复见 [Frontend](modules/frontend.md)，通道见 [Web](modules/web.md)。
 
-Thread Debug 区分 `NEXT REQUEST PREVIEW` 与 `FROZEN_INVOCATION`：前者按当前
+Thread Debug 区分 `NEXT_REQUEST_PREVIEW` 与 `FROZEN_INVOCATION`：前者按当前
 Branch 重新规划，后者从冻结的 ModelRequestSpec 和 EntryPath 物化实际请求。
 Debug 展示工具声明、Skill 路径与执行事件，并对凭据和私有存储地址做保密处理。
 

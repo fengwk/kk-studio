@@ -22,7 +22,7 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(2)
-    expect(lines[0].textContent).toBe('none env')
+    expect(lines[0].textContent).toBe('未选择环境')
     expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
@@ -125,11 +125,11 @@ describe('ThreadStatusFooter', () => {
     )
     const lines = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(2)
-    expect(lines[0].textContent).toBe('none env · ctx 0/128k')
+    expect(lines[0].textContent).toBe('未选择环境 · ctx 0/128k')
     expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
     expect(lines[0]).toHaveAttribute(
       'title',
-      'none env · 最新模型调用已知上下文输入估计：0 / 128000 tokens（非待发请求精确值）',
+      '未选择环境 · 最新模型调用已知上下文输入估计：0 / 128000 tokens（非待发请求精确值）',
     )
     expect(lines[1]).toHaveAttribute(
       'title',

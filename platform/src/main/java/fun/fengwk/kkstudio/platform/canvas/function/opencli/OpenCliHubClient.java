@@ -614,7 +614,7 @@ public class OpenCliHubClient {
 
   private void requireEnabled() {
     if (!settings.enabled()) {
-      throw new OpenCliHubException("OpenCLI Hub integration is disabled by SystemSettings");
+      throw new OpenCliHubException("OpenCLI Hub integration is disabled");
     }
   }
 

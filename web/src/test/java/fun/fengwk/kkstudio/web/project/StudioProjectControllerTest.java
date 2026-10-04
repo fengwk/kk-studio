@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
 import java.util.List;
@@ -64,7 +65,7 @@ class StudioProjectControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProjectErrorAdvice())
+            .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
   }

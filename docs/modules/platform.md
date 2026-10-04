@@ -33,6 +33,7 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [plugin](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin) | 安装目录、安全管理面、凭据加密与资源端口 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与启动期全局代理装配 |
+| [configsync](../../platform/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 七类配置的 YAML 读写、依赖闭包与原子导入 |
 
 ## Catalog
 
@@ -40,7 +41,7 @@ Provider 与 Agent 以不可变 `name` 寻址；Model 以 `(providerName, name)`
 变更携带 `expectedVersion`。Model 重命名在同一事务内插入新行、更新 Agent 引用、删除旧行，
 任何 CAS 或引用校验失败整体回滚。删除前校验入边，数据库外键提供并发兜底。
 
-Provider credential 只在显式写入口接收，常规响应给出安全投影。运行时类型取自
+Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
 `openai`、`openai_response`、`anthropic`、`google`，按精确 wire value 解析。
 Model 配置保存 limit、abilities、variants、pricing 和 default variant。
@@ -233,6 +234,21 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 拒绝非法 header，此路径无客户端可关闭的流，只返回不回显 header 原值的安全错误。
 
 ## 配置
+
+### 配置同步
+
+`ConfigSyncService` 提供条目清单、选择导出和 YAML 导入。清单不含配置值；
+导出在单一只读数据库快照中沿依赖边补齐选择，循环 Subagent 去重，不做反向扩展。
+YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider 凭据、Environment 注册令牌和 MCP headers。
+运行态、数据库身份、版本和时间戳不进入文件。
+
+导入按名称新增或更新，不删除文件外配置。未知或不支持内容明确报告，依赖不满足的条目整体跳过；
+结构、类型和有效值错误拒绝导入。Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
+可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
+系统设置按提供字段合并，并以准备时版本 CAS，避免覆盖并发变更；提交后沿现有通知刷新快照。
+产品操作、恢复范围与保密要求见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
+
+### 在线设置与启动配置
 
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
 integrations、storageMedia、advanced 七个 section。strict codec 与 record 校验完整聚合，
