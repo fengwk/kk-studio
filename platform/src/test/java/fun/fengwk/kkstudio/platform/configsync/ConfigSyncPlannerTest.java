@@ -31,23 +31,24 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.util.List;
 import java.util.Optional;
 
 /**
- * 测试意图：锁定 Planner 的外部准备与依赖判定——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
- * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过），Skill 名称先校验且 Git 错误不回显 URL，Skill re-import 只在 URL
- * 不变且不丢被引用技能时进行，Agent 未满足依赖逐条给出明确原因，settings 合并后缺依赖 skip / 非法字段拒绝。
+ * 测试意图：锁定 Planner 的依赖判定与外部准备——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
+ * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过）、Skill re-import 只在 URL 不变且不丢被引用技能时进行、Git 错误不回显 URL、 Agent
+ * 未满足依赖逐条给出明确原因、settings 缺依赖 skip。条目级静态校验（含 Skill 名称）已移入 Parser；这里用真实校验器 fixture 触发。
  */
 class ConfigSyncPlannerTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
-  private final ConfigSyncParser parser = new ConfigSyncParser(yaml);
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
   private final SkillGitCache skillGitCache = mock(SkillGitCache.class);
@@ -59,12 +60,10 @@ class ConfigSyncPlannerTest {
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
-          yaml,
           mcpDiscovery,
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          new SystemSettingsCodec(),
           toolCatalog);
 
   private ConfigSyncSnapshot emptySnapshot() {
@@ -251,7 +250,7 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void existingSkillPackageRepositoryUrlChangeIsSkipped() {
+  void existingSkillPackageRepositoryUrlChangeIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -272,17 +271,14 @@ class ConfigSyncPlannerTest {
             + "    currentCommit: "
             + "a".repeat(40)
             + "\n";
-    ConfigSyncPlan plan = plan(yamlText);
+    AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
 
-    assertEquals(
-        "repositoryUrl is immutable for an existing package",
-        reason(plan.skipped(), "skillPackages", "pkg"));
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertFalse(error.getMessage().contains("other.git"));
     verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
   }
 
   @Test
-  void existingSkillPackageLosingReferencedSkillIsSkipped() {
+  void existingSkillPackageLosingReferencedSkillIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -306,10 +302,7 @@ class ConfigSyncPlannerTest {
             + "    currentCommit: "
             + "a".repeat(40)
             + "\n";
-    ConfigSyncPlan plan = plan(yamlText);
-
-    assertTrue(reason(plan.skipped(), "skillPackages", "pkg").contains("s2"));
-    assertTrue(plan.skillPackages().isEmpty());
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -367,10 +360,6 @@ class ConfigSyncPlannerTest {
         "agents:\n"
             + agent("missing_model", "q/x", agentConfigLines())
             + agent(
-                "invalid_skill",
-                "p/m",
-                "      tools: []\n      skills:\n        - null\n      subagents: []\n")
-            + agent(
                 "missing_pkg",
                 "p/m",
                 "      tools: []\n      skills:\n        - packageName: ghost\n          name: s\n      subagents: []\n")
@@ -388,11 +377,26 @@ class ConfigSyncPlannerTest {
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "missing_model"));
-    assertEquals("invalid skill reference", reason(plan.skipped(), "agents", "invalid_skill"));
     assertEquals("missing skill package: ghost", reason(plan.skipped(), "agents", "missing_pkg"));
     assertEquals("missing skill: pkg/nope", reason(plan.skipped(), "agents", "missing_skill"));
     assertEquals("missing subagent: ghost", reason(plan.skipped(), "agents", "missing_sub"));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
+  }
+
+  /** 嵌套 config 内 null skill 引用是结构错误，必须在计划阶段硬拒绝而不是当作依赖 skip。 */
+  @Test
+  void invalidSkillReferenceIsRejected() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "agents:\n"
+            + agent(
+                "a",
+                "p/m",
+                "      tools: []\n      skills:\n        - null\n      subagents: []\n");
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -516,7 +520,8 @@ class ConfigSyncPlannerTest {
                 ConfigSyncFixtures.settings(5L)));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan = plan("settings:\n  tool:\n    defaultYolo: false\n");
+    ConfigSyncPlan plan =
+        plan(ConfigSyncFixtures.settingsYaml(ConfigSyncFixtures.defaultSettings()));
 
     assertNotNull(plan.settings());
     assertEquals("5", plan.settings().expectedVersion());
@@ -528,14 +533,14 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan =
-        plan(
-            "settings:\n"
-                + "  aiRuntime:\n"
-                + "    compactionFallbackModel:\n"
-                + "      providerName: p\n"
-                + "      modelName: m\n"
-                + "      variant: v\n");
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    HarnessModelSelectionDTO fallback = new HarnessModelSelectionDTO();
+    fallback.setProviderName("p");
+    fallback.setModelName("m");
+    fallback.setVariant("v");
+    sections.getAiRuntime().setCompactionFallbackModel(fallback);
+
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
 
     assertNull(plan.settings());
     assertEquals("missing fallback model: p/m", reason(plan.skipped(), "settings", "settings"));
@@ -546,8 +551,10 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan =
-        plan("settings:\n  integrations:\n    minimaxH3:\n      promptAgentName: ghost\n");
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    sections.getIntegrations().getMinimaxH3().setPromptAgentName("ghost");
+
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
 
     assertNull(plan.settings());
     assertEquals("missing prompt agent: ghost", reason(plan.skipped(), "settings", "settings"));
@@ -558,12 +565,14 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    String yamlText = "settings:\n  aiRuntime:\n    retryBackoffStrategy: BOGUS\n";
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    sections.getAiRuntime().setRetryBackoffStrategy("BOGUS");
+    String yamlText = ConfigSyncFixtures.settingsYaml(sections);
     assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
-  void referencedMcpToolRemovalSkipsServer() {
+  void referencedMcpToolRemovalIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -580,10 +589,7 @@ class ConfigSyncPlannerTest {
 
     String yamlText =
         "mcpServers:\n" + "  - name: mcp\n" + "    url: https://mcp.example.com/mcp\n";
-    ConfigSyncPlan plan = plan(yamlText);
-
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MCP_SERVERS, "mcp")));
-    assertTrue(skipped(plan.skipped(), "mcpServers", "mcp"));
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test

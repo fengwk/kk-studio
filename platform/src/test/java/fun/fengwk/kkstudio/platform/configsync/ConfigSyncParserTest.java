@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,12 +15,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 测试意图：锁定 Parser 的条目级决策——不支持协议与未知字段 skip、嵌套 config 未知字段整体 skip、settings 未知叶剔除并保留受支持字段、 重复名（含被 skip
- * 条目）硬错、present-but-null 与 absent 区分。
+ * 测试意图：锁定 Parser 的条目级决策——不支持协议 skip、未知字段/嵌套 config 未知字段在通过 known 校验后才整体 skip、已知非法值或缺必填即使伴随未知字段
+ * 也硬错、settings 完整七节校验且未知叶剔除并保留受支持 section、重复名（含被 skip 条目）硬错、present-but-null 与 absent 区分。
  */
 class ConfigSyncParserTest {
 
-  private final ConfigSyncParser parser = new ConfigSyncParser(new ConfigSyncYaml());
+  private final ConfigSyncYaml yaml = new ConfigSyncYaml();
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
 
   private static final String VALID_MODEL_CONFIG =
       ConfigSyncFixtures.resourceYaml("model-config-block.yaml");
@@ -115,19 +115,16 @@ class ConfigSyncParserTest {
   }
 
   @Test
-  void settingsUnknownLeafIsPrunedAndReportedWhileSupportedFieldsRemain() {
-    String yaml =
-        "settings:\n"
-            + "  tool:\n"
-            + "    defaultYolo: true\n"
-            + "    bogus: 1\n"
-            + "  unknownSection:\n"
-            + "    x: 1\n";
-    ConfigSyncParser.ParsedDocument document = parser.parse(yaml);
+  void settingsUnknownLeafIsPrunedAndReportedWhileSupportedSectionsRemain() {
+    Map<String, Object> settings =
+        (Map<String, Object>) yaml.toMap(ConfigSyncFixtures.defaultSettings(), "settings");
+    ((Map<String, Object>) settings.get("tool")).put("bogus", 1);
+    settings.put("unknownSection", Map.of("x", 1));
+    String yamlText = yaml.dump(Map.of("settings", settings));
+    ConfigSyncParser.ParsedDocument document = parser.parse(yamlText);
 
     assertNotNull(document.settings());
-    assertTrue(document.settings().containsKey("tool"));
-    assertFalse(document.settings().containsKey("unknownSection"));
+    assertNotNull(document.settings().getTool());
     List<ConfigSyncSkipped> settingsSkips =
         document.skipped().stream().filter(skip -> "settings".equals(skip.getKind())).toList();
     assertEquals(2, settingsSkips.size());
@@ -283,6 +280,46 @@ class ConfigSyncParserTest {
     assertTrue(mcp.mcpServers().isEmpty());
   }
 
+  /** 未知嵌套 config 字段不能掩盖当前必填字段缺失：只有 obsolete、缺 limit/abilities/pricing/variants 必须硬拒绝。 */
+  @Test
+  void unknownNestedConfigWithMissingMandatoryFieldsIsRejected() {
+    String yaml =
+        "providers:\n"
+            + provider("p", "openai")
+            + "models:\n"
+            + "  - providerName: p\n"
+            + "    name: m\n"
+            + "    modelId: gpt\n"
+            + "    config:\n"
+            + "      obsolete: 1\n";
+    assertThrows(AiValidationException.class, () -> parser.parse(yaml));
+  }
+
+  /** 未知条目字段不能掩盖 known 非法值/缺必填：环境空 token、MCP 非法 url、model 空 modelId 都必须硬拒绝。 */
+  @Test
+  void unknownEntryFieldWithKnownInvalidValueIsRejected() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "environments:\n  - name: env\n    registrationToken: ''\n    bogus: 1\n"));
+    assertThrows(
+        AiValidationException.class,
+        () -> parser.parse("mcpServers:\n  - name: mcp\n    url: not-a-url\n    bogus: 1\n"));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            parser.parse(
+                "providers:\n"
+                    + provider("p", "openai")
+                    + "models:\n"
+                    + "  - providerName: p\n"
+                    + "    name: m\n"
+                    + "    modelId: ''\n"
+                    + "    config: {}\n"
+                    + "    bogus: 1\n"));
+  }
+
   @Test
   void agentModelRefWithoutSeparatorIsAHardError() {
     assertThrows(
@@ -358,9 +395,10 @@ class ConfigSyncParserTest {
                 + "    headers:\n"
                 + "      Authorization: Bearer t\n"
                 + "      X-Null: null\n");
-    Map<String, String> headers = document.mcpServers().get(0).headers();
+    Map<String, String> headers = document.mcpServers().get(0).config().headers();
     assertEquals("Bearer t", headers.get("Authorization"));
-    assertNull(headers.get("X-Null"));
+    // null header 值在规范化阶段归一化为空串。
+    assertEquals("", headers.get("X-Null"));
 
     assertThrows(
         AiValidationException.class,

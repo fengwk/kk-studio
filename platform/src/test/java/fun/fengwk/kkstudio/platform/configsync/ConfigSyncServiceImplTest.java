@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +25,8 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportResultDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncInventoryDTO;
@@ -49,7 +52,7 @@ class ConfigSyncServiceImplTest {
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
           yaml);
-  private final ConfigSyncParser parser = new ConfigSyncParser(yaml);
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
 
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncApplier applier = mock(ConfigSyncApplier.class);
@@ -62,12 +65,10 @@ class ConfigSyncServiceImplTest {
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
-          yaml,
           mcpDiscovery,
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          new SystemSettingsCodec(),
           toolCatalog);
 
   private final ConfigSyncServiceImpl service =
@@ -82,6 +83,10 @@ class ConfigSyncServiceImplTest {
         List.of(),
         List.of(),
         List.of());
+  }
+
+  private ConfigSyncSnapshot emptySnapshot() {
+    return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
   }
 
   private static ConfigSyncItem item(
@@ -156,6 +161,55 @@ class ConfigSyncServiceImplTest {
 
     assertThrows(AiValidationException.class, () -> service.importYaml(request));
     assertThrows(AiValidationException.class, () -> service.importYaml(null));
+  }
+
+  @Test
+  void checkImportClassifiesCreatedWithoutWriting() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    ConfigSyncImportCheckRequestDTO request = new ConfigSyncImportCheckRequestDTO();
+    request.setYaml(ConfigSyncFixtures.providerAndModelYaml());
+
+    ConfigSyncImportCheckDTO check = service.checkImport(request);
+
+    assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
+    assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(check.getUpdated().isEmpty());
+    assertTrue(check.getSkipped().isEmpty());
+    verify(applier, never()).apply(any());
+  }
+
+  @Test
+  void checkImportClassifiesExistingAsUpdatedWithoutWriting() {
+    when(snapshotReader.read()).thenReturn(richSnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    ConfigSyncImportCheckRequestDTO request = new ConfigSyncImportCheckRequestDTO();
+    request.setYaml(ConfigSyncFixtures.providerAndModelYaml());
+
+    ConfigSyncImportCheckDTO check = service.checkImport(request);
+
+    assertTrue(check.getCreated().isEmpty());
+    assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
+    assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    verify(applier, never()).apply(any());
+  }
+
+  @Test
+  void importWithSkippedEntriesRequiresExplicitPartialConfirmation() {
+    when(snapshotReader.read()).thenReturn(richSnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
+    request.setYaml("unknownThing: []\n");
+
+    assertThrows(AiValidationException.class, () -> service.importYaml(request));
+    verify(applier, never()).apply(any());
+
+    request.setAllowPartial(true);
+    ConfigSyncImportResultDTO result = service.importYaml(request);
+
+    assertTrue(result.getImported().isEmpty());
+    assertEquals(1, result.getSkipped().size());
+    verify(applier, never()).apply(any());
   }
 
   @Test

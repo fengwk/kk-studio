@@ -51,7 +51,7 @@ import java.util.UUID;
  *
  * <p>真实隔离 PostgreSQL（{@link ConfigSyncTestSupport} 的进程级 disposable 容器）、真实 JGit 本地 {@code file://}
  * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/{@code ${VAR}} 原值、exact commit 恢复、同名
- * upsert、部分 settings、skip、事务回滚与 {@code no-store}。
+ * upsert、完整七节 settings 校验、显式 {@code allowPartial} 部分导入、预检查零写入、skip、事务回滚与 {@code no-store}。
  */
 class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
@@ -183,6 +183,195 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     // 清理本用例新建资源，避免污染同库后续断言。
     deleteOk(
         "/api/harness/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
+    deleteOk(
+        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+  }
+
+  // ---------------------------------------------------------------- import precheck
+
+  /** 预检查零写入并按快照分类 create/update，响应绝不包含凭据、token 或配置值。 */
+  @Test
+  void checkEndpointClassifiesWithoutWritingAndNeverReturnsValues() throws Exception {
+    String suffix = unique();
+    String existing = "ck_existing_" + suffix;
+    String created = "ck_created_" + suffix;
+    createProvider(existing, "existing provider");
+    String existingYaml =
+        postData("/api/settings/sync/export", exportRequest(providerRef(existing)))
+            .path("yaml")
+            .asText();
+
+    MvcResult existingResult = checkRequest(existingYaml);
+    JsonNode existingCheck = data(existingResult);
+    assertTrue(existingCheck.path("created").isEmpty());
+    assertTrue(existingCheck.path("updated").findValuesAsText("name").contains(existing));
+    String existingBody = body(existingResult);
+    assertFalse(
+        existingBody.contains("sk-configsync-" + existing), "check must not echo credential");
+    assertFalse(existingBody.contains("credential"));
+    assertFalse(existingBody.contains("registrationToken"));
+
+    String newYaml = "providers:\n  - name: " + created + "\n    providerType: openai\n";
+    JsonNode newCheck = checkData(newYaml);
+    assertTrue(newCheck.path("created").findValuesAsText("name").contains(created));
+    assertTrue(newCheck.path("updated").isEmpty());
+    assertNull(findProvider(created), "check must not write");
+
+    deleteOk(
+        "/api/ai/catalog/providers/" + existing, findProvider(existing).path("version").asText());
+  }
+
+  /** 预检查与执行都严格拒绝未知请求字段与错误字段类型。 */
+  @Test
+  void checkEndpointEnforcesStrictRequestShape() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/settings/sync/import/check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yaml\":\"providers: []\\n\",\"extra\":1}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
+    mockMvc
+        .perform(
+            post("/api/settings/sync/import/check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yaml\":123}"))
+        .andExpect(status().isBadRequest());
+    // allowPartial 只属于执行请求，检查请求不接受。
+    mockMvc
+        .perform(
+            post("/api/settings/sync/import/check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yaml\":\"providers: []\\n\",\"allowPartial\":true}"))
+        .andExpect(status().isBadRequest());
+    // 执行请求的 allowPartial 必须是布尔，不接受字符串。
+    mockMvc
+        .perform(
+            post("/api/settings/sync/import")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yaml\":\"providers: []\\n\",\"allowPartial\":\"yes\"}"))
+        .andExpect(status().isBadRequest());
+  }
+
+  /** 预检查对缺 section、空对象、非法嵌套值都与执行一致地硬拒绝，且不回显值。 */
+  @Test
+  void checkEndpointRejectsIncompleteSettingsAndInvalidValues() throws Exception {
+    checkRejected("settings:\n  aiRuntime:\n    retryBaseDelayMillis: 1\n");
+    checkRejected("settings: {}\n");
+
+    String full = exportedSettingsYaml();
+    String missingNetwork = mutateYaml(full, document -> settingsMap(document).remove("network"));
+    checkRejected(missingNetwork);
+
+    String badValue =
+        mutateYaml(
+            full,
+            document ->
+                settingsSection(document, "aiRuntime").put("retryBackoffStrategy", "BOGUS"));
+    MvcResult badValueResult = checkRejected(badValue);
+    assertFalse(body(badValueResult).contains("BOGUS"), "error must not echo the raw value");
+
+    String badPermission =
+        mutateYaml(
+            full,
+            document ->
+                settingsSection(document, "tool").put("permission", Map.of("Bad Key!", List.of())));
+    checkRejected(badPermission);
+  }
+
+  /** 预检查拒绝 Environment token 冲突且零写入。 */
+  @Test
+  void checkEndpointRejectsEnvironmentTokenConflict() throws Exception {
+    JsonNode envDto =
+        createEnvironment("ck_env_existing_" + UUID.randomUUID().toString().substring(0, 8));
+    String token = envDto.path("registrationToken").asText();
+    String name = "ck_env_new_" + unique();
+    String yaml = "environments:\n  - name: " + name + "\n    registrationToken: " + token + "\n";
+
+    MvcResult result = checkRejected(yaml);
+    assertFalse(body(result).contains(token), "check error must not echo the token");
+    assertNull(findEnvironment(name), "rejected check must not write");
+  }
+
+  /** 部分导入必须显式授权；执行阶段重跑同一校验，不信任已完成的预检查。 */
+  @Test
+  void partialImportDefaultsToFalseAndExecuteRechecks() throws Exception {
+    String suffix = unique();
+    String provider = "pf_provider_" + suffix;
+    String yaml =
+        "providers:\n  - name: " + provider + "\n    providerType: openai\nunknownThing: []\n";
+
+    JsonNode check = checkData(yaml);
+    assertTrue(check.path("skipped").findValuesAsText("kind").contains("unknownThing"));
+    assertTrue(check.path("created").findValuesAsText("name").contains(provider));
+    assertNull(findProvider(provider), "check must not write");
+
+    // 客户端已看到 skip 也不能省略授权：执行重跑并拒绝。
+    importRejected(yaml);
+    assertNull(findProvider(provider), "rejected partial import must not write");
+
+    JsonNode imported = importYaml(yaml, true);
+    assertTrue(imported.path("imported").findValuesAsText("name").contains(provider));
+    assertTrue(imported.path("skipped").findValuesAsText("kind").contains("unknownThing"));
+    assertNotNull(findProvider(provider));
+
+    deleteOk(
+        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+  }
+
+  /**
+   * 未知字段不能绕过当前契约：未知 nested config + 缺必填、未知条目字段 + known 非法值，在 check 与 {@code allowPartial=true}
+   * 执行都必须硬拒绝且零写入；只有「known 完整」的条目本身才可能因未知字段被 skip，其余条目在显式 partial 下正常导入。
+   */
+  @Test
+  void unknownFieldsDoNotBypassKnownValidation() throws Exception {
+    String suffix = unique();
+
+    // 未知 nested config 字段 + 缺当前必填（config 只有 obsolete，缺 limit/abilities/pricing/variants）。
+    String nestedMissingProvider = "uvn_provider_" + suffix;
+    String nestedMissing =
+        "providers:\n  - name: "
+            + nestedMissingProvider
+            + "\n    providerType: openai\n"
+            + "models:\n  - providerName: "
+            + nestedMissingProvider
+            + "\n    name: m\n"
+            + "    modelId: gpt\n    config:\n      obsolete: 1\n";
+    checkRejected(nestedMissing);
+    importRejected(nestedMissing, true);
+    assertNull(findProvider(nestedMissingProvider), "rejected import must not write provider");
+
+    // 未知条目字段 + known 非法值：Environment 空 registrationToken 必须硬拒绝，而不是被未知字段掩盖后 skip。
+    String envName = "uv_env_" + suffix;
+    String invalidEnv =
+        "environments:\n  - name: " + envName + "\n    registrationToken: ''\n    bogus: 1\n";
+    checkRejected(invalidEnv);
+    importRejected(invalidEnv, true);
+    assertNull(findEnvironment(envName), "rejected import must not write environment");
+
+    // known 完整条目 + 另一条未知条目字段：只有未知条目本身作为 skip，其余条目在显式 partial 下正常导入。
+    String provider = "uv_ok_provider_" + suffix;
+    String unknownProvider = "uv_skip_provider_" + suffix;
+    String mixed =
+        "providers:\n  - name: "
+            + provider
+            + "\n    providerType: openai\n"
+            + "  - name: "
+            + unknownProvider
+            + "\n    providerType: openai\n    bogus: 1\n";
+    JsonNode check = checkData(mixed);
+    assertTrue(check.path("created").findValuesAsText("name").contains(provider));
+    assertTrue(check.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertNull(findProvider(provider), "check must not write");
+    assertNull(findProvider(unknownProvider), "check must not write");
+    importRejected(mixed);
+    assertNull(findProvider(provider), "partial import without confirmation must not write");
+    JsonNode imported = importYaml(mixed, true);
+    assertTrue(imported.path("imported").findValuesAsText("name").contains(provider));
+    assertTrue(imported.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertNull(
+        findProvider(unknownProvider),
+        "entry carrying an unknown field must be skipped, not imported");
     deleteOk(
         "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
   }
@@ -539,14 +728,22 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       throws Exception {
     String name = "settings_cas_" + unique();
     JsonNode before = getData("/api/settings");
+    String settingsYaml = exportedSettingsYaml();
+    String planned =
+        mutateYaml(
+            settingsYaml,
+            document -> settingsSection(document, "aiRuntime").put("retryBaseDelayMillis", 9999L));
     ConfigSyncPlan plan =
         planner.plan(
             parser.parse(
-                "providers:\n  - name: "
-                    + name
-                    + "\n    providerType: openai\nsettings:\n  aiRuntime:\n    retryBaseDelayMillis: 9999\n"));
+                "providers:\n  - name: " + name + "\n    providerType: openai\n" + planned));
+
+    // 计划后并发写入另一份完整 settings，推进版本；旧计划的 CAS 必须失败并整体回滚。
     boolean concurrentYolo = !before.path("tool").path("defaultYolo").asBoolean();
-    importYaml("settings:\n  tool:\n    defaultYolo: " + concurrentYolo + "\n");
+    importYaml(
+        mutateYaml(
+            settingsYaml,
+            document -> settingsSection(document, "tool").put("defaultYolo", concurrentYolo)));
     JsonNode concurrent = getData("/api/settings");
 
     assertThrows(SystemSettingsVersionConflictException.class, () -> applier.apply(plan));
@@ -556,86 +753,80 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         concurrent, getData("/api/settings"), "concurrent values and version must remain intact");
   }
 
-  /** 部分 settings 只合入给出字段、不重置省略字段；未知 section 必须只报告该 section 而不整体丢弃。 */
+  /** settings 必须完整七节：完整导入生效，未知字段剔除并报告，局部 patch 与空对象硬拒绝。 */
   @Test
-  void partialSettingsMergeAndUnknownSectionIsReported() throws Exception {
+  void fullSettingsImportAndUnknownSectionIsReported() throws Exception {
+    String settingsYaml = exportedSettingsYaml();
     JsonNode before = getData("/api/settings");
-    String originalDelay = before.path("aiRuntime").path("retryBaseDelayMillis").asText();
     int originalRetries = before.path("aiRuntime").path("retryMaxRetries").asInt();
 
-    String partial = "settings:\n  aiRuntime:\n    retryBaseDelayMillis: 9999\n";
-    JsonNode imported = importYaml(partial);
+    String changed =
+        mutateYaml(
+            settingsYaml,
+            document -> settingsSection(document, "aiRuntime").put("retryBaseDelayMillis", 9999L));
+    JsonNode imported = importYaml(changed);
     assertTrue(
         imported.path("imported").findValuesAsText("name").contains("settings"),
-        "partial settings must be imported");
+        "full settings must be imported");
     JsonNode after = getData("/api/settings");
     assertEquals("9999", after.path("aiRuntime").path("retryBaseDelayMillis").asText());
     assertEquals(
         originalRetries,
         after.path("aiRuntime").path("retryMaxRetries").asInt(),
-        "omitted field must not reset");
+        "the full snapshot carries unchanged sections as-is");
 
-    // 未知 section 与可支持 section 并存：可支持字段仍应合入，未知 section 只作为 skip 报告。
+    // 完整七节 + 未知 section：可支持 section 仍生效，未知 section 只作为 settings skip 报告。
     String mixed =
-        "settings:\n  aiRuntime:\n    retryBaseDelayMillis: 8888\n  unknownSection:\n    x: 1\n";
-    JsonNode mixedResult = importYaml(mixed);
+        mutateYaml(
+            changed, document -> settingsMap(document).put("unknownSection", Map.of("x", 1)));
+    JsonNode mixedResult = importYaml(mixed, true);
     assertTrue(
         mixedResult.path("skipped").findValuesAsText("kind").contains("settings"),
         "unknown settings section must be reported");
-    JsonNode mixedAfter = getData("/api/settings");
     assertEquals(
-        "8888",
-        mixedAfter.path("aiRuntime").path("retryBaseDelayMillis").asText(),
-        "supported settings section must still merge when another section is unknown");
+        "9999",
+        getData("/api/settings").path("aiRuntime").path("retryBaseDelayMillis").asText(),
+        "supported settings sections must apply when another section is unknown");
 
-    // 空 settings 对象是合法的 no-op 合并。
-    JsonNode emptyResult = importYaml("settings: {}\n");
-    assertEquals(0, emptyResult.path("imported").size(), "no-op does not report an applied item");
-    assertEquals(0, emptyResult.path("skipped").size());
+    // 局部 settings 与空对象都不满足完整七节契约：硬拒绝且不改变现值或版本。
+    JsonNode held = getData("/api/settings");
+    importRejected("settings:\n  aiRuntime:\n    retryBaseDelayMillis: 8888\n");
+    importRejected("settings: {}\n");
     assertEquals(
-        mixedAfter, getData("/api/settings"), "no-op must not alter values or CAS version");
-
-    // 恢复原值，避免影响后续断言（本类每个测试重建 schema，此处仍显式恢复）。
-    importYaml("settings:\n  aiRuntime:\n    retryBaseDelayMillis: " + originalDelay + "\n");
+        held, getData("/api/settings"), "rejected settings must not alter values or version");
   }
 
-  /** 网络配置参与真实 YAML 往返，其他设置的部分导入不得重置已有代理。 */
+  /** 完整 settings 参与真实 YAML 往返；仅含 network 的局部 settings 必须硬拒绝。 */
   @Test
-  void networkSettingsRoundtripAndPartialImportsPreserveOtherSections() throws Exception {
+  void networkSettingsRoundtripAndPartialImportsAreRejected() throws Exception {
     JsonNode before = getData("/api/settings");
-    String original =
-        postData("/api/settings/sync/export", exportRequest(ref("settings", "settings")))
-            .path("yaml")
-            .asText();
+    String original = exportedSettingsYaml();
+    String configured =
+        mutateYaml(
+            original,
+            document -> {
+              settingsSection(document, "network").put("proxyUrl", "http://127.0.0.1:9");
+              settingsSection(document, "network").put("noProxyHosts", "localhost,127.0.0.1");
+            });
     try {
-      JsonNode imported =
-          importYaml(
-              "settings:\n  network:\n    proxyUrl: http://127.0.0.1:9\n"
-                  + "    noProxyHosts: localhost,127.0.0.1\n");
+      JsonNode imported = importYaml(configured);
       assertEquals(0, imported.path("skipped").size());
-      JsonNode configured = getData("/api/settings");
-      assertEquals("http://127.0.0.1:9", configured.path("network").path("proxyUrl").asText());
-      assertEquals("localhost,127.0.0.1", configured.path("network").path("noProxyHosts").asText());
-      assertEquals(before.path("aiRuntime"), configured.path("aiRuntime"));
-      assertEquals(before.path("tool"), configured.path("tool"));
+      JsonNode current = getData("/api/settings");
+      assertEquals("http://127.0.0.1:9", current.path("network").path("proxyUrl").asText());
+      assertEquals("localhost,127.0.0.1", current.path("network").path("noProxyHosts").asText());
+      assertEquals(before.path("aiRuntime"), current.path("aiRuntime"));
+      assertEquals(before.path("tool"), current.path("tool"));
 
-      String exported =
-          postData("/api/settings/sync/export", exportRequest(ref("settings", "settings")))
-              .path("yaml")
-              .asText();
-      importYaml("settings:\n  network:\n    proxyUrl: null\n    noProxyHosts: ''\n");
+      // 导出完整快照后再导入：network 恢复为导出的值。
+      String exported = exportedSettingsYaml();
+      importYaml(original);
       assertTrue(getData("/api/settings").path("network").path("proxyUrl").isMissingNode());
       importYaml(exported);
-      assertEquals(configured.path("network"), getData("/api/settings").path("network"));
-
-      importYaml(
-          "settings:\n  tool:\n    defaultYolo: "
-              + !configured.path("tool").path("defaultYolo").asBoolean()
-              + "\n");
-      assertEquals(configured.path("network"), getData("/api/settings").path("network"));
+      assertEquals(current.path("network"), getData("/api/settings").path("network"));
     } finally {
       importYaml(original);
     }
+    importRejected("settings:\n  network:\n    proxyUrl: http://127.0.0.1:9\n");
   }
 
   // ---------------------------------------------------------------- malformed / errors
@@ -674,7 +865,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "settings:\n  integrations:\n    openCliHub:\n      enabled: ''\n", secret);
 
     // 未知顶层类别是条目级 skip，而不是整份文档错误。
-    JsonNode unknownCategory = importYaml("unknownThing: []\n");
+    JsonNode unknownCategory = importYaml("unknownThing: []\n", true);
     assertTrue(
         unknownCategory.path("skipped").findValuesAsText("kind").contains("unknownThing"),
         "unknown top-level category must be reported as skip");
@@ -702,16 +893,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(body(result).contains(secret));
   }
 
-  // ---------------------------------------------------------------- rollback
+  // ---------------------------------------------------------------- precheck hard conflicts
 
-  /** 依赖写入后晚到的 DB token 冲突必须整体回滚，且系统设置快照保持不变。 */
+  /** Environment token 与其他身份冲突属硬错误：预检查阶段拒绝，绝不产生任何写入，也不回显 token。 */
   @Test
-  void environmentTokenCollisionRollsBackWholeImportAndLeavesSettings() throws Exception {
+  void environmentTokenCollisionIsRejectedBeforeAnyWrite() throws Exception {
     JsonNode envDto =
         createEnvironment("rb_env_existing_" + UUID.randomUUID().toString().substring(0, 8));
     String collidingToken = envDto.path("registrationToken").asText();
-    String originalDelay =
-        getData("/api/settings").path("aiRuntime").path("retryBaseDelayMillis").asText();
+    JsonNode settingsBefore = getData("/api/settings");
 
     String yaml =
         "providers:\n"
@@ -723,24 +913,37 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "  - name: rb_env_new\n"
             + "    registrationToken: "
             + collidingToken
+            + "\n";
+
+    MvcResult result = importRejected(yaml);
+    assertFalse(body(result).contains(collidingToken), "error must not echo the token");
+    assertNull(findProvider("rb_provider"), "rejected file must not write earlier entries");
+    assertNull(findEnvironment("rb_env_new"), "rejected environment must not be created");
+    assertEquals(settingsBefore, getData("/api/settings"), "settings must not change");
+  }
+
+  /** 同一文件内不同身份共用 registrationToken 同样是硬错误。 */
+  @Test
+  void duplicateEnvironmentTokenWithinFileIsRejected() throws Exception {
+    String suffix = unique();
+    String token = "shared-token-" + suffix;
+    String yaml =
+        "environments:\n"
+            + "  - name: dup_a_"
+            + suffix
+            + "\n    registrationToken: "
+            + token
             + "\n"
-            + "settings:\n"
-            + "  aiRuntime:\n"
-            + "    retryBaseDelayMillis: 7777\n";
+            + "  - name: dup_b_"
+            + suffix
+            + "\n    registrationToken: "
+            + token
+            + "\n";
 
-    mockMvc
-        .perform(
-            post("/api/settings/sync/import")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
-        .andExpect(status().is4xxClientError())
-        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"));
-
-    assertNull(findProvider("rb_provider"), "earlier provider write must be rolled back");
-    assertEquals(
-        originalDelay,
-        getData("/api/settings").path("aiRuntime").path("retryBaseDelayMillis").asText(),
-        "system settings snapshot must not change when import rolls back");
+    MvcResult result = importRejected(yaml);
+    assertFalse(body(result).contains(token), "error must not echo the token");
+    assertNull(findEnvironment("dup_a_" + suffix));
+    assertNull(findEnvironment("dup_b_" + suffix));
   }
 
   // ---------------------------------------------------------------- skip semantics
@@ -771,7 +974,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "      tools: [totally_unknown_tool]\n"
             + "      skills: []\n"
             + "      subagents: []\n";
-    JsonNode result = importYaml(yaml);
+    JsonNode result = importYaml(yaml, true);
     assertTrue(
         result.path("skipped").findValuesAsText("name").contains(bad),
         "agent with unsupported tool must be skipped: " + result);
@@ -787,7 +990,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "  - name: unsupported_provider\n"
             + "    providerType: not_a_real_protocol\n"
             + "    credential: c\n";
-    JsonNode result = importYaml(yaml);
+    JsonNode result = importYaml(yaml, true);
     assertTrue(
         result.path("skipped").findValuesAsText("name").contains("unsupported_provider"),
         "unsupported provider protocol must be reported as skip, got: " + result);
@@ -812,7 +1015,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + url
             + "\n"
             + "    enabled: true\n";
-    JsonNode result = importYaml(yaml);
+    JsonNode result = importYaml(yaml, true);
     assertTrue(
         result.path("skipped").findValuesAsText("name").contains("broken_mcp"),
         "MCP discovery failure must be reported as skip, got: " + result);
@@ -953,6 +1156,64 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private JsonNode importYaml(String yaml) throws Exception {
     return postData("/api/settings/sync/import", Map.of("yaml", yaml));
+  }
+
+  private JsonNode importYaml(String yaml, boolean allowPartial) throws Exception {
+    return postData(
+        "/api/settings/sync/import", Map.of("yaml", yaml, "allowPartial", allowPartial));
+  }
+
+  private MvcResult checkRequest(String yaml) throws Exception {
+    return mockMvc
+        .perform(
+            post("/api/settings/sync/import/check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andReturn();
+  }
+
+  private JsonNode checkData(String yaml) throws Exception {
+    return data(checkRequest(yaml));
+  }
+
+  private MvcResult checkRejected(String yaml) throws Exception {
+    return mockMvc
+        .perform(
+            post("/api/settings/sync/import/check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
+        .andExpect(status().isBadRequest())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andReturn();
+  }
+
+  private MvcResult importRejected(String yaml) throws Exception {
+    return importRejected(yaml, false);
+  }
+
+  private MvcResult importRejected(String yaml, boolean allowPartial) throws Exception {
+    return mockMvc
+        .perform(
+            post("/api/settings/sync/import")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("yaml", yaml, "allowPartial", allowPartial))))
+        .andExpect(status().isBadRequest())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andReturn();
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> settingsMap(Map<String, Object> document) {
+    return (Map<String, Object>) document.get("settings");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> settingsSection(Map<String, Object> document, String section) {
+    return (Map<String, Object>) settingsMap(document).get(section);
   }
 
   private String getEnvironmentToken(String id) throws Exception {
