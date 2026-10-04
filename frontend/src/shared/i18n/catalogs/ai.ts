@@ -2596,8 +2596,8 @@ export const aiCatalog = {
     'zh-CN': "启用 LSP servers",
   },
   'ai.environment.install.lspHelp': {
-    'en-US': 'Example (Java + Mason): {"jdtls": {"command": ["~/.local/share/nvim/mason/bin/jdtls"], "extensions": [".java"], "rootMarkers": ["pom.xml"]} }. "command" and "extensions" are required; extensions must start with a dot. Install language servers yourself, Studio does not install them.',
-    'zh-CN': '示例（Java + Mason）：{"jdtls": {"command": ["~/.local/share/nvim/mason/bin/jdtls"], "extensions": [".java"], "rootMarkers": ["pom.xml"]} }。command 与 extensions 必填，extensions 需以 . 开头；语言服务器需自行安装，Studio 不代装。',
+    'en-US': 'Only command, extensions, rootMarkers and firstMatchMarkers are supported. command and extensions are required; extensions must start with a dot. Install language servers yourself; Studio does not install them.',
+    'zh-CN': '只支持 command、extensions、rootMarkers 和 firstMatchMarkers。command 与 extensions 必填，extensions 需以 . 开头。语言服务器需自行安装，Studio 不代装。',
   },
   'ai.environment.install.saveCopy': {
     'en-US': "Save and copy installation command",

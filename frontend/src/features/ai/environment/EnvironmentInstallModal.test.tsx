@@ -6,6 +6,7 @@ import { EnvironmentInstallModal } from './EnvironmentInstallModal'
 import { environmentService } from '@/shared/api/environment-service'
 import { copyTextToClipboard } from './clipboard'
 import { ApiError } from '@/shared/api/client'
+import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/environment-service', () => ({
@@ -62,7 +63,7 @@ describe('EnvironmentInstallModal', () => {
     const user = userEvent.setup()
     const { queryClient } = open()
     await waitFor(() => expect(origin()).toHaveValue(saved.daemon.studioUrl))
-    expect(screen.getByRole('combobox')).toHaveValue('windows')
+    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'windows')
     expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
     await user.click(screen.getByText(/可选：Java/))
     expect(screen.getByRole('textbox', { name: 'Java home (JDK 21)' })).toHaveValue('C:\\Java\\21')
@@ -75,6 +76,8 @@ describe('EnvironmentInstallModal', () => {
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
     await user.click(copyButton())
     expect(await screen.findByText(/配置已保存，命令已复制/)).toBeInTheDocument()
+    expect(screen.getByRole('status').closest('[role="dialog"]')).toBeNull()
+    expect(within(screen.getByRole('dialog')).queryByRole('status')).toBeNull()
     expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', savedNormalized)
     expect(environmentService.getRegistrationToken).toHaveBeenCalledWith('env-1')
     expect(vi.mocked(environmentService.saveInstallConfig).mock.invocationCallOrder[0])
@@ -91,7 +94,7 @@ describe('EnvironmentInstallModal', () => {
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     expect(origin()).toHaveValue(window.location.origin)
-    expect(screen.getByRole('combobox')).toHaveValue('linux')
+    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'linux')
   })
 
   it('preserves draft after save failure with no credential request or copy', async () => {
@@ -166,7 +169,7 @@ describe('EnvironmentInstallModal', () => {
       installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://new.example.com' } } })
     open()
     await waitFor(() => expect(origin()).toHaveValue('https://new.example.com'))
-    expect(screen.getByRole('combobox')).toHaveValue('macos')
+    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
   })
 
   it.each(['metadata', 'save', 'token', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
@@ -184,7 +187,11 @@ describe('EnvironmentInstallModal', () => {
       await waitFor(() => expect(copyButton()).toBeEnabled())
       await user.click(copyButton())
       if (phase === 'token') await waitFor(() => expect(environmentService.getRegistrationToken).toHaveBeenCalled())
-      if (phase === 'clipboard') await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
+      if (phase === 'clipboard') {
+        await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
+        // 剪贴板尚未确认时，不能抢先宣布复制成功。
+        expect(screen.queryByText(/配置已保存，命令已复制/)).toBeNull()
+      }
     }
     view.unmount()
     await act(async () => {
@@ -275,7 +282,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Studio 地址无效/))
     await user.clear(origin()); await user.type(origin(), 'https://valid.example.com/')
-    await user.selectOptions(screen.getByRole('combobox'), 'linux')
+    await chooseSelectOption(user, '操作系统', 'Linux')
     const java = screen.getByRole('textbox', { name: 'Java home (JDK 21)' })
     fireEvent.change(java, { target: { value: '/opt/${JAVA_HOME}' } })
     await user.click(copyButton())
@@ -320,14 +327,14 @@ describe('EnvironmentInstallModal', () => {
     const user = userEvent.setup()
     open({ uninstall: true, environment: { ...card, version: '1',
       installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://saved.example.com' } } } })
-    expect(screen.getByRole('combobox')).toHaveValue('macos')
+    expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
     // 卸载作用域是当前 OS 用户唯一 Daemon，不一定是本卡片环境，且只移除服务与程序。
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('当前系统用户 HOME/.kk-studio 下唯一 Daemon')
     expect(dialog).toHaveTextContent('不一定是此卡片对应的环境')
     expect(dialog).toHaveTextContent('保留本地配置、Token、数据和日志')
     expect(dialog).toHaveTextContent('不删除任何 Studio 环境记录')
-    await user.selectOptions(screen.getByRole('combobox'), 'windows')
+    await chooseSelectOption(user, '操作系统', 'Windows')
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByText(/卸载命令已复制/)).toBeInTheDocument()
     expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain('-File $installer uninstall')

@@ -6444,14 +6444,14 @@ select.settings-input option {
   padding: 0 8px;
 }
 
-.ui-select.chat-layout-selector.is-compact .ui-select-menu {
+.ui-select-menu.chat-layout-selector.is-compact {
   width: 80px;
   min-width: 80px;
   max-width: 80px;
-  max-height: min(290px, calc(100dvh - 48px));
+  max-height: min(290px, calc(100dvh - 48px), var(--ui-select-available-height));
 }
 
-.ui-select.chat-layout-selector.is-compact .ui-select-option {
+.ui-select-menu.chat-layout-selector.is-compact .ui-select-option {
   min-height: 28px;
   padding: 0 8px;
 }
@@ -7894,16 +7894,14 @@ select.settings-input option {
 }
 
 .ui-select-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 70;
+  /* portal 到 body，用视口坐标固定定位，避免被滚动/裁剪容器截断。 */
+  position: fixed;
+  z-index: 130;
   display: grid;
   gap: 2px;
   width: max-content;
-  min-width: 100%;
   max-width: min(360px, calc(100vw - 24px));
-  max-height: min(280px, calc(100dvh - 48px));
+  max-height: min(280px, calc(100dvh - 48px), var(--ui-select-available-height, 280px));
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -7914,10 +7912,8 @@ select.settings-input option {
   box-shadow: var(--shadow-md);
 }
 
-.ui-select.is-compact .ui-select-menu {
-  left: auto;
-  right: 0;
-  min-width: max(100%, 148px);
+.ui-select-menu.is-compact {
+  min-width: max(var(--ui-select-trigger-width), 148px);
 }
 
 .ui-select-option {
@@ -7944,7 +7940,7 @@ select.settings-input option {
   white-space: nowrap;
 }
 
-.ui-select.is-compact .ui-select-option {
+.ui-select-menu.is-compact .ui-select-option {
   font-size: 12px;
 }
 
@@ -8131,6 +8127,102 @@ select.settings-input option {
   color: var(--fg);
 }
 
+/* Shared toast：portal 到 body，滚动容器与 overlay 都无法裁剪它。 */
+.ui-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--overlay-surface-strong);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-md);
+  animation: ui-toast-in 0.18s ease-out;
+}
+
+.ui-toast-success {
+  border-color: var(--green-border);
+}
+
+.ui-toast-success .ui-toast-icon {
+  color: var(--green-primary);
+}
+
+.ui-toast-error {
+  border-color: var(--danger-border);
+}
+
+.ui-toast-error .ui-toast-icon {
+  color: var(--danger);
+}
+
+.ui-toast-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.ui-toast-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ui-toast-dismiss:hover {
+  color: var(--fg);
+  background: var(--stage-dot);
+}
+
+.ui-toast-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast {
+    animation: none;
+  }
+}
+
 .topnav .locale-selector {
   display: none;
 }
@@ -8159,13 +8251,13 @@ select.settings-input option {
     font-size: 14px;
   }
 
-  .topnav .locale-selector .ui-select-menu {
-    right: 0;
-    left: 0;
+  .ui-select-menu.locale-selector {
+    width: var(--ui-select-trigger-width);
+    min-width: var(--ui-select-trigger-width);
     max-width: none;
   }
 
-  .topnav .locale-selector .ui-select-option {
+  .ui-select-menu.locale-selector .ui-select-option {
     min-height: 38px;
     padding: 0 12px;
     font-size: 14px;
