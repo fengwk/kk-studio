@@ -153,7 +153,11 @@ elif tool == "systemctl":
     if mode == "unavailable":
         fail()
     if "show" in args:
-        print(env.get("FAKE_FRAGMENT_PATH", ""))
+        if mode == "resolved-fragment":
+            service = Path(env["HOME"]) / ".config/systemd/user/kk-studio-daemon.service"
+            print(service.resolve() if service.exists() else "")
+        else:
+            print(env.get("FAKE_FRAGMENT_PATH", ""))
     elif "is-active" in args:
         if mode == "inactive":
             sys.exit(3)
