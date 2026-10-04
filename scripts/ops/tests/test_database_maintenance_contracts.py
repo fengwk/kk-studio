@@ -1,12 +1,12 @@
 """Permanent shell and library contracts of the database reset maintenance script.
 
-Product settings are exported and imported by the product's own settings sync, so the only
-remaining database maintenance step replaces a target database with a completely empty one. Two
+Product settings are exported and imported by the product's own settings sync. Database maintenance
+replaces a target with an empty database or explicitly cleans up its frozen snapshots. Two
 properties must never regress and cannot be proven by an integration test alone:
 
 * the reset entrypoint and its private library stay strict, non-interactive, libpq-only and free
   of any container or application coupling;
-* the destructive flow keeps an explicit confirmation, a full backup and a reversible freeze.
+* reset keeps an explicit confirmation, a full backup and a reversible freeze.
 
 The real-server behaviour of the same script is covered by ``test_reset_database_integration.py``.
 """
