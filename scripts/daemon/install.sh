@@ -1,755 +1,310 @@
 #!/usr/bin/env bash
-# scripts/daemon/install.sh — 从官方 GitHub Release 安装/升级 Environment Daemon
-#
-# 单一职责：把发布的 shaded JAR 与一个由本脚本拥有的用户服务
-# 安装到当前用户，并提供状态查询与卸载。Linux 使用 `systemd --user`；macOS 使用
-# 当前用户 GUI 域的 LaunchAgent。显式 --from-source 才解析仓库并构建；不生成
-# `~/.local/bin` wrapper，也不写任何 daemon 环境变量文件：服务定义是配置的唯一载体，
-# 凭证只以 owner-only 文件路径出现在 `--registration-token-file`。
-#
-# 用法：
-#   scripts/daemon/install.sh install --gateway-uri <ws://...|wss://...> \
-#     (--registration-token <token> | --registration-token-file <absolute-path>) [options]
-#   scripts/daemon/install.sh upgrade
-#   scripts/daemon/install.sh status
-#   scripts/daemon/install.sh uninstall
-#   scripts/daemon/install.sh --help
-#
-# 前置条件：Linux + 可用的 `systemctl --user`，或 macOS + 可用的 `gui/$(id -u)`
-# LaunchAgent 域；JDK 21、curl 与 SHA256 工具。源码模式还需要 Maven。
-#
-# 安全边界：所有取值先校验再构建；未知/重复选项、控制字符、非 ws/wss scheme、相对路径
-# 与不合规 token 文件都在触碰任何安装路径之前失败。文件模式只校验元数据；直接 token
-# 通过 builtin printf 写入默认文件，不传给子进程。调用者 argv/历史及显式 bash -x 不在保密边界内。
-
+# Official-release-only, per-user installer. Bash 3.2 / GNU and BSD utilities.
+# JSON and token semantics belong exclusively to the downloaded JAR preflight.
 set -euo pipefail
+umask 077
 
-REPO_ROOT=
-BUILT_JAR=
-FROM_SOURCE=false
-RELEASE_TAG=
 RELEASE_BASE=https://github.com/fengwk/kk-studio/releases
-DOWNLOAD_DIR=
-
-# HOME 参与所有受管路径的推导：必须先证明它是绝对路径且不含控制字符，才允许它进入 unit。
-if [ -z "${HOME:-}" ]; then
-  echo "ERROR: HOME must be set to resolve the managed installation paths" >&2
-  exit 1
-fi
-case "$HOME" in
-  *[[:cntrl:]]*) echo "ERROR: HOME must not contain control characters" >&2; exit 1 ;;
-esac
-case "$HOME" in
-  /*) ;;
-  *) echo "ERROR: HOME must be an absolute path: $HOME" >&2; exit 1 ;;
-esac
-
 SERVICE_NAME=kk-studio-daemon.service
-# 单元标记同时是所有权凭证：卸载只删除带该标记的单元，缺失时一律拒绝。
 UNIT_MARKER='# Managed by scripts/daemon/install.sh'
-UNIT_DIR="$HOME/.config/systemd/user"
-UNIT_PATH="$UNIT_DIR/$SERVICE_NAME"
-INSTALL_ROOT="$HOME/.local/lib/kk-studio"
-INSTALLED_JAR="$INSTALL_ROOT/kk-studio-daemon.jar"
-
-# macOS 与 Linux 共用 JAR，但服务定义是当前用户的 LaunchAgent。标记必须是 XML 注释，
-# 并且紧跟 XML 声明，这样所有权检查不需要解析 plist 正文。
 LAUNCHD_LABEL=fun.fengwk.kkstudio.environment-daemon
 PLIST_MARKER='<!-- Managed by scripts/daemon/install.sh -->'
-PLIST_DIR="$HOME/Library/LaunchAgents"
-PLIST_PATH="$PLIST_DIR/$LAUNCHD_LABEL.plist"
-LAUNCHD_LOG_DIR="$HOME/Library/Logs/kk-studio"
-LAUNCHD_STDOUT_LOG="$LAUNCHD_LOG_DIR/environment-daemon.stdout.log"
-LAUNCHD_STDERR_LOG="$LAUNCHD_LOG_DIR/environment-daemon.stderr.log"
-HOST_OS=$(uname -s)
-LAUNCHD_DOMAIN=
-
-JOURNAL_TAIL_LINES=20
-# 重启后的验证窗口（秒）：先在这个窗口内等到 active，再要求服务连续保持 active 稳定窗口。
-# 0 表示不做等待/不要求稳定窗口，只做一次立即检查，供不等待的自动化使用。
+CONFIG_FILE=
+TOKEN_FILE=
+OPT_JAVA_HOME=
+SEEN_OPTIONS=
+DOWNLOAD_DIR=
+BACKUP_DIR=
+PUBLISHED=false
+TEMP_PATHS=()
 VERIFY_TIMEOUT_SECONDS=${DAEMON_VERIFY_TIMEOUT_SECONDS:-30}
 VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
 
-# 顶层选项取值；空字符串表示未给出。
-GATEWAY_URI=
-TOKEN_FILE=
-# 避免同名环境变量的 export 属性被脚本赋值继承。
-export -n INLINE_TOKEN
-INLINE_TOKEN=
-OPT_JAVA_HOME=
-DATA_DIR=
-NOTE=
-BASH_EXECUTABLE=
-LSP_CONFIG=
-SEEN_OPTIONS=
-
-TEMP_PATHS=()
-
 usage() {
   cat <<'EOF'
-Usage: bash install.sh [command] [options]
+Usage: bash install.sh install --config-file <absolute daemon.json> --token-file <absolute daemon.token> [--java-home <absolute JDK home>]
+       bash install.sh status | uninstall | help
 
-Install, upgrade, inspect or remove the kk-studio Environment Daemon as a
-per-user service from the official GitHub Release. Linux uses `systemd --user`;
-macOS uses a LaunchAgent in the current user's GUI domain.
+Install downloads the latest official GitHub release, validates private sibling
+inputs with that JAR, replaces program/config/token and restarts the user service.
+Requires JDK 21, an executable Bash, curl and a SHA256 tool.
+Java discovery: --java-home, JAVA_HOME_21, JAVA_HOME, PATH.
+Inputs must be named daemon.json and daemon.token in the same private directory.
+No interactive prompts. Unknown and duplicate options fail closed.
 
-Commands:
-  install    Default command. Download, install/update the managed JAR and service
-             definition, start it and verify the service stays running.
-  upgrade    Require an existing managed service, download the latest release and
-             replace only the JAR, then restart and verify. Configuration
-             already stored in the service is reused; no daemon configuration option is
-             accepted and nothing has to be repeated.
-  status     Print non-interactive service status and a short log tail.
-             Linux: exit 0 when the unit is active, 1 when not installed,
-             3 when installed but not active.
-             macOS: exit 0 when the LaunchAgent is loaded, 1 when not
-             installed, 3 when installed but not loaded. Loaded is not a
-             running-process check.
-  uninstall  Stop the service, remove only the managed service definition and
-             the installed JAR. The registration token file, the data directory
-             and macOS launchd logs are preserved.
-  --help     Print this help and exit. `install --help` prints it only when it
-             is the complete install argument list; other combinations fail.
+Fixed layout: ~/.kk-studio (0700), daemon.json and daemon.token (0600),
+lib/kk-studio-daemon.jar, logs/ (macOS), backups/ (private unique backups).
+Uninstall removes only the owned service and program; config/token/data remain.
+No automatic rollback: after publication failures, inspect status/logs and use
+the reported backup for manual recovery or retry install with corrected inputs.
 
-Install options:
-  --gateway-uri <uri>                 Environment server WebSocket
-                                      gateway; scheme must be ws or wss.
-  --registration-token <token>        Exactly one token option is required.
-                                      Write to $HOME/.config/kk-studio/daemon.token
-                                      atomically (0600); no whitespace allowed.
-                                      Visible in caller argv/shell history;
-                                      explicit bash -x can disclose it.
-  --registration-token-file <path>    Alternative. Absolute owner-only file that
-                                      holds the registration token. Its content
-                                      is never read or printed by this script.
-  --java-home <dir>                   Optional. Absolute JDK 21 home used for
-                                      verification and the unit. Default order:
-                                      JAVA_HOME_21, JAVA_HOME, then PATH.
-  --data-dir <path>                   Optional. Absolute daemon data directory
-                                      (default: $HOME/.kk-studio).
-  --note <text>                       Optional. Single-line trusted note, at
-                                      most 512 characters.
-  --bash-executable <value>           Optional. bash for process.exec
-                                      (default: the resolved bash path).
-  --lsp-config <path>                 Optional. Absolute path to a JSON file
-                                      declaring language servers. Omitted by
-                                      default, which disables LSP queries.
-
-Missing gateway/token are prompted via /dev/tty (token input is hidden).
-Without a terminal, pass --gateway-uri and one registration token option.
-
-Install/upgrade artifact options:
-  --version <vTAG>                    Pin an official release; default: latest.
-                                      Tag must match ^v[0-9A-Za-z._-]+$.
-  --from-source                      Build the local checkout with Maven instead
-                                      of downloading. Cannot combine with --version.
-
-Unknown or duplicated options fail closed. Values must not contain control
-characters; tokens, gateway values and notes never reach the Maven build.
-
-Environment:
-  DAEMON_VERIFY_TIMEOUT_SECONDS=30   Seconds to wait for the restarted service
-                                     to report active (0 = one immediate check).
-  DAEMON_VERIFY_STABLE_SECONDS=3     Seconds the service must then stay
-                                     continuously active (0 = one immediate
-                                     check). Both must be non-negative integers.
-
-Managed layout:
-  $HOME/.config/kk-studio/daemon.token              mode 0600 (inline token only)
-          newly created credential directories: mode 0700
-  $HOME/.local/lib/kk-studio/kk-studio-daemon.jar     mode 0644
-  Linux:  $HOME/.config/systemd/user/kk-studio-daemon.service mode 0644
-  macOS:  $HOME/Library/LaunchAgents/fun.fengwk.kkstudio.environment-daemon.plist
-          mode 0644
-          logs: $HOME/Library/Logs/kk-studio/environment-daemon.{stdout,stderr}.log
-
-No $HOME/.local/bin wrapper and no daemon environment/config file is created.
+Linux uses systemd --user; macOS uses the current user's GUI LaunchAgent.
+Status exits 0 when the unit is active / LaunchAgent is loaded, 1 if absent,
+3 if installed but inactive / not loaded. Loaded is not a running-process check.
+DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 control
+the startup and stability windows (non-negative integers; 0 checks immediately).
 EOF
 }
 
-fail() {
-  echo "ERROR: $*" >&2
-  exit 1
+fail() { echo "ERROR: $*" >&2; exit 1; }
+require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
+absolute_path() {
+  case "$1" in /*) ;; *) fail "$2 must be an absolute path" ;; esac
+  case "$1" in *[[:cntrl:]]*) fail "$2 must not contain control characters" ;; esac
+  # Canonical spelling prevents ancestor checks being bypassed with '..' or '.'.
+  case "/${1#/}/" in */../* | */./* | *//*) fail "$2 must not contain dot or empty path segments" ;; esac
+}
+file_owner_uid() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+check_metadata() {
+  local path=$1 mask=$2 owner mode
+  owner=$(file_owner_uid "$path") || fail "cannot inspect owner: $path"
+  [ "$owner" = "$(id -u)" ] || fail "must be owned by the current user: $path"
+  mode=$(file_mode "$path") || fail "cannot inspect permissions: $path"
+  case "$mode" in '' | *[!0-7]*) fail "cannot interpret permissions: $path" ;; esac
+  (( (8#$mode & mask) == 0 )) || fail "unsafe permissions: $path"
 }
 
-step() {
-  echo "==> $*"
+# Every ancestor is checked for symlinks; ancestors outside HOME may be system-owned.
+# Existing HOME children cannot be foreign-owned or group/other writable.
+check_parents() {
+  local path=$1
+  while [ "$path" != / ]; do
+    [ ! -L "$path" ] || fail "symbolic link parent is unsafe: $path"
+    if [ -e "$path" ]; then
+      [ -d "$path" ] || fail "parent must be a directory: $path"
+      case "$path/" in "$HOME/"*) check_metadata "$path" 8#022 ;; esac
+    fi
+    path=${path%/*}
+    [ -n "$path" ] || path=/
+  done
+}
+check_private_directory() {
+  local path=$1
+  check_parents "$path"
+  if [ -e "$path" ]; then check_metadata "$path" 8#077; fi
+}
+check_file() {
+  local path=$1 private=$2
+  [ ! -L "$path" ] || fail "symbolic link file is unsafe: $path"
+  [ -f "$path" ] && [ -r "$path" ] || fail "must be a readable regular file: $path"
+  if [ "$private" = true ]; then
+    check_metadata "$path" 8#077
+  else
+    check_metadata "$path" 8#022
+  fi
+  local mode
+  mode=$(file_mode "$path")
+  (( (8#$mode & 8#400) != 0 )) || fail "must be readable by its owner: $path"
+}
+check_input() {
+  local path=$1 maximum=$2 size
+  check_parents "${path%/*}"
+  check_private_directory "${path%/*}"
+  check_file "$path" true
+  size=$(wc -c <"$path")
+  (( size > 0 && size <= maximum )) || fail "input is empty or exceeds size limit: $path"
+}
+check_managed_paths() {
+  local path
+  check_private_directory "$INSTALL_ROOT"
+  for path in "$INSTALL_ROOT/lib" "$INSTALL_ROOT/logs" "$INSTALL_ROOT/backups"; do
+    check_private_directory "$path"
+  done
+  for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
+  done
+  if [ -e "$INSTALLED_JAR" ] || [ -L "$INSTALLED_JAR" ]; then check_file "$INSTALLED_JAR" false; fi
+  for path in "$STDOUT_LOG" "$STDERR_LOG"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; fi
+  done
 }
 
 cleanup() {
-  local path
-  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
-    rm -f "$path"
-  done
-  if [ -n "$DOWNLOAD_DIR" ]; then
-    rm -rf "$DOWNLOAD_DIR"
+  local code=$? path
+  trap - EXIT
+  for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do rm -f "$path"; done
+  if [ -n "$DOWNLOAD_DIR" ]; then rm -rf "$DOWNLOAD_DIR"; fi
+  if [ "$code" -ne 0 ] && [ "$PUBLISHED" = true ]; then
+    echo "ERROR: installation failed after publication; no automatic rollback." >&2
+    echo "Published installation: $INSTALL_ROOT; service definition: $SERVICE_PATH" >&2
+    echo "Prior managed files backup: ${BACKUP_DIR:-none (first installation)}" >&2
+    echo "Inspect: bash install.sh status" >&2
+    if [ "$HOST_OS" = Linux ]; then
+      echo "Logs: journalctl --user -u $SERVICE_NAME; systemctl --user status $SERVICE_NAME" >&2
+      echo "Before manual recovery: systemctl --user stop $SERVICE_NAME" >&2
+    else
+      echo "Logs: $STDOUT_LOG and $STDERR_LOG; launchctl print $LAUNCHD_TARGET" >&2
+      echo "Before manual recovery: launchctl bootout $LAUNCHD_TARGET (if loaded)" >&2
+    fi
+    echo "Inspect the private backup. Manual restore destinations: kk-studio-daemon.jar -> $INSTALLED_JAR; daemon.json -> $INSTALLED_CONFIG; daemon.token -> $INSTALLED_TOKEN; service definition -> $SERVICE_PATH." >&2
+    echo "Keep config/token mode 0600 and private directories 0700; reload/restart the user service after manual recovery." >&2
+    echo "Alternatively correct the staged inputs and retry install. Config/token/data are not automatically reverted." >&2
   fi
+  exit "$code"
 }
-
-# 只有 Linux 与 Darwin 有受管安装路径。探测必须发生在任何 mkdir/替换之前，否则不受支持的
-# 系统会留下一个永远不会被本脚本启动的 JAR。
-require_supported_host() {
-  case "$HOST_OS" in
-    Linux | Darwin) ;;
-    *) fail "unsupported operating system: $HOST_OS (only Linux and macOS are supported)" ;;
-  esac
-}
-
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    fail "missing command: $1"
-  fi
-}
-
-# systemd 只用于用户实例：不可用的 `systemctl --user` 必须在改动任何路径之前失败，否则
-# 会留下一个永远不会被 reload 的单元文件。
-require_systemd_user() {
-  require_cmd systemctl
-  if ! systemctl --user --no-pager show-environment >/dev/null 2>&1; then
-    fail "systemctl --user is unavailable or unusable; this installer requires a user systemd instance"
-  fi
-}
-
-# macOS 只操作当前用户的 GUI 域。没有该域时 bootstrap 无法把服务交给用户会话，因此必须在
-# 写 plist 或 JAR 之前失败。不调用 `launchctl enable`：用户持久化的 disabled 状态要保留。
-require_launchd_gui_domain() {
-  require_cmd launchctl
-  LAUNCHD_DOMAIN="gui/$(id -u)"
-  if ! launchctl print "$LAUNCHD_DOMAIN" >/dev/null 2>&1; then
-    fail "launchctl GUI domain $LAUNCHD_DOMAIN is unavailable; this installer requires a per-user macOS GUI session"
-  fi
-}
-
-launchd_target() {
-  printf '%s/%s' "$LAUNCHD_DOMAIN" "$LAUNCHD_LABEL"
-}
-
-# `launchctl print` 的文本格式不是稳定契约，因此只把它的退出状态当作 loaded/unloaded。
-launchd_service_is_loaded() {
-  launchctl print "$(launchd_target)" >/dev/null 2>&1
-}
-
-# 属主与权限查询只返回单个数值；失败时由调用方按「无法读取」处理，不回显文件内容。
-file_owner_uid() {
-  stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null
-}
-
-file_mode() {
-  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
-}
-
-# 控制字符（含换行）在 unit 文件与 argv 里都没有安全表达，越早拒绝越好。
-reject_control_characters() {
-  local value=$1 name=$2
-  case "$value" in
-    *[[:cntrl:]]*) fail "$name must not contain control characters" ;;
-  esac
-}
-
-# 选项取值最终都会成为 Daemon 的 argv；Daemon 拒绝空值与前缀 `--` 的值，因此在这里先失败，
-# 不把必然启动失败的配置写进单元。
-require_option_value() {
-  local value=$1 name=$2
-  if [ -z "$value" ]; then
-    fail "missing value for $name"
-  fi
-  case "$value" in
-    --*) fail "missing value for $name" ;;
-  esac
-  reject_control_characters "$value" "$name"
-}
-
-require_absolute_path() {
-  local value=$1 name=$2
-  case "$value" in
-    /*) ;;
-    *) fail "$name must be an absolute path" ;;
-  esac
-}
-
-# 验证窗口直接进入 bash 算术表达式：非十进制非负整数会让算术求值错误，必须在开始工作前拒绝。
-require_nonnegative_integer() {
-  local value=$1 name=$2
-  case "$value" in
-    '' | *[!0-9]*) fail "$name must be a non-negative decimal integer: $value" ;;
-  esac
-}
-
-resolve_verification_windows() {
-  require_nonnegative_integer "$VERIFY_TIMEOUT_SECONDS" DAEMON_VERIFY_TIMEOUT_SECONDS
-  require_nonnegative_integer "$VERIFY_STABLE_SECONDS" DAEMON_VERIFY_STABLE_SECONDS
-}
-
-option_seen() {
-  case "$SEEN_OPTIONS" in
-    *"|$1|"*) return 0 ;;
-  esac
-  return 1
-}
-
-mark_option_seen() {
-  SEEN_OPTIONS="$SEEN_OPTIONS|$1|"
-}
-
-parse_install_options() {
-  local option value
-  while [ $# -gt 0 ]; do
-    option=$1
-    if [ "$option" = --from-source ]; then
-      if option_seen "$option"; then
-        fail "duplicate option: $option"
-      fi
-      mark_option_seen "$option"
-      FROM_SOURCE=true
-      shift
-      continue
-    fi
-    case "$option" in
-      --gateway-uri | --registration-token | --registration-token-file | --java-home | --data-dir | --note | \
-        --bash-executable | --lsp-config | --version) ;;
-      *) fail "unknown option: unexpected argument (value not echoed)" ;;
-    esac
-    if option_seen "$option"; then
-      fail "duplicate option: $option"
-    fi
-    mark_option_seen "$option"
-    if [ $# -lt 2 ]; then
-      fail "missing value for $option"
-    fi
-    value=$2
-    shift 2
-    require_option_value "$value" "$option"
-    case "$option" in
-      --gateway-uri) GATEWAY_URI=$value ;;
-      --registration-token) INLINE_TOKEN=$value ;;
-      --registration-token-file) TOKEN_FILE=$value ;;
-      --java-home) OPT_JAVA_HOME=$value ;;
-      --data-dir) DATA_DIR=$value ;;
-      --note) NOTE=$value ;;
-      --bash-executable) BASH_EXECUTABLE=$value ;;
-      --lsp-config) LSP_CONFIG=$value ;;
-      --version) RELEASE_TAG=$value ;;
-    esac
-  done
-}
-
-validate_gateway_uri() {
-  local name=--gateway-uri
-  case "$GATEWAY_URI" in
-    ws://* | wss://*) ;;
-    *) fail "$name must use the ws or wss scheme: $GATEWAY_URI" ;;
-  esac
-  if [[ ! $GATEWAY_URI =~ ^wss?://[^[:space:]/?#]+([/?#][^[:space:]]*)?$ ]]; then
-    fail "$name must be an absolute ws/wss URL with a host: $GATEWAY_URI"
-  fi
-}
-
-# 文件模式这里只做 stat 级校验，绝不读取或输出其内容。
-validate_token_file() {
-  local name=--registration-token-file owner mode
-  require_absolute_path "$TOKEN_FILE" "$name"
-  if [ -L "$TOKEN_FILE" ]; then
-    fail "$name must not be a symbolic link"
-  fi
-  if [ ! -f "$TOKEN_FILE" ]; then
-    fail "$name must be an existing regular file"
-  fi
-  if [ ! -s "$TOKEN_FILE" ]; then
-    fail "$name must not be empty"
-  fi
-  owner=$(file_owner_uid "$TOKEN_FILE") || fail "cannot read the $name owner"
-  if [ "$owner" != "$(id -u)" ]; then
-    fail "$name must be owned by the current user"
-  fi
-  mode=$(file_mode "$TOKEN_FILE") || fail "cannot read the $name permissions"
-  case "$mode" in
-    *[!0-7]*) fail "cannot interpret the $name permissions" ;;
-  esac
-  if (( (8#$mode & 8#077) != 0 )); then
-    fail "$name must not grant group or other permissions"
-  fi
-  if (( (8#$mode & 8#400) == 0 )); then
-    fail "$name must be readable by its owner"
-  fi
-}
-
-# 默认路径不得经过链接；HOME 及其下的已有父目录须由当前用户拥有且不可被
-# group/other 写入。系统祖先（如 /home）不要求由当前用户拥有。
-validate_inline_token_target() {
-  local home=$HOME owner mode uid
-  # HOME 尾部斜杠不能让其自身绕过 owner/权限检查。
-  while [ "$home" != "/" ] && [ "${home%/}" != "$home" ]; do
-    home=${home%/}
-  done
-  local path="$home/.config/kk-studio"
-  uid=$(id -u)
-  while [ "$path" != "/" ]; do
-    [ ! -L "$path" ] || fail "default token parent must not be a symbolic link"
-    case "$path/" in
-      "$home/"*)
-        if [ -e "$path" ]; then
-          [ -d "$path" ] || fail "default token parent must be a directory"
-          owner=$(file_owner_uid "$path") || fail "cannot read default token parent owner"
-          [ "$owner" = "$uid" ] || fail "default token parent must be owned by the current user"
-          mode=$(file_mode "$path") || fail "cannot read default token parent permissions"
-          case "$mode" in
-            '' | *[!0-7]*) fail "cannot interpret default token parent permissions" ;;
-          esac
-          if (( (8#$mode & 8#022) != 0 )); then
-            fail "default token parent must not be group or other writable: $path"
-          fi
-        fi
-        ;;
-    esac
-    path=${path%/*}
-    [ -n "$path" ] || path=/
-  done
-  [ ! -L "$TOKEN_FILE" ] || fail "default token file must not be a symbolic link"
-  if [ -e "$TOKEN_FILE" ]; then
-    [ -f "$TOKEN_FILE" ] || fail "default token file must be a regular file"
-    owner=$(file_owner_uid "$TOKEN_FILE") || fail "cannot read default token file owner"
-    [ "$owner" = "$uid" ] || fail "default token file must be owned by the current user"
-  fi
-}
-
-# 全部预检/构建（macOS 包括 lint）之后、服务切换之前发布。随机同目录文件
-# 从创建起为 0600；仅 builtin printf 接触文本，trap 清理未发布的暂存文件。
-publish_inline_token() {
-  [ -n "$INLINE_TOKEN" ] || return 0
-  validate_inline_token_target
-  local directory="$HOME/.config/kk-studio" temp
-  (umask 077; mkdir -p "$directory")
-  validate_inline_token_target
-  temp=$(umask 077; mktemp "$directory/.daemon.token.tmp.XXXXXXXX") ||
-    fail "cannot stage default token file"
-  TEMP_PATHS+=("$temp")
-  chmod 0600 "$temp"
-  builtin printf '%s' "$INLINE_TOKEN" >"$temp"
-  mv -f "$temp" "$TOKEN_FILE"
-  INLINE_TOKEN=
-}
-
-validate_note() {
-  if [ -z "$NOTE" ]; then
-    fail "--note must not be blank"
-  fi
-  case "$NOTE" in
-    ' '* | *' ') fail "--note must not have surrounding whitespace" ;;
-  esac
-  if (( ${#NOTE} > 512 )); then
-    fail "--note must not exceed 512 characters"
-  fi
-}
-
-validate_lsp_config() {
-  local name=--lsp-config
-  reject_control_characters "$LSP_CONFIG" "$name"
-  case "$LSP_CONFIG" in
-    *'~'*) fail "$name must not contain '~'" ;;
-    *'$'* | *'%'*) fail "$name must not contain environment-variable placeholders" ;;
-  esac
-  require_absolute_path "$LSP_CONFIG" "$name"
-  if [ ! -f "$LSP_CONFIG" ] || [ ! -r "$LSP_CONFIG" ]; then
-    fail "$name must be an existing readable regular file"
-  fi
-}
-
-resolve_data_dir() {
-  if [ -z "$DATA_DIR" ]; then
-    DATA_DIR="$HOME/.kk-studio"
-  fi
-  require_absolute_path "$DATA_DIR" --data-dir
-}
-
-resolve_bash_executable() {
-  if [ -z "$BASH_EXECUTABLE" ]; then
-    BASH_EXECUTABLE=$(command -v bash 2>/dev/null || true)
-    if [ -z "$BASH_EXECUTABLE" ]; then
-      fail "cannot resolve the bash executable; pass --bash-executable"
-    fi
-  fi
-}
-
-# 发布物以 JDK 21 为目标：更低版本的 JDK 会让 Daemon 以 UnsupportedClassVersionError 退出，
-# 所以构建与单元都必须落在同一个 21 上。构建还需要 javac，因此这里同时要求它就是 JDK。
-assert_jdk21() {
-  local java_home=$1 version
-  if [ ! -x "$java_home/bin/java" ]; then
-    fail "JDK 21 home must contain an executable bin/java: $java_home"
-  fi
-  if [ ! -x "$java_home/bin/javac" ]; then
-    fail "JDK 21 home must contain an executable bin/javac: $java_home"
-  fi
-  version=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
-    "$java_home/bin/java" -version 2>&1) || fail "cannot execute $java_home/bin/java"
-  version=${version%%$'\n'*}
-  case "$version" in
-    *'version "21"'* | *'version "21.'*) ;;
-    *) fail "JDK 21 is required (found: $version)" ;;
-  esac
-}
-
-resolve_java_home() {
-  local candidate
-  if [ -n "$OPT_JAVA_HOME" ]; then
-    require_absolute_path "$OPT_JAVA_HOME" --java-home
-    assert_jdk21 "$OPT_JAVA_HOME"
-    printf '%s\n' "$OPT_JAVA_HOME"
-    return 0
-  fi
-  # 环境变量提供的 JDK 路径同样要进入单元，因此和显式选项一样必须是绝对路径且无控制字符。
-  for candidate in "${JAVA_HOME_21:-}" "${JAVA_HOME:-}"; do
-    if [ -n "$candidate" ]; then
-      reject_control_characters "$candidate" "JAVA_HOME_21/JAVA_HOME"
-      require_absolute_path "$candidate" "JAVA_HOME_21/JAVA_HOME"
-      assert_jdk21 "$candidate"
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  local java_path
-  java_path=$(command -v java 2>/dev/null || true)
-  if [ -n "$java_path" ]; then
-    candidate=$(cd "$(dirname "$java_path")/.." && pwd -P)
-    assert_jdk21 "$candidate"
-    printf '%s\n' "$candidate"
-    return 0
-  fi
-  fail "JDK 21 not found: set JAVA_HOME_21 or JAVA_HOME, pass --java-home, or put java on PATH"
-}
-
-# 构建：显式 JAVA_HOME 走 Maven，其余一切（gateway、token 路径、note）都不进入构建，
-# 因此 Maven 既看不到数据面配置，也不进入 Daemon 的连接参数。
-build_daemon() {
-  resolve_repository_root
-  require_cmd mvn
-  step "Cleaning and packaging harness/daemon (JAVA_HOME=$SELECTED_JAVA_HOME)"
-  (
-    cd "$REPO_ROOT"
-    env JAVA_HOME="$SELECTED_JAVA_HOME" mvn -B -ntp -pl harness/daemon -am clean package
-  )
-}
-
-# 仓库解析只属于开发者源码模式；curl | bash 的 BASH_SOURCE 可以不存在。
-resolve_repository_root() {
-  if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
-    REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd -P)
+ownership_conflict() {
+  local reason=$1 actual_path=${2:-$SERVICE_PATH}
+  echo "ERROR: refusing unmanaged service: $reason" >&2
+  echo "Requested service definition: $SERVICE_PATH" >&2
+  echo "Actual service definition: $actual_path" >&2
+  echo "Inspect/export the definition before any manual action; do not fabricate the ownership marker." >&2
+  printf 'Inspect: ls -ld %q; cat %q\n' "$actual_path" "$actual_path" >&2
+  if [ "$HOST_OS" = Linux ]; then
+    echo "Inspect: systemctl --user cat $SERVICE_NAME; systemctl --user status $SERVICE_NAME" >&2
+    echo "Manual stop/disable (only after confirming ownership): systemctl --user disable --now $SERVICE_NAME" >&2
   else
-    [ -n "${BASH_SOURCE[0]:-}" ] || fail "--from-source requires a checkout or KK_STUDIO_REPO_ROOT"
-    REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
-    while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
-      REPO_ROOT=$(dirname "$REPO_ROOT")
+    echo "Inspect: launchctl print $LAUNCHD_TARGET; plutil -lint \"$SERVICE_PATH\"" >&2
+    echo "Manual stop/disable (only after confirming ownership): launchctl bootout $LAUNCHD_TARGET; launchctl disable $LAUNCHD_TARGET" >&2
+  fi
+  # These are literal instructions, not executed shell expressions.
+  # shellcheck disable=SC2016
+  printf 'Manual export (only after inspection): backup=$(umask 077; mktemp -d "$HOME/daemon-service-backup.XXXXXXXX"); cp -p %q "$backup/"\n' "$actual_path" >&2
+  case "$actual_path" in
+    "$HOME/"*)
+      # shellcheck disable=SC2016
+      printf 'Manual move (only a confirmed user-owned definition, never its unknown data): mv %q "$backup/"\n' "$actual_path" >&2 ;;
+    *) echo "Manual cleanup: this definition is outside HOME; ask its administrator/owner to resolve the conflict. Do not move/delete system files." >&2 ;;
+  esac
+  if [ "$HOST_OS" = Linux ]; then
+    echo "Reload: systemctl --user daemon-reload" >&2
+  else
+    echo "After unloaded, retry install; if you manually disabled this job, explicitly launchctl enable $LAUNCHD_TARGET before retry." >&2
+  fi
+  echo "Preserve unknown JAR/config/token/data; then retry the intended install/uninstall command." >&2
+  exit 1
+}
+require_ownership() {
+  check_parents "${SERVICE_PATH%/*}"
+  if [ "$HOST_OS" = Linux ]; then
+    local fragment
+    fragment=$(systemctl --user show --property=FragmentPath --value "$SERVICE_NAME") ||
+      fail "cannot inspect systemd service ownership"
+    if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ]; then
+      ownership_conflict "service resolves to another definition" "$fragment"
+    fi
+  fi
+  if [ -e "$SERVICE_PATH" ] || [ -L "$SERVICE_PATH" ]; then
+    [ ! -L "$SERVICE_PATH" ] && [ -f "$SERVICE_PATH" ] ||
+      ownership_conflict "definition is a symlink or not a regular file"
+    local marker
+    if [ "$HOST_OS" = Linux ]; then marker=$(head -n 1 "$SERVICE_PATH");
+    else marker=$(sed -n '2p' "$SERVICE_PATH"); fi
+    [ "$marker" = "$SERVICE_MARKER" ] || ownership_conflict "missing ownership marker"
+    local owner mode
+    owner=$(file_owner_uid "$SERVICE_PATH") || ownership_conflict "cannot inspect definition owner"
+    [ "$owner" = "$(id -u)" ] || ownership_conflict "definition belongs to another user"
+    mode=$(file_mode "$SERVICE_PATH") || ownership_conflict "cannot inspect definition permissions"
+    case "$mode" in '' | *[!0-7]*) ownership_conflict "cannot interpret definition permissions" ;; esac
+    (( (8#$mode & 8#022) == 0 )) || ownership_conflict "definition is group/other writable"
+    check_file "$SERVICE_PATH" false
+  elif [ "$HOST_OS" = Darwin ] && launchd_loaded; then
+    ownership_conflict "job is loaded but its definition is absent"
+  elif [ "$HOST_OS" = Linux ] && [ -n "$fragment" ]; then
+    ownership_conflict "resolved definition is absent from disk" "$fragment"
+  fi
+}
+require_manager() {
+  if [ "$HOST_OS" = Linux ]; then
+    require_cmd systemctl
+    systemctl --user --no-pager show-environment >/dev/null 2>&1 ||
+      fail "systemctl --user is unavailable or unusable"
+  else
+    require_cmd launchctl
+    launchctl print "$LAUNCHD_DOMAIN" >/dev/null 2>&1 ||
+      fail "launchctl GUI domain $LAUNCHD_DOMAIN is unavailable"
+  fi
+}
+launchd_loaded() { launchctl print "$LAUNCHD_TARGET" >/dev/null 2>&1; }
+stop_launchd() {
+  local attempt
+  if launchd_loaded; then
+    launchctl bootout "$LAUNCHD_TARGET" || fail "cannot bootout $LAUNCHD_TARGET; nothing was replaced or removed"
+    for ((attempt=0; attempt<=VERIFY_TIMEOUT_SECONDS; attempt++)); do
+      if ! launchd_loaded; then return 0; fi
+      if (( attempt < VERIFY_TIMEOUT_SECONDS )); then sleep 1; fi
     done
-    [ -e "$REPO_ROOT/.git" ] || fail "cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT"
-  fi
-  reject_control_characters "$REPO_ROOT" "repository root"
-  BUILT_JAR="$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"
-}
-
-validate_release_tag() {
-  [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] ||
-    fail "--version must be a safe release tag matching ^v[0-9A-Za-z._-]+$"
-}
-
-validate_artifact_options() {
-  if [ -n "$RELEASE_TAG" ]; then
-    validate_release_tag
-    [ "$FROM_SOURCE" = false ] || fail "--from-source cannot be combined with --version"
+    fail "$LAUNCHD_TARGET is still loaded after bootout; nothing was replaced or removed"
   fi
 }
-
-parse_upgrade_options() {
-  local option
-  while [ $# -gt 0 ]; do
-    option=$1
-    case "$option" in
-      --from-source)
-        option_seen "$option" && fail "duplicate option: $option"
-        mark_option_seen "$option"
-        FROM_SOURCE=true
-        shift
-        ;;
-      --version)
-        option_seen "$option" && fail "duplicate option: $option"
-        mark_option_seen "$option"
-        [ $# -ge 2 ] || fail "missing value for $option"
-        require_option_value "$2" "$option"
-        RELEASE_TAG=$2
-        shift 2
-        ;;
-      *) fail "upgrade accepts no options for daemon configuration; use --version or --from-source" ;;
-    esac
-  done
+resolve_java_home() {
+  local candidate version java_path
+  candidate=$OPT_JAVA_HOME
+  if [ -z "$candidate" ]; then candidate=${JAVA_HOME_21:-${JAVA_HOME:-}}; fi
+  if [ -z "$candidate" ]; then
+    java_path=$(command -v java) || fail "JDK 21 not found; set JAVA_HOME_21 or --java-home"
+    candidate=$(cd "$(dirname "$java_path")/.." && pwd -P)
+  fi
+  absolute_path "$candidate" "Java home"
+  [ -x "$candidate/bin/java" ] || fail "JDK 21 requires executable bin/java"
+  [ -x "$candidate/bin/javac" ] || fail "JDK 21 requires executable bin/javac"
+  version=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS "$candidate/bin/java" -version 2>&1) ||
+    fail "cannot execute selected Java"
+  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "JDK 21 is required" ;; esac
+  SELECTED_JAVA_HOME=$candidate
 }
-
-# curl 不读取用户 curlrc；请求及全部重定向只允许 HTTPS（保留默认 TLS 证书验证）。
 release_curl() {
   curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$@"
 }
-
 download_daemon() {
-  local effective_url asset checksum expected actual checksum_pattern
+  local effective_url asset checksum expected actual pattern
   require_cmd curl
-  if [ -z "$RELEASE_TAG" ]; then
-    effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' \
-      "$RELEASE_BASE/latest") || fail "cannot resolve the latest official release"
-    case "$effective_url" in
-      "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
-      *) fail "latest release did not resolve to an official immutable release tag" ;;
-    esac
-  fi
-  validate_release_tag
-  asset="kk-studio-daemon-${RELEASE_TAG}.jar"
-  DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX") ||
-    fail "cannot create release download staging directory"
-  BUILT_JAR="$DOWNLOAD_DIR/$asset"
-  checksum="$BUILT_JAR.sha256"
-  step "Downloading official release $RELEASE_TAG"
-  release_curl --output "$BUILT_JAR" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
+  effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' "$RELEASE_BASE/latest") ||
+    fail "cannot resolve latest official release"
+  case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
+    *) fail "latest release did not resolve to an official immutable release tag" ;; esac
+  [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
+  DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX")
+  chmod 0700 "$DOWNLOAD_DIR"
+  asset="kk-studio-daemon-$RELEASE_TAG.jar"
+  DOWNLOADED_JAR="$DOWNLOAD_DIR/$asset"
+  checksum="$DOWNLOADED_JAR.sha256"
+  release_curl --output "$DOWNLOADED_JAR" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
     fail "cannot download daemon release JAR"
   release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
     fail "cannot download daemon release SHA256"
-  # 标准 sha256sum 单行格式；拒绝额外条目，文件名必须匹配本次产物。
   expected=$(cat "$checksum")
-  checksum_pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
-  [[ $expected =~ $checksum_pattern ]] || fail "invalid daemon release SHA256 file"
+  pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
+  [[ $expected =~ $pattern ]] || fail "invalid daemon release SHA256 file"
   expected=${BASH_REMATCH[1]}
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual=$(sha256sum "$BUILT_JAR") || fail "cannot calculate daemon release SHA256"
-  else
-    require_cmd shasum
-    actual=$(shasum -a 256 "$BUILT_JAR") || fail "cannot calculate daemon release SHA256"
-  fi
-  actual=${actual%% *}
-  # Bash 3.2 没有 ${value,,}，使用 tr 规范大小写。
+  if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$DOWNLOADED_JAR");
+  else require_cmd shasum; actual=$(shasum -a 256 "$DOWNLOADED_JAR"); fi
   expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
-  [ "$actual" = "$expected" ] ||
-    fail "daemon release SHA256 mismatch; existing installation was not changed"
+  [ "${actual%% *}" = "$expected" ] || fail "daemon release SHA256 mismatch"
 }
-
-# 提示直接读写 controlling terminal，而不是管道里的脚本 stdin。
-prompt_install_value() {
-  local kind=$1
-  if ! { exec 3<>/dev/tty; } 2>/dev/null; then
-    fail "noninteractive install requires --gateway-uri and --registration-token or --registration-token-file"
-  fi
-  if [ "$kind" = gateway ]; then
-    printf 'Gateway URI: ' >&3
-    IFS= read -r GATEWAY_URI <&3 || fail "cannot read gateway URI from /dev/tty"
-    require_option_value "$GATEWAY_URI" --gateway-uri
-  else
-    printf 'Registration token (hidden): ' >&3
-    IFS= read -r -s INLINE_TOKEN <&3 || fail "cannot read registration token from /dev/tty"
-    printf '\n' >&3
-    require_option_value "$INLINE_TOKEN" --registration-token
-    mark_option_seen --registration-token
-  fi
-  exec 3>&-
-}
-
-# Release 升级用服务已配置的 Java 进行预检，不改写或求值任何保存的 daemon argv。
-# Linux 只解码本脚本写入的第一个带引号单词；不支持的定义失败关闭。
-resolve_upgrade_java_home() {
-  local line encoded java_path= character index=0 closed=false
-  if [ "$FROM_SOURCE" = true ]; then
-    resolve_java_home
-    return
-  fi
-  if [ "$HOST_OS" = Darwin ]; then
-    require_cmd plutil
-    java_path=$(plutil -extract ProgramArguments.0 raw -o - "$PLIST_PATH") ||
-      fail "cannot read Java executable from managed LaunchAgent"
-  else
-    line=$(sed -n '/^ExecStart=/p' "$UNIT_PATH")
-    case "$line" in
-      'ExecStart="'*) encoded=${line#'ExecStart="'} ;;
-      *) fail "cannot read Java executable from managed unit" ;;
-    esac
-    while [ "$index" -lt "${#encoded}" ]; do
-      character=${encoded:index:1}
-      index=$((index + 1))
-      case "$character" in
-        '"') closed=true; break ;;
-        '\')
-          [ "$index" -lt "${#encoded}" ] || fail "invalid Java executable in managed unit"
-          character=${encoded:index:1}
-          index=$((index + 1))
-          case "$character" in
-            '\' | '"') ;;
-            *) fail "unsupported Java executable escape in managed unit" ;;
-          esac
-          ;;
-        '%' | '$')
-          [ "${encoded:index:1}" = "$character" ] ||
-            fail "unsupported Java executable expansion in managed unit"
-          index=$((index + 1))
-          ;;
-      esac
-      java_path=$java_path$character
-    done
-    [ "$closed" = true ] || fail "invalid Java executable in managed unit"
-  fi
-  reject_control_characters "$java_path" "managed Java executable"
-  require_absolute_path "$java_path" "managed Java executable"
-  case "$java_path" in
-    */bin/java) ;;
-    *) fail "managed Java executable must be a JDK bin/java path" ;;
-  esac
-  local java_home=${java_path%/bin/java}
-  assert_jdk21 "$java_home"
-  printf '%s\n' "$java_home"
-}
-
-# 安装前必须证明新产物真的可执行：`java -jar <jar> --version` 成功是唯一能同时证明入口类与
-# 内嵌依赖都可用的检查。
-verify_built_jar() {
+preflight() {
   local output
-  if [ ! -f "$BUILT_JAR" ] || [ ! -s "$BUILT_JAR" ]; then
-    fail "built daemon JAR not found or empty: $BUILT_JAR"
+  [ -s "$DOWNLOADED_JAR" ] || fail "downloaded JAR is empty"
+  output=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
+    "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --version 2>&1) ||
+    fail "downloaded daemon JAR is not executable"
+  [ "$output" = "kk-studio-daemon ${RELEASE_TAG#v}" ] || fail "daemon --version does not match resolved release tag"
+  # Validate exactly the secure snapshot that will be published, not inputs reread later.
+  cp "$CONFIG_FILE" "$DOWNLOAD_DIR/daemon.json"
+  cp "$TOKEN_FILE" "$DOWNLOAD_DIR/daemon.token"
+  chmod 0600 "$DOWNLOAD_DIR/daemon.json" "$DOWNLOAD_DIR/daemon.token"
+  CONFIG_FILE="$DOWNLOAD_DIR/daemon.json"
+  TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
+  # Do not echo JAR diagnostics: a failing/older JAR may echo input values.
+  if ! env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
+    "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
+    fail "downloaded release rejected --check-config or staged configuration/token; correct inputs or publish a release supporting --check-config, then retry. Existing installation unchanged"
   fi
-  if ! output=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
-    "$SELECTED_JAVA_HOME/bin/java" -jar "$BUILT_JAR" --version 2>&1); then
-    fail "built daemon JAR is not executable: 'java -jar $BUILT_JAR --version' failed: $output"
-  fi
-  case "$output" in
-    'kk-studio-daemon '*) ;;
-    *) fail "unexpected daemon --version output: $output" ;;
-  esac
-  if [ "$FROM_SOURCE" = false ] && [ "$output" != "kk-studio-daemon ${RELEASE_TAG#v}" ]; then
-    fail "daemon --version does not match the requested release tag"
-  fi
+  output=$(cat "$DOWNLOAD_DIR/preflight.log")
+  [ "$output" = "Daemon configuration is valid" ] ||
+    fail "unexpected --check-config result; use a release supporting this installer. Existing installation unchanged"
 }
-
-# 同目录临时文件 + rename：替换必须与目标处于同一文件系统，中途失败也不留半份产物。
-# 路径必须在当前 shell 登记。命令替换会丢弃数组变更，退出清理就看不到这次暂存。
-register_temp_path() {
-  local directory=$1 name=$2
-  REGISTERED_TEMP_PATH=$(umask 077; mktemp "$directory/.$name.tmp.XXXXXXXX") ||
-    fail "cannot create installation staging file"
+stage_file() {
+  local source=$1 directory=$2 name=$3 mode=$4
+  REGISTERED_TEMP_PATH=$(mktemp "$directory/.$name.tmp.XXXXXXXX")
   TEMP_PATHS+=("$REGISTERED_TEMP_PATH")
+  cp "$source" "$REGISTERED_TEMP_PATH"
+  chmod "$mode" "$REGISTERED_TEMP_PATH"
 }
-
-stage_jar() {
-  mkdir -p "$INSTALL_ROOT"
-  register_temp_path "$INSTALL_ROOT" kk-studio-daemon.jar
-  STAGED_JAR=$REGISTERED_TEMP_PATH
-  # 源路径由构建或已校验下载推导；不用 GNU 专用的 `--` 操作数，BSD cp 不接受它。
-  cp "$BUILT_JAR" "$STAGED_JAR"
-  chmod 0644 "$STAGED_JAR"
-}
-
-publish_staged_jar() {
-  mv -f "$STAGED_JAR" "$INSTALLED_JAR"
-}
-
-# systemd 会先做 `%` 说明符与 `$` 变量展开，再做引号解析；这里把每个 argv 都包成带引号的
-# 单词，并对反斜杠、双引号、`%`、`$` 逐层转义，因此空格与这些字符都不会被二次解释。
-# 换行与控制字符在解析选项时已经拒绝。
 escape_exec_argument() {
   local value=$1 percent_escape='%%' dollar_escape='$$'
   value=${value//\\/\\\\}
@@ -758,36 +313,24 @@ escape_exec_argument() {
   value=${value//\$/$dollar_escape}
   printf '"%s"' "$value"
 }
-
-build_exec_start() {
-  local arguments=("$SELECTED_JAVA_HOME/bin/java" -jar "$INSTALLED_JAR")
-  arguments+=(--gateway-uri "$GATEWAY_URI")
-  arguments+=(--registration-token-file "$TOKEN_FILE")
-  arguments+=(--data-dir "$DATA_DIR")
-  if [ -n "$NOTE" ]; then
-    arguments+=(--note "$NOTE")
-  fi
-  arguments+=(--bash-executable "$BASH_EXECUTABLE")
-  if [ -n "$LSP_CONFIG" ]; then
-    arguments+=(--lsp-config "$LSP_CONFIG")
-  fi
-
-  local argument line=
-  for argument in "${arguments[@]}"; do
-    line="$line $(escape_exec_argument "$argument")"
+xml_escape() {
+  local value=$1 index=0 character
+  while [ "$index" -lt "${#value}" ]; do
+    character=${value:index:1}
+    case "$character" in
+      '&') printf '&amp;' ;; '<') printf '&lt;' ;; '>') printf '&gt;' ;;
+      "'") printf '&apos;' ;; '"') printf '&quot;' ;; *) printf '%s' "$character" ;;
+    esac
+    index=$((index + 1))
   done
-  printf '%s\n' "${line# }"
 }
-
-# 加固与生命周期设置沿用宿主既有单元：network-online 排序、start limit、home 工作目录、
-# 失败重启、停止超时、mixed kill、owner-only umask、禁止提权与 default target。
-write_unit_file() {
-  local temp exec_start
-  mkdir -p "$UNIT_DIR"
-  register_temp_path "$UNIT_DIR" "$SERVICE_NAME"
-  temp=$REGISTERED_TEMP_PATH
-  exec_start=$(build_exec_start)
-  cat >"$temp" <<EOF
+xml_string() { printf '<string>%s</string>\n' "$(xml_escape "$1")"; }
+stage_service() {
+  STAGED_SERVICE="$DOWNLOAD_DIR/service"
+  local arguments=("$SELECTED_JAVA_HOME/bin/java" -jar "$INSTALLED_JAR" --config "$INSTALLED_CONFIG") argument line=
+  if [ "$HOST_OS" = Linux ]; then
+    for argument in "${arguments[@]}"; do line="$line $(escape_exec_argument "$argument")"; done
+    cat >"$STAGED_SERVICE" <<EOF
 $UNIT_MARKER
 [Unit]
 Description=kk-studio Environment Daemon
@@ -799,7 +342,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 WorkingDirectory=%h
-ExecStart=$exec_start
+ExecStart=${line# }
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=30
@@ -811,547 +354,195 @@ SyslogIdentifier=kk-studio-daemon
 [Install]
 WantedBy=default.target
 EOF
-  chmod 0644 "$temp"
-  mv -f "$temp" "$UNIT_PATH"
-}
-
-# 只有带标记的单元才归本脚本所有；缺失标记说明它是人工或别处写入的配置。
-require_managed_unit() {
-  local first_line
-  if [ ! -f "$UNIT_PATH" ]; then
-    fail "no managed installation found at $UNIT_PATH"
+  else
+    {
+      printf '<?xml version="1.0" encoding="UTF-8"?>\n%s\n' "$PLIST_MARKER"
+      printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key>\n'
+      xml_string "$LAUNCHD_LABEL"
+      printf '<key>ProgramArguments</key><array>\n'
+      for argument in "${arguments[@]}"; do xml_string "$argument"; done
+      printf '</array>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\n<key>ThrottleInterval</key><integer>10</integer>\n<key>Umask</key><integer>63</integer>\n<key>WorkingDirectory</key>\n'
+      xml_string "$HOME"
+      printf '<key>StandardOutPath</key>\n'; xml_string "$STDOUT_LOG"
+      printf '<key>StandardErrorPath</key>\n'; xml_string "$STDERR_LOG"
+      printf '</dict></plist>\n'
+    } >"$STAGED_SERVICE"
+    require_cmd plutil
+    plutil -lint "$STAGED_SERVICE" >/dev/null || fail "generated LaunchAgent failed validation; existing installation unchanged"
   fi
-  # `head -n 1` 在 GNU 与 BSD 上都可用；`--` 在 BSD head 上会被当成文件名。
-  first_line=$(head -n 1 "$UNIT_PATH")
-  if [ "$first_line" != "$UNIT_MARKER" ]; then
-    fail "refusing to touch unmanaged unit $UNIT_PATH (missing marker: $UNIT_MARKER)"
-  fi
 }
-
-# XML 文本节点的五个预定义实体都要转义。属性不用，因此这里只处理元素文本。
-# 必须一次扫描：先替换 `&` 再替换 `<` 会把刚写出的 `&lt;` 再转成 `&amp;lt;`。
-xml_escape() {
-  local value=$1 index=0 escaped= character
-  while [ "$index" -lt "${#value}" ]; do
-    character=${value:index:1}
-    case "$character" in
-      '&') escaped="${escaped}&amp;" ;;
-      '<') escaped="${escaped}&lt;" ;;
-      '>') escaped="${escaped}&gt;" ;;
-      "'") escaped="${escaped}&apos;" ;;
-      '"') escaped="${escaped}&quot;" ;;
-      *) escaped="${escaped}${character}" ;;
-    esac
-    index=$((index + 1))
+backup_current() {
+  local path present=false
+  for path in "$INSTALLED_JAR" "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
+    if [ -f "$path" ]; then present=true; fi
   done
-  printf '%s' "$escaped"
-}
-
-append_xml_string() {
-  printf '  <string>%s</string>\n' "$(xml_escape "$1")" >>"$2"
-}
-
-append_program_arguments() {
-  local destination=$1
-  local arguments=("$SELECTED_JAVA_HOME/bin/java" -jar "$INSTALLED_JAR")
-  arguments+=(--gateway-uri "$GATEWAY_URI")
-  arguments+=(--registration-token-file "$TOKEN_FILE")
-  arguments+=(--data-dir "$DATA_DIR")
-  if [ -n "$NOTE" ]; then
-    arguments+=(--note "$NOTE")
-  fi
-  arguments+=(--bash-executable "$BASH_EXECUTABLE")
-  if [ -n "$LSP_CONFIG" ]; then
-    arguments+=(--lsp-config "$LSP_CONFIG")
-  fi
-
-  local argument
-  printf '  <array>\n' >>"$destination"
-  for argument in "${arguments[@]}"; do
-    printf '    <string>%s</string>\n' "$(xml_escape "$argument")" >>"$destination"
-  done
-  printf '  </array>\n' >>"$destination"
-}
-
-# plist 直接执行绝对路径的 java，不经过 shell，也不读取环境变量。生命周期键固定：登录即启动、
-# 非成功退出才重启、10 秒节流、owner-only umask、工作目录为 HOME。逐行写入，避免把带换行的
-# 命令替换嵌进 heredoc 后破坏 XML。
-# 只写并校验临时 plist。通过之前不得改名覆盖现有受管文件。
-stage_plist_file() {
-  local temp
-  mkdir -p "$PLIST_DIR" "$LAUNCHD_LOG_DIR"
-  register_temp_path "$PLIST_DIR" "$LAUNCHD_LABEL.plist"
-  temp=$REGISTERED_TEMP_PATH
-  STAGED_PLIST=$temp
-  cat >"$temp" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-$PLIST_MARKER
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-EOF
-  append_xml_string "$LAUNCHD_LABEL" "$temp"
-  cat >>"$temp" <<'EOF'
-  <key>ProgramArguments</key>
-EOF
-  append_program_arguments "$temp"
-  cat >>"$temp" <<'EOF'
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
-  <key>ThrottleInterval</key>
-  <integer>10</integer>
-  <key>Umask</key>
-  <integer>63</integer>
-  <key>WorkingDirectory</key>
-EOF
-  append_xml_string "$HOME" "$temp"
-  printf '  <key>StandardOutPath</key>\n' >>"$temp"
-  append_xml_string "$LAUNCHD_STDOUT_LOG" "$temp"
-  printf '  <key>StandardErrorPath</key>\n' >>"$temp"
-  append_xml_string "$LAUNCHD_STDERR_LOG" "$temp"
-  printf '</dict>\n</plist>\n' >>"$temp"
-  # 非法 XML 不得替换已有受管 plist：先 lint 临时文件，通过后才原子改名。
-  require_cmd plutil
-  if ! plutil -lint "$temp" >/dev/null; then
-    fail "generated LaunchAgent plist failed validation; the existing configuration was not replaced"
-  fi
-  chmod 0644 "$temp"
-}
-
-publish_staged_plist() {
-  mv -f "$STAGED_PLIST" "$PLIST_PATH"
-}
-
-# 所有权只看声明之后的那一行精确注释。缺少标记的 plist 可能是用户自己的 LaunchAgent。
-require_managed_plist() {
-  local marker_line
-  if [ ! -f "$PLIST_PATH" ]; then
-    fail "no managed installation found at $PLIST_PATH"
-  fi
-  marker_line=$(sed -n '2p' "$PLIST_PATH")
-  if [ "$marker_line" != "$PLIST_MARKER" ]; then
-    fail "refusing to touch unmanaged plist $PLIST_PATH (missing marker: $PLIST_MARKER)"
-  fi
-}
-
-# bootout 返回后任务仍可能短暂处于 loaded。只看 print 的退出状态，不解析它的文本；
-# 在它变为 unloaded 之前不得替换 plist 或再次 bootstrap。
-wait_until_launchd_unloaded() {
-  local attempt
-  for (( attempt = 0; attempt <= VERIFY_TIMEOUT_SECONDS; attempt++ )); do
-    if ! launchd_service_is_loaded; then
-      return 0
-    fi
-    if (( attempt < VERIFY_TIMEOUT_SECONDS )); then
-      sleep 1
+  [ "$present" = true ] || return 0
+  mkdir -p "$INSTALL_ROOT/backups"
+  BACKUP_DIR=$(mktemp -d "$INSTALL_ROOT/backups/install.XXXXXXXX")
+  chmod 0700 "$BACKUP_DIR"
+  for path in "$INSTALLED_JAR" "$INSTALLED_CONFIG" "$INSTALLED_TOKEN" "$SERVICE_PATH"; do
+    if [ -f "$path" ]; then
+      cp "$path" "$BACKUP_DIR/${path##*/}"
+      chmod 0600 "$BACKUP_DIR/${path##*/}"
     fi
   done
-  fail "$LAUNCHD_LABEL is still loaded after bootout; the existing configuration was not replaced"
 }
-
-# 替换已加载服务的 plist 之前必须先 bootout，否则 launchd 继续使用旧定义。
-bootout_loaded_service() {
-  if launchd_service_is_loaded; then
-    if ! launchctl bootout "$(launchd_target)"; then
-      fail "cannot bootout $LAUNCHD_LABEL; the existing configuration was not replaced"
-    fi
-    wait_until_launchd_unloaded
-  fi
-}
-
-# 启动成功只由进程存活性证明：`kickstart -p` 给出 PID，稳定窗口内 `kill -0` 必须一直成功。
-# 不解析 `launchctl print` 的文本，缺失或畸形 PID 一律失败。
-verify_launchd_process() {
-  local attempt stable pid
-  for (( attempt = 0; attempt <= VERIFY_TIMEOUT_SECONDS; attempt++ )); do
-    if pid=$(launchctl kickstart -p "$(launchd_target)" 2>/dev/null); then
-      # kickstart 按行输出 PID；尾部换行与空白都不是进程号的一部分。
+verify_running() {
+  local attempt stable pid active
+  for ((attempt=0; attempt<=VERIFY_TIMEOUT_SECONDS; attempt++)); do
+    active=false
+    if [ "$HOST_OS" = Linux ]; then
+      if systemctl --user is-active --quiet "$SERVICE_NAME"; then active=true; fi
+    elif pid=$(launchctl kickstart -p "$LAUNCHD_TARGET" 2>/dev/null); then
       pid=${pid//[[:space:]]/}
-      case "$pid" in
-        '' | *[!0-9]*)
-          fail "$LAUNCHD_LABEL did not report a numeric process id after start"
-          ;;
-      esac
-      if kill -0 "$pid" 2>/dev/null; then
-        for (( stable = 0; stable < VERIFY_STABLE_SECONDS; stable++ )); do
-          sleep 1
-          if ! kill -0 "$pid" 2>/dev/null; then
-            fail "$LAUNCHD_LABEL pid $pid did not stay alive for ${VERIFY_STABLE_SECONDS}s after start"
-          fi
-        done
-        return 0
-      fi
+      case "$pid" in '' | *[!0-9]*) fail "LaunchAgent did not report a numeric process id" ;; esac
+      if kill -0 "$pid" 2>/dev/null; then active=true; fi
     fi
-    if (( attempt < VERIFY_TIMEOUT_SECONDS )); then
-      sleep 1
-    fi
-  done
-  fail "$LAUNCHD_LABEL is not running after start; inspect: launchctl print $(launchd_target)"
-}
-
-service_is_active() {
-  systemctl --user is-active --quiet "$SERVICE_NAME"
-}
-
-# 重启成功不等于服务可用：单元可能在数秒内因注册失败或配置错误退出。先等到 systemd 报告
-# active，再要求服务在整个稳定窗口内持续 active，因此一次短暂的 active 结果不足以判定成功。
-verify_service_active() {
-  local attempt stable
-  for (( attempt = 0; attempt <= VERIFY_TIMEOUT_SECONDS; attempt++ )); do
-    if service_is_active; then
-      for (( stable = 0; stable < VERIFY_STABLE_SECONDS; stable++ )); do
+    if [ "$active" = true ]; then
+      for ((stable=0; stable<VERIFY_STABLE_SECONDS; stable++)); do
         sleep 1
-        if ! service_is_active; then
-          fail "$SERVICE_NAME did not stay active for ${VERIFY_STABLE_SECONDS}s after restart; inspect: systemctl --user status $SERVICE_NAME"
-        fi
+        if [ "$HOST_OS" = Linux ]; then
+          systemctl --user is-active --quiet "$SERVICE_NAME" || fail "service did not stay active"
+        else kill -0 "$pid" 2>/dev/null || fail "LaunchAgent did not stay alive"; fi
       done
       return 0
     fi
-    if (( attempt < VERIFY_TIMEOUT_SECONDS )); then
-      sleep 1
-    fi
+    if (( attempt < VERIFY_TIMEOUT_SECONDS )); then sleep 1; fi
   done
-  fail "$SERVICE_NAME is not active after restart; inspect: systemctl --user status $SERVICE_NAME"
+  fail "service is not running after start"
 }
-
-# 只报告本次调用真正知道的取值：升级不接收任何配置选项，因此不会伪造一个空的数据目录。
-print_installed_summary() {
-  if [ "$HOST_OS" = Darwin ]; then
-    echo "Service:   $LAUNCHD_LABEL"
-    echo "JAR:       $INSTALLED_JAR"
-    echo "Plist:     $PLIST_PATH"
-  else
-    echo "Service:   $SERVICE_NAME"
-    echo "JAR:       $INSTALLED_JAR"
-    echo "Unit:      $UNIT_PATH"
-  fi
-  if [ -n "$DATA_DIR" ]; then
-    echo "Data dir:  $DATA_DIR"
-  fi
-  if [ "$HOST_OS" = Darwin ]; then
-    echo "Next:      launchctl print $(launchd_target)"
-  else
-    echo "Next:      systemctl --user status $SERVICE_NAME"
-  fi
-}
-
-prepare_install_inputs() {
-  parse_install_options "$@"
-  validate_artifact_options
-  if option_seen --registration-token && option_seen --registration-token-file; then
-    fail "choose exactly one of --registration-token and --registration-token-file"
-  fi
-  if [ -z "$GATEWAY_URI" ]; then
-    prompt_install_value gateway
-  fi
-  if ! option_seen --registration-token && ! option_seen --registration-token-file; then
-    prompt_install_value token
-  fi
-  validate_gateway_uri
-  if option_seen --registration-token; then
-    case "$INLINE_TOKEN" in
-      *[[:space:][:cntrl:]]*) fail "--registration-token must not contain whitespace or control characters" ;;
-    esac
-    TOKEN_FILE="$HOME/.config/kk-studio/daemon.token"
-    validate_inline_token_target
-  else
-    validate_token_file
-  fi
-  if [ -n "$NOTE" ]; then
-    validate_note
-  fi
-  if [ -n "$LSP_CONFIG" ]; then
-    validate_lsp_config
-  fi
-  resolve_data_dir
-  resolve_bash_executable
-  resolve_verification_windows
-
-  # 所有输入（含 JDK）先校验完，再探测宿主服务管理器与受管定义，最后才构建。
-  # 不受支持的系统也在这里失败：选项错误优先于宿主错误，且此时还没有受管路径被创建。
-  require_supported_host
-  SELECTED_JAVA_HOME=$(resolve_java_home)
-}
-
-prepare_validated_jar() {
-  if [ "$FROM_SOURCE" = true ]; then
-    build_daemon
-  else
-    download_daemon
-  fi
-  verify_built_jar
-  stage_jar
-}
-
-cmd_install_linux() {
-  require_systemd_user
-  # 已存在的单元必须先确认归属，避免覆盖人工维护的单元。
-  if [ -e "$UNIT_PATH" ]; then
-    require_managed_unit
-  fi
-
-  prepare_validated_jar
-  publish_inline_token
-  publish_staged_jar
-  step "Installed $INSTALLED_JAR"
-  write_unit_file
-  step "Wrote $UNIT_PATH"
-
-  systemctl --user daemon-reload
-  systemctl --user enable "$SERVICE_NAME"
-  systemctl --user restart "$SERVICE_NAME"
-  verify_service_active
-  step "$SERVICE_NAME is active"
-  print_installed_summary
-}
-
-cmd_install_darwin() {
-  require_launchd_gui_domain
-  # 已存在的 plist 必须先确认归属。构建、JAR 校验和 plist lint 都发生在 bootout 之前，
-  # 因此这些失败不会卸下、也不会改写仍在运行的安装。
-  if [ -e "$PLIST_PATH" ]; then
-    require_managed_plist
-  fi
-
-  prepare_validated_jar
-  stage_plist_file
-  publish_inline_token
-  if [ -e "$PLIST_PATH" ]; then
-    bootout_loaded_service
-  fi
-  publish_staged_jar
-  step "Installed $INSTALLED_JAR"
-  publish_staged_plist
-  step "Wrote $PLIST_PATH"
-
-  launchctl bootstrap "$LAUNCHD_DOMAIN" "$PLIST_PATH"
-  verify_launchd_process
-  step "$LAUNCHD_LABEL is running"
-  print_installed_summary
-}
-
 cmd_install() {
-  prepare_install_inputs "$@"
-  case "$HOST_OS" in
-    Linux) cmd_install_linux ;;
-    Darwin) cmd_install_darwin ;;
-  esac
-}
-
-# 升级不重复任何配置：服务定义保留安装时的取值，只替换已校验的 JAR。
-cmd_upgrade_linux() {
-  require_systemd_user
-  require_managed_unit
-
-  SELECTED_JAVA_HOME=$(resolve_upgrade_java_home)
-  prepare_validated_jar
-  publish_staged_jar
-  step "Replaced $INSTALLED_JAR"
-
-  systemctl --user daemon-reload
-  systemctl --user restart "$SERVICE_NAME"
-  verify_service_active
-  step "$SERVICE_NAME is active"
-  print_installed_summary
-}
-
-cmd_upgrade_darwin() {
-  require_launchd_gui_domain
-  require_managed_plist
-
-  SELECTED_JAVA_HOME=$(resolve_upgrade_java_home)
-  prepare_validated_jar
-  publish_staged_jar
-  step "Replaced $INSTALLED_JAR"
-
-  # 升级不改写 plist。`-k` 先停再起，让新 JAR 被已经加载的服务重新执行。
-  launchctl kickstart -k "$(launchd_target)"
-  verify_launchd_process
-  step "$LAUNCHD_LABEL is running"
-  print_installed_summary
-}
-
-cmd_upgrade() {
-  parse_upgrade_options "$@"
-  validate_artifact_options
-  resolve_verification_windows
-  case "$HOST_OS" in
-    Linux) cmd_upgrade_linux ;;
-    Darwin) cmd_upgrade_darwin ;;
-  esac
-}
-
-tail_log_file() {
-  local path=$1 label=$2
-  if [ -f "$path" ]; then
-    echo
-    echo "==== $label (last $JOURNAL_TAIL_LINES lines) ===="
-    tail -n "$JOURNAL_TAIL_LINES" "$path" || true
+  local option value
+  while [ $# -gt 0 ]; do
+    option=$1
+    case "$option" in --config-file | --token-file | --java-home) ;; *) fail "unknown option (value not echoed)" ;; esac
+    case "$SEEN_OPTIONS" in *"|$option|"*) fail "duplicate option: $option" ;; esac
+    SEEN_OPTIONS="$SEEN_OPTIONS|$option|"
+    [ $# -ge 2 ] || fail "missing value for $option"
+    value=$2
+    [ -n "$value" ] || fail "missing value for $option"
+    absolute_path "$value" "$option"
+    case "$option" in --config-file) CONFIG_FILE=$value ;; --token-file) TOKEN_FILE=$value ;; --java-home) OPT_JAVA_HOME=$value ;; esac
+    shift 2
+  done
+  [ -n "$CONFIG_FILE" ] && [ -n "$TOKEN_FILE" ] || fail "install requires --config-file and --token-file"
+  [ "${CONFIG_FILE##*/}" = daemon.json ] && [ "${TOKEN_FILE##*/}" = daemon.token ] &&
+    [ "${CONFIG_FILE%/*}" = "${TOKEN_FILE%/*}" ] || fail "inputs must be sibling daemon.json and daemon.token"
+  require_manager
+  require_ownership
+  check_managed_paths
+  check_input "$CONFIG_FILE" 1048576
+  check_input "$TOKEN_FILE" 16384
+  resolve_java_home
+  require_cmd bash
+  local bash_path
+  bash_path=$(command -v bash)
+  [ -x "$bash_path" ] || fail "default Bash must be executable"
+  "$bash_path" -c ':' || fail "default Bash is unusable"
+  download_daemon
+  preflight
+  stage_service
+  # All semantic checks (including macOS plist lint) precede target writes and stop.
+  check_managed_paths
+  require_ownership
+  mkdir -p "$INSTALL_ROOT/lib" "${SERVICE_PATH%/*}"
+  if [ "$HOST_OS" = Darwin ]; then mkdir -p "$INSTALL_ROOT/logs"; fi
+  backup_current
+  stage_file "$DOWNLOADED_JAR" "$INSTALL_ROOT/lib" kk-studio-daemon.jar 0644; STAGED_JAR=$REGISTERED_TEMP_PATH
+  stage_file "$CONFIG_FILE" "$INSTALL_ROOT" daemon.json 0600; STAGED_CONFIG=$REGISTERED_TEMP_PATH
+  stage_file "$TOKEN_FILE" "$INSTALL_ROOT" daemon.token 0600; STAGED_TOKEN=$REGISTERED_TEMP_PATH
+  stage_file "$STAGED_SERVICE" "${SERVICE_PATH%/*}" service 0644; STAGED_SERVICE=$REGISTERED_TEMP_PATH
+  if [ -f "$SERVICE_PATH" ]; then
+    if [ "$HOST_OS" = Linux ]; then systemctl --user stop "$SERVICE_NAME";
+    else stop_launchd; fi
   fi
+  # From the first rename onward a failure must report manual recovery, even partial publication.
+  PUBLISHED=true
+  mv -f "$STAGED_JAR" "$INSTALLED_JAR"
+  mv -f "$STAGED_CONFIG" "$INSTALLED_CONFIG"
+  mv -f "$STAGED_TOKEN" "$INSTALLED_TOKEN"
+  mv -f "$STAGED_SERVICE" "$SERVICE_PATH"
+  if [ "$HOST_OS" = Linux ]; then
+    systemctl --user daemon-reload
+    systemctl --user enable "$SERVICE_NAME"
+    systemctl --user restart "$SERVICE_NAME"
+  else launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH"; fi
+  verify_running
+  echo "Installed: $INSTALLED_JAR"
+  echo "Configuration: $INSTALLED_CONFIG"
+  echo "Service: $SERVICE_PATH"
+  if [ -n "$BACKUP_DIR" ]; then echo "Prior managed files backup: $BACKUP_DIR"; fi
 }
-
-cmd_status_linux() {
-  require_systemd_user
-  if [ ! -e "$UNIT_PATH" ]; then
-    echo "kk-studio daemon is not installed: no unit at $UNIT_PATH" >&2
-    return 1
-  fi
-  # 无标记的单元不属于本脚本：不能把它报告成受管安装。
-  require_managed_unit
-
-  # status 是只读命令：systemd 对 inactive 单元返回非零，这里只作为显示内容。
-  systemctl --user --no-pager status "$SERVICE_NAME" || true
-
-  if command -v journalctl >/dev/null 2>&1; then
-    echo
-    echo "==== journal (last $JOURNAL_TAIL_LINES lines) ===="
-    journalctl --user --no-pager -n "$JOURNAL_TAIL_LINES" -u "$SERVICE_NAME" || true
-  else
-    echo "journalctl is not available; cannot show the service journal" >&2
-  fi
-
-  if service_is_active; then
-    return 0
-  fi
-  echo "$SERVICE_NAME is not active" >&2
-  return 3
-}
-
-cmd_status_darwin() {
-  require_launchd_gui_domain
-  if [ ! -e "$PLIST_PATH" ]; then
-    echo "kk-studio daemon is not installed: no plist at $PLIST_PATH" >&2
-    return 1
-  fi
-  # 无标记的 plist 不属于本脚本：不能把它报告成受管安装。
-  require_managed_plist
-
-  # status 只读：打印 launchctl 状态与已有日志尾部，不用 kickstart，因此不会把服务拉起来。
-  launchctl print "$(launchd_target)" || true
-  tail_log_file "$LAUNCHD_STDOUT_LOG" stdout
-  tail_log_file "$LAUNCHD_STDERR_LOG" stderr
-
-  if launchd_service_is_loaded; then
-    return 0
-  fi
-  echo "$LAUNCHD_LABEL is installed but not loaded" >&2
-  return 3
-}
-
 cmd_status() {
-  if [ $# -ne 0 ]; then
-    fail "status accepts no options"
+  require_manager
+  require_ownership
+  [ -f "$SERVICE_PATH" ] || { echo "daemon is not installed: $SERVICE_PATH" >&2; return 1; }
+  check_managed_paths
+  if [ "$HOST_OS" = Linux ]; then
+    local code=0
+    systemctl --user --no-pager status "$SERVICE_NAME" || code=$?
+    case "$code" in 0 | 3) ;; *) fail "systemctl status failed ($code)" ;; esac
+    if command -v journalctl >/dev/null 2>&1; then journalctl --user --no-pager -n 20 -u "$SERVICE_NAME"; fi
+    systemctl --user is-active --quiet "$SERVICE_NAME" || return 3
+  else
+    local loaded=false path
+    if launchctl print "$LAUNCHD_TARGET"; then loaded=true; fi
+    for path in "$STDOUT_LOG" "$STDERR_LOG"; do
+      if [ -e "$path" ] || [ -L "$path" ]; then check_file "$path" true; tail -n 20 "$path"; fi
+    done
+    [ "$loaded" = true ] || return 3
   fi
-  case "$HOST_OS" in
-    Linux) cmd_status_linux ;;
-    Darwin) cmd_status_darwin ;;
-  esac
 }
-
-uninstall_linux() {
-  # 停止并禁用失败时立即中止：先移除 JAR 会让仍在运行的进程失去自己的产物。
-  if ! systemctl --user disable --now "$SERVICE_NAME"; then
-    fail "cannot stop and disable $SERVICE_NAME; nothing was removed"
-  fi
-  rm -f "$UNIT_PATH"
-  rm -f "$INSTALLED_JAR"
-  systemctl --user daemon-reload
-  systemctl --user reset-failed "$SERVICE_NAME" 2>/dev/null || true
-
-  echo "Removed:   $UNIT_PATH"
-  echo "Removed:   $INSTALLED_JAR"
-  echo "Preserved: the registration token file and the daemon data directory (default \$HOME/.kk-studio)"
-  echo "Preserved: no other file under \$HOME/.config/kk-studio or \$HOME/.kk-studio was changed"
-}
-
-uninstall_darwin() {
-  # bootout 失败时什么都不删：仍在运行的进程必须继续能找到自己的 JAR 与 plist。
-  if launchd_service_is_loaded; then
-    if ! launchctl bootout "$(launchd_target)"; then
-      fail "cannot bootout $LAUNCHD_LABEL; nothing was removed"
-    fi
-  fi
-  rm -f "$PLIST_PATH"
-  rm -f "$INSTALLED_JAR"
-
-  echo "Removed:   $PLIST_PATH"
-  echo "Removed:   $INSTALLED_JAR"
-  echo "Preserved: the registration token file and the daemon data directory (default \$HOME/.kk-studio)"
-  echo "Preserved: $LAUNCHD_STDOUT_LOG"
-  echo "Preserved: $LAUNCHD_STDERR_LOG"
-}
-
 cmd_uninstall() {
-  if [ $# -ne 0 ]; then
-    fail "uninstall accepts no options"
+  require_manager
+  require_ownership
+  check_managed_paths
+  if [ ! -f "$SERVICE_PATH" ]; then
+    echo "daemon is not installed; preserved all files under $INSTALL_ROOT"
+    return 0
   fi
-  case "$HOST_OS" in
-    Linux)
-      require_systemd_user
-      require_managed_unit
-      uninstall_linux
-      ;;
-    Darwin)
-      require_launchd_gui_domain
-      require_managed_plist
-      uninstall_darwin
-      ;;
-  esac
+  if [ "$HOST_OS" = Linux ]; then
+    systemctl --user disable --now "$SERVICE_NAME" || fail "cannot stop/disable service; nothing was removed"
+  else stop_launchd; fi
+  rm -f "$SERVICE_PATH" "$INSTALLED_JAR"
+  if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload; fi
+  echo "Removed: $SERVICE_PATH and $INSTALLED_JAR"
+  echo "Preserved: config/token/data/logs/backups under $INSTALL_ROOT"
 }
-
-usage_error() {
-  usage >&2
-  exit 2
-}
-
 main() {
-  if [ $# -eq 0 ]; then
-    set -- install
-  elif [[ $1 = --* ]] && [ "$1" != --help ]; then
-    set -- install "$@"
-  fi
-  # 帮助不依赖宿主。其它命令在解析选项或触碰受管路径之前就拒绝不受支持的系统。
-  case "$1" in
-    -h | --help | install) ;;
-    *) require_supported_host ;;
-  esac
-  case "$1" in
-    -h | --help)
-      usage
-      ;;
+  local action=${1:-help}
+  if [ $# -gt 0 ]; then shift; fi
+  case "$action" in
+    help | --help | -h) [ $# -eq 0 ] || fail "help accepts no options"; usage; return ;;
     install)
-      shift
-      # `install --help` 只在它是完整的 install 参数列表时才是信息命令；混入其它参数一律
-      # 交给选项解析失败，未知/重复选项不会被帮助掩盖。
-      if [ $# -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
-        usage
-        return 0
-      fi
-      cmd_install "$@"
-      ;;
-    upgrade)
-      shift
-      cmd_upgrade "$@"
-      ;;
-    status)
-      shift
-      cmd_status "$@"
-      ;;
-    uninstall)
-      shift
-      cmd_uninstall "$@"
-      ;;
-    *)
-      echo "ERROR: unknown command (value not echoed)" >&2
-      usage_error
-      ;;
+      if [ $# -eq 1 ] && { [ "$1" = --help ] || [ "$1" = -h ]; }; then usage; return; fi ;;
+    status | uninstall) [ $# -eq 0 ] || fail "$action accepts no options" ;;
+    *) fail "unknown command (value not echoed)" ;;
   esac
+  [ -n "${HOME:-}" ] || fail "HOME must be set"
+  while [ "$HOME" != / ] && [ "${HOME%/}" != "$HOME" ]; do HOME=${HOME%/}; done
+  absolute_path "$HOME" HOME
+  INSTALL_ROOT="$HOME/.kk-studio"
+  INSTALLED_JAR="$INSTALL_ROOT/lib/kk-studio-daemon.jar"
+  INSTALLED_CONFIG="$INSTALL_ROOT/daemon.json"
+  INSTALLED_TOKEN="$INSTALL_ROOT/daemon.token"
+  STDOUT_LOG="$INSTALL_ROOT/logs/environment-daemon.stdout.log"
+  STDERR_LOG="$INSTALL_ROOT/logs/environment-daemon.stderr.log"
+  HOST_OS=$(uname -s)
+  case "$HOST_OS" in
+    Linux) SERVICE_PATH="$HOME/.config/systemd/user/$SERVICE_NAME"; SERVICE_MARKER=$UNIT_MARKER ;;
+    Darwin)
+      LAUNCHD_DOMAIN="gui/$(id -u)"
+      LAUNCHD_TARGET="$LAUNCHD_DOMAIN/$LAUNCHD_LABEL"
+      SERVICE_PATH="$HOME/Library/LaunchAgents/$LAUNCHD_LABEL.plist"; SERVICE_MARKER=$PLIST_MARKER ;;
+    *) fail "unsupported operating system: $HOST_OS" ;;
+  esac
+  local value
+  for value in "$VERIFY_TIMEOUT_SECONDS" "$VERIFY_STABLE_SECONDS"; do
+    case "$value" in '' | *[!0-9]*) fail "verification windows must be non-negative decimal integers" ;; esac
+  done
+  VERIFY_TIMEOUT_SECONDS=$((10#$VERIFY_TIMEOUT_SECONDS))
+  VERIFY_STABLE_SECONDS=$((10#$VERIFY_STABLE_SECONDS))
+  case "$action" in install) cmd_install "$@" ;; status) cmd_status ;; uninstall) cmd_uninstall ;; esac
 }
-
 main "$@"
