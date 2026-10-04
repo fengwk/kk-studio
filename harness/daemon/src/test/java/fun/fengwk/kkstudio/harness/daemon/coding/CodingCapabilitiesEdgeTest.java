@@ -285,9 +285,9 @@ class CodingCapabilitiesEdgeTest {
     assertFalse(result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
-  /** 已删除的 {@code kkstudio.daemon.*} 系统属性不再是配置来源；配置只从 CLI 显式取值与数据目录资源根构建。 */
+  /** 已删除的 {@code kkstudio.daemon.*} 系统属性不再是配置来源；配置只从运行时显式取值与数据目录资源根构建。 */
   @Test
-  void cliOnlyConfigurationIgnoresRemovedSystemProperties() throws Exception {
+  void runtimeConfigurationIgnoresRemovedSystemProperties() throws Exception {
     String[] removed = {
       "kkstudio.daemon.resource-directory",
       "kkstudio.daemon.max-resource-bytes",
@@ -304,9 +304,9 @@ class CodingCapabilitiesEdgeTest {
     try {
       Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
       CodingToolsConfig config =
-          CodingToolsConfig.fromCli(resources, "/usr/bin/bash", TestCodingConfig.testLsp());
+          CodingToolsConfig.fromRuntime(resources, "/usr/bin/bash", TestCodingConfig.testLsp());
 
-      // 唯一权威来源是 CLI：被删除的属性不得改写任何取值。
+      // 被删除的属性不得改写任何运行时取值。
       assertEquals("/usr/bin/bash", config.bashExecutable());
       assertEquals("test-ls", config.lsp().servers().getFirst().id());
       // 输出布局完全由数据目录决定；本地不再有二进制 resource 导出根。
@@ -325,15 +325,16 @@ class CodingCapabilitiesEdgeTest {
 
   /** 本地执行程序参数的默认值与显式覆盖：空白回退默认，显式取值原样保留，未配置时没有 LSP 服务器。 */
   @Test
-  void cliConfigurationResolvesLocalExecutableDefaults() throws Exception {
+  void runtimeConfigurationResolvesLocalExecutableDefaults() throws Exception {
     Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
 
-    CodingToolsConfig defaults = CodingToolsConfig.fromCli(resources, "  ", LspDiscovery.empty());
+    CodingToolsConfig defaults =
+        CodingToolsConfig.fromRuntime(resources, "  ", LspDiscovery.empty());
     assertEquals(CodingToolsConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
-    assertTrue(defaults.lsp().servers().isEmpty(), "未提供 --lsp-config 时没有 LSP 服务器");
+    assertTrue(defaults.lsp().servers().isEmpty(), "未配置 lsp 时没有 LSP 服务器");
 
     CodingToolsConfig explicit =
-        CodingToolsConfig.fromCli(resources, "custom-bash", LspDiscovery.empty());
+        CodingToolsConfig.fromRuntime(resources, "custom-bash", LspDiscovery.empty());
     assertEquals("custom-bash", explicit.bashExecutable());
     assertTrue(explicit.lsp().servers().isEmpty());
   }

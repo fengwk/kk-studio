@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.DaemonCapabilityRegistry;
+import fun.fengwk.kkstudio.harness.daemon.DaemonConfig;
 import fun.fengwk.kkstudio.harness.daemon.skill.SkillPackageInstaller;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -21,11 +22,14 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,9 +37,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Daemon 装配的 LSP 切片：{@code --lsp-config} 声明的扩展名必须真的决定能力可用性，并且装配好的注册表能端到端跑通。
+ * Daemon 装配的 LSP 切片：内联 lsp 声明的扩展名必须真的决定能力可用性，并且装配好的注册表能端到端跑通。
  *
- * <p>这里是"配置 → 发现 → 客户端 → capability"的完整链路测试：配置来自 CLI JSON 文件，服务器进程来自假服务器，断言读自真实协议记录。
+ * <p>这里是"配置 → 发现 → 客户端 → capability"的完整链路测试：配置来自唯一 Daemon JSON 文件，服务器进程来自假服务器，断言读自真实协议记录。
  */
 class LspDaemonWiringTest {
 
@@ -62,9 +66,9 @@ class LspDaemonWiringTest {
     executor.shutdownNow();
   }
 
-  /** 意图：CLI 声明 {@code .java} 后 lsp capability 端到端可用；未声明的扩展名给出可操作错误。 */
+  /** 意图：配置声明 {@code .java} 后 lsp capability 端到端可用；未声明的扩展名给出可操作错误。 */
   @Test
-  void cliConfiguredExtensionsDriveTheRegisteredCapabilities() throws Exception {
+  void inlineConfiguredExtensionsDriveTheRegisteredCapabilities() throws Exception {
     Path repo = Files.createDirectories(root.resolve("repo"));
     Files.createDirectories(repo.resolve(".git"));
     Files.writeString(repo.resolve("pom.xml"), "<project/>");
@@ -73,9 +77,9 @@ class LspDaemonWiringTest {
     Path transcript = FakeLspServers.transcript(root);
     Path configFile = writeLspConfig(transcript);
 
-    LspDiscovery discovery = LspDiscovery.read(configFile);
+    LspDiscovery discovery = discovery(configFile);
     CodingToolsConfig config =
-        CodingToolsConfig.fromCli(
+        CodingToolsConfig.fromRuntime(
             Files.createDirectories(root.resolve("data/resources")), "bash", discovery);
     LspService service =
         LspService.create(
@@ -131,15 +135,15 @@ class LspDaemonWiringTest {
   /** 意图：配置声明的扩展名大小写不敏感，且 read header 会报告"类型受支持但未安装"。 */
   @Test
   void configuredExtensionsAreCaseInsensitiveAndReportNotInstalled() throws Exception {
-    Path config = root.resolve("lsp.json");
+    Path config = root.resolve("daemon.json");
     Files.writeString(
         config,
-        "{\"servers\":{\"kt-ls\":{\"command\":[\"/nope/missing-language-server\"],"
-            + "\"extensions\":[\".KT\"]}}}",
+        "{\"studioUrl\":\"http://localhost\",\"lsp\":{\"servers\":{\"kt-ls\":{\"command\":[\"/nope/missing-language-server\"],"
+            + "\"extensions\":[\".KT\"]}}}}",
         StandardCharsets.UTF_8);
     Path file = Files.writeString(root.resolve("App.KT"), "val app = 1\n");
 
-    LspDiscovery discovery = LspDiscovery.read(config);
+    LspDiscovery discovery = discovery(config);
     LspSupport support = discovery.support(file);
 
     assertTrue(support.supported(), "扩展名匹配必须大小写不敏感");
@@ -148,7 +152,7 @@ class LspDaemonWiringTest {
   }
 
   private Path writeLspConfig(Path transcript) throws Exception {
-    Path config = root.resolve("lsp-config.json");
+    Path config = root.resolve("daemon.json");
     List<String> command = new ArrayList<>();
     command.add(FakeLspServers.javaExecutable());
     command.add("-cp");
@@ -165,11 +169,20 @@ class LspDaemonWiringTest {
     }
     Files.writeString(
         config,
-        "{\"servers\":{\"fake\":{\"command\":["
+        "{\"studioUrl\":\"http://localhost\",\"lsp\":{\"servers\":{\"fake\":{\"command\":["
             + jsonCommand
-            + "],\"extensions\":[\".java\"],\"rootMarkers\":[\"pom.xml\"]}}}",
+            + "],\"extensions\":[\".java\"],\"rootMarkers\":[\"pom.xml\"]}}}}",
         StandardCharsets.UTF_8);
     return config;
+  }
+
+  private LspDiscovery discovery(Path config) throws Exception {
+    Path token = Files.writeString(config.resolveSibling("daemon.token"), "test-token");
+    if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+      Files.setPosixFilePermissions(
+          token, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+    }
+    return DaemonConfig.fromArgs(new String[] {"--config", config.toString()}).lsp();
   }
 
   private static String quote(String value) throws Exception {

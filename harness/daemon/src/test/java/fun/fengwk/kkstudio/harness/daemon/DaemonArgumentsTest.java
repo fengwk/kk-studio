@@ -78,13 +78,10 @@ class DaemonArgumentsTest {
         new String[][] {
           {"--base64-args", ""},
           {"--help", "--version"},
-          {"--note", "one", "--note", "two"},
-          {"--data-dir", "/one", "--data-dir", "/two"},
-          {"--lsp-config", "/one", "--lsp-config", "/two"},
-          {"--registration-token-file", "/one", "--registration-token-file", "/two"},
-          {"--note"},
-          {"--gateway-uri", "--note"},
-          {"--gateway-uri", "ws://localhost/gateway"}
+          {"--config", "/one", "--config", "/two"},
+          {"--config"},
+          {"--config", "--check-config"},
+          {"--config", "relative.json"}
         }) {
       assertThrows(
           IllegalArgumentException.class,
