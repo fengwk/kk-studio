@@ -130,6 +130,19 @@ class ConfigSyncYamlTest {
   }
 
   @Test
+  void blankStringsAreNotCoercedToNullableScalars() {
+    // 空字符串和空白字符串仍是字符串，不能静默变成数字/布尔字段的 null。
+    for (String field : List.of("count", "ratio", "enabled")) {
+      for (String value : List.of("", " ")) {
+        assertThrows(
+            AiValidationException.class,
+            () -> yaml.convert(Map.of(field, value), Sample.class, "sample"),
+            field);
+      }
+    }
+  }
+
+  @Test
   void enumOrdinalIsRejected() {
     Map<String, Object> node = Map.of("modality", 0);
     assertThrows(AiValidationException.class, () -> yaml.convert(node, Sample.class, "sample"));

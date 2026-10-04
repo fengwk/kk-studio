@@ -62,13 +62,16 @@ public final class ConfigSyncYaml {
     mapper
         .coercionConfigFor(LogicalType.Integer)
         .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
     mapper
         .coercionConfigFor(LogicalType.Float)
-        .setCoercion(CoercionInputShape.String, CoercionAction.Fail);
+        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail);
     mapper
         .coercionConfigFor(LogicalType.Boolean)
         .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
     mapper
