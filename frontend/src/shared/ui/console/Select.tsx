@@ -1,11 +1,72 @@
 import { Check, ChevronDown } from 'lucide-react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useI18n } from '@/shared/i18n'
 
 export interface SelectOption {
   value: string
   label: string
   disabled?: boolean
+}
+
+const MENU_MARGIN = 8
+const MENU_GAP = 6
+const MENU_MIN_HEIGHT = 120
+const MENU_MAX_HEIGHT = 280
+const MENU_MAX_WIDTH = 360
+
+/**
+ * 菜单位于 body portal，必须用视口坐标定位，避免被滚动容器（如 modal-body）裁剪。
+ * 触发按钮与菜单都不在彼此的可滚动祖先内，故外点判断需同时检查两棵子树。
+ */
+function computeMenuPosition(trigger: HTMLElement, compact: boolean, menu?: HTMLElement | null): CSSProperties {
+  const rect = trigger.getBoundingClientRect()
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  if (compact) {
+    const width = menu?.getBoundingClientRect().width ?? Math.max(rect.width, 148)
+    const below = viewportHeight - rect.bottom - MENU_GAP - MENU_MARGIN
+    const above = rect.top - MENU_GAP - MENU_MARGIN
+    const openBelow = below >= above
+    return {
+      position: 'fixed',
+      ...(openBelow
+        ? { top: rect.bottom + MENU_GAP }
+        : { bottom: viewportHeight - rect.top + MENU_GAP }),
+      left: 'auto',
+      right: Math.min(
+        Math.max(MENU_MARGIN, viewportWidth - rect.right),
+        Math.max(MENU_MARGIN, viewportWidth - MENU_MARGIN - width),
+      ),
+      '--ui-select-available-height': `${Math.max(0, openBelow ? below : above)}px`,
+      '--ui-select-trigger-width': `${rect.width}px`,
+    } as CSSProperties & {
+      '--ui-select-trigger-width': string
+      '--ui-select-available-height': string
+    }
+  }
+  const spaceBelow = viewportHeight - rect.bottom - MENU_GAP - MENU_MARGIN
+  const spaceAbove = rect.top - MENU_GAP - MENU_MARGIN
+  const openBelow = spaceBelow >= spaceAbove || spaceBelow >= MENU_MIN_HEIGHT
+  const vertical: CSSProperties = openBelow
+    ? { top: rect.bottom + MENU_GAP }
+    : { bottom: viewportHeight - rect.top + MENU_GAP }
+  const maxHeight = Math.max(
+    0,
+    Math.min(MENU_MAX_HEIGHT, openBelow ? spaceBelow : spaceAbove),
+  )
+  const maxWidth = Math.max(rect.width, Math.min(MENU_MAX_WIDTH, viewportWidth - MENU_MARGIN * 2))
+  const width = menu?.getBoundingClientRect().width ?? rect.width
+  const maxLeft = Math.max(MENU_MARGIN, viewportWidth - MENU_MARGIN - width)
+  return {
+    ...vertical,
+    position: 'fixed',
+    left: Math.min(Math.max(rect.left, MENU_MARGIN), maxLeft),
+    right: 'auto',
+    minWidth: rect.width,
+    maxWidth,
+    maxHeight,
+  }
 }
 
 /**
@@ -47,6 +108,7 @@ export function Select({
   const listboxId = `ui-select-listbox-${instanceId}`
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const selectedIndex = Math.max(
     0,
@@ -54,9 +116,18 @@ export function Select({
   )
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(selectedIndex)
+  const [menuPosition, setMenuPosition] = useState<CSSProperties | null>(null)
   const selected = options.find((option) => option.value === value)
   const effectivePlaceholder = placeholder ?? t('shared.selectPlaceholder')
   const triggerLabel = selected?.label ?? effectivePlaceholder
+
+  /** 触发按钮与 portal 菜单分处两棵子树，判断“内部”必须同时覆盖两者。 */
+  function containsNode(node: Node | null): boolean {
+    if (node == null) {
+      return false
+    }
+    return rootRef.current?.contains(node) === true || menuRef.current?.contains(node) === true
+  }
 
   function closeListbox(focusTrigger = false) {
     setOpen(false)
@@ -67,6 +138,9 @@ export function Select({
 
   function openListbox() {
     setActiveIndex(selectedIndex)
+    if (triggerRef.current) {
+      setMenuPosition(computeMenuPosition(triggerRef.current, compact))
+    }
     setOpen(true)
   }
 
@@ -98,19 +172,38 @@ export function Select({
     option?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex, open])
 
+  useLayoutEffect(() => {
+    if (!open) {
+      return
+    }
+    function reposition() {
+      if (triggerRef.current) {
+        setMenuPosition(computeMenuPosition(triggerRef.current, compact, menuRef.current))
+      }
+    }
+    reposition()
+    window.addEventListener('resize', reposition)
+    // capture 阶段监听任意滚动容器，保证滚动后菜单仍贴着触发按钮。
+    window.addEventListener('scroll', reposition, true)
+    return () => {
+      window.removeEventListener('resize', reposition)
+      window.removeEventListener('scroll', reposition, true)
+    }
+  }, [open, compact])
+
   useEffect(() => {
     if (!open) {
       return
     }
     function handlePointerDown(event: PointerEvent) {
       const target = event.target
-      if (!(target instanceof Node) || !rootRef.current?.contains(target)) {
+      if (!(target instanceof Node) || !containsNode(target)) {
         closeListbox()
       }
     }
     function handleFocusIn(event: FocusEvent) {
       const target = event.target
-      if (!(target instanceof Node) || !rootRef.current?.contains(target)) {
+      if (!(target instanceof Node) || !containsNode(target)) {
         closeListbox()
       }
     }
@@ -157,6 +250,33 @@ export function Select({
     event: React.KeyboardEvent<HTMLButtonElement>,
     option: SelectOption,
   ) {
+    if (event.key === 'Tab') {
+      // Portal 的 DOM 顺序不代表控件顺序：Tab 从触发按钮的相邻可聚焦控件继续。
+      const controls = Array.from(document.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, summary, a[href], [tabindex]',
+      )).filter(element => {
+        if (element.tabIndex < 0 || element.matches(':disabled') || menuRef.current?.contains(element)) {
+          return false
+        }
+        for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor)
+          if (ancestor.hidden || ancestor.inert || style.display === 'none' || style.visibility === 'hidden') {
+            return false
+          }
+        }
+        return true
+      })
+      const index = controls.indexOf(triggerRef.current!)
+      const adjacent = controls[index + (event.shiftKey ? -1 : 1)]
+      if (adjacent) {
+        event.preventDefault()
+        closeListbox()
+        adjacent.focus()
+      } else {
+        closeListbox(true)
+      }
+      return
+    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       moveActive(event.key === 'ArrowDown' ? 1 : -1)
@@ -205,41 +325,53 @@ export function Select({
         <span className="ui-select-value">{triggerLabel}</span>
         <ChevronDown className={`ui-select-chevron${open ? ' is-open' : ''}`} aria-hidden="true" />
       </button>
-      {open ? (
-        <div id={listboxId} className="ui-select-menu" role="listbox" aria-label={listboxLabel ?? ariaLabel}>
-          {options.map((option, index) => {
-            const isSelected = option.value === value
-            return (
-              <button
-                key={option.value === '' ? '__empty__' : option.value}
-                ref={(element) => {
-                  optionRefs.current[index] = element
-                }}
-                type="button"
-                role="option"
-                tabIndex={activeIndex === index ? 0 : -1}
-                disabled={option.disabled}
-                aria-selected={isSelected}
-                aria-disabled={option.disabled || undefined}
-                data-value={option.value}
-                className={`ui-select-option${activeIndex === index ? ' is-active' : ''}`}
-                onClick={() => {
-                  if (!option.disabled) {
-                    selectValue(option.value)
-                  }
-                }}
-                onKeyDown={(event) => handleOptionKeyDown(event, option)}
-                onMouseEnter={() => setActiveIndex(index)}
-              >
-                <span className="ui-select-option-label">{option.label}</span>
-                <span className="ui-select-option-indicator" aria-hidden="true">
-                  {isSelected ? <Check /> : null}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              id={listboxId}
+              className={['ui-select-menu', compact ? 'is-compact' : '', className]
+                .filter(Boolean)
+                .join(' ')}
+              role="listbox"
+              aria-label={listboxLabel ?? ariaLabel}
+              style={menuPosition ?? { position: 'fixed', visibility: 'hidden' }}
+            >
+              {options.map((option, index) => {
+                const isSelected = option.value === value
+                return (
+                  <button
+                    key={option.value === '' ? '__empty__' : option.value}
+                    ref={(element) => {
+                      optionRefs.current[index] = element
+                    }}
+                    type="button"
+                    role="option"
+                    tabIndex={activeIndex === index ? 0 : -1}
+                    disabled={option.disabled}
+                    aria-selected={isSelected}
+                    aria-disabled={option.disabled || undefined}
+                    data-value={option.value}
+                    className={`ui-select-option${activeIndex === index ? ' is-active' : ''}`}
+                    onClick={() => {
+                      if (!option.disabled) {
+                        selectValue(option.value)
+                      }
+                    }}
+                    onKeyDown={(event) => handleOptionKeyDown(event, option)}
+                    onMouseEnter={() => setActiveIndex(index)}
+                  >
+                    <span className="ui-select-option-label">{option.label}</span>
+                    <span className="ui-select-option-indicator" aria-hidden="true">
+                      {isSelected ? <Check /> : null}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

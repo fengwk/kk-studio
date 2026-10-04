@@ -45,6 +45,10 @@ export const sharedCatalog = {
     'en-US': 'Copied',
     'zh-CN': '已复制',
   },
+  'shared.dismissNotification': {
+    'en-US': 'Dismiss notification',
+    'zh-CN': '关闭通知',
+  },
   'shared.mermaidDiagram': {
     'en-US': 'Mermaid diagram',
     'zh-CN': 'Mermaid 图表',
