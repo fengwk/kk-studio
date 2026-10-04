@@ -349,9 +349,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 免费 L1 覆盖的部分产品契约面：
 
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
-  `config_sync.environment_identity_and_token`：七类配置清单、凭据随 YAML 导出、
-  同名 Provider 更新、Environment 身份与注册令牌恢复，以及成功和错误响应的 `no-store`。
-  三个 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
+  `config_sync.environment_identity_and_token` / `config_sync.import_precheck_and_partial_confirmation`：
+  七类配置清单、凭据随 YAML 导出、导入前的新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、
+  同名 Provider 更新、Environment 身份与注册令牌恢复，以及同步响应的 `no-store`。
+  这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
   幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
@@ -747,16 +748,25 @@ Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Su
 Model 包含 Provider；系统设置包含其引用的备用模型和提示词 Agent。
 依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
 
-导入选择 `.yaml` 或 `.yml` 文件并确认，按名称新增或更新，不删除文件外的配置。
-条目名称须非空且没有首尾空白，重复名称会使导入失败，不会依次覆盖。
+导入选择 `.yaml` 或 `.yml` 文件后先检查，不写数据库。确认页分别列出将新增、将覆盖的配置，
+以及将跳过的条目和原因；同名配置即使内容未变也归入覆盖清单。
+没有跳过项时点击“确认导入”；有跳过项时，可取消或明确选择“仅导入可用配置”。
+没有可导入项时不提供执行按钮。不支持的条目及依赖它们的配置不会被悄悄改写。
+
+YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒绝整份文件。
+条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
+同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
+文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
-系统设置只合并提供且支持的字段，省略字段保持原值。导入结果列出已导入条目和跳过原因；
-不支持的条目及依赖它们的配置不会被悄悄改写。YAML 结构、类型或有效值错误使导入失败，
+
+确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；
+导入期间应避免并发编辑，同名配置按文件覆盖。未授权部分导入时，执行发现跳过项也会拒绝，
 数据库写入失败整体回滚。设置页的未保存草稿不会被自动覆盖，可在导入结果中明确重新加载。
 网络代理设置参与同步，导入后仍须重启 Backend 才会生效。
 
 Skill Package 文件保存仓库地址、分支和已发布的 exact commit，不包含 Git 文件内容；
-目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。MCP 工具在导入时重新发现，
+目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。检查与执行都会准备 Git commit
+并重新发现 MCP 工具，外部服务状态变化可能使实际结果与预览不同；
 发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
 Environment 保留注册令牌，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
 
