@@ -81,6 +81,19 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm --prefix frontend ci
+      - name: Test generated Windows install command natively
+        # The generator stages owner-private files; only a real Windows host proves ACLs.
+        shell: bash
+        run: npm --prefix frontend run test:install:windows
 
   validate:
     name: validate repository

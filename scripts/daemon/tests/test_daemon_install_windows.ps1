@@ -84,7 +84,7 @@ function Assert-Throws {
                 "actual: <$($_.Exception.Message)>"
             )
         }
-        return
+        return $_.Exception.Message
     }
     throw "assertion failed: $Message (no exception)"
 }
@@ -612,8 +612,6 @@ function Test-PrivatePublication {
     $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-private-" + [Guid]::NewGuid().ToString("N"))
     function Resolve-JavaHome { param($ExplicitJavaHome); return (Join-Path $sandbox "jdk") }
-    function Resolve-Executable { param($Value, $DefaultName, $OptionName); return "bash.exe" }
-    function Assert-BashReady {}
     try {
         New-PrivateDirectory -Path $sandbox
         $source = Join-Path $sandbox ("source-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587))
@@ -806,22 +804,25 @@ function Test-PureValidation {
         -Message "manual backup instructions construct protected owner ACL"
 }
 
-function Test-BashReadiness {
-    function Resolve-Executable { param($Value, $DefaultName, $OptionName); return "fixture-bash" }
-    function Invoke-NativeProcess {
-        param($Executable, $Arguments)
-        Assert-SequenceEqual -Expected @("--version") -Actual $Arguments -Message "Bash probe is non-mutating"
-        return $probe
-    }
-    $probe = [pscustomobject] @{ Stdout = "GNU bash, version 5"; ExitCode = 0 }
-    Assert-BashReady
-    $probe.ExitCode = 1
-    Assert-Throws -Action { Assert-BashReady } -ExpectedMessage "Bash on PATH is not ready" `
-        -Message "failed Bash forwarding executable is rejected"
-    $probe.ExitCode = 0
-    $probe.Stdout = "not Bash"
-    Assert-Throws -Action { Assert-BashReady } -ExpectedMessage "Bash on PATH is not ready" `
-        -Message "wrong executable rejected"
+function Test-ConfigFailureDetail {
+    # Only the core's fixed, value-free marker line is surfaced; everything else stays generic
+    # so an old release or a stack trace can never echo configuration or credential values.
+    $trusted = "Invalid daemon configuration: daemon.studioUrl must be an absolute http(s) origin"
+    Assert-Equal -Expected $trusted `
+        -Actual (Get-TrustedConfigFailureDetail -Stdout $trusted -Stderr "") `
+        -Message "trusted marker line is surfaced"
+    Assert-Equal -Expected $trusted `
+        -Actual (Get-TrustedConfigFailureDetail -Stdout "" -Stderr "warning`n$trusted`nsecret") `
+        -Message "marker is extracted from wrapped diagnostics"
+    Assert-Equal -Expected $null `
+        -Actual (Get-TrustedConfigFailureDetail -Stdout "not valid" -Stderr "stack trace") `
+        -Message "unrecognized output stays generic"
+    Assert-Equal -Expected $null `
+        -Actual (Get-TrustedConfigFailureDetail -Stdout ("Invalid daemon configuration: " + ("x" * 600)) -Stderr "") `
+        -Message "overlong marker is not surfaced"
+    Assert-Equal -Expected $null `
+        -Actual (Get-TrustedConfigFailureDetail -Stdout ("Invalid daemon configuration: bad" + [char] 7) -Stderr "") `
+        -Message "control characters are not surfaced"
 }
 
 function Assert-WindowsIdentity {
@@ -965,7 +966,7 @@ try {
     }
     Test-JdkVersionGate
     Test-PureValidation
-    Test-BashReadiness
+    Test-ConfigFailureDetail
     if (-not $ProcessOnly) {
         Test-PrivateFileAcl
         Test-PrivatePublication

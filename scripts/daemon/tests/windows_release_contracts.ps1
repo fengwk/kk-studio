@@ -55,10 +55,6 @@ function Test-ReleaseInstallerContracts {
         return (Get-Item -LiteralPath $Path -Force).FullName
     }
     function Resolve-JavaHome { param($ExplicitJavaHome); return (Join-Path $sandbox "jdk") }
-    function Resolve-Executable { param($Value, $DefaultName, $OptionName); return "bash.exe" }
-    function Assert-BashReady {
-        if ($state.Failure -eq "bash") { throw "fixture bash failure" }
-    }
     function Copy-PrivateFile {
         param($Source, $Destination)
         if ((Split-Path -Leaf $Destination) -like ".publish-*" -and
@@ -155,6 +151,7 @@ function Test-ReleaseInstallerContracts {
         Assert-True -Condition ($calls -notcontains "stop") -Message "all probes precede stop"
         $exit = 0
         $stdout = "kk-studio-daemon 2.4.6`n"
+        $stderr = "private diagnostic not for output"
         if ($logical[0] -eq "--version") {
             if ($state.Failure -eq "version") { $stdout = "kk-studio-daemon 9.9.9" }
             if ($state.Failure -eq "version-exit") { $exit = 23 }
@@ -166,10 +163,24 @@ function Test-ReleaseInstallerContracts {
                 -Actual ([IO.File]::ReadAllText((Join-Path $WorkingDirectory "daemon.token"))) `
                 -Message "staged sibling token copied unchanged"
             $stdout = "Daemon configuration is valid`n"
-            if ($state.Failure -eq "config") { $exit = 2 }
-            if ($state.Failure -eq "config-output") { $stdout = "not valid" }
+            switch ($state.Failure) {
+                "config" {
+                    $exit = 2
+                    $stderr = "Invalid daemon configuration: daemon.studioUrl must be an absolute http(s) origin`n"
+                }
+                "config-leak" {
+                    # The trusted field line is safe; the raw token line beside it must not surface.
+                    $exit = 2
+                    $stderr = "Invalid daemon configuration: daemon.note must be a single line`nnew token fixture`n"
+                }
+                "config-unknown" {
+                    $exit = 2
+                    $stderr = "Exception in thread main java.lang.IllegalArgumentException`nnew token fixture`n"
+                }
+                "config-output" { $stdout = "not valid" }
+            }
         }
-        return [pscustomobject] @{ Stdout = $stdout; Stderr = "private diagnostic not for output"; ExitCode = $exit }
+        return [pscustomobject] @{ Stdout = $stdout; Stderr = $stderr; ExitCode = $exit }
     }
     function Reset-Fixture {
         if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
@@ -232,17 +243,22 @@ function Test-ReleaseInstallerContracts {
 
         foreach ($case in @(
             @("owner", "unmanaged Scheduled Task"), @("refresh-owner", "unmanaged Scheduled Task"),
-            @("bash", "fixture bash failure"),
             @("download", "fixture download failure"), @("checksum", "checksum mismatch"),
             @("foreign-checksum", "exactly one matching asset"), @("multiple-checksum", "exactly one matching asset"),
             @("version", "does not match"), @("version-exit", "exit code 23"),
-            @("config", "--check-config failed"), @("config-output", "--check-config failed"),
+            @("config", "Invalid daemon configuration"), @("config-leak", "Invalid daemon configuration"),
+            @("config-unknown", "unrecognized output"), @("config-output", "unrecognized output"),
             @("definition", "fixture definition failure"), @("backup", "Partial backup")
         )) {
             Reset-Fixture
             $state.Failure = $case[0]
             if ($state.Failure -eq "owner") { $state.Task.Description = "foreign task" }
-            Assert-Throws -Action { Invoke-Main } -ExpectedMessage $case[1] -Message "$($case[0]) refused"
+            $message = Assert-Throws -Action { Invoke-Main } -ExpectedMessage $case[1] `
+                -Message "$($case[0]) refused"
+            if ($state.Failure -in @("config-leak", "config-unknown")) {
+                Assert-True -Condition ($message -notmatch "new token fixture") `
+                    -Message "$($state.Failure) never echoes the token"
+            }
             Assert-OldFiles -Context $case[0]
             Assert-True -Condition ($calls -notcontains "stop" -and $calls -notcontains "register") `
                 -Message "$($case[0]) never stops or registers"
