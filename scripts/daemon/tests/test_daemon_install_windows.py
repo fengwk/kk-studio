@@ -76,32 +76,15 @@ class TestWindowsInstallerSurface(unittest.TestCase):
         self.assertNotRegex(text, r"(?m)^\+")
 
     def test_help_lists_commands_options_layout_and_windows_limitations(self):
-        """The only discovery surface must state login, logging, Bash, and supervision limits."""
+        """The discovery surface describes fixed storage and per-user supervision limits."""
         text = function_body("Write-Usage")
-        for command in ("install", "upgrade", "status", "uninstall"):
-            self.assertIn(command, text)
-        for option in (
-            "-GatewayUri",
-            "-RegistrationTokenFile",
-            "-RegistrationToken",
-            "-FromSource",
-            "-Version",
-            "-JavaHome",
-            "-DataDir",
-            "-Note",
-            "-BashExecutable",
-            "-LspConfig",
-        ):
-            self.assertIn(option, text)
-        self.assertIn("%LOCALAPPDATA%\\kk-studio\\daemon", text)
-        self.assertIn("AtLogOn", text)
-        self.assertIn("Interactive", text)
-        self.assertIn("Limited", text)
-        self.assertIn("does not capture daemon stdout/stderr", text)
-        self.assertIn("best effort settings", text)
-        self.assertIn("Service/systemd supervision", text)
-        self.assertIn("Git for", text)
-        self.assertIn("compatible Bash", text)
+        for value in ("install", "status", "uninstall", "help", "-ConfigFile", "-TokenFile", "-JavaHome",
+                      "%USERPROFILE%\\.kk-studio", "AtLogOn", "Interactive", "Limited",
+                      "does not capture daemon stdout/stderr", "best effort settings", "compatible Bash"):
+            self.assertIn(value, text)
+        for value in ("GatewayUri", "RegistrationToken", "FromSource", "$Version", "LspConfig", "Read-Host",
+                      "Invoke-Upgrade", "Invoke-DaemonBuild", "Resolve-RepositoryRoot"):
+            self.assertNotIn(value, script_text())
 
     def test_functions_are_dot_sourceable_without_running_main(self):
         """Native tests must load pure helpers without installing or registering anything."""
@@ -115,7 +98,7 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
 
     def test_token_validation_reads_metadata_only_and_requires_private_acl(self):
         """The installer must validate ACL metadata without ever opening the token bytes."""
-        body = function_body("Assert-RegistrationTokenFile")
+        body = function_body("Assert-PrivateFile")
         for expected in (
             "Get-Item -LiteralPath",
             "ReparsePoint",
@@ -148,17 +131,13 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertNotIn("Get-ScheduledTask -TaskName", body)
 
     def test_explicit_executable_and_jdk_options_cannot_be_empty(self):
-        """An explicitly empty option must not silently fall back to a different executable."""
+        """Explicit empty JavaHome and missing config/token never silently fall back."""
         body = function_body("Resolve-InstallInputs")
-        for name in ("JavaHome", "BashExecutable"):
-            self.assertIn(
-                f'$script:InvocationParameters.ContainsKey("{name}")',
-                body,
-            )
-            self.assertIn(
-                f"Assert-RequiredValue -Value ${name} -Name \"-{name}\"",
-                body,
-            )
+        self.assertIn('$script:InvocationParameters.ContainsKey("JavaHome")', body)
+        self.assertIn('Assert-RequiredValue -Value $JavaHome -Name "-JavaHome"', body)
+        self.assertIn('Assert-PrivateFile -Path $ConfigFile', body)
+        self.assertIn('Assert-PrivateFile -Path $TokenFile', body)
+        self.assertIn('must be siblings named daemon.json and daemon.token', body)
 
     def test_task_is_owned_by_an_exact_per_user_marker(self):
         """A SID-scoped name plus exact Description marker prevents cross-user clobbering."""
@@ -228,13 +207,13 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertIn('return @("--base64-args") + $encoded', encoder)
 
         arguments = function_body("New-DaemonArgumentList")
-        self.assertIn("ConvertTo-DaemonEncodedArguments -Arguments $arguments", arguments)
+        self.assertIn('ConvertTo-DaemonEncodedArguments -Arguments @("--config", $script:InstalledConfig)', arguments)
         self.assertIn('"-jar", "kk-studio-daemon.jar"', arguments)
         self.assertNotIn("$script:InstalledJar", arguments)
 
     def test_task_runs_in_the_install_root_so_the_jar_stays_a_relative_name(self):
         """A profile-dependent absolute JAR path must never be stored in the task command line."""
-        self.assertIn("-WorkingDirectory $script:InstallRoot", function_body("Invoke-Install"))
+        self.assertIn("-WorkingDirectory (Split-Path -Parent $script:InstalledJar)", function_body("Invoke-Install"))
         definition = function_body("New-DaemonScheduledTaskDefinition")
         self.assertIn("-WorkingDirectory $WorkingDirectory", definition)
         self.assertIn("New-ScheduledTaskAction -Execute $JavaExecutable", definition)
@@ -296,40 +275,29 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
     """Build validation and ownership checks must precede every destructive transition."""
 
     def test_install_validates_owner_and_artifacts_before_stopping_or_forcing(self):
-        """A foreign task or failed build must remain untouched."""
+        """Foreign tasks/layout conflicts precede downloads; all preflight precedes publication."""
         body = function_body("Invoke-Install")
-        assert_in_order(
-            self,
-            body,
-            "Assert-ManagedTask -Task $existing",
-            "Prepare-StagedJar",
-            "New-DaemonScheduledTaskDefinition",
-            "Stop-DaemonTaskIfRunning",
-            "$managedBeforePublish = Find-DaemonTask",
-            "Assert-ManagedTask -Task $managedBeforePublish",
-            "Publish-StagedJar",
-            "$managedBeforeRegistration = Find-DaemonTask",
-            "Assert-ManagedTask -Task $managedBeforeRegistration",
-            "Register-ScheduledTask",
-            "-Force",
-            "Start-AndVerifyDaemonTask",
-        )
+        assert_in_order(self, body, "Initialize-HostContext", "Find-DaemonTask", "Assert-ManagedTask",
+                        "Assert-ManagedLayout", "Resolve-InstallInputs", "Prepare-StagedJar",
+                        "New-DaemonScheduledTaskDefinition", "Assert-ManagedLayout", "Backup-ManagedFiles",
+                        "Stop-DaemonTaskIfRunning", "Assert-ManagedTask", "Publish-PrivateFile",
+                        "Register-ScheduledTask", "Start-AndVerifyDaemonTask")
 
-    def test_upgrade_builds_and_stages_before_stop_then_only_replaces_the_jar(self):
-        """Upgrade must preserve the task definition and avoid downtime on build failure."""
-        body = function_body("Invoke-Upgrade")
-        assert_in_order(
-            self,
-            body,
-            "Get-RequiredManagedTask",
-            "Prepare-StagedJar",
-            "Stop-DaemonTaskIfRunning",
-            "$managedBeforePublish = Get-RequiredManagedTask",
-            "Publish-StagedJar",
-            "Start-AndVerifyDaemonTask",
-        )
-        self.assertNotIn("Register-ScheduledTask", body)
-        self.assertNotIn("New-DaemonScheduledTaskDefinition", body)
+    def test_backups_and_failure_recovery_never_roll_back_or_touch_external_paths(self):
+        """Backups contain only fixed regular owned targets; failures report manual recovery."""
+        backup = function_body("Backup-ManagedFiles")
+        for value in ("$script:InstalledJar", "$script:InstalledConfig", "$script:InstalledToken",
+                      '"backups"', "Guid", "Assert-PrivateFile", "Copy-PrivateFile", "Export-ScheduledTask"):
+            self.assertIn(value, backup)
+        body = function_body("Invoke-Install")
+        self.assertIn("No automatic rollback", body)
+        self.assertIn("Targets:", body)
+        self.assertIn("Backup:", body)
+        self.assertNotIn("Publish-PrivateFile", body[body.index("    catch {"):])
+        conflict = function_body("Assert-ManagedTask")
+        for value in ("missing exact ownership marker", "Export-ScheduledTask", "Stop-ScheduledTask",
+                      "Disable-ScheduledTask", "Unregister-ScheduledTask", "Get-ConflictBackupCommands", "retry install"):
+            self.assertIn(value, conflict)
 
     def test_uninstall_stops_and_unregisters_before_removing_the_jar(self):
         """Stop or unregister failure must leave the managed JAR in place."""
@@ -337,7 +305,7 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         assert_in_order(
             self,
             body,
-            "Get-RequiredManagedTask",
+            "Assert-ManagedTask",
             "Stop-DaemonTaskIfRunning",
             "Unregister-ScheduledTask",
             "Remove-Item -LiteralPath $script:InstalledJar",
@@ -359,28 +327,25 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
             self.assertNotIn(forbidden, body)
 
     def test_staged_jar_is_always_cleaned_by_main_finally(self):
-        """A failed stop/register/start must not leave a staged JAR beside the installation."""
+        """Only the installer-created staging directory is deleted on failures."""
         body = function_body("Invoke-Main")
         self.assertIn("finally", body)
-        self.assertIn("$script:StagedJar", body)
-        self.assertIn("Remove-Item -LiteralPath $script:StagedJar", body)
         self.assertIn("Remove-Item -LiteralPath $script:DownloadDirectory", body)
+        self.assertNotIn("SilentlyContinue", body)
 
-    def test_release_is_default_and_repository_resolution_is_source_only(self):
-        """Static supplement: standalone management must not resolve a checkout."""
+    def test_release_is_latest_only_and_checks_staged_config(self):
+        """Official latest tag selects both assets, then the new JAR validates sibling inputs."""
         self.assertIn('[string] $Command = "install"', script_text())
-        self.assertNotIn("Resolve-RepositoryRoot", function_body("Initialize-HostContext"))
-        assert_in_order(
-            self, function_body("Prepare-StagedJar"),
-            "if ($FromSource)", "Resolve-RepositoryRoot",
-            "Invoke-DaemonBuild", "Get-ReleaseJar", "Assert-BuiltJar", "Stage-BuiltJar",
-        )
+        staged = function_body("Prepare-StagedJar")
+        assert_in_order(self, staged, "Get-ReleaseJar", "Assert-BuiltJar", "Copy-PrivateFile -Source $ConfigFile",
+                        "Copy-PrivateFile -Source $TokenFile", '"--check-config"', "Invoke-NativeProcess")
+        self.assertIn('"Daemon configuration is valid"', staged)
+        self.assertNotIn("$result.Stderr", staged)
         release = function_body("Get-ReleaseJar")
-        self.assertIn("https://api.github.com/repos/fengwk/kk-studio/releases/latest", release)
-        self.assertIn("https://github.com/fengwk/kk-studio/releases/download/$tag", release)
-        self.assertIn("[Net.SecurityProtocolType]::Tls12", release)
-        self.assertIn("Get-FileHash", release)
-        self.assertNotIn("Invoke-DaemonBuild", release)
+        for value in ("https://api.github.com/repos/fengwk/kk-studio/releases/latest",
+                      "https://github.com/fengwk/kk-studio/releases/download/$tag",
+                      "[Net.SecurityProtocolType]::Tls12", "Get-FileHash", "New-PrivateDirectory"):
+            self.assertIn(value, release)
 
 
 class TestWindowsInstallerNativeContracts(unittest.TestCase):
