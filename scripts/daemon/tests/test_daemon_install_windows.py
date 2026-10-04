@@ -265,7 +265,10 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertIn(package, probe)
         self.assertIn("DaemonArguments.decode(", probe)
         self.assertEqual(
-            sorted(path.name for path in PROBE_RESOURCE_DIRECTORY.iterdir()),
+            sorted(
+                path.relative_to(PROBE_RESOURCE_DIRECTORY).as_posix()
+                for path in PROBE_RESOURCE_DIRECTORY.rglob("*.java")
+            ),
             ["ProcessProbe.java"],
             "the decoder must never be copied into test resources",
         )
