@@ -356,6 +356,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
   `config_sync.environment_identity_and_token` /
+  `config_sync.import_precheck_and_partial_confirmation` /
   `config_sync.environment_install_config_roundtrip` /
   `config_sync.install_config_hard_invalid_precheck`：七类配置清单、凭据随 YAML 导出、导入前的
   新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌保留，
