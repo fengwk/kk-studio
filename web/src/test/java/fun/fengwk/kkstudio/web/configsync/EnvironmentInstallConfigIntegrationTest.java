@@ -45,6 +45,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             String.class,
             UUID.fromString(id)));
     assertEquals(token, getData(path + "/token").path("registrationToken").asText());
+    // token 端点是只读最新快照：返回当前最新 version，与 PUT 保存响应同源但独立读取。
+    assertEquals("1", getData(path + "/token").path("version").asText());
 
     perform(
         put(path + "/install-config")
@@ -57,6 +59,10 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     JsonNode rotated = postData(path + "/registration-token", Map.of("expectedVersion", "1"));
     assertEquals(saved.path("installConfig"), rotated.path("installConfig"));
     assertEquals("2", rotated.path("version").asText());
+    // 轮换后 token 端点是独立的最新读：返回 v2 的新 token，而非 PUT 保存时的 v1；调用方不得假定与保存响应同版本。
+    JsonNode latestToken = getData(path + "/token");
+    assertEquals("2", latestToken.path("version").asText());
+    assertFalse(token.equals(latestToken.path("registrationToken").asText()));
     perform(delete(path).param("expectedVersion", "2"), 204);
     assertEquals(0, jdbc.queryForObject("select count(*) from environment", Integer.class));
   }
@@ -71,6 +77,11 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             "{\"expectedVersion\":\"0\",\"installConfig\":null}",
             "{\"expectedVersion\":\"0\",\"bogus\":true,\"installConfig\":{}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":42}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":\"string\"}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"unknown\":1}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{\"jdtls\":{\"command\":[\"jdtls\"],\"unknown\":1}}}}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":[]}}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"javaHome\":\"${JAVA_HOME}\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
             "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{}}}}}")) {
       perform(put(path).contentType(MediaType.APPLICATION_JSON).content(json), 400);
