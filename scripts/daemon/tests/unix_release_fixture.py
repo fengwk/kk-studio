@@ -72,8 +72,8 @@ class Fixture:
         for tool in ("uname", "curl", "systemctl", "journalctl", "launchctl", "plutil",
                      "mvn", "git"):
             write_executable(self.bin / tool, content)
+        # Only a runtime is provided: the installer must not require a compiler.
         write_executable(self.jdk / "bin/java", content)
-        write_executable(self.jdk / "bin/javac", "#!/bin/sh\nexit 0\n")
 
     def environment(self, **overrides):
         environment = {
@@ -85,6 +85,7 @@ class Fixture:
             "FAKE_ROOT": str(self.root),
             "FAKE_RECORD": str(self.record),
             "FAKE_OS": self.operating_system,
+            "FAKE_STAGING": str(self.staging),
             "FAKE_JAR_BODY": self.jar_body,
             "FAKE_LIVE_PID": str(os.getpid()),
             "DAEMON_VERIFY_TIMEOUT_SECONDS": "0",
