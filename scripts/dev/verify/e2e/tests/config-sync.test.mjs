@@ -10,6 +10,8 @@ const CASE_IDS = [
   'config_sync.inventory_contract',
   'config_sync.provider_roundtrip_same_name',
   'config_sync.environment_identity_and_token',
+  'config_sync.environment_install_config_roundtrip',
+  'config_sync.install_config_hard_invalid_precheck',
   'config_sync.import_precheck_and_partial_confirmation',
 ]
 
@@ -31,6 +33,10 @@ test('config sync cases are registered as free L1 cases and run-matrix imports t
   assert.ok(
     runMatrixSource.includes("await import('./cases/config-sync.mjs')"),
     "run-matrix.mjs must contain exact import line: await import('./cases/config-sync.mjs')",
+  )
+  assert.ok(
+    runMatrixSource.includes("await import('./cases/environment-install-config.mjs')"),
+    "run-matrix.mjs must import the environment install-config cases",
   )
 })
 
@@ -163,4 +169,28 @@ test('precheck case enforces read-only checking and explicit partial import befo
   assert.equal(writes.length, 1)
   assert.equal(writes[0].allowPartial, true)
   assert.equal(provider, null, 'case must clean up its provider')
+})
+
+test('install config hard-invalid precheck rejects every endpoint without side effects', async () => {
+  // 测试意图：以 recorder 证明硬非法 installConfig 在 check/import 两个端点都 400，且不创建 Environment。
+  const requests = []
+  const ctx = {
+    async call(method, path, body) {
+      if (method === 'GET') {
+        assert.equal(path, '/api/harness/environments')
+        return { json: { data: [] } }
+      }
+      assert.equal(method, 'POST')
+      assert.ok(['/api/settings/sync/import/check', '/api/settings/sync/import'].includes(path))
+      requests.push({ path, yaml: body.yaml, allowPartial: body.allowPartial })
+      throw new HttpError(400, 'environment installConfig.daemon.studioUrl is invalid', path)
+    },
+  }
+  await getCase('config_sync.install_config_hard_invalid_precheck').run(ctx)
+  // 3 组非法配置 × 2 个端点，全部硬拒绝。
+  assert.equal(requests.length, 6)
+  for (const request of requests) {
+    assert.equal(request.allowPartial, true)
+    assert.ok(request.yaml.includes('environments'), 'probe yaml must target environments')
+  }
 })

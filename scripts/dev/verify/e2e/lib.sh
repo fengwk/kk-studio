@@ -37,11 +37,12 @@ SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
 DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
 DAEMON_REGISTRATION_TOKEN=${DAEMON_REGISTRATION_TOKEN:-e2e-token-host-tool}
 DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
-DAEMON_DATA_DIR=${DAEMON_DATA_DIR:-"$WORK_DIR/daemon-data"}
+# DAEMON_ROOT 是本次 E2E 隔离的 Daemon 根：daemon.json 与同目录 daemon.token 都在这里，
+# 其父目录即 Daemon 运行数据目录。DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录
+# （fixture 路径与 Tool 调用的 workdir 都由它派生），两者互不影响。
+DAEMON_ROOT=${DAEMON_ROOT:-"$WORK_DIR/daemon"}
 DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 
-# DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录（fixture 路径与 Tool 调用的 workdir 都由
-# 它派生），不是 Daemon 配置：Daemon 自身的数据目录由 --data-dir 决定。
 export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.2.jar"}
@@ -268,23 +269,18 @@ start_daemon() {
   if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
     die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
   fi
-  chmod 700 "$WORK_DIR"
-  local token_file
-  token_file=$(cd "$WORK_DIR" && pwd)/daemon-registration.token
-  (umask 077 && printf '%s\n' "$DAEMON_REGISTRATION_TOKEN" > "$token_file")
-  chmod 600 "$token_file"
   local -a test_env_unsets=()
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
-  nohup env \
+  # 只有 bootstrap helper 物化 daemon.json/daemon.token；daemon 只接收 --config。
+  # 凭证经 assignment 前缀进入子进程环境（不出现在任何 argv），helper 在 exec 前 unset。
+  DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env \
     "${test_env_unsets[@]}" \
-    -u DAEMON_REGISTRATION_TOKEN \
-    -u KK_STUDIO_DAEMON_REGISTRATION_TOKEN \
-    JAVA_HOME="$java_home" "$java_home/bin/java" \
-    -jar "$DAEMON_JAR" \
-    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
-    --registration-token-file "$token_file" \
-    --note "$DAEMON_NOTE" \
-    --data-dir "$DAEMON_DATA_DIR" \
+    JAVA_HOME="$java_home" \
+    DAEMON_ROOT="$DAEMON_ROOT" \
+    DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
+    DAEMON_NOTE="$DAEMON_NOTE" \
+    DAEMON_JAR="$DAEMON_JAR" \
+    bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"
   local i env_status=""
