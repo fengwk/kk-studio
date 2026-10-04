@@ -11,6 +11,8 @@ export default defineConfig({
       'src/features/ai/environment/EnvironmentInstallModal.test.tsx',
       'src/features/ai/environment/EnvironmentsPage.test.tsx',
       'src/shared/api/environment-service.test.ts',
+      'src/shared/ui/console/Toast.test.tsx',
+      'src/shared/ui/console/Select.test.tsx',
     ],
     coverage: {
       reporter: ['text', 'html', 'json-summary'],
@@ -19,6 +21,7 @@ export default defineConfig({
         'src/features/ai/environment/install-command.ts',
         'src/features/ai/environment/EnvironmentInstallModal.tsx',
         'src/shared/api/environment-service.ts',
+        'src/shared/ui/console/Toast.tsx',
       ],
       thresholds: { perFile: true, lines: 90, statements: 90, functions: 80, branches: 80 },
     },

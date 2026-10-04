@@ -10,6 +10,9 @@ import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { Select } from '@/shared/ui/console/Select'
+import { Checkbox } from '@/shared/ui/console/Checkbox'
+import { Toast } from '@/shared/ui/console/Toast'
 import { useI18n, type InterpolationValues } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { copyTextToClipboard } from './clipboard'
@@ -280,33 +283,37 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 </div>
               </div>
             )}
-            <label className="form-group">
+            <div className="form-group">
               <span>{t('ai.environment.install.os')}</span>
-              <select
+              <Select
+                aria-label={t('ai.environment.install.os')}
                 value={os}
-                onChange={event => setOS(event.target.value as InstallOperatingSystem)}
+                onChange={value => setOS(value as InstallOperatingSystem)}
                 disabled={disabled}
-              >
-                <option value="linux">Linux</option>
-                <option value="macos">macOS</option>
-                <option value="windows">Windows</option>
-              </select>
-            </label>
+                options={[
+                  { value: 'linux', label: 'Linux' },
+                  { value: 'macos', label: 'macOS' },
+                  { value: 'windows', label: 'Windows' },
+                ]}
+              />
+            </div>
             {!uninstall && (
               <>
-                <label className="form-group">
-                  <span>{t('ai.environment.install.origin')}</span>
-                  <input
-                    value={studioUrl}
-                    onChange={event => setStudioUrl(event.target.value)}
-                    aria-describedby="install-origin-help"
-                    disabled={disabled}
-                    required
-                  />
-                </label>
-                <p id="install-origin-help" className="field-help">
-                  {t('ai.environment.install.originHelp')}
-                </p>
+                <div className="install-field">
+                  <label className="form-group">
+                    <span>{t('ai.environment.install.origin')}</span>
+                    <input
+                      value={studioUrl}
+                      onChange={event => setStudioUrl(event.target.value)}
+                      aria-describedby="install-origin-help"
+                      disabled={disabled}
+                      required
+                    />
+                  </label>
+                  <p id="install-origin-help" className="field-help">
+                    {t('ai.environment.install.originHelp')}
+                  </p>
+                </div>
                 <details>
                   <summary>{t('ai.environment.install.optional')}</summary>
                   <label className="form-group">
@@ -334,19 +341,14 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                       disabled={disabled}
                     />
                   </label>
-                  <label className="form-group">
-                    <span>
-                      <input
-                        type="checkbox"
-                        checked={lspEnabled}
-                        onChange={event => setLspEnabled(event.target.checked)}
-                        disabled={disabled}
-                      />{' '}
-                      {t('ai.environment.install.lsp')}
-                    </span>
-                  </label>
+                  <Checkbox
+                    checked={lspEnabled}
+                    onChange={setLspEnabled}
+                    disabled={disabled}
+                    label={t('ai.environment.install.lsp')}
+                  />
                   {lspEnabled && (
-                    <>
+                    <div className="install-field">
                       <label className="form-group">
                         <span>LSP servers (JSON)</span>
                         <textarea
@@ -361,7 +363,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                       <p id="install-lsp-help" className="field-help">
                         {t('ai.environment.install.lspHelp')}
                       </p>
-                    </>
+                    </div>
                   )}
                 </details>
               </>
@@ -371,7 +373,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                 {error}
               </p>
             )}
-            {feedback && <p role="status">{feedback}</p>}
           </div>
           <div className="modal-footer">
             <button type="button" className="ghost-btn" onClick={onClose}>
@@ -382,6 +383,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             </button>
           </div>
         </form>
+        {feedback && <Toast message={feedback} onDismiss={() => setFeedback(null)} />}
         <ConflictPresenter
           conflict={conflict}
           onClose={() => setConflict(null)}
