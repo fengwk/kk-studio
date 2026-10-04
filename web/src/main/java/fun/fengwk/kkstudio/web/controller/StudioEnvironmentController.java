@@ -9,12 +9,14 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
@@ -24,6 +26,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 稳定 Environment Card REST API。
@@ -86,6 +89,15 @@ public class StudioEnvironmentController {
       @PathVariable String environmentId, @RequestParam String expectedVersion) {
     environmentService.delete(parseEnvironmentId(environmentId), expectedVersion);
     return Results.noContent();
+  }
+
+  @PutMapping("/{environmentId}/install-config")
+  public Result<EnvironmentCardDTO> updateInstallConfig(
+      @PathVariable String environmentId, @RequestBody Map<String, Object> request) {
+    return Results.ok(
+        environmentService.updateInstallConfig(
+            parseEnvironmentId(environmentId),
+            EnvironmentInstallConfigs.parseUpdate(EnvironmentInstallConfigs.tree(request))));
   }
 
   private static EnvironmentId parseEnvironmentId(String text) {

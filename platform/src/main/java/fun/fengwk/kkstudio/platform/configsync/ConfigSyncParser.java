@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidat
 import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -17,6 +18,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -310,10 +312,15 @@ public final class ConfigSyncParser {
     // 与 register/update 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
     EnvironmentServiceImpl.validateName(name);
     EnvironmentServiceImpl.validateRegistrationToken(token);
+    Object configNode = entry.node("installConfig");
+    EnvironmentInstallConfigDTO config =
+        configNode == null
+            ? null
+            : EnvironmentInstallConfigs.parse(EnvironmentInstallConfigs.tree(configNode));
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
     }
-    return new EnvironmentSpec(name, token);
+    return new EnvironmentSpec(name, token, config);
   }
 
   private McpSpec parseMcpServer(
@@ -457,7 +464,8 @@ public final class ConfigSyncParser {
       String branch,
       String currentCommit) {}
 
-  public record EnvironmentSpec(String name, String registrationToken) {}
+  public record EnvironmentSpec(
+      String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {}
 
   public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
 

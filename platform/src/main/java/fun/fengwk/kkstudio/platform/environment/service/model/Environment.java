@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.environment.service.model;
 
 import lombok.Data;
 
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -11,6 +13,7 @@ public class Environment {
   private UUID id;
   private String name;
   private String registrationToken;
+  private EnvironmentInstallConfigDTO installConfig;
   private Long version;
   private Instant createTime;
   private Instant updateTime;

@@ -26,6 +26,30 @@ class ConfigSyncParserTest {
   private static final String VALID_MODEL_CONFIG =
       ConfigSyncFixtures.resourceYaml("model-config-block.yaml");
 
+  @Test
+  void absentInstallConfigMeansClearAndDeepKnownInvalidIsNotSkipped() {
+    assertNull(
+        parser
+            .parse("environments:\n  - name: env\n    registrationToken: token-env\n")
+            .environments()
+            .get(0)
+            .installConfig());
+    String valid = ConfigSyncFixtures.resourceYaml("environment-install-config.yaml");
+    assertNotNull(parser.parse(valid).environments().get(0).installConfig());
+    for (String invalid :
+        List.of(
+            valid.replace("linux", "wsl"),
+            valid.replace("/opt/jdk21", "${JAVA_HOME}"),
+            valid.replace("\"pom.xml\"", "\"../outside\""),
+            valid.replace("https://studio.example.com/", "https://studio.example.com/private"))) {
+      assertThrows(
+          AiValidationException.class,
+          () ->
+              parser.parse(
+                  invalid.replace("    installConfig:", "    bogus: true\n    installConfig:")));
+    }
+  }
+
   private static String provider(String name, String protocol) {
     return "  - name: " + name + "\n    providerType: " + protocol + "\n";
   }

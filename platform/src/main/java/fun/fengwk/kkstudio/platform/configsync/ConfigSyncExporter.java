@@ -153,6 +153,9 @@ public final class ConfigSyncExporter {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("name", env.getName());
     map.put("registrationToken", env.getRegistrationToken());
+    if (env.getInstallConfig() != null) {
+      map.put("installConfig", yaml.toMap(env.getInstallConfig(), "installConfig"));
+    }
     return map;
   }
 

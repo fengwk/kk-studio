@@ -39,6 +39,7 @@ create table environment (
     id                  uuid          primary key,
     name                varchar(64)   not null,
     registration_token  varchar(128)  not null,
+    install_config      jsonb,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
@@ -55,13 +56,17 @@ create table environment (
         and char_length(registration_token) <= 128
         and registration_token = btrim(registration_token)
     ),
-    constraint ck_environment_version_nonneg check (version >= 0)
+    constraint ck_environment_version_nonneg check (version >= 0),
+    constraint ck_environment_install_config_object check (
+        install_config is null or jsonb_typeof(install_config) = 'object'
+    )
 );
 
 comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token 是 Daemon 握手凭证';
 comment on column environment.id is 'Environment 的全局唯一 UUID（服务端生成，永不变更）';
 comment on column environment.name is 'Environment 唯一名称（NFKC trim，<= 64 字符，不含空白或斜杠）';
 comment on column environment.registration_token is 'Daemon HELLO 握手的注册凭证（部署侧秘密，仅 create/rotate 响应一次性返回，正常查询绝不泄露）';
+comment on column environment.install_config is '保存的安装设置（不含 token，不表示已部署）';
 comment on column environment.created_at is '创建时间（毫秒精度）';
 comment on column environment.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 开始，每次更新 +1';

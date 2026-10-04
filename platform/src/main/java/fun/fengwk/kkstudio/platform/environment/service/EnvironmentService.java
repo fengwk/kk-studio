@@ -4,6 +4,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.util.List;
@@ -18,9 +20,14 @@ public interface EnvironmentService {
    * 配置同步导入：以新 UUID 与显式 registrationToken 创建 Environment。
    *
    * <p>与 {@link #create(EnvironmentCreateDTO)} 的区别是不生成随机 token，而是保留导入文件中的 token，使 Daemon HELLO 可继续按
-   * token 注册。同名 Environment 由调用方按名称走 {@link #updateRegistrationToken}。
+   * token 注册。同名 Environment 由调用方按名称走 {@link #updateImportedEnvironment}。
    */
-  EnvironmentCardDTO importEnvironment(String name, String registrationToken);
+  EnvironmentCardDTO importEnvironment(
+      String name, String registrationToken, EnvironmentInstallConfigDTO installConfig);
+
+  /** CAS 保存安装设置，响应不含注册凭据。 */
+  EnvironmentCardDTO updateInstallConfig(
+      EnvironmentId id, EnvironmentInstallConfigUpdateDTO request);
 
   /** 查询单个 Environment Card 详情，永不返回 registrationToken。 */
   EnvironmentCardDTO get(EnvironmentId id);
@@ -39,12 +46,15 @@ public interface EnvironmentService {
   EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);
 
   /**
-   * 配置同步导入：按名称更新的同名 Environment 显式设置 token（保持 UUID 身份）。
+   * 配置同步导入：原子更新 token 与安装设置（保持 UUID 身份），null 清空设置。
    *
-   * <p>token 与当前值相同则不写行、不推进 version；否则 CAS 更新。
+   * <p>两个值均相同则不写行、不推进 version；否则 CAS 更新。
    */
-  EnvironmentCardDTO updateRegistrationToken(
-      EnvironmentId id, String registrationToken, String expectedVersion);
+  EnvironmentCardDTO updateImportedEnvironment(
+      EnvironmentId id,
+      String registrationToken,
+      EnvironmentInstallConfigDTO installConfig,
+      String expectedVersion);
 
   /**
    * CAS 轮换 registrationToken，返回新生成的 token。

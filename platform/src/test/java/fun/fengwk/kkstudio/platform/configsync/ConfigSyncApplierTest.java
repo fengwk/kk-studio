@@ -175,14 +175,14 @@ class ConfigSyncApplierTest {
             List.of(),
             List.of(),
             List.of(
-                new ConfigSyncParser.EnvironmentSpec("new", "token-new"),
-                new ConfigSyncParser.EnvironmentSpec("old", "token-old")),
+                new ConfigSyncParser.EnvironmentSpec("new", "token-new", null),
+                new ConfigSyncParser.EnvironmentSpec("old", "token-old", null)),
             List.of(),
             null));
 
-    verify(environmentService).importEnvironment("new", "token-new");
+    verify(environmentService).importEnvironment("new", "token-new", null);
     verify(environmentService)
-        .updateRegistrationToken(EnvironmentId.of(existing.getId()), "token-old", "2");
+        .updateImportedEnvironment(EnvironmentId.of(existing.getId()), "token-old", null, "2");
   }
 
   @Test

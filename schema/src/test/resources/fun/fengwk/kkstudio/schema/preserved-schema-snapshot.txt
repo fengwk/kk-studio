@@ -42,6 +42,7 @@ column	chat	version	type=bigint notnull=t default=0 generated= collation=-
 column	chat	yolo_enabled	type=boolean notnull=t default=false generated= collation=-
 column	environment	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	environment	id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment	install_config	type=jsonb notnull=f default=<null> generated= collation=-
 column	environment	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	environment	registration_token	type=character varying(128) notnull=t default=<null> generated= collation="default"
 column	environment	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
@@ -226,6 +227,7 @@ constraint	agent_provider	ck_agent_provider_version_nonneg	CHECK ((version >= 0)
 constraint	chat	chat_pkey	PRIMARY KEY (id)
 constraint	chat	ck_chat_agent_name	CHECK ((((agent_name)::text !~ '^[[:space:]]'::text) AND ((agent_name)::text !~ '[[:space:]]$'::text) AND (char_length((agent_name)::text) > 0) AND (POSITION(('/'::text) IN (agent_name)) = 0)))
 constraint	chat	ck_chat_version_nonneg	CHECK ((version >= 0))
+constraint	environment	ck_environment_install_config_object	CHECK (((install_config IS NULL) OR (jsonb_typeof(install_config) = 'object'::text)))
 constraint	environment	ck_environment_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
 constraint	environment	ck_environment_registration_token	CHECK (((btrim((registration_token)::text) <> ''::text) AND (char_length((registration_token)::text) <= 128) AND ((registration_token)::text = btrim((registration_token)::text))))
 constraint	environment	ck_environment_version_nonneg	CHECK ((version >= 0))

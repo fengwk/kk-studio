@@ -1,0 +1,17 @@
+environments:
+  - name: env
+    registrationToken: token-env
+    installConfig:
+      operatingSystem: linux
+      javaHome: /opt/jdk21
+      daemon:
+        studioUrl: https://studio.example.com/
+        note: "宿主 'quoted'"
+        bashExecutable: /bin/bash
+        lsp:
+          servers:
+            jdtls:
+              command: ["~/.local/share/nvim/mason/bin/jdtls", "--stdio"]
+              extensions: [".java"]
+              rootMarkers: ["pom.xml"]
+              firstMatchMarkers: [".git"]
