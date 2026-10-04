@@ -15,6 +15,7 @@
     "test:layout": "npm run build:layout && playwright test --config playwright.layout.config.ts",
     "coverage": "vitest run --coverage",
     "test:install": "vitest run --config vite.install.config.ts --coverage",
+    "test:install:windows": "vitest run --config vite.install.config.ts src/features/ai/environment/install-command.windows.test.ts",
     "test:install:browser": "playwright test --config playwright.install.config.ts",
     "e2e": "../scripts/dev/verify/e2e/run.sh",
     "e2e:ui": "../scripts/dev/verify/e2e/run.sh --ui",
