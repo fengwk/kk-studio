@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import shlex
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -174,6 +176,75 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             )
             self.assertNotEqual(0, result.returncode)
             self.assertIn("DAEMON_REGISTRATION_TOKEN", result.stderr)
+
+    def test_e2e_daemon_bootstrap_rejects_a_relative_root(self):
+        """DAEMON_ROOT 必须为绝对路径，否则拒绝启动。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            probe_dir = Path(temporary) / "jdk" / "bin"
+            probe_dir.mkdir(parents=True)
+            (probe_dir / "java").write_text("#!/bin/bash\nexit 0\n")
+            (probe_dir / "java").chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "JAVA_HOME": str(probe_dir.parent),
+                    "DAEMON_ROOT": "relative/daemon",
+                    "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
+                    "DAEMON_JAR": str(Path(temporary) / "daemon.jar"),
+                    "DAEMON_REGISTRATION_TOKEN": "e2e-token-host-tool",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(E2E_ROOT / "lib" / "daemon-bootstrap.sh")],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("DAEMON_ROOT", result.stderr)
+            self.assertIn("absolute", result.stderr)
+
+    def test_e2e_daemon_bootstrap_creates_config_owner_only_without_relying_on_chmod(self):
+        """共享配置必须在写入时即 owner-only：桩掉 chmod 并把 umask 全开也不能出现 world-readable 窗口。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            bin_dir = Path(temporary) / "bin"
+            bin_dir.mkdir()
+            # chmod 桩为 no-op：只有 writeFileSync 的显式 mode 与 umask 能收敛权限。
+            (bin_dir / "chmod").write_text("#!/bin/bash\nexit 0\n")
+            (bin_dir / "chmod").chmod(0o755)
+            jdk_bin = Path(temporary) / "jdk" / "bin"
+            jdk_bin.mkdir(parents=True)
+            (jdk_bin / "java").write_text("#!/bin/bash\nexit 0\n")
+            (jdk_bin / "java").chmod(0o755)
+
+            root = Path(temporary) / "daemon"
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+                    "JAVA_HOME": str(jdk_bin.parent),
+                    "DAEMON_ROOT": str(root),
+                    "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
+                    "DAEMON_JAR": str(Path(temporary) / "daemon.jar"),
+                    "DAEMON_REGISTRATION_TOKEN": "e2e-token-host-tool",
+                }
+            )
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"umask 000; exec bash {shlex.quote(str(E2E_ROOT / 'lib' / 'daemon-bootstrap.sh'))}",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(0o600, stat.S_IMODE((root / "daemon.json").stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE((root / "daemon.token").stat().st_mode))
 
     def test_distributed_a_b_tokens_are_distinct(self):
         """Distributed A and B must never share a registration token."""

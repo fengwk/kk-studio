@@ -194,3 +194,114 @@ test('install config hard-invalid precheck rejects every endpoint without side e
     assert.ok(request.yaml.includes('environments'), 'probe yaml must target environments')
   }
 })
+
+test('environment install-config roundtrip case wires PUT/export/import/clear/cleanup against real state', async () => {
+  // 测试意图：以带持久状态的 recorder 真跑该 case，证明脚本 wiring 正确：
+  // PUT install-config 参数顺序、导出往返、新 token+config 原子导入、缺失 installConfig 清空、最后按最新版本清理。
+  // 严格限定 method 合法，任何把 path 当 method 的调用会立即失败（回归先前的参数顺序缺陷）。
+  const LEGAL_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE'])
+  const environmentId = '00000000-0000-4000-8000-0000000000cf'
+  const base = `/api/harness/environments/${environmentId}`
+  let state = null
+  let deleted = false
+  let deleteSnapshot = null
+  const calls = []
+  let atomicUpdateApplied = false
+
+  const parseEntry = (body) => JSON.parse(body.yaml).environments[0]
+
+  const ctx = {
+    async call(method, path, body) {
+      assert.ok(LEGAL_METHODS.has(method), `illegal method ${JSON.stringify(method)} for ${path}`)
+      calls.push({ method, path, body })
+      if (method === 'POST' && path === '/api/harness/environments') {
+        state = {
+          id: environmentId,
+          name: body.name,
+          registrationToken: 'e2e-token-original',
+          installConfig: null,
+          version: '0',
+        }
+        return { json: { data: { ...state } } }
+      }
+      if (method === 'PUT' && path === `${base}/install-config`) {
+        assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
+        state = { ...state, installConfig: body.installConfig, version: String(Number(state.version) + 1) }
+        return { json: { data: { id: environmentId, installConfig: state.installConfig, version: state.version } } }
+      }
+      if (method === 'POST' && path === '/api/settings/sync/export') {
+        return {
+          json: {
+            data: {
+              yaml: JSON.stringify({
+                environments: [
+                  {
+                    name: state.name,
+                    registrationToken: state.registrationToken,
+                    installConfig: state.installConfig,
+                  },
+                ],
+              }),
+            },
+          },
+        }
+      }
+      if (method === 'POST' && path === '/api/settings/sync/import/check') {
+        parseEntry(body)
+        // 预检查只暴露覆盖引用，绝不回显 token 或 installConfig 值。
+        return {
+          json: {
+            data: {
+              created: [],
+              updated: [{ kind: 'environments', name: state.name }],
+              skipped: [],
+            },
+          },
+        }
+      }
+      if (method === 'POST' && path === '/api/settings/sync/import') {
+        const entry = parseEntry(body)
+        assert.equal(entry.name, state.name)
+        const nextConfig = entry.installConfig ?? null
+        if (state.installConfig != null && nextConfig != null && entry.registrationToken !== state.registrationToken) {
+          atomicUpdateApplied = true
+        }
+        state = {
+          ...state,
+          registrationToken: entry.registrationToken,
+          installConfig: nextConfig,
+          version: String(Number(state.version) + 1),
+        }
+        return { json: { data: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } } }
+      }
+      if (method === 'GET' && path === `${base}/token`) {
+        return { json: { data: { id: environmentId, registrationToken: state.registrationToken } } }
+      }
+      if (method === 'GET' && path === base) {
+        return { json: { data: { id: environmentId, installConfig: state.installConfig, version: state.version } } }
+      }
+      if (method === 'DELETE' && path.startsWith(base)) {
+        const expected = new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('expectedVersion')
+        assert.equal(expected, state.version, 'DELETE must use the freshest persisted version')
+        deleteSnapshot = { token: state.registrationToken, config: state.installConfig }
+        deleted = true
+        return { json: { data: null } }
+      }
+      assert.fail(`unexpected call ${method} ${path}`)
+    },
+  }
+
+  await getCase('config_sync.environment_install_config_roundtrip').run(ctx)
+
+  const methods = calls.map((c) => `${c.method} ${c.path.split('?')[0]}`)
+  assert.ok(methods.includes(`PUT ${base}/install-config`), 'case must persist installConfig via PUT')
+  assert.ok(methods.includes('POST /api/settings/sync/export'), 'case must export the environment')
+  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import/check').length, 2, 'roundtrip plus atomic update precheck')
+  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import').length, 3, 'roundtrip, atomic update, and clearing import')
+  assert.ok(methods.includes(`GET ${base}/token`), 'case must read the rotated token')
+  assert.equal(deleted, true, 'case must delete the environment it created')
+  assert.equal(atomicUpdateApplied, true, 'new token+config must be applied in a single import entry')
+  assert.ok(deleteSnapshot, 'cleanup must have observed persisted state')
+  assert.equal(deleteSnapshot.config, null, 'absent installConfig must clear saved settings before cleanup')
+  assert.notEqual(deleteSnapshot.token, 'e2e-token-original', 'cleanup must see the rotated token')
+})
