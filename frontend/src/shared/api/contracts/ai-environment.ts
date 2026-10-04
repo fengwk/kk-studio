@@ -1,5 +1,25 @@
 import type { CatalogVersion, InstantTimestamp } from '@/shared/api/contracts/base'
 
+export type InstallOperatingSystem = 'linux' | 'macos' | 'windows'
+
+export interface DaemonLspServerConfiguration {
+  command: string[]
+  extensions?: string[] | null
+  rootMarkers?: string[] | null
+  firstMatchMarkers?: string[] | null
+}
+
+export interface EnvironmentInstallConfigDTO {
+  operatingSystem: InstallOperatingSystem
+  javaHome?: string | null
+  daemon: {
+    studioUrl: string
+    note?: string | null
+    bashExecutable?: string | null
+    lsp?: { servers: Record<string, DaemonLspServerConfiguration> } | null
+  }
+}
+
 export interface LiveEnvironmentCapabilityDTO {
   id: string
   version: string
@@ -41,6 +61,7 @@ export interface EnvironmentEventDTO {
  */
 export interface EnvironmentCardDTO {
   id: string
+  installConfig?: EnvironmentInstallConfigDTO | null
   name: string
   registrationToken?: string | null
   /** 当前连接状态：CONNECTING / READY / OFFLINE。 */

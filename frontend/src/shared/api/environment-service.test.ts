@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { createEnvironmentService } from '@/shared/api/environment-service'
 
 describe('environmentService', () => {
+  it('saves nested daemon settings with the CAS version and encoded ID', async () => {
+    const client = { get: vi.fn(), post: vi.fn(), put: vi.fn().mockResolvedValue({ version: '9' }), delete: vi.fn() }
+    const config = { operatingSystem: 'linux' as const, daemon: { studioUrl: 'https://studio.example.com' } }
+    expect(await createEnvironmentService(client).saveInstallConfig('env/a', '8', config)).toEqual({ version: '9' })
+    expect(client.put).toHaveBeenCalledWith('/harness/environments/env%2Fa/install-config', { expectedVersion: '8', installConfig: config })
+  })
   /**
    * 测试意图：验证 Environment 列表查询端点已迁移至 /harness/environments。
    */
