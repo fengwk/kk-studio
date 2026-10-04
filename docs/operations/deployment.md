@@ -30,13 +30,13 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
-test -f web/target/kk-studio-web-1.0.2.jar
+test -f web/target/kk-studio-web-1.0.3.jar
 sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
-  web/target/kk-studio-web-1.0.2.jar \
+  web/target/kk-studio-web-1.0.3.jar \
   web/target/convention4j-agent/convention4j-agent.jar
 "$JAVA_HOME_21/bin/java" \
   -javaagent:web/target/convention4j-agent/convention4j-agent.jar \
-  -jar web/target/kk-studio-web-1.0.2.jar
+  -jar web/target/kk-studio-web-1.0.3.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -60,7 +60,7 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 验证静态资源已进入产物：
 
 ```bash
-"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.2.jar \
+"$JAVA_HOME_21/bin/jar" tf web/target/kk-studio-web-1.0.3.jar \
   | grep -E '^BOOT-INF/classes/static/(index.html|assets/)'
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
