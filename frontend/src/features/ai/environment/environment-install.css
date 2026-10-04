@@ -1,0 +1,27 @@
+.environment-install-modal details {
+  margin-top: 16px;
+}
+
+.environment-install-modal summary {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.environment-install-modal .confirm-modal-description {
+  margin-bottom: 16px;
+}
+
+.environment-install-modal textarea {
+  width: 100%;
+  min-width: 0;
+  font-family: monospace;
+  resize: vertical;
+}
+
+.environment-install-modal .modal-footer {
+  flex-wrap: wrap;
+}
+
+.environment-card .chat-card-foot {
+  flex-wrap: wrap;
+}

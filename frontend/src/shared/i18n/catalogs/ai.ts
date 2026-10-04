@@ -2559,25 +2559,73 @@ export const aiCatalog = {
     'en-US': 'Are you sure you want to delete environment "{name}"?',
     'zh-CN': '确认删除环境「{name}」？',
   },
-  'ai.environment.tokenTitle': {
-    'en-US': 'Registration Token',
-    'zh-CN': 'Registration Token',
+  'ai.environment.install': {
+    'en-US': "Install / overwrite",
+    'zh-CN': "安装 / 覆盖",
   },
-  'ai.environment.tokenNotice': {
-    'en-US': 'This is the newly rotated token. Existing connections keep running; the next connection must use it. You can copy the current token later from the Environment card.',
-    'zh-CN': '这是刚刚重新生成的 Token。已有连接继续运行，下一次连接必须使用它；之后可随时从环境卡片复制当前 Token。',
+  'ai.environment.uninstall': {
+    'en-US': "Uninstall",
+    'zh-CN': "卸载",
   },
-  'ai.environment.copyToken': {
-    'en-US': 'Copy Token',
-    'zh-CN': '复制 Token',
+  'ai.environment.install.os': {
+    'en-US': "Operating system",
+    'zh-CN': "操作系统",
   },
-  'ai.environment.copyTokenFailed': {
-    'en-US': 'Failed to copy the token. Check clipboard permissions and try again.',
-    'zh-CN': '复制 Token 失败，请检查剪贴板权限后重试。',
+  'ai.environment.install.origin': {
+    'en-US': "Studio origin",
+    'zh-CN': "Studio 地址（仅 origin）",
   },
-  'ai.environment.tokenCopied': {
-    'en-US': 'Copied!',
-    'zh-CN': '已复制！',
+  'ai.environment.install.optional': {
+    'en-US': "Optional: Java, Bash, note and LSP servers",
+    'zh-CN': "可选：Java、Bash、备注和 LSP servers",
+  },
+  'ai.environment.install.bash': {
+    'en-US': "Bash executable",
+    'zh-CN': "Bash 可执行文件",
+  },
+  'ai.environment.install.note': {
+    'en-US': "Note",
+    'zh-CN': "备注",
+  },
+  'ai.environment.install.lsp': {
+    'en-US': "Enable LSP servers",
+    'zh-CN': "启用 LSP servers",
+  },
+  'ai.environment.install.saveCopy': {
+    'en-US': "Save and copy installation command",
+    'zh-CN': "保存并复制安装命令",
+  },
+  'ai.environment.install.copyUninstall': {
+    'en-US': "Copy uninstall command",
+    'zh-CN': "复制卸载命令",
+  },
+  'ai.environment.install.notice': {
+    'en-US': "The command contains credentials. Keep it private. Requires JDK 21 and Bash. Run it on the target host to deploy; saving does not apply settings. Overwrite restarts and interrupts the single daemon for the current OS user (all environments), preserving runtime data.",
+    'zh-CN': "命令包含凭据，请勿分享。需要 JDK 21 和 Bash。在目标主机执行才会部署，保存不代表已应用。覆盖会重启并中断当前系统用户唯一的 Daemon（影响所有环境），保留运行数据。",
+  },
+  'ai.environment.install.uninstallNotice': {
+    'en-US': "Uninstall affects the current OS user’s single daemon at HOME/.kk-studio, not just this environment. It removes the managed service and program, preserves local config, token and data, and does not delete any Studio environment record.",
+    'zh-CN': "卸载影响当前系统用户 HOME/.kk-studio 下唯一的 Daemon，并非仅此环境。只移除托管服务和程序，保留本地配置、Token 和数据，不删除任何 Studio 环境记录。",
+  },
+  'ai.environment.install.savedCopied': {
+    'en-US': "Settings saved and command copied. Execute on the target host to apply.",
+    'zh-CN': "配置已保存，命令已复制。在目标主机执行后才会应用。",
+  },
+  'ai.environment.install.savedCopyFailed': {
+    'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",
+    'zh-CN': "配置已保存，但命令生成或复制失败。请检查剪贴板权限后重试。尚未部署。",
+  },
+  'ai.environment.install.uninstallCopied': {
+    'en-US': "Uninstall command copied. No environment record was changed.",
+    'zh-CN': "卸载命令已复制，未修改环境记录。",
+  },
+  'ai.environment.install.clipboardFailed': {
+    'en-US': "Copy failed. Check clipboard permissions and retry.",
+    'zh-CN': "复制失败，请检查剪贴板权限后重试。",
+  },
+  'ai.environment.install.invalidLsp': {
+    'en-US': "Invalid LSP servers JSON (maximum 64 KiB).",
+    'zh-CN': "LSP servers JSON 无效（最大 64 KiB）。",
   },
   'ai.environment.close': {
     'en-US': 'Close',

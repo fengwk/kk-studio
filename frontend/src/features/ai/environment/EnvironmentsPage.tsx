@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Check, Copy, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
   environmentEventLevelClass,
   filterEnvironments,
   formatTimestamp,
 } from '@/features/ai/environment/environment-utils'
-import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
+import { EnvironmentInstallModal } from '@/features/ai/environment/EnvironmentInstallModal'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
 import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
@@ -45,11 +45,6 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
   )
 }
 
-interface TokenModalState {
-  environmentName: string
-  token: string
-}
-
 export function EnvironmentsPage() {
   const { t, locale } = useI18n()
   const queryClient = useQueryClient()
@@ -58,20 +53,8 @@ export function EnvironmentsPage() {
   const [createName, setCreateName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const [tokenModal, setTokenModal] = useState<TokenModalState | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [copiedEnvironmentId, setCopiedEnvironmentId] = useState<string | null>(null)
-  const [copyError, setCopyError] = useState<string | null>(null)
-  const copiedResetTimerRef = useRef<number | null>(null)
-
-  useEffect(
-    () => () => {
-      if (copiedResetTimerRef.current !== null) {
-        window.clearTimeout(copiedResetTimerRef.current)
-      }
-    },
-    [],
-  )
+  const [installTarget, setInstallTarget] = useState<EnvironmentCardDTO | null>(null)
+  const [uninstallTarget, setUninstallTarget] = useState<EnvironmentCardDTO | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<EnvironmentCardDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -92,18 +75,16 @@ export function EnvironmentsPage() {
   )
 
   const createMutation = useMutation({
-    mutationFn: (name: string) => environmentService.createEnvironment({ name }),
+    mutationFn: async (name: string) => {
+      const card = await environmentService.createEnvironment({ name })
+      return { ...card, registrationToken: null }
+    },
     onSuccess: (card) => {
       setCreateModalOpen(false)
       setCreateName('')
       setCreateError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-      if (card.registrationToken) {
-        setTokenModal({
-          environmentName: card.name,
-          token: card.registrationToken,
-        })
-      }
+      setInstallTarget({ ...card, registrationToken: null })
     },
     onError: (err: unknown) => {
       if (isConflictError(err)) {
@@ -117,19 +98,14 @@ export function EnvironmentsPage() {
   })
 
   const rotateMutation = useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
-      environmentService.rotateToken(id, expectedVersion),
-    onSuccess: (card) => {
+    mutationFn: async ({ id, expectedVersion }: { id: string; expectedVersion: string }) => {
+      const card = await environmentService.rotateToken(id, expectedVersion)
+      return { ...card, registrationToken: null }
+    },
+    onSuccess: () => {
       setRotateTarget(null)
       setRotateError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-      if (card.registrationToken) {
-        setTokenModal({
-          environmentName: card.name,
-          token: card.registrationToken,
-        })
-        finishCopyFeedback(false)
-      }
     },
     onError: (err: unknown) => {
       if (isConflictError(err)) {
@@ -139,31 +115,6 @@ export function EnvironmentsPage() {
         return
       }
       setRotateError(err instanceof Error ? err.message : String(err))
-    },
-  })
-
-  /**
-   * 「复制 Token」：用户点击时才读取当前 token，读取成功即写入剪贴板。
-   *
-   * 读取是幂等只读动作（不轮换、不断开连接），且不写入任何持久化存储。
-   */
-  const copyTokenMutation = useMutation({
-    mutationFn: (environment: EnvironmentCardDTO) =>
-      environmentService.getRegistrationToken(environment.id).then((token) => ({
-        environment,
-        token,
-      })),
-    onSuccess: async ({ environment, token }) => {
-      setCopyError(null)
-      const ok = await copyTextToClipboard(token.registrationToken)
-      if (!ok) {
-        setCopyError(t('ai.environment.copyTokenFailed'))
-        return
-      }
-      finishCopyFeedback(true, environment.id)
-    },
-    onError: (err: unknown) => {
-      setCopyError(err instanceof Error ? err.message : String(err))
     },
   })
 
@@ -195,38 +146,6 @@ export function EnvironmentsPage() {
     }
     setCreateError(null)
     createMutation.mutate(trimmed)
-  }
-
-  /** 复制反馈：成功时标记 2 秒后自动复位，并清理上一个计时器。 */
-  function finishCopyFeedback(success: boolean, environmentId?: string) {
-    setCopied(success)
-    setCopiedEnvironmentId(success ? (environmentId ?? null) : null)
-    if (copiedResetTimerRef.current !== null) {
-      window.clearTimeout(copiedResetTimerRef.current)
-      copiedResetTimerRef.current = null
-    }
-    if (success) {
-      copiedResetTimerRef.current = window.setTimeout(() => {
-        copiedResetTimerRef.current = null
-        setCopied(false)
-        setCopiedEnvironmentId(null)
-      }, 2000)
-    }
-  }
-
-  /** 弹窗内复制：token 已在内存中，直接写剪贴板，不再发起请求。 */
-  async function handleCopyToken() {
-    if (!tokenModal?.token) return
-    const ok = await copyTextToClipboard(tokenModal.token)
-    if (ok) {
-      finishCopyFeedback(true)
-    }
-  }
-
-  /** 按需复制当前 token：读取请求只在点击时发出，绝不预取。 */
-  function handleRequestCopyToken(environment: EnvironmentCardDTO) {
-    setCopyError(null)
-    copyTokenMutation.mutate(environment)
   }
 
   return (
@@ -322,21 +241,16 @@ export function EnvironmentsPage() {
                   <button
                     type="button"
                     className="action-enter-btn"
-                    aria-label={`${t('ai.environment.copyToken')} ${environment.name}`}
-                    onClick={() => handleRequestCopyToken(environment)}
-                    disabled={
-                      copyTokenMutation.isPending
-                      && copyTokenMutation.variables?.id === environment.id
-                    }
+                    aria-label={`${t('ai.environment.install')} ${environment.name}`}
+                    onClick={() => setInstallTarget(environment)}
                   >
-                    {copied && copiedEnvironmentId === environment.id ? (
-                      <Check aria-hidden="true" />
-                    ) : (
-                      <Copy aria-hidden="true" />
-                    )}
-                    {copied && copiedEnvironmentId === environment.id
-                      ? t('ai.environment.tokenCopied')
-                      : t('ai.environment.copyToken')}
+                    <Download aria-hidden="true" />
+                    {t('ai.environment.install')}
+                  </button>
+                  <button type="button" className="action-enter-btn"
+                    aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
+                    onClick={() => setUninstallTarget(environment)}>
+                    {t('ai.environment.uninstall')}
                   </button>
                   <button
                     type="button"
@@ -378,11 +292,6 @@ export function EnvironmentsPage() {
                     {t('ai.catalog.action.delete')}
                   </button>
                 </div>
-                {copyError && copyTokenMutation.variables?.id === environment.id ? (
-                  <p className="field-error" role="alert">
-                    {copyError}
-                  </p>
-                ) : null}
               </article>
             )
           })}
@@ -485,69 +394,8 @@ export function EnvironmentsPage() {
         />
       )}
 
-      {tokenModal && (
-        <ModalBackdrop onClose={() => setTokenModal(null)}>
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('ai.environment.tokenTitle')}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <ModalHeader
-              title={`${t('ai.environment.tokenTitle')} - ${tokenModal.environmentName}`}
-              onClose={() => setTokenModal(null)}
-            />
-            <div className="modal-body">
-              <p className="confirm-modal-description" style={{ marginBottom: 16 }}>
-                {t('ai.environment.tokenNotice')}
-              </p>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  background: 'var(--surface)',
-                  padding: '8px 12px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                <code
-                  style={{
-                    flex: 1,
-                    wordBreak: 'break-all',
-                    fontFamily: 'monospace',
-                    fontSize: 13,
-                    userSelect: 'all',
-                  }}
-                >
-                  {tokenModal.token}
-                </code>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={handleCopyToken}
-                  aria-label={t('ai.environment.copyToken')}
-                  style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                >
-                  {copied ? <Check size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-                  {copied ? t('ai.environment.tokenCopied') : t('ai.environment.copyToken')}
-                </button>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={() => setTokenModal(null)}
-              >
-                {t('ai.environment.close')}
-              </button>
-            </div>
-          </div>
-        </ModalBackdrop>
-      )}
+      {installTarget && <EnvironmentInstallModal environment={installTarget} onClose={() => setInstallTarget(null)} />}
+      {uninstallTarget && <EnvironmentInstallModal environment={uninstallTarget} uninstall onClose={() => setUninstallTarget(null)} />}
 
       {manageTarget && (
         <EnvironmentManagementModal
