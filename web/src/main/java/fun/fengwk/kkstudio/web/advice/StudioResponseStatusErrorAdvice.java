@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
@@ -42,7 +43,8 @@ import java.util.Map;
       StudioHarnessProviderRequestPreviewController.class,
       StudioHarnessSessionController.class,
       StudioHarnessThreadController.class,
-      StudioInteractionController.class
+      StudioInteractionController.class,
+      StudioConfigSyncController.class
     })
 public class StudioResponseStatusErrorAdvice {
 

@@ -16,7 +16,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
@@ -582,6 +585,28 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(
         unknownCategory.path("skipped").findValuesAsText("kind").contains("unknownThing"),
         "unknown top-level category must be reported as skip");
+  }
+
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void malformedJsonUsesSanitizedResponseWithoutLoggingInput(CapturedOutput output)
+      throws Exception {
+    // 原生 Jackson 的错误消息包含非法 token；同步入口不得回显或记录这个输入。
+    String secret = "syntheticConfigSyncCredentialCanary";
+    MvcResult result =
+        mockMvc
+            .perform(
+                post("/api/settings/sync/import")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"yaml\": " + secret + "}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andReturn();
+    assertFalse(output.getAll().contains(secret), "invalid input must not enter request logs");
+    assertEquals(
+        "Failed to read request",
+        objectMapper.readTree(body(result)).path("errors").path("detail").asText());
+    assertFalse(body(result).contains(secret));
   }
 
   // ---------------------------------------------------------------- rollback
