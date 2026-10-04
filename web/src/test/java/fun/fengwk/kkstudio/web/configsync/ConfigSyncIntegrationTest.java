@@ -51,7 +51,7 @@ import java.util.UUID;
  *
  * <p>真实隔离 PostgreSQL（{@link ConfigSyncTestSupport} 的进程级 disposable 容器）、真实 JGit 本地 {@code file://}
  * 仓库与 loopback Mock MCP，全程不访问外网或付费服务。覆盖七类往返、依赖闭包与循环 Agent、凭据/{@code ${VAR}} 原值、exact commit 恢复、同名
- * upsert、部分 settings、skip、事务回滚与 {@code no-store}。
+ * upsert、完整七节 settings 校验、显式 {@code allowPartial} 部分导入、预检查零写入、skip、事务回滚与 {@code no-store}。
  */
 class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
@@ -315,6 +315,63 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(imported.path("skipped").findValuesAsText("kind").contains("unknownThing"));
     assertNotNull(findProvider(provider));
 
+    deleteOk(
+        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+  }
+
+  /**
+   * 未知字段不能绕过当前契约：未知 nested config + 缺必填、未知条目字段 + known 非法值，在 check 与 {@code allowPartial=true}
+   * 执行都必须硬拒绝且零写入；只有「known 完整」的条目本身才可能因未知字段被 skip，其余条目在显式 partial 下正常导入。
+   */
+  @Test
+  void unknownFieldsDoNotBypassKnownValidation() throws Exception {
+    String suffix = unique();
+
+    // 未知 nested config 字段 + 缺当前必填（config 只有 obsolete，缺 limit/abilities/pricing/variants）。
+    String nestedMissingProvider = "uvn_provider_" + suffix;
+    String nestedMissing =
+        "providers:\n  - name: "
+            + nestedMissingProvider
+            + "\n    providerType: openai\n"
+            + "models:\n  - providerName: "
+            + nestedMissingProvider
+            + "\n    name: m\n"
+            + "    modelId: gpt\n    config:\n      obsolete: 1\n";
+    checkRejected(nestedMissing);
+    importRejected(nestedMissing, true);
+    assertNull(findProvider(nestedMissingProvider), "rejected import must not write provider");
+
+    // 未知条目字段 + known 非法值：Environment 空 registrationToken 必须硬拒绝，而不是被未知字段掩盖后 skip。
+    String envName = "uv_env_" + suffix;
+    String invalidEnv =
+        "environments:\n  - name: " + envName + "\n    registrationToken: ''\n    bogus: 1\n";
+    checkRejected(invalidEnv);
+    importRejected(invalidEnv, true);
+    assertNull(findEnvironment(envName), "rejected import must not write environment");
+
+    // known 完整条目 + 另一条未知条目字段：只有未知条目本身作为 skip，其余条目在显式 partial 下正常导入。
+    String provider = "uv_ok_provider_" + suffix;
+    String unknownProvider = "uv_skip_provider_" + suffix;
+    String mixed =
+        "providers:\n  - name: "
+            + provider
+            + "\n    providerType: openai\n"
+            + "  - name: "
+            + unknownProvider
+            + "\n    providerType: openai\n    bogus: 1\n";
+    JsonNode check = checkData(mixed);
+    assertTrue(check.path("created").findValuesAsText("name").contains(provider));
+    assertTrue(check.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertNull(findProvider(provider), "check must not write");
+    assertNull(findProvider(unknownProvider), "check must not write");
+    importRejected(mixed);
+    assertNull(findProvider(provider), "partial import without confirmation must not write");
+    JsonNode imported = importYaml(mixed, true);
+    assertTrue(imported.path("imported").findValuesAsText("name").contains(provider));
+    assertTrue(imported.path("skipped").findValuesAsText("kind").contains("providers"));
+    assertNull(
+        findProvider(unknownProvider),
+        "entry carrying an unknown field must be skipped, not imported");
     deleteOk(
         "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
   }
@@ -1133,11 +1190,17 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private MvcResult importRejected(String yaml) throws Exception {
+    return importRejected(yaml, false);
+  }
+
+  private MvcResult importRejected(String yaml, boolean allowPartial) throws Exception {
     return mockMvc
         .perform(
             post("/api/settings/sync/import")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("yaml", yaml))))
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("yaml", yaml, "allowPartial", allowPartial))))
         .andExpect(status().isBadRequest())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andReturn();

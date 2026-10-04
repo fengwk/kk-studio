@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 导入计划：准备阶段（事务外 Git / MCP 发现与 settings 合并）完成后的可写入事实。
+ * 导入计划：准备阶段（事务外 Git / MCP 发现）完成后的可写入事实。
  *
  * <p>{@code imported} 是最终会实际写入的引用，{@code skipped} 是被明确跳过的条目；两者都已在计划阶段定性。
  */
@@ -54,6 +54,6 @@ public record ConfigSyncPlan(
       Long timeoutMillis,
       List<McpTool> discoveredTools) {}
 
-  /** 已合并并校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
+  /** 已在解析期按完整七节契约校验的 settings 更新；{@code expectedVersion} 是计划期读到的快照版本，写事务内以其做 CAS。 */
   public record SettingsUpdate(SystemSettingsSectionsDTO sections, String expectedVersion) {}
 }
