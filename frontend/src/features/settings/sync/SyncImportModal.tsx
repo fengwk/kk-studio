@@ -73,30 +73,21 @@ export function SyncImportModal({
     if (mode === 'empty') {
       return null
     }
-    if (mode === 'partial') {
-      return (
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => {
-            void handleImport(true)
-          }}
-          disabled={pending}
-        >
-          {pending ? t('settings.sync.import.importing') : t('settings.sync.import.confirmPartial')}
-        </button>
-      )
-    }
+    // 单一执行按钮：部分可用时改变文案与 allowPartial，不复制两套按钮。
+    const partial = mode === 'partial'
+    const labelKey = partial
+      ? 'settings.sync.import.confirmPartial'
+      : 'settings.sync.import.confirm'
     return (
       <button
         type="button"
         className="btn-primary"
         onClick={() => {
-          void handleImport(false)
+          void handleImport(partial)
         }}
         disabled={pending}
       >
-        {pending ? t('settings.sync.import.importing') : t('settings.sync.import.confirm')}
+        {pending ? t('settings.sync.import.importing') : t(labelKey)}
       </button>
     )
   }

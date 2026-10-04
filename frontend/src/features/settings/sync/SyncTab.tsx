@@ -13,7 +13,10 @@ interface SyncTabProps {
   settingsDirty: boolean
 }
 
-/** 预检查通过后待确认的导入：保留文件文本直到关闭或失败时释放。 */
+/**
+ * 预检查通过后待确认的导入：YAML 保留到关闭，执行失败可原样重试；
+ * 读取或预检查失败不会进入该状态，因此不会在页面上留存文件内容。
+ */
 interface PendingImport {
   fileName: string
   yaml: string
