@@ -318,7 +318,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       }
       return getPackage(name);
     }
-    // repository URL 是不可变身份：同名换仓库不支持，调用方须在准备阶段跳过。
+    // repository URL 是不可变身份：同名换仓库拒绝导入。
     if (!url.equals(current.getRepositoryUrl())) {
       throw new AiValidationException(
           SkillPackageGuard.RESOURCE, "skill package repositoryUrl is immutable: " + name);
@@ -343,6 +343,16 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     current.setHeadCheckError(null);
     casUpdate(current, current.getVersion());
     return getPackage(name);
+  }
+
+  @Override
+  public void validateImport(
+      String packageName, String description, String repositoryUrl, String branch, String commit) {
+    requirePackageName(packageName);
+    requireDescription(description);
+    requireRepositoryUrl(repositoryUrl);
+    requireBranch(branch);
+    requireCommit(commit, "currentCommit");
   }
 
   /** 以锁定时读到的 {@code expected} 为条件整体更新事实；影响行数为 0 时重读判定 404 或 version conflict。 */

@@ -314,7 +314,7 @@ public final class ConfigSyncParser {
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
       raw.put(String.valueOf(entry.getKey()), entry.getValue());
     }
-    // 未知叶只被移除并报告，其余受支持字段继续合入当前设置。
+    // 未知字段移除并报告，剩余结构仍须满足当前完整 settings 契约。
     List<String> removed = new ArrayList<>();
     Object cleaned =
         yaml.removeUnknownProperties(SystemSettingsSectionsDTO.class, raw, key, removed);
