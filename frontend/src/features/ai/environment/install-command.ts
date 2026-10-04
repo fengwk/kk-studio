@@ -156,7 +156,7 @@ function lspConfiguration(
   if (!isPlainObject(value) || Object.keys(value).some(key => key !== 'servers')) fail('daemon.lsp')
   const nodes = value.servers
   if (!isPlainObject(nodes) || Object.keys(nodes).length === 0) fail('daemon.lsp.servers')
-  const servers: Record<string, DaemonLspServerConfiguration> = {}
+  const servers: Record<string, DaemonLspServerConfiguration> = Object.create(null)
   for (const [id, node] of Object.entries(nodes)) {
     const path = `daemon.lsp.servers.${id}`
     if (!serverIdPattern.test(id) || !isPlainObject(node) || hasUnknownField(node, serverFields)) {
