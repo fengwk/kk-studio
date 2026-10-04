@@ -116,6 +116,20 @@ final class ConfigSyncFixtures {
     return config;
   }
 
+  static AgentModelConfigDTO modelConfigWithVariants(
+      List<String> variantIds, String defaultVariant) {
+    AgentModelConfigDTO config = modelConfig();
+    List<AgentModelVariantDTO> variants = new ArrayList<>();
+    for (String id : variantIds) {
+      AgentModelVariantDTO variant = new AgentModelVariantDTO();
+      variant.setId(id);
+      variants.add(variant);
+    }
+    config.setVariants(variants);
+    config.setDefaultVariant(defaultVariant);
+    return config;
+  }
+
   static AgentDefinitionConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
@@ -144,11 +158,15 @@ final class ConfigSyncFixtures {
   }
 
   static AgentModel model(String providerName, String name) {
+    return model(providerName, name, modelConfig());
+  }
+
+  static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
     AgentModel model = new AgentModel();
     model.setProviderName(providerName);
     model.setName(name);
     model.setModelId("gpt-4");
-    model.setConfigJson(MODEL_CONFIG_PARSER.encode(modelConfig()));
+    model.setConfigJson(MODEL_CONFIG_PARSER.encode(config));
     model.setVersion(0L);
     return model;
   }
@@ -261,5 +279,20 @@ final class ConfigSyncFixtures {
       map.put((String) keyValues[index], keyValues[index + 1]);
     }
     return map;
+  }
+
+  /** 把 typed Agent Model config 序列化为 config sync 纯结构，便于构造文件内 Model 条目。 */
+  static Map<String, Object> modelConfigMap(AgentModelConfigDTO config) {
+    return new ConfigSyncYaml().toMap(config, "config");
+  }
+
+  /** 把 typed Agent config 序列化为 config sync 纯结构。 */
+  static Map<String, Object> agentConfigMap(AgentDefinitionConfigDTO config) {
+    return new ConfigSyncYaml().toMap(config, "config");
+  }
+
+  /** 按纯结构 dump 完整 config sync 文档，避免内联长篇 YAML。 */
+  static String documentYaml(Map<String, Object> document) {
+    return new ConfigSyncYaml().dump(document);
   }
 }

@@ -9,6 +9,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
@@ -18,6 +20,7 @@ import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -56,6 +59,7 @@ public final class ConfigSyncPlanner {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalog toolCatalog;
+  private final AgentModelRuntimeConfigParser configParser;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
   public ConfigSyncPlan plan(ConfigSyncParser.ParsedDocument document) {
@@ -86,11 +90,12 @@ public final class ConfigSyncPlanner {
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, spec.name()));
     }
 
-    Set<String> availableModels = new LinkedHashSet<>();
+    Map<String, AgentModelConfigDTO> availableModels = new LinkedHashMap<>();
     for (var model : snapshot.models()) {
       String key = ConfigSyncRefs.modelName(model.getProviderName(), model.getName());
       if (!skippedModels.contains(key) && availableProviders.contains(model.getProviderName())) {
-        availableModels.add(key);
+        // 快照中未被文件覆盖的 Model 以 DB config 为准；解码失败与写入路径一致地硬拒绝。
+        availableModels.put(key, configParser.decode(model.getConfigJson()));
       }
     }
     List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
@@ -106,10 +111,14 @@ public final class ConfigSyncPlanner {
         availableModels.remove(key);
         continue;
       }
-      availableModels.add(key);
+      // 文件内同名 Model 覆盖快照 config：预检查按导入后将生效的配置判定。
+      availableModels.put(key, spec.properties().getConfig());
       models.add(spec);
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.MODELS, key));
     }
+
+    // 模型池就绪后、外部准备前：Agent 显式 variant 必须由导入后将生效的 Model config 声明。
+    rejectUnknownAgentModelVariants(document.agents(), availableModels);
 
     Map<String, SkillPackage> existingPackages = new LinkedHashMap<>();
     Map<String, Set<String>> availableSkills = new LinkedHashMap<>();
@@ -279,7 +288,7 @@ public final class ConfigSyncPlanner {
         if (agentUnsatisfiedReason(
                 spec,
                 agentPool,
-                availableModels,
+                availableModels.keySet(),
                 availableSkills,
                 availableMcpTools,
                 knownMcpToolNames)
@@ -302,7 +311,7 @@ public final class ConfigSyncPlanner {
                 agentUnsatisfiedReason(
                     spec,
                     agentPool,
-                    availableModels,
+                    availableModels.keySet(),
                     availableSkills,
                     availableMcpTools,
                     knownMcpToolNames)));
@@ -313,7 +322,7 @@ public final class ConfigSyncPlanner {
     SystemSettingsSectionsDTO sections = document.settings();
     if (sections != null) {
       // 完整七节契约已在解析期校验，这里只判定与当前可用依赖的引用关系。
-      String reason = settingsUnsatisfiedReason(sections, availableModels, agentPool);
+      String reason = settingsUnsatisfiedReason(sections, availableModels.keySet(), agentPool);
       if (reason != null) {
         skipped.add(
             new ConfigSyncSkipped(ConfigSyncKind.SETTINGS.wireValue(), SETTINGS_NAME, reason));
@@ -336,6 +345,34 @@ public final class ConfigSyncPlanner {
         settingsUpdate,
         imported,
         skipped);
+  }
+
+  /**
+   * Agent 引用的显式 variant 必须由导入后将生效的 Model config 声明。仅校验引用可用 Model 且 variant 非空白的 Agent：缺 Model
+   * 仍按既有依赖 skip 政策处理；即使该 Agent 会因其它依赖被 skip，已知非法 variant 仍必须先硬拒绝。
+   *
+   * <p>错误消息只带安全条目名，不回显 raw variant、Model 配置或 cause。
+   */
+  private static void rejectUnknownAgentModelVariants(
+      List<ConfigSyncParser.AgentSpec> agents, Map<String, AgentModelConfigDTO> availableModels) {
+    for (ConfigSyncParser.AgentSpec spec : agents) {
+      String variant = spec.properties().getVariant();
+      if (variant == null || variant.isBlank()) {
+        continue;
+      }
+      AgentModelConfigDTO config =
+          availableModels.get(ConfigSyncRefs.modelName(spec.providerName(), spec.modelName()));
+      if (config == null) {
+        continue;
+      }
+      try {
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+            spec.providerName(), spec.modelName(), variant, config);
+      } catch (IllegalArgumentException error) {
+        throw new AiValidationException(
+            RESOURCE, "agent references unknown model variant: " + spec.name());
+      }
+    }
   }
 
   private static Set<String> skippedNames(List<ConfigSyncSkipped> skipped, ConfigSyncKind kind) {
