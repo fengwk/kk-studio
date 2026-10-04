@@ -23,17 +23,24 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-const syncMocks = vi.hoisted(() => ({ getInventory: vi.fn(), exportConfig: vi.fn(), importConfig: vi.fn() }))
+const syncMocks = vi.hoisted(() => ({
+  getInventory: vi.fn(),
+  exportConfig: vi.fn(),
+  checkImport: vi.fn(),
+  importConfig: vi.fn(),
+}))
 
 vi.mock('@/shared/api/config-sync-service', () => ({
   configSyncService: {
     getInventory: syncMocks.getInventory,
     exportConfig: syncMocks.exportConfig,
+    checkImport: syncMocks.checkImport,
     importConfig: syncMocks.importConfig,
   },
   createConfigSyncService: () => ({
     getInventory: vi.fn(),
     exportConfig: vi.fn(),
+    checkImport: vi.fn(),
     importConfig: vi.fn(),
   }),
 }))

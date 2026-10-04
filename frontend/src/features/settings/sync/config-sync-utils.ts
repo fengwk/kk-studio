@@ -1,4 +1,5 @@
 import type {
+  ConfigSyncImportCheckDTO,
   ConfigSyncItem,
   ConfigSyncKind,
   ConfigSyncRef,
@@ -98,6 +99,21 @@ export function configSyncErrorMessage(error: unknown, fallback: string): string
     return error.message
   }
   return fallback
+}
+
+/**
+ * 预检查结果的导入能力：
+ * - `full`：存在可执行项且无跳过项，直接确认导入；
+ * - `partial`：存在可执行项但也有跳过项，必须由用户显式选择仅导入可用配置；
+ * - `empty`：没有可执行项，不提供执行按钮。
+ */
+export type ConfigSyncImportMode = 'full' | 'partial' | 'empty'
+
+export function configSyncImportMode(preview: ConfigSyncImportCheckDTO): ConfigSyncImportMode {
+  if (preview.created.length + preview.updated.length === 0) {
+    return 'empty'
+  }
+  return preview.skipped.length > 0 ? 'partial' : 'full'
 }
 
 /** 按种类统计闭包条目数，仅返回有内容的种类，用于展示实际导出范围。 */

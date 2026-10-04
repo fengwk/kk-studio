@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ConfigSyncItem } from '@/shared/api/contracts/config-sync'
 import {
   CONFIG_SYNC_GROUPS,
+  configSyncImportMode,
   configSyncRefKey,
   configSyncScopeKindCounts,
   configSyncScopeRefs,
@@ -40,6 +41,37 @@ describe('sync selection grouping', () => {
       ['mcpServers'],
       ['settings'],
     ])
+  })
+})
+
+describe('configSyncImportMode', () => {
+  // 有可执行项且无跳过项才是全量导入。
+  it('returns full when there are usable items and no skips', () => {
+    expect(configSyncImportMode({ created: [{ kind: 'providers', name: 'a' }], updated: [], skipped: [] })).toBe('full')
+    expect(configSyncImportMode({ created: [], updated: [{ kind: 'settings', name: 'settings' }], skipped: [] })).toBe('full')
+  })
+
+  // 有跳过项时只有显式部分导入才安全。
+  it('returns partial when usable items coexist with skips', () => {
+    expect(
+      configSyncImportMode({
+        created: [{ kind: 'providers', name: 'a' }],
+        updated: [],
+        skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
+      }),
+    ).toBe('partial')
+  })
+
+  // 没有 created/updated 时没有可执行动作，不应提供执行按钮。
+  it('returns empty when nothing can be executed', () => {
+    expect(configSyncImportMode({ created: [], updated: [], skipped: [] })).toBe('empty')
+    expect(
+      configSyncImportMode({
+        created: [],
+        updated: [],
+        skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
+      }),
+    ).toBe('empty')
   })
 })
 

@@ -3,6 +3,8 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { configSyncService } from '@/shared/api/config-sync-service'
+import type { ConfigSyncImportCheckDTO } from '@/shared/api/contracts/config-sync'
+import { configSyncErrorMessage } from '@/features/settings/sync/config-sync-utils'
 import { SyncExportModal } from '@/features/settings/sync/SyncExportModal'
 import { SyncImportModal } from '@/features/settings/sync/SyncImportModal'
 
@@ -11,9 +13,11 @@ interface SyncTabProps {
   settingsDirty: boolean
 }
 
+/** 预检查通过后待确认的导入：保留文件文本直到关闭或失败时释放。 */
 interface PendingImport {
   fileName: string
   yaml: string
+  preview: ConfigSyncImportCheckDTO
 }
 
 /** 设置同步页签：只提供导入、导出两个操作。 */
@@ -27,11 +31,11 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
 
   const [exportOpen, setExportOpen] = useState(false)
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
-  const [reading, setReading] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const readingRef = useRef(false)
+  const busyRef = useRef(false)
 
   const items = inventoryQuery.data?.items ?? []
   const canExport = inventoryQuery.isSuccess && items.length > 0
@@ -45,26 +49,34 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
     const file = event.target.files?.[0] ?? null
     // 立即清空 input：再次选择同一文件也会触发 change。
     event.target.value = ''
-    // 上一次读取未结束前忽略新选择，避免旧读取结果覆盖新文件。
-    if (file == null || readingRef.current) {
+    // 读取或检查未结束前忽略新选择，避免旧结果覆盖新文件。
+    if (file == null || busyRef.current) {
       return
     }
     if (!isYamlFile(file.name)) {
       setFileError(t('settings.sync.import.invalidFile'))
       return
     }
-    readingRef.current = true
-    setReading(true)
+    busyRef.current = true
+    setBusy(true)
+    setFileError(null)
     try {
-      const yaml = await file.text()
-      setFileError(null)
+      let yaml: string
+      try {
+        yaml = await file.text()
+      } catch {
+        setFileError(t('settings.sync.import.readFailed'))
+        return
+      }
+      // 先预检查再决定是否打开确认弹窗；检查失败不进入可导入状态。
+      const preview = await configSyncService.checkImport(yaml)
       setStatus(null)
-      setPendingImport({ fileName: file.name, yaml })
-    } catch {
-      setFileError(t('settings.sync.import.readFailed'))
+      setPendingImport({ fileName: file.name, yaml, preview })
+    } catch (error) {
+      setFileError(configSyncErrorMessage(error, t('settings.sync.import.checkFailed')))
     } finally {
-      readingRef.current = false
-      setReading(false)
+      busyRef.current = false
+      setBusy(false)
     }
   }
 
@@ -110,7 +122,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       ) : null}
 
       <div className="settings-sync-actions">
-        <button type="button" className="settings-button" onClick={openFilePicker} disabled={reading}>
+        <button type="button" className="settings-button" onClick={openFilePicker} disabled={busy}>
           {t('settings.sync.import')}
         </button>
         <button
@@ -126,7 +138,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
           className="settings-sync-file-input"
           type="file"
           accept=".yaml,.yml"
-          disabled={reading}
+          disabled={busy}
           onChange={(event) => {
             void handleFileChange(event)
           }}
@@ -164,6 +176,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
         <SyncImportModal
           fileName={pendingImport.fileName}
           yaml={pendingImport.yaml}
+          preview={pendingImport.preview}
           settingsDirty={settingsDirty}
           onClose={closeImport}
           onImported={handleImported}
