@@ -29,6 +29,11 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
+  public List<AgentModel> listAll() {
+    return agentModelMapper.listAll().stream().map(this::convert).toList();
+  }
+
+  @Override
   public AgentModel getByProviderNameAndName(String providerName, String name) {
     return convert(agentModelMapper.getByProviderNameAndName(providerName, name));
   }

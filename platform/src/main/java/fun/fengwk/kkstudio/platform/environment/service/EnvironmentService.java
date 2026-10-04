@@ -14,6 +14,14 @@ public interface EnvironmentService {
   /** 创建 Environment Card，返回包含 registrationToken 的 DTO；列表/详情永不返回 token。 */
   EnvironmentCardDTO create(EnvironmentCreateDTO dto);
 
+  /**
+   * 配置同步导入：以新 UUID 与显式 registrationToken 创建 Environment。
+   *
+   * <p>与 {@link #create(EnvironmentCreateDTO)} 的区别是不生成随机 token，而是保留导入文件中的 token，使 Daemon HELLO 可继续按
+   * token 注册。同名 Environment 由调用方按名称走 {@link #updateRegistrationToken}。
+   */
+  EnvironmentCardDTO importEnvironment(String name, String registrationToken);
+
   /** 查询单个 Environment Card 详情，永不返回 registrationToken。 */
   EnvironmentCardDTO get(EnvironmentId id);
 
@@ -29,6 +37,14 @@ public interface EnvironmentService {
 
   /** 幂等只读当前 registrationToken；不轮换、不更新 version/updateTime。 */
   EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);
+
+  /**
+   * 配置同步导入：按名称更新的同名 Environment 显式设置 token（保持 UUID 身份）。
+   *
+   * <p>token 与当前值相同则不写行、不推进 version；否则 CAS 更新。
+   */
+  EnvironmentCardDTO updateRegistrationToken(
+      EnvironmentId id, String registrationToken, String expectedVersion);
 
   /**
    * CAS 轮换 registrationToken，返回新生成的 token。

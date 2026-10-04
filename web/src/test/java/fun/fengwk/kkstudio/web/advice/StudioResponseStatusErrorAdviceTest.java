@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.advice;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import fun.fengwk.convention4j.api.result.Result;
@@ -13,12 +14,23 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.http.MockHttpInputMessage;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
+import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
+import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
+import fun.fengwk.kkstudio.web.controller.StudioChatController;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
+import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
@@ -43,6 +55,27 @@ class StudioResponseStatusErrorAdviceTest {
   void resetLocaleContext() {
     LocaleContextHolder.resetLocaleContext();
     Locale.setDefault(originalDefault);
+  }
+
+  @Test
+  void scopesAdviceToSupportedControllersIncludingSync() {
+    // 同步请求反序列化错误沿用安全翻译，其他控制器仍维持原有边界。
+    RestControllerAdvice annotation =
+        StudioResponseStatusErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
+    assertArrayEquals(
+        new Class<?>[] {
+          StudioCanvasController.class,
+          StudioCanvasFunctionController.class,
+          StudioCanvasResourceController.class,
+          StudioChatController.class,
+          StudioHarnessCommandBatchController.class,
+          StudioHarnessProviderRequestPreviewController.class,
+          StudioHarnessSessionController.class,
+          StudioHarnessThreadController.class,
+          StudioInteractionController.class,
+          StudioConfigSyncController.class
+        },
+        annotation.assignableTypes());
   }
 
   @Test

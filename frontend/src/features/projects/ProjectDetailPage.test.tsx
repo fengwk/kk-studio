@@ -282,7 +282,7 @@ describe('ProjectDetailPage', () => {
     const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
     await screen.findByText('Awesome Platform')
-    const refreshBtn = screen.getByLabelText('刷新项目 Snapshot')
+    const refreshBtn = screen.getByLabelText('刷新项目数据')
     fireEvent.click(refreshBtn)
 
     await waitFor(() => {
@@ -503,7 +503,7 @@ describe('ProjectDetailPage', () => {
     expect(transitionMock).not.toHaveBeenCalled()
 
     // 页面呈现受控错误横幅
-    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+    expect(await screen.findByText(/无法保存操作记录，未发送请求/i)).toBeInTheDocument()
 
     setItemSpy.mockRestore()
   })
@@ -605,7 +605,7 @@ describe('ProjectDetailPage', () => {
     expect(stopMock).not.toHaveBeenCalled()
 
     // 界面展示拦截横幅
-    expect(await screen.findByText(/操作无法持久化侧车，已安全拦截/i)).toBeInTheDocument()
+    expect(await screen.findByText(/无法保存操作记录，未发送请求/i)).toBeInTheDocument()
 
     setItemSpy.mockRestore()
     clearPendingAction(targetIssue.id)
@@ -645,7 +645,7 @@ describe('ProjectDetailPage', () => {
     expect(stopMock).not.toHaveBeenCalled()
 
     // 页面呈现阻止错误提示
-    expect(await screen.findByText(/该 Issue 存在未确认结果的写操作，禁止新请求/i)).toBeInTheDocument()
+    expect(await screen.findByText(/该 Issue 存在未确认结果的写操作，暂不能继续/i)).toBeInTheDocument()
 
     // 验证侧车中的 TRANSITION 记录完好无损，未被 STOP 覆盖
     const loaded = loadPendingAction(targetIssue.id)
@@ -909,8 +909,8 @@ describe('ProjectDetailPage', () => {
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
     await screen.findByText('Awesome Platform')
 
-    // 1. 刷新 Snapshot
-    fireEvent.click(screen.getByRole('button', { name: '刷新项目 Snapshot' }))
+    // 1. 刷新项目数据
+    fireEvent.click(screen.getByRole('button', { name: '刷新项目数据' }))
     await waitFor(() => {
       expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2)
     })

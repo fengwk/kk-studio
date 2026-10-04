@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
@@ -39,6 +40,7 @@ class StudioDomainErrorAdviceTest {
 
   @Test
   void scopesAdviceToSupportedControllers() {
+    // 同步复用目录领域错误翻译；其余控制器不应被纳入此边界。
     RestControllerAdvice advice =
         StudioDomainErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
 
@@ -50,7 +52,8 @@ class StudioDomainErrorAdviceTest {
           StudioChatController.class,
           StudioMcpServerController.class,
           StudioEnvironmentController.class,
-          StudioSkillCatalogController.class
+          StudioSkillCatalogController.class,
+          StudioConfigSyncController.class
         },
         advice.assignableTypes());
   }
@@ -66,7 +69,7 @@ class StudioDomainErrorAdviceTest {
     assertNotNull(validation.getBody());
     Result<Void> validationBody = validation.getBody();
     assertEquals("validation", validationBody.getCode());
-    assertEquals("Invalid agent_provider request.", validationBody.getMessage());
+    assertEquals("Invalid agent provider request.", validationBody.getMessage());
     assertEquals(
         Map.of("resource", "agent_provider", "detail", "invalid provider"),
         validationBody.getErrors());
@@ -78,7 +81,7 @@ class StudioDomainErrorAdviceTest {
     assertNotNull(conflict.getBody());
     Result<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
-    assertEquals("agent_model 已被其他请求修改。", conflictBody.getMessage());
+    assertEquals("Agent Model 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
         Map.of(
             "resource",

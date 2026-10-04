@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -20,6 +21,8 @@ import java.util.ResourceBundle;
  *
  * <p>convention starter 只暴露单一启动 locale 的 manager。本服务有意为每个受支持的请求 locale 各持有一个
  * manager，使请求可以选择自己的语言，而无需改动 platform 错误模型或进程级 convention 配置。
+ *
+ * <p>{@code errors.resource} 保留稳定内部标识；用户可见 message 经 {@link #resourceDisplayName(String)} 使用本地化名称。
  */
 @Component
 public class StudioMessageService {
@@ -28,6 +31,7 @@ public class StudioMessageService {
   private static final Locale EN_US = Locale.US;
   private static final Locale ZH_CN = Locale.SIMPLIFIED_CHINESE;
   private static final String DOMAIN_PREFIX = "studio.error.domain.";
+  private static final String RESOURCE_PREFIX = "studio.error.domain.resource.";
   private static final String HTTP_PREFIX = "studio.error.http.";
 
   private final Map<Locale, StringManager> stringManagers;
@@ -79,7 +83,28 @@ public class StudioMessageService {
 
   public String domainMessage(DomainErrorCode code, Map<String, ?> context) {
     Objects.requireNonNull(code, "code");
-    return message(DOMAIN_PREFIX + code.code() + ".message", context);
+    return message(DOMAIN_PREFIX + code.code() + ".message", withResourceDisplayName(context));
+  }
+
+  /** 解析 resource 的本地化展示名；未登记标识回退为下划线分隔的可读形式。 */
+  public String resourceDisplayName(String resource) {
+    if (resource == null || resource.isBlank()) {
+      return resource;
+    }
+    try {
+      return message(RESOURCE_PREFIX + resource, Collections.emptyMap());
+    } catch (MissingResourceException missing) {
+      return resource.replace('_', ' ');
+    }
+  }
+
+  private Map<String, ?> withResourceDisplayName(Map<String, ?> context) {
+    if (context == null || !(context.get("resource") instanceof String resource)) {
+      return context;
+    }
+    Map<String, Object> display = new LinkedHashMap<>(context);
+    display.put("resource", resourceDisplayName(resource));
+    return display;
   }
 
   public String validationRequired(String resource) {

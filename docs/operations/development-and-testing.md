@@ -84,7 +84,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
-| 只格式化本次改动的模块 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply` |
+| 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
@@ -162,11 +162,12 @@ Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp spotless:check
-env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <changed-module> spotless:apply
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <changed-module> spotless:apply '-DspotlessFiles=.*(Foo|Bar)\.java'
 ```
 
-`spotless:apply` 会修改源码；`<changed-module>` 用实际发生 Java 变更的模块，避免对无关模块执行
-全仓格式化。
+`spotless:apply` 会修改源码；`<changed-module>` 限定变更模块，`spotlessFiles` 用正则进一步限定
+实际改动的文件。示例匹配 `Foo.java` 与 `Bar.java`，不是逗号分隔的 glob；同名文件较多时应包含包路径。
+只指定模块仍会格式化该模块全部 Java 文件，不用于普通开发切片。
 
 ### Checkstyle
 
@@ -347,6 +348,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 免费 L1 覆盖的部分产品契约面：
 
+- `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
+  `config_sync.environment_identity_and_token`：七类配置清单、凭据随 YAML 导出、
+  同名 Provider 更新、Environment 身份与注册令牌恢复，以及成功和错误响应的 `no-store`。
+  三个 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
   幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
@@ -719,20 +724,49 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。
 
 ### 共享数据库重建
 
-这是独立的数据库维护流程：验证备份、冻结原库、建立空库，再初始化 schema 和回灌 Catalog。
-它不是自动迁移。健康且与镜像兼容的数据面继续复用；
+配置保存在产品中，数据库维护只负责备份与建立空库：
+
+```text
+设置 -> 同步 -> 导出 YAML
+  -> 停止写入 -> 备份并重建数据库
+  -> 初始化当前 Schema -> 启动产品 -> 同步 -> 导入 YAML
+```
+
+这不是运行数据迁移。健康且与镜像兼容的数据面继续复用；
 只有数据所有者批准数据范围、停机窗口与恢复方案时才执行重建。
 恢复入口与对象存储保护要求见[恢复与重建](deployment.md#恢复与重建)。
 
-数据库维护由三个独立入口组成：
+#### 配置导入与导出
 
-- [scripts/ops/export-agent-catalog.sh](../../scripts/ops/export-agent-catalog.sh)：只读导出 durable Agent catalog（Provider / Model / Agent 定义）为版本化包；
-- [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：安全备份旧库、重命名冻结并以原元数据创建同名空库；
-- [scripts/ops/import-agent-catalog.sh](../../scripts/ops/import-agent-catalog.sh)：在外部完成 Flyway V1 初始化后，单事务回灌 catalog 包。
+设置页的“同步”位于“高级”之后，提供“导入”和“导出”。
+导出默认选择全部配置，也可只选具体条目；依赖自动加入，无需另选开关。
+文件始终包含配置所需的凭据和注册令牌，请保存在私密位置，不提交到 Git、不粘贴到日志。
 
-三个脚本只连接 PostgreSQL，不管理任何应用、容器或其他服务的生命周期。连接存在时，
-`reset-database.sh` 只读拒绝且不终止会话；`import-agent-catalog.sh` 通过事务锁、空表复查和指纹校验
-处理并发写入。部署侧无需向脚本暴露自身的编排方式。
+可导出 Provider、Model、Agent、Skill Package、Environment、MCP 服务与系统设置。
+Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
+Model 包含 Provider；系统设置包含其引用的备用模型和提示词 Agent。
+依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
+
+导入选择 `.yaml` 或 `.yml` 文件并确认，按名称新增或更新，不删除文件外的配置。
+条目名称须非空且没有首尾空白，重复名称会使导入失败，不会依次覆盖。
+Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
+系统设置只合并提供且支持的字段，省略字段保持原值。导入结果列出已导入条目和跳过原因；
+不支持的条目及依赖它们的配置不会被悄悄改写。YAML 结构、类型或有效值错误使导入失败，
+数据库写入失败整体回滚。设置页的未保存草稿不会被自动覆盖，可在导入结果中明确重新加载。
+网络代理设置参与同步，导入后仍须重启 Backend 才会生效。
+
+Skill Package 文件保存仓库地址、分支和已发布的 exact commit，不包含 Git 文件内容；
+目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。MCP 工具在导入时重新发现，
+发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
+Environment 保留注册令牌，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
+
+配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
+连接租约和发现快照，也不包含部署级数据库/S3 参数、Plugin 认证或主密钥。
+需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
+
+数据库脚本只有 [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：
+备份旧库、重命名冻结，并以原元数据创建同名空库。它只连接 PostgreSQL，不管理应用或容器，
+也不执行 Flyway；存在其他会话时只读拒绝，不终止会话。
 
 #### 连接
 
@@ -746,10 +780,10 @@ export VPS_POSTGRES_PASSWORD=
 export VPS_POSTGRES_DATABASE=
 ```
 
-也可以把非敏感连接项直接传给任一入口：
+也可以直接传入非敏感连接项：
 
 ```bash
-./scripts/ops/export-agent-catalog.sh \
+./scripts/ops/reset-database.sh \
   --host <host> \
   --port <port> \
   --username <username> \
@@ -774,37 +808,14 @@ export VPS_POSTGRES_DATABASE=
 
 部署基线是 PostgreSQL 17；`pg_dump` 不得比服务端旧。`reset-database.sh` 使用 PostgreSQL 15+
 的 `createdb --locale-provider`，并通过 `KK_STUDIO_MAINTENANCE_DB` 选择维护库（默认 `postgres`）。
-托管服务若禁止 `CREATE DATABASE` 或 `ALTER DATABASE ... RENAME`，仍可使用 export/import，但 reset
-应改用服务商提供的数据库生命周期能力。
-
-#### 数据范围
-
-导出包持有以下三张 Catalog 表：
-
-1. `agent_provider`
-2. `agent_model`
-3. `agent_definition`
-
-全库备份与冻结库持有其余数据，包括 Chat、Canvas、Project、Issue、Harness、Blob 引用和设置。
-新库只回灌 Catalog，其它运行数据无法从新入口访问。维护后重新创建 Environment、轮换各主机
-Daemon token，并按需登记 Skill Package、Plugin credential、MCP 与系统设置；V1 初始化提供默认设置。
+托管服务若禁止 `CREATE DATABASE` 或 `ALTER DATABASE ... RENAME`，使用服务商提供的数据库
+生命周期能力；配置同步仍通过产品完成。
 
 #### 执行
 
-1. 批准维护窗口后停止全部 App/Worker、preview 与 Daemon，等待在途调用收敛，
-   保持整个维护过程停写。从与目标部署相同的提交执行导出预检，确认列结构、包目录与数据范围，
-   再导出并记录 `package_dir`：
-
-```bash
-./scripts/ops/export-agent-catalog.sh --dry-run
-./scripts/ops/export-agent-catalog.sh
-```
-
-导出要求三张 Catalog 表与当前 schema 的精确列集合匹配；多列、缺列或缺表会在写产物前失败。
-预检失败时保留原服务与数据，先由数据所有者决定维护方案。三张表的指纹、行数和
-COPY 数据来自同一个 `psql` 进程里的 `REPEATABLE READ READ ONLY` 事务，因此成功的包对应
-这一个快照，而不是多次独立查询拼起来的结果。输出目录为 `0700`，
-`catalog.sql`、`manifest.json` 与 `sha256sums.txt` 均为 `0600`。
+1. 在产品中导出需要保留的配置并确认文件可用；导出后停止配置编辑。
+   批准维护窗口后停止全部 App/Worker、preview 与 Daemon，等待在途调用收敛，
+   保持数据库重建和验收期间停写。
 
 2. 确认仓库外备份位置、访问权限、空间与恢复能力，预检后备份并建立空库：
 
@@ -831,25 +842,16 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 
 3. 通过部署侧既有的 schema/Flyway 初始化路径在空库上应用当前
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
-脚本；import 会验证目标列集合以及本地、导出包、`flyway_schema_history` 三方 V1 checksum。
-初始化期间保持对外入口关闭和 Worker 停止，回灌完成前避免向 Catalog 写入。
+脚本。随后仅向维护人员开放产品入口，Worker 保持停止。
 
-4. 回灌：
+4. 在“设置 → 同步”导入之前保存的 YAML。检查已导入和跳过的条目，
+   补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
 
-```bash
-./scripts/ops/import-agent-catalog.sh --package '<package-dir>' --dry-run
-./scripts/ops/import-agent-catalog.sh --package '<package-dir>'
-```
-
-将 `<package-dir>` 替换为本次已验证导出包的绝对目录，再先预检、后真实回灌。
-恢复事务先排他锁定三张表并复查为空，再按外键顺序 COPY，提交前逐表比对包内指纹；锁超时、并发
-写入、脏表或指纹不符都会整体回滚。失败日志只保留 SQLSTATE 与固定安全类别，不保留行值。
-
-5. 重新登记 Environment/Daemon 与运行配置，检查 App 健康、Catalog、关键业务和既有 bucket。
+5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
 
-维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证 checksum、
-export/reset/import、事务回滚、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
+维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证备份、
+重建回滚、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
 Docker 不可用时跳过的结果不能当作数据库流程通过。
 
 #### 权限、产物与清理
@@ -859,12 +861,10 @@ Docker 不可用时跳过的结果不能当作数据库流程通过。
   - 非 superuser 角色必须拥有 `CREATEDB`；
   - 非 superuser 角色必须能对原 owner 角色 `SET ROLE`（即拥有其成员资格），否则 `createdb --owner=<原 owner>` 会被拒绝；
   - `pg_dump` 必须能读取库内全部表；备份步骤会在任何数据库变更前验证这一点；
-- **导出与回灌权限**：导出需要读取三张 Catalog 表；回灌需要其读写/锁表权限和 `flyway_schema_history` 读取权限；两者连接目标库；
-- **敏感产物**：catalog 包、冻结快照和全库备份都可能含真实 Provider 凭据；不得提交、粘贴到日志或上传公共存储；
-- **本地产物**：默认都位于 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance`，目录为
-  `0700`、文件为 `0600`，也可通过各入口的 `--work-dir` 覆盖；
-- **维护后操作**：重新登记 Environment/Daemon，并按需重建 Skill package、Plugin credential 与
-  Platform MCP 配置；验证完成后按部署侧策略归档或清理本地包、备份和冻结快照。
+- **敏感产物**：配置 YAML、冻结库和全库备份都可能含真实凭据；不得提交、粘贴到日志或上传公共存储；
+- **本地备份**：默认位于 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`，目录为
+  `0700`、文件为 `0600`，可通过 `--work-dir` 覆盖。浏览器下载的 YAML 不由脚本设置权限，须自行妥善保管；
+- **维护后操作**：确认配置与重连，按需恢复 Plugin 认证；验收完成后按部署策略归档或清理 YAML、备份和冻结库。
 
 ### 自迭代闭环
 

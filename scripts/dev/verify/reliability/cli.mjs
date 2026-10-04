@@ -60,7 +60,7 @@ export function usage() {
     'Usage: node scripts/dev/verify/reliability/run-agent-matrix.mjs [options]',
     '',
     'Options:',
-    '  --list                     List the frozen eight-case matrix without HTTP or model calls.',
+    '  --list                     List the frozen case matrix without HTTP or model calls.',
     '  --only <case-id>           Select one case; may be repeated.',
     `  --base-url <url>           Backend URL (default: ${DEFAULT_BASE_URL}).`,
     `  --daemon-env <name>        Environment name (default: ${DEFAULT_DAEMON_ENV}).`,

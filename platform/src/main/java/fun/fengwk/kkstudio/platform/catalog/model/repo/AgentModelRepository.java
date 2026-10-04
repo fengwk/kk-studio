@@ -5,10 +5,15 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 
+import java.util.List;
+
 /** 全局 model 仓库。 */
 public interface AgentModelRepository {
 
   Page<AgentModel> page(PageQuery pageQuery);
+
+  /** 按 {@code provider_name asc, name asc} 列出全部 model，用于一次性导出快照。 */
+  List<AgentModel> listAll();
 
   /** Model 名在同一个 provider 内唯一，而非全局唯一。 */
   AgentModel getByProviderNameAndName(String providerName, String name);

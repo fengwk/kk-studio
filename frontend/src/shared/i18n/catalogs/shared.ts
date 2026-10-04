@@ -54,8 +54,8 @@ export const sharedCatalog = {
     'zh-CN': '请求失败',
   },
   'shared.conflict.title': {
-    'en-US': 'The durable state changed',
-    'zh-CN': '持久状态已变化',
+    'en-US': 'The data has changed',
+    'zh-CN': '数据已发生变化',
   },
   'shared.conflict.reason': {
     'en-US': 'Reason: {{reason}}',

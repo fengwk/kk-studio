@@ -242,9 +242,11 @@ Commands:
   tail     Follow logs. Optional target: backend, frontend, all.
 
 Environment:
+  BACKEND_HOST=127.0.0.1
   BACKEND_PORT=18080
+  FRONTEND_HOST=127.0.0.1
   FRONTEND_PORT=5173
-  SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
+  SPRING_PROFILES_ACTIVE=e2e   # 默认 e2e（真实 Provider seed）；dev 为 stub seed
   SHARED_PREVIEW_ENV_FILE=/absolute/path/to/shared-preview.env
   # 只有显式给出时才按字面量解析 KEY=VALUE 外部数据面配置（owner-only、无 group/other 权限位、
   # 非符号链接）；未给出时脚本只按下面的默认值启动本机服务，不读取任何外部配置文件。
@@ -257,9 +259,10 @@ Environment:
   # e2e profile: complete pairs are written to the matching seeded providers after backend readiness
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
-  # DEV_SKIP_PACKAGE=true 只在 web/target/.kk-studio-revision 记录的是当前 HEAD 时才复用 JAR
+  # DEV_SKIP_PACKAGE=true 只在 JAR 由当前修订构建时复用；非 Git 工作区只要 JAR 存在即复用
   DEV_SKIP_NPM_INSTALL=false
   DEV_READY_TIMEOUT_SECONDS=90   # seconds to wait for backend/frontend readiness before failing
+  LOG_LINES=120   # number of recent lines printed by logs/tail
   DEV_WORK_DIR=$REPO_ROOT/runtime/dev
 EOF
 }
@@ -636,6 +639,9 @@ if [ "${BASH_SOURCE[0]}" = "$0" ]; then
       tail_logs "$target"
       ;;
     *)
+      if [ -n "$cmd" ]; then
+        echo "ERROR: unknown command: $cmd" >&2
+      fi
       usage
       exit 1
       ;;

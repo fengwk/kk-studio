@@ -49,7 +49,7 @@ require_value() {
 validate_duration() {
   local value=$1
   [[ "$value" =~ ^(0|[1-9][0-9]*)$ ]] || die "--duration-seconds must be an integer between 1 and 120: $value"
-  ((value >= 1 && value <= 120)) || die "--duration-seconds must be between 1 and 120: $value"
+  ((value >= 1 && value <= 120)) || die "--duration-seconds must be an integer between 1 and 120: $value"
 }
 
 validate_report_root() {
@@ -201,7 +201,7 @@ else
   docker image inspect "$APP_IMAGE" >/dev/null 2>&1 || die "application image not found for --skip-build: $APP_IMAGE"
 fi
 
-printf '\n==> Building shared MinIO client image (using cached layers)\n'
+printf '\n==> Building shared MinIO client image\n'
 "${COMPOSE[@]}" build minio-init
 
 printf '\n==> Starting isolated PostgreSQL/MinIO/mock/app stack\n'

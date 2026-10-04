@@ -1,7 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-Installs the kk-studio Environment Daemon for the current Windows user.
+Installs (default), upgrades, inspects, or removes the kk-studio Environment Daemon
+for the current Windows user.
 
 .DESCRIPTION
 The daemon runs as a per-user Scheduled Task while the installing user is logged in.
@@ -94,7 +95,8 @@ Commands:
              Exit 0 when Running, 1 when not installed, 3 otherwise.
   uninstall  Stop and unregister the managed task, then remove its JAR.
              The registration token file and daemon data are preserved.
-  -Help      Print this help. `install -Help` is also accepted.
+  -Help      Print this help. `install -Help` is also accepted. Cannot be
+             combined with other options.
 
 Install/upgrade options:
   -Version <vTAG>                   Pin a release tag matching ^v[0-9A-Za-z._-]+$.

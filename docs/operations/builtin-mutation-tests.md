@@ -70,7 +70,7 @@ edit 读取当前文件，不提供跨调用 stale-read 保护（`editsCurrentFi
 
 [`TextFileCommit`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextFileCommit.java)
 在目标目录内写临时文件再原子替换。既有 POSIX 权限保留，新文件遵循平台创建权限与 umask，不提升权限。
-`preservesExistingPosixPermissionsOfReplacedFile` 是权限保真的证据：
+`WriteEditMutationCapabilitiesTest.preservesExistingPosixPermissionsOfReplacedFile` 是权限保真的证据：
 目录可写时 0444 目标仍可被原子覆盖并保留 0444
 （`overwritesReadOnlyFileWhenDirectoryIsWritable`），0000 因原内容不可读而拒绝
 （`rejectsWhollyUnreadableTargetWithoutModifyingIt`）。

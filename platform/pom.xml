@@ -83,6 +83,10 @@
             <artifactId>org.eclipse.jgit</artifactId>
         </dependency>
         <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+        <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-mcp</artifactId>
         </dependency>
@@ -191,6 +195,19 @@
                                         <include>fun/fengwk/kkstudio/platform/plugin/resource/PublicAddressDnsResolver</include>
                                         <include>fun/fengwk/kkstudio/platform/plugin/resource/HttpRemoteMediaTransport</include>
                                         <include>fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun/fengwk/kkstudio/platform/configsync/ConfigSync*</include>
                                     </includes>
                                     <limits>
                                         <limit>

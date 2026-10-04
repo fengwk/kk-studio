@@ -44,6 +44,10 @@ public interface AgentModelMapper extends BaseMapper {
       })
   List<AgentModelDO> page(@Param("offset") long offset, @Param("limit") int limit);
 
+  @Select("select " + COLUMNS + " from agent_model order by provider_name asc, name asc")
+  @ResultMap("agentModelResultMap")
+  List<AgentModelDO> listAll();
+
   @Select(
       "select "
           + COLUMNS

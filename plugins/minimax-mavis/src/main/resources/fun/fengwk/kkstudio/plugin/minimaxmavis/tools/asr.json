@@ -14,7 +14,7 @@
       },
       "language": {
         "type": "string",
-        "description": "Optional expected language code. It becomes part of the transcription hint and is never sent as a gateway field on its own."
+        "description": "Optional expected language code."
       }
     },
     "required": ["input"],

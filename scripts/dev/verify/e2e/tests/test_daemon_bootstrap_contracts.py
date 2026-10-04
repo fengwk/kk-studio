@@ -112,7 +112,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn('button[aria-label="工作区路径"]', ui_smoke)
         self.assertIn("button.environment-binding-trigger", ui_smoke)
         self.assertIn("Create Chat still rendered a workspace path selector", ui_smoke)
-        self.assertIn("environmentText === 'none env'", ui_smoke)
+        self.assertIn("environmentText === '未选择环境'", ui_smoke)
         self.assertIn("for (const field of ['workspacePath', 'environment', 'environmentId'])", ui_smoke)
         self.assertIn("!Object.hasOwn(created, field)", ui_smoke)
         self.assertIn("apiDeleteByName(args.backendUrl, 'chats', title)", ui_smoke)

@@ -120,7 +120,7 @@ describe('tool-attachments', () => {
     expect(toToolAttachmentSrc(attachment)).toBeNull()
     expect(getToolAttachmentHref(attachment)).toBeNull()
     expect(formatToolAttachmentFallback(attachment)).toBe('[audio] audio/mpeg')
-    expect(getToolAttachmentLabel({ ...attachment, mime: '' })).toBe('audio attachment')
+    expect(getToolAttachmentLabel({ ...attachment, mime: '' })).toBe('audio 附件')
     expect(formatToolAttachmentFallback({ ...attachment, mime: '', name: 'preview.mp3' })).toBe('[audio] preview.mp3')
   })
 })

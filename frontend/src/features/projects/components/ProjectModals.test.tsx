@@ -119,7 +119,7 @@ describe('EditProjectModal', () => {
 
     // 切换到工作流 tab
     await user.click(screen.getByRole('button', { name: '工作流 JSON 配置' }))
-    const textarea = screen.getByLabelText(/工作流配置/i)
+    const textarea = screen.getByLabelText(/工作流 \(JSON\)/i)
     expect(textarea).toBeInTheDocument()
 
     // 格式化 JSON
@@ -679,7 +679,7 @@ describe('EditProjectModal', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '工作流 JSON 配置' }))
-    const textarea = screen.getByLabelText(/工作流配置/i)
+    const textarea = screen.getByLabelText(/工作流 \(JSON\)/i)
 
     // 输入非法 JSON 并格式化
     fireEvent.change(textarea, { target: { value: '{ invalid json' } })

@@ -6,8 +6,8 @@ import type { LocaleCatalog } from '@/shared/i18n/types'
  */
 export const shortcutsCatalog = {
   'ai.runtime.shortcuts.escape': {
-    'en-US': 'Close the current panel or return focus to the Composer',
-    'zh-CN': '关闭当前面板或把焦点还给 Composer',
+    'en-US': 'Close the panel or return to the message input',
+    'zh-CN': '关闭面板或返回消息输入框',
   },
   'ai.runtime.shortcuts.send': {
     'en-US': 'Send the message',

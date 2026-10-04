@@ -602,7 +602,7 @@ describe('ThreadWidgetStack', () => {
     )
     expect(screen.getByText('Working...')).toBeInTheDocument()
     expect(screen.getByText('稍后处理这条')).toBeInTheDocument()
-    const zone = screen.getByLabelText('会话组件区')
+    const zone = screen.getByLabelText('会话活动')
     const zoneText = zone.textContent ?? ''
     expect(zoneText.indexOf('Working...')).toBeLessThan(zoneText.indexOf('稍后处理这条'))
 

@@ -218,11 +218,11 @@ export function ProjectDetailPage({
 
     const loadResult = loadPendingAction(issueId)
     if (loadResult.type === 'STORAGE_ERROR') {
-      setActionError(`无法访问本地存储，已安全拦截操作: ${loadResult.error}`)
+      setActionError(`无法访问本地存储，未发送请求: ${loadResult.error}`)
       return false
     }
     if (loadResult.type === 'CORRUPT') {
-      setActionError('该 Issue 存在未确认结果的损坏写操作记录，为防覆盖已安全拦截；请在详情中确认或放弃')
+      setActionError('该 Issue 存在未确认结果的损坏操作记录，为避免覆盖未发送请求；请在详情中确认或放弃')
       handleSelectIssue(issueId)
       return false
     }
@@ -255,7 +255,7 @@ export function ProjectDetailPage({
           inflightIssuesRef.current.delete(issueId)
         }
       } else {
-        setActionError('该 Issue 存在未确认结果的写操作，禁止新请求；请在详情中确认或放弃')
+        setActionError('该 Issue 存在未确认结果的写操作，暂不能继续；请在详情中确认或放弃')
         handleSelectIssue(issueId)
         return false
       }
@@ -265,7 +265,7 @@ export function ProjectDetailPage({
     try {
       storePendingAction(issueId, action)
     } catch (err) {
-      setActionError(`操作无法持久化侧车，已安全拦截: ${err instanceof Error ? err.message : String(err)}`)
+      setActionError(`无法保存操作记录，未发送请求: ${err instanceof Error ? err.message : String(err)}`)
       return false
     }
 
@@ -473,8 +473,8 @@ export function ProjectDetailPage({
               className="ghost-btn"
               onClick={() => void refetch()}
               disabled={isLoading}
-              title="刷新 Snapshot"
-              aria-label="刷新项目 Snapshot"
+              title="刷新"
+              aria-label="刷新项目数据"
             >
               <RefreshCw
                 size={14}

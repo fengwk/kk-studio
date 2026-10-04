@@ -1,18 +1,18 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034 # sourced library exports shared variables to its entrypoints
 #
-# scripts/ops 下三个数据库维护入口的私有共享实现，不是公开入口。
+# scripts/ops/reset-database.sh 的私有共享实现，不是公开入口。
 #
-# 三个入口都只通过原生 libpq 客户端（psql/pg_dump/pg_restore/createdb）与继承的连接设置访问
-# 数据库，因此这里集中承载它们共有的、只有一份实现才有意义的机制：
+# 维护入口只通过原生 libpq 客户端（psql/pg_dump/pg_restore/createdb）与继承的连接设置访问
+# 数据库，因此这里集中承载只有一份实现才有意义的机制：
 #
 #   * 仓库根解析，以及「产物必须落在仓库外」的强制约束；
 #   * 连接解析：CLI 非敏感参数 > VPS_POSTGRES_* > 标准 libpq PG*/PGSERVICE，并集中校验端口与库名；
 #   * 库名与标识符校验：库名只接受纯标识符，URI/conninfo 一律拒绝；
 #   * libpq 调用封装：永不交互提示、永不把口令放进参数、固定可复现的会话默认值；
-#   * 仓库 V1 baseline 的 Flyway checksum 与文件 sha256。
+#   * 产物 sha256，用于备份完整性。
 #
-# 维护约定：本文件不实现业务步骤（顺序由各入口持有）、不管理任何服务的生命周期、不打印任何行值；
+# 维护约定：本文件不实现业务步骤（顺序由入口持有）、不管理任何服务的生命周期、不打印任何行值；
 # 错误信息不回显可能带口令的连接设置值。
 #
 # 目标库的选择（psql -d、pg_dump --dbname、createdb --maintenance-db）是工具自身的行为，库名已在
@@ -20,13 +20,8 @@
 
 OPS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 OPS_DIR=$(dirname "$OPS_LIB_DIR")
-CATALOG_TOOL="$OPS_DIR/agent_catalog.py"
-V1_MIGRATION_RELATIVE=schema/src/main/resources/db/migration/V1__schema.sql
 
-# 维护入口只迁移这三张表，顺序即外键依赖顺序：Provider -> Model -> Agent 定义。
-CATALOG_TABLES='agent_provider agent_model agent_definition'
-
-# 会话固定项：指纹、导出与回灌必须在任何服务器默认值下都可复现。
+# 会话固定项：预检查询在任何服务器默认值下都可复现。
 DATABASE_SESSION_OPTIONS='-c timezone=UTC -c datestyle=ISO'
 
 # 产物默认落在仓库外的 owner-only 目录，可通过各入口的 --work-dir 覆盖。
@@ -223,30 +218,9 @@ resolve_target_database() {
   TARGET_DB=$resolved
 }
 
-report_value() {
-  local report=$1
-  local key=$2
-  printf '%s\n' "$report" | sed -n "s/^$key=//p"
-}
-
 # 把任意文本安全地包进 SQL 字面量：角色名等来自数据库的名字可以包含单引号。
 sql_literal() {
   printf "'%s'" "${1//\'/\'\'}"
-}
-
-# 私有 Python helper 只通过这一个入口调用：显式依赖 python3，不要求 helper 自身可执行。
-catalog_tool() {
-  python3 "$CATALOG_TOOL" "$@"
-}
-
-require_report_value() {
-  local report=$1
-  local key=$2
-  local label=$3
-  local value
-  value=$(report_value "$report" "$key")
-  [ -n "$value" ] || fail "$label is missing from $key"
-  printf '%s\n' "$value"
 }
 
 prepare_owner_only_directory() {
@@ -254,8 +228,7 @@ prepare_owner_only_directory() {
   chmod 700 "$1"
 }
 
-# Fingerprint 与凭证都不允许出现两套算法：这里只保留一份 sha256 实现（不依赖宿主是否有
-# sha256sum 二进制，产物可能很大因此流式读取）。
+# 只保留一份 sha256 实现（不依赖宿主是否有 sha256sum 二进制，备份可能很大因此流式读取）。
 file_sha256() {
   python3 - "$1" <<'PY'
 import hashlib
@@ -269,25 +242,4 @@ print(digest.hexdigest())
 PY
 }
 
-# Flyway 对 SQL migration 的 checksum：去掉 BOM 后按 "\n" 分行，逐行 CRC32 累积。
-# 仓库 V1 是唯一 migration，导入必须证明目标库的 V1 与本仓库 revision 一致。
-v1_checksum() {
-  python3 - "$V1_MIGRATION" <<'PY'
-import sys
-import zlib
-
-with open(sys.argv[1], encoding="utf-8") as migration:
-    content = migration.read()
-if content.startswith("\ufeff"):
-    content = content[1:]
-checksum = 0
-for line in content.split("\n"):
-    checksum = zlib.crc32(line.encode("utf-8"), checksum)
-if checksum >= 2**31:
-    checksum -= 2**32
-print(checksum)
-PY
-}
-
 REPO_ROOT=$(resolve_repository_root)
-V1_MIGRATION="$REPO_ROOT/$V1_MIGRATION_RELATIVE"

@@ -23,6 +23,21 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
+const syncMocks = vi.hoisted(() => ({ getInventory: vi.fn(), exportConfig: vi.fn(), importConfig: vi.fn() }))
+
+vi.mock('@/shared/api/config-sync-service', () => ({
+  configSyncService: {
+    getInventory: syncMocks.getInventory,
+    exportConfig: syncMocks.exportConfig,
+    importConfig: syncMocks.importConfig,
+  },
+  createConfigSyncService: () => ({
+    getInventory: vi.fn(),
+    exportConfig: vi.fn(),
+    importConfig: vi.fn(),
+  }),
+}))
+
 const STORAGE_KEY = 'kkstudio.browser-preferences.v1'
 
 interface NotificationState {
@@ -38,6 +53,7 @@ beforeEach(() => {
   setLocale('zh-CN')
   mocks.get.mockResolvedValue(makeSettingsDto())
   mocks.getSchema.mockResolvedValue(makeSettingsSchema())
+  syncMocks.getInventory.mockResolvedValue({ items: [] })
   notificationState = {
     permission: 'default',
     requestPermission: vi.fn(async () => {
@@ -77,8 +93,8 @@ async function tabByName(name: string) {
 }
 
 describe('SettingsPage general tab + notifications', () => {
-  // 页签顺序直接来自 schema，网络位于环境之后、集成之前。
-  it('renders every top-level settings tab in schema order', async () => {
+  // 网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
+  it('renders every top-level settings tab with Sync after Advanced', async () => {
     renderSettings()
     await tabByName('网络')
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
@@ -91,6 +107,7 @@ describe('SettingsPage general tab + notifications', () => {
       '集成',
       '存储与媒体',
       '高级',
+      '同步',
     ])
   })
 
@@ -237,7 +254,7 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
   it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
     renderSettings()
     expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
-    for (const name of ['AI 运行时', '工具与权限', '环境', '集成', '存储与媒体', '高级']) {
+    for (const name of ['AI 运行时', '工具与权限', '环境', '集成', '存储与媒体', '高级', '同步']) {
       expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
     }
   })
@@ -258,8 +275,8 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     expect(document.activeElement?.id).toBe('settings-tab-aiRuntime')
 
     await user.keyboard('{End}')
-    expect(selectedTab()).toBe(await tabByName('高级'))
-    expect(document.activeElement?.id).toBe('settings-tab-advanced')
+    expect(selectedTab()).toBe(await tabByName('同步'))
+    expect(document.activeElement?.id).toBe('settings-tab-sync')
 
     await user.keyboard('{Home}')
     expect(selectedTab()).toBe(await tabByName('常规'))
@@ -267,8 +284,8 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
 
     // Arrow 环绕：从首项向左回到末项。
     await user.keyboard('{ArrowLeft}')
-    expect(selectedTab()).toBe(await tabByName('高级'))
-    expect(document.activeElement?.id).toBe('settings-tab-advanced')
+    expect(selectedTab()).toBe(await tabByName('同步'))
+    expect(document.activeElement?.id).toBe('settings-tab-sync')
   })
 
   it('keeps click selection working with focus on the clicked tab', async () => {
@@ -277,5 +294,18 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
     await user.click(await tabByName('高级'))
     expect(selectedTab()).toBe(await tabByName('高级'))
     expect(document.activeElement?.id).toBe('settings-tab-advanced')
+  })
+})
+
+describe('settings sync tab', () => {
+  it('offers only import/export and never saves the current settings draft', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await user.click(await tabByName('同步'))
+
+    expect(screen.getByRole('button', { name: '导入' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
+    // 同步只走 /api/settings/sync，不触发 system settings 的 CAS 保存。
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 })

@@ -78,7 +78,7 @@ ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener 
 
 [`ToolHistoryRenderer`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java) 是 Tool 拥有的可选能力：当 Provider 无法再承载原生长 Tool 历史（工具已不在本次请求的绑定中，或调用的 Environment 已被切换）时，Runtime 用渲染出的自然语言动作替代那次调用，使模型仍能理解过去发生过什么。输入是刻意最小的 [`ToolHistoryRenderRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderRequest.java)：已按 schema 归一化的 `ToolCall` 与调用冻结时的 Environment 名（可空），不含 durable Entry、callIndex 或 Provider 协议结构。
 
-渲染器必须是无副作用的确定性纯函数，并只描述动作本身：保留动作、核心目标与作用域，省略 timeout、limit、offset、分页、`maxTurns`、并发版本（`expected_version`、`observed_*`）等执行控制参数，以及已由结果表达的长正文。渲染结果不得暴露 toolCallId，也不得模拟 Tool 协议文本。Runtime 在成功响应持久化前调用它；返回 absent、blank 或抛异常一律按「未提供映射」处理，回退到逐字保留全部 arguments 的中性描述——缺失渲染器绝不让模型请求失败，也绝不猜测工具语义。冻结、回退与投影由 [`harness-runtime`](harness-runtime.md) 承担；MCP 与其它第三方 Tool 保持默认 absent。
+渲染器必须是无副作用的确定性纯函数，并只描述动作本身：保留动作、核心目标与作用域，省略 timeout、limit、offset、分页、`maxTurns`、并发版本（`expected_version`、`observed_*`）等执行控制参数，以及已由结果表达的长正文。渲染结果不得暴露 toolCallId，也不得模拟 Tool 协议文本。Runtime 在成功响应持久化前调用它；返回 absent、blank 或抛异常一律按「未提供映射」处理，回退到逐字保留全部 arguments 的中性描述——缺失渲染器绝不让模型请求失败，也绝不猜测工具语义。冻结、回退与历史投影由 [`harness-runtime`](harness-runtime.md) 承担；MCP 与其它第三方 Tool 保持默认 absent。
 
 ## Environment 能力
 

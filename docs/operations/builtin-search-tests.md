@@ -67,9 +67,9 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
 无 workdir 的绝对目标保留绝对路径。
 只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE；直接二进制目标报错，目录中的二进制文件跳过。
 非法编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
-`grepDetectsBinaryContentBeyondProbePrefix`）。单行保留上限为 1 Mi 字符，超出时以无法完整搜索失败，
+`grepDetectsBinaryContentBeyondProbePrefix`）。单行保留上限为 1,048,576 个字符，超出时以无法完整搜索失败，
 由 `grepFailsExplicitlyWhenSingleLineExceedsRetentionLimit` 验证；这与命中后的有界摘录不同。
-多行扫描有独立整文件预算，不是 read 的文件大小上限。
+多行扫描有独立整文件预算；`read` 没有文件大小上限，只有调用预算与取消。
 
 ## Find 的路径匹配与停止条件
 

@@ -701,7 +701,7 @@ describe('AgentPane orchestration', () => {
       kind: 'BOUND_THREAD',
       threadId: THREAD_ID,
     })
-    expect(hook.result.current.error).toContain('等待完成或精确重试')
+    expect(hook.result.current.error).toContain('等待完成或重试原操作')
 
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBeNull()
@@ -1388,7 +1388,7 @@ describe('AgentPane orchestration', () => {
 
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBeNull()
-    expect(hook.result.current.error).toContain('等待完成或精确重试')
+    expect(hook.result.current.error).toContain('等待完成或重试原操作')
 
     act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
     await waitFor(() =>
@@ -1499,7 +1499,7 @@ describe('AgentPane orchestration', () => {
   })
 
   it('renders localized WAITING_CHILDREN status label when bound thread is waiting for child threads', async () => {
-    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子线程”。
+    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子 Thread”。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { status: 'WAITING_CHILDREN', processing: false })),
     )
@@ -1509,7 +1509,7 @@ describe('AgentPane orchestration', () => {
     )
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() => {
-      expect(screen.getByText('等待子线程')).toBeInTheDocument()
+      expect(screen.getByText('等待子 Thread')).toBeInTheDocument()
     })
   })
 
@@ -2699,7 +2699,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       act(() => {
         result.current.selectAgent('assistant')
       })
-      expect(result.current.error).toBe('当前受控模式不支持切换 Agent')
+      expect(result.current.error).toBe('当前模式不支持切换 Agent')
 
       // 4. 分支切换与导航尝试
       act(() => {
@@ -2712,7 +2712,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           createTime: null,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       act(() => {
         result.current.selectSession({
@@ -2724,7 +2724,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           threadCount: 1,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       act(() => {
         result.current.selectThread({
@@ -2737,7 +2737,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           headMessagePreview: null,
         })
       })
-      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+      expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
 
       // 5. 目标切换与重命名尝试
       expect(result.current.target.kind).toBe('BOUND_THREAD')
@@ -2986,7 +2986,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
         // 出现明确的存储失败可重试错误提示
         await waitFor(() => {
-          expect(screen.getByText(/无法安全记录请求状态/)).toBeInTheDocument()
+          expect(screen.getByText(/无法保存发送记录/)).toBeInTheDocument()
         })
       } finally {
         storageSpy.mockRestore()
@@ -3223,7 +3223,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await act(async () => {
         await controller2.current.composer.onSubmit()
       })
-      expect(controller2.current.error).toMatch(/无法安全记录请求状态/)
+      expect(controller2.current.error).toMatch(/无法保存发送记录/)
       expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
       expect(localStorage.getItem(pendingKey)).toBe(pane1Stored)
       expect(controller2.current.pendingMessage).toBeNull()

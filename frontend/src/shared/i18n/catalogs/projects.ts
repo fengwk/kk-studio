@@ -92,11 +92,11 @@ export const projectsCatalog = {
     'en-US': 'Resume Execution',
   },
   'projects.issue.stop': {
-    'zh-CN': '终止运行 (Stop)',
+    'zh-CN': '终止运行',
     'en-US': 'Stop Execution',
   },
   'projects.issue.resolveUnknown': {
-    'zh-CN': '人工核查 (解除 UNKNOWN)',
+    'zh-CN': '人工核查并解除 UNKNOWN',
     'en-US': 'Verify & Resolve UNKNOWN',
   },
   'projects.issue.reopen': {
@@ -104,7 +104,7 @@ export const projectsCatalog = {
     'en-US': 'Reopen',
   },
   'projects.issue.agentThreads': {
-    'zh-CN': 'Agent 线程',
+    'zh-CN': 'Agent Thread',
     'en-US': 'Agent Threads',
   },
   'projects.issue.stageBudgets': {
@@ -116,7 +116,7 @@ export const projectsCatalog = {
     'en-US': 'Reset Budget',
   },
   'projects.issue.runs': {
-    'zh-CN': 'Run 执行记录',
+    'zh-CN': '执行记录',
     'en-US': 'Runs',
   },
   'projects.issue.activities': {
@@ -140,12 +140,12 @@ export const projectsCatalog = {
     'en-US': 'Upload Evidence',
   },
   'projects.conflictWarning': {
-    'zh-CN': '版本冲突 (409)：已保留您的编辑草稿，请确认最新版本后重试。',
+    'zh-CN': '版本冲突 (409)：已保留您的编辑草稿，请刷新获取最新版本后重试。',
     'en-US': 'Conflict (409): Your draft has been preserved. Refresh to update version and retry.',
   },
   'projects.retrySameKey': {
-    'zh-CN': '重试操作 (保持幂等键)',
-    'en-US': 'Retry (Preserving Request Key)',
+    'zh-CN': '重试操作（沿用原请求）',
+    'en-US': 'Retry (same request)',
   },
   'projects.saveBasic': {
     'zh-CN': '保存基础信息',

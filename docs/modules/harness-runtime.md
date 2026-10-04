@@ -28,7 +28,7 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 行锁阶梯：Session -> Thread -> Command -> Model -> Tool -> Work
 ```
 
-这两组锁分别跟踪：行锁守卫维护六级 rank，advisory 围栏先于业务行锁。
+advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
 task 接受先取全局准入锁，跨所有执行树统计非空闲子 Thread，保证全局额度判定与创建原子；根 Thread 不计入子代理额度。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
@@ -273,7 +273,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
-| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；递归生命周期收敛与 `admission -> tree -> session -> thread -> command -> invocation -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
+| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；递归生命周期收敛与 `admission -> tree -> session -> thread -> command -> model -> tool -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
 | `runtime.admission` | `ConcurrencyAdmission` 进程内非阻塞并发槽位 | 纯内存，不持久化、不跨进程协调 |
 | `runtime.cache` | `PromptCacheAffinityKeyFactory` 与 `PromptCacheRequestFinalizer` | 纯内存派生稳定亲和键，规划时冻结缓存策略意图，不依赖尚未物化的历史 |
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |

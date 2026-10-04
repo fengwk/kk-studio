@@ -221,6 +221,46 @@ public class AgentProviderMutationFactoryTest {
     assertNotNull(provider.getConnectionGenerationId());
   }
 
+  /** 导入式覆盖把 null/空白凭据视为文件事实“无凭据”，必须清空而非沿用旧值。 */
+  @Test
+  public void importUpdateClearsMissingCredentialInsteadOfRetainingIt() {
+    AgentProviderMutationFactory factory = factory();
+    AgentProvider provider = existingProvider("initial-secret", "{}");
+
+    AgentProviderUpdateDTO props = new AgentProviderUpdateDTO();
+    props.setProviderType("openai");
+    props.setCredential("   ");
+    factory.importUpdate(provider, props);
+
+    assertNull(provider.getCredential());
+  }
+
+  /** 导入恢复原始凭据时写入该值，并在凭据变更时轮换 connection generation。 */
+  @Test
+  public void importUpdateRestoresCredentialAndRotatesGeneration() {
+    AgentProviderMutationFactory factory = factory();
+    UUID original = UUID.randomUUID();
+    AgentProvider provider = existingProvider(null, "{}");
+    provider.setConnectionGenerationId(original);
+    provider.setBaseUrl("http://localhost:8080");
+
+    AgentProviderUpdateDTO props = new AgentProviderUpdateDTO();
+    props.setProviderType("openai");
+    props.setBaseUrl("http://localhost:8080");
+    props.setCredential("restored-secret");
+    factory.importUpdate(provider, props);
+
+    assertEquals("restored-secret", provider.getCredential());
+    assertNotEquals(original, provider.getConnectionGenerationId());
+  }
+
+  /** 创建时缺失凭据保持为空，不产生伪凭据。 */
+  @Test
+  public void createWithMissingCredentialLeavesCredentialAbsent() {
+    AgentProviderCreateDTO dto = provider("provider", "   ");
+    assertNull(factory().newProvider("provider", dto).getCredential());
+  }
+
   private AgentProviderCreateDTO provider(String name, String credential) {
     AgentProviderCreateDTO dto = new AgentProviderCreateDTO();
     dto.setName(name);

@@ -131,7 +131,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createAgentDescription': {
     'en-US': 'Combine Model, tools, skills, and policy',
-    'zh-CN': '配置聚合：Model / tools / skills / policy',
+    'zh-CN': '组合模型、工具、技能与策略',
   },
   'ai.catalog.createModel': {
     'en-US': 'Create Model',
@@ -139,7 +139,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createModelDescription': {
     'en-US': 'Define model information and variants',
-    'zh-CN': '定义模型信息与 variants',
+    'zh-CN': '定义模型信息与 Variant',
   },
   'ai.catalog.createProvider': {
     'en-US': 'Create Provider',
@@ -147,7 +147,7 @@ export const aiCatalog = {
   },
   'ai.catalog.createProviderDescription': {
     'en-US': 'Configure provider and credentials',
-    'zh-CN': '配置供应商与凭据',
+    'zh-CN': '配置提供商与凭据',
   },
   'ai.catalog.action.createSession': {
     'en-US': 'Start session',
@@ -291,15 +291,15 @@ export const aiCatalog = {
   },
   'ai.catalog.form.nameHint': {
     'en-US': 'Logical identity used by Agents and branch settings.',
-    'zh-CN': '逻辑身份，供 Agent 与 branch settings 引用。',
+    'zh-CN': '逻辑标识，供 Agent 与分支配置引用。',
   },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
     'zh-CN': 'Model ID',
   },
   'ai.catalog.form.modelIdHint': {
-    'en-US': 'Real upstream wire model id sent to the Provider; may differ from Name.',
-    'zh-CN': '发往 Provider 的真实 wire 模型标识；可与 Name 不同。',
+    'en-US': 'Upstream model ID sent to the Provider; may differ from Name.',
+    'zh-CN': '发送给 Provider 的上游模型 ID，可与 Name 不同。',
   },
   'ai.catalog.form.description': {
     'en-US': 'Description',
@@ -764,8 +764,8 @@ export const aiCatalog = {
     'zh-CN': '新建 Chat',
   },
   'ai.chat.createDescription': {
-    'en-US': 'Create a persistent Chat (an Agent is required)',
-    'zh-CN': '创建持久 Chat（必须选择 Agent）',
+    'en-US': 'Create a Chat (an Agent is required)',
+    'zh-CN': '新建 Chat（需选择 Agent）',
   },
   'ai.chat.edit': {
     'en-US': 'Edit Chat',
@@ -1175,45 +1175,53 @@ export const aiCatalog = {
     'en-US': 'Select or create a Thread first',
     'zh-CN': '选择或创建 Thread 后可用',
   },
+  'ai.runtime.command.disabled.readOnly': {
+    'en-US': 'Read-only mode',
+    'zh-CN': '只读模式',
+  },
+  'ai.runtime.command.disabled.singleSession': {
+    'en-US': 'This project supports only one session',
+    'zh-CN': '当前项目仅支持单会话',
+  },
   'ai.runtime.command.upload': {
-    'en-US': 'Upload files and insert ordered attachment references',
-    'zh-CN': '上传文件并插入有序附件引用',
+    'en-US': 'Upload files',
+    'zh-CN': '上传文件',
   },
   'ai.runtime.command.thread': {
-    'en-US': 'Switch the Thread bound to this Pane (does not modify any Thread)',
-    'zh-CN': '切换当前 Pane 绑定的 Thread（不修改任何 Thread）',
+    'en-US': 'Switch Thread',
+    'zh-CN': '切换 Thread',
   },
   'ai.runtime.command.agent': {
-    'en-US': 'Change this Chat’s visible Agent; the next message uses it',
-    'zh-CN': '修改当前 Chat 可见的 Agent；下一条消息直接使用',
+    'en-US': 'Switch Agent',
+    'zh-CN': '切换 Agent',
   },
   'ai.runtime.command.yolo': {
     'en-US': 'Toggle automatic approval of Tool calls',
     'zh-CN': '切换 YOLO 自动批准工具调用',
   },
   'ai.runtime.command.tree': {
-    'en-US': 'Open history and relocate the current Thread to the selected Entry',
-    'zh-CN': '打开历史面板，把当前 Thread 重定位到所选 Entry',
+    'en-US': 'View history and pick where to continue',
+    'zh-CN': '查看历史并选择续接位置',
   },
   'ai.runtime.command.stop': {
     'en-US': 'Stop the current Thread and restore unprocessed messages',
     'zh-CN': '停止当前 Thread 并恢复尚未处理的消息',
   },
   'ai.runtime.command.new': {
-    'en-US': 'Return to a blank pane; sending creates a new Session / Thread',
-    'zh-CN': '回到空面板；发送后创建新的 Session / Thread',
+    'en-US': 'Start a new Session / Thread',
+    'zh-CN': '新建 Session / Thread',
   },
   'ai.runtime.command.debug': {
-    'en-US': 'Toggle the durable Entry debug view and live model / tool invocations',
-    'zh-CN': '切换持久 Entry 调试视图与活跃 model / tool 调用',
+    'en-US': 'Toggle the debug view',
+    'zh-CN': '切换调试视图',
   },
   'ai.runtime.command.compact': {
-    'en-US': 'Request manual context compaction for this Thread',
-    'zh-CN': '请求压缩当前 Thread 的上下文',
+    'en-US': 'Compact the current Thread context',
+    'zh-CN': '压缩当前 Thread 的上下文',
   },
   'ai.runtime.command.shortcuts': {
-    'en-US': 'Show the keyboard shortcut catalog',
-    'zh-CN': '查看键盘快捷键目录',
+    'en-US': 'Show keyboard shortcuts',
+    'zh-CN': '查看键盘快捷键',
   },
   'ai.runtime.command.uploadLabel': {
     'en-US': 'upload',
@@ -1228,8 +1236,8 @@ export const aiCatalog = {
     'zh-CN': 'agent',
   },
   'ai.runtime.command.models': {
-    'en-US': 'Choose the model and variant for the next message',
-    'zh-CN': '选择下一条消息使用的模型与 Variant',
+    'en-US': 'Choose the model and Variant',
+    'zh-CN': '选择模型与 Variant',
   },
   'ai.runtime.command.yoloLabel': {
     'en-US': 'yolo',
@@ -1445,7 +1453,7 @@ export const aiCatalog = {
   },
   'ai.runtime.thread.widgetZone': {
     'en-US': 'Thread activity',
-    'zh-CN': '会话组件区',
+    'zh-CN': '会话活动',
   },
   'ai.runtime.thread.queue': {
     'en-US': 'Queued messages',
@@ -1461,7 +1469,7 @@ export const aiCatalog = {
   },
   'ai.runtime.thread.status.WAITING_CHILDREN': {
     'en-US': 'Waiting for child threads',
-    'zh-CN': '等待子线程',
+    'zh-CN': '等待子 Thread',
   },
   'ai.runtime.thread.status.QUEUED': {
     'en-US': 'Queued',
@@ -1572,16 +1580,16 @@ export const aiCatalog = {
     'zh-CN': '无文本输出',
   },
   'ai.runtime.message.rawEntry': {
-    'en-US': 'View raw Entry',
-    'zh-CN': '查看原始 Entry',
+    'en-US': 'View raw data',
+    'zh-CN': '查看原始数据',
   },
   'ai.runtime.message.attachment': {
     'en-US': '{{type}} attachment',
-    'zh-CN': '{{type}} attachment',
+    'zh-CN': '{{type}} 附件',
   },
   'ai.runtime.message.binaryPayload': {
     'en-US': 'binary payload',
-    'zh-CN': 'binary payload',
+    'zh-CN': '二进制内容',
   },
   'ai.runtime.message.downloadResource': {
     'en-US': 'Download {{name}}',
@@ -1612,8 +1620,8 @@ export const aiCatalog = {
     'zh-CN': 'env:{{name}}',
   },
   'ai.runtime.status.environmentNoneText': {
-    'en-US': 'none env',
-    'zh-CN': 'none env',
+    'en-US': 'No environment',
+    'zh-CN': '未选择环境',
   },
   'ai.runtime.status.branchUsageTitle': {
     'en-US': 'Cumulative branch usage (including the first request; cache is the cumulative input cache hit rate): {{usage}}',
@@ -1716,8 +1724,8 @@ export const aiCatalog = {
     'zh-CN': '会话开始',
   },
   'ai.runtime.entry.rootText': {
-    'en-US': 'The conversation tree root was created.',
-    'zh-CN': '已创建会话树根节点。',
+    'en-US': 'The conversation was created.',
+    'zh-CN': '会话已创建。',
   },
   'ai.runtime.entry.rootSettings': {
     'en-US': 'Conversation started · Agent: {{agent}} · Model: {{model}} · Environment: {{environment}}',
@@ -1764,24 +1772,24 @@ export const aiCatalog = {
     'zh-CN': '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
   },
   'ai.runtime.entry.unsupportedTitle': {
-    'en-US': 'Unrecognized message Entry',
-    'zh-CN': '无法识别消息 Entry',
+    'en-US': 'Unrecognized message',
+    'zh-CN': '无法识别消息',
   },
   'ai.runtime.entry.unsupportedRoleText': {
-    'en-US': 'Message role not supported: {{role}}. Expand the raw payload to inspect it.',
-    'zh-CN': '暂不支持的消息角色：{{role}}。原始 payload 可展开查看。',
+    'en-US': 'Message role not supported: {{role}}. Expand the raw data to inspect it.',
+    'zh-CN': '暂不支持的消息角色：{{role}}。可展开原始数据查看。',
   },
   'ai.runtime.entry.unsupportedText': {
-    'en-US': 'Message role or payload is invalid. Expand the raw payload to inspect it.',
-    'zh-CN': '消息角色或 payload 无效。原始 payload 可展开查看。',
+    'en-US': 'Message role or data is invalid. Expand the raw data to inspect it.',
+    'zh-CN': '消息角色或数据无效，可展开原始数据查看。',
   },
   'ai.runtime.entry.unknownTitle': {
     'en-US': 'Unrecognized Entry: {{type}}',
     'zh-CN': '未识别 Entry：{{type}}',
   },
   'ai.runtime.entry.unknownText': {
-    'en-US': 'This Entry type has no dedicated renderer yet. Expand the raw payload to inspect it.',
-    'zh-CN': '该 Entry 类型尚无专用渲染器，原始 payload 可展开查看。',
+    'en-US': 'This entry type cannot be displayed. Expand the raw data to inspect it.',
+    'zh-CN': '无法显示此类型的记录，可展开原始数据查看。',
   },
   'ai.runtime.event.list': {
     'en-US': 'Events',
@@ -2415,6 +2423,18 @@ export const aiCatalog = {
     'en-US': '(Agent deleted or missing)',
     'zh-CN': '（Agent 已删除/缺失）',
   },
+  'ai.runtime.action.agentSwitchDisabled': {
+    'en-US': 'Agent switching is not available in this mode',
+    'zh-CN': '当前模式不支持切换 Agent',
+  },
+  'ai.runtime.action.branchingDisabled': {
+    'en-US': 'Branch switching and forking are not available in this mode',
+    'zh-CN': '当前模式不支持分支切换或分叉',
+  },
+  'ai.runtime.action.genericChatDisabled': {
+    'en-US': 'Generic chat is not allowed in this mode',
+    'zh-CN': '当前模式不支持通用 Chat 发送',
+  },
   'ai.runtime.action.firstSendFailed': {
     'en-US': 'First send failed',
     'zh-CN': '首发失败',
@@ -2476,20 +2496,20 @@ export const aiCatalog = {
     'zh-CN': '上一条接受请求仍在等待确定结果',
   },
   'ai.runtime.action.abandonedPendingNotice': {
-    'en-US': 'Pending message was discarded locally. Note: this does not cancel any command that may have already been accepted by the server, and will not auto-resend.',
-    'zh-CN': '已放弃未决消息。请注意：此操作仅清除本地未决状态，不会取消服务端可能已接受的命令，也不会自动重发。',
+    'en-US': 'The pending message was discarded locally. Commands already accepted by the server are not cancelled, and the message will not be resent automatically.',
+    'zh-CN': '已放弃未决消息。这不会取消服务端可能已接受的命令，也不会自动重发。',
   },
   'ai.runtime.action.storageFailed': {
-    'en-US': 'Failed to safely persist request state; send aborted to prevent state loss. Please retry.',
-    'zh-CN': '无法安全记录请求状态，发送已中止以防状态丢失，请重试。',
+    'en-US': 'Could not save the send record; the message was not sent. Please retry.',
+    'zh-CN': '无法保存发送记录，未发送消息；请重试。',
   },
   'ai.runtime.action.storageClearFailed': {
-    'en-US': 'Failed to clear local pending state. Please retry.',
-    'zh-CN': '清除本地未决状态失败，请重试。',
+    'en-US': 'Could not clear the pending message record. Please retry.',
+    'zh-CN': '清除未确认的消息记录失败，请重试。',
   },
   'ai.runtime.action.operationPending': {
-    'en-US': 'The current Thread still has an operation awaiting completion or exact replay',
-    'zh-CN': '当前 Thread 仍有操作等待完成或精确重试',
+    'en-US': 'This Thread has a pending operation; wait for it to finish or retry the original operation',
+    'zh-CN': '当前 Thread 仍有未完成的操作，请等待完成或重试原操作',
   },
   'ai.common.loadingMcpServer': {
     'en-US': 'Loading MCP Servers',
@@ -2497,11 +2517,11 @@ export const aiCatalog = {
   },
   'ai.environment.loading': {
     'en-US': 'Loading Environments',
-    'zh-CN': '正在加载 Environments',
+    'zh-CN': '正在加载 Environment',
   },
   'ai.environment.loadFailed': {
     'en-US': 'Failed to load environments',
-    'zh-CN': '加载失败',
+    'zh-CN': '加载 Environment 失败',
   },
   'ai.environment.empty': {
     'en-US': 'There are no Environments',
@@ -2929,7 +2949,7 @@ export const aiCatalog = {
   },
   'ai.interaction.sourceIssue': {
     'en-US': 'Issue Agent',
-    'zh-CN': '需求 Agent',
+    'zh-CN': 'Issue Agent',
   },
   'ai.interaction.submit': {
     'en-US': 'Submit Answers',
@@ -2973,7 +2993,7 @@ export const aiCatalog = {
   },
   'ai.interaction.allow': {
     'en-US': 'Allow',
-    'zh-CN': '放行',
+    'zh-CN': '允许',
   },
   'ai.interaction.deny': {
     'en-US': 'Deny',

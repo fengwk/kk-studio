@@ -1297,7 +1297,7 @@ async function main(argv) {
           .locator('.thread-status-environment .thread-status-seg')
           .innerText()
         assert(
-          environmentText === 'none env',
+          environmentText === '未选择环境',
           `Footer inferred an implicit Environment: ${environmentText}`,
         )
 

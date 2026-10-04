@@ -52,6 +52,9 @@ export const queryKeys = {
     all: ['system-settings', 'aggregate'] as const,
     schema: ['system-settings', 'schema'] as const,
   },
+  configSync: {
+    inventory: ['config-sync', 'inventory'] as const,
+  },
   studio: {
     canvases: ['studio', 'canvases'] as const,
     canvas: (canvasId: string) => ['studio', 'canvas', canvasId] as const,

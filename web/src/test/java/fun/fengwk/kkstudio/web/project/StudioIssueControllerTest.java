@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.share.project.StopIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
+import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
 import java.util.List;
@@ -101,7 +102,7 @@ class StudioIssueControllerTest {
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
-            .setControllerAdvice(new StudioProjectErrorAdvice())
+            .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
             .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
             .build();
   }

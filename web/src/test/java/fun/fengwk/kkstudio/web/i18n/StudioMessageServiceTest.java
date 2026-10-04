@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.i18n;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +38,7 @@ class StudioMessageServiceTest {
   void resolvesDomainAndHttpMessagesForSupportedLocales() {
     LocaleContextHolder.setLocale(Locale.US);
     assertEquals(
-        "The agent_model was modified by another request.",
+        "The agent model was modified by another request.",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
@@ -45,7 +46,7 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
-        "agent_model 已被其他请求修改。",
+        "Agent Model 已被其他请求修改。",
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));
@@ -78,6 +79,25 @@ class StudioMessageServiceTest {
     assertEquals("HTTP error (status 599).", messageService.httpMessage(599));
     assertEquals("HTTP Error", messageService.httpTitle(599));
     assertFalse(messageService.httpMessage(599).isBlank());
+  }
+
+  /** 展示层按请求 locale 解析 resource 名称；未登记标识回退为下划线分隔的可读形式，空值原样返回。 */
+  @Test
+  void mapsResourceCodesToDisplayNamesPerLocale() {
+    LocaleContextHolder.setLocale(Locale.US);
+    assertEquals("system settings", messageService.resourceDisplayName("system_settings"));
+    assertEquals("MCP server", messageService.resourceDisplayName("mcp_server"));
+    assertEquals("skill package", messageService.resourceDisplayName("skill_package"));
+    assertEquals("chat", messageService.resourceDisplayName("chat"));
+    assertEquals(
+        "some future resource", messageService.resourceDisplayName("some_future_resource"));
+    assertNull(messageService.resourceDisplayName(null));
+
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertEquals("系统设置", messageService.resourceDisplayName("system_settings"));
+    assertEquals("MCP 服务", messageService.resourceDisplayName("mcp_server"));
+    assertEquals("技能包", messageService.resourceDisplayName("skill_package"));
+    assertEquals("对话", messageService.resourceDisplayName("chat"));
   }
 
   @Test
