@@ -9,7 +9,7 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 | 平台 | 入口 | 所需环境与行为 |
 | --- | --- | --- |
 | Linux / macOS | [daemon/install.sh](daemon/install.sh) | JDK 21、Bash、curl、SHA-256 工具；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
-| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | JDK 21、PowerShell 5.1/7、ScheduledTasks、`bash.exe`；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
+| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | JDK 21、PowerShell 5.1/7、ScheduledTasks、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
 
 正常入口是 Studio 的 Web 安装弹窗：保存配置后复制命令，脚本会自行暂存 `daemon.json` 与
 `daemon.token`、下载安装器并执行。安装器只有 `install` / `status` / `uninstall` / `help`
@@ -21,8 +21,9 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 删除受管服务定义与 JAR，保留配置、token、数据与日志。详情与三平台排错见
 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 
-安装器从 checkout 构建或直接运行安装器只属于开发/CI fixture，用来验证脚本契约，**不是用户安装
-路径**；Fixture 会替代网络与服务管理命令，不注册真实 systemd/launchd 服务，测试入口见
+从 checkout 运行安装脚本只属于开发/CI fixture，用来验证脚本契约，**不是用户安装路径**；安装器
+从不构建，真实 shaded JAR 由 Maven 独立构建。Fixture 会替代网络与服务管理命令，不注册真实
+systemd/launchd 服务，测试入口见
 [开发与测试](../docs/operations/development-and-testing.md#daemon-安装脚本回归)。
 
 ## 日常开发
