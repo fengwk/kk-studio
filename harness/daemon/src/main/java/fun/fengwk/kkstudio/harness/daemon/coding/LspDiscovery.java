@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonLspConfiguration;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,7 +26,6 @@ import java.util.regex.Pattern;
  */
 public final class LspDiscovery {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String DEFAULT_PATHEXT = ".EXE;.CMD;.BAT;.COM";
 
   private final List<LspServerConfig> servers;
@@ -55,92 +52,24 @@ public final class LspDiscovery {
     return new LspDiscovery(new ArrayList<>(unique.values()));
   }
 
-  /**
-   * 读取 {@code --lsp-config} 指向的 JSON 配置。
-   *
-   * <p>格式固定为 {@code {"servers": {"<id>": {"command": [...], "extensions": [...], "rootMarkers":
-   * [...], "firstMatchMarkers": [...]}}}}：顶层与条目内的未知字段、缺失的必填字段、非法取值都在启动期失败关闭，不做兼容回退。
-   */
-  public static LspDiscovery read(Path configFile) {
-    Path file = Objects.requireNonNull(configFile, "configFile");
-    if (!file.isAbsolute()) {
-      throw new IllegalArgumentException("LSP configuration path must be absolute: " + file);
+  /** 采用共享 codec 已校验的结构化配置；这里只做不可变运行时快照，不重复校验。 */
+  public static LspDiscovery fromConfiguration(DaemonLspConfiguration configuration) {
+    if (configuration == null) {
+      return empty();
     }
-    JsonNode root;
-    try {
-      root = MAPPER.readTree(Files.readAllBytes(file));
-    } catch (IOException error) {
-      throw new IllegalArgumentException(
-          "cannot read LSP configuration " + file + ": " + error.getMessage(), error);
-    }
-    requireObject(root, "LSP configuration " + file);
-    requireKnownFields(root, List.of("servers"), "LSP configuration " + file);
-    JsonNode serversNode = root.get("servers");
-    if (serversNode == null || !serversNode.isObject()) {
-      throw new IllegalArgumentException(
-          "LSP configuration " + file + " must contain a 'servers' object");
-    }
-    List<LspServerConfig> parsed = new ArrayList<>();
-    serversNode
-        .properties()
-        .forEach(entry -> parsed.add(parseServer(entry.getKey(), entry.getValue(), file)));
-    if (parsed.isEmpty()) {
-      throw new IllegalArgumentException(
-          "LSP configuration " + file + " must declare at least one server");
-    }
-    return of(parsed);
-  }
-
-  private static LspServerConfig parseServer(String id, JsonNode node, Path file) {
-    String owner = "LSP server '" + id + "' in " + file;
-    requireObject(node, owner);
-    requireKnownFields(
-        node, List.of("command", "extensions", "rootMarkers", "firstMatchMarkers"), owner);
-    return new LspServerConfig(
-        id,
-        textList(node, "command", List.of(), owner),
-        textList(node, "extensions", List.of(), owner),
-        textList(node, "rootMarkers", List.of(), owner),
-        textList(node, "firstMatchMarkers", List.of(), owner));
-  }
-
-  private static void requireObject(JsonNode node, String owner) {
-    if (node == null || !node.isObject()) {
-      throw new IllegalArgumentException(owner + " must be a JSON object");
-    }
-  }
-
-  private static void requireKnownFields(JsonNode node, List<String> known, String owner) {
-    node.properties()
+    List<LspServerConfig> servers = new ArrayList<>();
+    configuration
+        .getServers()
         .forEach(
-            entry -> {
-              if (!known.contains(entry.getKey())) {
-                throw new IllegalArgumentException(
-                    owner + " contains unknown field '" + entry.getKey() + "'");
-              }
-            });
-  }
-
-  private static List<String> textList(
-      JsonNode node, String field, List<String> fallback, String owner) {
-    JsonNode value = node.get(field);
-    if (value == null) {
-      return fallback;
-    }
-    if (!value.isArray()) {
-      throw new IllegalArgumentException(
-          owner + " field '" + field + "' must be an array of strings");
-    }
-    List<String> result = new ArrayList<>();
-    value.forEach(
-        element -> {
-          if (!element.isTextual()) {
-            throw new IllegalArgumentException(
-                owner + " field '" + field + "' must be an array of strings");
-          }
-          result.add(element.textValue());
-        });
-    return result;
+            (id, server) ->
+                servers.add(
+                    new LspServerConfig(
+                        id,
+                        server.getCommand(),
+                        server.getExtensions(),
+                        server.getRootMarkers(),
+                        server.getFirstMatchMarkers())));
+    return new LspDiscovery(servers);
   }
 
   /** 已配置服务器的声明顺序。 */
@@ -169,7 +98,7 @@ public final class LspDiscovery {
                 new IllegalStateException(
                     "No LSP server configured for "
                         + file
-                        + ". Add the server to the daemon LSP configuration (--lsp-config)."));
+                        + ". Add the server to lsp.servers in the daemon configuration."));
   }
 
   /**

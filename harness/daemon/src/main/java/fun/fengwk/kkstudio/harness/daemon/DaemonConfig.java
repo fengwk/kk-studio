@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.daemon;
 import fun.fengwk.kkstudio.harness.daemon.coding.LspDiscovery;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -12,21 +14,13 @@ import java.util.Objects;
 /**
  * Daemon 独立进程的连接与本地执行配置。
  *
- * <p>连接、身份、说明、本地执行程序与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway 连接参数、可选且唯一 {@code
- * --note}、可选 {@code --data-dir}、可选 {@code --bash-executable} 与可选 {@code --lsp-config}。已删除的 {@code
- * --tool-timeout} 作为未知参数 fail closed：执行超时只由 Tool definition 默认值与调用显式值决定。
+ * <p>唯一外部配置来源是 {@code --config} 指定的 JSON 文件；其父目录是运行数据目录， 同目录的 {@code daemon.token} 是 owner-only
+ * 注册凭证文件。本 record 只保存凭证路径， 因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。 内联 LSP 经共享
+ * codec 校验，不自动安装语言服务器。
  *
- * <p>{@code --lsp-config} 指向一个绝对路径的 JSON 文件，声明预先安装在本机的外部语言服务器（命令、扩展名与项目根标记）。配置在解析 CLI
- * 时一次性读出并校验：文件缺失、结构非法或取值越界都使启动失败，不做兼容回退，也不自动安装服务器。
+ * <p>数据目录承载大文本输出与进程锁。二进制结果由 Daemon 直传对象存储。 Environment UUID 由 Gateway 在 WELCOME 消息中下发。
  *
- * <p>{@code --registration-token-file} 指向 owner-only 普通文件：凭证文本只存在于该文件，进程参数、环境变量与日志都不携带它；本 record
- * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
- * --registration-token} 作为未知参数 fail closed，不提供兼容回退。
- *
- * <p>{@code --data-dir} 承载本地大文本输出与 daemon 进程锁；省略时为 {@link #defaultDataDir()}。二进制结果不落本地 Resource
- * 仓库，而是由 Daemon 直传对象存储。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。
- *
- * <p>{@code --note} 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
+ * <p>note 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -81,71 +75,47 @@ public record DaemonConfig(
         LspDiscovery.empty());
   }
 
-  /** 解析 CLI 参数。{@code --data-dir} 可省略并回退到 {@link #defaultDataDir()}；任何未声明参数都失败。 */
+  /** 正常运行仅接受唯一的 {@code --config <absolute-path>}。 */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
-    String gatewayUri = null;
-    String registrationTokenFile = null;
-    String heartbeat = null;
-    String reconnectInitial = null;
-    String reconnectMax = null;
-    String note = null;
-    String dataDir = null;
-    String bashExecutable = null;
-    String lspConfig = null;
-
-    for (int index = 0; index < args.length; index++) {
-      String arg = args[index];
-      switch (arg) {
-        case "--gateway-uri" -> gatewayUri = requireArgValue(args, ++index, arg);
-        case "--registration-token-file" -> {
-          if (registrationTokenFile != null) {
-            throw new IllegalArgumentException(
-                "--registration-token-file may only be specified once");
-          }
-          registrationTokenFile = requireArgValue(args, ++index, arg);
-        }
-        case "--heartbeat" -> heartbeat = requireArgValue(args, ++index, arg);
-        case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
-        case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
-        case "--bash-executable" -> bashExecutable = requireArgValue(args, ++index, arg);
-        case "--lsp-config" -> {
-          if (lspConfig != null) {
-            throw new IllegalArgumentException("--lsp-config may only be specified once");
-          }
-          lspConfig = requireArgValue(args, ++index, arg);
-        }
-        case "--note" -> {
-          if (note != null) {
-            throw new IllegalArgumentException("--note may only be specified once");
-          }
-          note = requireArgValue(args, ++index, arg);
-        }
-        case "--data-dir" -> {
-          if (dataDir != null) {
-            throw new IllegalArgumentException("--data-dir may only be specified once");
-          }
-          dataDir = requireArgValue(args, ++index, arg);
-        }
-        default -> throw new IllegalArgumentException("unknown argument: " + arg);
-      }
+    if (args.length != 2 || !"--config".equals(args[0])) {
+      throw new IllegalArgumentException("expected exactly --config <absolute-path>");
     }
-
-    return new DaemonConfig(
-        URI.create(requirePresent(gatewayUri, "gateway-uri")),
-        Path.of(requirePresent(registrationTokenFile, "registration-token-file")),
-        parseDuration(heartbeat, Duration.ofSeconds(15)),
-        parseDuration(reconnectInitial, Duration.ofSeconds(1)),
-        parseDuration(reconnectMax, Duration.ofSeconds(30)),
-        note,
-        dataDir == null ? defaultDataDir() : Path.of(dataDir),
-        bashExecutable,
-        lspConfig == null ? LspDiscovery.empty() : LspDiscovery.read(Path.of(lspConfig)));
+    return fromFile(configPath(args[1]));
   }
 
-  /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */
-  public static Path defaultDataDir() {
-    return DaemonDataDirectory.defaultRoot();
+  /** 只读取与校验，不创建目录、锁、连接或启动语言服务器。 */
+  static DaemonConfig fromFile(Path file) {
+    if (!file.isAbsolute()) {
+      throw new IllegalArgumentException("configuration path must be absolute");
+    }
+    Path normalized = file.normalize();
+    DaemonConfiguration configuration = DaemonConfigurationCodec.read(normalized);
+    return new DaemonConfig(
+        DaemonConfigurationCodec.gatewayUri(configuration.getStudioUrl()),
+        normalized.resolveSibling("daemon.token"),
+        Duration.ofSeconds(15),
+        Duration.ofSeconds(1),
+        Duration.ofSeconds(30),
+        configuration.getNote(),
+        normalized.getParent(),
+        configuration.getBashExecutable(),
+        LspDiscovery.fromConfiguration(configuration.getLsp()));
+  }
+
+  static Path configPath(String value) {
+    if (value == null || value.isBlank() || value.startsWith("--")) {
+      throw new IllegalArgumentException("configuration path must be absolute");
+    }
+    try {
+      Path path = Path.of(value);
+      if (path.isAbsolute()) {
+        return path;
+      }
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("configuration path must be absolute");
+    }
+    throw new IllegalArgumentException("configuration path must be absolute");
   }
 
   /**
@@ -171,31 +141,6 @@ public record DaemonConfig(
       case LINUX -> "Linux environment.";
       case MACOS -> "macOS environment.";
     };
-  }
-
-  private static String requireArgValue(String[] args, int index, String flag) {
-    if (index >= args.length) {
-      throw new IllegalArgumentException("missing value for " + flag);
-    }
-    String value = args[index];
-    if (value == null || value.isBlank() || value.startsWith("--")) {
-      throw new IllegalArgumentException("missing value for " + flag);
-    }
-    return value;
-  }
-
-  private static String requirePresent(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("missing required configuration: " + name);
-    }
-    return value;
-  }
-
-  private static Duration parseDuration(String value, Duration defaultValue) {
-    if (value == null || value.isBlank()) {
-      return defaultValue;
-    }
-    return Duration.parse(value);
   }
 
   private static Duration requirePositive(Duration value, String name) {
@@ -230,7 +175,7 @@ public record DaemonConfig(
     return value == null || value.isBlank() ? null : value;
   }
 
-  /** 数据目录可省略，但一旦显式给出就必须绝对；不必预先存在，Daemon 会创建它。 */
+  /** 内部运行时数据目录必须绝对；直接构造时不必预先存在，Daemon 会创建它。 */
   private static Path requireAbsoluteDirectory(Path value) {
     Path path = Objects.requireNonNull(value, "dataDir");
     if (!path.isAbsolute()) {

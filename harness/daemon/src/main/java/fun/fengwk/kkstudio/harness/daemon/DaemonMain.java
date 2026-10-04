@@ -11,16 +11,15 @@ public final class DaemonMain {
   /** {@code --help} / {@code -h} 的完整用法文本：列出全部 CLI 选项及其默认值。 */
   static final String USAGE =
       """
-      Usage: java -jar kk-studio-daemon.jar [options]
+      Usage: java -jar kk-studio-daemon.jar --config <absolute-path>
 
-      Connection:
-        --gateway-uri <uri>              Environment server WebSocket gateway; scheme must be ws
-                                         or wss (required)
-        --registration-token-file <path> Absolute owner-only file holding the registration
-                                         token; the token text is never passed in argv (required)
-        --heartbeat <duration>           Heartbeat interval (default: PT15S)
-        --reconnect-initial <duration>   Initial reconnect backoff (default: PT1S)
-        --reconnect-max <duration>       Maximum reconnect backoff (default: PT30S)
+      Configuration:
+        --config <absolute-path>         Load daemon JSON (studioUrl, note, bashExecutable, lsp).
+                                         The sibling daemon.token holds the owner-only token;
+                                         the configuration parent is the runtime data directory.
+        --check-config <absolute-path>   Validate configuration and sibling token, then exit.
+                                         No data creation, locking, connections or LSP startup.
+                                         Managed installation uses ~/.kk-studio/daemon.json.
 
       Local proxy:
         http_proxy / https_proxy         Independent HTTP proxy URLs (http://host:port);
@@ -29,18 +28,6 @@ public final class DaemonMain {
                                          to environment and OS proxies. Empty proxy means
                                          DIRECT; unset proxy falls back to the JDK OS selector.
                                          JVM java.net.useSystemProxies defaults to true.
-
-      Host identity:
-        --note <text>                    Single-line note shown to the model; at most once
-        --data-dir <path>                Absolute daemon data directory holding the process lock
-                                         and published text output
-                                         (default: ~/.kk-studio)
-
-      Local executables:
-        --bash-executable <path>         bash executable for process.exec (default: bash)
-        --lsp-config <path>              Absolute JSON file declaring the pre-installed
-                                         language servers (command, extensions, project
-                                         root markers); omitted means no LSP server
 
       Information:
         --help, -h                       Print this help and exit
@@ -51,7 +38,8 @@ public final class DaemonMain {
                                          argument encoded as UTF-8 Base64 (not encryption).
                                          Decoded arguments follow the same CLI rules.
 
-      Durations use ISO-8601 form (for example PT30S or PT5M). Unknown arguments fail closed.
+      Runtime heartbeat/reconnect intervals are fixed at PT15S/PT1S/PT30S.
+      The default bash executable is bash. Unknown or extra arguments fail closed.
       """;
 
   private DaemonMain() {}
@@ -59,9 +47,7 @@ public final class DaemonMain {
   /**
    * 使用 CLI 参数启动带本地 coding capabilities 的 Daemon。
    *
-   * <p>权威参数：{@code --registration-token-file}、可选且唯一 {@code --note}、可选 {@code --data-dir}
-   * 与两个可选的本地执行程序参数；连接参数见 {@link DaemonConfig#fromArgs(String[])}。HELLO 携带从 {@code
-   * --registration-token-file} 按需读取的凭证；若注册凭证被拒绝， 握手以终态错误结束，daemon 停止重连并以非零状态退出。
+   * <p>唯一运行参数是 {@code --config}。HELLO 携带按需读取的同目录凭证； 若注册凭证被拒绝，握手以终态错误结束，daemon 停止重连并以非零状态退出。
    *
    * <p>数据目录在启动期以 owner-only 权限创建并持有 {@code daemon.lock}：同一目录上的第二个 Daemon
    * 立即失败，而不是并发写同一份本地数据；该锁在进程整个生命周期内持有。
@@ -74,11 +60,20 @@ public final class DaemonMain {
     if (printInfoCommand(args, System.out)) {
       return;
     }
+    if (args.length > 0 && "--check-config".equals(args[0])) {
+      if (args.length != 2) {
+        throw new IllegalArgumentException("expected exactly --check-config <absolute-path>");
+      }
+      DaemonConfig checked = DaemonConfig.fromFile(DaemonConfig.configPath(args[1]));
+      checked.registrationToken();
+      System.out.println("Daemon configuration is valid");
+      return;
+    }
     DaemonConfig daemonConfig = DaemonConfig.fromArgs(args);
     DaemonProxyInitializer.install(System.getenv());
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(daemonConfig.dataDir())) {
       CodingToolsConfig toolsConfig =
-          CodingToolsConfig.fromCli(
+          CodingToolsConfig.fromRuntime(
               dataDirectory.resources(), daemonConfig.bashExecutable(), daemonConfig.lsp());
       DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, dataDirectory);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));

@@ -5,12 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfigurationCodec;
+
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -196,19 +197,21 @@ class LspDiscoveryTest {
     assertEquals(List.of(".exe", ".CMD"), LspDiscovery.windowsExecutableSuffixes(".exe;CMD;;"));
   }
 
-  /** 意图：{@code --lsp-config} 的 JSON 结构被完整解析为服务器条目，扩展名统一小写。 */
+  /** 意图：共享结构化配置转换为运行时快照，声明顺序与规范化扩展名保持不变。 */
   @Test
   void readsServersFromJsonConfiguration() throws IOException {
-    Path config =
-        writeConfig(
-            """
+    var config =
+        DaemonConfigurationCodec.parseLsp(
+            new ObjectMapper()
+                .readTree(
+                    """
             {"servers":{
               "java":{"command":["/usr/bin/java"],"extensions":[".java"],"rootMarkers":["pom.xml"]},
               "ts":{"command":["ts-server"],"extensions":[".TS",".tsx"],"firstMatchMarkers":["package.json"]}
             }}
-            """);
+            """));
 
-    LspDiscovery discovery = LspDiscovery.read(config);
+    LspDiscovery discovery = LspDiscovery.fromConfiguration(config);
     assertEquals(
         List.of("java", "ts"), discovery.servers().stream().map(LspServerConfig::id).toList());
     assertEquals(List.of(".java"), discovery.servers().getFirst().extensions());
@@ -216,82 +219,24 @@ class LspDiscoveryTest {
     assertEquals(List.of("package.json"), discovery.servers().get(1).firstMatchMarkers());
     assertEquals(List.of(".ts", ".tsx"), discovery.servers().get(1).extensions());
     assertEquals("ts", discovery.server(Path.of("/p/App.ts")).orElseThrow().id());
+    config.getServers().get("ts").setCommand(List.of("changed"));
+    config.getServers().clear();
+    assertEquals(List.of("ts-server"), discovery.servers().get(1).command());
+    assertEquals(2, discovery.servers().size(), "运行时快照不受共享 JavaBean 后续修改影响");
   }
 
-  /** 意图：非法配置在启动期失败关闭，错误信息指出具体位置，且不做任何兼容回退。 */
+  /** 外部 JSON 校验由共享 codec 测试覆盖；内部发现器仍拒绝重复运行时 ID。 */
   @Test
-  void rejectsInvalidJsonConfigurations() throws IOException {
-    assertMessage("must be absolute", () -> LspDiscovery.read(Path.of("relative/lsp.json")));
-    assertMessage(
-        "cannot read LSP configuration", () -> LspDiscovery.read(root.resolve("missing.json")));
-    assertMessage(
-        "must declare at least one server",
-        () -> LspDiscovery.read(writeConfig("{\"servers\":{}}")));
-    assertMessage(
-        "must contain a 'servers' object",
-        () -> LspDiscovery.read(writeConfig("{\"servers\":[]}")));
-    assertMessage(
-        "unknown field 'extra'",
-        () ->
-            LspDiscovery.read(
-                writeConfig(
-                    "{\"servers\":{\"a\":{\"command\":[\"x\"],\"extensions\":[\".a\"]}},\"extra\":1}")));
-    assertMessage(
-        "unknown field 'bogus'",
-        () ->
-            LspDiscovery.read(
-                writeConfig(
-                    "{\"servers\":{\"a\":{\"command\":[\"x\"],\"extensions\":[\".a\"],\"bogus\":1}}}")));
-    assertMessage(
-        "command must not be empty",
-        () ->
-            LspDiscovery.read(
-                writeConfig("{\"servers\":{\"a\":{\"command\":[],\"extensions\":[\".a\"]}}}")));
-    assertMessage(
-        "extensions must not be empty",
-        () ->
-            LspDiscovery.read(
-                writeConfig("{\"servers\":{\"a\":{\"command\":[\"x\"],\"extensions\":[]}}}")));
-    assertMessage(
-        "leading dot",
-        () ->
-            LspDiscovery.read(
-                writeConfig(
-                    "{\"servers\":{\"a\":{\"command\":[\"x\"],\"extensions\":[\"java\"]}}}")));
-    assertMessage(
-        "must match",
-        () ->
-            LspDiscovery.read(
-                writeConfig(
-                    "{\"servers\":{\"bad id\":{\"command\":[\"x\"],\"extensions\":[\".a\"]}}}")));
-    assertMessage(
-        "project-relative",
-        () ->
-            LspDiscovery.read(
-                writeConfig(
-                    "{\"servers\":{\"a\":{\"command\":[\"x\"],\"extensions\":[\".a\"],\"rootMarkers\":[\"/abs\"]}}}")));
-    assertMessage(
-        "must be an array of strings",
-        () ->
-            LspDiscovery.read(
-                writeConfig("{\"servers\":{\"a\":{\"command\":\"x\",\"extensions\":[\".a\"]}}}")));
-    assertMessage(
-        "duplicate lsp server id",
-        () ->
-            LspDiscovery.of(
-                List.of(
-                    server("a", List.of("x"), List.of(".a")),
-                    server("a", List.of("x"), List.of(".b")))));
-  }
-
-  private Path writeConfig(String json) throws IOException {
-    return Files.writeString(
-        root.resolve("lsp-config-" + System.nanoTime() + ".json"), json, StandardCharsets.UTF_8);
-  }
-
-  private static void assertMessage(String expected, Executable action) {
-    IllegalArgumentException error = assertThrows(IllegalArgumentException.class, action);
-    assertTrue(error.getMessage().contains(expected), error.getMessage());
+  void rejectsDuplicateRuntimeServerIds() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                LspDiscovery.of(
+                    List.of(
+                        server("a", List.of("x"), List.of(".a")),
+                        server("a", List.of("x"), List.of(".b")))));
+    assertTrue(error.getMessage().contains("duplicate lsp server id"));
   }
 
   private static LspServerConfig server(String id, List<String> command, List<String> extensions) {
