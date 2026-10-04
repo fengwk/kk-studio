@@ -152,14 +152,12 @@ class UnixInstallContracts:
         self.assertNotIn("curl", fixture.tools())
 
     def test_unsafe_managed_paths_rejected_without_relaxing_permissions(self):
-        for kind in ("home-writable", "root-public", "root-link", "lib-link", "config-public",
+        for kind in ("root-public", "root-link", "lib-link", "config-public", "token-public",
                      "token-link", "jar-directory", "backups-link", "logs-link"):
             with self.subTest(kind=kind):
                 fixture = self.fixture()
                 self.assert_ok(fixture.install())
-                if kind == "home-writable":
-                    fixture.home.chmod(0o777)
-                elif kind == "root-public":
+                if kind == "root-public":
                     fixture.install_root.chmod(0o755)
                 elif kind == "root-link":
                     moved = fixture.root / "moved-root"
@@ -171,6 +169,8 @@ class UnixInstallContracts:
                     fixture.jar.parent.symlink_to(fixture.root)
                 elif kind == "config-public":
                     fixture.config.chmod(0o644)
+                elif kind == "token-public":
+                    fixture.token.chmod(0o644)
                 elif kind == "token-link":
                     fixture.token.unlink()
                     fixture.token.symlink_to(fixture.input_token)
@@ -183,14 +183,83 @@ class UnixInstallContracts:
                         path.rmdir()
                     path.symlink_to(fixture.root)
                 fixture.reset_record()
-                for command in ("install", "uninstall"):
+                before = {path: path.read_bytes() for path in
+                          (fixture.jar, fixture.config, fixture.token, fixture.service)
+                          if path.is_file()}
+                for command in ("install", "status", "uninstall"):
                     result = fixture.install() if command == "install" else fixture.run(command)
                     self.assertNotEqual(0, result.returncode)
                     self.assertTrue(fixture.service.exists())
+                    for path, contents in before.items():
+                        self.assertEqual(contents, path.read_bytes())
                     self.assertNotIn("curl", fixture.tools())
                     self.assert_no_switch(fixture)
                 self.assertFalse((fixture.install_root / "backups").is_dir()
                                  and not (fixture.install_root / "backups").is_symlink())
+
+    def shared_ancestors(self, fixture):
+        """Host layout directories the installer must treat as the user's own trust boundary."""
+        if fixture.operating_system == "Linux":
+            return [fixture.home, fixture.home / ".config",
+                    fixture.home / ".config/systemd", fixture.home / ".config/systemd/user"]
+        return [fixture.home, fixture.home / "Library", fixture.home / "Library/LaunchAgents"]
+
+    def test_group_writable_shared_ancestors_are_trusted(self):
+        """Group-writable HOME/.config/systemd/user (Linux) and Library/LaunchAgents (macOS) install."""
+        for mode in (0o775, 0o777):
+            with self.subTest(mode=oct(mode)):
+                self.check_shared_ancestor_lifecycle(mode)
+
+    def check_shared_ancestor_lifecycle(self, mode):
+        fixture = self.fixture()
+        shared = self.shared_ancestors(fixture)
+        sentinels = {}
+        for path in shared:
+            path.mkdir(parents=True, exist_ok=True)
+            path.chmod(mode)
+            sentinel = path / "pre-existing-shared-file"
+            sentinel.write_text(str(path))
+            sentinels[sentinel] = sentinel.read_bytes()
+        before = {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
+                  for path in shared}
+        for action in ("install", "install", "status", "uninstall"):
+            result = fixture.install() if action == "install" else fixture.run(action)
+            self.assert_ok(result)
+            for path in shared:
+                self.assertEqual(before[path],
+                                 (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid))
+            for path, contents in sentinels.items():
+                self.assertEqual(contents, path.read_bytes())
+            self.assert_no_secret(fixture, result)
+        self.assert_clean(fixture)
+
+    def test_symlinked_shared_ancestor_link_and_target_are_preserved(self):
+        """A shared ancestor may be a relative symlink to another location; never scan or mutate it."""
+        fixture = self.fixture()
+        link = (fixture.home / ".config" if fixture.operating_system == "Linux"
+                else fixture.home / "Library")
+        target = fixture.root / "elsewhere" / link.name
+        target.mkdir(parents=True, mode=0o700)
+        target.chmod(0o777)
+        sentinel = target / "pre-existing-target-file"
+        sentinel.write_text("keep-target")
+        relative = os.path.relpath(target, link.parent)
+        link.symlink_to(relative)
+        before = {path: (path.lstat().st_mode, path.lstat().st_uid, path.lstat().st_gid)
+                  for path in (link, target, target.parent)}
+        for action in ("install", "install", "status", "uninstall"):
+            result = fixture.install() if action == "install" else fixture.run(action)
+            self.assert_ok(result)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(relative, os.readlink(link))
+            for path, metadata in before.items():
+                self.assertEqual(metadata,
+                                 (path.lstat().st_mode, path.lstat().st_uid, path.lstat().st_gid))
+            self.assertEqual("keep-target", sentinel.read_text())
+            self.assertEqual(action != "uninstall", fixture.service.exists())
+            self.assert_no_secret(fixture, result)
+        self.assertFalse(fixture.service.exists())
+        self.assert_clean(fixture)
 
     def test_foreign_service_diagnostics_exact_reason_path_and_safe_commands(self):
         reasons = {
