@@ -56,8 +56,18 @@ elif tool == "java":
             if mode == "old-jar":
                 print("unknown option --check-config", file=sys.stderr)
                 fail()
+            if mode == "check-invalid":
+                print("Invalid daemon configuration: daemon.lsp.servers.jdtls.command must not be empty",
+                      file=sys.stderr)
+                fail()
+            if mode == "check-invalid-noisy":
+                # Safe marker line plus an unrelated stack line that must stay hidden.
+                print("Invalid daemon configuration: daemon.studioUrl must be an absolute http(s) origin",
+                      file=sys.stderr)
+                print("  at java.base/java.util.Objects.requireNonNull(Objects.java:1)", file=sys.stderr)
+                fail()
             if mode == "check-fail":
-                # Prove installer never copies potentially secret-bearing diagnostics to output.
+                # Legacy/unsafe failure: no marker, only raw secret-bearing diagnostics.
                 print(token.read_text(), file=sys.stderr)
                 fail()
             try:
@@ -76,8 +86,9 @@ elif tool == "java":
                                                             for c in token.read_text().strip())
                 if data.get("bashExecutable"):
                     import shutil
-                    bash = shutil.which(data["bashExecutable"])
-                    assert bash and os.access(bash, os.X_OK)
+                    candidate = data["bashExecutable"]
+                    resolved = candidate if os.path.isabs(candidate) else shutil.which(candidate)
+                    assert resolved and os.access(resolved, os.X_OK), candidate
             except (AssertionError, ValueError, KeyError):
                 print("invalid config/token", file=sys.stderr)
                 fail()
@@ -128,6 +139,14 @@ elif tool == "curl":
             if mode == "jar-fail":
                 target.write_bytes(b"partial")
                 fail()
+            if mode in ("mutate-input", "mutate-input-public"):
+                # Simulate a swap of the user-controlled staging input during the download.
+                staged = Path(env["FAKE_STAGING"]) / "daemon.json"
+                if mode == "mutate-input":
+                    staged.unlink()
+                    staged.symlink_to(Path(env["FAKE_STAGING"]) / "daemon.token")
+                else:
+                    staged.chmod(0o644)
             target.write_bytes(b"" if mode == "empty-jar" else body)
 elif tool == "systemctl":
     assert args[0] == "--user"
