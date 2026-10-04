@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.2.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.3.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
