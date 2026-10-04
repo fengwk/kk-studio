@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 
 import java.util.List;
 import java.util.Map;
@@ -138,5 +140,44 @@ class EnvironmentInstallConfigsTest {
                           "daemon",
                           Map.of("studioUrl", "https://studio.example.com")))));
     }
+  }
+
+  /** 边界必须原样保留未知字段与标量类型：成功请求解析，嵌套未知字段/错误类型一律拒绝，不静默丢弃或强转。 */
+  @Test
+  void parseUpdateAcceptsValidBodyAndRejectsUnknownNestedFieldsAndTypeCoercion() throws Exception {
+    var parsed =
+        EnvironmentInstallConfigs.parseUpdate(
+            json.readTree(
+                "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}"));
+    assertEquals("0", parsed.getExpectedVersion());
+    assertEquals("linux", parsed.getInstallConfig().getOperatingSystem());
+
+    for (String raw :
+        List.of(
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"unknown\":true}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"unknown\":1,\"daemon\":{\"studioUrl\":\"https://studio.example.com\"}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":{\"jdtls\":{\"command\":[\"jdtls\"],\"extensions\":[\".java\"],\"unknown\":true}}}}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":\"string\"}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"lsp\":{\"servers\":[]}}}}",
+            "{\"expectedVersion\":\"0\",\"installConfig\":{\"operatingSystem\":\"linux\",\"daemon\":{\"studioUrl\":\"https://studio.example.com\",\"note\":42}}}")) {
+      assertThrows(
+          AiValidationException.class,
+          () -> EnvironmentInstallConfigs.parseUpdate(json.readTree(raw)));
+    }
+  }
+
+  /** validate 也覆盖程序化构造的模型；read 遇到损坏持久化 JSON 必须失败而非静默返回空配置。 */
+  @Test
+  void validateRejectsProgrammaticModelAndReadRejectsCorruptPersistedJson() {
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallConfigs.validate(new EnvironmentInstallConfigDTO()));
+    DaemonConfiguration invalidDaemon = new DaemonConfiguration();
+    invalidDaemon.setStudioUrl("not-an-origin");
+    EnvironmentInstallConfigDTO bad = new EnvironmentInstallConfigDTO();
+    bad.setOperatingSystem("linux");
+    bad.setDaemon(invalidDaemon);
+    assertThrows(AiValidationException.class, () -> EnvironmentInstallConfigs.validate(bad));
+    assertThrows(IllegalStateException.class, () -> EnvironmentInstallConfigs.read("not json"));
   }
 }
