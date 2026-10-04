@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +15,8 @@ import java.util.regex.Pattern;
  * 宿主可执行程序的只读解析：绝对/含分隔符路径、裸命令的 PATH 查找、HOME 前缀展开与 Windows PATHEXT 后缀。
  *
  * <p>只做文件系统探测，绝不启动进程。LSP 服务器命令与 Daemon 配置的 bash 共用同一解析， 保证能力执行时使用的就是这里判定为可用的宿主路径。
+ *
+ * <p>路径来源非法（例如含宿主不允许的字符）只收敛为空结果，不抛出携带原始取值的异常；命中的 PATH 条目一律解析为绝对路径， 避免子进程按自身 workdir 误解析相对程序。
  */
 public final class ExecutableResolver {
 
@@ -22,52 +25,96 @@ public final class ExecutableResolver {
   private ExecutableResolver() {}
 
   /**
-   * 解析宿主可执行程序。
-   *
-   * <p>含分隔符的命令必须是绝对路径且为可执行文件；裸命令按 {@code PATH} 查找，Windows 上还要求命中 {@code PATHEXT} 后缀。
+   * 用当前宿主环境解析可执行程序。
    *
    * @param command 配置或默认的命令名/路径
-   * @return 命中时的宿主路径；找不到或不可执行时为空
+   * @return 命中时的绝对宿主路径；找不到、不可执行或路径来源非法时为空
    */
   public static Optional<String> resolve(String command) {
+    return resolve(command, isWindows(), System.getenv("PATH"), System.getenv("PATHEXT"));
+  }
+
+  /** 注入宿主环境的解析入口：便于确定性测试 Windows/PATH/PATHEXT 语义，不读进程全局状态。 */
+  static Optional<String> resolve(
+      String command, boolean windows, String pathVariable, String pathext) {
     Objects.requireNonNull(command, "command");
     String expanded = expandHome(command);
     if (expanded.indexOf('/') < 0 && expanded.indexOf('\\') < 0) {
-      return resolveOnPath(expanded);
+      return resolveOnPath(expanded, windows, pathVariable, pathext);
     }
-    Path path = Path.of(expanded);
+    Path path;
+    try {
+      path = Path.of(expanded);
+    } catch (InvalidPathException error) {
+      return Optional.empty();
+    }
     if (!path.isAbsolute()) {
       return Optional.empty();
     }
-    return isRunnable(path) ? Optional.of(path.toString()) : Optional.empty();
+    return isRunnable(path, windows) ? Optional.of(path.toString()) : Optional.empty();
   }
 
-  private static Optional<String> resolveOnPath(String command) {
-    String path = System.getenv("PATH");
-    if (path == null || path.isBlank()) {
+  private static Optional<String> resolveOnPath(
+      String command, boolean windows, String pathVariable, String pathext) {
+    if (pathVariable == null || pathVariable.isBlank()) {
       return Optional.empty();
     }
-    boolean windows = isWindows();
-    for (String element : path.split(Pattern.quote(File.pathSeparator))) {
+    for (String element : pathVariable.split(Pattern.quote(File.pathSeparator))) {
       if (element.isBlank()) {
         continue;
       }
-      Path directory = Path.of(expandHome(element));
-      if (!windows) {
-        Path candidate = directory.resolve(command);
-        if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-          return Optional.of(candidate.toString());
-        }
+      Path directory;
+      try {
+        // 相对 PATH 条目按进程 cwd 解析为绝对路径：子进程可能使用不同 workdir 解析相对程序。
+        directory = Path.of(expandHome(element)).toAbsolutePath().normalize();
+      } catch (InvalidPathException error) {
         continue;
       }
-      for (String suffix : windowsExecutableSuffixes(System.getenv("PATHEXT"))) {
-        Path candidate = directory.resolve(command + suffix);
-        if (Files.isRegularFile(candidate)) {
-          return Optional.of(candidate.toString());
-        }
+      Optional<String> candidate =
+          windows ? resolveWindows(directory, command, pathext) : resolvePosix(directory, command);
+      if (candidate.isPresent()) {
+        return candidate;
       }
     }
     return Optional.empty();
+  }
+
+  private static Optional<String> resolvePosix(Path directory, String command) {
+    Path candidate = directory.resolve(command);
+    return Files.isRegularFile(candidate) && Files.isExecutable(candidate)
+        ? Optional.of(candidate.toString())
+        : Optional.empty();
+  }
+
+  /**
+   * Windows 语义：命令已带被识别的 {@code PATHEXT} 后缀（大小写不敏感）时按原样解析，否则追加后缀查找。
+   *
+   * <p>这样 {@code bash.exe} 不会被误拼成 {@code bash.exe.EXE}。
+   */
+  private static Optional<String> resolveWindows(Path directory, String command, String pathext) {
+    List<String> suffixes = windowsExecutableSuffixes(pathext);
+    if (hasRecognizedSuffix(command, suffixes)) {
+      Path candidate = directory.resolve(command);
+      return Files.isRegularFile(candidate) ? Optional.of(candidate.toString()) : Optional.empty();
+    }
+    for (String suffix : suffixes) {
+      Path candidate = directory.resolve(command + suffix);
+      if (Files.isRegularFile(candidate)) {
+        return Optional.of(candidate.toString());
+      }
+    }
+    return Optional.empty();
+  }
+
+  private static boolean hasRecognizedSuffix(String command, List<String> suffixes) {
+    for (String suffix : suffixes) {
+      if (command.length() >= suffix.length()
+          && command.regionMatches(
+              true, command.length() - suffix.length(), suffix, 0, suffix.length())) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Windows 上裸命令必须命中 {@code PATHEXT} 后缀，普通文本文件不算可执行程序。 */
@@ -83,8 +130,8 @@ public final class ExecutableResolver {
     return suffixes;
   }
 
-  private static boolean isRunnable(Path candidate) {
-    return Files.isRegularFile(candidate) && (isWindows() || Files.isExecutable(candidate));
+  private static boolean isRunnable(Path candidate, boolean windows) {
+    return Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate));
   }
 
   static boolean isWindows() {
