@@ -374,6 +374,18 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
 class TestWindowsInstallerNativeContracts(unittest.TestCase):
     """Run native tests only where Windows and PowerShell are genuinely available."""
 
+    def test_junction_cleanup_is_noninteractive_and_preserves_source_files(self):
+        """PS 5.1 must delete the junction itself, never prompt or recurse into its target."""
+        native = NATIVE_TEST.read_text(encoding="ascii")
+        self.assertIn("[IO.Directory]::Delete($junction)", native)
+        self.assertNotIn("Remove-Item -LiteralPath $junction", native)
+        for case in (
+            "junction cleanup removes only the link",
+            "junction cleanup preserves the source config",
+            "junction cleanup preserves the source token",
+        ):
+            self.assertIn(case, native)
+
     def test_task_identity_assertions_resolve_accounts_without_relaxing_ownership(self):
         """Both task identities require SID equality, including native negative controls."""
         native = NATIVE_TEST.read_text(encoding="ascii")

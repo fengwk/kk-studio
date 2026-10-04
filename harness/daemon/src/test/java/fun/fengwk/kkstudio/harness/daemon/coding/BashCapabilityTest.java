@@ -135,7 +135,7 @@ class BashCapabilityTest {
    * <p>同时断言终态说明不进入全文、也不计入捕获总量，因此 {@code totalLines} 仍忠实等于进程自己的输出行数。
    *
    * <p>触发时机由屏障决定：命令写完 5000 行之后才落下就绪标记，测试看到标记才让 deadline 到达。因此这些字节要么已经在管道里、要么 已经被捕获，收尾读出的一定是完整 5000
-   * 行；慢机器上 helper 与 Git Bash 的冷启动不再影响结论。
+   * 行；慢机器上 helper 与 Git Bash 的冷启动不再影响结论。标记由 shell 内建写入，然后 exec 等待进程，避免 shell 为被杀子进程追加平台相关的 stderr。
    */
   @Test
   void timeoutPublishesSpilledOutputAndKeepsCountsFaithful() throws Exception {
@@ -146,9 +146,9 @@ class BashCapabilityTest {
             config,
             executor,
             timer,
-            "{\"command\":\"seq 1 5000; touch '"
+            "{\"command\":\"seq 1 5000; : > '"
                 + embedded(ready)
-                + "'; sleep 30\",\"workdir\":"
+                + "'; exec sleep 30\",\"workdir\":"
                 + json(workspaceRoot)
                 + "}",
             TIMEOUT_TRIGGERED_BY_THE_TEST);
