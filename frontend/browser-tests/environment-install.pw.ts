@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '../src/shared/api/contracts/ai-environment'
 
+// 全量 layout 回归也会收集本文件，剪贴板读写权限由本文件自持，不依赖专属 install 配置。
+test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
+
 const token = 'browser-private-token'
 const initialConfig: EnvironmentInstallConfigDTO = {
   operatingSystem: 'macos', javaHome: '/Library/Java/汉字',

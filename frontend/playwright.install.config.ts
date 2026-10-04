@@ -8,7 +8,6 @@ export default defineConfig({
     baseURL: 'http://127.0.0.1:5175',
     browserName: 'chromium',
     headless: true,
-    permissions: ['clipboard-read', 'clipboard-write'],
     trace: 'retain-on-failure',
   },
   webServer: {

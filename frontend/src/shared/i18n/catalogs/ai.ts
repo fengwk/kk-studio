@@ -2608,12 +2608,12 @@ export const aiCatalog = {
     'zh-CN': "复制卸载命令",
   },
   'ai.environment.install.notice': {
-    'en-US': "The command contains credentials. Keep it private. Requires JDK 21 and Bash. Run it on the target host to deploy; saving does not apply settings. Overwrite restarts and interrupts the single daemon for the current OS user (all environments), preserving runtime data.",
-    'zh-CN': "命令包含凭据，请勿分享。需要 JDK 21 和 Bash。在目标主机执行才会部署，保存不代表已应用。覆盖会重启并中断当前系统用户唯一的 Daemon（影响所有环境），保留运行数据。",
+    'en-US': "The command contains credentials. Keep it private. Requires JDK 21 and Bash. Run it on the target host to deploy; saving does not apply settings. Overwrite restarts the single daemon for the current OS user, interrupts tool calls in the environment it is currently bound to, and connects it to the selected environment, preserving runtime data.",
+    'zh-CN': "命令包含凭据，请勿分享。需要 JDK 21 和 Bash。在目标主机执行才会部署，保存不代表已应用。覆盖会重启当前系统用户唯一的 Daemon，中断其当前绑定环境的工具调用，并连接到所选环境，保留运行数据。",
   },
   'ai.environment.install.uninstallNotice': {
-    'en-US': "Uninstall affects the current OS user’s single daemon at HOME/.kk-studio, not just this environment. It removes the managed service and program, preserves local config, token and data, and does not delete any Studio environment record.",
-    'zh-CN': "卸载影响当前系统用户 HOME/.kk-studio 下唯一的 Daemon，并非仅此环境。只移除托管服务和程序，保留本地配置、Token 和数据，不删除任何 Studio 环境记录。",
+    'en-US': "Uninstall removes the managed service and program for the current OS user’s single daemon at HOME/.kk-studio, which may not be the environment in this card. Local config, token, data and logs are preserved, and no Studio environment record is deleted.",
+    'zh-CN': "卸载会移除当前系统用户 HOME/.kk-studio 下唯一 Daemon 的托管服务和程序，该 Daemon 不一定是此卡片对应的环境。保留本地配置、Token、数据和日志，不删除任何 Studio 环境记录。",
   },
   'ai.environment.install.savedCopied': {
     'en-US': "Settings saved and command copied. Execute on the target host to apply.",
