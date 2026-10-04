@@ -1,3 +1,15 @@
+.environment-install-modal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.environment-install-modal .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .environment-install-modal details {
   margin-top: 16px;
 }
@@ -20,6 +32,21 @@
 
 .environment-install-modal .modal-footer {
   flex-wrap: wrap;
+}
+
+.environment-install-modal .field-help {
+  margin: -8px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #9ca3af);
+  word-break: break-word;
+}
+
+.environment-install-modal .install-load-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .environment-card .chat-card-foot {
