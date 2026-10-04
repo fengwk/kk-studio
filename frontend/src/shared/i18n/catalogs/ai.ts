@@ -2572,8 +2572,12 @@ export const aiCatalog = {
     'zh-CN': "操作系统",
   },
   'ai.environment.install.origin': {
-    'en-US': "Studio origin",
-    'zh-CN': "Studio 地址（仅 origin）",
+    'en-US': "Studio address",
+    'zh-CN': "Studio 地址",
+  },
+  'ai.environment.install.originHelp': {
+    'en-US': "HTTP(S) base host, e.g. https://studio.example.com; optional port, no path or query.",
+    'zh-CN': "HTTP(S) base 主机，例如 https://studio.example.com，可带端口，不含路径或查询参数。",
   },
   'ai.environment.install.optional': {
     'en-US': "Optional: Java, Bash, note and LSP servers",
@@ -2590,6 +2594,10 @@ export const aiCatalog = {
   'ai.environment.install.lsp': {
     'en-US': "Enable LSP servers",
     'zh-CN': "启用 LSP servers",
+  },
+  'ai.environment.install.lspHelp': {
+    'en-US': 'Example (Java + Mason): {"jdtls": {"command": ["~/.local/share/nvim/mason/bin/jdtls"], "extensions": [".java"], "rootMarkers": ["pom.xml"]} }. "command" and "extensions" are required; extensions must start with a dot. Install language servers yourself, Studio does not install them.',
+    'zh-CN': '示例（Java + Mason）：{"jdtls": {"command": ["~/.local/share/nvim/mason/bin/jdtls"], "extensions": [".java"], "rootMarkers": ["pom.xml"]} }。command 与 extensions 必填，extensions 需以 . 开头；语言服务器需自行安装，Studio 不代装。',
   },
   'ai.environment.install.saveCopy': {
     'en-US': "Save and copy installation command",
@@ -2615,6 +2623,10 @@ export const aiCatalog = {
     'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",
     'zh-CN': "配置已保存，但命令生成或复制失败。请检查剪贴板权限后重试。尚未部署。",
   },
+  'ai.environment.install.savedStale': {
+    'en-US': "Settings saved, but the environment changed while reading the credential, so no command was generated. Retry to save and copy again.",
+    'zh-CN': "配置已保存，但环境在读取凭据时已发生变化，未生成命令。请重试以重新保存并复制。",
+  },
   'ai.environment.install.uninstallCopied': {
     'en-US': "Uninstall command copied. No environment record was changed.",
     'zh-CN': "卸载命令已复制，未修改环境记录。",
@@ -2623,9 +2635,49 @@ export const aiCatalog = {
     'en-US': "Copy failed. Check clipboard permissions and retry.",
     'zh-CN': "复制失败，请检查剪贴板权限后重试。",
   },
+  'ai.environment.install.reload': {
+    'en-US': "Reload",
+    'zh-CN': "重新加载",
+  },
+  'ai.environment.install.useDefaults': {
+    'en-US': "Use default settings",
+    'zh-CN': "使用默认设置",
+  },
+  'ai.environment.install.metadataFailed': {
+    'en-US': "Could not load environment settings: {{message}}",
+    'zh-CN': "读取环境信息失败：{{message}}",
+  },
+  'ai.environment.install.invalidSaved': {
+    'en-US': "Saved installation settings are invalid: {{reason}}",
+    'zh-CN': "已保存的安装设置无效：{{reason}}",
+  },
+  'ai.environment.install.invalidOrigin': {
+    'en-US': "Studio address is invalid: use an http(s) base host without path, query or userinfo.",
+    'zh-CN': "Studio 地址无效：请填写 http(s) base 主机，不含路径、查询或用户信息。",
+  },
+  'ai.environment.install.invalidJavaHome': {
+    'en-US': "Java home is invalid: use an absolute path without $, % or ~.",
+    'zh-CN': "Java home 无效：需为绝对路径，且不含 $、% 或 ~。",
+  },
+  'ai.environment.install.invalidNote': {
+    'en-US': "Note is invalid: a single nonblank line of at most 512 characters.",
+    'zh-CN': "备注无效：单行、非空、最多 512 字符。",
+  },
+  'ai.environment.install.invalidBash': {
+    'en-US': "Bash executable is invalid: it must be nonblank without control characters.",
+    'zh-CN': "Bash 可执行文件无效：不能为空或包含控制字符。",
+  },
+  'ai.environment.install.invalidOs': {
+    'en-US': "The operating system is invalid.",
+    'zh-CN': "操作系统无效。",
+  },
+  'ai.environment.install.invalidField': {
+    'en-US': "Installation setting is invalid: {{field}}",
+    'zh-CN': "安装设置无效：{{field}}",
+  },
   'ai.environment.install.invalidLsp': {
-    'en-US': "Invalid LSP servers JSON (maximum 64 KiB).",
-    'zh-CN': "LSP servers JSON 无效（最大 64 KiB）。",
+    'en-US': "LSP servers are invalid: check server IDs, command, extensions (required, dot-prefixed) and markers.",
+    'zh-CN': "LSP servers 配置无效：请检查 server ID、command、extensions（必填，以 . 开头）和 markers。",
   },
   'ai.environment.close': {
     'en-US': 'Close',
