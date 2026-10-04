@@ -3,6 +3,7 @@ import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
   EnvironmentEventDTO,
+  EnvironmentInstallConfigDTO,
   EnvironmentRegistrationTokenDTO,
 } from '@/shared/api/contracts/ai-environment'
 
@@ -22,10 +23,20 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
     /**
      * 按需读取当前 registrationToken（不轮换、幂等、响应 no-store）。
      *
-     * 该调用只在用户显式点击「复制 Token」时发起，绝不进入通用 query cache、LocalStorage 或 URL。
+     * 仅在用户显式生成安装命令时读取，不进入 query cache、LocalStorage 或 URL。
      */
     getRegistrationToken: (id: string): Promise<EnvironmentRegistrationTokenDTO> =>
       client.get(`/harness/environments/${encodeURIComponent(id)}/token`),
+
+    saveInstallConfig: (
+      id: string,
+      expectedVersion: string,
+      installConfig: EnvironmentInstallConfigDTO,
+    ): Promise<EnvironmentCardDTO> =>
+      client.put(`/harness/environments/${encodeURIComponent(id)}/install-config`, {
+        expectedVersion,
+        installConfig,
+      }),
 
     rotateToken: (id: string, expectedVersion: string): Promise<EnvironmentCardDTO> =>
       client.post(`/harness/environments/${encodeURIComponent(id)}/registration-token`, {
