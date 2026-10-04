@@ -27,7 +27,7 @@ public interface EnvironmentRepository {
 
   boolean create(Environment environment);
 
-  /** CAS 轮换 registrationToken；name 是不可变身份，绝不参与更新。 */
+  /** CAS 原子更新 registrationToken 与 installConfig；name 是不可变身份，绝不参与更新。 */
   boolean updateById(Environment environment, long expectedVersion);
 
   boolean deleteById(UUID id, long expectedVersion);

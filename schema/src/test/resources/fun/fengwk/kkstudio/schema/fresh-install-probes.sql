@@ -50,6 +50,18 @@ $$;
 -- Fixtures: Catalog identity, workflow projects, Harness Session/Thread/Entry,
 -- Issue+Agent Thread bindings, stage budgets and Runs.
 -- ---------------------------------------------------------------------------
+insert into environment (id, name, registration_token)
+    values (pg_temp.uid(9000), 'install-fixture', 'install-fixture-token');
+select pg_temp.assert_true('environment install settings default null',
+    (select install_config is null from environment where id = pg_temp.uid(9000)));
+update environment set install_config = '{"operatingSystem":"linux"}'::jsonb
+    where id = pg_temp.uid(9000);
+select pg_temp.assert_true('environment install settings accept object',
+    (select install_config->>'operatingSystem' = 'linux' from environment where id = pg_temp.uid(9000)));
+select pg_temp.rejects('environment install settings reject array',
+    $$update environment set install_config = '[]'::jsonb where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_config_object');
+
 insert into agent_provider (name, provider_type, base_url, config, connection_generation_id)
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
 insert into agent_model (provider_name, name, model_id, config)

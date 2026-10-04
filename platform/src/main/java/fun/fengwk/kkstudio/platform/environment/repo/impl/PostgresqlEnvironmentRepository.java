@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.mapper.EnvironmentMapper;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.model.EnvironmentDO;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 
 import java.util.List;
@@ -84,6 +85,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
     target.setId(model.getId());
     target.setName(model.getName());
     target.setRegistrationToken(model.getRegistrationToken());
+    target.setInstallConfigJson(EnvironmentInstallConfigs.write(model.getInstallConfig()));
     target.setVersion(model.getVersion());
     target.setCreateTime(model.getCreateTime());
     target.setUpdateTime(model.getUpdateTime());
@@ -98,6 +100,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
     target.setId(row.getId());
     target.setName(row.getName());
     target.setRegistrationToken(row.getRegistrationToken());
+    target.setInstallConfig(EnvironmentInstallConfigs.read(row.getInstallConfigJson()));
     target.setVersion(row.getVersion());
     target.setCreateTime(row.getCreateTime());
     target.setUpdateTime(row.getUpdateTime());

@@ -20,7 +20,7 @@ import java.util.UUID;
 public interface EnvironmentMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, name, registration_token, version, "
+      "id, name, registration_token, install_config::text as install_config_json, version, "
           + "created_at as create_time, updated_at as update_time";
 
   @Select(
@@ -31,6 +31,7 @@ public interface EnvironmentMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "name", property = "name"),
         @Result(column = "registration_token", property = "registrationToken"),
+        @Result(column = "install_config_json", property = "installConfigJson"),
         @Result(column = "version", property = "version"),
         @Result(column = "create_time", property = "createTime"),
         @Result(column = "update_time", property = "updateTime")
@@ -67,9 +68,9 @@ public interface EnvironmentMapper extends BaseMapper {
   @Insert(
       """
       insert into environment (
-          id, name, registration_token, created_at, updated_at, version
+          id, name, registration_token, install_config, created_at, updated_at, version
       ) values (
-          #{id}, #{name}, #{registrationToken}, current_timestamp, current_timestamp, 0
+          #{id}, #{name}, #{registrationToken}, cast(#{installConfigJson} as jsonb), current_timestamp, current_timestamp, 0
       )
       """)
   int insert(EnvironmentDO environment);
@@ -78,6 +79,7 @@ public interface EnvironmentMapper extends BaseMapper {
       """
       update environment
       set registration_token = #{environment.registrationToken},
+          install_config = cast(#{environment.installConfigJson} as jsonb),
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
       where id = #{environment.id} and version = #{expectedVersion}

@@ -13,13 +13,13 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 
 /**
- * Environment name 是不可变身份：持久层唯一的更新语句只允许写 registration_token / timestamp / version。
+ * Environment name 是不可变身份：更新语句只允许写 token、安装设置与 CAS 字段。
  *
  * <p>测试直接读取 {@link EnvironmentMapper#updateById} 的 SQL 文本，保证 token 轮换绝不会意外改名。
  */
 class EnvironmentMapperContractTest {
 
-  /** 意图：token 轮换的 SQL 必须只更新 token 与 CAS 字段，绝不包含 name。 */
+  /** 意图：token 和配置同一条 CAS SQL 更新，绝不包含 name。 */
   @Test
   void updateByIdNeverWritesName() throws Exception {
     Method updateById =
@@ -29,6 +29,8 @@ class EnvironmentMapperContractTest {
     String sql = String.join(" ", annotation.value());
 
     assertTrue(sql.contains("registration_token = #{environment.registrationToken}"), sql);
+    assertTrue(
+        sql.contains("install_config = cast(#{environment.installConfigJson} as jsonb)"), sql);
     assertTrue(sql.contains("version = version + 1"), sql);
     assertFalse(sql.contains("name"), "environment name must never be updated: " + sql);
   }

@@ -60,7 +60,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 154;
+  private static final int PROBE_ASSERTION_COUNT = 157;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -160,6 +160,8 @@ class FreshInstallSchemaContractTest {
   /** 重写 V1 时唯一允许出现的共享表对象变更。 */
   private static final List<String> ALLOWED_SHARED_OBJECTS =
       List.of(
+          "environment.install_config",
+          "environment.ck_environment_install_config_object",
           "chat.archived_at",
           "chat.idx_chat_archived",
           "harness_thread.parent_thread_id",

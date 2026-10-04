@@ -73,6 +73,7 @@ class ConfigSyncExporterTest {
     List<Map<String, Object>> environments =
         (List<Map<String, Object>>) document.get("environments");
     assertEquals("token-env", environments.get(0).get("registrationToken"));
+    assertFalse(environments.get(0).containsKey("installConfig"));
 
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> mcpServers = (List<Map<String, Object>>) document.get("mcpServers");
@@ -93,5 +94,27 @@ class ConfigSyncExporterTest {
     assertFalse(document.containsKey("models"));
     assertFalse(document.containsKey("agents"));
     assertFalse(document.containsKey("settings"));
+  }
+
+  @Test
+  void installConfigExportsAsNestedStructureAndParsesBackWithoutSecretsInConfig() {
+    ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
+    var spec =
+        parser
+            .parse(ConfigSyncFixtures.resourceYaml("environment-install-config.yaml"))
+            .environments()
+            .get(0);
+    var env = environment("env");
+    env.setInstallConfig(spec.installConfig());
+    var state =
+        snapshot(List.of(), List.of(), List.of(), List.of(), List.of(env), List.of(), List.of());
+    String exported =
+        exporter.export(state, List.of(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
+    var imported = parser.parse(exported).environments().get(0);
+    assertEquals(spec.installConfig(), imported.installConfig());
+    assertEquals(spec.registrationToken(), imported.registrationToken());
+    assertEquals("https://studio.example.com", imported.installConfig().getDaemon().getStudioUrl());
+    assertFalse(
+        yaml.toMap(imported.installConfig(), "installConfig").containsKey("registrationToken"));
   }
 }
