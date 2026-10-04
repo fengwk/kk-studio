@@ -159,7 +159,7 @@ public final class ConfigSyncParser {
 
   private ProviderSpec parseProvider(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String name = entry.reqString("name");
+    String name = entry.reqName("name");
     declared.add(name);
     String providerType = entry.reqString("providerType");
     ProviderType type;
@@ -186,8 +186,8 @@ public final class ConfigSyncParser {
 
   private ModelSpec parseModel(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String providerName = entry.reqString("providerName");
-    String name = entry.reqString("name");
+    String providerName = entry.reqName("providerName");
+    String name = entry.reqName("name");
     String key = ConfigSyncRefs.modelName(providerName, name);
     declared.add(key);
     String modelId = entry.reqString("modelId");
@@ -216,7 +216,7 @@ public final class ConfigSyncParser {
 
   private AgentSpec parseAgent(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String name = entry.reqString("name");
+    String name = entry.reqName("name");
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
@@ -254,7 +254,7 @@ public final class ConfigSyncParser {
 
   private SkillSpec parseSkillPackage(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String packageName = entry.reqString("packageName");
+    String packageName = entry.reqName("packageName");
     declared.add(packageName);
     String description = entry.optString("description");
     String repositoryUrl = entry.reqString("repositoryUrl");
@@ -273,7 +273,7 @@ public final class ConfigSyncParser {
 
   private EnvironmentSpec parseEnvironment(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String name = entry.reqString("name");
+    String name = entry.reqName("name");
     declared.add(name);
     String token = entry.reqString("registrationToken");
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
@@ -284,7 +284,7 @@ public final class ConfigSyncParser {
 
   private McpSpec parseMcpServer(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String name = entry.reqString("name");
+    String name = entry.reqName("name");
     declared.add(name);
     String url = entry.reqString("url");
     Map<String, String> headers = entry.optStringMap("headers");
@@ -428,6 +428,15 @@ public final class ConfigSyncParser {
       String value = optString(key);
       if (value == null) {
         throw new AiValidationException(RESOURCE, path + "." + key + " is required");
+      }
+      return value;
+    }
+
+    String reqName(String key) {
+      String value = reqString(key);
+      if (value.isBlank() || !value.equals(value.strip())) {
+        throw new AiValidationException(
+            RESOURCE, path + "." + key + " must be non-blank and unpadded");
       }
       return value;
     }

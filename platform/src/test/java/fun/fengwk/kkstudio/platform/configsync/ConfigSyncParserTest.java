@@ -31,6 +31,32 @@ class ConfigSyncParserTest {
   }
 
   @Test
+  void paddedNamesCannotBypassDuplicateIdentityValidation() {
+    // 目录服务会 strip 名称；文件不能用带空白的别名绕过同名条目的硬错误。
+    assertThrows(
+        AiValidationException.class,
+        () -> parser.parse("providers:\n" + provider("p", "openai") + provider("' p '", "openai")));
+  }
+
+  @Test
+  void everyConfigurationIdentityIsNonBlankAndUnpadded() {
+    // 各类身份在解析期校验，不能把错误推迟到依赖判断、Git/MCP 准备或数据库写入。
+    List<?> cases =
+        (List<?>)
+            new ConfigSyncYaml()
+                .parse(ConfigSyncFixtures.resourceYaml("invalid-identities.yaml"))
+                .get("cases");
+    for (Object value : cases) {
+      Map<?, ?> fixture = (Map<?, ?>) value;
+      AiValidationException error =
+          assertThrows(
+              AiValidationException.class, () -> parser.parse((String) fixture.get("yaml")));
+      assertTrue(
+          error.getMessage().contains(fixture.get("path") + " must be non-blank and unpadded"));
+    }
+  }
+
+  @Test
   void unsupportedProviderProtocolIsSkippedNotFatal() {
     ConfigSyncParser.ParsedDocument document =
         parser.parse("providers:\n" + provider("p", "unknown_protocol"));
