@@ -29,16 +29,17 @@ describe('Toast', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('复制失败')
   })
 
-  it('restarts the auto-dismiss timer when the same feedback repeats via nonce', () => {
+  it('restarts the auto-dismiss timer when the same feedback is mounted again', () => {
     vi.useFakeTimers()
     const onDismiss = vi.fn()
-    const { rerender } = render(<Toast message="命令已复制" nonce={0} onDismiss={onDismiss} />)
+    const { rerender } = render(<Toast message="命令已复制" onDismiss={onDismiss} />)
 
     act(() => {
       vi.advanceTimersByTime(3000)
     })
-    // 相同 message 再次出现时靠 nonce 变化重新计时，而不是沿用旧定时器。
-    rerender(<Toast message="命令已复制" nonce={1} onDismiss={onDismiss} />)
+    // 与调用方一致，清除旧反馈后再挂载相同反馈。
+    rerender(<></>)
+    rerender(<Toast message="命令已复制" onDismiss={onDismiss} />)
     act(() => {
       vi.advanceTimersByTime(3000)
     })
@@ -59,6 +60,18 @@ describe('Toast', () => {
       vi.advanceTimersByTime(10000)
     })
     expect(onDismiss).not.toHaveBeenCalled()
+  })
+
+  it('restarts the timer when the displayed message changes', () => {
+    vi.useFakeTimers()
+    const onDismiss = vi.fn()
+    const { rerender } = render(<Toast message="安装命令已复制" onDismiss={onDismiss} />)
+    act(() => vi.advanceTimersByTime(3000))
+    rerender(<Toast message="卸载命令已复制" onDismiss={onDismiss} />)
+    act(() => vi.advanceTimersByTime(3000))
+    expect(onDismiss).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1000))
+    expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 
   it('dismisses manually through the keyboard-accessible close button', () => {

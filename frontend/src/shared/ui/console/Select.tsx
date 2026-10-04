@@ -251,30 +251,8 @@ export function Select({
     option: SelectOption,
   ) {
     if (event.key === 'Tab') {
-      // Portal 的 DOM 顺序不代表控件顺序：Tab 从触发按钮的相邻可聚焦控件继续。
-      const controls = Array.from(document.querySelectorAll<HTMLElement>(
-        'button, input, select, textarea, summary, a[href], [tabindex]',
-      )).filter(element => {
-        if (element.tabIndex < 0 || element.matches(':disabled') || menuRef.current?.contains(element)) {
-          return false
-        }
-        for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-          const style = getComputedStyle(ancestor)
-          if (ancestor.hidden || ancestor.inert || style.display === 'none' || style.visibility === 'hidden') {
-            return false
-          }
-        }
-        return true
-      })
-      const index = controls.indexOf(triggerRef.current!)
-      const adjacent = controls[index + (event.shiftKey ? -1 : 1)]
-      if (adjacent) {
-        event.preventDefault()
-        closeListbox()
-        adjacent.focus()
-      } else {
-        closeListbox(true)
-      }
+      // 同步恢复控件位置，再由浏览器执行原生 Tab/Shift+Tab 默认动作。
+      closeListbox(true)
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
