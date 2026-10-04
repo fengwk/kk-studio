@@ -418,52 +418,17 @@ function Test-JarVersionGate {
 }
 
 function Get-EncodedDaemonArgumentFixture {
-    # Synthesize a resolved install context so the production serializer can be inspected
-    # without resolving a real profile, gateway, token file, or Bash executable.
-    $savedParameters = $script:InvocationParameters
-    $savedGatewayUri = $GatewayUri
-    $savedNote = $Note
-    $savedTokenFile = $script:ResolvedTokenFile
-    $savedDataDir = $script:ResolvedDataDir
-    $savedBash = $script:SelectedBash
-    $savedLspConfig = $script:ResolvedLspConfig
-    $savedInstallRoot = $script:InstallRoot
+    $savedConfig = $script:InstalledConfig
     try {
-        $script:InvocationParameters = @{ Note = $true; LspConfig = $true }
-        $GatewayUri =
-            "wss://studio.example.invalid/api/harness/environment-daemon/v1?x=1&y=2"
-        $Note = New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587
-        $script:ResolvedTokenFile = "C:\Fixture Root\.config\kk-studio\daemon token.txt"
-        $script:ResolvedDataDir = "C:\Fixture Root\.kk-studio"
-        $script:SelectedBash = "C:\Program Files\Git\bin\bash.exe"
-        $script:ResolvedLspConfig = "C:\Fixture Root\lsp-config.json"
-        # The JAR uses an ASCII relative name, while application arguments use Base64. The
-        # non-ASCII install root lives only in the native working directory field.
-        $script:InstallRoot = "C:\Fixture Root\AppData\Local\kk-studio\" +
-            (New-TextFromCodePoints -CodePoints 0x62A4, 0x7406)
+        $root = "C:\Fixture Root\" + (New-TextFromCodePoints -CodePoints 0x62A4, 0x7406) + "\.kk-studio"
+        $script:InstalledConfig = "$root\daemon.json"
         return [pscustomobject] @{
             Arguments = @(New-DaemonArgumentList)
-            InstallRoot = $script:InstallRoot
-            Logical = @(
-                "--gateway-uri", $GatewayUri,
-                "--registration-token-file", $script:ResolvedTokenFile,
-                "--data-dir", $script:ResolvedDataDir,
-                "--note", $Note,
-                "--bash-executable", $script:SelectedBash,
-                "--lsp-config", $script:ResolvedLspConfig
-            )
+            InstallRoot = "$root\lib"
+            Logical = @("--config", $script:InstalledConfig)
         }
     }
-    finally {
-        $script:InvocationParameters = $savedParameters
-        $GatewayUri = $savedGatewayUri
-        $Note = $savedNote
-        $script:ResolvedTokenFile = $savedTokenFile
-        $script:ResolvedDataDir = $savedDataDir
-        $script:SelectedBash = $savedBash
-        $script:ResolvedLspConfig = $savedLspConfig
-        $script:InstallRoot = $savedInstallRoot
-    }
+    finally { $script:InstalledConfig = $savedConfig }
 }
 
 function Test-EncodedDaemonArgumentList {
@@ -553,7 +518,7 @@ function Set-OwnerOnlyReadAcl {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
-function Test-RegistrationTokenAcl {
+function Test-PrivateFileAcl {
     # The installer must prove private metadata without reading even the fixture bytes.
     $tempDirectory = Join-Path ([IO.Path]::GetTempPath()) (
         "kk-studio-daemon-acl-$([Guid]::NewGuid().ToString('N'))"
@@ -568,7 +533,7 @@ function Test-RegistrationTokenAcl {
         )
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         Set-OwnerOnlyReadAcl -Path $tokenPath -Owner $identity.User
-        $validated = Assert-RegistrationTokenFile `
+        $validated = Assert-PrivateFile `
             -Path $tokenPath -ExpectedOwnerSid $identity.User.Value
         Assert-Equal -Expected (Get-Item -LiteralPath $tokenPath).FullName `
             -Actual $validated -Message "owner-only token ACL is accepted"
@@ -587,7 +552,7 @@ function Test-RegistrationTokenAcl {
         )
         Set-Acl -LiteralPath $tokenPath -AclObject $acl
         Assert-Throws -Action {
-            Assert-RegistrationTokenFile `
+            Assert-PrivateFile `
                 -Path $tokenPath -ExpectedOwnerSid $identity.User.Value
         } -ExpectedMessage "another SID" -Message "foreign Allow ACE is rejected"
 
@@ -602,7 +567,7 @@ function Test-RegistrationTokenAcl {
         )
         Set-Acl -LiteralPath $tokenPath -AclObject $acl
         Assert-Throws -Action {
-            Assert-RegistrationTokenFile `
+            Assert-PrivateFile `
                 -Path $tokenPath -ExpectedOwnerSid $identity.User.Value
         } -ExpectedMessage "deny-read ACE" -Message "deny-read ACE is rejected"
 
@@ -611,7 +576,7 @@ function Test-RegistrationTokenAcl {
         $acl.SetAccessRuleProtection($false, $true)
         Set-Acl -LiteralPath $tokenPath -AclObject $acl
         Assert-Throws -Action {
-            Assert-RegistrationTokenFile `
+            Assert-PrivateFile `
                 -Path $tokenPath -ExpectedOwnerSid $identity.User.Value
         } -ExpectedMessage "inheritance must be disabled" `
             -Message "inherited ACL is rejected"
@@ -638,289 +603,225 @@ function Test-MissingScheduledTaskLookup {
     }
 }
 
-function Test-AtomicTokenReplacement {
-    # Exercise the PS -> .NET string binding directly, including the failing bare-null control.
-    # The real Save-RegistrationToken second write then proves production uses the safe binding.
-    if ($null -eq ("WindowsNullStringProbe" -as [type])) {
-        Add-Type -TypeDefinition @'
-public static class WindowsNullStringProbe {
-    public static bool IsNull(string value) { return value == null; }
-}
-'@
-    }
-    Assert-True -Condition ([WindowsNullStringProbe]::IsNull(
-        [System.Management.Automation.Language.NullString]::Value
-    )) -Message "NullString binds to a true null managed string, not an empty path"
-    Assert-True -Condition (-not [WindowsNullStringProbe]::IsNull($null)) `
-        -Message "bare PowerShell null is converted to an empty managed string"
-    Assert-True -Condition (-not [WindowsNullStringProbe]::IsNull("")) `
-        -Message "empty string is distinct from the null backup path"
-
-    # Mock only Windows ACL capabilities; temporary files and File.Replace remain real.
-    function Assert-NoReparseAncestors { param($Path) }
-    function Assert-PrivateDirectory { param($Path) }
-    function New-PrivateAcl { param([switch] $Directory) return "fixture ACL" }
-    function Set-Acl { param($LiteralPath, $AclObject) }
-    function Assert-RegistrationTokenFile {
-        param($Path, $ExpectedOwnerSid)
-        return $Path
-    }
-    $root = Join-Path ([IO.Path]::GetTempPath()) ("kk-null-backup-" + [Guid]::NewGuid().ToString("N"))
-    $savedConfig = $script:ConfigRoot
+function Test-PrivatePublication {
+    # Real NTFS ACLs, sibling validation and atomic replacement; never touch the host installation.
     $savedSid = $script:CurrentSid
-    $script:ConfigRoot = Join-Path $root "config"
-    $script:CurrentSid = "fixture SID"
-    $first = ConvertTo-SecureString "first fixture" -AsPlainText -Force
-    $second = ConvertTo-SecureString "second fixture" -AsPlainText -Force
-    try {
-        $path = Save-RegistrationToken -Token $first
-        $null = Save-RegistrationToken -Token $second
-        Assert-Equal -Expected "second fixture" -Actual ([IO.File]::ReadAllText($path)) `
-            -Message "production File.Replace succeeds on the second token write without a backup path"
-        Assert-SequenceEqual -Expected @("daemon.token") `
-            -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot | Select-Object -ExpandProperty Name) `
-            -Message "atomic replacement creates neither a backup secret nor a staging leftover"
-    }
-    finally {
-        $first.Dispose()
-        $second.Dispose()
-        $script:ConfigRoot = $savedConfig
-        $script:CurrentSid = $savedSid
-        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Test-RegistrationTokenPersistence {
-    # Real NTFS ACLs and Unicode bytes prove inline/prompt persistence remains private,
-    # atomic, and fail-closed without ever touching the user's actual configuration.
-    $root = Join-Path ([IO.Path]::GetTempPath()) ("kk-token-" + [Guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $root | Out-Null
-    $savedConfig = $script:ConfigRoot
-    $savedSid = $script:CurrentSid
+    $savedParameters = $script:InvocationParameters
+    $savedJavaHome = $script:SelectedJavaHome
+    $savedJava = $script:SelectedJava
     $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    Set-Acl -LiteralPath $root -AclObject (New-PrivateAcl -Directory)
-    $script:ConfigRoot = Join-Path $root (
-        "config " + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587)
-    )
-    $text = "fixture-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587, 0xD83D, 0xDE00)
-    $token = ConvertTo-SecureString $text -AsPlainText -Force
+    $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-private-" + [Guid]::NewGuid().ToString("N"))
+    function Resolve-JavaHome { param($ExplicitJavaHome); return (Join-Path $sandbox "jdk") }
+    function Resolve-Executable { param($Value, $DefaultName, $OptionName); return "bash.exe" }
+    function Assert-BashReady {}
     try {
-        $path = Save-RegistrationToken -Token $token
-        Assert-PrivateDirectory -Path $script:ConfigRoot
-        Assert-Equal -Expected $text -Actual ([IO.File]::ReadAllText($path)) `
-            -Message "private token bytes round-trip Unicode without BOM"
-        Assert-Equal -Expected $path -Actual (Assert-RegistrationTokenFile `
-            -Path $path -ExpectedOwnerSid $script:CurrentSid) `
-            -Message "persisted token satisfies the strict external-file ACL contract"
-        $replacement = ConvertTo-SecureString "replacement-fixture" -AsPlainText -Force
-        try {
-            $null = Save-RegistrationToken -Token $replacement
-            Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
-                -Message "atomic overwrite publishes the new token"
+        New-PrivateDirectory -Path $sandbox
+        $source = Join-Path $sandbox ("source-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587))
+        $target = Join-Path $sandbox "target"
+        New-PrivateDirectory -Path $source
+        New-PrivateDirectory -Path $target
+        $ConfigFile = Join-Path $source "daemon.json"
+        $TokenFile = Join-Path $source "daemon.token"
+        foreach ($file in @($ConfigFile, $TokenFile)) {
+            [IO.File]::WriteAllText($file, "public fixture", [Text.UTF8Encoding]::new($false))
+            Set-Acl -LiteralPath $file -AclObject (New-PrivateAcl)
         }
-        finally { $replacement.Dispose() }
+        $script:InvocationParameters = @{ ConfigFile = $ConfigFile; TokenFile = $TokenFile }
+        Resolve-InstallInputs
+        $destination = Join-Path $target "daemon.token"
+        Publish-PrivateFile -Source $TokenFile -Destination $destination
+        [IO.File]::WriteAllText($TokenFile, "replacement fixture", [Text.UTF8Encoding]::new($false))
+        Publish-PrivateFile -Source $TokenFile -Destination $destination
+        Assert-Equal -Expected "replacement fixture" -Actual ([IO.File]::ReadAllText($destination)) `
+            -Message "atomic replacement copies new bytes"
+        $null = Assert-PrivateFile -Path $destination -ExpectedOwnerSid $script:CurrentSid
+        Assert-Equal -Expected 0 -Actual @(Get-ChildItem -LiteralPath $target -Filter ".publish-*").Count `
+            -Message "no publication temporary file remains"
+        $TokenFile = $destination
+        Assert-Throws -Action { Resolve-InstallInputs } -ExpectedMessage "must be siblings" `
+            -Message "token outside config parent is rejected"
+        $TokenFile = Join-Path $source "daemon.token"
+        $script:InvocationParameters.JavaHome = ""
+        Assert-Throws -Action { Resolve-InstallInputs } -ExpectedMessage "-JavaHome is required" `
+            -Message "explicit empty JavaHome cannot fall back"
+        $script:InvocationParameters.Remove("JavaHome")
 
-        $invalid = ConvertTo-SecureString "invalid`nfixture" -AsPlainText -Force
-        try {
-            Assert-Throws -Action { Save-RegistrationToken -Token $invalid } `
-                -ExpectedMessage "control characters" `
-                -Message "invalid token fails after staging without replacing the old token"
-            Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
-                -Message "failed credential staging keeps the old bytes"
-            Assert-Equal -Expected 0 -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot `
-                -Filter "*.tmp").Count -Message "failed credential staging removes its private temp file"
-        }
-        finally { $invalid.Dispose() }
+        Assert-Throws -Action {
+            Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid "S-1-1-0"
+        } -ExpectedMessage "owned by the current user" -Message "wrong file owner is rejected"
+        Assert-Throws -Action {
+            Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 1
+        } -ExpectedMessage "bounded" -Message "oversized input rejected"
+        [IO.File]::WriteAllText($TokenFile, "")
+        Assert-Throws -Action {
+            Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid
+        } -ExpectedMessage "nonempty" -Message "empty input rejected"
 
-        $acl = Get-Acl -LiteralPath $path
-        $acl.SetAccessRuleProtection($false, $true)
-        Set-Acl -LiteralPath $path -AclObject $acl
-        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
-            -ExpectedMessage "inheritance must be disabled" `
-            -Message "an unsafe existing token is never overwritten"
-        Assert-Equal -Expected "replacement-fixture" -Actual ([IO.File]::ReadAllText($path)) `
-            -Message "rejected target retains its original contents"
-        Set-Acl -LiteralPath $path -AclObject (New-PrivateAcl)
-
-        $acl = Get-Acl -LiteralPath $script:ConfigRoot
-        $acl.SetAccessRuleProtection($false, $true)
-        Set-Acl -LiteralPath $script:ConfigRoot -AclObject $acl
-        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
-            -ExpectedMessage "protected ACL inheritance" `
-            -Message "an inherited directory ACL fails before writing token bytes"
-        Set-Acl -LiteralPath $script:ConfigRoot -AclObject (New-PrivateAcl -Directory)
+        # A junction needs no elevation, unlike a Windows symlink.
+        $junction = Join-Path $sandbox "junction"
+        New-Item -ItemType Junction -Path $junction -Target $source | Out-Null
+        Assert-Throws -Action { Assert-NoReparseAncestors -Path (Join-Path $junction "daemon.json") } `
+            -ExpectedMessage "reparse point" -Message "reparse ancestor rejected"
+        Remove-Item -LiteralPath $junction -Force
 
         $world = [System.Security.Principal.SecurityIdentifier]::new("S-1-1-0")
-        $acl = Get-Acl -LiteralPath $script:ConfigRoot
+        $acl = Get-Acl -LiteralPath $destination
         $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
             $world, [System.Security.AccessControl.FileSystemRights]::Read,
-            [System.Security.AccessControl.AccessControlType]::Allow
-        ))
-        Set-Acl -LiteralPath $script:ConfigRoot -AclObject $acl
-        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
-            -ExpectedMessage "another SID" -Message "a foreign directory Allow ACE is unsafe"
-        Set-Acl -LiteralPath $script:ConfigRoot -AclObject (New-PrivateAcl -Directory)
-        Assert-Equal -Expected 0 -Actual @(Get-ChildItem -LiteralPath $script:ConfigRoot `
-            -Filter "*.tmp").Count -Message "no temporary credential file remains"
+            [System.Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $destination -AclObject $acl
+        [IO.File]::WriteAllText($TokenFile, "should not publish")
+        Assert-Throws -Action { Publish-PrivateFile -Source $TokenFile -Destination $destination } `
+            -ExpectedMessage "another SID" -Message "unsafe existing target is not replaced"
+        Assert-Equal -Expected "replacement fixture" -Actual ([IO.File]::ReadAllText($destination)) `
+            -Message "rejected overwrite preserves previous bytes"
 
-        $acl = Get-Acl -LiteralPath $root
-        $acl.SetAccessRuleProtection($false, $true)
-        Set-Acl -LiteralPath $root -AclObject $acl
-        Assert-Throws -Action { Save-RegistrationToken -Token $token } `
-            -ExpectedMessage "protected ACL inheritance" `
-            -Message "an unsafe parent directory cannot be used to replace private storage"
-        Set-Acl -LiteralPath $root -AclObject (New-PrivateAcl -Directory)
-
-        $junction = Join-Path $root "junction"
-        New-Item -ItemType Junction -Path $junction -Target $script:ConfigRoot | Out-Null
-        try {
-            $script:ConfigRoot = $junction
-            Assert-Throws -Action { Save-RegistrationToken -Token $token } `
-                -ExpectedMessage "reparse point" -Message "reparse token storage is rejected"
-        }
-        finally {
-            # Remove only the junction itself, never recurse into its target.
-            [IO.Directory]::Delete($junction)
-        }
+        $acl = Get-Acl -LiteralPath $target
+        $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            $world, [System.Security.AccessControl.FileSystemRights]::Read,
+            [System.Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $target -AclObject $acl
+        Assert-Throws -Action { New-PrivateDirectory -Path $target } `
+            -ExpectedMessage "another SID" -Message "unsafe existing directory is not repaired"
+        Assert-True -Condition (@((Get-Acl -LiteralPath $target).GetAccessRules(
+            $true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object {
+            $_.IdentityReference.Value -eq "S-1-1-0"
+        }).Count -gt 0) -Message "directory protections are never silently rewritten"
     }
     finally {
-        $token.Dispose()
-        $script:ConfigRoot = $savedConfig
         $script:CurrentSid = $savedSid
-        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        $script:InvocationParameters = $savedParameters
+        $script:SelectedJavaHome = $savedJavaHome
+        $script:SelectedJava = $savedJava
+        Remove-Item -LiteralPath $sandbox -Recurse -Force
     }
 }
 
-function Test-InstallPrompts {
-    # Input collection is exercised independently of NTFS, downloads, JDK, and scheduler.
-    $savedParameters = $script:InvocationParameters
-    $savedGateway = $script:GatewayUri
-    $savedInlineToken = $script:RegistrationToken
-    $savedTokenFile = $script:ResolvedTokenFile
-    $savedData = $script:ResolvedDataDir
-    $savedJava = $script:SelectedJava
-    $savedJavaHome = $script:SelectedJavaHome
-    $savedBash = $script:SelectedBash
-    $savedHome = $script:HomePath
-    $savedConfig = $script:ConfigRoot
-    $savedPending = $script:PendingToken
-    $prompts = [Collections.Generic.List[string]]::new()
-    $expectedToken = "fixture-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587)
-    function Read-Host {
-        param($Prompt, [switch] $AsSecureString)
-        $prompts.Add($Prompt)
-        if ($AsSecureString) {
-            return ConvertTo-SecureString $expectedToken -AsPlainText -Force
-        }
-        return "wss://studio.example.invalid/daemon"
-    }
-    function Save-RegistrationToken {
-        param([Security.SecureString] $Token)
-        throw "input resolution must not persist a credential"
-    }
-    function Assert-PromptToken {
-        $Token = $script:PendingToken
-        $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
-        try {
-            Assert-Equal -Expected $expectedToken `
-                -Actual ([Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)) `
-                -Message "prompt retains the Unicode SecureString without disk writes"
-        }
-        finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
-    }
-    function Resolve-JavaHome { param($ExplicitJavaHome) return [IO.Path]::GetTempPath() }
-    function Resolve-Executable { param($Value, $DefaultName, $OptionName) return "C:\Fixture\bash.exe" }
+function Test-PrivateBackups {
+    # Real owner-private backup layout, without querying or registering any Scheduled Task.
+    $names = @("CurrentSid", "InstallRoot", "InstalledJar", "InstalledConfig", "InstalledToken", "BackupDirectory")
+    $saved = @{}
+    foreach ($name in $names) { $saved[$name] = (Get-Variable -Name $name -Scope Script).Value }
+    $root = Join-Path ([IO.Path]::GetTempPath()) ("kk-native-backup-" + [Guid]::NewGuid().ToString("N"))
     try {
-        $script:HomePath = [IO.Path]::GetTempPath()
-        $script:ConfigRoot = [IO.Path]::GetTempPath()
-        $script:InvocationParameters = @{}
-        Resolve-InstallInputs
-        Assert-Equal -Expected 2 -Actual $prompts.Count -Message "omitted URI and token both prompt"
-        Assert-Equal -Expected "wss://studio.example.invalid/daemon" -Actual $script:GatewayUri `
-            -Message "prompted URI is used by daemon arguments"
-        Assert-PromptToken
-        Assert-Equal -Expected (Join-Path $script:ConfigRoot "daemon.token") `
-            -Actual $script:ResolvedTokenFile -Message "only the future file path reaches daemon arguments"
-        $script:PendingToken.Dispose()
-        $script:PendingToken = $null
-        $prompts.Clear()
-        $script:RegistrationToken = $expectedToken
-        $script:InvocationParameters = @{
-            GatewayUri = $script:GatewayUri; RegistrationToken = $expectedToken
+        $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $script:InstallRoot = $root
+        $script:InstalledJar = Join-Path $root "lib/kk-studio-daemon.jar"
+        $script:InstalledConfig = Join-Path $root "daemon.json"
+        $script:InstalledToken = Join-Path $root "daemon.token"
+        New-PrivateDirectory -Path $root
+        New-PrivateDirectory -Path (Join-Path $root "lib")
+        foreach ($file in @($script:InstalledJar, $script:InstalledConfig, $script:InstalledToken)) {
+            [IO.File]::WriteAllText($file, "previous fixture", [Text.UTF8Encoding]::new($false))
+            Set-Acl -LiteralPath $file -AclObject (New-PrivateAcl)
         }
-        Resolve-InstallInputs
-        Assert-PromptToken
-        Assert-Equal -Expected 0 -Actual $prompts.Count -Message "explicit URI and inline token do not prompt"
-        Assert-True -Condition (-not $script:InvocationParameters.ContainsKey("RegistrationToken")) `
-            -Message "inline secret is removed from retained invocation parameters"
-        $script:InvocationParameters = @{ RegistrationToken = "fixture"; RegistrationTokenFile = "fixture" }
-        Assert-Throws -Action { Resolve-InstallInputs } -ExpectedMessage "mutually exclusive" `
-            -Message "inline and file credentials cannot be combined"
+        Backup-ManagedFiles -Task $null
+        $first = $script:BackupDirectory
+        Backup-ManagedFiles -Task $null
+        Assert-True -Condition ($first -ne $script:BackupDirectory) -Message "native backups are unique"
+        foreach ($backup in @($first, $script:BackupDirectory)) {
+            Assert-PrivateDirectory -Path $backup
+            foreach ($name in @("kk-studio-daemon.jar", "daemon.json", "daemon.token")) {
+                $path = Join-Path $backup $name
+                $null = Assert-PrivateFile -Path $path -ExpectedOwnerSid $script:CurrentSid
+                Assert-Equal -Expected "previous fixture" -Actual ([IO.File]::ReadAllText($path)) `
+                    -Message "native backup has private ACL and original bytes"
+            }
+        }
     }
     finally {
-        $script:InvocationParameters = $savedParameters
-        $script:GatewayUri = $savedGateway
-        $script:RegistrationToken = $savedInlineToken
-        $script:ResolvedTokenFile = $savedTokenFile
-        $script:ResolvedDataDir = $savedData
-        $script:SelectedJava = $savedJava
-        $script:SelectedJavaHome = $savedJavaHome
-        $script:SelectedBash = $savedBash
-        $script:HomePath = $savedHome
-        $script:ConfigRoot = $savedConfig
-        if ($null -ne $script:PendingToken) { $script:PendingToken.Dispose() }
-        $script:PendingToken = $savedPending
+        foreach ($name in $saved.Keys) { Set-Variable -Name $name -Scope Script -Value $saved[$name] }
+        Remove-Item -LiteralPath $root -Recurse -Force
     }
+}
+
+function Test-RealFatJarConfig {
+    # Native CI builds the actual fat JAR. A tiny process fixture is not release compatibility.
+    $jar = Join-Path (Resolve-ProductionSourceRoot) "harness/daemon/target/kk-studio-daemon.jar"
+    Assert-True -Condition (Test-Path -LiteralPath $jar -PathType Leaf) `
+        -Message "native acceptance requires the built real daemon fat JAR"
+    $sandbox = Join-Path ([IO.Path]::GetTempPath()) (
+        "kk-fat-jar-" + (New-TextFromCodePoints -CodePoints 0x4E2D, 0x6587) + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $sandbox | Out-Null
+    try {
+        Copy-Item -LiteralPath $jar -Destination (Join-Path $sandbox "daemon.jar")
+        $config = Join-Path $sandbox "daemon.json"
+        $token = Join-Path $sandbox "daemon.token"
+        [IO.File]::WriteAllText($config, '{"studioUrl":"https://studio.example.invalid"}', [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText($token, "public-native-fixture", [Text.UTF8Encoding]::new($false))
+        $java = Get-RequiredJavaExecutable
+        $version = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java -WorkingDirectory $sandbox `
+                -Arguments (@("-jar", "daemon.jar") + (ConvertTo-DaemonEncodedArguments -Arguments @("--version")))
+        }
+        Assert-Equal -Expected 0 -Actual $version.ExitCode -Message "real fat JAR version works"
+        Assert-True -Condition ($version.Stdout.Trim() -match "^kk-studio-daemon \S+$") `
+            -Message "real fat JAR identifies its version"
+        $arguments = @("-jar", "daemon.jar") + (ConvertTo-DaemonEncodedArguments -Arguments @("--check-config", $config))
+        $result = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java -Arguments $arguments -WorkingDirectory $sandbox
+        }
+        Assert-Equal -Expected 0 -Actual $result.ExitCode -Message "real fat JAR accepts unified config"
+        Assert-Equal -Expected "Daemon configuration is valid" -Actual $result.Stdout.TrimEnd([char[]] @("`r", "`n")) `
+            -Message "real preflight has fixed success output"
+        # Invalid input proves normal --config is understood without connecting to any host.
+        [IO.File]::WriteAllText($config, "{}", [Text.UTF8Encoding]::new($false))
+        $normal = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java -WorkingDirectory $sandbox `
+                -Arguments (@("-jar", "daemon.jar") + (ConvertTo-DaemonEncodedArguments -Arguments @("--config", $config)))
+        }
+        Assert-True -Condition ($normal.ExitCode -ne 0 -and ($normal.Stdout + $normal.Stderr) -match "studioUrl") `
+            -Message "real normal CLI loads config and rejects invalid studioUrl before startup"
+        [IO.File]::WriteAllText($config, '{"studioUrl":"https://studio.example.invalid"}', [Text.UTF8Encoding]::new($false))
+        Remove-Item -LiteralPath $token
+        $invalid = Invoke-WithoutJavaOptionEnvironment {
+            Invoke-NativeProcess -Executable $java -Arguments $arguments -WorkingDirectory $sandbox
+        }
+        Assert-True -Condition ($invalid.ExitCode -ne 0) -Message "real preflight rejects missing sibling token"
+        Assert-Equal -Expected 2 -Actual @(Get-ChildItem -LiteralPath $sandbox -Force).Count `
+            -Message "preflight never creates data or locks"
+    }
+    finally { Remove-Item -LiteralPath $sandbox -Recurse -Force }
 }
 
 function Test-PureValidation {
-    Assert-GatewayUri -Value "wss://studio.example.invalid/api/harness/environment-daemon/v1"
-    Assert-GatewayUri -Value "ws://127.0.0.1:8080/path?x=1&y=2"
-    Assert-Throws -Action { Assert-GatewayUri -Value "https://example.invalid" } `
-        -ExpectedMessage "ws or wss" -Message "HTTP gateway is rejected"
-    Assert-Throws -Action { Assert-GatewayUri -Value "wss://" } `
-        -ExpectedMessage "absolute ws/wss" -Message "hostless gateway is rejected"
-
-    Assert-Note -Value "trusted host note"
-    Assert-Throws -Action { Assert-Note -Value " padded" } `
-        -ExpectedMessage "surrounding whitespace" -Message "padded note is rejected"
-    Assert-Throws -Action { Assert-Note -Value ("x" * 513) } `
-        -ExpectedMessage "512" -Message "long note is rejected"
-
-    Assert-AbsoluteWindowsPath -Value "C:\Fixture\token.txt" -Name "fixture"
-    Assert-AbsoluteWindowsPath -Value "\\server\share\token.txt" -Name "fixture"
+    Assert-AbsoluteWindowsPath -Value "C:\Fixture\daemon.json" -Name "fixture"
+    Assert-AbsoluteWindowsPath -Value "\\server\share\daemon.json" -Name "fixture"
     Assert-Throws -Action {
-        Assert-AbsoluteWindowsPath -Value "relative\token.txt" -Name "fixture"
+        Assert-AbsoluteWindowsPath -Value "relative\daemon.json" -Name "fixture"
     } -ExpectedMessage "absolute drive or UNC" -Message "relative path is rejected"
     Assert-Throws -Action {
         Assert-NoControlCharacters -Value "line1`nline2" -Name "fixture"
     } -ExpectedMessage "control characters" -Message "newline is rejected"
+    Assert-Equal -Expected "'C:\owner''s profile\daemon.json'" `
+        -Actual (ConvertTo-PowerShellLiteral -Value "C:\owner's profile\daemon.json") `
+        -Message "manual recovery literals quote apostrophes safely"
+    $instructions = Get-ConflictBackupCommands
+    $commands = $instructions.Substring($instructions.IndexOf("`n") + 1)
+    $tokens = $null
+    $errors = $null
+    $null = [Management.Automation.Language.Parser]::ParseInput($commands, [ref] $tokens, [ref] $errors)
+    Assert-Equal -Expected 0 -Actual $errors.Count -Message "manual private-backup commands parse"
+    Assert-True -Condition ($commands.IndexOf("Set-Acl") -gt $commands.IndexOf("SetAccessRuleProtection")) `
+        -Message "manual backup instructions construct protected owner ACL"
+}
 
-    Assert-Throws -Action {
-        Assert-LspConfigFile -Path "relative\config.json"
-    } -ExpectedMessage "absolute drive or UNC" -Message "relative lsp-config is rejected"
-    Assert-Throws -Action {
-        Assert-LspConfigFile -Path "C:\path\~dir\config.json"
-    } -ExpectedMessage "~" -Message "tilde in lsp-config is rejected"
-    Assert-Throws -Action {
-        Assert-LspConfigFile -Path "C:\path\%VAR%\config.json"
-    } -ExpectedMessage "environment-variable placeholders" -Message "percent placeholder is rejected"
-    Assert-Throws -Action {
-        Assert-LspConfigFile -Path "C:\path\`$VAR\config.json"
-    } -ExpectedMessage "environment-variable placeholders" -Message "dollar placeholder is rejected"
-    Assert-Throws -Action {
-        Assert-LspConfigFile -Path "C:\nonexistent\config.json"
-    } -ExpectedMessage "existing readable regular file" -Message "missing lsp-config is rejected"
-
-    $tempLspConfig = [IO.Path]::GetTempFileName()
-    try {
-        $validated = Assert-LspConfigFile -Path $tempLspConfig
-        Assert-Equal -Expected (Get-Item -LiteralPath $tempLspConfig).FullName `
-            -Actual $validated -Message "valid lsp config file is accepted"
+function Test-BashReadiness {
+    function Resolve-Executable { param($Value, $DefaultName, $OptionName); return "fixture-bash" }
+    function Invoke-NativeProcess {
+        param($Executable, $Arguments)
+        Assert-SequenceEqual -Expected @("--version") -Actual $Arguments -Message "Bash probe is non-mutating"
+        return $probe
     }
-    finally {
-        Remove-Item -LiteralPath $tempLspConfig -Force -ErrorAction SilentlyContinue
-    }
+    $probe = [pscustomobject] @{ Stdout = "GNU bash, version 5"; ExitCode = 0 }
+    Assert-BashReady
+    $probe.ExitCode = 1
+    Assert-Throws -Action { Assert-BashReady } -ExpectedMessage "Bash on PATH is not ready" `
+        -Message "failed Bash forwarding executable is rejected"
+    $probe.ExitCode = 0
+    $probe.Stdout = "not Bash"
+    Assert-Throws -Action { Assert-BashReady } -ExpectedMessage "Bash on PATH is not ready" `
+        -Message "wrong executable rejected"
 }
 
 function Assert-WindowsIdentity {
@@ -1040,6 +941,8 @@ function Test-ScheduledTaskDefinition {
     Assert-Equal -Expected 1 -Actual @($definition.Triggers).Count `
         -Message "one logon trigger"
     $trigger = @($definition.Triggers)[0]
+    Assert-Equal -Expected "MSFT_TaskLogonTrigger" -Actual $trigger.CimClass.CimClassName `
+        -Message "trigger is AtLogOn, not a system-wide startup trigger"
     Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity $trigger.UserId `
         -Message "logon trigger is scoped to current SID"
 }
@@ -1047,8 +950,6 @@ function Test-ScheduledTaskDefinition {
 try {
     Test-QuotingGoldenCases
     Test-ReleaseInstallerContracts
-    Test-InstallPrompts
-    Test-AtomicTokenReplacement
     Test-JavaVersionCapture
     Test-EncodedDaemonArgumentList
     $fixture = New-ProbeFixture -Java (Get-RequiredJavaExecutable)
@@ -1063,11 +964,14 @@ try {
             -ErrorAction SilentlyContinue
     }
     Test-JdkVersionGate
+    Test-PureValidation
+    Test-BashReadiness
     if (-not $ProcessOnly) {
-        Test-RegistrationTokenAcl
-        Test-RegistrationTokenPersistence
+        Test-PrivateFileAcl
+        Test-PrivatePublication
+        Test-PrivateBackups
+        Test-RealFatJarConfig
         Test-MissingScheduledTaskLookup
-        Test-PureValidation
         Test-WindowsIdentityAssertion
         Test-ScheduledTaskDefinition
     }
