@@ -69,7 +69,8 @@ class ConfigSyncServiceImplTest {
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          toolCatalog);
+          toolCatalog,
+          ConfigSyncFixtures.MODEL_CONFIG_PARSER);
 
   private final ConfigSyncServiceImpl service =
       new ConfigSyncServiceImpl(snapshotReader, graph, exporter, parser, planner, applier);

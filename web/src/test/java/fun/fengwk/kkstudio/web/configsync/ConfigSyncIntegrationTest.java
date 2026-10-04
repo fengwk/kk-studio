@@ -28,10 +28,13 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
@@ -291,6 +294,71 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult result = checkRejected(yaml);
     assertFalse(body(result).contains(token), "check error must not echo the token");
     assertNull(findEnvironment(name), "rejected check must not write");
+  }
+
+  /**
+   * Agent 引用的未知 Model variant 必须在 check 与执行两个阶段都硬拒绝且零写入，而不是等到写 Agent 时才由服务层报错；判定依据是导入后将生效的 模型
+   * config，错误不回显 raw variant 或凭据。
+   */
+  @Test
+  void unknownAgentModelVariantIsRejectedBeforeAnyWrite() throws Exception {
+    String suffix = unique();
+    String provider = "vv_provider_" + suffix;
+    String model = "vv_model_" + suffix;
+    String agent = "vv_agent_" + suffix;
+    String rawVariant = "raw_variant_" + suffix;
+    String credential = "vv-secret-" + suffix;
+
+    String yaml =
+        modelVariantDocument(
+            provider, model, credential, modelConfig("{}", "1.25"), agent, rawVariant);
+
+    MvcResult checkResult = checkRejected(yaml);
+    String checkBody = body(checkResult);
+    assertFalse(checkBody.contains(rawVariant), "check error must not echo the raw variant");
+    assertFalse(checkBody.contains(credential), "check error must not echo the credential");
+    assertFalse(checkBody.contains("defaultVariant"), "check error must not echo model config");
+    assertNull(findProvider(provider), "rejected check must not write provider");
+    assertNull(findModel(provider, model), "rejected check must not write model");
+    assertNull(findAgent(agent), "rejected check must not write agent");
+
+    // allowPartial 也不能把已知非法 variant 降级为 skip：执行阶段同样硬拒绝且不写此前条目。
+    MvcResult importResult = importRejected(yaml, true);
+    assertFalse(
+        body(importResult).contains(rawVariant), "import error must not echo the raw variant");
+    assertNull(findProvider(provider), "rejected import must not write earlier provider");
+    assertNull(findModel(provider, model), "rejected import must not write earlier model");
+    assertNull(findAgent(agent), "rejected import must not write agent");
+  }
+
+  /** 文件内同名 Model config 覆盖 DB 旧 config：文件新增的 variant 通过预检查且零写入，DB 独有 variant 被移除后拒绝。 */
+  @Test
+  void fileModelConfigOverridesStoredConfigForVariantPrecheck() throws Exception {
+    String suffix = unique();
+    String provider = "ov_provider_" + suffix;
+    String model = "ov_model_" + suffix;
+    String agent = "ov_agent_" + suffix;
+    createProvider(provider, "override provider");
+    createModel(provider, model, "1.25", "{}"); // DB config 只声明 default variant。
+
+    String fileOnly = "file_variant_" + suffix;
+    AgentModelConfigDTO fileConfig = modelConfigWithVariants(List.of(fileOnly));
+    String credential = "vv-secret-" + suffix;
+
+    // Agent 引用文件新增 variant：预检查按文件 config 通过，且不写。
+    String accepted =
+        modelVariantDocument(provider, model, credential, fileConfig, agent, fileOnly);
+    JsonNode check = checkData(accepted);
+    assertTrue(
+        check.path("created").findValuesAsText("name").contains(agent),
+        "file-only variant must pass precheck: " + check);
+    assertNull(findAgent(agent), "check must not write");
+
+    // Agent 引用 DB 独有、已被文件移除的 default variant：必须按文件 config 硬拒绝。
+    String rejected =
+        modelVariantDocument(provider, model, credential, fileConfig, agent, "default");
+    checkRejected(rejected);
+    assertNull(findAgent(agent), "rejected check must not write agent");
   }
 
   /** 部分导入必须显式授权；执行阶段重跑同一校验，不信任已完成的预检查。 */
@@ -1276,6 +1344,61 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
   private static Map<String, String> agentRef(String name) {
     return ref("agents", name);
+  }
+
+  private static Map<String, Object> configYaml(Object config) {
+    return new ConfigSyncYaml().toMap(config, "config");
+  }
+
+  private static String yamlDocument(Map<String, Object> document) {
+    return new ConfigSyncYaml().dump(document);
+  }
+
+  /** 单一 "default" variant 的模型 config 之外，按需构造只声明文件内 variant 的 config。 */
+  private static AgentModelConfigDTO modelConfigWithVariants(List<String> variantIds) {
+    AgentModelConfigDTO config = modelConfig("{}", "1.25");
+    List<AgentModelVariantDTO> variants = new ArrayList<>();
+    for (String id : variantIds) {
+      AgentModelVariantDTO variant = new AgentModelVariantDTO();
+      variant.setId(id);
+      variants.add(variant);
+    }
+    config.setVariants(variants);
+    config.setDefaultVariant(variantIds.get(0));
+    return config;
+  }
+
+  /** 由 typed DTO 构造含 provider + model + agent 的完整 config sync YAML，避免手写长 fixture。 */
+  private static String modelVariantDocument(
+      String provider,
+      String model,
+      String credential,
+      AgentModelConfigDTO config,
+      String agent,
+      String variant) {
+    Map<String, Object> providerEntry = new LinkedHashMap<>();
+    providerEntry.put("name", provider);
+    providerEntry.put("providerType", "openai");
+    providerEntry.put("baseUrl", "https://example.com/v1");
+    providerEntry.put("credential", credential);
+
+    Map<String, Object> modelEntry = new LinkedHashMap<>();
+    modelEntry.put("providerName", provider);
+    modelEntry.put("name", model);
+    modelEntry.put("modelId", "wire-" + model);
+    modelEntry.put("config", configYaml(config));
+
+    Map<String, Object> agentEntry = new LinkedHashMap<>();
+    agentEntry.put("name", agent);
+    agentEntry.put("model", provider + "/" + model);
+    agentEntry.put("variant", variant);
+    agentEntry.put("config", configYaml(agentConfig(List.of(), List.of(), List.of())));
+
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("providers", List.of(providerEntry));
+    document.put("models", List.of(modelEntry));
+    document.put("agents", List.of(agentEntry));
+    return yamlDocument(document);
   }
 
   private static String unique() {

@@ -31,13 +31,16 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -64,7 +67,8 @@ class ConfigSyncPlannerTest {
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          toolCatalog);
+          toolCatalog,
+          ConfigSyncFixtures.MODEL_CONFIG_PARSER);
 
   private ConfigSyncSnapshot emptySnapshot() {
     return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
@@ -615,5 +619,166 @@ class ConfigSyncPlannerTest {
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
     assertTrue(skipped(plan.skipped(), "agents", "a"));
+  }
+
+  /** 既有 Model 未声明 Agent 显式 variant 时预检查硬拒绝；错误只带安全条目名，不回显 raw variant。缺 Model 仍走依赖 skip，不被此规则遮蔽。 */
+  @Test
+  void agentVariantMustBeDeclaredByAvailableModel() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> unknown =
+        document(
+            agent(
+                "a",
+                "p/m",
+                "raw-variant-xyz",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(unknown)));
+    assertTrue(error.getMessage().contains("unknown model variant"));
+    assertTrue(error.getMessage().contains("a"));
+    assertFalse(error.getMessage().contains("raw-variant-xyz"));
+
+    // 缺 Model 的 Agent 不因 variant 被硬拒绝，而是按既有依赖政策 skip。
+    Map<String, Object> missingModel =
+        document(
+            agent(
+                "b",
+                "q/x",
+                "raw-variant-xyz",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(missingModel));
+    assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "b"));
+  }
+
+  /** 无 variant 或仅空白的 Agent 不触发声明校验，维持既有“不覆盖 default”语义。 */
+  @Test
+  void agentWithoutVariantIsNotDeclaredChecked() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> doc = new LinkedHashMap<>();
+    doc.put(
+        "agents",
+        List.of(
+            ConfigSyncFixtures.mapOf(
+                "name",
+                "no_variant",
+                "model",
+                "p/m",
+                "config",
+                ConfigSyncFixtures.agentConfigMap(
+                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
+            ConfigSyncFixtures.mapOf(
+                "name",
+                "blank_variant",
+                "model",
+                "p/m",
+                "variant",
+                "   ",
+                "config",
+                ConfigSyncFixtures.agentConfigMap(
+                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())))));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(doc));
+
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "no_variant")));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "blank_variant")));
+  }
+
+  /** 文件内同名 Model config 覆盖快照：文件新增的 variant 通过，快照独有而被移除的 variant 被拒。 */
+  @Test
+  void fileModelConfigOverridesSnapshotForVariantPrecheck() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(
+                    model(
+                        "p",
+                        "m",
+                        ConfigSyncFixtures.modelConfigWithVariants(List.of("old"), "old"))),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> fileModel =
+        ConfigSyncFixtures.mapOf(
+            "providerName",
+            "p",
+            "name",
+            "m",
+            "modelId",
+            "gpt",
+            "config",
+            ConfigSyncFixtures.modelConfigMap(
+                ConfigSyncFixtures.modelConfigWithVariants(List.of("new"), "new")));
+
+    Map<String, Object> withNew =
+        documentWithModel(
+            fileModel,
+            agent(
+                "a",
+                "p/m",
+                "new",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(withNew));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+
+    Map<String, Object> withOld =
+        documentWithModel(
+            fileModel,
+            agent(
+                "a",
+                "p/m",
+                "old",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    assertThrows(AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(withOld)));
+  }
+
+  private static Map<String, Object> document(Map<String, Object> agent) {
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("agents", List.of(agent));
+    return document;
+  }
+
+  private static Map<String, Object> documentWithModel(
+      Map<String, Object> model, Map<String, Object> agent) {
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("models", List.of(model));
+    document.put("agents", List.of(agent));
+    return document;
+  }
+
+  private static Map<String, Object> agent(
+      String name, String model, String variant, AgentDefinitionConfigDTO config) {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("name", name);
+    entry.put("model", model);
+    entry.put("variant", variant);
+    entry.put("config", ConfigSyncFixtures.agentConfigMap(config));
+    return entry;
   }
 }

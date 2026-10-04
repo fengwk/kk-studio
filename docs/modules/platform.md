@@ -245,6 +245,7 @@ YAML 使用业务名称寻址，只保存可编辑字段，显式包含 Provider
 导入检查复用写入路径的字段与 codec 校验，在一次计划快照上分类新增、覆盖和跳过，不写数据库。
 未知或不支持内容、依赖不满足和外部准备失败可明确跳过；必填缺失、结构/类型/有效值错误、
 Environment 令牌身份冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
+Agent Variant 按导入后将生效的 Model 配置检查，文件内同名 Model 优先；未知 Variant 整份拒绝。
 Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完成。
 
 执行重新生成计划，按名称新增或更新，不删除文件外配置；有跳过项而未显式 `allowPartial=true`
