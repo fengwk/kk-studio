@@ -11,16 +11,19 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 | Linux / macOS | [daemon/install.sh](daemon/install.sh) | JDK 21、Bash、curl、SHA-256 工具；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
 | Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | JDK 21、PowerShell 5.1/7、ScheduledTasks、`bash.exe`；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
 
-默认 `install` 从 GitHub latest 下载 JAR 与 SHA 文件，隐藏交互询问 gateway/token，写用户服务定义并启动。`upgrade` 下载新 JAR、复用已有配置并重启；`status` 只读；`uninstall` 删除受管服务定义与 JAR，保留 token、数据目录。支持 `--version` / `-Version` 固定发布版本；仅开发者使用 `--from-source` / `-FromSource`，该模式才需要 checkout 与 Maven。
+正常入口是 Studio 的 Web 安装弹窗：保存配置后复制命令，脚本会自行暂存 `daemon.json` 与
+`daemon.token`、下载安装器并执行。安装器只有 `install` / `status` / `uninstall` / `help`
+四个动作，稳定契约是
+`bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token> [--java-home <绝对 JDK21>]`
+（Windows 为 `-ConfigFile` / `-TokenFile` / `-JavaHome`）。它默认下载官方 GitHub latest release
+的 JAR 与 SHA 文件、用新 JAR `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
+保留数据；没有交互提示，也没有 from-source 或单独 upgrade 动作。`status` 只读；`uninstall`
+删除受管服务定义与 JAR，保留配置、token、数据与日志。详情与三平台排错见
+[Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 
-Unix 安装与更新可直接执行：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash
-curl -fsSL https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon/install.sh | bash -s -- upgrade
-```
-
-Windows 下载脚本为临时或明确的用户文件，再用 `powershell -File` 执行。PowerShell 5.1 的 TLS 1.2、Unicode、token 权限、可复制安装/更新命令与三平台排错统一见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。可保留脚本日常管理，但要重新下载才能获取新版安装器。下载/预检失败保留现有安装，替换与重启阶段失败不自动回滚；同名服务的所有权标记不匹配时拒绝管理。
+安装器从 checkout 构建或直接运行安装器只属于开发/CI fixture，用来验证脚本契约，**不是用户安装
+路径**；Fixture 会替代网络与服务管理命令，不注册真实 systemd/launchd 服务，测试入口见
+[开发与测试](../docs/operations/development-and-testing.md#daemon-安装脚本回归)。
 
 ## 日常开发
 
