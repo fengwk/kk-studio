@@ -136,7 +136,8 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
 解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
-构建或直接运行安装器只是开发/CI fixture，不是用户安装路径。测试不注册真实 systemd/launchd 服务。
+运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实 shaded JAR 由 Maven
+独立构建。测试不注册真实 systemd/launchd 服务。
 Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
 
 ```powershell
@@ -148,6 +149,9 @@ pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_w
 Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
 应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
 验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
+
+Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证生成的 Windows 安装命令
+在真实 PowerShell 子进程中暂存 owner-only 文件、UTF-8 字节与清理，仅在 Windows 主机执行。
 
 只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
@@ -351,10 +355,15 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 免费 L1 覆盖的部分产品契约面：
 
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
-  `config_sync.environment_identity_and_token` / `config_sync.import_precheck_and_partial_confirmation`：
-  七类配置清单、凭据随 YAML 导出、导入前的新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、
-  同名 Provider 更新、Environment 身份、注册令牌与保存的安装设置恢复，以及同步响应的 `no-store`。
+  `config_sync.environment_identity_and_token` /
+  `config_sync.environment_install_config_roundtrip` /
+  `config_sync.install_config_hard_invalid_precheck`：七类配置清单、凭据随 YAML 导出、导入前的
+  新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌保留，
+  以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌的导出导入往返、
+  token+配置原子更新与清除、installConfig 硬错误在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
   这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
+- `environment.install_config_cas_roundtrip`：`PUT .../install-config` 以 `expectedVersion` CAS 保存
+  嵌套 `installConfig`，仅内容变化时推进版本，相同配置 no-op 不推进；硬非法值 400 且零写入、不回显提交值。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
   幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
