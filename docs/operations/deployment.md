@@ -267,17 +267,12 @@ distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操�
 
 Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon/v1` 连接 App。
 
-```text
---gateway-uri ws://app:8080/api/harness/environment-daemon/v1
---note "Isolated Docker reliability environment."
---data-dir /workspace/.kkstudio/daemon
-```
-
-注册凭证不经 argv 传递：Compose 只向容器注入 `KK_STUDIO_DAEMON_REGISTRATION_TOKEN`，
-[daemon-entrypoint.sh](../../deploy/reliability/daemon-entrypoint.sh) 把它写成
-`/home/kkdaemon/.kkstudio/daemon-registration.token`（目录 0700、文件 0600）并从环境中 `unset`，
-再用 `--registration-token-file <绝对路径>` 传入。凭证不出现在 `ps` 可见的 argv，也不留在
-`/proc/<pid>/environ`。
+容器入口在启动前按与产品相同的布局物化配置与凭证：把注入的注册凭证写为
+`/workspace/.kk-studio/daemon.token`（目录 0700、文件 0600），并按 studioUrl `http://app:8080`
+生成兄弟 `daemon.json`，最后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
+凭证文本既不进入 argv（`ps` 不可见），也不残留在 `/proc/<pid>/environ`；Daemon 由配置的
+`studioUrl` 自行派生上述 gateway。容器配置不含 `--gateway-uri`、`--data-dir` 或 `--lsp-config`
+等第二入口。
 
 [daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 JDK 21 builder 构建
 [`harness/daemon`](../../harness/daemon) 单文件 shaded JAR，runtime 使用
@@ -457,10 +452,10 @@ Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-
 `127.0.0.1:18080`，Vite/HMR 默认监听 `127.0.0.1:5173`；配置文件的权限要求、键白名单与失败
 边界见[开发与测试](development-and-testing.md#本机-preview-的外部数据面)。
 
-Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机按
-[Environment Daemon 安装与运行](environment-daemon.md)安装常驻服务，并连接 NAS App 的
-gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制、注册 token 文件、
-升级与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
+Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机通过 Studio 的安装弹窗保存
+配置、复制命令并执行，宿主 Daemon 再按配置中的 studioUrl 连接 NAS App 的
+`wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制、安装设置字段、注册 token
+文件、更新与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界
 
@@ -476,8 +471,9 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
 registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
-或报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现
-在 Daemon argv 或环境变量中。本机 preview 的配置文件同样留在仓库之外、只有 owner 可读，脚本
+或报告；registration token 只经 owner-only 的 `daemon.token` 兄弟文件传递，由 `install` 的
+`--config-file` / `--token-file` 读取，不出现在 Daemon argv 或环境变量中。本机 preview 的配置文件同样
+留在仓库之外、只有 owner 可读，脚本
 只把它当作数据面输入，不打印其中的值。共享数据库维护流程（产品导出配置、重建空库、当前 Schema 初始化与产品导入）见
 [开发与测试](development-and-testing.md#共享数据库重建)。
 

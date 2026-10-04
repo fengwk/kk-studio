@@ -10,7 +10,7 @@ Environment Daemon 是目标宿主上的独立 JVM 进程，把 Platform 的原�
 
 单独 `--help` / `-h` 或 `--version` 不打开数据目录。机器入口 `--base64-args` 必须在首位，后续每个 token 是一个原始应用参数的 UTF-8 Base64；[`DaemonArguments`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonArguments.java) 严格解码一次，拒绝非法 Base64、UTF-8、null 与 NUL，且不回显原值。它不是加密或第二套配置来源。Windows 安装器用该入口传应用参数，并通过任务的 Unicode 字段设置 Java 路径和工作目录，以 ASCII 相对 JAR 名规避 JDK 21 launcher 的 ANSI argv 转换损失。
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 只消费 CLI；gateway 与 token 文件路径必填，数据目录默认用户 HOME 下 `.kk-studio`。完整参数见安装指南。进程不接受 token 文本；安装器的交互或直接 token 入口最终也只给进程传文件路径。
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 只消费唯一的 `--config <绝对路径>`：配置文件是 `daemon.json`，其父目录就是运行数据目录，同目录的 `daemon.token` 是 owner-only 注册凭证。gateway 由配置里的 `studioUrl` 派生，心跳/重连固定 `PT15S`/`PT1S`/`PT30S`。进程不接受 token 文本，也不接受 gateway、数据目录或 LSP 文件路径等第二配置来源；完整参数见安装指南。
 
 [`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 校验绝对路径、普通文件和非符号链接，在 POSIX 上要求属主可读且无 group/other 权限位。它不核对 Unix UID，也不复核 Windows DACL；当前用户所有权和 Windows ACL 由安装器检查。配置对象只保存路径，每次 HELLO 前读取 UTF-8 内容并去除外围空白，凭证不进入配置对象的 `toString` 或日志。
 
@@ -98,7 +98,7 @@ grep/find 用 Java NIO 遍历，不依赖外部检索二进制。忽略规则从
 
 ### LSP
 
-[`LspDiscovery`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/LspDiscovery.java) 在 CLI 解析时读取 `--lsp-config`；缺省禁用，JSON 非法则启动失败。配置声明外部语言服务器命令、扩展名、项目根标记，完整可复制例子见安装指南。read header 只探测配置与可执行程序，不启动服务器，也不证明其能初始化。
+[`LspDiscovery`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/LspDiscovery.java) 在 CLI 解析时从共享 `DaemonConfiguration` 的 `lsp.servers` 构建；缺省禁用，结构与取值非法则启动失败。配置声明外部语言服务器命令、扩展名、项目根标记，完整可复制例子见安装指南；Daemon 不自动安装语言服务器，也不接受独立 `--lsp-config` 文件。read header 只探测配置与可执行程序，不启动服务器，也不证明其能初始化。
 
 客户端按项目根与配置复用 stdio 连接，闲置 5 分钟且无在途请求后回收，关闭宽限 1 秒。查询前同步文件，位置编码按服务器声明协商；协议流持续解析，stderr 仅留有界诊断尾部。请求超时/取消只发 `$/cancelRequest`，不终止共享客户端。jdtls 才支持 Java class 源码请求，无 javap 回退。行为证据见[内置 LSP 测试映射](../operations/builtin-lsp-tests.md)。
 

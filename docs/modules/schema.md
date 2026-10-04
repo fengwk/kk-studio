@@ -27,7 +27,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
 | Plugin | plugin_credential：认证密文、状态、refresh lease | [Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| Environment | environment、environment_connection：注册与路由租约、宿主/Skill 投影 | [Environment](harness-environment.md) |
+| Environment | environment、environment_connection：注册与路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/work/evidence | [Project](project.md) |
@@ -53,6 +53,8 @@ Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue �
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
 Harness 命令按 sequence 与 idempotencyKey 唯一，Join 固定匹配回执与交付坐标。
 Work lease 成对，required_environment_id 非空仅适用于 TOOL。
+`environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
+应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。

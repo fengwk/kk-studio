@@ -1,7 +1,7 @@
 # 内置 LSP 的行为验证
 
-LSP 链路从 `--lsp-config` 进入服务器与项目根发现，经真实 stdio JSON-RPC，最终服务
-`lsp.goto-definition`、`lsp.workspace-symbols` 与 `lsp.java-decompile`。
+LSP 链路从共享 `DaemonConfiguration` 的内联 `lsp.servers` 进入服务器与项目根发现，经真实 stdio
+JSON-RPC，最终服务 `lsp.goto-definition`、`lsp.workspace-symbols` 与 `lsp.java-decompile`。
 验证时分别观察发现、协议、复用和进程清理，不能把假服务器返回成功当成真实 jdtls 已安装或可反编译。
 行为定义见[Harness Daemon](../modules/harness-daemon.md)，配置入口见
 [Environment Daemon 安装与运行](environment-daemon.md)。
@@ -22,17 +22,20 @@ Daemon 不绑定 `jacoco:check`。检查目标类实际执行与平台跳过项�
 ## 发现正确的服务器和项目根
 
 [`LspDiscoveryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LspDiscoveryTest.java)
-验证扩展名大小写、JSON 配置拒绝、命令的绝对/家目录路径与安装状态：
+验证扩展名大小写、结构化配置解析、命令的绝对/家目录路径与安装状态：
 
 - `prefersShallowestRootMarkerInsideGitBoundary` 验证同一 Git 边界内最浅的 root marker
   优先于更深的 root marker。
 - `stopsAtWorktreeGitFileBoundary` 与 `fallsBackToFirstMatchMarkerThenFileParent` 验证 `.git` 文件/目录
   是扫描上界、缺 root marker 时的回退；非 Git 项目由 `nonGitProjectUsesFileParentDirectory` 验证。
 - `supportRequiresInstalledExecutable`、`resolvesAbsoluteAndHomeRelativeCommands`、
-  `windowsExecutableSuffixesFollowPathext` 验证可执行命令解析；Windows 运行期分支仍需 Windows 原生测试。
+  `expandsHomeShortcuts`、`windowsExecutableSuffixesFollowPathext` 验证可执行命令解析；
+  Windows 运行期分支仍需 Windows 原生测试。
+- `readsServersFromJsonConfiguration` 与 `rejectsDuplicateRuntimeServerIds` 验证共享 JSON 配置到
+  运行时服务器的映射和重复 id 拒绝；未知字段与非法取值由共享 codec 测试覆盖。
 
 Daemon 不自动选择 JDK、安装服务器或注入 jdtls `-data`；服务器命令与标记由 operator 显式配置。
-`LspDaemonWiringTest.cliConfiguredExtensionsDriveTheRegisteredCapabilities` 验证 CLI 到注册能力的装配，
+`LspDaemonWiringTest.inlineConfiguredExtensionsDriveTheRegisteredCapabilities` 验证内联配置到注册能力的装配，
 并断言服务器 cwd 为自动发现的项目根，不是随意的调用目录。
 
 ## 参数与请求位置
