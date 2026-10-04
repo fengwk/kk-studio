@@ -129,7 +129,7 @@ function createSettingsPage(world) {
           },
         }
       }
-      if (role === 'alertdialog' && options.name === '持久状态已变化') {
+      if (role === 'alertdialog' && options.name === '数据已发生变化') {
         return {
           async waitFor() {
             assert.equal(view.conflictVisible, true, 'conflict dialog must be visible')
