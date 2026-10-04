@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
 import { createConfigSyncService } from '@/shared/api/config-sync-service'
 import type {
+  ConfigSyncImportCheckDTO,
   ConfigSyncImportResponseDTO,
   ConfigSyncInventoryDTO,
 } from '@/shared/api/contracts/config-sync'
@@ -47,7 +48,7 @@ describe('configSyncService', () => {
     expect(client.post).toHaveBeenCalledWith('/settings/sync/export', { items })
   })
 
-  it('maps import to POST /settings/sync/import with the {yaml} body', async () => {
+  it('maps import to POST /settings/sync/import with {yaml, allowPartial}', async () => {
     const client = createClient()
     const response: ConfigSyncImportResponseDTO = {
       imported: [{ kind: 'providers', name: 'openai' }],
@@ -56,7 +57,33 @@ describe('configSyncService', () => {
     vi.mocked(client.post).mockResolvedValue(response)
     const service = createConfigSyncService(client)
 
+    // 缺省不授权部分导入。
     await expect(service.importConfig('providers: []')).resolves.toBe(response)
-    expect(client.post).toHaveBeenCalledWith('/settings/sync/import', { yaml: 'providers: []' })
+    expect(client.post).toHaveBeenCalledWith('/settings/sync/import', {
+      yaml: 'providers: []',
+      allowPartial: false,
+    })
+
+    // 显式授权部分导入。
+    vi.mocked(client.post).mockClear()
+    await expect(service.importConfig('providers: []', true)).resolves.toBe(response)
+    expect(client.post).toHaveBeenCalledWith('/settings/sync/import', {
+      yaml: 'providers: []',
+      allowPartial: true,
+    })
+  })
+
+  it('maps precheck to POST /settings/sync/import/check with the {yaml} body', async () => {
+    const client = createClient()
+    const response: ConfigSyncImportCheckDTO = {
+      created: [{ kind: 'providers', name: 'openai' }],
+      updated: [{ kind: 'models', name: 'openai/gpt' }],
+      skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
+    }
+    vi.mocked(client.post).mockResolvedValue(response)
+    const service = createConfigSyncService(client)
+
+    await expect(service.checkImport('providers: []')).resolves.toBe(response)
+    expect(client.post).toHaveBeenCalledWith('/settings/sync/import/check', { yaml: 'providers: []' })
   })
 })
