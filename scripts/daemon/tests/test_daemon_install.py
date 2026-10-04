@@ -35,6 +35,7 @@ class UnixInstallContracts:
         self.assert_private(fixture.jar, 0o644)
         self.assert_private(fixture.service, 0o644)
         self.assertFalse((fixture.home / ".local").exists())
+        self.assertIn("READY in Studio", result.stdout)
         self.assert_no_secret(fixture, result)
         self.assert_clean(fixture)
         checks = [args for args in fixture.calls("java") if "--check-config" in args]
@@ -191,26 +192,94 @@ class UnixInstallContracts:
                 self.assertFalse((fixture.install_root / "backups").is_dir()
                                  and not (fixture.install_root / "backups").is_symlink())
 
-    def test_foreign_service_diagnostics_are_actionable_and_non_destructive(self):
-        for kind in ("marker", "link", "directory"):
-            fixture = self.fixture()
-            fixture.service.parent.mkdir(parents=True, mode=0o700)
-            if kind == "marker":
-                fixture.service.write_text("unknown service")
-            elif kind == "link":
-                fixture.service.symlink_to(fixture.root / "missing")
-            else:
-                fixture.service.mkdir()
+    def test_foreign_service_diagnostics_exact_reason_path_and_safe_commands(self):
+        reasons = {
+            "marker": "missing ownership marker",
+            "link": "definition is a symlink or not a regular file",
+            "directory": "definition is a symlink or not a regular file",
+        }
+        for kind, reason in reasons.items():
             for action in ("install", "uninstall"):
+                with self.subTest(kind=kind, action=action):
+                    fixture = self.fixture()
+                    fixture.service.parent.mkdir(parents=True, mode=0o700)
+                    if kind == "marker":
+                        fixture.service.write_text("unknown service")
+                    elif kind == "link":
+                        fixture.service.symlink_to(fixture.root / "missing")
+                    else:
+                        fixture.service.mkdir()
+                    result = fixture.install() if action == "install" else fixture.run(action)
+                    self.assertNotEqual(0, result.returncode)
+                    lines = result.stderr.splitlines()
+                    self.assertEqual(f"ERROR: refusing unmanaged service: {reason}", lines[0])
+                    self.assertIn(f"Requested service definition: {fixture.service}", lines)
+                    self.assertIn(f"Actual service definition: {fixture.service}", lines)
+                    self.assertIn(f"Inspect: ls -ld {fixture.service}; cat {fixture.service}", lines)
+                    self.assertIn("mktemp -d", result.stderr)
+                    self.assertIn("cp -p", result.stderr)
+                    self.assertIn(f'mv {fixture.service} "$backup/"', result.stderr)
+                    self.assertIn("Preserve unknown JAR/config/token/data; then retry", result.stderr)
+                    if fixture.operating_system == "Linux":
+                        self.assertIn(f"systemctl --user disable --now {SERVICE_NAME}", result.stderr)
+                        self.assertIn("Reload: systemctl --user daemon-reload", result.stderr)
+                    else:
+                        self.assertIn(f"Manual stop (only after confirming ownership): launchctl bootout {fixture.target}",
+                                      result.stderr)
+                        self.assertNotIn("launchctl disable", result.stderr)
+                        self.assertNotIn("launchctl enable", result.stderr)
+                    self.assertNotIn("curl", fixture.tools())
+                    self.assertFalse(fixture.install_root.exists())
+                    self.assert_no_switch(fixture)
+
+    def test_release_diagnostic_marker_surfaced_and_unknown_stays_generic(self):
+        fixture = self.fixture()
+        self.assert_ok(fixture.install())
+        before = fixture.snapshot()
+        for mode, marker in (
+            ("check-invalid", "Invalid daemon configuration: daemon.lsp.servers.jdtls.command must not be empty"),
+            ("check-invalid-noisy", "Invalid daemon configuration: daemon.studioUrl must be an absolute http(s) origin"),
+        ):
+            with self.subTest(mode=mode):
                 fixture.reset_record()
-                result = fixture.install() if action == "install" else fixture.run(action)
+                result = fixture.install(env={"FAKE_JAVA_MODE": mode})
                 self.assertNotEqual(0, result.returncode)
-                for expected in ("unmanaged", str(fixture.service), "Inspect", "Manual",
-                                 "mktemp", "retry", "Preserve unknown"):
-                    self.assertIn(expected, result.stderr)
-                self.assertNotIn("curl", fixture.tools())
-                self.assertFalse(fixture.install_root.exists())
+                self.assertIn(f"ERROR: {marker}", result.stderr.splitlines())
+                self.assertNotIn("at java.base", result.stderr)
+                self.assertEqual(before, fixture.snapshot())
                 self.assert_no_switch(fixture)
+                self.assert_no_secret(fixture, result)
+                self.assert_clean(fixture)
+        for mode in ("check-fail", "old-jar"):
+            with self.subTest(mode=mode):
+                fixture.reset_record()
+                result = fixture.install(env={"FAKE_JAVA_MODE": mode})
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn(TOKEN_VALUE, result.stderr)
+                self.assertFalse(any(line.startswith("Invalid daemon configuration:")
+                                     for line in result.stderr.splitlines()))
+                self.assertNotIn("unknown option", result.stderr)
+                self.assertIn("rejected --check-config", result.stderr)
+                self.assertEqual(before, fixture.snapshot())
+                self.assert_no_switch(fixture)
+                self.assert_clean(fixture)
+
+    def test_mutated_staging_input_is_rejected_before_snapshot(self):
+        for mode, expected in (("mutate-input", "symbolic link"), ("mutate-input-public", "permissions")):
+            with self.subTest(mode=mode):
+                fixture = self.fixture()
+                self.assert_ok(fixture.install())
+                before = fixture.snapshot()
+                fixture.input_config.write_text(json.dumps({"studioUrl": STUDIO_URL, "note": "swapped"}))
+                fixture.reset_record()
+                result = fixture.install(env={"FAKE_CURL_MODE": mode})
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(expected, result.stderr)
+                self.assertEqual(before, fixture.snapshot())
+                self.assertFalse((fixture.install_root / "backups").exists())
+                self.assert_no_switch(fixture)
+                self.assert_no_secret(fixture, result)
+                self.assert_clean(fixture)
 
     def test_foreign_file_and_directory_owners_are_rejected(self):
         for target_kind in ("input", "input-parent", "root", "config", "jar", "service"):
@@ -393,7 +462,7 @@ class TestLinuxInstall(UnixInstallContracts, FixtureTestCase):
             self.assert_no_secret(fixture, result)
             self.assert_clean(fixture)
 
-    def test_java_discovery_order_and_jdk_prerequisites(self):
+    def test_java_discovery_order_without_requiring_a_compiler(self):
         fixture = self.fixture()
         other = fixture.root / "other-jdk"
         shutil.copytree(fixture.jdk, other)
@@ -405,8 +474,25 @@ class TestLinuxInstall(UnixInstallContracts, FixtureTestCase):
         ):
             self.assert_ok(fixture.install(env=env, **overrides))
             self.assertIn(systemd_escape(str(chosen / "bin/java")), fixture.unit.read_text())
-        (fixture.jdk / "bin/javac").unlink()
-        self.assertNotEqual(0, fixture.install().returncode)
+        # Runtime-only home: the release JAR is never compiled, so bin/javac is not required.
+        self.assertFalse((fixture.jdk / "bin/javac").exists())
+        self.assert_ok(fixture.install())
+
+    def test_off_path_bash_is_accepted_and_path_bash_is_not_probed(self):
+        fixture = self.fixture()
+        # A broken bash earlier on PATH must never be executed by the installer.
+        write_executable(fixture.bin / "bash", "#!/bin/sh\nexit 99\n")
+        self.assert_ok(fixture.install())
+        real_bash = shutil.which("bash")
+        self.assertIsNotNone(real_bash)
+        off_path = fixture.root / "off-path-bin"
+        off_path.mkdir(mode=0o700)
+        target = off_path / "bash"
+        shutil.copy(real_bash, target)
+        target.chmod(0o755)
+        self.assertNotIn(str(off_path), fixture.environment()["PATH"])
+        fixture.input_config.write_text(json.dumps({"studioUrl": STUDIO_URL, "bashExecutable": str(target)}))
+        self.assert_ok(fixture.install())
 
     def test_manager_errors_are_not_silently_successful(self):
         fixture = self.fixture()
@@ -424,8 +510,10 @@ class TestInstallInterface(FixtureTestCase):
             self.assert_ok(result)
             self.assertIn("--config-file", result.stdout)
             self.assertIn("--token-file", result.stdout)
+            self.assertIn("READY in Studio", result.stdout)
             for old in ("upgrade", "--from-source", "--gateway-uri", "--version",
-                        "--registration-token", "interactive prompts via"):
+                        "--registration-token", "interactive prompts via",
+                        "javac", "compiler", "default Bash"):
                 self.assertNotIn(old, result.stdout)
         for action in ("upgrade", "version", TOKEN_VALUE):
             result = fixture.run(action)
@@ -454,14 +542,12 @@ class TestInstallInterface(FixtureTestCase):
         self.assertNotIn("curl", fixture.tools())
         self.assertFalse(fixture.install_root.exists())
 
-    def test_home_os_windows_and_default_bash_validation(self):
+    def test_home_os_and_verification_window_validation(self):
         fixture = self.fixture()
         for env in ({"HOME": ""}, {"HOME": "relative"}, {"HOME": str(fixture.home) + "\t"},
                     {"FAKE_OS": "FreeBSD"}, {"DAEMON_VERIFY_TIMEOUT_SECONDS": "abc"},
                     {"DAEMON_VERIFY_STABLE_SECONDS": "-1"}, {"DAEMON_VERIFY_STABLE_SECONDS": "1.5"}):
             self.assertNotEqual(0, fixture.install(env=env).returncode)
-        write_executable(fixture.bin / "bash", "#!/bin/sh\nexit 99\n")
-        self.assertNotEqual(0, fixture.install().returncode)
         self.assertNotIn("curl", fixture.tools())
 
     def test_executable_and_shell_syntax(self):
