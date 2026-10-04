@@ -247,8 +247,10 @@ class UnixInstallContracts:
         link.symlink_to(relative)
         before = {path: (path.lstat().st_mode, path.lstat().st_uid, path.lstat().st_gid)
                   for path in (link, target, target.parent)}
+        # systemd may return the resolved path through .config, not its HOME spelling.
+        env = {"FAKE_SYSTEMCTL_MODE": "resolved-fragment"}
         for action in ("install", "install", "status", "uninstall"):
-            result = fixture.install() if action == "install" else fixture.run(action)
+            result = fixture.install(env=env) if action == "install" else fixture.run(action, env=env)
             self.assert_ok(result)
             self.assertTrue(link.is_symlink())
             self.assertEqual(relative, os.readlink(link))
@@ -257,6 +259,8 @@ class UnixInstallContracts:
                                  (path.lstat().st_mode, path.lstat().st_uid, path.lstat().st_gid))
             self.assertEqual("keep-target", sentinel.read_text())
             self.assertEqual(action != "uninstall", fixture.service.exists())
+            if fixture.operating_system == "Linux" and action != "uninstall":
+                self.assertNotEqual(fixture.service, fixture.service.resolve())
             self.assert_no_secret(fixture, result)
         self.assertFalse(fixture.service.exists())
         self.assert_clean(fixture)
@@ -498,6 +502,66 @@ class TestLinuxInstall(UnixInstallContracts, FixtureTestCase):
         self.assertIn("/etc/systemd/user/kk-studio-daemon.service", result.stderr)
         self.assertIn("Manual", result.stderr)
         self.assertNotIn("curl", fixture.tools())
+
+    def test_different_or_missing_fragment_preserves_managed_files(self):
+        """Even identical bytes at a different inode cannot authorize service replacement."""
+        fixture = self.fixture()
+        self.assert_ok(fixture.install())
+        foreign = fixture.root / "different.service"
+        foreign.write_bytes(fixture.service.read_bytes())
+        foreign.chmod(0o644)
+        before = fixture.snapshot()
+        foreign_before = foreign.read_bytes()
+        for fragment in (foreign, fixture.root / "missing.service"):
+            for action in ("install", "status", "uninstall"):
+                with self.subTest(fragment=fragment, action=action):
+                    fixture.reset_record()
+                    env = {"FAKE_FRAGMENT_PATH": str(fragment)}
+                    result = (fixture.install(env=env) if action == "install"
+                              else fixture.run(action, env=env))
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("service resolves to another definition", result.stderr)
+                    self.assertEqual(before, fixture.snapshot())
+                    self.assertEqual(foreign_before, foreign.read_bytes())
+                    self.assertNotIn("curl", fixture.tools())
+                    self.assert_no_switch(fixture)
+                    self.assert_no_secret(fixture, result)
+        self.assert_clean(fixture)
+
+    def test_same_inode_fragment_keeps_service_endpoint_guards(self):
+        """A file alias is allowed, but does not bypass marker or endpoint symlink checks."""
+        for kind in ("hard-link", "foreign-marker", "service-link"):
+            with self.subTest(kind=kind):
+                fixture = self.fixture()
+                self.assert_ok(fixture.install())
+                alias = fixture.root / "alias.service"
+                if kind == "service-link":
+                    fixture.service.rename(alias)
+                    fixture.service.symlink_to(alias)
+                else:
+                    alias.hardlink_to(fixture.service)
+                    if kind == "foreign-marker":
+                        fixture.service.write_text("unknown service")
+                self.assertTrue(os.path.samefile(alias, fixture.service))
+                before = fixture.snapshot()
+                fixture.reset_record()
+                env = {"FAKE_FRAGMENT_PATH": str(alias)}
+                if kind == "hard-link":
+                    self.assert_ok(fixture.run("status", env=env))
+                else:
+                    for action in ("install", "status", "uninstall"):
+                        result = (fixture.install(env=env) if action == "install"
+                                  else fixture.run(action, env=env))
+                        self.assertNotEqual(0, result.returncode)
+                        reason = ("missing ownership marker" if kind == "foreign-marker"
+                                  else "definition is a symlink or not a regular file")
+                        self.assertIn(reason, result.stderr)
+                        self.assertEqual(before, fixture.snapshot())
+                        self.assertEqual(before[str(fixture.service)], alias.read_bytes())
+                        self.assert_no_secret(fixture, result)
+                self.assert_no_switch(fixture)
+                self.assertNotIn("curl", fixture.tools())
+                self.assert_clean(fixture)
 
     def test_stop_disable_failures_preserve_files(self):
         fixture = self.fixture()

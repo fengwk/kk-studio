@@ -54,7 +54,7 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 absolute_path() {
   case "$1" in /*) ;; *) fail "$2 must be an absolute path" ;; esac
   case "$1" in *[[:cntrl:]]*) fail "$2 must not contain control characters" ;; esac
-  # Reject dot and empty segments so path-prefix comparisons stay unambiguous.
+  # Require an absolute path without dot or empty segments.
   case "/${1#/}/" in */../* | */./* | *//*) fail "$2 must not contain dot or empty path segments" ;; esac
 }
 file_owner_uid() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null; }
@@ -176,7 +176,8 @@ require_ownership() {
     local fragment
     fragment=$(systemctl --user show --property=FragmentPath --value "$SERVICE_NAME") ||
       fail "cannot inspect systemd service ownership"
-    if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ]; then
+    if [ -n "$fragment" ] && [ "$fragment" != "$SERVICE_PATH" ] &&
+      [ ! "$fragment" -ef "$SERVICE_PATH" ]; then
       ownership_conflict "service resolves to another definition" "$fragment"
     fi
   fi
