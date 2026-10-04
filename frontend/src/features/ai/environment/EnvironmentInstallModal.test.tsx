@@ -304,12 +304,29 @@ describe('EnvironmentInstallModal', () => {
     expect(screen.getByText(/语言服务器需自行安装/)).toBeInTheDocument()
   })
 
+  it('states the overwrite warning about the single daemon and its bound environment', async () => {
+    open()
+    const dialog = await screen.findByRole('dialog')
+    // 覆盖语义是重启当前系统用户唯一的 Daemon 并重绑到所选环境，不能声称影响所有环境。
+    expect(dialog).toHaveTextContent('覆盖会重启当前系统用户唯一的 Daemon')
+    expect(dialog).toHaveTextContent('中断其当前绑定环境的工具调用')
+    expect(dialog).toHaveTextContent('连接到所选环境')
+    expect(dialog).toHaveTextContent('保留运行数据')
+    expect(dialog).toHaveTextContent('保存不代表已应用')
+    expect(dialog).not.toHaveTextContent('影响所有环境')
+  })
+
   it('defaults uninstall to the saved operating system without metadata, token or save', async () => {
     const user = userEvent.setup()
     open({ uninstall: true, environment: { ...card, version: '1',
       installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://saved.example.com' } } } })
     expect(screen.getByRole('combobox')).toHaveValue('macos')
-    expect(screen.getByText(/影响当前系统用户 HOME/)).toBeInTheDocument()
+    // 卸载作用域是当前 OS 用户唯一 Daemon，不一定是本卡片环境，且只移除服务与程序。
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('当前系统用户 HOME/.kk-studio 下唯一 Daemon')
+    expect(dialog).toHaveTextContent('不一定是此卡片对应的环境')
+    expect(dialog).toHaveTextContent('保留本地配置、Token、数据和日志')
+    expect(dialog).toHaveTextContent('不删除任何 Studio 环境记录')
     await user.selectOptions(screen.getByRole('combobox'), 'windows')
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByText(/卸载命令已复制/)).toBeInTheDocument()
