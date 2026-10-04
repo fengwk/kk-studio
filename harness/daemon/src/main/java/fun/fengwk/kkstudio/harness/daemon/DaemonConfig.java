@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.ExecutableResolver;
 import fun.fengwk.kkstudio.harness.daemon.coding.LspDiscovery;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -84,7 +85,11 @@ public record DaemonConfig(
     return fromFile(configPath(args[1]));
   }
 
-  /** 只读取与校验，不创建目录、锁、连接或启动语言服务器。 */
+  /**
+   * 只读取与校验配置、同目录凭证路径与配置的 bash 可执行程序：不创建目录、锁、连接或启动任何进程。
+   *
+   * <p>bash 按宿主 PATH/绝对路径只读解析为实际路径，无法解析时立即失败关闭， 避免安装成功后才在执行期暴露缺失。
+   */
   static DaemonConfig fromFile(Path file) {
     if (!file.isAbsolute()) {
       throw new IllegalArgumentException("configuration path must be absolute");
@@ -99,8 +104,23 @@ public record DaemonConfig(
         Duration.ofSeconds(30),
         configuration.getNote(),
         normalized.getParent(),
-        configuration.getBashExecutable(),
+        resolveBash(configuration.getBashExecutable()),
         LspDiscovery.fromConfiguration(configuration.getLsp()));
+  }
+
+  /**
+   * 解析配置或默认的 bash 可执行程序为宿主路径。
+   *
+   * <p>错误只给字段路径与规则，不回显配置取值；解析只做文件系统探测，不启动进程。
+   */
+  private static String resolveBash(String configuredBash) {
+    String command = configuredBash == null ? DEFAULT_BASH_EXECUTABLE : configuredBash;
+    return ExecutableResolver.resolve(command)
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "daemon.bashExecutable: must resolve to an executable on PATH or an absolute"
+                        + " executable path"));
   }
 
   static Path configPath(String value) {

@@ -269,6 +269,17 @@ class DaemonMainTest {
           UncheckedIOException.class,
           () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
       DaemonConfigTest.writeToken(root);
+      Files.writeString(
+          file,
+          "{\"studioUrl\":\"http://host\",\"bashExecutable\":\""
+              + root.resolve("absent-bash")
+              + "\"}");
+      IllegalArgumentException bashError =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
+      assertTrue(bashError.getMessage().contains("daemon.bashExecutable"));
+      DaemonConfigTest.writeToken(root);
       Files.writeString(file, "{\"studioUrl\":\"http://host\",\"studioUrl\":\"SECRET\"}");
       assertThrows(
           IllegalArgumentException.class,
@@ -278,5 +289,29 @@ class DaemonMainTest {
     } finally {
       System.setOut(previousOut);
     }
+  }
+
+  /** 正常运行同样在代理初始化与数据目录打开之前完成 bash 解析；失败时不留任何运行期副作用。 */
+  @Test
+  @ResourceLock(Resources.SYSTEM_OUT)
+  @ResourceLock(Resources.SYSTEM_PROPERTIES)
+  @ResourceLock("defaultProxySelector")
+  void normalRuntimeValidatesBashBeforeProxyOrData(@TempDir Path root) throws Exception {
+    Path file = DaemonConfigTest.writeConfig(root, "http://localhost");
+    Files.writeString(
+        file,
+        "{\"studioUrl\":\"http://localhost\",\"bashExecutable\":\""
+            + root.resolve("absent-bash")
+            + "\"}");
+    ProxySelector previousSelector = ProxySelector.getDefault();
+    String previousProxyProperty = System.getProperty("java.net.useSystemProxies");
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> DaemonMain.main(new String[] {"--config", file.toString()}));
+    assertTrue(error.getMessage().contains("daemon.bashExecutable"));
+    assertSame(previousSelector, ProxySelector.getDefault());
+    assertEquals(previousProxyProperty, System.getProperty("java.net.useSystemProxies"));
+    assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
   }
 }
