@@ -618,6 +618,16 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertBadImportDoesNotLeak("root: &anchor\n  child: *anchor\n", secret);
     assertBadImportDoesNotLeak("providers: 5\n", secret);
     assertBadImportDoesNotLeak("providers:\n  - name: 123\n    providerType: openai\n", secret);
+    String duplicateName = "invalid_duplicate_" + unique();
+    assertBadImportDoesNotLeak(
+        "providers:\n  - name: "
+            + duplicateName
+            + "\n    providerType: openai\n  - name: ' "
+            + duplicateName
+            + " '\n    providerType: openai\n",
+        secret);
+    assertNull(
+        findProvider(duplicateName), "invalid identity aliases must not write either declaration");
     assertBadImportDoesNotLeak("settings:\n  aiRuntime:\n    retryBaseDelayMillis: ''\n", secret);
     assertBadImportDoesNotLeak(
         "settings:\n  integrations:\n    openCliHub:\n      enabled: ''\n", secret);

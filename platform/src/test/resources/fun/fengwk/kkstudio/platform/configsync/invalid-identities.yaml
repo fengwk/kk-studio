@@ -1,0 +1,43 @@
+cases:
+  - path: providers[0].name
+    yaml: |
+      providers:
+        - name: ''
+          providerType: openai
+  - path: models[0].providerName
+    yaml: |
+      models:
+        - providerName: ' p '
+          name: m
+          modelId: m
+          config: {}
+  - path: models[0].name
+    yaml: |
+      models:
+        - providerName: p
+          name: ' m '
+          modelId: m
+          config: {}
+  - path: agents[0].name
+    yaml: |
+      agents:
+        - name: ' a '
+          model: p/m
+          config: {}
+  - path: environments[0].name
+    yaml: |
+      environments:
+        - name: ' '
+          registrationToken: token
+  - path: mcpServers[0].name
+    yaml: |
+      mcpServers:
+        - name: ' server '
+          url: http://127.0.0.1:9
+  - path: skillPackages[0].packageName
+    yaml: |
+      skillPackages:
+        - packageName: ' pkg '
+          repositoryUrl: file:///tmp/unused
+          branch: main
+          currentCommit: '1111111111111111111111111111111111111111'
