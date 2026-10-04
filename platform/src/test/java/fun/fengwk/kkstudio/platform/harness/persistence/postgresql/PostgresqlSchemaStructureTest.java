@@ -237,7 +237,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "archived_at");
     assertColumns("chat_session", "session_id", "chat_id", "created_at");
     assertColumns(
-        "environment", "id", "name", "registration_token", "created_at", "updated_at", "version");
+        "environment",
+        "id",
+        "name",
+        "registration_token",
+        "install_config",
+        "created_at",
+        "updated_at",
+        "version");
     assertColumns(
         "environment_connection",
         "environment_id",
@@ -515,6 +522,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "agent_provider.config",
             "canvas_function_run.state_json",
             "canvas_node.function",
+            "environment.install_config",
             "environment_connection.recent_events",
             "environment_connection.runtime_info",
             "environment_connection.skill_state",
@@ -541,7 +549,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "skill_package.skills",
             "system_setting.config"),
         jsonbColumns,
-        "jsonb columns must exactly match the 30 declared structured payloads");
+        "jsonb columns must exactly match the 31 declared structured payloads");
 
     // 自由文本字段不受列宽限制，使用 text
     assertColumnType("text", "agent_provider", "description");
