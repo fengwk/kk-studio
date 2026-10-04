@@ -618,6 +618,8 @@ class TestDaemonReleaseWorkflow(unittest.TestCase):
                 (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
                 (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
                 (f"actions/setup-java@{SETUP_JAVA_SHA}", "v4"),
+                # Windows validates the generated install command natively as well.
+                (f"actions/setup-node@{SETUP_NODE_SHA}", "v4"),
                 (f"actions/checkout@{CHECKOUT_SHA}", "v4"),
                 (f"actions/setup-java@{SETUP_JAVA_SHA}", "v4"),
                 (f"actions/setup-node@{SETUP_NODE_SHA}", "v4"),
