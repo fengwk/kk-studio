@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
@@ -139,10 +139,24 @@ describe('Select', () => {
     )
     await user.click(screen.getByLabelText('Choose'))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
-    // 菜单 portal 到 body 后，焦点移到触发按钮与菜单之外的元素仍应关闭。
-    await user.tab()
+    act(() => screen.getByText('Outside').focus())
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(screen.getByText('Outside')).toHaveFocus()
+  })
+
+  it.each([false, true])('restores trigger focus and leaves the Tab default action uncancelled (shift=%s)', async shiftKey => {
+    const user = userEvent.setup()
+    render(<Select aria-label="Choose" value="a" options={OPTIONS} onChange={() => undefined} />)
+    const trigger = screen.getByLabelText('Choose')
+    await user.click(trigger)
+    const option = screen.getByRole('option', { name: 'Alpha' })
+    expect(option).toHaveFocus()
+    // jsdom 没有原生 Tab 默认动作；邻接顺序由 Playwright 验证，此层只验证 handler 契约。
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true })
+    fireEvent(option, event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
   it('renders the listbox as a body-level portal outside the control root', async () => {

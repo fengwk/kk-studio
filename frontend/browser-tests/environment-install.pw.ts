@@ -207,23 +207,12 @@ for (const viewport of [
       await option.click()
     }
     await uninstall.getByRole('button', { name: '操作系统' }).click()
-    if (viewport.width === 1280) {
-      // 浏览器实证旧 absolute 菜单放回 modal-body 后，末项被滚动容器裁剪。
-      const legacyClipped = await page.getByRole('listbox').evaluate(element => {
-        const menu = element as HTMLElement
-        const parent = menu.parentElement!
-        const savedStyle = menu.style.cssText
-        document.querySelector('.environment-install-modal .ui-select')!.append(menu)
-        menu.style.cssText = 'position:absolute;top:calc(100% + 6px);left:0;width:100%;z-index:130'
-        const last = menu.querySelector('[role="option"]:last-child')!
-        const rect = last.getBoundingClientRect()
-        const clipped = !last.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-        parent.append(menu)
-        menu.style.cssText = savedStyle
-        return clipped
-      })
-      expect(legacyClipped).toBe(true)
-    }
+    expect(await page.getByRole('listbox').evaluate(element => element.closest('.modal-body'))).toBeNull()
+    const menuBox = (await page.getByRole('listbox').boundingBox())!
+    expect(menuBox.x).toBeGreaterThanOrEqual(0)
+    expect(menuBox.y).toBeGreaterThanOrEqual(0)
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(viewport.width)
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height)
     await page.screenshot({ path: testInfo.outputPath('uninstall-menu.png'), fullPage: true })
     await page.keyboard.press('Escape')
     await expect(uninstall.getByRole('button', { name: '操作系统' })).toBeFocused()
@@ -292,4 +281,25 @@ test('larger fonts preserve the editor help gap and reachable footer on a narrow
   expect(bounds.scrollWidth).toBeLessThanOrEqual(bounds.clientWidth)
   await expect(modal.getByRole('button', { name: '保存并复制安装命令' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('large-fonts.png'), fullPage: true })
+})
+
+test('native Tab skips closed details inputs and disabled controls around both Select modes', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/browser-tests/environment-install-harness.html?controls&tab-boundaries')
+  for (const label of ['Normal', 'Compact']) {
+    const trigger = page.getByRole('button', { name: label, exact: true })
+    await trigger.click()
+    await page.keyboard.press('Shift+Tab')
+    await expect(page.getByText(label === 'Normal' ? 'Before details' : 'Between details', { exact: true })).toBeFocused()
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+    await trigger.click()
+    await page.keyboard.press('Tab')
+    await expect(page.getByText(label === 'Normal' ? 'Between details' : 'After details', { exact: true })).toBeFocused()
+    await expect(page.getByRole('listbox')).toHaveCount(0)
+  }
+  // closed details 的子 input 在 DOM 中存在，但不是当前原生 Tab 顺序的一部分。
+  await expect(page.getByLabel('Closed before')).toBeHidden()
+  await expect(page.getByLabel('Closed between')).toBeHidden()
+  await expect(page.getByLabel('Closed after')).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Disabled between' })).toBeDisabled()
 })

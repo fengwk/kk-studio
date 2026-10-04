@@ -10,10 +10,6 @@ export interface ToastProps {
   /** 成功用 status（polite），失败用 alert（assertive）。 */
   tone?: ToastTone
   onDismiss: () => void
-  /**
-   * 连续多次相同反馈时递增此值即可重新计时，避免因 message 未变而沿用旧定时器。
-   */
-  nonce?: number
   /** 自动消失时间；显式关闭始终可用。 */
   duration?: number
 }
@@ -22,7 +18,7 @@ export interface ToastProps {
  * 轻量共享 Toast：portal 到 body，避免被滚动容器或 overlay 裁剪。
  * 单一实例即一条反馈，不引入全局 provider / store / 事件总线。
  */
-export function Toast({ message, tone = 'success', onDismiss, nonce = 0, duration = 4000 }: ToastProps) {
+export function Toast({ message, tone = 'success', onDismiss, duration = 4000 }: ToastProps) {
   const { t } = useI18n()
   const onDismissRef = useRef(onDismiss)
   useEffect(() => {
@@ -32,7 +28,7 @@ export function Toast({ message, tone = 'success', onDismiss, nonce = 0, duratio
   useEffect(() => {
     const timer = setTimeout(() => onDismissRef.current(), duration)
     return () => clearTimeout(timer)
-  }, [message, tone, nonce, duration])
+  }, [message, tone, duration])
 
   return createPortal(
     <div
