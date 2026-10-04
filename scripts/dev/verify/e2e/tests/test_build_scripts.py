@@ -22,6 +22,7 @@ def repository_root():
 REPOSITORY_ROOT = repository_root()
 E2E_ROOT = REPOSITORY_ROOT / "scripts" / "dev" / "verify" / "e2e"
 E2E_LIB = E2E_ROOT / "lib.sh"
+E2E_DAEMON_BOOTSTRAP = E2E_ROOT / "lib" / "daemon-bootstrap.sh"
 E2E_ENTRY = E2E_ROOT / "run.sh"
 MATRIX_RUNNER = E2E_ROOT / "run-matrix.mjs"
 
@@ -96,11 +97,18 @@ class TestE2EBuildScripts(unittest.TestCase):
         for removed_machinery in ("dependency:build-classpath", "dependency:copy-dependencies"):
             self.assertNotIn(removed_machinery, lib, removed_machinery)
 
+        # 启动逻辑集中在 bootstrap helper：daemon 只通过 `java -jar <jar> --config` 启动。
+        bootstrap = E2E_DAEMON_BOOTSTRAP.read_text()
+        self.assertIn('exec "$java_bin" -jar "$jar" --config "$config_file"', bootstrap)
+        self.assertNotIn("-cp ", bootstrap)
+        self.assertNotIn("DaemonMain", bootstrap)
+        # 旧 CLI/裸配置来源必须保持删除状态。
+        for removed_flag in ("--gateway-uri", "--data-dir", "--registration-token-file", "--note "):
+            self.assertNotIn(removed_flag, lib, removed_flag)
+            self.assertNotIn(removed_flag, bootstrap, removed_flag)
+
         start_daemon = function_body(E2E_LIB, "start_daemon")
-        # Runtime classpath construction is gone: the daemon starts only via `java -jar <jar>`.
-        self.assertIn('-jar "$DAEMON_JAR"', start_daemon)
-        self.assertNotIn("-cp ", start_daemon)
-        self.assertNotIn("DaemonMain", start_daemon)
+        self.assertIn("daemon-bootstrap.sh", start_daemon)
 
         # `kill_daemon` can no longer match the main class, so it must match the configured JAR.
         kill_daemon = function_body(E2E_LIB, "kill_daemon")

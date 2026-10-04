@@ -227,13 +227,8 @@ services:
         condition: service_completed_successfully
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}
-    command:
-      - --gateway-uri
-      - ws://app-a:8080/api/harness/environment-daemon/v1
-      - --note
-      - Distributed test node A (shared data, no app-to-app network).
-      - --data-dir
-      - /workspace/.kkstudio/daemon
+      KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080
+      KK_STUDIO_DAEMON_NOTE: Distributed test node A (shared data, no app-to-app network).
     volumes:
       - daemon-workspace-a:/workspace
     networks:
@@ -249,13 +244,8 @@ services:
         condition: service_completed_successfully
     environment:
       KK_STUDIO_DAEMON_REGISTRATION_TOKEN: ${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}
-    command:
-      - --gateway-uri
-      - ws://app-b:8080/api/harness/environment-daemon/v1
-      - --note
-      - Distributed test node B (shared data, no app-to-app network).
-      - --data-dir
-      - /workspace/.kkstudio/daemon
+      KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080
+      KK_STUDIO_DAEMON_NOTE: Distributed test node B (shared data, no app-to-app network).
     volumes:
       - daemon-workspace-b:/workspace
     networks:

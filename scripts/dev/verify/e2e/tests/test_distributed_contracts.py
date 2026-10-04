@@ -177,9 +177,11 @@ class TestDistributedTopologyContract(unittest.TestCase):
         compose = COMPOSE_FILE.read_text()
         self.assertIn("${DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN:-e2e-token-dist-a}", compose)
         self.assertIn("${DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN:-e2e-token-dist-b}", compose)
-        self.assertNotIn("--environment-name", compose)
-        self.assertNotIn("--gateway-token", compose)
-        self.assertNotIn("--daemon-id", compose)
+        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL: http://app-a:8080", compose)
+        self.assertIn("KK_STUDIO_DAEMON_STUDIO_URL: http://app-b:8080", compose)
+        # 旧 CLI/数据目录参数必须保持删除状态；配置只经共享 daemon.json。
+        for removed in ("--gateway-uri", "--data-dir", "--environment-name", "--gateway-token", "--daemon-id"):
+            self.assertNotIn(removed, compose, removed)
         self.assertNotIn("DISTRIBUTED_DAEMON_TOKEN", compose)
 
 
