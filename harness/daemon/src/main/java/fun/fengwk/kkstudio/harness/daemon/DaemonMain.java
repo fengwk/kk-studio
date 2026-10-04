@@ -17,8 +17,9 @@ public final class DaemonMain {
         --config <absolute-path>         Load daemon JSON (studioUrl, note, bashExecutable, lsp).
                                          The sibling daemon.token holds the owner-only token;
                                          the configuration parent is the runtime data directory.
-        --check-config <absolute-path>   Validate configuration and sibling token, then exit.
-                                         No data creation, locking, connections or LSP startup.
+        --check-config <absolute-path>   Validate configuration, sibling token and resolved bash
+                                         executable, then exit. No data creation, locking,
+                                         connections, process spawning or LSP startup.
                                          Managed installation uses ~/.kk-studio/daemon.json.
 
       Local proxy:
@@ -51,6 +52,9 @@ public final class DaemonMain {
    *
    * <p>数据目录在启动期以 owner-only 权限创建并持有 {@code daemon.lock}：同一目录上的第二个 Daemon
    * 立即失败，而不是并发写同一份本地数据；该锁在进程整个生命周期内持有。
+   *
+   * <p>{@code --check-config} 只读取并校验配置、同目录凭证与配置的 bash 可执行程序，不打开数据目录、不建立连接也不启动进程；
+   * 正常运行前同样先完成同一解析，因此缺失或不可执行的 bash 在启动期即失败关闭。
    *
    * <p>单个 {@code --help}/{@code -h} 或 {@code --version} 是纯信息命令：在打开数据目录或建立连接之前输出并直接返回；其余情况（含
    * 混用与多余参数）一律交给 {@link DaemonConfig#fromArgs(String[])} 解析并失败关闭。
