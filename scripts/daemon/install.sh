@@ -27,14 +27,17 @@ Usage: bash install.sh install --config-file <absolute daemon.json> --token-file
 
 Install downloads the latest official GitHub release, validates private sibling
 inputs with that JAR, replaces program/config/token and restarts the user service.
-Requires JDK 21, an executable Bash, curl and a SHA256 tool.
-Java discovery: --java-home, JAVA_HOME_21, JAVA_HOME, PATH.
+Requires JDK 21 (java), curl and a SHA256 tool.
+Java discovery order: --java-home, JAVA_HOME_21, JAVA_HOME, then PATH.
 Inputs must be named daemon.json and daemon.token in the same private directory.
+The release --check-config preflight validates the configuration, its sibling
+token and the configured Bash before any installation change.
 No interactive prompts. Unknown and duplicate options fail closed.
 
 Fixed layout: ~/.kk-studio (0700), daemon.json and daemon.token (0600),
 lib/kk-studio-daemon.jar, logs/ (macOS), backups/ (private unique backups).
 Uninstall removes only the owned service and program; config/token/data remain.
+After install, confirm the environment reports READY in Studio.
 No automatic rollback: after publication failures, inspect status/logs and use
 the reported backup for manual recovery or retry install with corrected inputs.
 
@@ -159,7 +162,7 @@ ownership_conflict() {
     echo "Manual stop/disable (only after confirming ownership): systemctl --user disable --now $SERVICE_NAME" >&2
   else
     echo "Inspect: launchctl print $LAUNCHD_TARGET; plutil -lint \"$SERVICE_PATH\"" >&2
-    echo "Manual stop/disable (only after confirming ownership): launchctl bootout $LAUNCHD_TARGET; launchctl disable $LAUNCHD_TARGET" >&2
+    echo "Manual stop (only after confirming ownership): launchctl bootout $LAUNCHD_TARGET" >&2
   fi
   # These are literal instructions, not executed shell expressions.
   # shellcheck disable=SC2016
@@ -173,7 +176,7 @@ ownership_conflict() {
   if [ "$HOST_OS" = Linux ]; then
     echo "Reload: systemctl --user daemon-reload" >&2
   else
-    echo "After unloaded, retry install; if you manually disabled this job, explicitly launchctl enable $LAUNCHD_TARGET before retry." >&2
+    echo "After the job is unloaded, retry the intended command." >&2
   fi
   echo "Preserve unknown JAR/config/token/data; then retry the intended install/uninstall command." >&2
   exit 1
@@ -240,11 +243,11 @@ resolve_java_home() {
     candidate=$(cd "$(dirname "$java_path")/.." && pwd -P)
   fi
   absolute_path "$candidate" "Java home"
-  [ -x "$candidate/bin/java" ] || fail "JDK 21 requires executable bin/java"
-  [ -x "$candidate/bin/javac" ] || fail "JDK 21 requires executable bin/javac"
+  # Only the runtime is needed: the released JAR is never compiled here.
+  [ -x "$candidate/bin/java" ] || fail "JDK 21 requires an executable bin/java at $candidate/bin/java"
   version=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS "$candidate/bin/java" -version 2>&1) ||
-    fail "cannot execute selected Java"
-  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "JDK 21 is required" ;; esac
+    fail "cannot execute the selected Java at $candidate/bin/java"
+  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "JDK 21 is required (selected Java is not JDK 21)" ;; esac
   SELECTED_JAVA_HOME=$candidate
 }
 release_curl() {
@@ -276,22 +279,51 @@ download_daemon() {
   expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
   [ "${actual%% *}" = "$expected" ] || fail "daemon release SHA256 mismatch"
 }
+# Do not echo arbitrary JAR diagnostics. The release may print one stable, value-free
+# `Invalid daemon configuration:` line naming the field path and rule; surface only that
+# bounded line so JVM stack traces and raw input values can never be echoed.
+preflight_failure_detail() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      'Invalid daemon configuration:'*)
+        line=${line%$'\r'}
+        case "$line" in *[[:cntrl:]]*) return 1 ;; esac
+        (( ${#line} <= 512 )) || line=${line:0:512}
+        printf '%s' "$line"
+        return 0
+        ;;
+    esac
+  done <"$DOWNLOAD_DIR/preflight.log"
+  return 1
+}
+
+# The staging directory is user-controlled: re-validate regular/private/sibling right
+# before the snapshot so a symlink or permission swap during the network download is
+# never followed into the published configuration.
+recheck_inputs() {
+  check_input "$CONFIG_FILE" 1048576
+  check_input "$TOKEN_FILE" 16384
+  [ "${CONFIG_FILE%/*}" = "${TOKEN_FILE%/*}" ] ||
+    fail "staged inputs must remain sibling daemon.json and daemon.token"
+}
 preflight() {
-  local output
+  local output detail
   [ -s "$DOWNLOADED_JAR" ] || fail "downloaded JAR is empty"
   output=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
     "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --version 2>&1) ||
     fail "downloaded daemon JAR is not executable"
   [ "$output" = "kk-studio-daemon ${RELEASE_TAG#v}" ] || fail "daemon --version does not match resolved release tag"
+  recheck_inputs
   # Validate exactly the secure snapshot that will be published, not inputs reread later.
   cp "$CONFIG_FILE" "$DOWNLOAD_DIR/daemon.json"
   cp "$TOKEN_FILE" "$DOWNLOAD_DIR/daemon.token"
   chmod 0600 "$DOWNLOAD_DIR/daemon.json" "$DOWNLOAD_DIR/daemon.token"
   CONFIG_FILE="$DOWNLOAD_DIR/daemon.json"
   TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
-  # Do not echo JAR diagnostics: a failing/older JAR may echo input values.
   if ! env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
     "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
+    detail=$(preflight_failure_detail) && fail "$detail"
     fail "downloaded release rejected --check-config or staged configuration/token; correct inputs or publish a release supporting --check-config, then retry. Existing installation unchanged"
   fi
   output=$(cat "$DOWNLOAD_DIR/preflight.log")
@@ -433,12 +465,9 @@ cmd_install() {
   check_managed_paths
   check_input "$CONFIG_FILE" 1048576
   check_input "$TOKEN_FILE" 16384
+  # The released JAR's --check-config probes the configured Bash; the installer must not
+  # look up a Bash on PATH so an explicit off-PATH bashExecutable remains supported.
   resolve_java_home
-  require_cmd bash
-  local bash_path
-  bash_path=$(command -v bash)
-  [ -x "$bash_path" ] || fail "default Bash must be executable"
-  "$bash_path" -c ':' || fail "default Bash is unusable"
   download_daemon
   preflight
   stage_service
@@ -471,6 +500,7 @@ cmd_install() {
   echo "Installed: $INSTALLED_JAR"
   echo "Configuration: $INSTALLED_CONFIG"
   echo "Service: $SERVICE_PATH"
+  echo "Next: confirm the environment reports READY in Studio."
   if [ -n "$BACKUP_DIR" ]; then echo "Prior managed files backup: $BACKUP_DIR"; fi
 }
 cmd_status() {
