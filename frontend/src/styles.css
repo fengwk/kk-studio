@@ -5271,6 +5271,20 @@ select.settings-input option {
   font-size: 12px;
 }
 
+.settings-sync-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-sync-result-section[data-state='created'] h3 {
+  color: var(--green-primary);
+}
+
+.settings-sync-result-section[data-state='updated'] h3 {
+  color: var(--orange);
+}
+
 /* --- Permission ordered editor --- */
 
 .permission-editor {

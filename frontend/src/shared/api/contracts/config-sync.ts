@@ -1,11 +1,13 @@
 /**
- * 设置同步的严格 wire 契约（对齐 /api/settings/sync 三端点）。
+ * 设置同步的严格 wire 契约（对齐 /api/settings/sync 四端点）。
  *
  * - `GET /api/settings/sync` 返回可导出的库存条目与其依赖；
  * - `POST /api/settings/sync/export` 提交选中的引用，返回 YAML 文本；
+ * - `POST /api/settings/sync/import/check` 提交 YAML 文本，返回将新增/覆盖/跳过的计划；
  * - `POST /api/settings/sync/import` 提交 YAML 文本，返回已导入与跳过条目。
  *
- * 库存不含配置值与凭据：凭据只随导出 YAML 出现，UI 不渲染 YAML。
+ * 预检查不写库，只给出计划；执行会重新校验。库存与检查结果都不含配置值与凭据：
+ * 凭据只随导出 YAML 出现，UI 不渲染 YAML。
  */
 export type ConfigSyncKind =
   | 'providers'
@@ -48,9 +50,23 @@ export interface ConfigSyncExportResponseDTO {
 
 export interface ConfigSyncImportRequestDTO {
   yaml: string
+  /** 缺省 false：存在跳过条目时，未显式授权就不执行部分导入。 */
+  allowPartial?: boolean
 }
 
 export interface ConfigSyncImportResponseDTO {
   imported: ConfigSyncRef[]
+  skipped: ConfigSyncSkipped[]
+}
+
+/** 预检查请求：只提交 YAML 文本，不落库。 */
+export interface ConfigSyncImportCheckRequestDTO {
+  yaml: string
+}
+
+/** 预检查结果：将新增、将覆盖（同名且可写）与将跳过的条目。 */
+export interface ConfigSyncImportCheckDTO {
+  created: ConfigSyncRef[]
+  updated: ConfigSyncRef[]
   skipped: ConfigSyncSkipped[]
 }
