@@ -11,7 +11,7 @@ import java.util.Objects;
  * <p>没有本地二进制 resource 导出根：图片等二进制内容以 {@code BinaryResultContent} 直接进入终态，由 Daemon 侧上传端口直传全局对象
  * 存储；本地只保留大文本全文（{@link TextOutputStore}）。
  *
- * <p>所有取值都来自 CLI（{@link fun.fengwk.kkstudio.harness.daemon.DaemonConfig}），本类型不再读取任何 {@code
+ * <p>所有取值都来自配置文件派生的 {@link fun.fengwk.kkstudio.harness.daemon.DaemonConfig}，本类型不再读取任何 {@code
  * kkstudio.daemon.*} 系统属性：一条配置只有一个权威来源。
  */
 public record CodingToolsConfig(
@@ -44,7 +44,7 @@ public record CodingToolsConfig(
   }
 
   /**
-   * 用 CLI 的显式取值与数据目录资源根构建配置。
+   * 用运行时的显式取值与数据目录资源根构建配置。
    *
    * <p>输出布局完全由数据目录决定：本地大文本落在 {@code <resources>/text} 与 {@code <resources>/staging}。
    *
@@ -52,7 +52,8 @@ public record CodingToolsConfig(
    * @param bashExecutable 显式 bash 可执行文件，空白时回退默认值
    * @param lsp 预先配置的 LSP 服务器；未配置时为空集合
    */
-  public static CodingToolsConfig fromCli(Path resources, String bashExecutable, LspDiscovery lsp) {
+  public static CodingToolsConfig fromRuntime(
+      Path resources, String bashExecutable, LspDiscovery lsp) {
     Path root = Objects.requireNonNull(resources, "resources").toAbsolutePath().normalize();
     return new CodingToolsConfig(
         DEFAULT_PREVIEW_MAX_LINES,

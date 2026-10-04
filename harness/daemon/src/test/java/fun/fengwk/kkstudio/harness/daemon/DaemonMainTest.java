@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -13,10 +14,14 @@ import org.junit.jupiter.api.parallel.Resources;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.net.ProxySelector;
+import java.net.ServerSocket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * DaemonMain 信息命令契约。
@@ -43,22 +48,26 @@ class DaemonMainTest {
       assertEquals(DaemonMain.USAGE, usage, flag + " must print exactly the usage text");
       for (String option :
           new String[] {
-            "--gateway-uri",
-            "--registration-token-file",
-            "--heartbeat",
-            "--reconnect-initial",
-            "--reconnect-max",
-            "--note",
-            "--data-dir",
-            "--bash-executable",
-            "--lsp-config",
-            "--version",
-            "--base64-args",
+            "--config", "--check-config", "--version", "--base64-args",
           }) {
         assertTrue(usage.contains(option), "usage must document " + option);
       }
       assertFalse(
           usage.contains("--environment-root"), "usage must not document removed environment root");
+      for (String removed :
+          new String[] {
+            "--gateway-uri",
+            "--registration-token-file",
+            "--note",
+            "--data-dir",
+            "--lsp-config",
+            "--bash-executable",
+            "--heartbeat",
+            "--reconnect-initial",
+            "--reconnect-max"
+          }) {
+        assertFalse(usage.contains(removed), "usage must not document removed option " + removed);
+      }
       // 默认值也是契约的一部分：操作者必须能从这里读出省略参数时的行为。
       for (String documentedDefault :
           new String[] {"PT15S", "PT1S", "PT30S", "~/.kk-studio", "bash"}) {
@@ -118,7 +127,7 @@ class DaemonMainTest {
             () ->
                 DaemonConfig.fromArgs(
                     new String[] {"--help", "--gateway-uri", "ws://localhost/gateway"}));
-    assertTrue(error.getMessage().contains("--help"), error.getMessage());
+    assertTrue(error.getMessage().contains("--config"), error.getMessage());
   }
 
   /** 意图：真实 main 最先解码；没有连接配置、HOME 是普通文件，信息命令仍成功，证明不进入运行时。 */
@@ -178,6 +187,96 @@ class DaemonMainTest {
           DaemonArgumentsTest.encoded("--note")
         }) {
       assertThrows(IllegalArgumentException.class, () -> DaemonMain.main(args));
+    }
+  }
+
+  /** 真实 main 预检仅读取：即使数据目录锁已被占用，也不初始化代理、连接或启动 LSP。 */
+  @Test
+  @ResourceLock(Resources.SYSTEM_OUT)
+  @ResourceLock(Resources.SYSTEM_PROPERTIES)
+  @ResourceLock("defaultProxySelector")
+  void preflightHasNoFilesystemNetworkOrProcessSideEffects(@TempDir Path root) throws Exception {
+    PrintStream previousOut = System.out;
+    ProxySelector previousSelector = ProxySelector.getDefault();
+    String previousProxyProperty = System.getProperty("java.net.useSystemProxies");
+    try (ServerSocket server = new ServerSocket(0)) {
+      Path file = DaemonConfigTest.writeConfig(root, "http://127.0.0.1:" + server.getLocalPort());
+      Files.writeString(
+          file,
+          "{\"studioUrl\":\"http://127.0.0.1:"
+              + server.getLocalPort()
+              + "\",\"lsp\":{\"servers\":{\"not-installed\":{\"command\":[\"/SECRET/not-installed\"],\"extensions\":[\".java\"]}}}}");
+      List<String> before = DaemonConfigTest.entries(root);
+      byte[] configBytes = Files.readAllBytes(file);
+      byte[] tokenBytes = Files.readAllBytes(file.resolveSibling("daemon.token"));
+      var configTime = Files.getLastModifiedTime(file);
+      var tokenTime = Files.getLastModifiedTime(file.resolveSibling("daemon.token"));
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+      DaemonMain.main(new String[] {"--check-config", file.toString()});
+      assertEquals(
+          "Daemon configuration is valid" + System.lineSeparator(),
+          output.toString(StandardCharsets.UTF_8));
+      assertEquals(before, DaemonConfigTest.entries(root));
+      assertArrayEquals(configBytes, Files.readAllBytes(file));
+      assertArrayEquals(tokenBytes, Files.readAllBytes(file.resolveSibling("daemon.token")));
+      assertEquals(configTime, Files.getLastModifiedTime(file));
+      assertEquals(tokenTime, Files.getLastModifiedTime(file.resolveSibling("daemon.token")));
+      assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
+      // 已占用的锁也不会被预检重新打开；Windows 编码入口仍使用同一配置源。
+      try (DaemonDataDirectory locked = DaemonDataDirectory.open(root)) {
+        var lockedEntries = DaemonConfigTest.entries(root);
+        output.reset();
+        DaemonMain.main(DaemonArgumentsTest.encoded("--check-config", file.toString()));
+        assertEquals(
+            "Daemon configuration is valid" + System.lineSeparator(),
+            output.toString(StandardCharsets.UTF_8));
+        assertEquals(lockedEntries, DaemonConfigTest.entries(root));
+      }
+      assertSame(previousSelector, ProxySelector.getDefault());
+      assertEquals(previousProxyProperty, System.getProperty("java.net.useSystemProxies"));
+      server.setSoTimeout(100);
+      assertThrows(SocketTimeoutException.class, server::accept);
+    } finally {
+      System.setOut(previousOut);
+    }
+  }
+
+  /** 失败预检不输出成功、不创建数据；空 token、非法 UTF-8、重复字段均失败关闭。 */
+  @Test
+  @ResourceLock(Resources.SYSTEM_OUT)
+  void failedPreflightLeavesInputsUntouched(@TempDir Path root) throws Exception {
+    Path file = DaemonConfigTest.writeConfig(root, "http://localhost");
+    Path token = file.resolveSibling("daemon.token");
+    PrintStream previousOut = System.out;
+    try {
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
+      for (String[] args :
+          new String[][] {
+            {"--check-config"}, {"--check-config", file.toString(), "--version"},
+            {"--check-config", "relative.json"}, {"--check-config", "--help"},
+            {"--check-config", ""}
+          }) {
+        assertThrows(IllegalArgumentException.class, () -> DaemonMain.main(args));
+      }
+      Files.writeString(token, " \n");
+      assertThrows(
+          IllegalStateException.class,
+          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
+      Files.write(token, new byte[] {(byte) 0xff});
+      assertThrows(
+          UncheckedIOException.class,
+          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
+      DaemonConfigTest.writeToken(root);
+      Files.writeString(file, "{\"studioUrl\":\"http://host\",\"studioUrl\":\"SECRET\"}");
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
+      assertEquals("", output.toString(StandardCharsets.UTF_8));
+      assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
+    } finally {
+      System.setOut(previousOut);
     }
   }
 }

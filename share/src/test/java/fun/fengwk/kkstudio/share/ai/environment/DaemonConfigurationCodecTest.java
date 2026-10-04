@@ -22,7 +22,7 @@ class DaemonConfigurationCodecTest {
   @Test
   void normalizesWithoutMutatingInputAndPreservesOrder() throws Exception {
     ObjectNode json = MAPPER.createObjectNode().put("studioUrl", "https://studio.example/");
-    json.put("note", "  trusted note  ").put("bashExecutable", "/opt/custom bash");
+    json.put("note", "\u2003 trusted note \u2003").put("bashExecutable", "/opt/custom bash");
     ObjectNode servers = json.putObject("lsp").putObject("servers");
     for (String id : List.of("z", "a")) {
       ObjectNode server = servers.putObject(id);
@@ -38,7 +38,7 @@ class DaemonConfigurationCodecTest {
     assertEquals(List.of(".java"), parsed.getLsp().getServers().get("z").getExtensions());
     assertEquals(
         " argument with spaces ", parsed.getLsp().getServers().get("z").getCommand().get(1));
-    assertEquals("  trusted note  ", json.get("note").textValue());
+    assertEquals("\u2003 trusted note \u2003", json.get("note").textValue());
     assertEquals(
         URI.create("wss://studio.example/api/harness/environment-daemon/v1"),
         DaemonConfigurationCodec.gatewayUri(parsed.getStudioUrl()));
