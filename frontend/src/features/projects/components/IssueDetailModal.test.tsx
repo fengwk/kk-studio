@@ -271,6 +271,9 @@ describe('IssueDetailModal', () => {
     await screen.findByLabelText('Issue #12 详情')
     fireEvent.click(screen.getByRole('button', { name: /阶段预算/i }))
 
+    // budgetAfterOrdinal 是排除边界，不是已用次数；新额度只计入此序号之后的 Run。
+    expect(screen.getByText('额度从此序号后起算:').parentElement).toHaveTextContent('#0')
+
     // 点击重置阶段预算
     fireEvent.click(screen.getByRole('button', { name: '重置阶段预算' }))
 

@@ -1645,7 +1645,7 @@ export function IssueDetailModal({
                               </strong>
                             </div>
                             <div>
-                              <span>已用执行序号:</span>
+                              <span>额度从此序号后起算:</span>
                               <code>#{b.budgetAfterOrdinal}</code>
                             </div>
                           </div>
