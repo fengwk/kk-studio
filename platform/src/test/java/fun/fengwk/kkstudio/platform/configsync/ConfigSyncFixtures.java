@@ -4,18 +4,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
@@ -25,6 +32,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,8 +57,33 @@ final class ConfigSyncFixtures {
       new AgentModelRuntimeConfigParser(MAPPER);
   static final AgentProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
       new AgentProviderConfigurationCodec(MAPPER);
+  private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
+
+  static final AgentProviderMutationFactory PROVIDER_MUTATION_FACTORY =
+      new AgentProviderMutationFactory(EDITABLE_SUPPORT, PROVIDER_CONFIG_CODEC);
+  static final AgentModelMutationFactory MODEL_MUTATION_FACTORY =
+      new AgentModelMutationFactory(EDITABLE_SUPPORT, MODEL_CONFIG_PARSER);
+  static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
+      new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
+
+  /**
+   * 真实 {@code SkillCatalogServiceImpl.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由
+   * {@link SkillCatalogTestFixtures} 以 mock 占位。
+   */
+  static final SkillCatalogService SKILL_CATALOG_SERVICE = SkillCatalogTestFixtures.realValidator();
 
   private ConfigSyncFixtures() {}
+
+  /** 构造注入了真实校验器的 Parser，供解析期硬校验测试使用。 */
+  static ConfigSyncParser parser(ConfigSyncYaml yaml) {
+    return new ConfigSyncParser(
+        yaml,
+        PROVIDER_MUTATION_FACTORY,
+        MODEL_MUTATION_FACTORY,
+        AGENT_MUTATION_FACTORY,
+        SKILL_CATALOG_SERVICE,
+        new SystemSettingsCodec());
+  }
 
   static AgentModelConfigDTO modelConfig() {
     AgentModelLimitDTO limit = new AgentModelLimitDTO();
@@ -83,6 +116,20 @@ final class ConfigSyncFixtures {
     return config;
   }
 
+  static AgentModelConfigDTO modelConfigWithVariants(
+      List<String> variantIds, String defaultVariant) {
+    AgentModelConfigDTO config = modelConfig();
+    List<AgentModelVariantDTO> variants = new ArrayList<>();
+    for (String id : variantIds) {
+      AgentModelVariantDTO variant = new AgentModelVariantDTO();
+      variant.setId(id);
+      variants.add(variant);
+    }
+    config.setVariants(variants);
+    config.setDefaultVariant(defaultVariant);
+    return config;
+  }
+
   static AgentDefinitionConfigDTO agentConfig(
       List<String> tools, List<SkillRefDTO> skills, List<String> subagents) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
@@ -111,11 +158,15 @@ final class ConfigSyncFixtures {
   }
 
   static AgentModel model(String providerName, String name) {
+    return model(providerName, name, modelConfig());
+  }
+
+  static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
     AgentModel model = new AgentModel();
     model.setProviderName(providerName);
     model.setName(name);
     model.setModelId("gpt-4");
-    model.setConfigJson(MODEL_CONFIG_PARSER.encode(modelConfig()));
+    model.setConfigJson(MODEL_CONFIG_PARSER.encode(config));
     model.setVersion(0L);
     return model;
   }
@@ -209,11 +260,39 @@ final class ConfigSyncFixtures {
     return "providers:\n  - name: p\n    providerType: openai\n" + resourceYaml("model-entry.yaml");
   }
 
+  /** 当前七节 settings 的完整 DTO，便于测试按需改值后重新序列化。 */
+  static SystemSettingsSectionsDTO defaultSettings() {
+    return new SystemSettingsCodec().toSections(SystemSettings.DEFAULT);
+  }
+
+  /** 把完整 sections 序列化为 config sync YAML 文本；settings 出现时必须完整。 */
+  static String settingsYaml(SystemSettingsSectionsDTO sections) {
+    ConfigSyncYaml yaml = new ConfigSyncYaml();
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("settings", yaml.toMap(sections, "settings"));
+    return yaml.dump(document);
+  }
+
   static Map<String, Object> mapOf(Object... keyValues) {
     Map<String, Object> map = new LinkedHashMap<>();
     for (int index = 0; index < keyValues.length; index += 2) {
       map.put((String) keyValues[index], keyValues[index + 1]);
     }
     return map;
+  }
+
+  /** 把 typed Agent Model config 序列化为 config sync 纯结构，便于构造文件内 Model 条目。 */
+  static Map<String, Object> modelConfigMap(AgentModelConfigDTO config) {
+    return new ConfigSyncYaml().toMap(config, "config");
+  }
+
+  /** 把 typed Agent config 序列化为 config sync 纯结构。 */
+  static Map<String, Object> agentConfigMap(AgentDefinitionConfigDTO config) {
+    return new ConfigSyncYaml().toMap(config, "config");
+  }
+
+  /** 按纯结构 dump 完整 config sync 文档，避免内联长篇 YAML。 */
+  static String documentYaml(Map<String, Object> document) {
+    return new ConfigSyncYaml().dump(document);
   }
 }

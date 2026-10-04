@@ -349,9 +349,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 免费 L1 覆盖的部分产品契约面：
 
 - `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
-  `config_sync.environment_identity_and_token`：七类配置清单、凭据随 YAML 导出、
-  同名 Provider 更新、Environment 身份与注册令牌恢复，以及成功和错误响应的 `no-store`。
-  三个 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
+  `config_sync.environment_identity_and_token` / `config_sync.import_precheck_and_partial_confirmation`：
+  七类配置清单、凭据随 YAML 导出、导入前的新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、
+  同名 Provider 更新、Environment 身份与注册令牌恢复，以及同步响应的 `no-store`。
+  这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
   幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
@@ -747,16 +748,25 @@ Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Su
 Model 包含 Provider；系统设置包含其引用的备用模型和提示词 Agent。
 依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
 
-导入选择 `.yaml` 或 `.yml` 文件并确认，按名称新增或更新，不删除文件外的配置。
-条目名称须非空且没有首尾空白，重复名称会使导入失败，不会依次覆盖。
+导入选择 `.yaml` 或 `.yml` 文件后先检查，不写数据库。确认页分别列出将新增、将覆盖的配置，
+以及将跳过的条目和原因；同名配置即使内容未变也归入覆盖清单。
+没有跳过项时点击“确认导入”；有跳过项时，可取消或明确选择“仅导入可用配置”。
+没有可导入项时不提供执行按钮。不支持的条目及依赖它们的配置不会被悄悄改写。
+
+YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒绝整份文件。
+条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
+同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
+文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
-系统设置只合并提供且支持的字段，省略字段保持原值。导入结果列出已导入条目和跳过原因；
-不支持的条目及依赖它们的配置不会被悄悄改写。YAML 结构、类型或有效值错误使导入失败，
+
+确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；
+导入期间应避免并发编辑，同名配置按文件覆盖。未授权部分导入时，执行发现跳过项也会拒绝，
 数据库写入失败整体回滚。设置页的未保存草稿不会被自动覆盖，可在导入结果中明确重新加载。
 网络代理设置参与同步，导入后仍须重启 Backend 才会生效。
 
 Skill Package 文件保存仓库地址、分支和已发布的 exact commit，不包含 Git 文件内容；
-目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。MCP 工具在导入时重新发现，
+目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。检查与执行都会准备 Git commit
+并重新发现 MCP 工具，外部服务状态变化可能使实际结果与预览不同；
 发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
 Environment 保留注册令牌，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
 
@@ -765,8 +775,9 @@ Environment 保留注册令牌，同名更新保持其身份；新库生成新�
 需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
 
 数据库脚本只有 [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：
-备份旧库、重命名冻结，并以原元数据创建同名空库。它只连接 PostgreSQL，不管理应用或容器，
-也不执行 Flyway；存在其他会话时只读拒绝，不终止会话。
+默认备份旧库、重命名冻结，并以原元数据创建同名空库；验收后可显式清理冻结快照。
+它只连接 PostgreSQL，不管理应用或容器，也不执行 Flyway；重建目标库或删除快照时，
+发现该库仍有其他会话就拒绝，不终止会话。
 
 #### 连接
 
@@ -851,7 +862,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
 
 维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证备份、
-重建回滚、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
+重建回滚、快照清理范围与确认、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
 Docker 不可用时跳过的结果不能当作数据库流程通过。
 
 #### 权限、产物与清理
@@ -865,6 +876,29 @@ Docker 不可用时跳过的结果不能当作数据库流程通过。
 - **本地备份**：默认位于 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`，目录为
   `0700`、文件为 `0600`，可通过 `--work-dir` 覆盖。浏览器下载的 YAML 不由脚本设置权限，须自行妥善保管；
 - **维护后操作**：确认配置与重连，按需恢复 Plugin 认证；验收完成后按部署策略归档或清理 YAML、备份和冻结库。
+
+#### 清理冻结快照
+
+重建默认保留所有冻结库，不自动过期或删除。配置导入、关键功能与备份恢复能力验证通过，
+确认不再需要快速切回旧库后，使用独立清理模式：
+
+```bash
+./scripts/ops/reset-database.sh --database kk_studio --cleanup-snapshots --dry-run
+./scripts/ops/reset-database.sh --database kk_studio --cleanup-snapshots
+```
+
+连接来源与 reset 相同。预览列出库名、大小和数量；真实执行要求输入目标库名确认，
+`--yes` 仅用于已授权的非交互执行。没有匹配项时直接成功退出。
+
+只删除名称严格匹配 `<目标库>_pre_YYYYMMDDTHHMMSSZ`、禁止连接且不是模板的数据库，
+并排除目标库与维护库。**范围包含最新快照，不额外保留一份**。当前业务库可保持在线；
+清理需要每个快照的所有权或 superuser，不需要 `CREATEDB`、备份工具或备份目录。
+它不执行重建，也不创建或删除本地备份、配置 YAML、S3 对象。
+
+脚本在删除前检查整批权限和会话，并在确认后、每次删除前重新核对快照 OID、名称和冻结状态。
+预览后新建的快照不纳入本次删除；清理期间不要并发重建、改名、解冻或替换快照。
+出现状态变化或删除失败立即停止，不强杀连接。已完成的删除逐项输出且不能回滚，
+后续恢复只能使用保留的全库备份和匹配的对象存储数据。
 
 ### 自迭代闭环
 

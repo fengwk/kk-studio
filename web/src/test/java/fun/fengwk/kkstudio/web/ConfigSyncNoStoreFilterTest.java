@@ -24,7 +24,9 @@ class ConfigSyncNoStoreFilterTest {
     "/api/settings/sync/export,200",
     "/api/settings/sync/import,400",
     "/api/settings/sync/import,409",
-    "/api/settings/sync/import,500"
+    "/api/settings/sync/import,500",
+    "/api/settings/sync/import/check,200",
+    "/api/settings/sync/import/check,400"
   })
   void appliesBeforeDownstreamProcessing(String path, int status) throws Exception {
     MockHttpServletRequest request = new MockHttpServletRequest("POST", path);

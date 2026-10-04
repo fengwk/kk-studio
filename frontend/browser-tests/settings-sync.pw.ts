@@ -95,7 +95,7 @@ test('export sends only directly selected roots while the UI shows the full scop
   ])
 })
 
-test('import reads a YAML file, confirms and reports imported/skipped entries', async ({ page }) => {
+test('import prechecks the file and requires explicit partial confirmation', async ({ page }) => {
   await page.goto(HARNESS)
   await page.locator('.settings-sync-file-input').setInputFiles({
     name: 'kk-studio-config.yaml',
@@ -103,16 +103,87 @@ test('import reads a YAML file, confirms and reports imported/skipped entries', 
     buffer: Buffer.from('providers: []\n'),
   })
   const dialog = page.getByRole('dialog', { name: '导入配置' })
-  await expect(dialog.getByText('导入将更新同名配置。')).toBeVisible()
+  // 选择文件只做预检查，确认前不执行导入。
+  await expect(dialog.getByText('导入前请确认以下变更计划。')).toBeVisible()
   await expect(dialog.getByText('文件：kk-studio-config.yaml')).toBeVisible()
+  await expect(dialog.getByText('将新增')).toBeVisible()
+  await expect(dialog.getByText('将覆盖')).toBeVisible()
+  await expect(dialog.getByText('将跳过')).toBeVisible()
+  await expect(dialog.getByText('Agent: broken — unsupported tool')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '确认导入' })).toHaveCount(0)
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBeUndefined()
 
-  await dialog.getByRole('button', { name: '导入' }).click()
+  await dialog.getByRole('button', { name: '仅导入可用配置' }).click()
   await expect(dialog.getByText('已导入')).toBeVisible()
   await expect(dialog.getByText('已跳过')).toBeVisible()
-  await expect(dialog.getByText('Agent: broken — unsupported tool')).toBeVisible()
   // YAML 内容提交给后端，但绝不渲染到页面。
   expect(await page.evaluate(() => window.__syncImportYaml)).toBe('providers: []\n')
+  expect(await page.evaluate(() => window.__syncImportAllowPartial)).toBe(true)
   await expect(dialog.getByText('providers: []')).toHaveCount(0)
+})
+
+test('import confirms a fully importable plan without partial authorization', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.locator('#preview-mode').selectOption('full')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  const dialog = page.getByRole('dialog', { name: '导入配置' })
+  await expect(dialog.getByRole('button', { name: '仅导入可用配置' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '确认导入' }).click()
+
+  await expect(dialog.getByText('已导入')).toBeVisible()
+  expect(await page.evaluate(() => window.__syncImportAllowPartial)).toBe(false)
+})
+
+test('import with no usable items offers no execute action', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.locator('#preview-mode').selectOption('empty')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('agents: []\n'),
+  })
+  const dialog = page.getByRole('dialog', { name: '导入配置' })
+  await expect(dialog.getByText('此文件没有可导入的配置。')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '确认导入' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '仅导入可用配置' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '取消' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: '取消' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBeUndefined()
+})
+
+test('import check failure rejects with the settings alert and no confirm dialog', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.locator('#preview-mode').selectOption('fail')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+
+  await expect(page.getByRole('alert')).toContainText('unsupported file structure')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBeUndefined()
+})
+
+test('import dialog closes on Escape from the preview', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  const dialog = page.getByRole('dialog', { name: '导入配置' })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBeUndefined()
 })
 
 test('import keeps an unsaved settings draft visible with an explicit reload affordance', async ({
@@ -127,11 +198,32 @@ test('import keeps an unsaved settings draft visible with an explicit reload aff
     buffer: Buffer.from('providers: []\n'),
   })
   const dialog = page.getByRole('dialog', { name: '导入配置' })
-  await dialog.getByRole('button', { name: '导入' }).click()
+  await dialog.getByRole('button', { name: '仅导入可用配置' }).click()
 
   await expect(dialog.getByText('设置中有未保存的更改，将保持原样。')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '重新加载设置' })).toBeVisible()
 })
+
+for (const width of [1100, 360]) {
+  test(`sync import dialog stays within the viewport at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 640 })
+    await page.goto(HARNESS)
+    await page.locator('.settings-sync-file-input').setInputFiles({
+      name: 'kk.yaml',
+      mimeType: 'application/yaml',
+      buffer: Buffer.from('providers: []\n'),
+    })
+    const dialog = page.getByRole('dialog', { name: '导入配置' })
+    const box = (await dialog.boundingBox())!
+
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(width + 1)
+    // 长清单在弹窗内滚动，底部操作始终可达。
+    await expect(dialog.getByRole('button', { name: '仅导入可用配置' })).toBeVisible()
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth)
+    expect(scrollWidth).toBeLessThanOrEqual(width + 1)
+  })
+}
 
 for (const width of [1100, 360]) {
   test(`sync export dialog stays within the viewport at ${width}px`, async ({ page }) => {
@@ -158,4 +250,42 @@ test('renders the English copy consistently when the locale switches', async ({ 
   const dialog = page.getByRole('dialog', { name: 'Export configuration' })
   await expect(dialog.getByText('The configuration file contains credentials; please keep it safe.')).toBeVisible()
   await expect(dialog.getByText('Agents, Models & Providers')).toBeVisible()
+})
+
+test('renders the English import preview, partial confirmation and result', async ({ page }) => {
+  await page.goto(HARNESS)
+  await page.getByRole('button', { name: /Locale: zh-CN/ }).click()
+  await expect(page.getByRole('button', { name: 'Import' })).toBeVisible()
+
+  // partial：预览三段与显式部分导入文案。
+  await page.locator('#preview-mode').selectOption('partial')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  let dialog = page.getByRole('dialog', { name: 'Import configuration' })
+  await expect(dialog.getByText('Review the planned changes before importing.')).toBeVisible()
+  await expect(dialog.getByText('File: kk.yaml')).toBeVisible()
+  await expect(dialog.getByText('Will be added')).toBeVisible()
+  await expect(dialog.getByText('Will be overwritten')).toBeVisible()
+  await expect(dialog.getByText('Will be skipped')).toBeVisible()
+  await expect(dialog.getByText('Agents: broken — unsupported tool')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Import available only' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Import available only' }).click()
+  await expect(dialog.getByText('Imported')).toBeVisible()
+  await expect(dialog.getByText('Skipped')).toBeVisible()
+  await dialog.locator('.modal-footer .btn-primary').click()
+
+  // full：同一个执行按钮改用全量确认文案。
+  await page.locator('#preview-mode').selectOption('full')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+  dialog = page.getByRole('dialog', { name: 'Import configuration' })
+  await expect(dialog.getByText('Will be overwritten')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Confirm import' })).toBeVisible()
 })

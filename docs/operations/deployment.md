@@ -169,6 +169,10 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 Environment 注册令牌可恢复；Daemon 重连仍须验收，Plugin 认证和部署级配置需另行准备。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
+验收完成且确认备份可恢复后，可用 `reset-database.sh --cleanup-snapshots --dry-run`
+预览，再用 `--cleanup-snapshots` 确认删除目标库的全部冻结快照。默认重建不自动清理；
+清理包括最新快照，删除后无法直接切回旧库。连接与范围见[清理冻结快照](development-and-testing.md#清理冻结快照)。
+
 ## 生产部署与反向代理
 
 Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；

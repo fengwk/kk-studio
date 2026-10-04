@@ -142,7 +142,7 @@ public final class ConfigSyncYaml {
    * 按目标 DTO 的实际 Bean 属性递归剔除未声明字段，返回剔除后的纯结构副本。
    *
    * <p>Map 的值与集合/数组的元素按其声明的内容类型递归；未声明内容类型（如 {@code Object}）视为动态结构不检查。被剔除字段的路径写入 {@code
-   * removed}，供调用方决定是整体跳过条目还是合并其余字段。
+   * removed}，供调用方决定是整体跳过条目还是仅上报未知字段。
    */
   public Object removeUnknownProperties(
       Class<?> type, Object node, String path, List<String> removed) {

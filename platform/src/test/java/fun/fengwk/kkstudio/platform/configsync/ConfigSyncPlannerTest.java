@@ -31,23 +31,27 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
- * 测试意图：锁定 Planner 的外部准备与依赖判定——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
- * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过），Skill 名称先校验且 Git 错误不回显 URL，Skill re-import 只在 URL
- * 不变且不丢被引用技能时进行，Agent 未满足依赖逐条给出明确原因，settings 合并后缺依赖 skip / 非法字段拒绝。
+ * 测试意图：锁定 Planner 的依赖判定与外部准备——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
+ * 失效/不支持的同名条目从可用依赖池剔除（不能被既有同名绕过）、Skill re-import 只在 URL 不变且不丢被引用技能时进行、Git 错误不回显 URL、 Agent
+ * 未满足依赖逐条给出明确原因、settings 缺依赖 skip。条目级静态校验（含 Skill 名称）已移入 Parser；这里用真实校验器 fixture 触发。
  */
 class ConfigSyncPlannerTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
-  private final ConfigSyncParser parser = new ConfigSyncParser(yaml);
+  private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
   private final ConfigSyncSnapshotReader snapshotReader = mock(ConfigSyncSnapshotReader.class);
   private final ConfigSyncMcpDiscovery mcpDiscovery = mock(ConfigSyncMcpDiscovery.class);
   private final SkillGitCache skillGitCache = mock(SkillGitCache.class);
@@ -59,13 +63,12 @@ class ConfigSyncPlannerTest {
   private final ConfigSyncPlanner planner =
       new ConfigSyncPlanner(
           snapshotReader,
-          yaml,
           mcpDiscovery,
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          new SystemSettingsCodec(),
-          toolCatalog);
+          toolCatalog,
+          ConfigSyncFixtures.MODEL_CONFIG_PARSER);
 
   private ConfigSyncSnapshot emptySnapshot() {
     return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
@@ -251,7 +254,7 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void existingSkillPackageRepositoryUrlChangeIsSkipped() {
+  void existingSkillPackageRepositoryUrlChangeIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -272,17 +275,14 @@ class ConfigSyncPlannerTest {
             + "    currentCommit: "
             + "a".repeat(40)
             + "\n";
-    ConfigSyncPlan plan = plan(yamlText);
+    AiValidationException error = assertThrows(AiValidationException.class, () -> plan(yamlText));
 
-    assertEquals(
-        "repositoryUrl is immutable for an existing package",
-        reason(plan.skipped(), "skillPackages", "pkg"));
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
+    assertFalse(error.getMessage().contains("other.git"));
     verify(skillGitCache, never()).ensureCommit(anyString(), anyString(), anyString());
   }
 
   @Test
-  void existingSkillPackageLosingReferencedSkillIsSkipped() {
+  void existingSkillPackageLosingReferencedSkillIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -306,10 +306,7 @@ class ConfigSyncPlannerTest {
             + "    currentCommit: "
             + "a".repeat(40)
             + "\n";
-    ConfigSyncPlan plan = plan(yamlText);
-
-    assertTrue(reason(plan.skipped(), "skillPackages", "pkg").contains("s2"));
-    assertTrue(plan.skillPackages().isEmpty());
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -367,10 +364,6 @@ class ConfigSyncPlannerTest {
         "agents:\n"
             + agent("missing_model", "q/x", agentConfigLines())
             + agent(
-                "invalid_skill",
-                "p/m",
-                "      tools: []\n      skills:\n        - null\n      subagents: []\n")
-            + agent(
                 "missing_pkg",
                 "p/m",
                 "      tools: []\n      skills:\n        - packageName: ghost\n          name: s\n      subagents: []\n")
@@ -388,11 +381,26 @@ class ConfigSyncPlannerTest {
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "missing_model"));
-    assertEquals("invalid skill reference", reason(plan.skipped(), "agents", "invalid_skill"));
     assertEquals("missing skill package: ghost", reason(plan.skipped(), "agents", "missing_pkg"));
     assertEquals("missing skill: pkg/nope", reason(plan.skipped(), "agents", "missing_skill"));
     assertEquals("missing subagent: ghost", reason(plan.skipped(), "agents", "missing_sub"));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
+  }
+
+  /** 嵌套 config 内 null skill 引用是结构错误，必须在计划阶段硬拒绝而不是当作依赖 skip。 */
+  @Test
+  void invalidSkillReferenceIsRejected() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    String yamlText =
+        PROVIDER_AND_MODEL
+            + "agents:\n"
+            + agent(
+                "a",
+                "p/m",
+                "      tools: []\n      skills:\n        - null\n      subagents: []\n");
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -516,7 +524,8 @@ class ConfigSyncPlannerTest {
                 ConfigSyncFixtures.settings(5L)));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan = plan("settings:\n  tool:\n    defaultYolo: false\n");
+    ConfigSyncPlan plan =
+        plan(ConfigSyncFixtures.settingsYaml(ConfigSyncFixtures.defaultSettings()));
 
     assertNotNull(plan.settings());
     assertEquals("5", plan.settings().expectedVersion());
@@ -528,14 +537,14 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan =
-        plan(
-            "settings:\n"
-                + "  aiRuntime:\n"
-                + "    compactionFallbackModel:\n"
-                + "      providerName: p\n"
-                + "      modelName: m\n"
-                + "      variant: v\n");
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    HarnessModelSelectionDTO fallback = new HarnessModelSelectionDTO();
+    fallback.setProviderName("p");
+    fallback.setModelName("m");
+    fallback.setVariant("v");
+    sections.getAiRuntime().setCompactionFallbackModel(fallback);
+
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
 
     assertNull(plan.settings());
     assertEquals("missing fallback model: p/m", reason(plan.skipped(), "settings", "settings"));
@@ -546,8 +555,10 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    ConfigSyncPlan plan =
-        plan("settings:\n  integrations:\n    minimaxH3:\n      promptAgentName: ghost\n");
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    sections.getIntegrations().getMinimaxH3().setPromptAgentName("ghost");
+
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
 
     assertNull(plan.settings());
     assertEquals("missing prompt agent: ghost", reason(plan.skipped(), "settings", "settings"));
@@ -558,12 +569,14 @@ class ConfigSyncPlannerTest {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
-    String yamlText = "settings:\n  aiRuntime:\n    retryBackoffStrategy: BOGUS\n";
+    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
+    sections.getAiRuntime().setRetryBackoffStrategy("BOGUS");
+    String yamlText = ConfigSyncFixtures.settingsYaml(sections);
     assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
-  void referencedMcpToolRemovalSkipsServer() {
+  void referencedMcpToolRemovalIsRejected() {
     when(snapshotReader.read())
         .thenReturn(
             snapshot(
@@ -580,10 +593,7 @@ class ConfigSyncPlannerTest {
 
     String yamlText =
         "mcpServers:\n" + "  - name: mcp\n" + "    url: https://mcp.example.com/mcp\n";
-    ConfigSyncPlan plan = plan(yamlText);
-
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MCP_SERVERS, "mcp")));
-    assertTrue(skipped(plan.skipped(), "mcpServers", "mcp"));
+    assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
   @Test
@@ -609,5 +619,166 @@ class ConfigSyncPlannerTest {
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
     assertTrue(skipped(plan.skipped(), "agents", "a"));
+  }
+
+  /** 既有 Model 未声明 Agent 显式 variant 时预检查硬拒绝；错误只带安全条目名，不回显 raw variant。缺 Model 仍走依赖 skip，不被此规则遮蔽。 */
+  @Test
+  void agentVariantMustBeDeclaredByAvailableModel() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> unknown =
+        document(
+            agent(
+                "a",
+                "p/m",
+                "raw-variant-xyz",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(unknown)));
+    assertTrue(error.getMessage().contains("unknown model variant"));
+    assertTrue(error.getMessage().contains("a"));
+    assertFalse(error.getMessage().contains("raw-variant-xyz"));
+
+    // 缺 Model 的 Agent 不因 variant 被硬拒绝，而是按既有依赖政策 skip。
+    Map<String, Object> missingModel =
+        document(
+            agent(
+                "b",
+                "q/x",
+                "raw-variant-xyz",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(missingModel));
+    assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "b"));
+  }
+
+  /** 无 variant 或仅空白的 Agent 不触发声明校验，维持既有“不覆盖 default”语义。 */
+  @Test
+  void agentWithoutVariantIsNotDeclaredChecked() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> doc = new LinkedHashMap<>();
+    doc.put(
+        "agents",
+        List.of(
+            ConfigSyncFixtures.mapOf(
+                "name",
+                "no_variant",
+                "model",
+                "p/m",
+                "config",
+                ConfigSyncFixtures.agentConfigMap(
+                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
+            ConfigSyncFixtures.mapOf(
+                "name",
+                "blank_variant",
+                "model",
+                "p/m",
+                "variant",
+                "   ",
+                "config",
+                ConfigSyncFixtures.agentConfigMap(
+                    ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())))));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(doc));
+
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "no_variant")));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "blank_variant")));
+  }
+
+  /** 文件内同名 Model config 覆盖快照：文件新增的 variant 通过，快照独有而被移除的 variant 被拒。 */
+  @Test
+  void fileModelConfigOverridesSnapshotForVariantPrecheck() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(
+                    model(
+                        "p",
+                        "m",
+                        ConfigSyncFixtures.modelConfigWithVariants(List.of("old"), "old"))),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> fileModel =
+        ConfigSyncFixtures.mapOf(
+            "providerName",
+            "p",
+            "name",
+            "m",
+            "modelId",
+            "gpt",
+            "config",
+            ConfigSyncFixtures.modelConfigMap(
+                ConfigSyncFixtures.modelConfigWithVariants(List.of("new"), "new")));
+
+    Map<String, Object> withNew =
+        documentWithModel(
+            fileModel,
+            agent(
+                "a",
+                "p/m",
+                "new",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(withNew));
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+
+    Map<String, Object> withOld =
+        documentWithModel(
+            fileModel,
+            agent(
+                "a",
+                "p/m",
+                "old",
+                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+    assertThrows(AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(withOld)));
+  }
+
+  private static Map<String, Object> document(Map<String, Object> agent) {
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("agents", List.of(agent));
+    return document;
+  }
+
+  private static Map<String, Object> documentWithModel(
+      Map<String, Object> model, Map<String, Object> agent) {
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("models", List.of(model));
+    document.put("agents", List.of(agent));
+    return document;
+  }
+
+  private static Map<String, Object> agent(
+      String name, String model, String variant, AgentDefinitionConfigDTO config) {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("name", name);
+    entry.put("model", model);
+    entry.put("variant", variant);
+    entry.put("config", ConfigSyncFixtures.agentConfigMap(config));
+    return entry;
   }
 }
