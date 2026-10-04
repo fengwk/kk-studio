@@ -49,6 +49,10 @@ $script:BuiltJar = $null
 $script:DownloadDirectory = $null
 $script:ResolvedReleaseTag = $null
 $script:BackupDirectory = $null
+# The core preflight prints one trusted, value-free line for an invalid configuration;
+# only that bounded marker is surfaced, never raw diagnostics that could echo secrets.
+$script:ConfigFailureMarker = "Invalid daemon configuration: "
+$script:ConfigFailureMaxLength = 512
 
 function Write-Usage {
     @'
@@ -58,8 +62,8 @@ Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <abso
 Only the latest official fengwk/kk-studio GitHub release is installed.
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs.
 Token bytes are copied only; they never enter task arguments or environment variables.
-JDK 21 discovery: JAVA_HOME_21, JAVA_HOME, PATH. Git for Windows or compatible Bash
-must be available on PATH; the daemon validates a configured Bash executable.
+JDK 21 discovery: JAVA_HOME_21, JAVA_HOME, PATH. The read-only preflight resolves the
+configured (or default) Bash from the daemon config; no PATH Bash is assumed here.
 
 Fixed layout: %USERPROFILE%\.kk-studio\daemon.json, daemon.token, lib, logs, backups.
 Task: kk-studio-environment-daemon-<current-user-SID>
@@ -561,29 +565,6 @@ function Resolve-JavaHome {
     )
 }
 
-function Resolve-Executable {
-    param(
-        [AllowEmptyString()][string] $Value,
-        [Parameter(Mandatory = $true)][string] $DefaultName,
-        [Parameter(Mandatory = $true)][string] $OptionName
-    )
-    $candidate = if ([string]::IsNullOrEmpty($Value)) { $DefaultName } else { $Value }
-    Assert-NoControlCharacters -Value $candidate -Name $OptionName
-    if ($candidate -match "^[A-Za-z]:[\\/]" -or
-        $candidate -match "^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)") {
-        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-            Throw-Failure "$OptionName executable does not exist: $candidate"
-        }
-        return (Get-Item -LiteralPath $candidate).FullName
-    }
-    $resolved = Get-Command $candidate -CommandType Application `
-        -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $resolved) {
-        Throw-Failure "cannot resolve $candidate; pass $OptionName"
-    }
-    return $resolved.Source
-}
-
 function Resolve-InstallInputs {
     $config = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid `
         -Name "-ConfigFile" -MaximumBytes 1048576
@@ -600,21 +581,12 @@ function Resolve-InstallInputs {
     }
     $script:SelectedJavaHome = Resolve-JavaHome -ExplicitJavaHome $JavaHome
     $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
-    Assert-BashReady
-}
-
-function Assert-BashReady {
-    $bash = Resolve-Executable -Value "" -DefaultName "bash.exe" -OptionName "Bash on PATH"
-    $result = Invoke-NativeProcess -Executable $bash -Arguments @("--version")
-    if ($result.ExitCode -ne 0 -or $result.Stdout -notmatch "GNU bash") {
-        Throw-Failure "Bash on PATH is not ready; install Git for Windows or a compatible Bash before retrying"
-    }
 }
 
 function Assert-BuiltJar {
     if (-not (Test-Path -LiteralPath $script:BuiltJar -PathType Leaf) -or
         (Get-Item -LiteralPath $script:BuiltJar).Length -le 0) {
-        Throw-Failure "built daemon JAR not found or empty: $($script:BuiltJar)"
+        Throw-Failure "downloaded daemon JAR not found or empty: $($script:BuiltJar)"
     }
     # Probe the JAR exactly as the task runs it: ASCII leaf resolved against a working
     # directory, so a non-ASCII checkout path can never corrupt the -jar argument.
@@ -628,7 +600,7 @@ function Assert-BuiltJar {
             -WorkingDirectory $jarDirectory
     }
     if ($result.ExitCode -ne 0) {
-        Throw-Failure "built daemon JAR failed its --version check (exit code $($result.ExitCode))"
+        Throw-Failure "downloaded daemon JAR failed its --version check (exit code $($result.ExitCode))"
     }
     $output = $result.Stdout
     if (-not [string]::IsNullOrEmpty($script:ResolvedReleaseTag) -and
@@ -642,6 +614,32 @@ function Assert-BuiltJar {
     )) {
         Throw-Failure "unexpected daemon --version output"
     }
+}
+
+function Get-TrustedConfigFailureDetail {
+    # Surface only the core's fixed, value-free marker line. Every other outcome (an older
+    # release rejecting the flag, a stack trace) stays generic so nothing can echo a secret.
+    param(
+        [AllowEmptyString()][string] $Stdout,
+        [AllowEmptyString()][string] $Stderr
+    )
+    foreach ($stream in @($Stderr, $Stdout)) {
+        if ([string]::IsNullOrEmpty($stream)) {
+            continue
+        }
+        foreach ($line in ($stream -split "\r?\n")) {
+            $candidate = $line.Trim()
+            if (-not $candidate.StartsWith($script:ConfigFailureMarker, [StringComparison]::Ordinal)) {
+                continue
+            }
+            if ($candidate.Length -gt $script:ConfigFailureMaxLength -or
+                $candidate -match "[\x00-\x1F\x7F]") {
+                return $null
+            }
+            return $candidate
+        }
+    }
+    return $null
 }
 
 function Prepare-StagedJar {
@@ -660,11 +658,21 @@ function Prepare-StagedJar {
         Invoke-NativeProcess -Executable $script:SelectedJava -Arguments $arguments `
             -WorkingDirectory $script:DownloadDirectory
     }
-    if ($result.ExitCode -ne 0 -or
-        $result.Stdout.TrimEnd([char[]] @("`r", "`n")) -cne "Daemon configuration is valid") {
-        # Never echo runtime diagnostics: they could contain config or credential values.
-        Throw-Failure "release --check-config failed (exit code $($result.ExitCode)); use a release supporting --config and valid sibling inputs. Existing installation unchanged."
+    if ($result.ExitCode -eq 0 -and
+        $result.Stdout.TrimEnd([char[]] @("`r", "`n")) -ceq "Daemon configuration is valid") {
+        return
     }
+    # Prefer the core's trusted, value-free field diagnostic. Never echo the raw streams: an
+    # older release rejecting --check-config or an unexpected stack trace must not leak
+    # configuration or credential values.
+    $detail = Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr
+    if ($null -ne $detail) {
+        Throw-Failure "$detail Existing installation unchanged."
+    }
+    Throw-Failure (
+        "release --check-config failed (exit code $($result.ExitCode)) with unrecognized output; " +
+        "the downloaded release may predate the unified --config contract. Existing installation unchanged."
+    )
 }
 
 function Assert-ReleaseTag {
@@ -973,7 +981,7 @@ function Invoke-Install {
             "Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational if enabled. " +
             "$recovery No automatic rollback was attempted.")
     }
-    Write-Host "==> $($script:TaskName) is Running"
+    Write-Host "==> $($script:TaskName) is Running; confirm Environment READY in Studio"
     Write-Host "Root: $($script:InstallRoot)"
     if ($null -ne $script:BackupDirectory) { Write-Host "Backup: $($script:BackupDirectory)" }
     return 0
