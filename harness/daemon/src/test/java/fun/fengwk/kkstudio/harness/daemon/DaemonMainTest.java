@@ -14,7 +14,6 @@ import org.junit.jupiter.api.parallel.Resources;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.io.UncheckedIOException;
 import java.net.ProxySelector;
 import java.net.ServerSocket;
 import java.net.SocketTimeoutException;
@@ -24,10 +23,11 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * DaemonMain 信息命令契约。
+ * DaemonMain 信息命令与配置预检契约。
  *
  * <p>信息命令必须在接触数据目录或建立连接之前完成，因此本测试只断言入口自身的输出与返回值：输出流由调用方注入，不需要捕获进程全局 stdout，也不触发 {@code
- * System.exit}。
+ * System.exit}。预检失败同样通过 {@link DaemonMain#checkConfig(String[], PrintStream, PrintStream)}
+ * 注入输出流验证，不退出 JVM。
  */
 class DaemonMainTest {
 
@@ -47,9 +47,7 @@ class DaemonMainTest {
       String usage = out.toString(StandardCharsets.UTF_8);
       assertEquals(DaemonMain.USAGE, usage, flag + " must print exactly the usage text");
       for (String option :
-          new String[] {
-            "--config", "--check-config", "--version", "--base64-args",
-          }) {
+          new String[] {"--config", "--check-config", "--version", "--base64-args"}) {
         assertTrue(usage.contains(option), "usage must document " + option);
       }
       assertFalse(
@@ -242,53 +240,63 @@ class DaemonMainTest {
     }
   }
 
-  /** 失败预检不输出成功、不创建数据；空 token、非法 UTF-8、重复字段均失败关闭。 */
+  /**
+   * 意图：预检失败只输出单行安全诊断（固定前缀 + 字段路径/规则或固定规则），保持输入不变且不泄漏取值。
+   *
+   * <p>空 token、非法 UTF-8、缺失 bash、重复字段均失败关闭；已知失败保留字段路径，未知失败收敛为固定规则。
+   */
   @Test
-  @ResourceLock(Resources.SYSTEM_OUT)
-  void failedPreflightLeavesInputsUntouched(@TempDir Path root) throws Exception {
+  void failedPreflightReportsSafeDiagnosticWithoutSideEffects(@TempDir Path root) throws Exception {
     Path file = DaemonConfigTest.writeConfig(root, "http://localhost");
     Path token = file.resolveSibling("daemon.token");
-    PrintStream previousOut = System.out;
-    try {
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      System.setOut(new PrintStream(output, true, StandardCharsets.UTF_8));
-      for (String[] args :
-          new String[][] {
-            {"--check-config"}, {"--check-config", file.toString(), "--version"},
-            {"--check-config", "relative.json"}, {"--check-config", "--help"},
-            {"--check-config", ""}
-          }) {
-        assertThrows(IllegalArgumentException.class, () -> DaemonMain.main(args));
-      }
-      Files.writeString(token, " \n");
-      assertThrows(
-          IllegalStateException.class,
-          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
-      Files.write(token, new byte[] {(byte) 0xff});
-      assertThrows(
-          UncheckedIOException.class,
-          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
-      DaemonConfigTest.writeToken(root);
-      Files.writeString(
-          file,
-          "{\"studioUrl\":\"http://host\",\"bashExecutable\":\""
-              + root.resolve("absent-bash")
-              + "\"}");
-      IllegalArgumentException bashError =
-          assertThrows(
-              IllegalArgumentException.class,
-              () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
-      assertTrue(bashError.getMessage().contains("daemon.bashExecutable"));
-      DaemonConfigTest.writeToken(root);
-      Files.writeString(file, "{\"studioUrl\":\"http://host\",\"studioUrl\":\"SECRET\"}");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> DaemonMain.main(new String[] {"--check-config", file.toString()}));
-      assertEquals("", output.toString(StandardCharsets.UTF_8));
-      assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
-    } finally {
-      System.setOut(previousOut);
+    for (String[] args :
+        new String[][] {
+          {"--check-config"}, {"--check-config", file.toString(), "--version"},
+          {"--check-config", "relative.json"}, {"--check-config", "--help"},
+          {"--check-config", ""}
+        }) {
+      assertSafeDiagnostic(runCheck(args));
     }
+    Files.writeString(token, " \n");
+    assertSafeDiagnostic(runCheck(new String[] {"--check-config", file.toString()}));
+    Files.write(token, new byte[] {(byte) 0xff});
+    assertSafeDiagnostic(runCheck(new String[] {"--check-config", file.toString()}));
+    DaemonConfigTest.writeToken(root);
+    String absent = root.resolve("absent-bash").toString();
+    Files.writeString(
+        file, "{\"studioUrl\":\"http://host\",\"bashExecutable\":\"" + absent + "\"}");
+    CheckResult bash = runCheck(new String[] {"--check-config", file.toString()});
+    assertSafeDiagnostic(bash);
+    assertTrue(bash.err().contains("daemon.bashExecutable"), bash.err());
+    assertFalse(bash.err().contains(absent), "诊断不得回显配置取值: " + bash.err());
+    DaemonConfigTest.writeToken(root);
+    Files.writeString(file, "{\"studioUrl\":\"http://host\",\"studioUrl\":\"SECRET\"}");
+    CheckResult duplicate = runCheck(new String[] {"--check-config", file.toString()});
+    assertSafeDiagnostic(duplicate);
+    assertFalse(duplicate.err().contains("SECRET"), duplicate.err());
+    assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
+  }
+
+  /** 意图：已知共享 codec/bash 失败保留字段路径与规则；未知或含换行的信息收敛为固定规则，绝不回显取值。 */
+  @Test
+  void checkConfigDiagnosticsAreSafeAndSingleLine() {
+    assertEquals(
+        "Invalid daemon configuration: daemon.lsp.servers.java: unknown field",
+        DaemonMain.invalidConfigurationLine(
+            new IllegalArgumentException("daemon.lsp.servers.java: unknown field")));
+    assertTrue(
+        DaemonMain.invalidConfigurationLine(
+                new IllegalArgumentException(
+                    "daemon.bashExecutable: must resolve to an executable"))
+            .startsWith("Invalid daemon configuration: daemon.bashExecutable: "));
+    assertEquals(
+        "Invalid daemon configuration: configuration is invalid",
+        DaemonMain.invalidConfigurationLine(
+            new IllegalStateException("registration token file must exist: /SECRET/token")));
+    assertEquals(
+        "Invalid daemon configuration: configuration is invalid",
+        DaemonMain.invalidConfigurationLine(
+            new IllegalArgumentException("daemon.note: bad\nSECRET /private/path")));
   }
 
   /** 正常运行同样在代理初始化与数据目录打开之前完成 bash 解析；失败时不留任何运行期副作用。 */
@@ -314,4 +322,27 @@ class DaemonMainTest {
     assertEquals(previousProxyProperty, System.getProperty("java.net.useSystemProxies"));
     assertEquals(List.of("daemon.json", "daemon.token"), DaemonConfigTest.entries(root));
   }
+
+  private static CheckResult runCheck(String[] args) {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    ByteArrayOutputStream err = new ByteArrayOutputStream();
+    boolean success =
+        DaemonMain.checkConfig(
+            args,
+            new PrintStream(out, true, StandardCharsets.UTF_8),
+            new PrintStream(err, true, StandardCharsets.UTF_8));
+    return new CheckResult(
+        success, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+  }
+
+  private static void assertSafeDiagnostic(CheckResult result) {
+    assertFalse(result.success(), "预检必须失败");
+    assertEquals("", result.out(), "失败时不得输出成功文本");
+    assertTrue(
+        result.err().startsWith(DaemonMain.INVALID_CONFIGURATION_MARKER + ": "), result.err());
+    assertEquals(1, result.err().lines().count(), "必须只输出一行诊断: " + result.err());
+    assertTrue(result.err().endsWith(System.lineSeparator()), result.err());
+  }
+
+  private record CheckResult(boolean success, String out, String err) {}
 }
