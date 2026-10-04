@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
+import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioSystemSettingsController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -28,11 +29,13 @@ class StudioSystemSettingsErrorAdviceTest {
   }
 
   @Test
-  void scopesAdviceToSystemSettingsControllerOnly() {
+  void scopesAdviceToSettingsAndSyncControllers() {
+    // 同步中的 settings 写入使用相同错误模型，不影响无关控制器。
     RestControllerAdvice advice =
         StudioSystemSettingsErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
     assertArrayEquals(
-        new Class<?>[] {StudioSystemSettingsController.class}, advice.assignableTypes());
+        new Class<?>[] {StudioSystemSettingsController.class, StudioConfigSyncController.class},
+        advice.assignableTypes());
   }
 
   @Test
