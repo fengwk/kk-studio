@@ -112,7 +112,7 @@ Goal 由用户通过 typed `GOAL` 命令设置或清除。Agent 使用 `get_goal
 目标事实，Agent 进度供用户判断完成情况。压缩后仍生效的 Goal 作为 USER 级历史背景恢复。
 
 YOLO 是 Thread 的即时策略 `yoloEnabled`，通过
-`PUT /api/harness/threads/{threadId}/yolo` 与版本约束更新。开启时跳过普通工具权限
+`PUT /api/harness/threads/{threadId}/yolo` 直接更新。它不与完整 Thread version 做 CAS，同值请求不推进 version，变化时 version 精确 +1，最后一次序列化写入生效。开启时跳过普通工具权限
 preflight，关闭时按工具权限审批；`ask_user` 始终等待人工回答。子 Thread 首次创建时
 继承父 Thread 的 YOLO，后续恢复保留已有值。
 

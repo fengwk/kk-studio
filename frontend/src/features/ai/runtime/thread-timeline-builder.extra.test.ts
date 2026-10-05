@@ -460,15 +460,25 @@ describe('thread timeline edge branches', () => {
         entry(
           'tool-1',
           'MESSAGE',
-          messagePayload('TOOL', [
-            {
-              type: 'tool_result',
+          {
+            ...messagePayload('TOOL', [
+              {
+                type: 'tool_result',
+                toolCallId: 'call-1',
+                toolName: 'bash',
+                rendererKey: 'bash',
+                contents: [{ type: 'text', text: 'ok' }],
+              },
+            ]),
+            toolResultMetadata: {
+              assistantEntryId: 'assistant-1',
               toolCallId: 'call-1',
-              toolName: 'bash',
-              rendererKey: 'bash',
-              contents: [{ type: 'text', text: 'ok' }],
+              callIndex: 0,
+              status: 'SUCCEEDED',
+              synthetic: false,
+              reason: null,
             },
-          ]),
+          },
         ),
       ],
       [],

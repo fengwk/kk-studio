@@ -149,9 +149,7 @@ public final class HarnessRuntimeRequestMapper {
       String threadId, HarnessThreadYoloUpdateDTO dto) {
     requireNonNull(dto, "yoloUpdateDTO");
     return new SetThreadYoloCommand(
-        parseUuid(threadId, "threadId"),
-        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"),
-        requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
+        parseUuid(threadId, "threadId"), requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
 
   /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */

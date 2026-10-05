@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '@/shared/lib/query-keys'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
@@ -78,8 +76,8 @@ function compareDecimalVersions(a: string, b: string): number {
  *   pending projection 出的 effectiveBase；
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
  * - agent/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
- * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 version，
- *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
+ * - YOLO 走单字段策略控制面：写请求串行并合并快速连点（latest wins），
+ *   重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
  * 重绑是 render-time fail-closed：只有 branch state 与 controller snapshot 都
  * 属于当前 `threadId` 时，才返回 draft/effectiveBase 并允许 build batch；否则
@@ -98,7 +96,6 @@ export function useBoundBranchPanel({
   threadId: string
   initialParts?: ComposerPart[]
 }) {
-  const queryClient = useQueryClient()
   // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
   // 并在提交事件到达前由下方 effect 更新。
   const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
@@ -161,7 +158,13 @@ export function useBoundBranchPanel({
           draft: projectPendingTarget(snapshotDraft, controller.queuedCommands),
         }
       }
-      return { ...current, base: snapshotDraft }
+      return {
+        ...current,
+        base: snapshotDraft,
+        draft: yoloDrainingRef.current || yoloPendingRef.current != null
+          ? current.draft
+          : { ...current.draft, yoloEnabled: snapshotDraft.yoloEnabled },
+      }
     })
   }, [controller.queuedCommands, controller.thread, threadId])
 
@@ -253,9 +256,8 @@ export function useBoundBranchPanel({
 
   /**
    * 切换 Thread YOLO runtime policy：乐观更新 draft 后入队直接控制面写（PUT
-   * /yolo）。写请求串行执行并合并快速连点 —— 每次发送都基于最新权威 version
-   * （上次 /yolo 成功返回或非回退 snapshot），latest wins。成功后把 base 与 draft
-   * 的 yolo 对齐服务器权威值（其它未发送 settings 原样保留）并采纳新 version；
+   * /yolo）。写请求串行执行并合并快速连点，latest wins。成功后只采纳不回退的
+   * 权威 Thread，并把 base 与 draft 对齐该最新值；较旧响应不覆盖新 SSE。
    * 失败则把 draft 回滚到 base 值并暴露 yoloError。绝不生成 SET_YOLO command。
    */
   function setYoloEnabled(enabled: boolean) {
@@ -282,7 +284,7 @@ export function useBoundBranchPanel({
         yoloPendingRef.current = null
         const authoritative = authoritativeThreadRef.current
         if (authoritative == null || authoritative.threadId !== boundThreadIdRef.current) {
-          // 重绑后缺乏新 Thread 的权威 version：丢弃这次尝试；新绑定后的
+          // 重绑后缺乏新 Thread 的权威快照：丢弃这次尝试；新绑定后的
           // setYoloEnabled 会以新 generation 重新入队。
           continue
         }
@@ -301,7 +303,6 @@ export function useBoundBranchPanel({
   ) {
     try {
       const updated = await harnessService.setThreadYolo(authoritative.threadId, {
-        expectedVersion: authoritative.version,
         yoloEnabled: enabled,
       })
       if (
@@ -311,6 +312,10 @@ export function useBoundBranchPanel({
         return
       }
       adoptAuthoritative(updated)
+      const accepted = authoritativeThreadRef.current
+      if (accepted == null) {
+        return
+      }
       setYoloError(null)
       setConflict(null)
       // 捕获成功时刻的排队意图：React 会延迟执行 setBranchState 回调，届时
@@ -320,13 +325,13 @@ export function useBoundBranchPanel({
         if (current == null || current.threadId !== threadId) {
           return current
         }
-        // 排队意图时保留乐观 draft；base 恒跟随服务器确认值。
+        // 排队意图时保留乐观 draft；base 恒跟随最新权威值。
         return {
           ...current,
-          base: { ...current.base, yoloEnabled: updated.yoloEnabled },
+          base: { ...current.base, yoloEnabled: accepted.yoloEnabled },
           draft: hasNewerIntent
             ? current.draft
-            : { ...current.draft, yoloEnabled: updated.yoloEnabled },
+            : { ...current.draft, yoloEnabled: accepted.yoloEnabled },
         }
       })
     } catch (error) {
@@ -334,43 +339,6 @@ export function useBoundBranchPanel({
         generation !== yoloGenerationRef.current
         || authoritative.threadId !== boundThreadIdRef.current
       ) {
-        return
-      }
-      const presented = presentConflict(error)
-      if (presented != null) {
-        // 409 CAS 冲突：清空排队意图，回滚乐观 yoloEnabled（保留其他 draft 字段），发起权威 refetch 后展示 conflict
-        yoloPendingRef.current = null
-        setBranchState((current) =>
-          current == null || current.threadId !== threadId
-            ? current
-            : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
-        )
-        try {
-          const freshSnapshot = await harnessService.getThreadSnapshot(authoritative.threadId)
-          if (
-            generation === yoloGenerationRef.current
-            && freshSnapshot?.thread
-            && freshSnapshot.thread.threadId === boundThreadIdRef.current
-          ) {
-            adoptAuthoritative(freshSnapshot.thread)
-            setBranchState((current) => {
-              if (current == null || current.threadId !== threadId) {
-                return current
-              }
-              const freshBase = branchDraftFromThread(freshSnapshot.thread)
-              return {
-                ...current,
-                base: freshBase,
-                draft: { ...current.draft, yoloEnabled: freshSnapshot.thread.yoloEnabled },
-              }
-            })
-          }
-        } catch {
-          // 快照拉取异常不影响 conflict 展示
-        }
-        void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(authoritative.threadId) })
-        setConflict(presented)
-        setYoloError(null)
         return
       }
       if (yoloPendingRef.current != null) {
@@ -385,7 +353,14 @@ export function useBoundBranchPanel({
           ? current
           : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
       )
-      setYoloError(errorMessage(error))
+      const presentation = presentConflict(error)
+      if (presentation != null) {
+        setConflict(presentation)
+        setYoloError(null)
+      } else {
+        setConflict(null)
+        setYoloError(errorMessage(error))
+      }
     }
   }
 

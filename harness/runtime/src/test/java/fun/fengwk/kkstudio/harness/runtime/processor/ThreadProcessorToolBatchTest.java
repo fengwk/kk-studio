@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.assistantMetadata;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimLosingStore;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.insertAssistantWithCalls;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.model;
@@ -27,6 +28,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchToolTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionTool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -75,6 +78,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -156,6 +160,75 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
+  }
+
+  /**
+   * 测试意图：排队 USER 不得在 live TOOL 或 WAITING_APPROVAL 阶段被提前消费；只有 tool batch 终态先落盘， 下一安全 turn 边界才把它转成
+   * INPUT。
+   */
+  @Test
+  void queuedUserIsNotConsumedUntilToolBatchIsDurablyClosed() {
+    Fixture fixture = fixture();
+    var chain =
+        seedToolChain(
+            fixture.store,
+            List.of("call-1"),
+            ModelInvocationStatus.SUCCEEDED,
+            List.of(ToolInvocationStatus.READY));
+    UUID queued =
+        seedCommand(
+            fixture.store,
+            chain.turn().threadId(),
+            new UserMessageCommandPayload(userMessage("steer during tool")));
+    ToolInvocation ready = tool(fixture.store, chain.toolInvocationIds().getFirst());
+    fixture.store.transaction(
+        tx -> {
+          tx.lockToolInvocation(ready.id());
+          tx.updateToolInvocations(List.of(ready.requestApproval("needs approval", NOW)));
+          return null;
+        });
+    requestThreadWork(fixture.store, chain.turn().threadId());
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
+    assertEquals(
+        ThreadCommandState.QUEUED, command(fixture.store, chain.turn().threadId(), queued).state());
+    assertEquals(4, path(fixture.store, chain.turn().threadId()).entries().size());
+
+    ToolInvocation approved = tool(fixture.store, ready.id());
+    fixture.store.transaction(
+        tx -> {
+          tx.lockToolInvocation(approved.id());
+          tx.updateToolInvocations(
+              List.of(
+                  approved.decideApproval(
+                      ToolApprovalDecision.ALLOWED, UUID.randomUUID(), "tester", null, NOW, NOW)));
+          return null;
+        });
+    transitionTool(fixture.store, ready.id(), tool -> tool.beginDispatch(NOW));
+    transitionTool(fixture.store, ready.id(), tool -> tool.markRunning(NOW));
+    transitionTool(
+        fixture.store,
+        ready.id(),
+        tool ->
+            tool.succeed(
+                new ToolResult("call-1", List.of(new TextResultContent("tool ok")), false, "{}"),
+                NOW));
+    requestThreadWork(fixture.store, chain.turn().threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
+    assertEquals(
+        ThreadCommandState.QUEUED, command(fixture.store, chain.turn().threadId(), queued).state());
+    TurnEndPayload closed =
+        (TurnEndPayload) path(fixture.store, chain.turn().threadId()).head().payload();
+    assertTrue(closed.continueModel());
+
+    fixture.resolver.autoConsistent = true;
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
+    TurnStartPayload input =
+        (TurnStartPayload) path(fixture.store, chain.turn().threadId()).entries().get(6).payload();
+    assertEquals(TurnStartReason.INPUT, input.reason());
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        command(fixture.store, chain.turn().threadId(), queued).state());
   }
 
   /** 回归：Provider replay state 在 Model attach 时转移到 Assistant Entry，两个 terminal Tool 仍须完成 batch。 */

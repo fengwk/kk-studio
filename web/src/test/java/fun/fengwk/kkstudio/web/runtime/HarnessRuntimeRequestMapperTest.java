@@ -266,7 +266,6 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(8L, HarnessRuntimeRequestMapper.toStopCommand(THREAD_ID, stop).expectedVersion());
 
     HarnessThreadYoloUpdateDTO yolo = new HarnessThreadYoloUpdateDTO();
-    yolo.setExpectedVersion("9");
     yolo.setYoloEnabled(true);
     assertTrue(HarnessRuntimeRequestMapper.toSetThreadYoloCommand(THREAD_ID, yolo).enabled());
 

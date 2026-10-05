@@ -11,7 +11,7 @@
 ```text
 acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
 stop / decideToolApproval / submitToolInput / listPendingInteractions / setThreadYolo / renameThread / renameSession
-manualCompactionAvailability / compactThread / getThreadSnapshot
+manualCompactionAvailability / compactThread / getThreadSnapshot / getThreadTree
 findJoin / projectJoinReceipt / findAncestorChain
 ```
 
@@ -57,7 +57,7 @@ id / sessionId / parentThreadId / headEntryId / creationRequestHash / name
 yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 ```
 
-`sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进，`name` 是唯一可被控制面独立重命名的字段（`renameThread` 只替换名称并 +1，不产生 Command / Entry / Work）。
+`sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进。`name` 与 `yoloEnabled` 都由控制面直接更新：同值 no-op 不推进 version，值变化只替换该字段并精确 +1，不产生 Command / Entry / Work。YOLO 不与完整 Thread version 做 CAS，最后一次序列化写入生效。
 
 [`ThreadLifecycleStatus`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadLifecycleStatus.java) 是持久化的**递归**生命周期，只存 `IDLE` / `ACTIVE` / `WAITING_CHILDREN`：`IDLE` 表示本地无 queued command、无 applicable invocation、无 continuation obligation，并且全部永久直接孩子都 `IDLE`；`ACTIVE` 表示本地仍有工作；`WAITING_CHILDREN` 表示本地已完成但至少一个直接孩子非 `IDLE`。是否存在未交付的 join 不影响判定——等待子结果不是本地工作。显式停止不是第四种状态，而是 head 上的 `STOPPED` `TURN_END` 事实。对外的细粒度状态由 [`ThreadSnapshot.runtimeStatus()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 派生：`WAITING_CHILDREN` / `IDLE` 直接透出；`ACTIVE` 根据本地上下文保留 `TOOL_*` / `MODEL_*`、终态待物化的 `APPLYING` 和续写义务的 `CONTINUATION_DUE`，无本地适用上下文时投影为 `QUEUED`。`IDLE` 之外的每个值都表示 `processing`。
 
@@ -78,6 +78,8 @@ yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 会话显示名由服务端在创建时派生、不进入 creation request hash：Session 取初始批次末尾 user-like 消息的首个非空文本（折叠单行、前 40 个码点，无省略号），无文本回退 `session-` + Session UUID 前 8 位；ROOT Thread 恒为 `main`；分支 Thread 恒为 `branch-` + Thread UUID 前 8 位。手工名称统一经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/Names.java) 折叠空白并要求非空、至多 256 个码点（超长报错，绝不截断）。
 
 `getThreadSnapshot` 在单事务内锁 Thread、读取待处理命令与 `EntryPath`，再用分类器投影出最小适用状态：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
+
+`getThreadTree` 读取目标 Thread 所属的整棵执行树。它先用 `findAncestorChain` 找到真实根，不存在则 `HarnessRuntimeNotFoundException`；再取该根的树锁并重读确认，然后只按不可变 `parentThreadId` 用 `listChildren` 收集全部后代。同 Session 里另一棵 `parentThreadId = null` 的分支不会进入结果。收集完成后按 UUID 升序锁定全部 Thread，在树锁保护下只读探测各节点的 Invocation，并复用快照构造；返回顺序是 `createdAt` 再 UUID。查询不写 Command、Entry、Work，也不推进 version。节点上的 `turnCount` 只计当前 root-to-head 的 `INPUT` / `CONTINUATION`，`COMPACTION` 与 `STOP` 不计；`toolCallCount` 只计该路径上 ASSISTANT `MESSAGE` 的 ToolCall；`outcome` 只在运行时状态为 `IDLE` 且当前 head 是 `TURN_END` 时取 `COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`，否则为 null。状态仍是 `ThreadSnapshot.runtimeStatus()` 的细分值，不退回持久化的 `ACTIVE`。
 
 ### 发送前请求预览
 
@@ -174,7 +176,7 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 - `MODEL_TERMINAL_PENDING`：原子写入 Assistant / Error / Compaction 终态结果；关闭 turn 时物理删除 ModelInvocation，进入 Tool phase 时保留父行并挂接 Assistant Entry；
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool Result，追加 `TURN_END(continueModel=true)`，删除 children 与父 ModelInvocation；
 - `MODEL_ACTIVE` / `TOOL_ACTIVE`：下游长执行仍在进行，完成本次 claim 即归还；
-- `CONTINUATION_DUE`：先处理适用的自动压缩，否则启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
+- `CONTINUATION_DUE`：先处理适用的自动压缩；压缩判断完成后，若队列含 user-like 消息，则按 FIFO 消费到第一条消息并启动 INPUT，否则启动 continuation 投机规划（HISTORY 段缺口则以 `continueModel` 义务机械启动 TURN_PREFIX）；
 - `IDLE_OR_HISTORICAL`：先处理适用的压缩义务；普通 soft threshold 只在有真实用户需求时触发。有需求且无需压缩则启动 INPUT，否则传播 Idle 并完成 claim。
 
 需要外部解析器的回合走投机规划：第一短事务锁 Session `KEY SHARE` -> Thread、捕获命令快照与 cutoff、校验并对临近过期租约补齐余量、分配 candidate Entry ID 构造完整合法的 candidate `EntryPath`（不写任何持久化状态）；事务外调用 `TurnResolver`，期间由本地 `WorkHeartbeat` 续租；第二短事务以 source head、cutoff 内命令精确快照与 claim ownership 作 CAS，一次性提交 `TURN_START` + Message + 命令标记 + Thread 更新 + ModelInvocation/MODEL Work。Resolved 请求在提交前还要经机械一致性校验（route / model / variant / tools / compaction 必须与 candidate 分支事实一致，不一致即抛错且零写入）；任何 CAS 或 claim 损失都会整体回滚并映射为 `LOST_OWNERSHIP`，Resolver 异常、返回 null 或心跳调度失败则按统一的失败延迟 reschedule，绝不静默丢失 Work。重复或陈旧的 THREAD claim 是 no-op。
@@ -239,7 +241,7 @@ matchedIdleVersion / resultHeadEntryId / deliveryCommandSequence / createdAt / u
 
 首次「非空闲 -> Idle」的版本推进、join 匹配、父 `CUSTOM_MESSAGE` 入队与父重新标为非空闲在同一事务内完成，不存在假 Idle 窗口；多个 join 可以同时命中首个 Idle。完成消息是 `SystemReminder` 形态的 USER 消息（`<system-reminder>` 包裹 `<subagent_result thread_id agent state>`，内含本次任务原文 `<task>` 与 `<result>` / `<error>` / `<partial_result>`），渲染是 `runtime.join` 的纯函数，绝不读取子线程的当前 head。
 
-显式停止的父不会被自动唤醒：先保存已匹配的 receipt，父真实接受新输入时再在同一事务原子交付旧结果，重放不产生第二次交付。停止传播覆盖全部执行后代，迟到的模型/工具结果由既有 ownership fence 拒绝。`maxTurns` 是软预算，按源命令实际 turn 计数，在已确定继续运行的边界用 durable reminder 进度（`reminderTurn`）入队提醒，不为已经 Idle 的已完成子线程人为开启新 turn。
+显式停止的父不会被自动唤醒：先保存已匹配的 receipt，父真实接受新输入时再在同一事务原子交付旧结果，重放不产生第二次交付。停止传播覆盖全部执行后代，迟到的模型/工具结果由既有 ownership fence 拒绝。`maxTurns` 是软预算，按源命令实际 turn 计数。每个 join 在首次达到预算且已确定继续运行的边界只入队一条提醒，`reminderTurn` 记录当时轮数，幂等键稳定绑定 invocationId；后续轮次不再入队。已经 Idle 的完成边界不提醒，resume 产生的新 join 可以再次提醒。
 
 推进完全由 durable Work 驱动：PG NOTIFY 只作唤醒提示，通知丢失或进程重启后由 dispatcher 的周期恢复重新 claim（见 [Harness Infra](harness-infra.md)）。并发额度、`maxDepth` 与 `maxTurns` 配置属于 [Harness Builtin](harness-builtin.md) 与 [Platform](platform.md)。
 

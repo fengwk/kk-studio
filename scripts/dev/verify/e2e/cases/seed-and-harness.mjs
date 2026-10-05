@@ -1770,8 +1770,8 @@ registerCase({
 registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
-  title: 'Thread YOLO 直接控制面（version CAS 与同值 no-op）',
-  docs: 'PUT /api/harness/threads/{id}/yolo {expectedVersion,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 version 不冲突、version 零触碰）；值变化时 version 精确 +1，过期 version => 409 STALE_VERSION；不创建 Command/Entry/Work',
+  title: 'Thread YOLO 直接控制面（单字段幂等与同值 no-op）',
+  docs: 'PUT /api/harness/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1793,10 +1793,7 @@ registerCase({
     assert(thread.yoloEnabled === false, JSON.stringify(thread))
 
     // 变化 + 精确 version：version +1，返回权威 Thread。
-    const enabled = await setThreadYolo(ctx, threadId, {
-      expectedVersion: thread.version,
-      yoloEnabled: true,
-    })
+    const enabled = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
     assert(enabled.yoloEnabled === true, JSON.stringify(enabled))
     assert(
       String(Number(enabled.version)) === String(Number(thread.version) + 1),
@@ -1804,29 +1801,13 @@ registerCase({
     )
     assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
 
-    // 同值 no-op 先于 version CAS：携带过期 expectedVersion 仍 200，version/head 零触碰。
-    const sameValue = await setThreadYolo(ctx, threadId, {
-      expectedVersion: '999999999',
-      yoloEnabled: true,
-    })
+    // 同值 no-op：不读取请求 version，version/head 零触碰。
+    const sameValue = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
     assert(sameValue.yoloEnabled === true, JSON.stringify(sameValue))
     assert(String(sameValue.version) === String(enabled.version), JSON.stringify(sameValue))
 
-    // 变化 + 过期 version：409 STALE_VERSION。
-    await expectHttpError(
-      () =>
-        setThreadYolo(ctx, threadId, {
-          expectedVersion: thread.version,
-          yoloEnabled: false,
-        }),
-      { status: 409, messageIncludes: /version/i },
-    )
-
     // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
-    const disabled = await setThreadYolo(ctx, threadId, {
-      expectedVersion: enabled.version,
-      yoloEnabled: false,
-    })
+    const disabled = await setThreadYolo(ctx, threadId, { yoloEnabled: false })
     assert(disabled.yoloEnabled === false, JSON.stringify(disabled))
     assert(
       String(Number(disabled.version)) === String(Number(enabled.version) + 1),
@@ -1851,6 +1832,72 @@ registerCase({
     await ctx.call(
       'DELETE',
       `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
+  },
+})
+
+registerCase({
+  id: 'thread_tree.query_contract',
+  level: 'L1',
+  title: 'Agent 关系树最小只读投影',
+  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；缺失 Agent 确定性失败，无真实 Provider 调用',
+  async run(ctx) {
+    const target = await resolveAnyCatalogTarget(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-tree-${cid().slice(0, 8)}`,
+      agentName: target.agent.name,
+      yoloEnabled: false,
+    })
+    const threadId = cid()
+    try {
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        rootSettings: branchSettingsOf({ name: `missing-tree-agent-${cid()}` }, target.model),
+        yoloEnabled: false,
+        commands: [userMessageCommand('关系树投影', cid())],
+      })
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const before = await getThreadSnapshot(ctx, threadId)
+      const { json } = await ctx.call('GET', `/api/harness/threads/${threadId}/tree`)
+      const nodes = envelopeData(json)
+      assert(Array.isArray(nodes) && nodes.length === 1, JSON.stringify(nodes))
+      const root = nodes[0]
+      assertExactFields(
+        root,
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'processing', 'turnCount', 'toolCallCount', 'outcome'],
+        'HarnessThreadTreeNodeDTO',
+      )
+      assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
+      assert(root.status === 'IDLE' && root.processing === false, JSON.stringify(root))
+      assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
+      assert(isDeepStrictEqual(root.model, before.thread.branchSettings.model), JSON.stringify(root))
+      const after = await getThreadSnapshot(ctx, threadId)
+      assert(after.thread.version === before.thread.version, 'tree query must not change version')
+      assert(after.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
+  },
+})
+
+registerCase({
+  id: 'thread_tree.invalid_and_unknown_thread',
+  level: 'L1',
+  title: 'Agent 关系树 UUID 与缺失节点校验',
+  docs: 'GET /api/harness/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
+  async run(ctx) {
+    await expectHttpError(
+      () => ctx.call('GET', '/api/harness/threads/1-1-1-1-1/tree'),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () => ctx.call('GET', '/api/harness/threads/00000000-0000-0000-0000-000000000999/tree'),
+      { status: 404 },
     )
   },
 })

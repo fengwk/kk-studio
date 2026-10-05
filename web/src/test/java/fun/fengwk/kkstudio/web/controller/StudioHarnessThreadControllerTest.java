@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -105,6 +106,54 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.thread.status").value("WAITING_CHILDREN"))
         .andExpect(jsonPath("$.data.thread.processing").value(true))
         .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
+  }
+
+  /** 子节点入口返回真实根和父关系；根与未结束 outcome 必须显式序列化为 null。 */
+  @Test
+  void treeReturnsMinimalNodesAndExplicitNullableFields() throws Exception {
+    when(runtime.getThreadTree(id(1)))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.idleSnapshot(id(2)),
+                HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2))));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1) + "/tree"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].threadId").value(idText(2)))
+        .andExpect(jsonPath("$.data[0].parentThreadId").hasJsonPath())
+        .andExpect(jsonPath("$.data[0].parentThreadId").value(nullValue()))
+        .andExpect(jsonPath("$.data[0].outcome").hasJsonPath())
+        .andExpect(jsonPath("$.data[0].outcome").value(nullValue()))
+        .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))
+        .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$.data[0].turnCount").value(0))
+        .andExpect(jsonPath("$.data[0].toolCallCount").value(0))
+        .andExpect(jsonPath("$.data[0].entries").doesNotExist())
+        .andExpect(jsonPath("$.data[0].queuedCommands").doesNotExist())
+        .andExpect(jsonPath("$.data[1].parentThreadId").value(idText(2)))
+        .andExpect(jsonPath("$.data[1].status").value("WAITING_CHILDREN"))
+        .andExpect(jsonPath("$.data[1].processing").value(true));
+
+    verify(runtime).getThreadTree(id(1));
+    verify(runtime, never()).getThreadSnapshot(any());
+    verifyNoInteractions(modelRequestDebugService, projectThreadOwnerResolver, interactionService);
+  }
+
+  /** 非 canonical UUID 在进入 Runtime 前拒绝；未知节点沿用快照的 404 语义。 */
+  @Test
+  void treeRejectsInvalidUuidAndReturnsNotFoundForMissingThread() throws Exception {
+    mockMvc.perform(get("/api/harness/threads/1-1-1-1-1/tree")).andExpect(status().isBadRequest());
+    verifyNoInteractions(runtime);
+    when(runtime.getThreadTree(id(999)))
+        .thenThrow(
+            new HarnessRuntimeNotFoundException("thread " + idText(999) + " does not exist"));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(999) + "/tree"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
   }
 
   /** 意图：验证 GET /api/harness/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */
@@ -413,9 +462,9 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
   }
 
-  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 执行 CAS 更新并返回权威当前 Thread。 */
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 直接更新并返回权威当前 Thread。 */
   @Test
-  void yoloCarriesVersionCasAndReturnsCurrentThread() throws Exception {
+  void yoloUpdatesPolicyAndReturnsCurrentThread() throws Exception {
     when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
@@ -425,7 +474,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.status").value("IDLE"));
@@ -434,7 +483,27 @@ class StudioHarnessThreadControllerTest {
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
     verify(runtime).setThreadYolo(captor.capture());
     verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
-    assertEquals(3L, captor.getValue().expectedVersion());
+    assertTrue(captor.getValue().enabled());
+  }
+
+  /** 非布尔值、缺失策略与未知字段均在控制面变更之前拒绝。 */
+  @Test
+  void yoloRejectsMalformedPolicyRequestsBeforeRuntimeMutation() throws Exception {
+    for (String body :
+        List.of(
+            "{}",
+            "{\"yoloEnabled\":null}",
+            "{\"yoloEnabled\":\"true\"}",
+            "{\"yoloEnabled\":1}",
+            "{\"yoloEnabled\":true,\"expectedVersion\":\"0\"}")) {
+      mockMvc
+          .perform(
+              put("/api/harness/threads/" + idText(1) + "/yolo")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
+    verifyNoInteractions(runtime, projectThreadOwnerResolver);
   }
 
   /**
@@ -448,7 +517,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isConflict());
 
     // 拒绝必须发生在 runtime 变更之前：归属检查不依赖 Run 状态，也不允许经 CAS 绕过 Project 策略。
@@ -466,7 +535,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isNotFound());
   }
 
@@ -477,7 +546,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/not-a-uuid/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(projectThreadOwnerResolver);

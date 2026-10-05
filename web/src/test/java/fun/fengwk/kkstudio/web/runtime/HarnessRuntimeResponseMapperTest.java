@@ -66,6 +66,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
@@ -81,6 +82,32 @@ class HarnessRuntimeResponseMapperTest {
 
   private static final Instant NOW = HarnessRuntimeTestFixtures.NOW;
   private static final AgentMessageJsonCodec AGENT_MESSAGES = new AgentMessageJsonCodec();
+
+  /** 关系树投影沿用快照状态与计数，不向未结束节点伪造成功。 */
+  @Test
+  void projectsTreeNodesFromRuntimeSnapshots() {
+    ThreadSnapshot waiting = HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2));
+    ThreadSnapshot continuing = HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3));
+    List<HarnessThreadTreeNodeDTO> nodes =
+        HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waiting, continuing));
+
+    assertEquals(2, nodes.size());
+    HarnessThreadTreeNodeDTO node = nodes.get(0);
+    assertEquals(id(1).toString(), node.getThreadId());
+    assertEquals(id(2).toString(), node.getParentThreadId());
+    assertEquals(waiting.thread().name(), node.getName());
+    assertEquals(waiting.entryPath().baseSettings().agentName(), node.getAgentName());
+    assertEquals("openai", node.getModel().getProviderName());
+    assertEquals("gpt-5", node.getModel().getModelName());
+    assertEquals("WAITING_CHILDREN", node.getStatus());
+    assertTrue(node.isProcessing());
+    assertEquals(0, node.getTurnCount());
+    assertEquals(0, node.getToolCallCount());
+    assertNull(node.getOutcome());
+    assertEquals("CONTINUATION_DUE", nodes.get(1).getStatus());
+    assertEquals(1, nodes.get(1).getTurnCount());
+    assertNull(nodes.get(1).getOutcome());
+  }
 
   @Test
   void projectsEveryReachableRuntimeStatusFromThreadSnapshot() {

@@ -93,18 +93,28 @@ describe('harnessService', () => {
     const service = createHarnessService(http)
 
     await service.getModelRequestDebug('thread /1')
-    await service.setThreadYolo('thread /1', { expectedVersion: '1', yoloEnabled: true })
+    await service.setThreadYolo('thread /1', { yoloEnabled: true })
     await service.stopThread('thread /1', { stopRequestId: 'req-1', expectedVersion: '2' })
 
     expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/model-request-debug')
     expect(http.put).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/yolo', {
-      expectedVersion: '1',
       yoloEnabled: true,
     })
     expect(http.post).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/stop', {
       stopRequestId: 'req-1',
       expectedVersion: '2',
     })
+  })
+
+  /**
+   * 测试意图：关系树从任意节点读取真实 root，路径与 snapshot 分离且参数被编码。
+   */
+  it('queries the agent relationship tree via GET /harness/threads/{id}/tree', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    await service.getThreadTree('thread /1')
+
+    expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/tree')
   })
 
   /**
