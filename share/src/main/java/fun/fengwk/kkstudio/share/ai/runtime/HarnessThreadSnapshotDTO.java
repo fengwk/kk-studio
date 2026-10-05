@@ -42,4 +42,7 @@ public class HarnessThreadSnapshotDTO {
 
   /** 当前瞬时手动压缩可用性；实际提交仍由 compact 请求的 expectedVersion 守护。 */
   private HarnessManualCompactionDTO manualCompaction;
+
+  /** 该 Thread 自己的、包含可恢复人工输入的持久 Stop 回执（不可变列表，默认空）。 */
+  private List<HarnessStoppedThreadReceiptDTO> stopReceipts = List.of();
 }

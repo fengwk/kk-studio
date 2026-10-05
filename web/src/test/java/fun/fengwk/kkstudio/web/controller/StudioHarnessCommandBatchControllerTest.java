@@ -40,7 +40,10 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.util.List;
 import java.util.UUID;
 
-/** 唯一 owner-aware HTTP 写入口：三 target、严格字段、固定 command shape 与 accepted response。 */
+/**
+ * 唯一 owner-aware 创建型 HTTP 写入口：只承载 NEW_SESSION / NEW_THREAD、严格字段、固定 command shape 与 accepted
+ * response；既有 Thread 的继续写入走 {@link StudioHarnessThreadCommandBatchController}。
+ */
 class StudioHarnessCommandBatchControllerTest {
 
   private static final String OWNER_ID = "00000000-0000-0000-0000-000000000010";
@@ -77,9 +80,10 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void acceptsNewSessionNewThreadAndThreadTargetsAndMapsCurrentSnapshotResponse() throws Exception {
-    // 三种 target 都经过同一 owner-aware service。
-    for (String target : List.of(newSessionTarget(), newThreadTarget(), threadTarget())) {
+  void acceptsNewSessionAndNewThreadCreationTargetsAndMapsCurrentSnapshotResponse()
+      throws Exception {
+    // 两个创建型 target 都经过同一 owner-aware service。
+    for (String target : List.of(newSessionTarget(), newThreadTarget())) {
       mockMvc
           .perform(
               post("/api/harness/command-batches")
@@ -100,24 +104,70 @@ class StudioHarnessCommandBatchControllerTest {
 
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceService, times(3)).accept(any(OwnerRef.class), commandCaptor.capture());
-    assertEquals(3, commandCaptor.getAllValues().size());
+    verify(acceptanceService, times(2)).accept(any(OwnerRef.class), commandCaptor.capture());
+    assertEquals(2, commandCaptor.getAllValues().size());
     assertEquals(
         AcceptCommandsTarget.NewSession.class,
         commandCaptor.getAllValues().get(0).target().getClass());
     assertEquals(
         AcceptCommandsTarget.NewThread.class,
         commandCaptor.getAllValues().get(1).target().getClass());
-    assertEquals(
-        AcceptCommandsTarget.Thread.class, commandCaptor.getAllValues().get(2).target().getClass());
 
     ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
-    verify(acceptanceService, times(3))
+    verify(acceptanceService, times(2))
         .accept(ownerCaptor.capture(), any(AcceptCommandsCommand.class));
     assertEquals(OwnerType.CHAT, ownerCaptor.getAllValues().get(0).type());
     assertInstanceOf(OwnerRef.Chat.class, ownerCaptor.getAllValues().get(0));
     assertEquals(
         UUID.fromString(OWNER_ID), ((OwnerRef.Chat) ownerCaptor.getAllValues().get(0)).chatId());
+  }
+
+  /**
+   * 测试意图：THREAD target 与它的 cursor 字段已从创建型 union 删除；携带它们（无论是否补齐字段）都在入口 400，且不触达 service 与 runtime。
+   */
+  @Test
+  void rejectsDeletedThreadTargetAndCursorFieldsAtTheCreationRoute() throws Exception {
+    String bareThreadTarget =
+        batch(
+            """
+            {
+              "type":"THREAD",
+              "threadId":"%s"
+            }
+            """
+                .formatted(THREAD_ID));
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bareThreadTarget))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.detail").value("unknown target type: THREAD"));
+
+    // 历史 THREAD target 的 cursor 字段不再是 union 成员，多携带即未知字段。
+    String legacyThreadTarget =
+        batch(
+            """
+            {
+              "type":"THREAD",
+              "threadId":"%s",
+              "expectedHeadEntryId":"%s",
+              "expectedNextCommandSequence":"4"
+            }
+            """
+                .formatted(THREAD_ID, ENTRY_ID));
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(legacyThreadTarget))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.errors.detail").value("unknown command target field: expectedHeadEntryId"));
+
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+    verifyNoInteractions(runtime);
   }
 
   @Test
@@ -148,11 +198,12 @@ class StudioHarnessCommandBatchControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     batch(
-                        threadTarget()
+                        newThreadTarget()
                             .replace(
-                                "\"expectedNextCommandSequence\":\"4\"",
-                                "\"unknown\":true,\"expectedNextCommandSequence\":\"4\""))))
-        .andExpect(status().isBadRequest());
+                                "\"yoloEnabled\":false",
+                                "\"yoloEnabled\":false,\"unknown\":true"))))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.detail").value("unknown command target field: unknown"));
     verify(acceptanceService, never())
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
@@ -199,25 +250,27 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsCustomMessageAndAnySystemSteeringFromProductHttpSurface() throws Exception {
-    String custom =
-        batch(
-            """
-            {
-              "type":"CUSTOM_MESSAGE",
-              "idempotencyKey":"%s",
-              "content":"system rules",
-              "role":"SYSTEM"
-            }
-            """
-                .formatted(IDEMPOTENCY_KEY));
+  void rejectsInternalOnlyCommandTypesFromProductHttpSurface() throws Exception {
+    // CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE 都是内部 steering：产品 HTTP 请求体携带即 400。
+    for (String type : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+      String internalOnly =
+          batchWithCommands(
+              newThreadTarget(),
+              """
+              [{
+                "type":"%s",
+                "idempotencyKey":"%s"
+              }]
+              """
+                  .formatted(type, IDEMPOTENCY_KEY));
+      mockMvc
+          .perform(
+              post("/api/harness/command-batches")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(internalOnly))
+          .andExpect(status().isBadRequest());
+    }
 
-    mockMvc
-        .perform(
-            post("/api/harness/command-batches")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(custom))
-        .andExpect(status().isBadRequest());
     verify(acceptanceService, never())
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
@@ -230,7 +283,7 @@ class StudioHarnessCommandBatchControllerTest {
   void acceptsTypedGoalAsTerminalUserLikeCommandAndRejectsMalformedShapes() throws Exception {
     String withGoal =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"SET_AGENT",
@@ -263,7 +316,7 @@ class StudioHarnessCommandBatchControllerTest {
     // 显式 null 是「清除 Goal」，同样合法。
     String cleared =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"GOAL",
@@ -281,7 +334,7 @@ class StudioHarnessCommandBatchControllerTest {
     // 缺 text 的 GOAL 与「携带 text 的 USER_MESSAGE」都必须 400。
     String missingText =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"GOAL",
@@ -296,7 +349,7 @@ class StudioHarnessCommandBatchControllerTest {
         .andExpect(status().isBadRequest());
     String userWithText =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"USER_MESSAGE",
@@ -315,7 +368,7 @@ class StudioHarnessCommandBatchControllerTest {
     // GOAL 与 USER_MESSAGE 不能共存：恰有一条 user-like 终止命令。
     String bothUserLike =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"GOAL",
@@ -340,7 +393,7 @@ class StudioHarnessCommandBatchControllerTest {
   void enforcesFixedSetPrefixAndTrailingUserMessage() throws Exception {
     String wrongOrder =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"SET_MODEL",
@@ -380,7 +433,7 @@ class StudioHarnessCommandBatchControllerTest {
         .perform(
             post("/api/harness/command-batches")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(batch(threadTarget())))
+                .content(batch(newThreadTarget())))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
         .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
@@ -391,7 +444,7 @@ class StudioHarnessCommandBatchControllerTest {
     // 意图：验证 SET_ENVIRONMENT 命令携带未定义字段被严格拒绝且 detail 包含该字段，不调用底层服务。
     String payload =
         batchWithCommands(
-            threadTarget(),
+            newThreadTarget(),
             """
             [{
               "type":"SET_ENVIRONMENT",
@@ -438,7 +491,7 @@ class StudioHarnessCommandBatchControllerTest {
   @Test
   void rejectsIssueAgentCommandsAtPublicHttpBoundary() throws Exception {
     // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 owner 伪造公共命令批，返回 409 Conflict。
-    for (String target : List.of(newSessionTarget(), newThreadTarget(), threadTarget())) {
+    for (String target : List.of(newSessionTarget(), newThreadTarget())) {
       String request =
           batchWithCommands(
                   target,
@@ -524,17 +577,5 @@ class StudioHarnessCommandBatchControllerTest {
         }
         """
         .formatted(SESSION_ID, ENTRY_ID, THREAD_ID);
-  }
-
-  private static String threadTarget() {
-    return """
-        {
-          "type":"THREAD",
-          "threadId":"%s",
-          "expectedHeadEntryId":"%s",
-          "expectedNextCommandSequence":"4"
-        }
-        """
-        .formatted(THREAD_ID, ENTRY_ID);
   }
 }

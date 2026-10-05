@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
+import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -21,9 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -33,12 +31,13 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledUserMessageDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
@@ -60,7 +59,6 @@ public final class HarnessRuntimeResponseMapper {
       new HistoryEntryPayloadJsonCodec();
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
-  private static final AgentMessageJsonCodec AGENT_MESSAGES = new AgentMessageJsonCodec();
   private static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS =
       new StreamCheckpointJsonCodec();
   private static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
@@ -129,6 +127,7 @@ public final class HarnessRuntimeResponseMapper {
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
     dto.setProcessing(status.isProcessing());
+    dto.setExecutionControl(snapshot.thread().executionControl().name());
     dto.setBranchSettings(toBranchSettingsDto(snapshot.entryPath().baseSettings()));
     dto.setCreateTime(snapshot.thread().createdAt());
     dto.setUpdateTime(snapshot.thread().updatedAt());
@@ -304,6 +303,7 @@ public final class HarnessRuntimeResponseMapper {
     manualCompactionDto.setDisabledReason(
         manualCompaction.available() ? null : manualCompaction.disabledReason().name());
     dto.setManualCompaction(manualCompactionDto);
+    dto.setStopReceipts(toStopReceiptDtos(snapshot.stopReceipts()));
     return dto;
   }
 
@@ -365,25 +365,43 @@ public final class HarnessRuntimeResponseMapper {
       throw new IllegalArgumentException("post-stop snapshot does not match Stop result");
     }
     HarnessThreadStopResultDTO dto = new HarnessThreadStopResultDTO();
-    dto.setStatus(
-        result.replayed()
-            ? "REPLAYED"
-            : result.stoppedTurnEndEntryId() == null ? "IDLE" : "STOPPED");
+    dto.setStatus(result.replayed() ? "REPLAYED" : "STOPPED");
     dto.setThread(toThreadDto(postStopSnapshot));
-    dto.setStoppedTurnEndEntryId(
-        result.stoppedTurnEndEntryId() == null ? null : result.stoppedTurnEndEntryId().toString());
-    dto.setCancelledCommandCount(result.cancelledCommandCount());
-    List<HarnessCancelledUserMessageDTO> cancelled =
-        new ArrayList<>(result.cancelledUserMessages().size());
-    for (CancelledUserMessage message : result.cancelledUserMessages()) {
-      HarnessCancelledUserMessageDTO messageDto = new HarnessCancelledUserMessageDTO();
-      messageDto.setSequence(Long.toString(message.sequence()));
-      messageDto.setIdempotencyKey(message.idempotencyKey().toString());
-      messageDto.setMessageJson(
-          AGENT_MESSAGES.encode(new AgentMessage(AgentMessageRole.USER, message.contents())));
-      cancelled.add(messageDto);
+    dto.setStoppedThreads(toStopReceiptDtos(result.stoppedThreads()));
+    return dto;
+  }
+
+  /** 映射 Stop 的聚合回执集合；只投影可恢复人工输入，不把 CUSTOM_MESSAGE / NOTIFICATION 当作草稿。 */
+  private static List<HarnessStoppedThreadReceiptDTO> toStopReceiptDtos(
+      List<StoppedThreadReceipt> receipts) {
+    Objects.requireNonNull(receipts, "receipts");
+    List<HarnessStoppedThreadReceiptDTO> mapped = new ArrayList<>(receipts.size());
+    for (StoppedThreadReceipt receipt : receipts) {
+      mapped.add(toStopReceiptDto(receipt));
     }
-    dto.setCancelledUserMessages(List.copyOf(cancelled));
+    return List.copyOf(mapped);
+  }
+
+  private static HarnessStoppedThreadReceiptDTO toStopReceiptDto(StoppedThreadReceipt receipt) {
+    Objects.requireNonNull(receipt, "receipt");
+    HarnessStoppedThreadReceiptDTO dto = new HarnessStoppedThreadReceiptDTO();
+    dto.setThreadId(receipt.threadId().toString());
+    dto.setStopRequestId(receipt.stopRequestId().toString());
+    dto.setStoppedTurnEndEntryId(
+        receipt.stoppedTurnEndEntryId() == null
+            ? null
+            : receipt.stoppedTurnEndEntryId().toString());
+    dto.setCancelledCommandCount(receipt.cancelledCommandCount());
+    List<HarnessCancelledInputDTO> cancelled = new ArrayList<>(receipt.cancelledInputs().size());
+    for (CancelledThreadInput input : receipt.cancelledInputs()) {
+      HarnessCancelledInputDTO inputDto = new HarnessCancelledInputDTO();
+      inputDto.setSequence(Long.toString(input.sequence()));
+      inputDto.setIdempotencyKey(input.idempotencyKey().toString());
+      inputDto.setType(input.payload().type().name());
+      inputDto.setPayloadJson(COMMAND_PAYLOADS.encode(input.payload()));
+      cancelled.add(inputDto);
+    }
+    dto.setCancelledInputs(List.copyOf(cancelled));
     return dto;
   }
 }

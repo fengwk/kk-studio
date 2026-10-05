@@ -17,7 +17,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -436,9 +436,10 @@ class SessionDeletionOrchestratorTest {
         "0".repeat(64),
         "thread",
         false,
-        ThreadLifecycleStatus.IDLE,
-        1,
-        0,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
+        1L,
+        0L,
         NOW,
         NOW);
   }

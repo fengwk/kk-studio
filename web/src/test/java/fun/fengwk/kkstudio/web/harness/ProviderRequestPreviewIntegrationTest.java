@@ -215,8 +215,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         new AcceptCommandsCommand(fixture.threadTarget(), draftCommands(draftMessage));
 
     Map<String, Object> before = durableState(fixture, draftUploadId);
-    HarnessProviderRequestPreviewDTO preview =
-        previewService.preview(fixture.threadId(), fixture.owner(), draft);
+    HarnessProviderRequestPreviewDTO preview = previewService.preview(fixture.threadId(), draft);
     Map<String, Object> after = durableState(fixture, draftUploadId);
 
     // 预览是纯读取：Entry/Command/Work/Thread 行数、Session ref、storage blob/upload 行与 head cursor 全部原样。
@@ -285,8 +284,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             .startsWith(previousPrompt),
         "历史 turn 必须实际使用变更前的 system prompt");
 
-    acceptanceService.accept(
-        fixture.owner(),
+    acceptanceService.acceptOnThread(
         new AcceptCommandsCommand(
             fixture.threadTarget(),
             draftCommands(userMessage(List.of(new TextMessageContent("second history message"))))));
@@ -306,7 +304,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(fixture.threadId());
     fixture =
         new Fixture(
-            fixture.owner(),
             fixture.sessionId(),
             fixture.threadId(),
             snapshot.entryPath().head().id(),
@@ -335,8 +332,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
                         new AttachmentMessageContent(UUID.fromString(uploadId))))));
     Map<String, Object> before = durableState(fixture, uploadId);
     int requestsBefore = providerRequests.get();
-    HarnessProviderRequestPreviewDTO preview =
-        previewService.preview(fixture.threadId(), fixture.owner(), draft);
+    HarnessProviderRequestPreviewDTO preview = previewService.preview(fixture.threadId(), draft);
 
     assertEquals(before, durableState(fixture, uploadId), "预览不得写入 durable 状态或消费 upload");
     assertEquals(refsBefore, blobRefCount(blobId), "预览不得 retain 草稿附件");
@@ -434,7 +430,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     ProviderRequestPreviewUnavailableException error =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
-            () -> previewService.preview(fixture.threadId(), fixture.owner(), draft));
+            () -> previewService.preview(fixture.threadId(), draft));
     assertEquals(Reason.PREVIEW_ATTACHMENT_NOT_READY, error.reason());
     assertEquals(before, durableState(fixture, pending.getId()), "拒绝路径同样不得产生副作用");
   }
@@ -454,7 +450,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     mvc.perform(
             post(previewPath)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(httpDraft(fixture, head, sequence)))
+                .content(httpDraft(head, sequence)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.sourceHeadEntryId").value(head));
     UUID oldHead =
@@ -464,8 +460,8 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             fixture.sessionId());
     for (String body :
         List.of(
-            httpDraft(fixture, oldHead.toString(), sequence),
-            httpDraft(fixture, head, Long.toString(Long.parseLong(sequence) - 1)))) {
+            httpDraft(oldHead.toString(), sequence),
+            httpDraft(head, Long.toString(Long.parseLong(sequence) - 1)))) {
       mvc.perform(post(previewPath).contentType(MediaType.APPLICATION_JSON).content(body))
           .andExpect(status().isConflict())
           .andExpect(jsonPath("$.errors.reason").value("PREVIEW_STALE_CURSOR"));
@@ -478,7 +474,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     httpDraft(
-                        fixture,
                         retry.path("thread").path("headEntryId").asText(),
                         retry.path("thread").path("nextCommandSequence").asText())))
         .andExpect(status().isOk());
@@ -497,11 +492,9 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         .path("data");
   }
 
-  private String httpDraft(Fixture fixture, String head, String sequence) throws IOException {
+  private String httpDraft(String head, String sequence) throws IOException {
     try (var input = getClass().getResourceAsStream("preview-draft.json")) {
-      return new String(input.readAllBytes(), StandardCharsets.UTF_8)
-          .formatted(
-              ((OwnerRef.Chat) fixture.owner()).chatId(), fixture.threadId(), head, sequence);
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8).formatted(head, sequence);
     }
   }
 
@@ -523,13 +516,12 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     ProviderRequestPreviewUnavailableException cursorRejection =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
-            () -> previewService.preview(fixture.threadId(), fixture.owner(), drifted));
+            () -> previewService.preview(fixture.threadId(), drifted));
     assertTrue(cursorRejection.getMessage().contains("head/next command sequence"));
     assertEquals(Reason.PREVIEW_STALE_CURSOR, cursorRejection.reason());
 
     // 先把同一草稿 durable 接受（队列非空、尚未被 worker 处理），随后按当前 cursor 预览仍必须拒绝。
-    acceptanceService.accept(
-        fixture.owner(),
+    acceptanceService.acceptOnThread(
         new AcceptCommandsCommand(
             fixture.threadTarget(),
             draftCommands(userMessage(List.of(new TextMessageContent("queued draft"))))));
@@ -547,32 +539,19 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     ProviderRequestPreviewUnavailableException queuedRejection =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
-            () -> previewService.preview(fixture.threadId(), fixture.owner(), whileQueued));
+            () -> previewService.preview(fixture.threadId(), whileQueued));
     assertTrue(queuedRejection.getMessage().contains("queued commands"));
     assertEquals(Reason.PREVIEW_QUEUED_COMMANDS, queuedRejection.reason());
     assertEquals(before, durableState(fixture, null));
     assertEquals(requestsBefore, providerRequests.get());
   }
 
-  /** 跨 owner 与跨 Session 资源都是请求错误（400），且绝不产生任何写入。 */
+  /** 目标 Session 不持有草稿资源时，预览与发送同样拒绝（400），且绝不产生任何写入。 */
   @Test
-  void previewRejectsCrossOwnerAndForeignResourceWithoutAnyWrite() {
+  void previewRejectsForeignResourceWithoutAnyWrite() {
     Fixture fixture = fixtureWithCompletedTurn();
     Fixture other = fixtureWithCompletedTurn();
     Map<String, Object> before = durableState(fixture, null);
-
-    // 另一个产品的 Thread：owner 授权必须复用正式接受路径的判定。
-    IllegalArgumentException crossOwner =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                previewService.preview(
-                    fixture.threadId(),
-                    other.owner(),
-                    new AcceptCommandsCommand(
-                        fixture.threadTarget(),
-                        draftCommands(userMessage(List.of(new TextMessageContent("x")))))));
-    assertNotNull(crossOwner.getMessage());
 
     // 目标 Session 不持有该 blob：预览与发送同样拒绝，绝不顺带 retain。
     IllegalArgumentException foreignResource =
@@ -581,7 +560,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             () ->
                 previewService.preview(
                     fixture.threadId(),
-                    fixture.owner(),
                     new AcceptCommandsCommand(
                         fixture.threadTarget(),
                         draftCommands(
@@ -593,25 +571,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     assertEquals(before, durableState(fixture, null), "拒绝路径不得写入任何 durable 状态");
   }
 
-  /** Issue Agent Session 的 owner 不属于本预览能力范围：400 且不触达任何 Runtime/存储事实。 */
-  @Test
-  void previewRejectsIssueAgentSessionOwner() {
-    Fixture fixture = fixtureWithCompletedTurn();
-    Map<String, Object> before = durableState(fixture, null);
-    IllegalArgumentException rejection =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                previewService.preview(
-                    fixture.threadId(),
-                    new OwnerRef.IssueAgent(UUID.randomUUID(), "executor"),
-                    new AcceptCommandsCommand(
-                        fixture.threadTarget(),
-                        draftCommands(userMessage(List.of(new TextMessageContent("x")))))));
-    assertTrue(rejection.getMessage().contains("limited to CHAT owners"));
-    assertEquals(before, durableState(fixture, null));
-  }
-
   /**
    * 与发送完全相同的草稿经过 durable 接受后按只读规划重新编码：这是「预览与发送同源」的独立对照——durable 路径消费 upload 并写入 Session ref，而预览只
    * peek，两者必须给出同一份 wire 请求体。
@@ -621,7 +580,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
       AcceptCommandsCommand draft,
       List<AgentMessageContent> expectedDurableContents) {
     int acceptedCommandCount = draft.commands().size();
-    acceptanceService.accept(fixture.owner(), draft);
+    acceptanceService.acceptOnThread(draft);
     ThreadSnapshot queued = runtime.getThreadSnapshot(fixture.threadId());
     List<ThreadCommand> commands = queued.queuedCommands();
     assertEquals(acceptedCommandCount, commands.size(), "durable 队列必须与草稿命令一一对应");
@@ -691,7 +650,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
             "select blob_id from session_blob_ref where session_id = ?", UUID.class, sessionId);
     assertNotNull(resourceBlobId, "fixture turn 的附件必须已建立 Session ref");
     return new Fixture(
-        owner,
         sessionId,
         threadId,
         snapshot.entryPath().head().id(),
@@ -868,7 +826,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   /** 已完成真实 turn 的 fixture 事实。 */
   private record Fixture(
-      OwnerRef owner,
       UUID sessionId,
       UUID threadId,
       UUID headEntryId,

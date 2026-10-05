@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -106,17 +106,22 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadState thread(UUID id, UUID headEntryId) {
-    return thread(id, null, ThreadLifecycleStatus.IDLE, headEntryId);
+    return thread(id, null, ThreadExecutionControl.RUNNABLE, headEntryId);
   }
 
-  /** ACTIVE 生命周期的 Thread：本地仍有执行，只有这种 Thread 才会投影出模型/工具/排队等非 IDLE 状态。 */
+  /** 可执行（RUNNABLE）且本地仍有执行的 Thread：投影出模型/工具/排队等非 IDLE 状态。 */
   public static ThreadState activeThread(UUID id, UUID headEntryId) {
-    return thread(id, null, ThreadLifecycleStatus.ACTIVE, headEntryId);
+    return thread(id, null, ThreadExecutionControl.RUNNABLE, headEntryId);
   }
 
-  /** 显式指定不可变执行父关系与递归生命周期状态的 Thread（根 Thread 传 null 父）。 */
+  /** 显式停止（STOPPED）的 Thread：不再启动模型执行，对外状态为 STOPPED。 */
+  public static ThreadState stoppedThread(UUID id, UUID headEntryId) {
+    return thread(id, null, ThreadExecutionControl.STOPPED, headEntryId);
+  }
+
+  /** 显式指定不可变执行父关系与持久执行控制的 Thread（根 Thread 传 null 父）。 */
   public static ThreadState thread(
-      UUID id, UUID parentThreadId, ThreadLifecycleStatus status, UUID headEntryId) {
+      UUID id, UUID parentThreadId, ThreadExecutionControl executionControl, UUID headEntryId) {
     return new ThreadState(
         id,
         id(1),
@@ -125,7 +130,8 @@ public final class HarnessRuntimeTestFixtures {
         CREATION_REQUEST_HASH,
         "thread",
         true,
-        status,
+        executionControl,
+        0L,
         4,
         3,
         NOW,
@@ -142,7 +148,8 @@ public final class HarnessRuntimeTestFixtures {
         CREATION_REQUEST_HASH,
         "new thread name",
         true,
-        ThreadLifecycleStatus.IDLE,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
         4,
         4,
         NOW,
@@ -156,44 +163,53 @@ public final class HarnessRuntimeTestFixtures {
   /** IDLE 快照：仅 ROOT，无 open Turn、无 Invocation。 */
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(thread(id(1)), path, List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of());
   }
 
   /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
   public static ThreadSnapshot renamedIdleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(renamedThread(id(1)), path, List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        renamedThread(id(1)), path, List.of(), null, List.of(), List.of(), List.of());
   }
 
   /** IDLE 快照（指定 thread id）。 */
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
-    return new ThreadSnapshot(thread(threadId, id(1)), path, List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        thread(threadId, id(1)), path, List.of(), null, List.of(), List.of(), List.of());
   }
 
-  /**
-   * 本地已静止但仍有活跃直接孩子的父 Thread 快照：durable 生命周期为 {@link ThreadLifecycleStatus#WAITING_CHILDREN}， 对外必须是
-   * WAITING_CHILDREN 且 processing，而不是伪装成 IDLE。
-   */
-  public static ThreadSnapshot waitingChildrenSnapshot(UUID parentThreadId) {
+  /** 已静止但仍有活跃直接孩子的父 Thread 快照：本地状态只由该 Thread 自身投影为 IDLE，不再递归祖先表达子树忙碌；执行父关系仍显式暴露。 */
+  public static ThreadSnapshot idleParentSnapshot(UUID parentThreadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(id(1), parentThreadId, ThreadLifecycleStatus.WAITING_CHILDREN, id(1)),
+        thread(id(1), parentThreadId, ThreadExecutionControl.RUNNABLE, id(1)),
         path,
         List.of(),
         null,
+        List.of(),
         List.of(),
         List.of());
   }
 
-  /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：durable 生命周期为 ACTIVE。 */
+  /** 显式停止（STOPPED）的 Thread 快照：对外状态为 STOPPED 且非 processing。 */
+  public static ThreadSnapshot stoppedSnapshot() {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(
+        stoppedThread(id(1), id(1)), path, List.of(), null, List.of(), List.of(), List.of());
+  }
+
+  /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：RUNNABLE 本地空闲投影为 QUEUED。 */
   public static ThreadSnapshot queuedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(id(1), null, ThreadLifecycleStatus.ACTIVE, id(1)),
+        thread(id(1), null, ThreadExecutionControl.RUNNABLE, id(1)),
         path,
         List.of(queuedUserMessageCommand()),
         null,
+        List.of(),
         List.of(),
         List.of());
   }
@@ -223,7 +239,7 @@ public final class HarnessRuntimeTestFixtures {
         new EntryPath(
             List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
     return new ThreadSnapshot(
-        activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of());
+        activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of(), List.of());
   }
 
   public static ModelUsage usage() {

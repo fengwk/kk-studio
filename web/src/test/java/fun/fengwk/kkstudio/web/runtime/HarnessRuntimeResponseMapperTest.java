@@ -15,11 +15,12 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
+import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
@@ -44,12 +45,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -61,6 +63,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
@@ -81,12 +84,11 @@ import java.util.UUID;
 class HarnessRuntimeResponseMapperTest {
 
   private static final Instant NOW = HarnessRuntimeTestFixtures.NOW;
-  private static final AgentMessageJsonCodec AGENT_MESSAGES = new AgentMessageJsonCodec();
 
   /** 关系树投影沿用快照状态与计数，不向未结束节点伪造成功。 */
   @Test
   void projectsTreeNodesFromRuntimeSnapshots() {
-    ThreadSnapshot waiting = HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2));
+    ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
     ThreadSnapshot continuing = HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3));
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waiting, continuing));
@@ -95,12 +97,12 @@ class HarnessRuntimeResponseMapperTest {
     HarnessThreadTreeNodeDTO node = nodes.get(0);
     assertEquals(id(1).toString(), node.getThreadId());
     assertEquals(id(2).toString(), node.getParentThreadId());
-    assertEquals(waiting.thread().name(), node.getName());
-    assertEquals(waiting.entryPath().baseSettings().agentName(), node.getAgentName());
+    assertEquals(parent.thread().name(), node.getName());
+    assertEquals(parent.entryPath().baseSettings().agentName(), node.getAgentName());
     assertEquals("openai", node.getModel().getProviderName());
     assertEquals("gpt-5", node.getModel().getModelName());
-    assertEquals("WAITING_CHILDREN", node.getStatus());
-    assertTrue(node.isProcessing());
+    assertEquals("IDLE", node.getStatus());
+    assertFalse(node.isProcessing());
     assertEquals(0, node.getTurnCount());
     assertEquals(0, node.getToolCallCount());
     assertNull(node.getOutcome());
@@ -117,9 +119,7 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(ThreadRuntimeStatus.IDLE, HarnessRuntimeTestFixtures.idleSnapshot());
     // 生命周期 ACTIVE 且尚无本地适用上下文时，等待调度启动新 turn。
     cases.put(ThreadRuntimeStatus.QUEUED, HarnessRuntimeTestFixtures.queuedSnapshot());
-    cases.put(
-        ThreadRuntimeStatus.WAITING_CHILDREN,
-        HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2)));
+    cases.put(ThreadRuntimeStatus.STOPPED, HarnessRuntimeTestFixtures.stoppedSnapshot());
     cases.put(
         ThreadRuntimeStatus.CONTINUATION_DUE,
         HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
@@ -154,15 +154,14 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
-  void projectsWaitingChildrenParentAndQueuedThreadAsProcessing() {
-    // 测试意图：父 Thread 本地已静止但仍在等子执行时，对外状态就是 WAITING_CHILDREN 且 processing，
-    // 而不是"status=IDLE 另加一个外部补丁"——执行关系由 Runtime 的快照状态唯一表达，web 不再注入任何委派事实。
-    ThreadSnapshot waiting = HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2));
-    HarnessThreadDTO waitingDto = HarnessRuntimeResponseMapper.toThreadDto(waiting);
-    assertEquals(ThreadRuntimeStatus.WAITING_CHILDREN.name(), waitingDto.getStatus());
-    assertTrue(waitingDto.getProcessing());
+  void projectsIdleParentAndQueuedThreadStatusFromSnapshot() {
+    // 测试意图：父 Thread 的对外状态只由该 Thread 自身投影，不再递归子树；本地静止即 IDLE 且非 processing。
+    ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
+    HarnessThreadDTO parentDto = HarnessRuntimeResponseMapper.toThreadDto(parent);
+    assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
+    assertFalse(parentDto.getProcessing());
     // 同一快照必须同时暴露不可变执行父关系，供前端展示执行树而不混入 Session 对话历史。
-    assertEquals(idText(2), waitingDto.getParentThreadId());
+    assertEquals(idText(2), parentDto.getParentThreadId());
 
     // 已有接受但尚未被消费的命令同样是"工作尚未结束"：处理中，且不是 IDLE。
     ThreadSnapshot queued = HarnessRuntimeTestFixtures.queuedSnapshot();
@@ -196,6 +195,7 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(dto.getBranchSettings().getEnvironmentName());
     assertEquals(NOW, dto.getCreateTime());
     assertEquals(NOW, dto.getUpdateTime());
+    assertEquals("RUNNABLE", dto.getExecutionControl());
     assertFalse(dto.getProcessing());
   }
 
@@ -442,68 +442,89 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
-  void projectsStoppedIdleAndReplayedStopResults() {
-    // STOPPED/IDLE/REPLAYED 三态与取消消息必须由 StopResult 唯一决定。
-    StopResult stopped =
-        new StopResult(
-            false,
-            HarnessRuntimeTestFixtures.thread(id(1)),
+  void projectsStoppedAndReplayedStopResultsWithReceipts() {
+    // STOPPED/REPLAYED 两态与每节点聚合回执必须由 StopResult 唯一决定；不再有顶层取消消息与 IDLE 兼容状态。
+    StoppedThreadReceipt receipt =
+        new StoppedThreadReceipt(
+            id(1),
             id(5),
-            2,
+            id(6),
+            3,
             List.of(
-                new CancelledUserMessage(1, id(50), List.of(new TextMessageContent("first"))),
-                new CancelledUserMessage(
+                new CancelledThreadInput(
+                    1, id(50), new UserMessageCommandPayload(AgentMessage.user("first"))),
+                new CancelledThreadInput(
                     2,
                     id(51),
-                    List.of(ResourceMessageContent.media(id(70), "report.txt", "preview")))));
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER,
+                            List.of(
+                                ResourceMessageContent.media(id(70), "report.txt", "preview")))))));
+    StopResult stopped =
+        new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), List.of(receipt));
     HarnessThreadStopResultDTO stoppedDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
             stopped, HarnessRuntimeTestFixtures.idleSnapshot());
 
     assertEquals("STOPPED", stoppedDto.getStatus());
-    assertEquals(idText(5), stoppedDto.getStoppedTurnEndEntryId());
-    assertEquals(2, stoppedDto.getCancelledCommandCount());
-    assertEquals(2, stoppedDto.getCancelledUserMessages().size());
-    assertEquals(
-        "first",
-        ((TextMessageContent)
-                AGENT_MESSAGES
-                    .decode(stoppedDto.getCancelledUserMessages().getFirst().getMessageJson())
-                    .contents()
-                    .getFirst())
-            .text());
-    assertEquals(
-        id(70),
-        ((ResourceMessageContent)
-                AGENT_MESSAGES
-                    .decode(stoppedDto.getCancelledUserMessages().get(1).getMessageJson())
-                    .contents()
-                    .getFirst())
-            .blobId());
+    assertEquals(1, stoppedDto.getStoppedThreads().size());
+    HarnessStoppedThreadReceiptDTO receiptDto = stoppedDto.getStoppedThreads().getFirst();
+    assertEquals(idText(1), receiptDto.getThreadId());
+    assertEquals(idText(5), receiptDto.getStopRequestId());
+    assertEquals(idText(6), receiptDto.getStoppedTurnEndEntryId());
+    assertEquals(3, receiptDto.getCancelledCommandCount());
+    assertEquals(2, receiptDto.getCancelledInputs().size());
+    assertEquals("USER_MESSAGE", receiptDto.getCancelledInputs().getFirst().getType());
+    assertTrue(receiptDto.getCancelledInputs().getFirst().getPayloadJson().contains("first"));
+    assertTrue(receiptDto.getCancelledInputs().get(1).getPayloadJson().contains(idText(70)));
 
-    StopResult idle =
-        new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), null, 0, List.of());
-    HarnessThreadStopResultDTO idleDto =
+    StopResult replay = new StopResult(true, stopped.thread(), stopped.stoppedThreads());
+    HarnessThreadStopResultDTO replayDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
-            idle, HarnessRuntimeTestFixtures.idleSnapshot());
-    assertEquals("IDLE", idleDto.getStatus());
-    assertNull(idleDto.getStoppedTurnEndEntryId());
-    assertTrue(idleDto.getCancelledUserMessages().isEmpty());
+            replay, HarnessRuntimeTestFixtures.idleSnapshot());
+    assertEquals("REPLAYED", replayDto.getStatus());
+    assertEquals(1, replayDto.getStoppedThreads().size());
+  }
 
-    StopResult replay =
-        new StopResult(true, stopped.thread(), stopped.stoppedTurnEndEntryId(), 0, List.of());
-    assertEquals(
-        "REPLAYED",
-        HarnessRuntimeResponseMapper.toStopResultDto(
-                replay, HarnessRuntimeTestFixtures.idleSnapshot())
-            .getStatus());
+  /** 测试意图：snapshot 必须把该 Thread 自己的持久 Stop 回执一并投影，供刷新或未打开子页恢复草稿。 */
+  @Test
+  void projectsStopReceiptsFromSnapshot() {
+    StoppedThreadReceipt receipt =
+        new StoppedThreadReceipt(
+            id(1),
+            id(5),
+            null,
+            1,
+            List.of(
+                new CancelledThreadInput(
+                    1, id(50), new UserMessageCommandPayload(AgentMessage.user("draft")))));
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(
+            HarnessRuntimeTestFixtures.thread(id(1)),
+            new EntryPath(List.of(HarnessRuntimeTestFixtures.rootEntry())),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(receipt));
+
+    HarnessThreadSnapshotDTO dto =
+        HarnessRuntimeResponseMapper.toSnapshotDto(
+            snapshot, ManualCompactionAvailability.enabled());
+
+    assertEquals(1, dto.getStopReceipts().size());
+    HarnessStoppedThreadReceiptDTO receiptDto = dto.getStopReceipts().getFirst();
+    assertEquals(idText(1), receiptDto.getThreadId());
+    assertEquals(idText(5), receiptDto.getStopRequestId());
+    assertNull(receiptDto.getStoppedTurnEndEntryId());
+    assertTrue(receiptDto.getCancelledInputs().getFirst().getPayloadJson().contains("draft"));
   }
 
   @Test
   void rejectsStopSnapshotIdentityAndVersionMismatch() {
     // stop 后回读必须同时匹配 Thread id 与 version，不能返回另一时刻的快照。
-    StopResult result =
-        new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), null, 0, List.of());
+    StopResult result = new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), List.of());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -541,6 +562,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         null,
         List.of(),
+        List.of(),
         List.of());
   }
 
@@ -568,7 +590,8 @@ class HarnessRuntimeResponseMapperTest {
         queued,
         model,
         List.of(),
-        failures);
+        failures,
+        List.of());
   }
 
   private static ThreadSnapshot toolSnapshot(ToolInvocationStatus status) {
@@ -602,6 +625,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         model,
         List.of(tool),
+        List.of(),
         List.of());
   }
 
@@ -743,7 +767,8 @@ class HarnessRuntimeResponseMapperTest {
             thread.creationRequestHash(),
             thread.name(),
             thread.yoloEnabled(),
-            thread.status(),
+            thread.executionControl(),
+            thread.inputThroughSequence(),
             thread.nextCommandSequence(),
             version,
             thread.createdAt(),
@@ -754,7 +779,8 @@ class HarnessRuntimeResponseMapperTest {
         snapshot.queuedCommands(),
         snapshot.model(),
         snapshot.toolSiblings(),
-        snapshot.modelAttemptFailures());
+        snapshot.modelAttemptFailures(),
+        snapshot.stopReceipts());
   }
 
   private static UUID id(long value) {

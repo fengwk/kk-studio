@@ -9,11 +9,11 @@ import java.time.Instant;
  * HarnessThread 查询投影；实体 id 均为 canonical UUID string，{@code version} 为 durable snapshot
  * cursor（非负十进制字符串）。
  *
- * <p>{@code status} 与 {@code processing} 都直接来自 Thread 快照的 runtime 状态投影，不属于 durable 列，也不由调用方拼装：
- * {@code status} 覆盖自身执行阶段（{@code IDLE / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* /
- * APPLYING}）以及递归生命周期 （{@code WAITING_CHILDREN} 表示本地已静止但仍有活跃直接孩子），{@code processing} 等价于 {@code
- * status != IDLE}，因此 {@code WAITING_CHILDREN} 与 {@code QUEUED} 同样是处理中；{@code branchSettings} 是 head
- * Entry 分支的完整设置快照。
+ * <p>{@code status} 与 {@code processing} 都直接来自 Thread 快照的本地 runtime 状态投影，不属于 durable 列，也不由调用方拼装：
+ * {@code status} 覆盖自身执行阶段（{@code IDLE / STOPPED / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* /
+ * APPLYING}），不递归投影子树忙碌；{@code processing} 等价于阶段仍在处理中（{@code IDLE} 与 {@code STOPPED} 为 false）；
+ * {@code executionControl} 是持久执行控制（{@code RUNNABLE / STOPPED}）；{@code branchSettings} 是 head Entry
+ * 分支的完整设置快照。
  *
  * <p>{@code parentThreadId} 是该 Thread 不可变执行父关系的展示投影（根 Thread 为 null）；它只表达执行关系，Session 历史仍然按 Entry
  * 路径读取，不因父关系而混入其他 Thread 的对话。
@@ -46,13 +46,16 @@ public class HarnessThreadDTO {
   private String version;
 
   /**
-   * 展示状态（派生）：{@code IDLE / QUEUED / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> / APPLYING /
-   * WAITING_CHILDREN}。
+   * 展示状态（派生）：{@code IDLE / STOPPED / QUEUED / CONTINUATION_DUE / MODEL_<status> / TOOL_<status> /
+   * APPLYING}。只描述该 Thread 自身，不递归子树。
    */
   private String status;
 
-  /** 该 Thread 当前是否仍在处理（派生）：{@code status != IDLE}。 */
+  /** 该 Thread 当前是否仍在处理（派生）：{@code IDLE} 与 {@code STOPPED} 为 false。 */
   private Boolean processing;
+
+  /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */
+  private String executionControl;
 
   /** head Entry 分支的完整设置快照。 */
   private HarnessBranchSettingsDTO branchSettings;
