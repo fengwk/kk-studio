@@ -14,8 +14,8 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
-/** 把已保存的安装设置渲染成用户只需复制的一行命令。复杂的私有暂存、下载与清理留在脚本里，不新增票据、签名或安装器副本。 */
-public final class EnvironmentInstallCommands {
+/** 把已保存的安装设置渲染成可下载执行的安装或卸载脚本。 */
+public final class EnvironmentInstallScripts {
   static final String INSTALLER_BASE =
       "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon";
 
@@ -24,7 +24,7 @@ public final class EnvironmentInstallCommands {
   private static final String UNIX = load("environment-install-unix.sh");
   private static final String WINDOWS = load("environment-install-windows.ps1");
 
-  private EnvironmentInstallCommands() {}
+  private EnvironmentInstallScripts() {}
 
   public static String install(EnvironmentInstallConfigDTO config, String registrationToken) {
     EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
@@ -63,13 +63,9 @@ public final class EnvironmentInstallCommands {
         daemonJson.isEmpty()
             ? ""
             : (windows ? windowsStaging(daemonJson, token) : unixStaging(daemonJson, token));
-    return template
-        .replace(staging.isEmpty() ? "@@STAGING@@\n" : "@@STAGING@@", staging)
-        .replace(
-            "@@INSTALLER@@",
-            windows ? ps(INSTALLER_BASE + "/install.ps1") : sh(INSTALLER_BASE + "/install.sh"))
-        .replace("@@ACTION@@", action)
-        .replace("@@PARAMETERS@@", parameters);
+    String installer =
+        windows ? ps(INSTALLER_BASE + "/install.ps1") : sh(INSTALLER_BASE + "/install.sh");
+    return template.formatted(staging, installer, action, parameters);
   }
 
   private static String unixStaging(String daemonJson, String token) {
@@ -91,8 +87,8 @@ public final class EnvironmentInstallCommands {
             Set-KkPrivateAcl -Path $path
           }
           $utf8 = New-Object Text.UTF8Encoding($false)
-          [IO.File]::WriteAllText($config, %%s, $utf8)
-          [IO.File]::WriteAllText($token, %%s, $utf8)
+          [IO.File]::WriteAllText($config, %s, $utf8)
+          [IO.File]::WriteAllText($token, %s, $utf8)
         """
         .formatted(ps(daemonJson), ps(token));
   }
@@ -127,7 +123,7 @@ public final class EnvironmentInstallCommands {
 
   private static String load(String name) {
     try (InputStream input =
-        EnvironmentInstallCommands.class.getResourceAsStream(
+        EnvironmentInstallScripts.class.getResourceAsStream(
             "/fun/fengwk/kkstudio/platform/environment/service/" + name)) {
       if (input == null) {
         throw new IllegalStateException("missing install command template " + name);
