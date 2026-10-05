@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -161,12 +162,7 @@ public final class ThreadProcessor {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
-    this.coordinator =
-        new ThreadLifecycleCoordinator(
-            this.threadContextProbe,
-            this.automaticCompactionPlanner,
-            () -> this.config.compactionProvider().compactionConfig(),
-            this.clock);
+    this.coordinator = new ThreadLifecycleCoordinator();
   }
 
   /**
@@ -277,15 +273,15 @@ public final class ThreadProcessor {
         }
         // 压缩判断完成后，已关闭 turn 是安全边界：有序消费到第一条 user-like，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
-        if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
+        if (hasInputDemand(tx, thread)) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
         yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
       }
       case ThreadContext.IdleOrHistorical ignored -> {
-        List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-        // 已物化但位于输入水位之后的系统通知仍需普通输入处理：不能只从 QUEUED 行判断 demand。
-        boolean userDemand = hasQueuedDemand(queued) || path.hasTrailingNotifications();
+        // 已物化但位于输入水位之后的系统通知仍需普通输入处理：需求只按本 Thread 自己的 Command 判定（fork 不继承源邮箱，
+        // 压缩改写 head 也不会丢失该需求）。
+        boolean userDemand = hasInputDemand(tx, thread);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
             automaticCompactionPlanner.plan(
@@ -309,6 +305,30 @@ public final class ThreadProcessor {
   private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
       if (command.type().isMessage() || command.type().isNotification()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 本 Thread 输入需求：QUEUED 输入，或已物化但尚未被 INPUT 接纳（sequence &gt; inputThroughSequence）的 APPLIED
+   * NOTIFICATION。后者只按本 Thread 自己的 Command 判定，绝不从共享/继承历史推断。
+   */
+  private static boolean hasInputDemand(HarnessStore.Transaction tx, ThreadState thread) {
+    if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
+      return true;
+    }
+    return hasUnconsumedNotification(
+        tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
+  }
+
+  private static boolean hasUnconsumedNotification(
+      List<ThreadCommand> commands, long inputThroughSequence) {
+    for (ThreadCommand command : commands) {
+      if (command.sequence() > inputThroughSequence
+          && command.state() == ThreadCommandState.APPLIED
+          && command.type().isNotification()) {
         return true;
       }
     }
@@ -652,6 +672,11 @@ public final class ThreadProcessor {
       EntryPath updatedPath = tx.loadEntryPath(turnEndId);
       coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
     }
+    if (outcome == TurnEndOutcome.FAILED && !requestThread) {
+      // 不可恢复的 compaction 失败：执行已终止，必须明确结算已应用源的 Join，绝不悬挂。
+      ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+          tx, advanced, turnEndId, null, mutationNow, false);
+    }
     if (tx.lockClaimedWork(claim, workNow).isEmpty()) {
       throw new ClaimLostSignal();
     }
@@ -773,6 +798,11 @@ public final class ThreadProcessor {
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     Instant planNow = HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
+    // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
+    boolean pendingNotificationInput =
+        reason == TurnStartReason.INPUT
+            && hasUnconsumedNotification(
+                tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
     return planBuilder.build(
         thread.id(),
         path,
@@ -781,7 +811,8 @@ public final class ThreadProcessor {
         thread.nextCommandSequence() - 1,
         tx::nextId,
         planNow,
-        preparation);
+        preparation,
+        pendingNotificationInput);
   }
 
   /**
@@ -965,12 +996,12 @@ public final class ThreadProcessor {
     return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
   }
 
-  /** INPUT / CONTINUATION 把输入水位推进到冻结 cutoff；COMPACTION 不推进水位，保留尚待处理通知的原始尾部。 */
+  /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */
   private static long nextWatermark(TurnPlan plan, ThreadState thread) {
-    if (plan.reason() == TurnStartReason.COMPACTION) {
-      return thread.inputThroughSequence();
+    if (plan.reason() == TurnStartReason.INPUT) {
+      return plan.cutoffSequence();
     }
-    return plan.cutoffSequence();
+    return thread.inputThroughSequence();
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */

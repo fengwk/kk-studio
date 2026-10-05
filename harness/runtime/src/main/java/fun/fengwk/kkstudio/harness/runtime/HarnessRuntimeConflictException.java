@@ -40,7 +40,7 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     THREAD_ID_REUSED,
     /** Thread 存在等待原子 apply 的 terminal Model/Tool result。 */
     TERMINAL_APPLY_PENDING,
-    /** Stop 幂等键已被非 Stop 的关闭操作使用过。 */
+    /** Stop 幂等键已被其它 root 或非 Stop 的关闭操作使用过。 */
     STOP_REQUEST_ID_REUSED,
     /** Approval target 缺失、不属于请求 thread 或当前不适用。 */
     APPROVAL_NOT_APPLICABLE,

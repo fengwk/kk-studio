@@ -64,7 +64,8 @@ class TurnPlanBuilderGoalTest {
             1L,
             ids(),
             NOW,
-            null);
+            null,
+            false);
 
     assertEquals(List.of(goal), plan.consumedCommands());
     // 原子：turn 内只有 TURN_START + 一条冻结 USER 消息。
@@ -96,7 +97,15 @@ class TurnPlanBuilderGoalTest {
 
     TurnPlan first =
         builder.build(
-            baseline.threadId(), base, TurnStartReason.INPUT, List.of(goal), 1L, ids, NOW, null);
+            baseline.threadId(),
+            base,
+            TurnStartReason.INPUT,
+            List.of(goal),
+            1L,
+            ids,
+            NOW,
+            null,
+            false);
     GoalSetting firstSetting = first.candidatePath().baseSettings().goal();
     ThreadCommand repeated =
         new ThreadCommand(
@@ -118,7 +127,8 @@ class TurnPlanBuilderGoalTest {
             1L,
             ids,
             NOW,
-            null);
+            null,
+            false);
     GoalSetting secondSetting = second.candidatePath().baseSettings().goal();
     assertEquals("same text", secondSetting.text());
     assertFalse(secondSetting.id().equals(firstSetting.id()));
@@ -143,7 +153,8 @@ class TurnPlanBuilderGoalTest {
             1L,
             ids,
             NOW,
-            null);
+            null,
+            false);
     assertNull(cleared.candidatePath().baseSettings().goal());
     // 清除与设置走同一原子路径：候选 turn 内出现明确的取消 USER 消息。
     assertTrue(textOf(clearedUserMessage(cleared)).contains("clearing the goal of this branch"));
@@ -166,7 +177,8 @@ class TurnPlanBuilderGoalTest {
             1L,
             ids(),
             NOW,
-            null);
+            null,
+            false);
 
     assertEquals(List.of(), plan.consumedCommands());
     assertEquals(1, plan.candidateEntries().size());

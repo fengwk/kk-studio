@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -52,7 +51,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -361,12 +359,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
         tx -> {
           ThreadState locked = tx.lockThread(childId).orElseThrow();
           EntryPath currentPath = tx.loadEntryPath(locked.headEntryId());
-          ThreadLifecycleCoordinator coordinator =
-              new ThreadLifecycleCoordinator(
-                  new ThreadContextProbe(),
-                  new AutomaticCompactionPlanner(),
-                  () -> null,
-                  fixture.clock);
+          ThreadLifecycleCoordinator coordinator = new ThreadLifecycleCoordinator();
           coordinator.remindSoftBudgetIfDue(tx, locked, currentPath, NOW);
           return null;
         });
