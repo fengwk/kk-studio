@@ -13,6 +13,12 @@ export interface BranchGoalPanelProps {
   progress: BranchGoalProgressResult
   busy?: boolean
   readOnly?: boolean
+  /**
+   * 受控的 Goal 编辑区文本。绑定 Thread 由 Thread 草稿记录提供，使 Stop 回执恢复的
+   * 目标文本在面板关闭/重新打开或刷新后仍然存在；省略时面板自持文本。
+   */
+  draftText?: string
+  onDraftTextChange?: (text: string) => void
   onSubmitGoal: (goalText: string) => Promise<void> | void
   onClearGoal: () => Promise<void> | void
   onClose: () => void
@@ -23,13 +29,23 @@ export function BranchGoalPanel({
   progress,
   busy = false,
   readOnly = false,
+  draftText,
+  onDraftTextChange,
   onSubmitGoal,
   onClearGoal,
   onClose,
 }: BranchGoalPanelProps) {
   const { t } = useI18n()
-  const [inputText, setInputText] = useState('')
+  const [internalText, setInternalText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const inputText = draftText ?? internalText
+
+  function changeText(next: string) {
+    if (draftText === undefined) {
+      setInternalText(next)
+    }
+    onDraftTextChange?.(next)
+  }
 
   const charCount = Array.from(inputText).length
   const trimmed = inputText.trim()
@@ -143,7 +159,7 @@ export function BranchGoalPanel({
               value={inputText}
               disabled={busy}
               onChange={(e) => {
-                setInputText(e.target.value)
+                changeText(e.target.value)
                 setError(null)
               }}
             />

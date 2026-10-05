@@ -18,12 +18,14 @@ import type {
   ManualCompactionResponseDTO,
   ProviderRequestPreviewDTO,
   RuntimeThreadSummaryDTO,
+  ThreadCommandBatchRequestDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * Harness runtime 客户端调用统一收敛：
- * - POST /harness/command-batches
+ * - POST /harness/command-batches（仅 NEW_SESSION / NEW_THREAD 创建）
+ * - POST /harness/threads/{id}/command-batches（既有 Thread 的通用写入口）
  * - GET /harness/sessions/{id}/threads
  * - GET /harness/sessions/{id}/entries
  * - PUT /harness/sessions/{id}/name
@@ -42,6 +44,19 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: AgentCommandBatchRequestDTO,
     ): Promise<AgentCommandBatchResponseDTO> =>
       client.post('/harness/command-batches', data),
+
+    /**
+     * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
+     * 客户端只提交 CAS 游标与命令，不再伪造产品 owner。
+     */
+    acceptThreadCommandBatch: (
+      threadId: string,
+      data: ThreadCommandBatchRequestDTO,
+    ): Promise<AgentCommandBatchResponseDTO> =>
+      client.post(
+        `/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
+        data,
+      ),
 
     listSessionThreads: (sessionId: string): Promise<RuntimeThreadSummaryDTO[]> =>
       client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/threads`),
@@ -75,7 +90,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
 
     previewProviderRequest: (
       threadId: string,
-      data: AgentCommandBatchRequestDTO,
+      data: ThreadCommandBatchRequestDTO,
     ): Promise<ProviderRequestPreviewDTO> =>
       client.post(`/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`, data),
 

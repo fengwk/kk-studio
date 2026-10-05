@@ -86,6 +86,18 @@ describe('AgentPane command registry', () => {
     expect(commandIdsForTarget(bound)).toContain('rename-thread')
   })
 
+  it('exposes the full BOUND_THREAD command set without owner-based filtering', () => {
+    // 既有 Thread 的能力只由目标 kind 与显式选项决定：owner 不再参与裁剪，
+    // 因此 goal 与 stop 对 BOUND_THREAD 恒可用。
+    const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
+    const commands = threadCommandsForTarget(bound)
+    expect(commands.map((command) => command.id)).toEqual(
+      THREAD_COMMANDS.map((command) => command.id),
+    )
+    expect(commands.find((command) => command.id === 'goal')?.disabled).toBe(false)
+    expect(commands.find((command) => command.id === 'stop')?.disabled).toBe(false)
+  })
+
   it('disables mutation commands when readOnly is enabled', () => {
     // 测试意图：验证只读模式（如项目已归档）下，状态修改类命令均被禁用，仅保留查看类命令
     const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }

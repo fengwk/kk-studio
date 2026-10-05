@@ -5,10 +5,13 @@ import {
   savePendingAcceptance,
   loadPendingAcceptance,
 } from '@/features/ai/runtime/agent-pane/pane-target'
-import { threadCommandsForTarget } from '@/features/ai/runtime/thread-panel/thread-commands'
+import {
+  THREAD_COMMANDS,
+  threadCommandsForTarget,
+} from '@/features/ai/runtime/thread-panel/thread-commands'
 import { createTextPart, createAttachmentPart } from '@/features/ai/composer/composer-parts'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import type { AgentRuntimeOwnerDTO, HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
@@ -17,107 +20,90 @@ const baseDraft: BranchDraft = {
   yoloEnabled: false,
 }
 
-const mockThread: HarnessThreadSnapshotDTO = {
+const mockThread: HarnessThreadDTO = {
   threadId: 't-123',
+  name: 'Bound thread',
   sessionId: 's-123',
   headEntryId: 'e-1',
   parentThreadId: null,
+  yoloEnabled: false,
   nextCommandSequence: '1',
+  version: '1',
+  status: 'IDLE',
+  processing: false,
+  executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',
     model: { providerName: 'provider', modelName: 'model', variant: 'default' },
     environmentName: null,
     goal: { id: 'existing-goal-id', text: 'Existing goal text' },
   },
-  environmentReady: true,
-  createdAt: '2026-09-24T10:00:00Z',
-  updatedAt: '2026-09-24T10:00:00Z',
+  createTime: '2026-09-24T10:00:00Z',
+  updateTime: '2026-09-24T10:00:00Z',
 }
 
-describe('AgentPane Goal pipeline and owner gating', () => {
-  describe('Owner gating', () => {
-    it('does not expose goal command when owner option is absent (default fail-closed)', () => {
+describe('AgentPane Goal pipeline and owner-free command availability', () => {
+  describe('owner-free command availability', () => {
+    it('exposes the full BOUND_THREAD command set without any owner option', () => {
+      // owner 不再参与既有 Thread 的命令裁剪：无 owner 选项时仍是完整命令集。
       const commands = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't-1' })
-      expect(commands.some((c) => c.id === 'goal')).toBe(false)
+      expect(commands.map((command) => command.id)).toEqual(
+        THREAD_COMMANDS.map((command) => command.id),
+      )
+      expect(commands.find((command) => command.id === 'goal')?.disabled).toBe(false)
+      expect(commands.find((command) => command.id === 'stop')?.disabled).toBe(false)
     })
 
-    it('enables goal for Chat but rejects controlled Issue owners', () => {
-      const chatOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
-      const issueOwner: AgentRuntimeOwnerDTO = { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }
-
-      const chatCommands = threadCommandsForTarget(
+    it('keeps goal available on a bound thread regardless of explicit capability options', () => {
+      // 命令可用性只由目标 kind 与显式能力选项决定；owner（如受控 Issue Agent）
+      // 不再隐藏 goal，只有对应能力选项才禁用对应命令。
+      const plain = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't-1' })
+      const noBranching = threadCommandsForTarget(
         { kind: 'BOUND_THREAD', threadId: 't-1' },
-        { owner: chatOwner },
+        { allowBranching: false },
       )
-      expect(chatCommands.some((c) => c.id === 'goal')).toBe(true)
-
-      const issueCommands = threadCommandsForTarget(
-        { kind: 'BOUND_THREAD', threadId: 't-1' },
-        { owner: issueOwner },
-      )
-      expect(issueCommands.some((c) => c.id === 'goal')).toBe(false)
+      expect(plain.find((command) => command.id === 'goal')?.disabled).toBe(false)
+      // 禁止分支仍然生效，且只作用于导航命令，不触及 goal。
+      expect(noBranching.find((command) => command.id === 'thread')?.disabled).toBe(true)
+      expect(noBranching.find((command) => command.id === 'new')?.disabled).toBe(true)
+      expect(noBranching.find((command) => command.id === 'goal')?.disabled).toBe(false)
     })
 
-    it('hides goal command for ISSUE_AGENT in every target', () => {
-      const issueOwner: AgentRuntimeOwnerDTO = { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }
-
-      for (const target of [
-        { kind: 'NEW_SESSION_DRAFT' as const },
-        { kind: 'NEW_THREAD_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' },
-        { kind: 'BOUND_THREAD' as const, threadId: 't1' },
-      ]) {
-        const commands = threadCommandsForTarget(target, { owner: issueOwner })
-        expect(commands.some((c) => c.id === 'goal')).toBe(false)
-      }
+    it('scopes goal by the target kind instead of the owner', () => {
+      // 新建 Session 没有可绑定的 Thread，goal 被目标 kind 排除；
+      // 新建 Thread 与既有 Thread 共享同一 branch 语义，goal 可用。
+      const sessionDraft = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
+      const threadDraft = threadCommandsForTarget({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 's1',
+        startEntryId: 'e1',
+      })
+      const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
+      expect(sessionDraft.find((command) => command.id === 'goal')?.disabled).toBe(true)
+      expect(threadDraft.find((command) => command.id === 'goal')?.disabled).toBe(false)
+      expect(bound.find((command) => command.id === 'goal')?.disabled).toBe(false)
     })
   })
 
-  describe('buildGoalBatchPlan', () => {
-    it('emits typed GOAL command when setting a goal on a bound thread', () => {
-      const plan = buildGoalBatchPlan({
-        owner: { type: 'CHAT', chatId: 'chat-1' },
-        thread: mockThread,
-        effectiveBase: baseDraft,
-        draft: baseDraft,
-        goalText: 'Deploy feature to production',
-        createCommandId: () => 'fixed-goal-id',
-      })
-
-      expect(plan.request.target).toEqual({
-        type: 'THREAD',
-        threadId: 't-123',
-        expectedHeadEntryId: 'e-1',
-        expectedNextCommandSequence: '1',
-      })
-      expect(plan.request.commands).toHaveLength(1)
-      expect(plan.request.commands[0]).toEqual({
-        type: 'GOAL',
-        idempotencyKey: 'fixed-goal-id',
-        text: 'Deploy feature to production',
-      })
-    })
-
-    it('emits typed GOAL with null text when clearing a goal on a bound thread', () => {
-      const plan = buildGoalBatchPlan({
-        owner: { type: 'CHAT', chatId: 'chat-1' },
-        thread: mockThread,
-        effectiveBase: baseDraft,
-        draft: baseDraft,
-        goalText: null,
-        createCommandId: () => 'clear-goal-key',
-      })
-
-      expect(plan.request.commands).toHaveLength(1)
-      expect(plan.request.commands[0]).toEqual({
-        type: 'GOAL',
-        idempotencyKey: 'clear-goal-key',
-        text: null,
-      })
+  describe('creation targets keep the owner contract', () => {
+    it('rejects a bound thread target in favor of the thread command batch contract', () => {
+      // 既有 Thread 的 Goal 必须走无 owner 的 thread command batch；
+      // 创建构造器对 BOUND_THREAD 失败关闭，防止伪造 owner/target。
+      expect(() =>
+        buildGoalAcceptanceRequest({
+          owner: { type: 'CHAT', chatId: 'chat-1' },
+          target: { kind: 'BOUND_THREAD', threadId: 't-123' },
+          draft: baseDraft,
+          base: baseDraft,
+          goalText: 'New goal',
+        }),
+      ).toThrow('Existing threads submit through the thread command batch contract')
     })
 
     it('always preserves rootSettings.goal as null on NEW_SESSION target', () => {
+      const owner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-1' }
       const frozen = buildGoalAcceptanceRequest({
-        owner: { type: 'CHAT', chatId: 'chat-1' },
+        owner,
         target: { kind: 'NEW_SESSION_DRAFT' },
         draft: baseDraft,
         base: baseDraft,
@@ -125,6 +111,8 @@ describe('AgentPane Goal pipeline and owner gating', () => {
         createId: () => 'ns-goal-id',
       })
 
+      // 创建请求仍然必须携带产品 owner。
+      expect(frozen.request.owner).toEqual(owner)
       expect(frozen.request.target.type).toBe('NEW_SESSION')
       if (frozen.request.target.type === 'NEW_SESSION') {
         expect(frozen.request.target.rootSettings).toEqual({
@@ -139,6 +127,51 @@ describe('AgentPane Goal pipeline and owner gating', () => {
         idempotencyKey: 'ns-goal-id',
         text: 'Initial goal',
       })
+    })
+  })
+
+  describe('buildGoalBatchPlan', () => {
+    it('emits typed GOAL command in an owner-free bound-thread batch', () => {
+      const plan = buildGoalBatchPlan({
+        thread: mockThread,
+        effectiveBase: baseDraft,
+        draft: baseDraft,
+        goalText: 'Deploy feature to production',
+        createCommandId: () => 'fixed-goal-id',
+      })
+
+      // 既有 Thread 的写请求只携带精确 CAS 游标与有序命令，绝不伪造 owner/target。
+      expect(plan.request).toEqual({
+        expectedHeadEntryId: 'e-1',
+        expectedNextCommandSequence: '1',
+        commands: [
+          {
+            type: 'GOAL',
+            idempotencyKey: 'fixed-goal-id',
+            text: 'Deploy feature to production',
+          },
+        ],
+      })
+      expect(plan.request).not.toHaveProperty('owner')
+      expect(plan.request).not.toHaveProperty('target')
+    })
+
+    it('emits typed GOAL with null text when clearing a goal on a bound thread', () => {
+      const plan = buildGoalBatchPlan({
+        thread: mockThread,
+        effectiveBase: baseDraft,
+        draft: baseDraft,
+        goalText: null,
+        createCommandId: () => 'clear-goal-key',
+      })
+
+      expect(plan.request.commands).toHaveLength(1)
+      expect(plan.request.commands[0]).toEqual({
+        type: 'GOAL',
+        idempotencyKey: 'clear-goal-key',
+        text: null,
+      })
+      expect(plan.request).not.toHaveProperty('owner')
     })
   })
 
@@ -160,14 +193,14 @@ describe('AgentPane Goal pipeline and owner gating', () => {
       const attachment = createAttachmentPart('upload-uuid', 'test.png')
       const textPart = createTextPart('/goal New goal')
 
+      // 只有容器创建才冻结带 owner 的请求；既有 Thread 的 Goal 走 thread command batch。
       const frozen = buildGoalAcceptanceRequest({
         owner,
-        target: { kind: 'BOUND_THREAD', threadId: 't-123' },
+        target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's-123', startEntryId: 'e-1' },
         draft: baseDraft,
         base: baseDraft,
         goalText: 'New goal',
         localParts: [attachment, textPart],
-        thread: mockThread,
         createId: () => 'frozen-goal-id',
       })
 

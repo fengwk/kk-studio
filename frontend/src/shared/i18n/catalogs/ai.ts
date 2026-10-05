@@ -1531,9 +1531,9 @@ export const aiCatalog = {
     'en-US': 'Working...',
     'zh-CN': 'Working...',
   },
-  'ai.runtime.thread.status.WAITING_CHILDREN': {
-    'en-US': 'Waiting for child threads',
-    'zh-CN': '等待子 Thread',
+  'ai.runtime.thread.status.STOPPED': {
+    'en-US': 'Stopped',
+    'zh-CN': '已停止',
   },
   'ai.runtime.thread.status.QUEUED': {
     'en-US': 'Queued',
@@ -1726,6 +1726,18 @@ export const aiCatalog = {
   'ai.runtime.notification.agentBody': {
     'en-US': '{{title}}',
     'zh-CN': '{{title}}',
+  },
+  'ai.runtime.notification.entry.SUBAGENT_RESULTTitle': {
+    'en-US': 'Subagent result',
+    'zh-CN': '子 Thread 结果',
+  },
+  'ai.runtime.notification.entry.TASK_BUDGETTitle': {
+    'en-US': 'Task budget reminder',
+    'zh-CN': '任务预算提醒',
+  },
+  'ai.runtime.notification.entry.emptyText': {
+    'en-US': 'No text content was delivered with this notification.',
+    'zh-CN': '该通知没有附带文本内容。',
   },
   'ai.runtime.task.state.accepted': {
     'en-US': 'Accepted / Running in background',

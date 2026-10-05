@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,6 +13,8 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import { createTextPart } from '@/features/ai/composer/composer-parts'
+import { saveThreadDraftParts } from '@/features/ai/runtime/thread-draft-store'
 import { setLocale } from '@/shared/i18n'
 
 const CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000999'
@@ -50,6 +52,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     decideApproval: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
+    acceptThreadCommandBatch: vi.fn(),
     acceptCommandBatch: vi.fn(),
     compactThread: vi.fn(),
     setThreadYolo: vi.fn(),
@@ -67,7 +70,10 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     parentThreadId: null,
     yoloEnabled: false,
     nextCommandSequence: '1',
-    status: 'WAITING_TOOL',
+    version: '1',
+    status: 'WAITING_APPROVAL',
+    processing: true,
+    executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
       model: {
@@ -76,9 +82,10 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
         variant: 'default',
       },
       environmentName: null,
+      goal: null,
     },
-    createdAt: '2026-07-28T10:00:00Z',
-    lastActivityAt: '2026-07-28T10:00:00Z',
+    createTime: '2026-07-28T10:00:00Z',
+    updateTime: '2026-07-28T10:00:00Z',
     ...overrides,
   }
 }
@@ -137,6 +144,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
     ],
     modelInvocation: null,
     modelAttemptFailures: [],
+    manualCompaction: { available: true, disabledReason: null },
+    stopReceipts: [],
   }
 }
 
@@ -226,7 +235,32 @@ describe('ThreadWorkspacePage', () => {
     vi.clearAllMocks()
     setLocale('zh-CN')
     vi.mocked(agentService.listAgents).mockResolvedValue({ results: [], total: 0 })
-    vi.mocked(agentService.listModels).mockResolvedValue({ results: [], total: 0 })
+    vi.mocked(agentService.listModels).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 50,
+      totalCount: 1,
+      results: [{
+        providerName: 'minimax',
+        name: 'MiniMax',
+        description: null,
+        config: {
+          limit: { context: 128000, output: 8192 },
+          abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+          pricing: {
+            currency: 'USD',
+            pricingTier: 'default',
+            serviceTier: 'standard',
+            serviceTierMultiplier: 1,
+          },
+          defaultVariant: 'default',
+          variants: [{ id: 'default' }],
+        },
+        version: '0',
+        createTime: null,
+        updateTime: null,
+      }],
+    })
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue([])
     vi.mocked(agentService.listProviders).mockResolvedValue({ results: [], total: 0 })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(harnessService.decideApproval).mockResolvedValue(undefined)
@@ -356,13 +390,11 @@ describe('ThreadWorkspacePage', () => {
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
   })
 
-  it('hides the read-only composer and isolates two child snapshots when the route changes', async () => {
-    // 只读观察页不能留下可输入的父式 composer；切换 child 后旧消息、排队和审批都不得残留。
+  it('exposes the same interactive composer as a normal Thread and isolates two child snapshots when the route changes', async () => {
+    // 子 Thread 工作区与普通 Thread 能力一致（可输入、可设置、可 Goal/Stop）；
+    // 切换 child 后旧消息、排队、审批与该 Thread 自己的草稿都不得残留到另一个 child。
     const user = userEvent.setup()
-    localStorage.setItem(
-      'kk-studio.composer-draft.thread:00000000-0000-0000-0000-000000000999',
-      JSON.stringify([{ type: 'TEXT', text: 'stale child draft' }]),
-    )
+    await saveThreadDraftParts(CHILD_THREAD_ID, [createTextPart('stale child draft')])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => {
       if (threadId === OTHER_CHILD_THREAD_ID) {
         return snapshotFor(OTHER_CHILD_THREAD_ID)
@@ -381,8 +413,18 @@ describe('ThreadWorkspacePage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     })
-    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '发送' })).not.toBeInTheDocument()
+    // 子 Thread 工作区提供完整交互面：可编辑 composer、设置与命令表（含 goal / stop）。
+    const composer = screen.getByRole('textbox', { name: '给 AI 发送消息' })
+    expect(composer).toHaveAttribute('contenteditable', 'true')
+    expect(composer).toHaveAttribute('aria-disabled', 'false')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    const palette = await screen.findByRole('listbox', { name: '命令表' })
+    expect(within(palette).getByRole('option', { name: /goal/ })).toHaveAttribute('aria-disabled', 'false')
+    expect(within(palette).getByRole('option', { name: /stop/ })).toHaveAttribute('aria-disabled', 'false')
+    await user.keyboard('{Escape}')
+
     expect(screen.getByText('parent only')).toBeInTheDocument()
     expect(screen.getByText('parent queued')).toBeInTheDocument()
     expect(screen.getByText('等待审批')).toBeInTheDocument()
@@ -406,13 +448,13 @@ describe('ThreadWorkspacePage', () => {
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
     expect(screen.queryByText('等待审批')).not.toBeInTheDocument()
     expect(screen.queryByText('stale child draft')).not.toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toBeInTheDocument()
     expect(screen.getByText('child only')).toBeInTheDocument()
     expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(OTHER_CHILD_THREAD_ID)
   })
 
-  it('opens the read-only relationship tree for a child without exposing a composer', async () => {
-    // 只读观察页仍可查看真实 root 与兄弟，但不能因此恢复消息输入。
+  it('opens the relationship tree for a child while keeping its own composer interactive', async () => {
+    // 关系树仍可查看真实 root 与兄弟；子 Thread 工作区同时保有自己可交互的 composer。
     const user = userEvent.setup()
     const rootId = '00000000-0000-4000-8000-000000000010'
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID))
@@ -423,8 +465,8 @@ describe('ThreadWorkspacePage', () => {
         name: 'Root Agent',
         agentName: 'assistant',
         model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-        status: 'WAITING_CHILDREN',
-        processing: true,
+        status: 'STOPPED',
+        processing: false,
         turnCount: 2,
         toolCallCount: 1,
         outcome: null,
@@ -459,14 +501,15 @@ describe('ThreadWorkspacePage', () => {
     const toggle = await screen.findByRole('button', { name: 'Agent 关系' })
     expect(toggle).toBeEnabled()
     expect(await screen.findByRole('button', { name: '允许' })).toBeEnabled()
-    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toHaveAttribute('contenteditable', 'true')
     expect(harnessService.getThreadTree).not.toHaveBeenCalled()
 
     await user.click(toggle)
     expect(await screen.findByRole('link', { name: 'Root Agent' })).toHaveAttribute('href', `/threads/${rootId}`)
     expect(screen.getByRole('link', { name: 'Idle Child' })).toHaveAttribute('href', `/threads/${OTHER_CHILD_THREAD_ID}`)
+    expect(screen.getByText('已停止')).toBeInTheDocument()
     expect(screen.getByText('失败')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
-    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toHaveAttribute('contenteditable', 'true')
   })
 })
