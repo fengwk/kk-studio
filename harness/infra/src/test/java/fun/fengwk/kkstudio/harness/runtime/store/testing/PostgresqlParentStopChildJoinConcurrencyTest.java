@@ -43,9 +43,9 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -80,7 +80,7 @@ import java.util.function.Function;
  *   <li><b>Tree Lock 互斥与阻塞</b>：PG 事务级 advisory 锁 {@code lockTree(rootThreadId)} 保证同一执行树的父级 Stop 与子级
  *       Terminal Apply 严格互斥串行化，子级 processor 必须阻塞等待父级 Stop 事务提交；
  *   <li><b>Stop 优先场景下的交付冻结</b>：父级 Stop 提交后，子级后续执行观察到 STOPPED 边界，Join 凭据交付被冻结（不向父级注入活跃命令，不重复交付）；
- *   <li><b>Terminal 优先场景下的交付取消</b>：子级 Terminal Apply 先提交完成 Join 交付（注入 CUSTOM_MESSAGE）后，父级 Stop
+ *   <li><b>Terminal 优先场景下的交付取消</b>：子级 Terminal Apply 先提交完成 Join 交付（注入 NOTIFICATION）后，父级 Stop
  *       能精确取消该入队命令并保持版本与事实一致；
  *   <li><b>无 Arbitrary Sleep 与确定性 Barrier</b>：全流程通过 {@link CountDownLatch} 编排并发交错时序；
  *   <li><b>全事务原子回滚</b>：子级 Terminal 崩溃或父级 Stop CAS 冲突时，整个 PostgreSQL 事务完整回滚，释放锁且无孤儿或污染数据残留。
@@ -136,7 +136,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   REQUEST_HASH,
                   "parent-thread",
                   false,
-                  ThreadLifecycleStatus.WAITING_CHILDREN,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   now,
@@ -165,7 +166,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   REQUEST_HASH,
                   "child-thread",
                   false,
-                  ThreadLifecycleStatus.ACTIVE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   2L,
                   0L,
                   now,
@@ -225,7 +227,6 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   parentThreadId,
                   childThreadId,
                   1L,
-                  0L,
                   "subagent-calculator",
                   10,
                   0L,
@@ -432,7 +433,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
   @Test
   void childTerminalApplyDeliversReceiptOnceThenParentStopCancelsQueuedDeliveryOnPostgres() {
     // 测试意图：验证子线程率先执行 Terminal Apply 并成功闭合 Turn 时：
-    // 1. 在同一个 PostgreSQL 事务内子线程置为 IDLE，Join 凭据被原子匹配并向父级注入唯一的 CUSTOM_MESSAGE 回执命令；
+    // 1. 在同一个 PostgreSQL 事务内Join 凭据被原子匹配并向父级注入唯一的 NOTIFICATION 回执命令；
     // 2. 紧接着父线程执行 Stop 时，父级在原子 Stop 事务内将该已入队但未消费的回执命令置为 CANCELLED，
     //    且 Join 凭据的 deliveryCommandSequence 保持原值，不发生重复交付或序列错乱。
     Instant now = T1;
@@ -454,22 +455,20 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       ThreadProcessResult result = processor.process(childClaim);
       assertEquals(ThreadProcessResult.COMPLETED, result);
 
-      // 验证 PostgreSQL 数据库中的中间状态：子线程已空闲，Join 已匹配，父线程已有 1 条入队 CUSTOM_MESSAGE
+      // 验证 PostgreSQL 数据库中的中间状态：Join 已匹配，父线程已有 1 条入队 NOTIFICATION
       ThreadState childState =
           store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
-      assertEquals(ThreadLifecycleStatus.IDLE, childState.status());
-      assertEquals(1L, childState.version());
+      assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
 
       ThreadJoin matchedJoin =
           store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
       assertTrue(matchedJoin.matched());
-      assertEquals(childState.version(), matchedJoin.matchedIdleVersion());
-      assertEquals(childState.headEntryId(), matchedJoin.resultHeadEntryId());
+      assertNotNull(matchedJoin.terminalEntryId());
       assertEquals(1L, matchedJoin.deliveryCommandSequence());
 
       ThreadState parentState =
           store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
-      assertEquals(ThreadLifecycleStatus.ACTIVE, parentState.status());
+      assertEquals(ThreadExecutionControl.RUNNABLE, parentState.executionControl());
       assertEquals(2L, parentState.nextCommandSequence());
 
       List<ThreadCommand> parentQueued =
@@ -480,15 +479,15 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
               });
       assertEquals(1, parentQueued.size());
       ThreadCommand queuedCmd = parentQueued.get(0);
-      assertEquals(ThreadCommandType.CUSTOM_MESSAGE, queuedCmd.type());
+      assertEquals(ThreadCommandType.NOTIFICATION, queuedCmd.type());
       assertEquals(fixture.joinInvocationId(), queuedCmd.idempotencyKey());
       assertEquals(1L, queuedCmd.sequence());
       assertEquals(ThreadCommandState.QUEUED, queuedCmd.state());
 
-      CustomMessageCommandPayload payload =
-          assertInstanceOf(CustomMessageCommandPayload.class, queuedCmd.payload());
-      String rendered = payload.message().contents().get(0).toString();
-      assertTrue(rendered.contains("subagent-calculator"));
+      NotificationCommandPayload payload =
+          assertInstanceOf(NotificationCommandPayload.class, queuedCmd.payload());
+      assertEquals(fixture.childThreadId(), payload.sourceThreadId());
+      assertNotNull(payload.message());
 
       // 第二步：对父线程发起 Stop
       UUID stopRequestId = UUID.randomUUID();
@@ -497,7 +496,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
               new StopCommand(fixture.parentThreadId(), stopRequestId, parentState.version()));
       assertFalse(stopResult.replayed());
 
-      // 验证 PostgreSQL 数据库中的最终状态：父线程已 STOPPED，已投递的 CUSTOM_MESSAGE 被标记为 CANCELLED
+      // 验证 PostgreSQL 数据库中的最终状态：父线程已 STOPPED，已投递的 NOTIFICATION 被标记为 CANCELLED
       ThreadState stoppedParent =
           store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
       EntryPath parentPath = store.transaction(tx -> tx.loadEntryPath(stoppedParent.headEntryId()));

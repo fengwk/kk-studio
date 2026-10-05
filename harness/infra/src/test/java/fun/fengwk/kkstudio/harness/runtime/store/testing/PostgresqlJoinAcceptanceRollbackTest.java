@@ -35,7 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -70,7 +70,7 @@ import java.util.concurrent.TimeoutException;
  *       Session / Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
  *   <li><b>配额超限与标识重用回滚</b>：子线程 Join 配额超限或 InvocationId 重用被拒绝时，同样在 PostgreSQL 中不产生任何孤儿记录；
  *   <li><b>并发接受 Tree Lock 串行化</b>：同一父级下的并发子线程接受请求通过 PG Advisory Lock 严格串行化，避免配额竞态；
- *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> IDLE 匹配 -> 父级交付 CUSTOM_MESSAGE ->
+ *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> Join 冻结 -> 父级交付 NOTIFICATION ->
  *       父级消费， PostgreSQL 全表状态一致性与最终一致性检验。
  * </ul>
  */
@@ -416,7 +416,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   HASH,
                   "parent",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   T0,
@@ -570,7 +571,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     // 3. 由具体生产 ThreadProcessor 消费并推进子线程直至 IDLE；
     // 4. 直接查询 PG 数据表校验 harness_thread_join 各回执字段的真实落库（matched, idle_version, result_head,
     // delivery_seq）；
-    // 5. 验证父线程接收到精确渲染的 CUSTOM_MESSAGE XML 命令，并由 ThreadProcessor 驱动父级顺利开启下一轮 Turn。
+    // 5. 验证父线程接收到系统 NOTIFICATION 交付命令，并由 ThreadProcessor 驱动父级顺利开启下一轮 Turn。
     Instant now = T1;
     Baseline baseline = seedThreadBaseline(store);
 
@@ -671,14 +672,14 @@ class PostgresqlJoinAcceptanceRollbackTest {
       // 4. 直接从 PG 数据库底层查询 harness_thread_join 表，确认各字段真实正确落库
       ThreadJoin joinInPg = store.transaction(tx -> tx.findJoin(joinInvocationId).orElseThrow());
       assertTrue(joinInPg.matched(), "Join must be matched in PostgreSQL");
+      assertNotNull(joinInPg.terminalEntryId(), "Join must freeze a terminal entry");
+      // 子线程执行终止后持久执行控制保持 RUNNABLE（Join 配额按未完成 Join 计数，不再依赖递归 IDLE）
       ThreadState finalChildState =
           store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
-      assertEquals(ThreadLifecycleStatus.IDLE, finalChildState.status());
-      assertEquals(finalChildState.version(), joinInPg.matchedIdleVersion());
-      assertNotNull(joinInPg.resultHeadEntryId());
+      assertEquals(ThreadExecutionControl.RUNNABLE, finalChildState.executionControl());
       assertEquals(1L, joinInPg.deliveryCommandSequence());
 
-      // 5. 校验父线程收到唯一的 CUSTOM_MESSAGE 交付命令
+      // 5. 校验父线程收到唯一的 NOTIFICATION 交付命令
       List<ThreadCommand> parentQueued =
           store.transaction(
               tx -> {
@@ -687,7 +688,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               });
       assertEquals(1, parentQueued.size());
       ThreadCommand deliveredCmd = parentQueued.get(0);
-      assertEquals(ThreadCommandType.CUSTOM_MESSAGE, deliveredCmd.type());
+      assertEquals(ThreadCommandType.NOTIFICATION, deliveredCmd.type());
       assertEquals(joinInvocationId, deliveredCmd.idempotencyKey());
       assertEquals(1L, deliveredCmd.sequence());
 
@@ -783,7 +784,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     }
 
     // 额度被 A 树的 childA1 占满，被拒绝的 B 请求零残留
-    assertEquals(1, activeSubagentThreads());
+    assertEquals(1, incompleteSubagentJoins());
     assertNoRow("harness_session", "id", childBSessionId);
     assertNoRow("harness_entry", "session_id", childBSessionId);
     assertNoRow("harness_thread", "id", childBThreadId);
@@ -791,14 +792,15 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertNoRow("harness_thread_join", "invocation_id", joinBInvocationId);
     assertNoRow("harness_work", "target_id", childBThreadId);
 
-    // 释放额度：childA1 回到 IDLE
+    // 释放额度：冻结 childA 未完成 Join 的 terminal 结果（新模型按未完成 Join 计数，不再依赖 IDLE）
     store.transaction(
         tx -> {
           ThreadState child = tx.lockThread(childAThreadId).orElseThrow();
-          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T1));
+          ThreadJoin childJoin = tx.findJoin(joinAInvocationId).orElseThrow();
+          tx.updateJoin(childJoin.match(child.headEntryId(), null, T1));
           return null;
         });
-    assertEquals(0, activeSubagentThreads());
+    assertEquals(0, incompleteSubagentJoins());
 
     // 同一请求在额度释放后成功创建
     AcceptedCommands retried =
@@ -808,13 +810,13 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("harness_thread", "id", childBThreadId);
     assertSingleRow("harness_thread_command", "thread_id", childBThreadId);
     assertSingleRow("harness_thread_join", "invocation_id", joinBInvocationId);
-    assertEquals(1, activeSubagentThreads());
+    assertEquals(1, incompleteSubagentJoins());
 
     // exact replay 命中既有 Join，不重复占额度
     AcceptedCommands replayed =
         runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
-    assertEquals(1, activeSubagentThreads());
+    assertEquals(1, incompleteSubagentJoins());
   }
 
   /** 种入一个无父 root Thread（只含 ROOT Entry），用于构造互不相干的执行树。 */
@@ -832,7 +834,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   HASH,
                   "root",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   T0,
@@ -847,8 +850,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
         invocationId, parentThreadId, expectedHead, HASH, "test-agent", 5, 3, 5, globalCap);
   }
 
-  private int activeSubagentThreads() {
-    return store.transaction(tx -> tx.countActiveSubagentThreads());
+  private int incompleteSubagentJoins() {
+    return store.transaction(tx -> tx.countIncompleteSubagentJoins());
   }
 
   private void assertNoRow(String table, String column, UUID id) {
