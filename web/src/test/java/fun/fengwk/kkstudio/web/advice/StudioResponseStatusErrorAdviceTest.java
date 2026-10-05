@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -71,6 +72,7 @@ class StudioResponseStatusErrorAdviceTest {
           StudioHarnessCommandBatchController.class,
           StudioHarnessProviderRequestPreviewController.class,
           StudioHarnessSessionController.class,
+          StudioHarnessThreadCommandBatchController.class,
           StudioHarnessThreadController.class,
           StudioInteractionController.class,
           StudioConfigSyncController.class

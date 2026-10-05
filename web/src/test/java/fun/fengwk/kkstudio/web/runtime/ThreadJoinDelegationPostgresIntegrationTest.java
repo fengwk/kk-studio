@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
@@ -50,8 +51,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -979,10 +980,13 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     return store.transaction(tx -> tx.loadCommandsByThread(threadId));
   }
 
-  /** 父 Thread 上已入队的 join 结果交付命令（CUSTOM_MESSAGE），按 sequence 升序。 */
+  /** 父 Thread 上已入队的 join 结果交付命令（NOTIFICATION/SUBAGENT_RESULT），按 sequence 升序。 */
   private List<ThreadCommand> resultCommands(UUID parentThreadId) {
     return commandsOf(parentThreadId).stream()
-        .filter(command -> command.payload() instanceof CustomMessageCommandPayload)
+        .filter(
+            command ->
+                command.payload() instanceof NotificationCommandPayload notification
+                    && notification.kind() == NotificationKind.SUBAGENT_RESULT)
         .toList();
   }
 
@@ -1030,7 +1034,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private static String resultMessageText(ThreadCommand command) {
-    return messageText(((CustomMessageCommandPayload) command.payload()).message());
+    return messageText(((NotificationCommandPayload) command.payload()).message());
   }
 
   private static String messageText(AgentMessage message) {
