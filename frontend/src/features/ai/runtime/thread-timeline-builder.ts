@@ -29,11 +29,14 @@ import { contentText } from '@/features/ai/runtime/thread-timeline/content-utils
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
 
+/** 仍在 mailbox 中排队的人类输入类型；NOTIFICATION / CUSTOM_MESSAGE 是系统事实与编排产物。 */
+const HUMAN_INPUT_COMMAND_TYPES = new Set(['USER_MESSAGE', 'GOAL'])
+
 /**
  * Thread transcript 投影：
  * 持久路径的 Entries 是 transcript 的唯一权威来源；
- * 仅 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令会作为装饰性 overlay 渲染；NOTIFICATION
- * 等系统事实只出现在持久 transcript 中，不进入可编辑队列、草稿与上下键历史；
+ * 仅 QUEUED USER_MESSAGE 命令会作为可编辑的装饰性 overlay 渲染；NOTIFICATION 等系统事实
+ * 与 CUSTOM_MESSAGE 编排产物只出现在持久 transcript 中，不进入可编辑队列、草稿与上下键历史；
  * 活动 ModelInvocation 的 checkpoint/stream 以及 ToolInvocation 的 partial，作为
  * 瞬态 overlay 渲染，直到对应的持久 Entry 到达为止。
  */
@@ -76,8 +79,12 @@ export function buildThreadTimeline(
     if (command.state !== 'QUEUED') {
       continue
     }
-    // 系统结果通知是 runtime 上下文事实，不是可编辑的人类输入：不进入队列、草稿与上下键历史。
-    if (command.type === 'NOTIFICATION') {
+    // 可编辑队列与上下键历史只承载人类输入 USER_MESSAGE：NOTIFICATION（系统结果事实）、
+    // CUSTOM_MESSAGE（编排产物）、GOAL（在 Goal 编辑区按专用语义编辑）与配置命令都不进入。
+    if (command.type !== 'USER_MESSAGE') {
+      if (HUMAN_INPUT_COMMAND_TYPES.has(command.type)) {
+        hasPendingInputs = true
+      }
       continue
     }
     const queuedMessage = extractQueuedMessage(command.payloadJson)

@@ -1523,6 +1523,12 @@ export function useAgentPaneController({
     composer,
     pendingAcceptance,
     pendingMessage: isBoundTarget(target) ? controller.pendingMessage : null,
+    draftRestoreError: isBoundTarget(target) ? controller.draftRestoreError : null,
+    retryDraftRestore: () => {
+      if (isBoundTarget(target)) {
+        controller.retryDraftRestore()
+      }
+    },
     pending,
     error,
     previewDisabled,
