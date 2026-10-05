@@ -85,11 +85,6 @@ public record EntryPath(List<Entry> entries) {
     return root();
   }
 
-  /** 是否存在尾部系统通知（head 本身为 NOTIFICATION）：这类已物化但尚未被普通 INPUT 接纳的通知在 RUNNABLE 时仍需安排输入处理。 */
-  public boolean hasTrailingNotifications() {
-    return head().payload() instanceof NotificationPayload;
-  }
-
   /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */
   public BranchSettings baseSettings() {
     BranchSettings settings = ((RootPayload) root().payload()).settings();

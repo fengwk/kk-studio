@@ -390,7 +390,7 @@ class ThreadJoinProjectorTest {
             10,
             0L,
             turnEnd2,
-            null,
+            finalAssistant,
             null,
             T0,
             T1);
@@ -941,7 +941,7 @@ class ThreadJoinProjectorTest {
             10,
             0L,
             turnEnd2,
-            null,
+            assistant2,
             null,
             T1,
             T1);
@@ -1008,7 +1008,7 @@ class ThreadJoinProjectorTest {
             10,
             0L,
             turnEnd1,
-            null,
+            assistant1,
             null,
             T0,
             T0);
@@ -1166,7 +1166,7 @@ class ThreadJoinProjectorTest {
                   10,
                   0L,
                   turnEnd,
-                  null,
+                  assistant,
                   null,
                   T0,
                   T0);
@@ -1181,7 +1181,7 @@ class ThreadJoinProjectorTest {
                   10,
                   0L,
                   turnEnd,
-                  null,
+                  assistant,
                   null,
                   T0,
                   T0);
@@ -1196,7 +1196,7 @@ class ThreadJoinProjectorTest {
                   10,
                   0L,
                   turnEnd,
-                  null,
+                  assistant,
                   null,
                   T0,
                   T0);
@@ -1274,7 +1274,7 @@ class ThreadJoinProjectorTest {
             10,
             0L,
             turnEnd,
-            null,
+            assistant,
             null,
             T0,
             T0);

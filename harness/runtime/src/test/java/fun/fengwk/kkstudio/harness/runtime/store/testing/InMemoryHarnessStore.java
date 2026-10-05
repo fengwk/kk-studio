@@ -257,8 +257,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     final Map<UUID, ModelInvocation> modelInvocations = new HashMap<>();
     final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
     final Map<UUID, ThreadJoin> joins = new HashMap<>();
-    final Map<StopReceiptKey, StoppedThreadReceipt> stopReceipts = new HashMap<>();
-    final Map<UUID, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
+    final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
+    final Map<StopRootKey, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
     long nextId;
 
@@ -281,6 +281,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   /** Stop 回执身份 {@code (threadId, stopRequestId)}。 */
   private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
+
+  /** 一次 Stop 的根范围 {@code (rootThreadId, rootStopRequestId)}。 */
+  private record StopRootKey(UUID rootThreadId, UUID rootStopRequestId) {}
+
+  /** 回执本体与其所属 Stop 根范围。 */
+  private record StoredStopReceipt(StoppedThreadReceipt receipt, StopRootKey root) {}
 
   /** 行锁 key，用于每个 transaction 的 update tracking。 */
   private enum LockRank {
@@ -924,13 +930,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void insertStopReceipts(UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
+    public void insertStopReceipts(
+        UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
       checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
       Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
       Objects.requireNonNull(receipts, "receipts");
       if (receipts.isEmpty()) {
         throw new IllegalArgumentException("stop receipts must not be empty");
       }
+      StopRootKey root = new StopRootKey(rootThreadId, rootStopRequestId);
       List<StopReceiptKey> keys = new ArrayList<>(receipts.size());
       for (StoppedThreadReceipt receipt : receipts) {
         requireLocked(LockKey.thread(receipt.threadId()));
@@ -944,12 +953,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
         keys.add(key);
       }
       for (int i = 0; i < receipts.size(); i++) {
-        state.stopReceipts.put(keys.get(i), receipts.get(i));
+        state.stopReceipts.put(keys.get(i), new StoredStopReceipt(receipts.get(i), root));
       }
-      state
-          .stopReceiptsByRoot
-          .computeIfAbsent(rootStopRequestId, ignored -> new ArrayList<>())
-          .addAll(keys);
+      state.stopReceiptsByRoot.computeIfAbsent(root, ignored -> new ArrayList<>()).addAll(keys);
     }
 
     @Override
@@ -958,7 +964,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(stopRequestId, "stopRequestId");
       return Optional.ofNullable(
-          state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)));
+              state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)))
+          .map(StoredStopReceipt::receipt);
     }
 
     @Override
@@ -966,20 +973,25 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
       return state.stopReceipts.values().stream()
+          .map(StoredStopReceipt::receipt)
           .filter(receipt -> receipt.threadId().equals(threadId))
           .toList();
     }
 
     @Override
-    public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(UUID rootStopRequestId) {
+    public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
+        UUID rootThreadId, UUID rootStopRequestId) {
       checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
       Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
-      List<StopReceiptKey> keys = state.stopReceiptsByRoot.get(rootStopRequestId);
+      List<StopReceiptKey> keys =
+          state.stopReceiptsByRoot.get(new StopRootKey(rootThreadId, rootStopRequestId));
       if (keys == null) {
         return List.of();
       }
       return keys.stream()
           .map(state.stopReceipts::get)
+          .map(StoredStopReceipt::receipt)
           .sorted(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR))
           .toList();
     }

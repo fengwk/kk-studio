@@ -55,7 +55,8 @@ final class TurnPlanBuilder {
       long cutoffSequence,
       Supplier<UUID> idAllocator,
       Instant now,
-      CompactionPreparation preparation) {
+      CompactionPreparation preparation,
+      boolean pendingNotificationInput) {
     Objects.requireNonNull(sourcePath, "sourcePath");
     Objects.requireNonNull(reason, "reason");
     Objects.requireNonNull(plannedCommands, "plannedCommands");
@@ -82,7 +83,7 @@ final class TurnPlanBuilder {
     }
     if (reason == TurnStartReason.INPUT
         && !hasInputDemand(consumedCommands)
-        && !sourcePath.hasTrailingNotifications()) {
+        && !pendingNotificationInput) {
       throw new IllegalArgumentException(
           "INPUT plan requires at least one queued message or notification");
     }

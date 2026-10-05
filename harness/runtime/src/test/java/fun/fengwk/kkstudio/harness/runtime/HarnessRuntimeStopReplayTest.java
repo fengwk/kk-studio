@@ -136,7 +136,9 @@ class HarnessRuntimeStopReplayTest {
         tx -> {
           tx.lockThread(threadId);
           tx.insertStopReceipts(
-              key, List.of(new StoppedThreadReceipt(threadId, key, turnEnd1, 0, List.of())));
+              threadId,
+              key,
+              List.of(new StoppedThreadReceipt(threadId, key, turnEnd1, 0, List.of())));
           return null;
         });
     seedThreadWork(store, threadId);
@@ -298,7 +300,7 @@ class HarnessRuntimeStopReplayTest {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
-          tx.insertStopReceipts(stopRequestId, List.of(receipt));
+          tx.insertStopReceipts(threadId, stopRequestId, List.of(receipt));
           return null;
         });
     IllegalArgumentException error =
@@ -308,7 +310,7 @@ class HarnessRuntimeStopReplayTest {
                 store.transaction(
                     tx -> {
                       tx.lockThread(threadId);
-                      tx.insertStopReceipts(stopRequestId, List.of(receipt));
+                      tx.insertStopReceipts(threadId, stopRequestId, List.of(receipt));
                       return null;
                     }));
     assertTrue(error.getMessage().contains("already exists"));
