@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -9,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -506,8 +508,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         run.getId());
     ModelInvocation activeModel = mock(ModelInvocation.class);
     when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId()))
-        .thenReturn(overlay(run.getThreadId(), List.of(), activeModel, List.of()));
+    ThreadSnapshot inFlight = overlay(run.getThreadId(), List.of(), activeModel, List.of());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlight);
 
     IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
 
@@ -563,6 +565,190 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
     assertEquals(
         1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+  }
+
+  /** 测试意图：已冻结 root Join 的 Run 必须收尾；本 Thread 之后又出现的普通对话与在途模型不能把它重新拉回 DEFERRED_PROCESSING。 */
+  @Test
+  void matchedJoinClosesRunEvenWhenThreadIsBusyAgain() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("匹配后仍忙碌", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.COMPLETED);
+    matchRunJoin(run.getId(), terminal);
+    issueTransitionService.accept(
+        run.getThreadId(),
+        ProjectRunScope.SCHEMA_VERSION,
+        frozenRunScopeJson(run.getThreadId()),
+        "REVIEW");
+    // Join 冻结之后本 Thread 又有人类对话与在途模型：旧实现会因 busy 无限期延后，永不提交已匹配的收尾。
+    appendHistoryEntry(run.getThreadId());
+    ModelInvocation activeModel = mock(ModelInvocation.class);
+    when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
+    ThreadSnapshot busy = overlay(run.getThreadId(), List.of(), activeModel, List.of());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(busy);
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, outcome);
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'COMPLETED' and"
+                + " next_state = 'REVIEW' and end_entry_id = ?",
+            run.getId(),
+            terminal));
+    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    // 收尾在同一业务锁内闭合 scope：最新 scope 是同一 runId 的 active=false 副本。
+    ProjectRunScope closed = latestRunScope(run.getThreadId());
+    assertEquals(run.getId(), closed.runId());
+    assertFalse(closed.active());
+  }
+
+  /** 测试意图：root Join outcome=ERROR 的 Run 只做失败收尾，即使已登记交接意图也绝不按完成推进阶段。 */
+  @Test
+  void failedJoinFailsRunWithoutCompleting() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("Join失败不误完成", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueTransitionService.accept(
+        run.getThreadId(),
+        ProjectRunScope.SCHEMA_VERSION,
+        frozenRunScopeJson(run.getThreadId()),
+        "REVIEW");
+    UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.FAILED);
+    matchRunJoin(run.getId(), terminal);
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_FAILED, outcome);
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'FAILED' and"
+                + " end_entry_id = ?",
+            run.getId(),
+            terminal));
+    // 失败不推进阶段：Issue 仍停在本阶段，交接意图不生效。
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertFalse(latestRunScope(run.getThreadId()).active());
+  }
+
+  /** 测试意图：root Join outcome=CANCELLED 的 Run 只做取消收尾，绝不按完成提交阶段推进。 */
+  @Test
+  void cancelledJoinCancelsRunWithoutCompleting() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("Join取消不误完成", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID terminal = appendTurnEndEntry(run.getThreadId(), TurnEndOutcome.CANCELLED);
+    matchRunJoin(run.getId(), terminal);
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_CANCELLED, outcome);
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'CANCELLED' and"
+                + " end_entry_id = ?",
+            run.getId(),
+            terminal));
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertFalse(latestRunScope(run.getThreadId()).active());
+  }
+
+  /** 测试意图：旧 Run 收尾写入的 active=false 必须先于新 Run 接受的 active=true，后写的 scope 才代表当前生命周期。 */
+  @Test
+  void closingScopeIsOrderedBeforeNextRunScope() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("scope写入顺序", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID threadId = first.getThreadId();
+    UUID terminal = appendTurnEndEntry(threadId, TurnEndOutcome.COMPLETED);
+    matchRunJoin(first.getId(), terminal);
+    issueTransitionService.accept(
+        threadId, ProjectRunScope.SCHEMA_VERSION, frozenRunScopeJson(threadId), "REVIEW");
+    assertEquals(
+        IssueReconcileOutcome.RUN_HANDED_OFF, reconciler.reconcile(claimWork(issue.getId())));
+    long closeSequence = latestRunScopeSequence(threadId);
+    assertFalse(latestRunScope(threadId).active());
+
+    // 下一个调谐在 REVIEW 阶段接受新 Run；同一 Agent 复用同一 Thread，命令序号可直接比较。
+    assertEquals(
+        IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
+    IssueRun second = issueRunService.getActiveRun(issue.getId());
+    assertNotNull(second);
+    assertNotEquals(first.getId(), second.getId());
+    assertEquals(threadId, second.getThreadId());
+    ProjectRunScope reopened = latestRunScope(threadId);
+    assertEquals(second.getId(), reopened.runId());
+    assertTrue(reopened.active());
+    assertTrue(latestRunScopeSequence(threadId) > closeSequence);
+  }
+
+  /** 测试意图：匹配 root Join 先收尾时，未在安全点投递的人工指示不能被吞，游标保持原位置并由下一个 Run 投递。 */
+  @Test
+  void pendingInstructionSurvivesMatchedCloseAndIsDeliveredByNextRun() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("收尾不吞指示", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun first = issueRunService.acceptRun(issue.getId(), key("accept"));
+    // 收尾窗口内到达的人工指示绑定在当前 Run 上。
+    issue = issueService.getIssue(issue.getId());
+    issueService.appendInstruction(issue.getId(), issue.getVersion(), key("inst"), "先处理这条人工指示");
+    Long instructionSequence =
+        jdbc.queryForObject(
+            "select sequence from project_issue_activity where issue_id = ? and kind ="
+                + " 'INSTRUCTION'",
+            Long.class,
+            issue.getId());
+
+    issueTransitionService.accept(
+        first.getThreadId(),
+        ProjectRunScope.SCHEMA_VERSION,
+        frozenRunScopeJson(first.getThreadId()),
+        "REVIEW");
+    UUID terminal = appendTurnEndEntry(first.getThreadId(), TurnEndOutcome.COMPLETED);
+    matchRunJoin(first.getId(), terminal);
+    assertEquals(
+        IssueReconcileOutcome.RUN_HANDED_OFF, reconciler.reconcile(claimWork(issue.getId())));
+
+    // 匹配收尾先执行：指示从未被第一个 Run 观察，游标保持在指示之前。
+    Long firstCursor =
+        jdbc.queryForObject(
+            "select observed_activity_sequence from project_issue_run where id = ?",
+            Long.class,
+            first.getId());
+    assertTrue(firstCursor < instructionSequence);
+
+    // 下一个 Run 沿用既有活动事实游标，在安全点把该指示作为 USER_MESSAGE 投递。
+    assertEquals(
+        IssueReconcileOutcome.RUN_ACCEPTED, reconciler.reconcile(claimWork(issue.getId())));
+    IssueRun second = issueRunService.getActiveRun(issue.getId());
+    assertNotNull(second);
+    assertEquals(
+        IssueReconcileOutcome.INSTRUCTION_DELIVERED,
+        reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        instructionSequence,
+        jdbc.queryForObject(
+            "select observed_activity_sequence from project_issue_run where id = ?",
+            Long.class,
+            second.getId()));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from harness_thread_command where thread_id = ? and command_type ="
+                + " 'USER_MESSAGE'",
+            second.getThreadId()));
   }
 
   /** 测试意图：阶段已不匹配但有历史产出的迟到 Run，reconcile 会安全将其收尾为 COMPLETED，但绝不推进 Issue 当前阶段。 */
@@ -723,9 +909,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
   }
 
-  /** 测试意图：处于 RUNNING 状态的活动 Run 在 Issue 遇到控制暂停时会被置为 WAITING 状态并停止活动计时。 */
+  /** 测试意图：业务人工暂停只阻止新 Run 调度，不挂起已接受的在途 Thread；静止的 RUNNING Run 保持原状延后，绝不自动 stop 或复活执行。 */
   @Test
-  void activeRunRunningAndIssuePausedWaitsRun() {
+  void activeRunRunningAndIssuePausedStaysRunningWithoutStop() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("运行中遇到暂停", agent, agent, 3);
     Issue issue = createIssue(projectId);
@@ -738,12 +924,13 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueWorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
-    assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
+    assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
+    verify(harnessRuntime, never()).stop(any(StopCommand.class));
     assertEquals(
         1L,
         count(
-            "select count(*) from project_issue_run where id = ? and status = 'WAITING' and"
-                + " active_since is null",
+            "select count(*) from project_issue_run where id = ? and status = 'RUNNING' and"
+                + " active_since is not null",
             run.getId()));
     assertEquals(
         1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
@@ -1091,60 +1278,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(run.getId(), resumed.getId());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
-  }
-
-  /**
-   * 缺陷 2 测试意图：活动时长耗尽时，如果外部执行仍在途（例如模型调用中），绝不能立即 failRun 杀死可能存在副作用的在途执行； 必须先关闭派发门禁（pause ERROR）并返回
-   * DEFERRED_PROCESSING；只有当执行完全静止后才可安全 failRun。
-   */
-  @Test
-  void budgetExhaustedWithInFlightExecutionPausesIssueAndDefersWithoutFailingRun() {
-    String agent = createAgent();
-    UUID projectId = createProjectWithStages("在途时长耗尽安全停机", agent, agent, 3);
-    Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-
-    // 将时长设置为已耗尽
-    jdbc.update(
-        "update project_issue_run set remaining_execution_ms = 100, active_since ="
-            + " current_timestamp - interval '10 seconds' where id = ?",
-        run.getId());
-
-    // 模拟在途模型调用
-    ThreadSnapshot base = createSnapshot(run.getThreadId());
-    ModelInvocation activeModel = mock(ModelInvocation.class);
-    when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
-    ThreadSnapshot inFlightSnapshot =
-        new ThreadSnapshot(
-            base.thread(),
-            base.entryPath(),
-            List.of(),
-            activeModel,
-            List.of(),
-            List.of(),
-            List.of());
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlightSnapshot);
-
-    IssueWorkClaim claim = claimWork(issue.getId());
-    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
-
-    // 1. 在途时不直接失败，而是先关闭 Issue 门禁并返回 DEFERRED_PROCESSING
-    assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
-    Issue pausedIssue = issueService.getIssue(issue.getId());
-    assertEquals("ERROR", pausedIssue.getPauseReason());
-    assertEquals("Run active execution budget is exhausted", pausedIssue.getPauseDetail());
-    // Run 依然保留为 RUNNING，没有被替换或提前终结
-    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
-
-    // 2. 模型执行收敛至完全静止
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(base);
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
-    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
-
-    // 静止后安全收尾为 RUN_BUDGET_EXHAUSTED
-    assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, secondOutcome);
-    assertEquals(IssueRunStatus.FAILED, issueRunService.getRun(run.getId()).getStatus());
   }
 
   /**
