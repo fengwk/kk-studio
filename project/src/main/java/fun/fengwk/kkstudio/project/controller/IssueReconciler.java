@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
+import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -71,15 +72,17 @@ import java.util.UUID;
  * <ul>
  *   <li><b>durable mailbox lease + heartbeat</b>：领取即续租；结束用 claim 完成，仍需重检则归还 lease 并把 {@code due_at}
  *       延后，丢失通知由轮询恢复。
- *   <li><b>安全等待</b>：区分真正在途执行与静止等待（问答/审批等待）；只有完全静止且无等待工具才继续推进，静止等待进入 WAITING 并停止活动计时。
- *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时先关停派发门禁，在途执行收敛为静止后再安全失败收尾，绝不杀死在途副作用。
+ *   <li><b>安全等待</b>：区分真正在途执行与静止等待（问答/审批等待）；已冻结 root Join 的执行先收尾，在途执行未被收尾时只延后不投递，静止等待进入 WAITING
+ *       并停止活动计时。
+ *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时对当前 Thread 发起显式 Stop，并以 Stop 回执的权威 head 作为收尾区间，同一业务事务失败收尾；不写通用
+ *       Pause，也不再等待执行静止。
  *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞关闭派发门禁，阻止自动派发与 WAITING 恢复；Issue 控制暂停只阻止新 Run 调度，不再挂起已接受的 Thread。
- *   <li><b>指示不丢</b>：交接与正常收尾前必须投递全部定向指示，扫描至事实流尾，普通评论与系统事件不卡游标。
+ *   <li><b>指示不丢</b>：定向指示按活动事实位置投递，普通评论与系统事件不卡游标；root Join 冻结先收尾时未投递的指示保留游标，由下一个 Run 处理。
  *   <li><b>完成只认 root Join</b>：Run 结束只读取本次 root Join 冻结的 terminal/final-answer entry，既不按快照最新 head
  *       猜测，也不等待永久子树 idle；工具结果未定只是 Loop 反馈，不再升级为阻塞 Thread 的人工核查门禁。
  *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，只发布该最终答复明确引用且来源 Session 持有的
  *       Resource；无交接时保持当前阶段，之后的催促按额度新建 Run。
- *   <li><b>迟到回调拒绝</b>：旧 Run 仅在静止点安全收尾，绝不提交旧交接目标推进当前阶段。
+ *   <li><b>迟到回调拒绝</b>：旧 Run 只做安全收尾，绝不提交旧交接目标推进当前阶段；未冻结 root Join 的迟到 Run 仍在静止点才失败收尾。
  *   <li><b>确定性调度决策</b>：在写路径前完成归档/门禁/额度/阶段/证据合法性判定，不以全局 try-catch 吞掉数据库或编程异常。
  * </ul>
  */
@@ -258,17 +261,18 @@ public class IssueReconciler {
     }
 
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
-      // 业务预算要求停止在途长 loop：用显式 Stop（当前 Thread 版本 CAS + 稳定 requestId）结束执行，再在同一业务事务失败收尾；
-      // 不再写通用 Pause，也不等待 Runtime 已删除的业务派发门禁把执行收敛成 idle。
-      requireRuntime()
-          .stop(
-              new StopCommand(
-                  run.getThreadId(),
-                  budgetStopRequestId(run.getId()),
-                  snapshot.thread().version()));
+      // 业务预算要求停止在途长 loop：显式 Stop（当前 Thread 版本 CAS + 稳定 requestId）结束执行，再在同一业务事务失败收尾。
+      // 收尾区间以 Stop 回执的权威 Thread head 为界，绝不再反查当前 head，冻结本次停止的确定边界。
+      StopResult stopped =
+          requireRuntime()
+              .stop(
+                  new StopCommand(
+                      run.getThreadId(),
+                      budgetStopRequestId(run.getId()),
+                      snapshot.thread().version()));
       return failRun(
           run,
-          snapshot.thread().headEntryId(),
+          stopped.thread().headEntryId(),
           BUDGET_REASON,
           claim,
           IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
