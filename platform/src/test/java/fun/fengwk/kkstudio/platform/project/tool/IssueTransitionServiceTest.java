@@ -41,6 +41,7 @@ class IssueTransitionServiceTest {
   private static final UUID SESSION_ID = new UUID(0L, 2L);
   private static final UUID ISSUE_ID = new UUID(0L, 3L);
   private static final UUID PROJECT_ID = new UUID(0L, 4L);
+  private static final UUID OTHER_PROJECT_ID = new UUID(0L, 44L);
   private static final UUID RUN_ID = new UUID(0L, 5L);
   private static final long RUN_VERSION = 7L;
 
@@ -121,11 +122,52 @@ class IssueTransitionServiceTest {
                 "n",
                 null,
                 List.of(),
-                "designer"));
+                "designer",
+                true));
   }
 
   private static String scopeJson() {
     return scopeJson(THREAD_ID, "DESIGN");
+  }
+
+  /** 同一 Run 事实的关闭副本：runId 不变，仅 active=false，用于验证已结束 Run 不再获得交接权限。 */
+  private static String closedScopeJson() {
+    return new ProjectRunScopeJsonCodec()
+        .encode(
+            new ProjectRunScope(
+                RUN_ID,
+                ISSUE_ID,
+                PROJECT_ID,
+                THREAD_ID,
+                1L,
+                "t",
+                null,
+                "DESIGN",
+                "n",
+                null,
+                List.of(),
+                "designer",
+                false));
+  }
+
+  /** 用给定的 projectId 冻结 scope：只有 projectId 偏离真实 Issue/Project，用于验证归属校验。 */
+  private static String scopeJsonWithProject(UUID projectId) {
+    return new ProjectRunScopeJsonCodec()
+        .encode(
+            new ProjectRunScope(
+                RUN_ID,
+                ISSUE_ID,
+                projectId,
+                THREAD_ID,
+                1L,
+                "t",
+                null,
+                "DESIGN",
+                "n",
+                null,
+                List.of(),
+                "designer",
+                true));
   }
 
   private AiValidationException reject(String toState) {
@@ -197,6 +239,46 @@ class IssueTransitionServiceTest {
         acceptFrom(OTHER_THREAD_ID, scopeJson(), "REVIEW")
             .getMessage()
             .contains("only available on the run's own thread"));
+    verify(runs, never()).updateById(any(), anyLong());
+  }
+
+  /** 测试意图：已经闭合（active=false）的 Run scope 拒绝新的交接 —— 已结束的 Run 不再借继承快照获得业务写权限。 */
+  @Test
+  void rejectsClosedScope() {
+    assertTrue(
+        acceptFrom(THREAD_ID, closedScopeJson(), "REVIEW")
+            .getMessage()
+            .contains("already been closed"));
+    verify(runs, never()).updateById(any(), anyLong());
+  }
+
+  /** 测试意图：scope.projectId 必须与真实 Issue/Project 一致；prompt 里的 projectId 不能作为授权依据。 */
+  @Test
+  void rejectsScopeWithMismatchedProject() {
+    IllegalStateException mismatch =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                service.accept(
+                    THREAD_ID,
+                    ProjectRunScope.SCHEMA_VERSION,
+                    scopeJsonWithProject(OTHER_PROJECT_ID),
+                    "REVIEW"));
+    assertEquals("Project thread ownership is inconsistent", mismatch.getMessage());
+    verify(runs, never()).updateById(any(), anyLong());
+  }
+
+  /** 测试意图：scope 的 runId 指向别的 Issue 的 Run（旧 Run 迟到调用）时按数据不一致拒绝，绝不跨 Issue 授权。 */
+  @Test
+  void rejectsScopePointingToForeignRun() {
+    IssueRun foreign = activeRun(null);
+    foreign.setIssueId(new UUID(0L, 99L));
+    when(runs.getById(RUN_ID)).thenReturn(foreign);
+    IllegalStateException mismatch =
+        assertThrows(
+            IllegalStateException.class,
+            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
+    assertEquals("Project thread ownership is inconsistent", mismatch.getMessage());
     verify(runs, never()).updateById(any(), anyLong());
   }
 

@@ -36,7 +36,8 @@ class ProjectRunContextProjectorTest {
           "设计",
           "完成可交付方案",
           List.of("REVIEW"),
-          "worker");
+          "worker",
+          true);
 
   private final ProjectRunContextProjector projector = new ProjectRunContextProjector();
   private final ProjectRunScopeJsonCodec codec = new ProjectRunScopeJsonCodec();
@@ -77,16 +78,28 @@ class ProjectRunContextProjectorTest {
                             ProjectRunScope.SCHEMA_VERSION + 1, codec.encode(SCOPE))))));
   }
 
-  /** 损坏快照确定性失败关闭，而不是投影为空。 */
+  /** 损坏快照（合法 JSON 但缺少必需字段）确定性失败关闭，而不是投影为空。 */
   @Test
   void failsClosedOnCorruptSnapshot() {
     assertThrows(
         IllegalStateException.class,
         () ->
             projector.project(
-                view(
-                    Optional.of(
-                        new CustomStateSnapshot(ProjectRunScope.SCHEMA_VERSION, "{oops}")))));
+                view(Optional.of(new CustomStateSnapshot(ProjectRunScope.SCHEMA_VERSION, "{}")))));
+  }
+
+  /** 已关闭（active=false）的 Run scope 不再投影任何 Issue 上下文。 */
+  @Test
+  void projectsNothingForClosedScope() {
+    ProjectRunScope closed = SCOPE.closed();
+    List<ContextFragment> fragments =
+        projector.project(
+            view(
+                Optional.of(
+                    new CustomStateSnapshot(
+                        ProjectRunScope.SCHEMA_VERSION, codec.encode(closed)))));
+
+    assertEquals(List.of(), fragments);
   }
 
   private static BranchView view(Optional<CustomStateSnapshot> latest) {

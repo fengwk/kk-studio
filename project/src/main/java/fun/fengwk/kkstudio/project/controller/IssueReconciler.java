@@ -288,7 +288,8 @@ public class IssueReconciler {
     boolean waitingTool = hasWaitingTool(snapshot);
 
     if (run.getStatus() == IssueRunStatus.WAITING) {
-      if (blocked || waitingTool) {
+      if (issue.isGateClosed() || waitingTool) {
+        // 暂停/阻塞或安全等待尚未解除：保持 WAITING，不消耗新额度也不恢复执行。
         return finish(
             claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
       }
@@ -648,7 +649,12 @@ public class IssueReconciler {
     return false;
   }
 
-  /** 读取投递给当前 Run 的下一条 INSTRUCTION：跳过普通评论与系统事件，扫描至活动流尾，绝不因它们永久卡住游标。 */
+  /**
+   * 读取投递给当前 Run 的下一条 INSTRUCTION：跳过普通评论与系统事件，扫描至活动流尾，绝不因它们永久卡住游标。
+   *
+   * <p>只按「活动事实位置是否已被任何 Run 观察」判定，不要求指示恰好绑定当前 Run：上一个 Run 因匹配 root Join 安全收尾时未在安全点投递的
+   * 业务指示（游标未推进）会保留给下一个 Run 投递，绝不被收尾吞掉。
+   */
   private IssueActivity nextDeliverableInstruction(IssueRun run) {
     long cursor = run.getObservedActivitySequence();
     long maxSeen = cursor;
@@ -660,8 +666,7 @@ public class IssueReconciler {
       }
       for (IssueActivity activity : window) {
         maxSeen = Math.max(maxSeen, activity.getSequence());
-        if (activity.getKind() == IssueActivityKind.INSTRUCTION
-            && run.getId().equals(activity.getRunId())) {
+        if (activity.getKind() == IssueActivityKind.INSTRUCTION) {
           if (activity.getSequence() > run.getObservedActivitySequence() + 1) {
             advanceObservedSequence(run, activity.getSequence() - 1);
           }

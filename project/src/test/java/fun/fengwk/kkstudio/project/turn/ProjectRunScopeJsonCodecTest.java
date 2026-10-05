@@ -51,7 +51,8 @@ class ProjectRunScopeJsonCodecTest {
             "设计",
             null,
             List.of(),
-            "worker");
+            "worker",
+            true);
     String json = codec.encode(scope);
     assertNull(codec.decode(json).issueDescription());
     assertNull(codec.decode(json).stageInstructions());
@@ -132,6 +133,7 @@ class ProjectRunScopeJsonCodecTest {
         "设计",
         instructions,
         nextStates,
-        "worker");
+        "worker",
+        true);
   }
 }

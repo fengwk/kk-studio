@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -58,6 +59,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, run.getOrdinal());
     assertNull(run.getEndEntryId());
     assertNotNull(run.getActiveSince());
+    // 阶段未声明 environment：Run 显式清空环境选择，而不是沿用 Agent 默认。
+    assertNull(runEnvironmentName(run.getThreadId()));
     assertEquals(
         1L, count("select count(*) from harness_session where id = ?", run.getSessionId()));
     assertEquals(
@@ -109,6 +112,34 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from project_issue_work where issue_id = ? and wake_version >= 1",
             issue.getId()));
+  }
+
+  /** 测试意图：Run 的 SET_ENVIRONMENT 严格取自本阶段声明的 environment，而不是 Agent 默认（root 物化恒为 null）。 */
+  @Test
+  void setEnvironmentComesFromStageDeclaration() {
+    String agent = createAgent();
+    Project project = projectService.createProject("阶段环境", "描述", true);
+    projectService.updateWorkflow(
+        project.getId(),
+        project.getVersion(),
+        "{"
+            + "\"states\":["
+            + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"DESIGN\"]},"
+            + "{\"state\":\"DESIGN\",\"name\":\"设计\",\"agent\":\""
+            + agent
+            + "\",\"environment\":\"run-env-a\",\"maxRuns\":3,\"next\":[\"REVIEW\"]},"
+            + "{\"state\":\"REVIEW\",\"name\":\"检查\",\"agent\":\""
+            + agent
+            + "\",\"maxRuns\":1,\"next\":[\"DONE\"]},"
+            + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+            + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+            + "]}");
+    Issue issue = createIssue(project.getId());
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    assertEquals("run-env-a", runEnvironmentName(run.getThreadId()));
   }
 
   /** 丢响应后的精确重试：同请求键与同指纹返回原 Run，不新建 Session/Thread/Entry、不重复插入 RUN 活动、不重扣额度、不推进 ordinal 与 Work。 */
