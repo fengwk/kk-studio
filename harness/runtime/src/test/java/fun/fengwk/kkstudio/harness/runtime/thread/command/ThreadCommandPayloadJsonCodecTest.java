@@ -404,6 +404,20 @@ class ThreadCommandPayloadJsonCodecTest {
         + "}";
   }
 
+  /** schemaVersion 必须是整数 token，不能把小数截断为另一个 schema 版本。 */
+  @Test
+  void rejectsNonIntegralContributorSchemaVersions() {
+    for (String version : List.of("1.5", "1.0", "1e0", "\"1\"", "null", "2147483648")) {
+      String json =
+          "{\"state\":{\"contributorId\":\"project\",\"customType\":\"run\",\"schemaVersion\":"
+              + version
+              + ",\"data\":{}}}";
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json));
+    }
+  }
+
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }

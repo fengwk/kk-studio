@@ -344,7 +344,10 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.canConvertToInt() || value.intValue() < 0) {
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToInt()
+        || value.intValue() < 0) {
       throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
     }
     return value.intValue();
