@@ -25,7 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
+import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -35,12 +35,13 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -68,7 +69,6 @@ class StudioHarnessThreadControllerTest {
 
   private HarnessRuntime runtime;
   private ModelRequestDebugService modelRequestDebugService;
-  private ProjectThreadOwnerResolver projectThreadOwnerResolver;
   private InteractionService interactionService;
   private MockMvc mockMvc;
 
@@ -76,11 +76,9 @@ class StudioHarnessThreadControllerTest {
   void setUp() {
     runtime = mock(HarnessRuntime.class);
     modelRequestDebugService = mock(ModelRequestDebugService.class);
-    projectThreadOwnerResolver = mock(ProjectThreadOwnerResolver.class);
     interactionService = mock(InteractionService.class);
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(
-            runtime, modelRequestDebugService, projectThreadOwnerResolver, interactionService);
+        new StudioHarnessThreadController(runtime, modelRequestDebugService, interactionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -90,21 +88,21 @@ class StudioHarnessThreadControllerTest {
   }
 
   /**
-   * 意图：父 Thread 本地已静止但仍等子执行时，快照的 status 必须由 Runtime 投影为 WAITING_CHILDREN 且 processing=true，前端
-   * 据此显示"仍在工作"；同时必须暴露执行父关系。该路由不依赖任何 task join 侧事实，因此服务端不额外注入任何委派状态。
+   * 意图：父 Thread 本地已静止时，快照的 status 只由该 Thread 自身投影为 IDLE 且 processing=false，不再递归子树表达忙碌；
+   * 同时必须暴露执行父关系。该路由不依赖任何 task join 侧事实，因此服务端不额外注入任何委派状态。
    */
   @Test
-  void snapshotProjectsWaitingChildrenStatusAndParentThreadId() throws Exception {
+  void snapshotProjectsIdleParentStatusAndParentThreadId() throws Exception {
     when(runtime.getThreadSnapshot(id(1)))
-        .thenReturn(HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2)));
+        .thenReturn(HarnessRuntimeTestFixtures.idleParentSnapshot(id(2)));
     when(runtime.manualCompactionAvailability(id(1)))
         .thenReturn(ManualCompactionAvailability.enabled());
 
     mockMvc
         .perform(get("/api/harness/threads/" + idText(1)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.thread.status").value("WAITING_CHILDREN"))
-        .andExpect(jsonPath("$.data.thread.processing").value(true))
+        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
+        .andExpect(jsonPath("$.data.thread.processing").value(false))
         .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
   }
 
@@ -115,7 +113,7 @@ class StudioHarnessThreadControllerTest {
         .thenReturn(
             List.of(
                 HarnessRuntimeTestFixtures.idleSnapshot(id(2)),
-                HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2))));
+                HarnessRuntimeTestFixtures.idleParentSnapshot(id(2))));
 
     mockMvc
         .perform(get("/api/harness/threads/" + idText(1) + "/tree"))
@@ -133,12 +131,12 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data[0].entries").doesNotExist())
         .andExpect(jsonPath("$.data[0].queuedCommands").doesNotExist())
         .andExpect(jsonPath("$.data[1].parentThreadId").value(idText(2)))
-        .andExpect(jsonPath("$.data[1].status").value("WAITING_CHILDREN"))
-        .andExpect(jsonPath("$.data[1].processing").value(true));
+        .andExpect(jsonPath("$.data[1].status").value("IDLE"))
+        .andExpect(jsonPath("$.data[1].processing").value(false));
 
     verify(runtime).getThreadTree(id(1));
     verify(runtime, never()).getThreadSnapshot(any());
-    verifyNoInteractions(modelRequestDebugService, projectThreadOwnerResolver, interactionService);
+    verifyNoInteractions(modelRequestDebugService, interactionService);
   }
 
   /** 非 canonical UUID 在进入 Runtime 前拒绝；未知节点沿用快照的 404 语义。 */
@@ -462,10 +460,9 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
   }
 
-  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 直接更新并返回权威当前 Thread。 */
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 直接更新 YOLO policy 并返回权威当前 Thread。 */
   @Test
   void yoloUpdatesPolicyAndReturnsCurrentThread() throws Exception {
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -482,7 +479,6 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<SetThreadYoloCommand> captor =
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
     verify(runtime).setThreadYolo(captor.capture());
-    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
     assertTrue(captor.getValue().enabled());
   }
 
@@ -503,31 +499,12 @@ class StudioHarnessThreadControllerTest {
                   .content(body))
           .andExpect(status().isBadRequest());
     }
-    verifyNoInteractions(runtime, projectThreadOwnerResolver);
-  }
-
-  /**
-   * 意图：Issue Agent Branch（含无活动 Run 的 idle 情形）的公开 YOLO 覆盖必须在任何 runtime 变更前以 409 拒绝，既不调用 CAS 也不读取快照。
-   */
-  @Test
-  void yoloRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
-
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/yolo")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"yoloEnabled\":true}"))
-        .andExpect(status().isConflict());
-
-    // 拒绝必须发生在 runtime 变更之前：归属检查不依赖 Run 状态，也不允许经 CAS 绕过 Project 策略。
     verifyNoInteractions(runtime);
   }
 
-  /** 意图：缺失 Thread（resolver 判定为 false）保持既有 404 翻译，不发明新的错误语义。 */
+  /** 意图：缺失 Thread 保持既有 404 翻译，不发明新的错误语义。 */
   @Test
   void yoloKeepsNotFoundTranslationForMissingThread() throws Exception {
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
 
@@ -539,9 +516,9 @@ class StudioHarnessThreadControllerTest {
         .andExpect(status().isNotFound());
   }
 
-  /** 意图：非 canonical threadId 在归属判定与 runtime 变更之前以 400 拒绝（Issue Agent Branch 判定不得先于形状校验）。 */
+  /** 意图：非 canonical threadId 在 runtime 变更之前以 400 拒绝。 */
   @Test
-  void yoloRejectsNonCanonicalThreadIdBeforeOwnershipCheck() throws Exception {
+  void yoloRejectsNonCanonicalThreadIdBeforeRuntimeMutation() throws Exception {
     mockMvc
         .perform(
             put("/api/harness/threads/not-a-uuid/yolo")
@@ -549,64 +526,12 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
 
-    verifyNoInteractions(projectThreadOwnerResolver);
     verifyNoInteractions(runtime);
   }
 
+  /** 意图：非 canonical threadId 在 runtime 变更之前以 400 拒绝。 */
   @Test
-  void stopRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
-    // 测试意图：Issue Agent 的停止须先经过 Issue 工作流，通用 stop 不得直接撤销其 Turn 或命令。
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
-    mockMvc
-        .perform(
-            post("/api/harness/threads/" + idText(1) + "/stop")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
-        .andExpect(status().isConflict());
-    verifyNoInteractions(runtime);
-  }
-
-  /**
-   * 测试意图：Issue Agent Thread 的重命名由 Issue 工作流统一维护，通用 rename 必须先完成严格形状校验再 409 拒绝， 且绝不触达
-   * Runtime（否则形成第二条 Issue-owned 写入口）。
-   */
-  @Test
-  void renameRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
-
-    mockMvc
-        .perform(
-            put("/api/harness/threads/" + idText(1) + "/name")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"renamed\"}"))
-        .andExpect(status().isConflict());
-
-    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
-    verifyNoInteractions(runtime);
-  }
-
-  /**
-   * 测试意图：手动压缩会产生新的 Turn/Work，Issue Agent Thread 必须在产品锁内由 Issue 工作流发起；通用 compact 对 Issue-owned
-   * Thread 直接 409，Runtime 调用次数必须为 0。
-   */
-  @Test
-  void compactRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
-    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
-
-    mockMvc
-        .perform(
-            post("/api/harness/threads/" + idText(1) + "/compact")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\"}"))
-        .andExpect(status().isConflict());
-
-    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
-    verifyNoInteractions(runtime);
-  }
-
-  /** 意图：形状校验先于归属判定——非 canonical threadId 不得因为 owner 判定顺序而改变错误语义。 */
-  @Test
-  void compactRejectsNonCanonicalThreadIdBeforeOwnershipCheck() throws Exception {
+  void compactRejectsNonCanonicalThreadIdBeforeRuntimeMutation() throws Exception {
     mockMvc
         .perform(
             post("/api/harness/threads/not-a-uuid/compact")
@@ -614,7 +539,6 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"expectedVersion\":\"3\"}"))
         .andExpect(status().isBadRequest());
 
-    verifyNoInteractions(projectThreadOwnerResolver);
     verifyNoInteractions(runtime);
   }
 
@@ -727,11 +651,17 @@ class StudioHarnessThreadControllerTest {
             new StopResult(
                 false,
                 HarnessRuntimeTestFixtures.thread(id(1)),
-                id(9),
-                2,
                 List.of(
-                    new CancelledUserMessage(
-                        1L, id(50), List.of(new TextMessageContent("hello"))))));
+                    new StoppedThreadReceipt(
+                        id(1),
+                        id(9),
+                        id(6),
+                        2,
+                        List.of(
+                            new CancelledThreadInput(
+                                1L,
+                                id(50),
+                                new UserMessageCommandPayload(AgentMessage.user("hello"))))))));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
     mockMvc
         .perform(
@@ -740,13 +670,20 @@ class StudioHarnessThreadControllerTest {
                 .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("STOPPED"))
-        .andExpect(jsonPath("$.data.cancelledCommandCount").value(2))
-        .andExpect(jsonPath("$.data.cancelledUserMessages[0].sequence").value("1"))
-        .andExpect(jsonPath("$.data.cancelledUserMessages[0].idempotencyKey").value(idText(50)))
+        .andExpect(jsonPath("$.data.stoppedThreads[0].threadId").value(idText(1)))
+        .andExpect(jsonPath("$.data.stoppedThreads[0].stopRequestId").value(idText(9)))
+        .andExpect(jsonPath("$.data.stoppedThreads[0].stoppedTurnEndEntryId").value(idText(6)))
+        .andExpect(jsonPath("$.data.stoppedThreads[0].cancelledCommandCount").value(2))
+        .andExpect(jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].sequence").value("1"))
         .andExpect(
-            jsonPath("$.data.cancelledUserMessages[0].messageJson")
+            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].idempotencyKey")
+                .value(idText(50)))
+        .andExpect(
+            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].type").value("USER_MESSAGE"))
+        .andExpect(
+            jsonPath("$.data.stoppedThreads[0].cancelledInputs[0].payloadJson")
                 .value(
-                    "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}"));
+                    "{\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}}"));
 
     when(interactionService.decideApproval(any(ToolApprovalCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());

@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -58,7 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -70,8 +69,6 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavaila
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -92,10 +89,9 @@ import java.util.UUID;
 /**
  * {@link ProviderRequestPreviewService} 的失败矩阵与只读契约。
  *
- * <p>测试意图：预览必须在 owner 校验、cursor/idle/queued 判定、压缩判定、附件 READY 判定与资源归属上与正式发送同源且 fail-closed； 附件只读
- * peek（绝不 lock/delete/retain），命令形状只接受 SET_* 前缀 + 末尾 USER_MESSAGE，规划拒绝与 adapter 不支持的
- * 详情绝不外泄。规划/物化/编码本身由集成测试与 provider slice 的逐字节回归负责，这里用真实 planner/classifier/preparer 配合
- * 受控快照，确保拒绝发生在任何 Provider I/O 之前。
+ * <p>测试意图：预览必须在 cursor/idle/queued 判定、压缩判定、附件 READY 判定与资源归属上与正式发送同源且 fail-closed；附件只读 peek（绝不
+ * lock/delete/retain），命令形状只接受 SET_* 前缀 + 末尾 USER_MESSAGE，规划拒绝与 adapter 不支持的 详情绝不外泄。规划/物化/编码本身由集成测试与
+ * provider slice 的逐字节回归负责，这里用真实 planner/classifier/preparer 配合 受控快照，确保拒绝发生在任何 Provider I/O 之前。
  */
 class ProviderRequestPreviewServiceTest {
 
@@ -144,7 +140,6 @@ class ProviderRequestPreviewServiceTest {
   private static final byte[] BODY = "{\"model\":\"wire-model\"}".getBytes(StandardCharsets.UTF_8);
 
   private HarnessRuntime runtime;
-  private HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private DatabaseTurnResolver turnResolver;
   private DatabaseProviderResolutionService providerResolution;
   private StorageUploadService uploadService;
@@ -155,7 +150,6 @@ class ProviderRequestPreviewServiceTest {
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    acceptanceOrchestrator = mock(HarnessCommandAcceptanceOrchestrator.class);
     turnResolver = mock(DatabaseTurnResolver.class);
     providerResolution = mock(DatabaseProviderResolutionService.class);
     uploadService = mock(StorageUploadService.class);
@@ -165,7 +159,6 @@ class ProviderRequestPreviewServiceTest {
     service =
         new ProviderRequestPreviewService(
             runtime,
-            acceptanceOrchestrator,
             turnResolver,
             providerResolution,
             compactionConfigProvider,
@@ -179,12 +172,10 @@ class ProviderRequestPreviewServiceTest {
   void verifyReadOnlyBoundaries() {
     // 测试意图：成功及九类拒绝都只允许读取，不得接受命令、消费附件或改变资源引用。
     verify(runtime, atLeast(0)).getThreadSnapshot(any());
-    verify(acceptanceOrchestrator, atLeast(0)).authorizeThread(any(), any());
     verify(uploadService, atLeast(0)).peekReady(any());
     verify(refManager, atLeast(0)).contains(any(), any());
     verify(blobManager, atLeast(0)).getBlob(any());
-    verifyNoMoreInteractions(
-        runtime, acceptanceOrchestrator, uploadService, refManager, blobManager);
+    verifyNoMoreInteractions(runtime, uploadService, refManager, blobManager);
   }
 
   @Test
@@ -205,19 +196,15 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(Reason.PREVIEW_ENCODING_FAILED, error.reason());
   }
 
-  /** 测试意图：preview 只覆盖既有 THREAD（path 与 target 必须一致）且只服务 CHAT，命令形状只允许 SET_* + 末尾 USER_MESSAGE。 */
+  /** 测试意图：preview 只覆盖既有 THREAD（path 与 target 必须一致），命令形状只允许 SET_* + 末尾 USER_MESSAGE；不再有 owner 门禁。 */
   @Test
-  void rejectsForeignTargetOwnerAndNonUserMessageShape() {
-    OwnerRef chat = new OwnerRef.Chat(id(20L));
-    OwnerRef issueAgent = new OwnerRef.IssueAgent(id(21L), "executor");
-
+  void rejectsForeignTargetAndNonUserMessageShape() {
     // target 不是 THREAD：草稿预览不接受新建语义。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             service.preview(
                 THREAD_ID,
-                chat,
                 new AcceptCommandsCommand(
                     new AcceptCommandsTarget.NewSession(
                         SESSION_ID, THREAD_ID, SETTINGS, null, false),
@@ -228,24 +215,13 @@ class ProviderRequestPreviewServiceTest {
         () ->
             service.preview(
                 THREAD_ID,
-                chat,
                 command(new AcceptCommandsTarget.Thread(id(99L), ROOT_ID, 1L), userMessage("hi"))));
-    // Issue Agent Session 的命令由 Issue 工作流拥有。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            service.preview(
-                THREAD_ID,
-                issueAgent,
-                command(
-                    new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L), userMessage("hi"))));
     // GOAL 终止输入属于 Goal 专属功能，不是草稿消息预览。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             service.preview(
                 THREAD_ID,
-                chat,
                 command(
                     new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                     setting(ThreadCommandKind.SET_MODEL),
@@ -256,7 +232,6 @@ class ProviderRequestPreviewServiceTest {
         () ->
             service.preview(
                 THREAD_ID,
-                chat,
                 command(
                     new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                     userMessage("first"),
@@ -266,20 +241,17 @@ class ProviderRequestPreviewServiceTest {
         () ->
             service.preview(
                 THREAD_ID,
-                chat,
                 command(
                     new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                     userMessage("first"),
                     setting(ThreadCommandKind.SET_MODEL))));
-    // 形状拒绝必须发生在任何 owner 校验与快照读取之前。
-    verify(acceptanceOrchestrator, never()).authorizeThread(any(), any());
+    // 形状拒绝必须发生在任何快照读取之前。
     verify(runtime, never()).getThreadSnapshot(any());
   }
 
-  /** 测试意图：owner 授权复用只读入口；cursor 漂移与非空 queued 都在任何规划之前 fail closed。 */
+  /** 测试意图：cursor 漂移与非空 queued 都在任何规划之前 fail closed。 */
   @Test
-  void rejectsStaleCursorAndQueuedCommandsAfterReusingReadOnlyOwnerCheck() {
-    OwnerRef owner = new OwnerRef.Chat(id(30L));
+  void rejectsStaleCursorAndQueuedCommands() {
     ThreadState thread = thread(TURN_TWO_END_ID, 1L);
     EntryPath idlePath = closedTurnPath(OVER_THRESHOLD_USAGE);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot(thread, idlePath, List.of()));
@@ -291,7 +263,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, ROOT_ID, 1L),
                         userMessage("hi"))));
@@ -304,7 +275,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 2L),
                         userMessage("hi"))));
@@ -333,7 +303,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
@@ -341,9 +310,7 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(Reason.PREVIEW_QUEUED_COMMANDS, queued.reason());
     verify(turnResolver, never()).planLive(any(), any());
     verify(providerResolution, never()).resolve(any(), any(), any());
-    // 预览只调用只读 owner 校验，不触达接受路径的其它任何能力。
-    verify(acceptanceOrchestrator, atLeastOnce()).authorizeThread(eq(owner), eq(THREAD_ID));
-    verifyNoMoreInteractions(acceptanceOrchestrator);
+    // 预览只读取快照，不触达接受路径的其它任何能力。
   }
 
   /**
@@ -351,7 +318,6 @@ class ProviderRequestPreviewServiceTest {
    */
   @Test
   void rejectsThreadThatIsNotIdle() {
-    OwnerRef owner = new OwnerRef.Chat(id(40L));
     EntryPath continuationDue = continuationDuePath();
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(TURN_TWO_END_ID, 1L), continuationDue, List.of()));
@@ -362,7 +328,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
@@ -374,7 +339,6 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：下一步必定是自动压缩时明确拒绝（不运行压缩模型）；阈值以下的历史则继续走到真实规划边界。 */
   @Test
   void rejectsWhenNextStepIsAutomaticCompaction() {
-    OwnerRef owner = new OwnerRef.Chat(id(50L));
     ThreadState thread = thread(TURN_TWO_END_ID, 1L);
 
     when(runtime.getThreadSnapshot(THREAD_ID))
@@ -385,7 +349,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
@@ -404,7 +367,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
@@ -419,7 +381,6 @@ class ProviderRequestPreviewServiceTest {
    */
   @Test
   void peeksAttachmentWithoutConsumingAndProjectsFinalBody() {
-    OwnerRef owner = new OwnerRef.Chat(id(60L));
     EntryPath idle = closedTurnPath(BELOW_THRESHOLD_USAGE);
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread(TURN_TWO_END_ID, 3L), idle, List.of()));
@@ -441,7 +402,6 @@ class ProviderRequestPreviewServiceTest {
     HarnessProviderRequestPreviewDTO dto =
         service.preview(
             THREAD_ID,
-            owner,
             command(
                 new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 3L),
                 setting(ThreadCommandKind.SET_MODEL),
@@ -495,7 +455,6 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：未 READY 的附件与跨 Session 资源分别以 409（不可预览）与 400（越权）拒绝，绝不先物化再失败。 */
   @Test
   void rejectsPendingUploadAndCrossSessionResource() {
-    OwnerRef owner = new OwnerRef.Chat(id(70L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(
@@ -510,7 +469,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         target,
                         new NewThreadCommand(
@@ -529,7 +487,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         target,
                         new NewThreadCommand(
@@ -547,7 +504,6 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：adapter 未实现预览能力时明确拒绝（绝不伪装成空体），Provider 编码失败只回显稳定类别而不外泄原因文本。 */
   @Test
   void rejectsUnsupportedAdapterAndSanitizesProviderFailure() {
-    OwnerRef owner = new OwnerRef.Chat(id(80L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(
@@ -571,7 +527,7 @@ class ProviderRequestPreviewServiceTest {
     ProviderRequestPreviewUnavailableException unsupported =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
-            () -> service.preview(THREAD_ID, owner, command));
+            () -> service.preview(THREAD_ID, command));
     assertTrue(unsupported.getMessage().contains("does not support request body preview"));
     assertEquals(Reason.PREVIEW_UNSUPPORTED, unsupported.reason());
 
@@ -591,7 +547,7 @@ class ProviderRequestPreviewServiceTest {
     ProviderRequestPreviewUnavailableException invalid =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
-            () -> service.preview(THREAD_ID, owner, command));
+            () -> service.preview(THREAD_ID, command));
     assertEquals(Reason.PREVIEW_ENCODING_FAILED, invalid.reason());
     assertEquals("request body cannot be encoded for preview", invalid.getMessage());
     assertFalse(invalid.getMessage().contains("provider.internal.example"));
@@ -600,7 +556,6 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：Provider 解析漂移（generation/type 变化）与缺失 factory 一律确定性拒绝，绝不越过解析直接编码。 */
   @Test
   void rejectsProviderResolutionDrift() {
-    OwnerRef owner = new OwnerRef.Chat(id(90L));
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(
             snapshot(
@@ -616,7 +571,6 @@ class ProviderRequestPreviewServiceTest {
             () ->
                 service.preview(
                     THREAD_ID,
-                    owner,
                     command(
                         new AcceptCommandsTarget.Thread(THREAD_ID, TURN_TWO_END_ID, 1L),
                         userMessage("hi"))));
@@ -672,7 +626,7 @@ class ProviderRequestPreviewServiceTest {
 
   private static ThreadSnapshot snapshot(
       ThreadState thread, EntryPath path, List<ThreadCommand> queued) {
-    return new ThreadSnapshot(thread, path, queued, null, List.of(), List.of());
+    return new ThreadSnapshot(thread, path, queued, null, List.of(), List.of(), List.of());
   }
 
   private static ThreadState thread(UUID headEntryId, long nextCommandSequence) {
@@ -684,7 +638,8 @@ class ProviderRequestPreviewServiceTest {
         REQUEST_HASH,
         "thread",
         false,
-        ThreadLifecycleStatus.IDLE,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
         nextCommandSequence,
         1L,
         NOW,

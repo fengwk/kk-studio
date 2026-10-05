@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -189,6 +189,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 null,
                 List.of(),
+                List.of(),
                 List.of()));
     when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
@@ -254,6 +255,7 @@ class HarnessOwnerQueryServiceTest {
             List.of(),
             null,
             List.of(),
+            List.of(),
             List.of());
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
@@ -279,6 +281,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 null,
                 List.of(),
+                List.of(),
                 List.of()));
     String reminderHeadPreview =
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
@@ -298,7 +301,13 @@ class HarnessOwnerQueryServiceTest {
     when(runtime.getThreadSnapshot(threadId))
         .thenReturn(
             new ThreadSnapshot(
-                thread, new EntryPath(List.of(root)), List.of(), null, List.of(), List.of()));
+                thread,
+                new EntryPath(List.of(root)),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of()));
 
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
     assertEquals("IDLE", idle.getStatus());
@@ -380,7 +389,8 @@ class HarnessOwnerQueryServiceTest {
         "0".repeat(64),
         "thread",
         false,
-        ThreadLifecycleStatus.IDLE,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
         1L,
         0L,
         createdAt,

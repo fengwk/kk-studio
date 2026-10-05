@@ -16,8 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
@@ -45,8 +43,6 @@ import java.util.UUID;
  */
 @Service
 public class HarnessOwnerQueryService {
-
-  private static final ThreadContextClassifier CONTEXT_CLASSIFIER = new ThreadContextClassifier();
 
   private final ChatRepository chatRepository;
   private final ChatSessionRepository chatSessionRepository;
@@ -156,18 +152,15 @@ public class HarnessOwnerQueryService {
 
   private HarnessThreadSummaryDTO toThreadSummary(ThreadSnapshot snapshot) {
     ThreadState thread = snapshot.thread();
-    ThreadContext context =
-        CONTEXT_CLASSIFIER.classify(
-            thread, snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
     HarnessThreadSummaryDTO dto = new HarnessThreadSummaryDTO();
     dto.setThreadId(thread.id().toString());
     dto.setName(thread.name());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
-    ThreadRuntimeStatus status = ThreadRuntimeStatus.from(context);
+    // 本地执行状态直接复用 Thread 快照投影（含 STOPPED），不在此自造第二套递归 busy 判定。
+    ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
-    // 生命周期包含永久执行子树，不能按未交付的 join 数量推测。
-    dto.setProcessing(status.isProcessing() || !thread.status().isIdle());
+    dto.setProcessing(status.isProcessing());
     var selection = snapshot.entryPath().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setProviderName(selection.providerName());
