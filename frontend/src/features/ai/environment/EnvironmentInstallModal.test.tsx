@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { setLocale } from '@/shared/i18n'
 import { EnvironmentInstallModal } from './EnvironmentInstallModal'
 import { environmentService } from '@/shared/api/environment-service'
 import { copyTextToClipboard } from './clipboard'
@@ -75,7 +76,7 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
     await user.click(copyButton())
-    expect(await screen.findByText(/配置已保存，命令已复制/)).toBeInTheDocument()
+    expect(await screen.findByText('安装命令已复制。')).toBeInTheDocument()
     expect(screen.getByRole('status').closest('[role="dialog"]')).toBeNull()
     expect(within(screen.getByRole('dialog')).queryByRole('status')).toBeNull()
     expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', savedNormalized)
@@ -142,7 +143,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但环境在读取凭据时已发生变化')
     expect(copyTextToClipboard).not.toHaveBeenCalled()
-    expect(screen.queryByText(/配置已保存，命令已复制/)).toBeNull()
+    expect(screen.queryByText('安装命令已复制。')).toBeNull()
     // An explicit retry uses the refreshed version instead of the stale one.
     await user.click(copyButton())
     await waitFor(() => expect(vi.mocked(copyTextToClipboard)).toHaveBeenCalled())
@@ -158,7 +159,7 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但命令生成或复制失败')
-    expect(screen.queryByText(/配置已保存，命令已复制/)).toBeNull()
+    expect(screen.queryByText('安装命令已复制。')).toBeNull()
   })
 
   it('reopens with current remote defaults rather than stale list card metadata', async () => {
@@ -190,7 +191,7 @@ describe('EnvironmentInstallModal', () => {
       if (phase === 'clipboard') {
         await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
         // 剪贴板尚未确认时，不能抢先宣布复制成功。
-        expect(screen.queryByText(/配置已保存，命令已复制/)).toBeNull()
+        expect(screen.queryByText('安装命令已复制。')).toBeNull()
       }
     }
     view.unmount()
@@ -305,22 +306,115 @@ describe('EnvironmentInstallModal', () => {
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://saved.example.com' } } })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
-    expect(screen.getByText(/HTTP\(S\) base 主机/)).toBeInTheDocument()
+    expect(screen.getByText('不含路径或查询参数。')).toBeInTheDocument()
+    expect(origin()).toHaveAttribute('placeholder', 'https://studio.example.com')
     await user.click(screen.getByText(/可选：Java/))
     await user.click(screen.getByRole('checkbox'))
-    expect(screen.getByText(/语言服务器需自行安装/)).toBeInTheDocument()
+    expect(screen.getByText('请先在目标主机安装对应的语言服务器。')).toBeInTheDocument()
+    expect(screen.queryByText(/rootMarkers/)).toBeNull()
   })
 
-  it('states the overwrite warning about the single daemon and its bound environment', async () => {
+  it('states overwrite effects without implementation notes', async () => {
     open()
-    const dialog = await screen.findByRole('dialog')
-    // 覆盖语义是重启当前系统用户唯一的 Daemon 并重绑到所选环境，不能声称影响所有环境。
-    expect(dialog).toHaveTextContent('覆盖会重启当前系统用户唯一的 Daemon')
-    expect(dialog).toHaveTextContent('中断其当前绑定环境的工具调用')
-    expect(dialog).toHaveTextContent('连接到所选环境')
-    expect(dialog).toHaveTextContent('保留运行数据')
-    expect(dialog).toHaveTextContent('保存不代表已应用')
-    expect(dialog).not.toHaveTextContent('影响所有环境')
+    const dialog = await screen.findByRole('dialog', { name: '安装/覆盖环境' })
+    expect(dialog).toHaveAccessibleName('安装/覆盖环境')
+    expect(within(dialog).getByRole('heading', { name: '安装/覆盖环境' })).toBeInTheDocument()
+    expect(dialog).not.toHaveTextContent(card.name)
+    expect(dialog).toHaveTextContent('复制命令后，在目标主机的终端执行。')
+    expect(dialog).toHaveTextContent('需要 JDK 21 和 Bash。')
+    expect(dialog).toHaveTextContent('覆盖安装会重启服务并连接到此环境')
+    expect(dialog).toHaveTextContent('中断当前工具调用；已有数据保留')
+    expect(dialog).toHaveTextContent('命令含凭据，请勿分享。')
+    expect(dialog).not.toHaveTextContent('HOME/.kk-studio')
+    expect(dialog).not.toHaveTextContent('Daemon')
+    expect(dialog).not.toHaveTextContent('保存不代表已应用')
+  })
+
+  it('keeps a fresh empty LSP editor as a placeholder and rejects enabling it without JSON', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
+    open()
+    await waitFor(() => expect(copyButton()).toBeEnabled())
+    await user.click(screen.getByText(/可选：Java/))
+    await user.click(screen.getByRole('checkbox'))
+    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    const example = {
+      jdtls: {
+        command: ['~/.local/share/nvim/mason/bin/jdtls'],
+        extensions: ['.java'],
+        rootMarkers: ['pom.xml'],
+      },
+    }
+    expect(editor).toHaveValue('')
+    expect(JSON.parse(editor.getAttribute('placeholder')!)).toEqual(example)
+    await user.click(copyButton())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
+    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(copyTextToClipboard).not.toHaveBeenCalled()
+    const real = JSON.stringify({
+      jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'] },
+    }, null, 2)
+    fireEvent.change(editor, { target: { value: real } })
+    expect(editor).toHaveValue(real)
+    await user.click(copyButton())
+    await waitFor(() => expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', {
+      operatingSystem: 'linux', javaHome: null,
+      daemon: {
+        studioUrl: window.location.origin, note: null, bashExecutable: null,
+        lsp: { servers: { jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'], rootMarkers: [], firstMatchMarkers: [] } } },
+      },
+    }))
+  })
+
+  it('rejects a typed empty object instead of substituting the example', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, installConfig: null })
+    open()
+    await waitFor(() => expect(copyButton()).toBeEnabled())
+    await user.click(screen.getByText(/可选：Java/))
+    await user.click(screen.getByRole('checkbox'))
+    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    fireEvent.change(editor, { target: { value: '{}' } })
+    expect(editor).toHaveValue('{}')
+    expect(editor).toHaveAttribute('placeholder', expect.stringContaining('jdtls'))
+    await user.click(copyButton())
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
+    expect(editor).toHaveValue('{}')
+    expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
+    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(copyTextToClipboard).not.toHaveBeenCalled()
+  })
+
+  it('shows saved LSP settings without substituting the example', async () => {
+    const servers = { jdtls: { command: ['/opt/jdtls'], extensions: ['.java'], rootMarkers: ['pom.xml'], firstMatchMarkers: ['build.gradle'] } }
+    vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card,
+      installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://saved.example.com', lsp: { servers } } } })
+    const user = userEvent.setup()
+    open()
+    await waitFor(() => expect(copyButton()).toBeEnabled())
+    await user.click(screen.getByText(/可选：Java/))
+    const editor = screen.getByRole('textbox', { name: 'LSP servers (JSON)' })
+    expect(editor).toHaveValue(JSON.stringify(servers, null, 2))
+    expect(editor).not.toHaveValue(/mason/)
+  })
+
+  it('uses the same English title and copy placeholders', () => {
+    setLocale('en-US')
+    try {
+      const install = open()
+      const dialog = screen.getByRole('dialog', { name: 'Install/overwrite environment' })
+      expect(within(dialog).getByRole('heading', { name: 'Install/overwrite environment' })).toBeInTheDocument()
+      expect(dialog).toHaveTextContent('Copy the command and run it in a terminal on the target host.')
+      expect(dialog).toHaveTextContent('The command contains credentials. Do not share it.')
+      install.unmount()
+      open({ uninstall: true })
+      const uninstall = screen.getByRole('dialog', { name: 'Uninstall environment' })
+      expect(within(uninstall).getByRole('heading', { name: 'Uninstall environment' })).toBeInTheDocument()
+      expect(uninstall).toHaveTextContent('The environment record in Studio is not deleted.')
+    } finally {
+      setLocale('zh-CN')
+    }
   })
 
   it('defaults uninstall to the saved operating system without metadata, token or save', async () => {
@@ -329,14 +423,17 @@ describe('EnvironmentInstallModal', () => {
       installConfig: { operatingSystem: 'macos', daemon: { studioUrl: 'https://saved.example.com' } } } })
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
     // 卸载作用域是当前 OS 用户唯一 Daemon，不一定是本卡片环境，且只移除服务与程序。
-    const dialog = screen.getByRole('dialog')
-    expect(dialog).toHaveTextContent('当前系统用户 HOME/.kk-studio 下唯一 Daemon')
-    expect(dialog).toHaveTextContent('不一定是此卡片对应的环境')
-    expect(dialog).toHaveTextContent('保留本地配置、Token、数据和日志')
-    expect(dialog).toHaveTextContent('不删除任何 Studio 环境记录')
+    const dialog = screen.getByRole('dialog', { name: '卸载环境' })
+    expect(within(dialog).getByRole('heading', { name: '卸载环境' })).toBeInTheDocument()
+    expect(dialog).not.toHaveTextContent(card.name)
+    expect(dialog).toHaveTextContent('在需要卸载的主机上执行命令。')
+    expect(dialog).toHaveTextContent('环境服务会被移除，本地配置和数据保留')
+    expect(dialog).toHaveTextContent('Studio 中的环境记录不会删除')
+    expect(dialog).not.toHaveTextContent('HOME/.kk-studio')
+    expect(dialog).not.toHaveTextContent('Token')
     await chooseSelectOption(user, '操作系统', 'Windows')
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
-    expect(await screen.findByText(/卸载命令已复制/)).toBeInTheDocument()
+    expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
     expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain('-File $installer uninstall')
     expect(environmentService.getEnvironment).not.toHaveBeenCalled()
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
