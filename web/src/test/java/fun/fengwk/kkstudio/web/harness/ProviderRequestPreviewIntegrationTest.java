@@ -672,7 +672,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     return count("harness_work") == 0
         && jdbc.queryForObject(
                 "select count(*) from harness_thread_command where thread_id = ?"
-                    + " and applied_turn_start_entry_id is null and cancelled_at is null",
+                    + " and applied_entry_id is null and cancelled_at is null",
                 Integer.class,
                 threadId)
             == 0;
