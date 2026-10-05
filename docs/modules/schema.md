@@ -31,7 +31,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/work/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/work/thread_join | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/work/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 
@@ -51,7 +51,7 @@ INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待�
 
 Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
-Harness 命令按 sequence 与 idempotencyKey 唯一，Join 固定匹配回执与交付坐标。
+Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
 Work lease 成对，required_environment_id 非空仅适用于 TOOL。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
 应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
