@@ -108,6 +108,54 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
   }
 
+  /** 子节点入口返回真实根和父关系；根与未结束 outcome 必须显式序列化为 null。 */
+  @Test
+  void treeReturnsMinimalNodesAndExplicitNullableFields() throws Exception {
+    when(runtime.getThreadTree(id(1)))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.idleSnapshot(id(2)),
+                HarnessRuntimeTestFixtures.waitingChildrenSnapshot(id(2))));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1) + "/tree"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].threadId").value(idText(2)))
+        .andExpect(jsonPath("$.data[0].parentThreadId").hasJsonPath())
+        .andExpect(jsonPath("$.data[0].parentThreadId").value(nullValue()))
+        .andExpect(jsonPath("$.data[0].outcome").hasJsonPath())
+        .andExpect(jsonPath("$.data[0].outcome").value(nullValue()))
+        .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))
+        .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
+        .andExpect(jsonPath("$.data[0].turnCount").value(0))
+        .andExpect(jsonPath("$.data[0].toolCallCount").value(0))
+        .andExpect(jsonPath("$.data[0].entries").doesNotExist())
+        .andExpect(jsonPath("$.data[0].queuedCommands").doesNotExist())
+        .andExpect(jsonPath("$.data[1].parentThreadId").value(idText(2)))
+        .andExpect(jsonPath("$.data[1].status").value("WAITING_CHILDREN"))
+        .andExpect(jsonPath("$.data[1].processing").value(true));
+
+    verify(runtime).getThreadTree(id(1));
+    verify(runtime, never()).getThreadSnapshot(any());
+    verifyNoInteractions(modelRequestDebugService, projectThreadOwnerResolver, interactionService);
+  }
+
+  /** 非 canonical UUID 在进入 Runtime 前拒绝；未知节点沿用快照的 404 语义。 */
+  @Test
+  void treeRejectsInvalidUuidAndReturnsNotFoundForMissingThread() throws Exception {
+    mockMvc.perform(get("/api/harness/threads/1-1-1-1-1/tree")).andExpect(status().isBadRequest());
+    verifyNoInteractions(runtime);
+    when(runtime.getThreadTree(id(999)))
+        .thenThrow(
+            new HarnessRuntimeNotFoundException("thread " + idText(999) + " does not exist"));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(999) + "/tree"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.errors.detail").value("thread " + idText(999) + " does not exist"));
+  }
+
   /** 意图：验证 GET /api/harness/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */
   @Test
   void snapshotProjectsManualCompactionAvailabilityFromHarnessRuntime() throws Exception {
