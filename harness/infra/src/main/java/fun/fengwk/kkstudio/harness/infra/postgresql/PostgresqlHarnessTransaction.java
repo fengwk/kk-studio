@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -681,8 +682,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_thread (
             id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled,
-            status, next_command_sequence, version, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            execution_control, input_through_sequence, next_command_sequence, version, created_at,
+            updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
         thread.sessionId(),
@@ -691,7 +693,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.creationRequestHash(),
         thread.name(),
         thread.yoloEnabled(),
-        thread.status().name(),
+        thread.executionControl().name(),
+        thread.inputThroughSequence(),
         thread.nextCommandSequence(),
         thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
@@ -805,7 +808,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             set head_entry_id = ?,
                 name = ?,
                 yolo_enabled = ?,
-                status = ?,
+                execution_control = ?,
+                input_through_sequence = ?,
                 next_command_sequence = ?,
                 version = ?,
                 updated_at = ?
@@ -814,7 +818,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             thread.headEntryId(),
             thread.name(),
             thread.yoloEnabled(),
-            thread.status().name(),
+            thread.executionControl().name(),
+            thread.inputThroughSequence(),
             thread.nextCommandSequence(),
             thread.version(),
             PostgresqlHarnessRows.timestamp(thread.updatedAt()),
@@ -910,6 +915,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (findThread(join.childThreadId()).isEmpty()) {
       throw new IllegalArgumentException("join child thread does not exist");
     }
+    if (join.parentThreadId() != null && findThread(join.parentThreadId()).isEmpty()) {
+      throw new IllegalArgumentException("join parent thread does not exist");
+    }
     if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
       throw new IllegalArgumentException("new join must be unmatched");
     }
@@ -918,16 +926,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_thread_join (
             invocation_id, request_hash, parent_thread_id, child_thread_id,
-            source_command_sequence, after_version, agent, max_turns, reminder_turn,
-            matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)
+            source_command_sequence, agent, max_turns, reminder_turn,
+            terminal_entry_id, final_answer_entry_id, delivery_command_sequence,
+            created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)
         """,
         join.invocationId(),
         join.requestHash(),
         join.parentThreadId(),
         join.childThreadId(),
         join.sourceCommandSequence(),
-        join.afterVersion(),
         join.agent(),
         join.maxTurns(),
         join.reminderTurn(),
@@ -946,26 +954,27 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion) {
+  public List<ThreadJoin> loadIncompleteJoins(UUID childThreadId) {
     checkOpen();
+    Objects.requireNonNull(childThreadId, "childThreadId");
     return queryList(
         """
         select * from harness_thread_join
-        where child_thread_id = ? and matched_idle_version is null and after_version < ?
+        where child_thread_id = ? and terminal_entry_id is null
         order by created_at, invocation_id
         """,
         PostgresqlHarnessRows.JOIN,
-        childThreadId,
-        idleVersion);
+        childThreadId);
   }
 
   @Override
   public List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId) {
     checkOpen();
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
     return queryList(
         """
         select * from harness_thread_join
-        where parent_thread_id = ? and matched_idle_version is not null
+        where parent_thread_id = ? and terminal_entry_id is not null
           and delivery_command_sequence is null
         order by created_at, invocation_id
         """,
@@ -974,15 +983,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public int countActiveChildren(UUID parentThreadId) {
+  public int countIncompleteChildJoins(UUID parentThreadId) {
     checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
     Integer count =
         queryForObject(
             """
             select count(*)
-            from harness_thread
-            where parent_thread_id = ? and status <> 'IDLE'
+            from harness_thread_join
+            where parent_thread_id = ? and terminal_entry_id is null
             """,
             Integer.class,
             parentThreadId);
@@ -990,17 +999,121 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public int countActiveSubagentThreads() {
+  public int countIncompleteSubagentJoins() {
     checkOpen();
     Integer count =
         queryForObject(
             """
             select count(*)
-            from harness_thread
-            where parent_thread_id is not null and status <> 'IDLE'
+            from harness_thread_join
+            where parent_thread_id is not null and terminal_entry_id is null
             """,
             Integer.class);
     return count != null ? count : 0;
+  }
+
+  @Override
+  public void insertStopReceipts(
+      UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
+    checkOpen();
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+    requireLocked(LockKey.thread(rootThreadId));
+    List<StoppedThreadReceipt> copied = List.copyOf(receipts);
+    if (copied.isEmpty()) {
+      throw new IllegalArgumentException("stop receipts must not be empty");
+    }
+    Set<StopReceiptKey> keys = new HashSet<>();
+    boolean rootReceiptPresent = false;
+    for (StoppedThreadReceipt receipt : copied) {
+      requireLocked(LockKey.thread(receipt.threadId()));
+      if (!keys.add(new StopReceiptKey(receipt.threadId(), receipt.stopRequestId()))) {
+        throw new IllegalArgumentException(
+            "duplicate stop receipt " + receipt.threadId() + "/" + receipt.stopRequestId());
+      }
+      requireThreadInRootedTree(receipt.threadId(), rootThreadId);
+      if (receipt.threadId().equals(rootThreadId)) {
+        rootReceiptPresent = true;
+      }
+      if (receipt.stoppedTurnEndEntryId() != null) {
+        requireExistingEntry(receipt.stoppedTurnEndEntryId());
+      }
+    }
+    if (!rootReceiptPresent) {
+      throw new IllegalArgumentException(
+          "stop receipt set must contain the root thread receipt " + rootThreadId);
+    }
+    for (StoppedThreadReceipt receipt : copied) {
+      update(
+          """
+          insert into harness_thread_stop_receipt (
+              root_thread_id, thread_id, stop_request_id, root_stop_request_id,
+              stopped_turn_end_entry_id, cancelled_command_count, cancelled_inputs, created_at
+          ) values (?, ?, ?, ?, ?, ?, cast(? as jsonb), date_trunc('milliseconds', statement_timestamp()))
+          """,
+          rootThreadId,
+          receipt.threadId(),
+          receipt.stopRequestId(),
+          rootStopRequestId,
+          receipt.stoppedTurnEndEntryId(),
+          receipt.cancelledCommandCount(),
+          PostgresqlHarnessRows.encodeCancelledInputs(receipt.cancelledInputs()));
+    }
+  }
+
+  /** 回执所属 Thread 必须位于 {@code rootThreadId} 的执行树内，避免集合混入其它树。 */
+  private void requireThreadInRootedTree(UUID threadId, UUID rootThreadId) {
+    List<UUID> chain = findAncestorChain(threadId);
+    if (chain.isEmpty() || !chain.get(chain.size() - 1).equals(rootThreadId)) {
+      throw new IllegalArgumentException(
+          "thread " + threadId + " is not in the execution tree rooted at " + rootThreadId);
+    }
+  }
+
+  @Override
+  public Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(stopRequestId, "stopRequestId");
+    return queryOne(
+        """
+        select * from harness_thread_stop_receipt
+        where thread_id = ? and stop_request_id = ?
+        """,
+        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
+        threadId,
+        stopRequestId);
+  }
+
+  @Override
+  public List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    return queryList(
+        """
+        select * from harness_thread_stop_receipt
+        where thread_id = ?
+        order by created_at, stop_request_id
+        """,
+        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
+        threadId);
+  }
+
+  @Override
+  public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
+      UUID rootThreadId, UUID rootStopRequestId) {
+    checkOpen();
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+    return queryList(
+        """
+        select * from harness_thread_stop_receipt
+        where root_thread_id = ? and root_stop_request_id = ?
+        order by thread_id
+        """,
+        PostgresqlHarnessRows.STOPPED_THREAD_RECEIPT,
+        rootThreadId,
+        rootStopRequestId);
   }
 
   @Override
@@ -1017,18 +1130,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         update(
             """
         update harness_thread_join
-        set matched_idle_version = ?, result_head_entry_id = ?,
+        set terminal_entry_id = ?, final_answer_entry_id = ?,
             delivery_command_sequence = ?, reminder_turn = ?, updated_at = ?
-        where invocation_id = ? and matched_idle_version is not distinct from ?
+        where invocation_id = ? and terminal_entry_id is not distinct from ?
           and delivery_command_sequence is not distinct from ?
         """,
-            join.matchedIdleVersion(),
-            join.resultHeadEntryId(),
+            join.terminalEntryId(),
+            join.finalAnswerEntryId(),
             join.deliveryCommandSequence(),
             join.reminderTurn(),
             PostgresqlHarnessRows.timestamp(join.updatedAt()),
             join.invocationId(),
-            old.matchedIdleVersion(),
+            old.terminalEntryId(),
             old.deliveryCommandSequence());
     requireSingleUpdate(updated, "join", join.invocationId());
   }
@@ -1123,7 +1236,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select *
             from harness_thread_command
             where thread_id = ?
-              and applied_turn_start_entry_id is null
+              and applied_entry_id is null
               and cancelled_at is null
             order by sequence
             for update
@@ -1207,7 +1320,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_thread_command (
               thread_id, sequence, command_type, payload, idempotency_key,
-              request_hash, applied_turn_start_entry_id, stop_request_id,
+              request_hash, applied_entry_id, stop_request_id,
               cancelled_at, created_at
           ) values (?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?, ?)
           """,
@@ -1217,7 +1330,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           PostgresqlHarnessRows.COMMAND_PAYLOADS.encode(command.payload()),
           command.idempotencyKey(),
           command.requestHash(),
-          command.appliedTurnStartEntryId(),
+          command.appliedEntryId(),
           command.stopRequestId(),
           PostgresqlHarnessRows.timestamp(command.cancelledAt()),
           PostgresqlHarnessRows.timestamp(command.createdAt()));
@@ -1246,17 +1359,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       requireSameCommandIdentity(stored, command);
       requireLocked(LockKey.thread(command.threadId()));
       requireValidCommandLifecycle(stored, command);
-      requireValidAppliedTurnStart(command);
+      requireValidAppliedEntry(command);
     }
     for (ThreadCommand command : copied) {
       int updated =
           update(
               """
               update harness_thread_command
-              set applied_turn_start_entry_id = ?, stop_request_id = ?, cancelled_at = ?
+              set applied_entry_id = ?, stop_request_id = ?, cancelled_at = ?
               where thread_id = ? and sequence = ?
               """,
-              command.appliedTurnStartEntryId(),
+              command.appliedEntryId(),
               command.stopRequestId(),
               PostgresqlHarnessRows.timestamp(command.cancelledAt()),
               command.threadId(),
@@ -1870,6 +1983,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (UUID threadId : copied) {
       update("delete from harness_thread_command where thread_id = ?", threadId);
     }
+    // Stop 回执只引用 Thread 与 Entry：与 Thread 同批物理删除，避免深删残留孤儿回执。
+    update(
+        "delete from harness_thread_stop_receipt where thread_id in ("
+            + placeholders(copied.size())
+            + ")",
+        copied.toArray());
     if (!lockedTools.isEmpty()) {
       deleteToolInvocationsByIds(lockedTools.stream().map(ToolInvocation::id).toList());
     }
@@ -2249,43 +2368,42 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  private void requireValidAppliedTurnStart(ThreadCommand command) {
-    UUID appliedTurnStartEntryId = command.appliedTurnStartEntryId();
-    if (appliedTurnStartEntryId == null) {
+  /**
+   * {@code appliedEntryId}（若有）必须指向已存在 Entry、与 Command Thread 同 Session；若该 Entry 是 TURN_START，其
+   * ownerThreadId 必须等于 command 的 threadId。用户输入 / 配置引用其 TURN_START，系统通知引用自身的 NOTIFICATION Entry。
+   */
+  private void requireValidAppliedEntry(ThreadCommand command) {
+    UUID appliedEntryId = command.appliedEntryId();
+    if (appliedEntryId == null) {
       return;
     }
-    Entry turnStart = requireExistingEntry(appliedTurnStartEntryId);
-    if (turnStart.payload().type() != EntryType.TURN_START) {
-      throw new IllegalArgumentException(
-          "appliedTurnStartEntryId must reference a TURN_START entry");
-    }
+    Entry applied = requireExistingEntry(appliedEntryId);
     ThreadState thread =
         findThread(command.threadId())
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
                         "thread " + command.threadId() + " does not exist"));
-    if (!turnStart.sessionId().equals(thread.sessionId())) {
-      throw new IllegalArgumentException(
-          "applied turn start must be in the command thread's session");
+    if (!applied.sessionId().equals(thread.sessionId())) {
+      throw new IllegalArgumentException("applied entry must be in the command thread's session");
     }
-    TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
-    if (!command.threadId().equals(turnStartPayload.ownerThreadId())) {
+    if (applied.payload() instanceof TurnStartPayload turnStartPayload
+        && !command.threadId().equals(turnStartPayload.ownerThreadId())) {
       throw new IllegalArgumentException(
           "applied turn start ownerThreadId must equal the command threadId");
     }
   }
 
   private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {
-    if (stored.appliedTurnStartEntryId() != null || stored.cancelledAt() != null) {
-      if (!Objects.equals(stored.appliedTurnStartEntryId(), command.appliedTurnStartEntryId())
+    if (stored.appliedEntryId() != null || stored.cancelledAt() != null) {
+      if (!Objects.equals(stored.appliedEntryId(), command.appliedEntryId())
           || !Objects.equals(stored.cancelledAt(), command.cancelledAt())) {
         throw new IllegalArgumentException(
             "terminal commands must be updated exactly idempotently");
       }
       return;
     }
-    boolean applied = command.appliedTurnStartEntryId() != null;
+    boolean applied = command.appliedEntryId() != null;
     boolean cancelled = command.cancelledAt() != null;
     if (applied == cancelled) {
       throw new IllegalArgumentException(
@@ -2924,6 +3042,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private record CommandSequenceKey(UUID threadId, long sequence) {}
 
   private record CommandIdempotencyKey(UUID threadId, UUID idempotencyKey) {}
+
+  /** Stop 回执身份 {@code (threadId, stopRequestId)}，同批写入内不可重复。 */
+  private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
 
   private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
 }
