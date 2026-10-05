@@ -328,8 +328,7 @@ function projectToolResult(
   argumentsJson: string,
   callIndex: number,
 ): ToolDialogueMessage {
-  const contents = getRecordList(content.contents)
-  const error = content.error === true
+  const projected = projectToolResultContent(content, argumentsJson)
   return {
     id: `${entry.entryId}:tool-result:${toolCallIdentity(content, callIndex)}`,
     role: 'tool',
@@ -338,11 +337,30 @@ function projectToolResult(
     toolCallId: getString(content.toolCallId),
     toolName: getString(content.toolName),
     rendererKey: getString(content.rendererKey),
+    arguments: projected.arguments,
+    text: projected.text,
+    attachments: projected.attachments,
+    errorMessage: projected.errorMessage,
+    createdAt: entry.createTime,
+    status: projected.status,
+  }
+}
+
+/**
+ * 从规范 ToolResult JSON 解析展示正文、附件和错误。
+ * durable Entry 与尚未物化的 invocation resultJson 共用这一事实，避免两套结果格式。
+ */
+export function projectToolResultContent(
+  content: Record<string, unknown>,
+  argumentsJson: string,
+): Pick<ToolDialogueMessage, 'arguments' | 'text' | 'attachments' | 'errorMessage' | 'status'> {
+  const contents = getRecordList(content.contents)
+  const error = content.error === true
+  return {
     arguments: argumentsJson,
     text: contents.map(contentText).filter(Boolean).join('\n'),
     attachments: contents.flatMap(toResourceAttachment),
     errorMessage: error ? translate('ai.runtime.entry.toolFailed') : undefined,
-    createdAt: entry.createTime,
     status: error ? 'error' : 'done',
   }
 }

@@ -82,7 +82,10 @@ export function AgentPane({
     : null
 
   const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
-  const boundWorkingLabel = boundStatus === 'WAITING_CHILDREN' || boundStatus === 'QUEUED'
+  const boundWorkingLabel = boundStatus === 'WAITING_CHILDREN'
+    || boundStatus === 'QUEUED'
+    || boundStatus === 'WAITING_APPROVAL'
+    || boundStatus === 'TOOL_WAITING_APPROVAL'
     ? formatThreadStatusLabel(boundStatus, t)
     : undefined
 

@@ -267,7 +267,10 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
 payload 只含 settings、不物化任何委派运行树元数据。
 受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立 Thread 面板查看进度并处理工具审批，
-不依赖 Chat 归属，也不开放无 owner 的会话命令发送。
+不依赖 Chat 归属。该页只观察 URL 指定的 Thread：不渲染消息输入、发送、新建、设置或目标命令，
+也不开放无 owner 的会话命令发送；已有工具审批仍提交到该 Thread。
+同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
+等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
 通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
 这些是 jsdom 回归，不替代真实浏览器验证。

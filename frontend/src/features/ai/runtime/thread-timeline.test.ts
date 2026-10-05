@@ -1093,6 +1093,154 @@ describe('thread timeline', () => {
     expect(call).toMatchObject({ subjectEntryId: '40', toolCallId: 'call-1', status: 'done' })
     expect(call).not.toHaveProperty('invocationId')
     expect(call).not.toHaveProperty('approval')
+    expect(timeline.messages.filter((m) => m.role === 'tool' && m.phase === 'result')).toEqual([])
+  })
+
+  it('shows a succeeded sibling result while another tool in the batch is still waiting', () => {
+    // 同批兄弟仍 WAITING_APPROVAL 时，已成功调用必须按自身 resultJson 展示，不能一起 pending。
+    const timeline = buildThreadTimeline(
+      [
+        entry('40', 'MESSAGE', messagePayload('ASSISTANT', [
+          toolCallContent('call-ok', 0),
+          toolCallContent('call-ask', 1),
+        ])),
+      ],
+      [],
+      [
+        invocation('inv-ok', '40', 'call-ok', {
+          status: 'SUCCEEDED',
+          callIndex: 0,
+          resultJson: JSON.stringify({
+            contents: [
+              { type: 'text', text: 'listed files' },
+              { type: 'resource', uri: 'file:///tmp/out.txt', mediaType: 'text/plain', name: 'out.txt', size: 4, sha256: 'a'.repeat(64) },
+            ],
+            error: false,
+          }),
+          environmentId: 'env-must-not-be-thread',
+        }),
+        invocation('inv-ask', '40', 'call-ask', {
+          status: 'WAITING_APPROVAL',
+          callIndex: 1,
+          toolCallId: 'call-ask',
+          approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
+        }),
+      ],
+      null,
+      null,
+      [],
+      modelInvocation('RUNNING', 1),
+    )
+    const tools = timeline.messages.filter((message) => message.role === 'tool')
+    expect(tools).toMatchObject([
+      { phase: 'call', toolCallId: 'call-ok', status: 'done', threadId: 'thread-1' },
+      { phase: 'result', toolCallId: 'call-ok', text: 'listed files', status: 'done' },
+      { phase: 'call', toolCallId: 'call-ask', status: 'streaming', threadId: 'thread-1' },
+    ])
+    expect(tools[1]?.role === 'tool' ? tools[1].attachments : []).toHaveLength(1)
+    const waiting = tools.find((message) => message.toolCallId === 'call-ask')
+    expect(waiting?.role === 'tool' ? waiting.partial : 'present').toBeUndefined()
+    expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
+  })
+
+  it('projects failed, error-result, and unmatched invocations without treating argument completion as success', () => {
+    // error=true 即使 invocation SUCCEEDED 也是错误；FAILED/UNKNOWN/CANCELLED 无正文同样是错误。
+    // 身份不匹配或没有终态证据时保持 pending，不能把 durable call.status=done 当成成功。
+    const failed = buildThreadTimeline(
+      [assistantCalls(['call-error', 'call-failed', 'call-unknown', 'call-cancelled', 'call-live'])],
+      [],
+      [
+        invocation('inv-error', '40', 'call-error', {
+          status: 'SUCCEEDED',
+          callIndex: 0,
+          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'rejected' }], error: true }),
+        }),
+        invocation('inv-failed', '40', 'call-failed', {
+          status: 'FAILED',
+          callIndex: 1,
+          toolCallId: 'call-failed',
+        }),
+        invocation('inv-unknown', '40', 'call-unknown', {
+          status: 'UNKNOWN',
+          callIndex: 2,
+          toolCallId: 'call-unknown',
+          errorJson: JSON.stringify({ message: 'lost' }),
+        }),
+        invocation('inv-cancelled', '40', 'call-cancelled', {
+          status: 'CANCELLED',
+          callIndex: 3,
+          toolCallId: 'call-cancelled',
+        }),
+        invocation('inv-live', '40', 'call-live', {
+          status: 'RUNNING',
+          callIndex: 4,
+          toolCallId: 'call-live',
+        }),
+      ],
+    )
+    expect(failed.messages.filter((message) => message.role === 'tool')).toMatchObject([
+      { toolCallId: 'call-error', phase: 'call', status: 'error' },
+      { toolCallId: 'call-error', phase: 'result', status: 'error', text: 'rejected' },
+      { toolCallId: 'call-failed', phase: 'call', status: 'error' },
+      { toolCallId: 'call-failed', phase: 'result', status: 'error' },
+      { toolCallId: 'call-unknown', phase: 'call', status: 'error' },
+      { toolCallId: 'call-unknown', phase: 'result', status: 'error' },
+      { toolCallId: 'call-cancelled', phase: 'call', status: 'error' },
+      { toolCallId: 'call-cancelled', phase: 'result', status: 'error' },
+      { toolCallId: 'call-live', phase: 'call', status: 'streaming' },
+    ])
+
+    const mismatched = buildThreadTimeline(
+      [assistantCalls(['call-1'])],
+      [],
+      [invocation('inv-other-entry', 'other-entry', 'call-1', {
+        status: 'SUCCEEDED',
+        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'wrong call' }], error: false }),
+      })],
+    )
+    expect(mismatched.messages.filter((message) => message.role === 'tool')).toMatchObject([
+      { phase: 'call', status: 'done' },
+    ])
+  })
+
+  it('replaces a transient invocation result with the durable result and keeps a later success', () => {
+    // durable tool result 到达后是唯一输出；同 attempt 的旧 partial 错误不能盖过最终成功。
+    const timeline = buildThreadTimeline(
+      [
+        assistantCalls(['call-1']),
+        entry('41', 'MESSAGE', messagePayload('TOOL', [{
+          type: 'tool_result',
+          toolCallId: 'call-1',
+          toolName: 'bash',
+          rendererKey: 'bash',
+          error: false,
+          contents: [{ type: 'text', text: 'durable ok' }],
+        }])),
+      ],
+      [],
+      [invocation('inv-1', '40', 'call-1', {
+        status: 'SUCCEEDED',
+        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'transient ok' }], error: false }),
+      })],
+      null,
+      new Map([['inv-1', {
+        threadId: 'thread-1',
+        invocationId: 'inv-1',
+        attempt: 1,
+        toolCallId: 'call-1',
+        text: 'partial failure',
+        error: true,
+        errorText: 'temporary',
+        createdAt: '2026-07-28T10:00:01Z',
+      }]]),
+    )
+    const tools = timeline.messages.filter((message) => message.role === 'tool')
+    expect(tools).toMatchObject([
+      { phase: 'call', status: 'done', partial: 'partial failure', partialErrorText: 'temporary' },
+      { phase: 'result', text: 'durable ok', status: 'done' },
+    ])
+    expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
+    expect(tools.some((message) => message.id.startsWith('transient:tool-result:'))).toBe(false)
   })
 
   it('keeps a terminal model stream with content as a done assistant message', () => {
@@ -1250,6 +1398,23 @@ function messagePayload(role: string, contents: Array<Record<string, unknown>>) 
   return {
     message: { role, contents },
   }
+}
+
+function toolCallContent(toolCallId: string, _callIndex: number): Record<string, unknown> {
+  return {
+    type: 'tool_call',
+    toolCallId,
+    toolName: 'bash',
+    rendererKey: 'bash',
+    argumentsJson: '{"command":"ls"}',
+  }
+}
+
+function assistantCalls(toolCallIds: string[]): HarnessSessionEntryDTO {
+  return entry('40', 'MESSAGE', messagePayload(
+    'ASSISTANT',
+    toolCallIds.map((toolCallId, index) => toolCallContent(toolCallId, index)),
+  ))
 }
 
 function modelAttemptFailure(

@@ -70,6 +70,8 @@ export interface ThreadPanelComposerInput {
   interactionPanel?: ReactNode
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
+  /** 只读观察：不渲染消息输入、发送和设置，避免出现无效输入框。 */
+  displayOnly?: boolean
   scope?: string
   composerRef?: Ref<ThreadComposerHandle>
   onPreviewReadinessChange?: (readiness: ComposerPreviewReadiness) => void
@@ -154,25 +156,27 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
         {activity.actionError ? (
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />
         ) : null}
-        <ThreadComposer
-          ref={composerRef}
-          parts={composer.parts}
-          pending={composer.pending}
-          disabled={composer.disabled}
-          onPartsChange={composer.onPartsChange}
-          onHistoryPartsChange={composer.onHistoryPartsChange}
-          onSubmit={composer.onSubmit}
-          onSubmitGoal={composer.onSubmitGoal}
-          onCommand={composer.onCommand}
-          commands={composer.commands}
-          focusOnEscape={composer.focusOnEscape && !interactionOpen}
-          active={!interactionOpen}
-          historicalUserMessages={historicalUserMessages}
-          queuedUserMessages={queuedUserMessages}
-          settings={composer.settings}
-          scope={composer.scope}
-          onPreviewReadinessChange={composer.onPreviewReadinessChange}
-        />
+        {composer.displayOnly ? null : (
+          <ThreadComposer
+            ref={composerRef}
+            parts={composer.parts}
+            pending={composer.pending}
+            disabled={composer.disabled}
+            onPartsChange={composer.onPartsChange}
+            onHistoryPartsChange={composer.onHistoryPartsChange}
+            onSubmit={composer.onSubmit}
+            onSubmitGoal={composer.onSubmitGoal}
+            onCommand={composer.onCommand}
+            commands={composer.commands}
+            focusOnEscape={composer.focusOnEscape && !interactionOpen}
+            active={!interactionOpen}
+            historicalUserMessages={historicalUserMessages}
+            queuedUserMessages={queuedUserMessages}
+            settings={composer.settings}
+            scope={composer.scope}
+            onPreviewReadinessChange={composer.onPreviewReadinessChange}
+          />
+        )}
         {composer.interactionPanel}
         {slots?.footer}
       </main>
