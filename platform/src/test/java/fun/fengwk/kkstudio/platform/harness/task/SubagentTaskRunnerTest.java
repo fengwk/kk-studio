@@ -37,13 +37,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.time.Instant;
 import java.util.List;
@@ -79,6 +79,7 @@ class SubagentTaskRunnerTest {
   }
 
   /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
+  /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
   private void stubParent(List<String> allowedSubagents) {
     ThreadSnapshot parent = mock(ThreadSnapshot.class);
     ModelInvocation model = mock(ModelInvocation.class);
@@ -95,7 +96,8 @@ class SubagentTaskRunnerTest {
                 "0".repeat(64),
                 "main",
                 true,
-                ThreadLifecycleStatus.ACTIVE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
                 5L,
                 3L,
                 NOW,
@@ -160,9 +162,10 @@ class SubagentTaskRunnerTest {
     assertEquals(parentThreadId, acceptedTarget.parentThreadId());
     assertEquals(target, acceptedTarget.rootSettings());
     assertEquals(true, acceptedTarget.yoloEnabled());
-    // 源 prompt 与 join 同一批命令：恰好一条 USER 消息。
+    // 源 prompt 与 join 同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
     assertEquals(1, command.getValue().commands().size());
-    assertTrue(command.getValue().commands().get(0).payload() instanceof UserMessageCommandPayload);
+    assertTrue(
+        command.getValue().commands().get(0).payload() instanceof CustomMessageCommandPayload);
 
     // 未显式给出 max_turns 时用 policy 默认；额度按 config 快照冻结，0 表示不设树级上限。
     assertEquals(parentHeadEntryId, join.getValue().expectedParentHeadEntryId());
@@ -212,7 +215,8 @@ class SubagentTaskRunnerTest {
                 "0".repeat(64),
                 "child",
                 false,
-                ThreadLifecycleStatus.IDLE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
                 2L,
                 1L,
                 NOW,
@@ -297,7 +301,8 @@ class SubagentTaskRunnerTest {
                 "0".repeat(64),
                 "child",
                 false,
-                ThreadLifecycleStatus.IDLE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
                 2L,
                 1L,
                 NOW,
@@ -334,7 +339,7 @@ class SubagentTaskRunnerTest {
     assertEquals(new SetAgentCommandPayload(AGENT), commands.get(0).payload());
     assertEquals(new SetModelCommandPayload(MODEL), commands.get(1).payload());
     assertEquals(new SetEnvironmentCommandPayload("env"), commands.get(2).payload());
-    assertTrue(commands.get(3).payload() instanceof UserMessageCommandPayload);
+    assertTrue(commands.get(3).payload() instanceof CustomMessageCommandPayload);
   }
 
   @Test
@@ -398,7 +403,8 @@ class SubagentTaskRunnerTest {
                 "0".repeat(64),
                 "child",
                 false,
-                ThreadLifecycleStatus.IDLE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
                 2L,
                 1L,
                 NOW,
@@ -619,7 +625,8 @@ class SubagentTaskRunnerTest {
                 "0".repeat(64),
                 "child",
                 false,
-                ThreadLifecycleStatus.ACTIVE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
                 nextSequence,
                 7L,
                 NOW,

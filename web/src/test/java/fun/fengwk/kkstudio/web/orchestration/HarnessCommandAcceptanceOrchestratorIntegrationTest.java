@@ -98,9 +98,9 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(1, count("harness_work", "target_id", chatThreadId));
   }
 
-  /** 既有 Thread 必须经所属 Session 授权，并保持产品合法的 SET_* 前缀与末尾用户消息。 */
+  /** 既有 Thread 的继续写入不再经 owner 授权，但必须保持产品合法的 SET_* 前缀与末尾用户消息。 */
   @Test
-  void threadTargetAcceptsOwnedSessionAndPreservesCommandPrefix() {
+  void threadTargetContinuationPreservesCommandPrefix() {
     UUID chatId = createChat("thread-target");
     OwnerRef owner = new OwnerRef.Chat(chatId);
     UUID sessionId = UUID.randomUUID();
@@ -118,8 +118,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
                         UUID.randomUUID()))));
 
     AcceptedCommands continued =
-        acceptanceService.accept(
-            owner,
+        acceptanceService.acceptOnThread(
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.Thread(
                     threadId,
@@ -165,8 +164,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
             threadId));
     assertEquals(true, acceptanceService.accept(owner, setGoal).replayed());
 
-    acceptanceService.accept(
-        owner,
+    acceptanceService.acceptOnThread(
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(
                 threadId, accepted.thread().headEntryId(), accepted.thread().nextCommandSequence()),
@@ -309,46 +307,6 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(0, chatSessionRepository.listSessionIds(chat2Id).size());
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
-  }
-
-  /**
-   * 测试意图：请求预览使用的只读 owner 授权必须与正式接受共用同一份归属判定——同 owner 成功、跨 owner 与不存在的 owner 确定性拒绝， 且不写任何归属 relation
-   * 或 Harness 事实（预览因此既不能绕过跨 owner 检查，也不能顺带获得消费权限）。
-   */
-  @Test
-  void readOnlyAuthorizeThreadSharesAcceptanceOwnershipJudgmentWithoutAnyWrite() {
-    UUID chatId = createChat("authorize-readonly");
-    UUID otherChatId = createChat("authorize-readonly-other");
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    accept(
-        new OwnerRef.Chat(chatId),
-        sessionId,
-        threadId,
-        new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owned")))));
-
-    int sessionOwners = count("chat_session", "session_id", sessionId);
-    int entries = count("harness_entry", "session_id", sessionId);
-    int commands = count("harness_thread_command", "thread_id", threadId);
-    int works = count("harness_work", "target_id", threadId);
-
-    acceptanceService.authorizeThread(new OwnerRef.Chat(chatId), threadId);
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(otherChatId), threadId));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(UUID.randomUUID()), threadId));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(chatId), UUID.randomUUID()));
-
-    assertEquals(sessionOwners, count("chat_session", "session_id", sessionId));
-    assertEquals(entries, count("harness_entry", "session_id", sessionId));
-    assertEquals(commands, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(works, count("harness_work", "target_id", threadId));
   }
 
   @Test

@@ -8,11 +8,16 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 产品命令批次的严格 target union wire DTO。 */
+/**
+ * 创建型命令批次的严格 target union wire DTO。
+ *
+ * <p>只表达 NEW_SESSION / NEW_THREAD 两种创建语义；既有 Thread 的继续写入使用 {@link
+ * HarnessThreadCommandBatchDTO}，不再通过本 union 以 THREAD target 承载。
+ */
 @Data
 public class HarnessCommandTargetDTO {
 
-  /** target 类型：NEW_SESSION、NEW_THREAD 或 THREAD。 */
+  /** target 类型：NEW_SESSION 或 NEW_THREAD。 */
   private String type;
 
   private String sessionId;
@@ -20,8 +25,6 @@ public class HarnessCommandTargetDTO {
   private String threadId;
   private HarnessBranchSettingsDTO rootSettings;
   private Boolean yoloEnabled;
-  private String expectedHeadEntryId;
-  private String expectedNextCommandSequence;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -42,14 +45,6 @@ public class HarnessCommandTargetDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean yoloEnabledFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean expectedHeadEntryIdFieldPresent;
-
-  @Getter(AccessLevel.NONE)
-  @Setter(AccessLevel.NONE)
-  private boolean expectedNextCommandSequenceFieldPresent;
 
   @JsonSetter("type")
   public void setType(Object value) {
@@ -86,20 +81,6 @@ public class HarnessCommandTargetDTO {
     this.yoloEnabledFieldPresent = true;
   }
 
-  @JsonSetter("expectedHeadEntryId")
-  public void setExpectedHeadEntryId(Object value) {
-    this.expectedHeadEntryId =
-        HarnessRuntimeDtoSupport.requireJsonString(value, "target.expectedHeadEntryId");
-    this.expectedHeadEntryIdFieldPresent = true;
-  }
-
-  @JsonSetter("expectedNextCommandSequence")
-  public void setExpectedNextCommandSequence(Object value) {
-    this.expectedNextCommandSequence =
-        HarnessRuntimeDtoSupport.requireJsonString(value, "target.expectedNextCommandSequence");
-    this.expectedNextCommandSequenceFieldPresent = true;
-  }
-
   @JsonIgnore
   public boolean hasSessionIdField() {
     return sessionIdFieldPresent;
@@ -123,16 +104,6 @@ public class HarnessCommandTargetDTO {
   @JsonIgnore
   public boolean hasYoloEnabledField() {
     return yoloEnabledFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasExpectedHeadEntryIdField() {
-    return expectedHeadEntryIdFieldPresent;
-  }
-
-  @JsonIgnore
-  public boolean hasExpectedNextCommandSequenceField() {
-    return expectedNextCommandSequenceFieldPresent;
   }
 
   @JsonAnySetter

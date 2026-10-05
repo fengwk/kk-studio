@@ -47,18 +47,92 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
-  void targetDtoTracksFieldPresenceSoExplicitNullCannotBypassForbiddenChecks() {
+  void creationTargetDtoTracksFieldPresenceSoExplicitNullCannotBypassForbiddenChecks() {
     HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("THREAD");
+    target.setType("NEW_THREAD");
     target.setSessionId(null);
+    target.setStartEntryId("00000000-0000-0000-0000-000000000002");
     target.setThreadId("00000000-0000-0000-0000-000000000001");
-    target.setExpectedHeadEntryId("00000000-0000-0000-0000-000000000002");
-    target.setExpectedNextCommandSequence("3");
+    target.setYoloEnabled(false);
 
     assertTrue(target.hasSessionIdField());
     assertNull(target.getSessionId());
-    assertEquals("THREAD", target.getType());
-    assertEquals("3", target.getExpectedNextCommandSequence());
+    assertEquals("NEW_THREAD", target.getType());
+    assertEquals("00000000-0000-0000-0000-000000000001", target.getThreadId());
+  }
+
+  @Test
+  void threadCommandBatchTracksCursorAndImmutableCommandDefaults() {
+    HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
+    batch.setExpectedHeadEntryId("00000000-0000-0000-0000-000000000001");
+    batch.setExpectedNextCommandSequence("3");
+
+    assertEquals("00000000-0000-0000-0000-000000000001", batch.getExpectedHeadEntryId());
+    assertEquals("3", batch.getExpectedNextCommandSequence());
+    assertTrue(batch.getCommands().isEmpty());
+    assertThrows(UnsupportedOperationException.class, () -> batch.getCommands().add(null));
+    // 既有 Thread 的写入口不再暴露 owner / target / THREAD 相关字段。
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadCommandBatchDTO.class.getDeclaredField("owner"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadCommandBatchDTO.class.getDeclaredField("target"));
+  }
+
+  /** 测试意图：既有 Thread 的通用写请求必须自证严格边界——未知字段、非字符串 cursor 与非数组 commands 都必须由共享 DTO 直接拒绝。 */
+  @Test
+  void threadCommandBatchRejectsUnknownFieldsAndNonStringPrimitives() {
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"expectedHeadEntryId":"00000000-0000-0000-0000-000000000001",
+                 "expectedNextCommandSequence":"3","commands":[],"unknown":true}
+                """,
+                HarnessThreadCommandBatchDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"expectedHeadEntryId":1,"expectedNextCommandSequence":"3","commands":[]}
+                """,
+                HarnessThreadCommandBatchDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"expectedHeadEntryId":"00000000-0000-0000-0000-000000000001",
+                 "expectedNextCommandSequence":3,"commands":[]}
+                """,
+                HarnessThreadCommandBatchDTO.class));
+  }
+
+  /**
+   * 测试意图：创建 target union 只承载 NEW_SESSION / NEW_THREAD；旧 THREAD 字段（cursor）不得再被接受，ContinueCommand
+   * 形状由独立 {@link HarnessThreadCommandBatchDTO} 承担。
+   */
+  @Test
+  void creationTargetRejectsLegacyThreadCursorFields() {
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"type":"THREAD","threadId":"00000000-0000-0000-0000-000000000001",
+                 "expectedHeadEntryId":"00000000-0000-0000-0000-000000000002",
+                 "expectedNextCommandSequence":"3"}
+                """,
+                HarnessCommandTargetDTO.class));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessCommandTargetDTO.class.getDeclaredField("expectedHeadEntryId"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessCommandTargetDTO.class.getDeclaredField("expectedNextCommandSequence"));
   }
 
   @Test
@@ -315,6 +389,70 @@ class HarnessRuntimeDtoContractTest {
 
     assertTrue(snapshot.getManualCompaction().getAvailable());
     assertNull(snapshot.getManualCompaction().getDisabledReason());
+  }
+
+  /**
+   * 测试意图：Thread 投影必须显式暴露持久执行控制（RUNNABLE / STOPPED），且停止回执只使用新的聚合结构与恢复字段，不再保留旧顶层
+   * cancelledUserMessages / stoppedTurnEndEntryId。
+   */
+  @Test
+  void threadDtoExposesExecutionControlAndStopAggregates() throws Exception {
+    assertEquals(
+        String.class, HarnessThreadDTO.class.getDeclaredField("executionControl").getType());
+
+    HarnessStoppedThreadReceiptDTO receipt = new HarnessStoppedThreadReceiptDTO();
+    receipt.setThreadId("00000000-0000-0000-0000-000000000001");
+    receipt.setStopRequestId("00000000-0000-0000-0000-000000000002");
+    receipt.setStoppedTurnEndEntryId(null);
+    receipt.setCancelledCommandCount(1);
+    HarnessCancelledInputDTO cancelled = new HarnessCancelledInputDTO();
+    cancelled.setSequence("4");
+    cancelled.setIdempotencyKey("00000000-0000-0000-0000-000000000003");
+    cancelled.setType("USER_MESSAGE");
+    cancelled.setPayloadJson("{}");
+    receipt.setCancelledInputs(List.of(cancelled));
+
+    HarnessThreadStopResultDTO result = new HarnessThreadStopResultDTO();
+    result.setStatus("STOPPED");
+    result.setStoppedThreads(List.of(receipt));
+    assertEquals("STOPPED", result.getStatus());
+    assertEquals(1, result.getStoppedThreads().size());
+    assertEquals(
+        "USER_MESSAGE", result.getStoppedThreads().get(0).getCancelledInputs().get(0).getType());
+
+    // 旧顶层字段与旧取消消息 DTO 必须删除。
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadStopResultDTO.class.getDeclaredField("stoppedTurnEndEntryId"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadStopResultDTO.class.getDeclaredField("cancelledUserMessages"));
+    assertThrows(
+        ClassNotFoundException.class,
+        () ->
+            Class.forName(
+                HarnessThreadDTO.class.getPackageName() + ".HarnessCancelledUserMessageDTO"));
+  }
+
+  /** 测试意图：snapshot 必须携带本 Thread 的持久 Stop 回执，供刷新或未打开子页时恢复草稿。 */
+  @Test
+  void snapshotCarriesStopReceipts() {
+    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+    assertTrue(snapshot.getStopReceipts().isEmpty());
+    HarnessStoppedThreadReceiptDTO receipt = new HarnessStoppedThreadReceiptDTO();
+    receipt.setThreadId("00000000-0000-0000-0000-000000000001");
+    snapshot.setStopReceipts(List.of(receipt));
+    assertEquals(1, snapshot.getStopReceipts().size());
+  }
+
+  /** 测试意图：停止回执的 nullable 停止边界必须显式发射 null，避免刷新侧把「缺失」误判为「未知」。 */
+  @Test
+  void stoppedThreadReceiptAlwaysSerializesNullableStoppedTurnEndEntryId() throws Exception {
+    Field stoppedTurnEndEntryId =
+        HarnessStoppedThreadReceiptDTO.class.getDeclaredField("stoppedTurnEndEntryId");
+    JsonInclude include = stoppedTurnEndEntryId.getAnnotation(JsonInclude.class);
+    assertNotNull(include);
+    assertEquals(JsonInclude.Include.ALWAYS, include.value());
   }
 
   @Test

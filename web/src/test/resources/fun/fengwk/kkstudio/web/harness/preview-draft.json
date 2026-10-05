@@ -1,11 +1,6 @@
 {
-  "owner": {"type": "CHAT", "chatId": "%s"},
-  "target": {
-    "type": "THREAD",
-    "threadId": "%s",
-    "expectedHeadEntryId": "%s",
-    "expectedNextCommandSequence": "%s"
-  },
+  "expectedHeadEntryId": "%s",
+  "expectedNextCommandSequence": "%s",
   "commands": [{
     "type": "USER_MESSAGE",
     "idempotencyKey": "00000000-0000-0000-0000-000000000099",

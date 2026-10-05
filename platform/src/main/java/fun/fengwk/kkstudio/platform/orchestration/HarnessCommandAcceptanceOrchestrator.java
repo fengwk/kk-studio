@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -100,53 +99,50 @@ public class HarnessCommandAcceptanceOrchestrator {
             this::consumeAttachment);
   }
 
-  /** 接受 owner 的一次命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
+  /** 接受一次 owner-aware 的命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
   @Transactional
   public AcceptedCommands accept(OwnerRef owner, AcceptCommandsCommand command) {
     Objects.requireNonNull(owner, "owner");
     Objects.requireNonNull(command, "command");
+    requireCreationTarget(command.target());
     HarnessRuntime runtime = requireRuntime();
-    requireNoGoalCommand(owner, command);
     authorize(owner, command.target());
     AcceptancePreflight preflight = preflight(owner, command.target());
     return runtime.acceptCommands(command, preflight);
   }
 
   /**
-   * Issue Agent Thread 的 Issue 当前要求与活动本身才是权威，不得另设 Branch Goal：任何 Issue+Agent owner 的 GOAL
-   * 命令（设置或清除）都在加锁与调用 Runtime 之前确定性拒绝。
+   * 接受既有 Thread 的通用命令批（非 owner-aware）：target 由调用方从 path 与精确 cursor 组合。
    *
-   * <p>这是安全边界，不依赖前端隐藏入口；必须保留该检查，否则产品 HTTP 入口可以绕过 Issue 的权威要求写入 Goal。
+   * <p>Runtime 从 Thread 解析 Session，preflight 在同一事务内完成 USER_MESSAGE 附件物化与 RESOURCE 的 Session
+   * 归属校验；owner 授权与业务规则由调用方自己的边界显式完成，本服务不改写目标 Thread 的所属事实。
    */
-  private static void requireNoGoalCommand(OwnerRef owner, AcceptCommandsCommand command) {
-    if (!(owner instanceof OwnerRef.IssueAgent)) {
-      return;
+  @Transactional
+  public AcceptedCommands acceptOnThread(AcceptCommandsCommand command) {
+    Objects.requireNonNull(command, "command");
+    if (!(command.target() instanceof AcceptCommandsTarget.Thread)) {
+      throw new IllegalArgumentException("thread command acceptance requires a THREAD target");
     }
-    for (NewThreadCommand newThreadCommand : command.commands()) {
-      if (newThreadCommand.payload().type() == ThreadCommandType.GOAL) {
-        throw new IllegalArgumentException("Issue agent threads do not support branch goals");
-      }
-    }
+    AcceptancePreflight preflight =
+        (tx, session, commands) -> prepareUserContents(session.id(), commands);
+    return requireRuntime().acceptCommands(command, preflight);
   }
 
   /**
-   * owner 授权（请求预览用）：与 {@link #accept} 共用同一份归属判定，仅完成 KEY SHARE 归属锁与 relation 校验，不插入任何归属、 不物化附件、不调用
-   * Runtime，也不产生任何写入。因此预览不可能绕过跨 owner 检查，也不可能顺带获得消费权限。
-   *
-   * <p>事务必须是读写事务：归属判定对 owner 行取 {@code SELECT ... FOR KEY SHARE}（与 accept 同一把锁），而 PostgreSQL 不允许在
-   * read-only 事务中执行该语句。事务本身仍然只读语义——本方法没有任何 INSERT/UPDATE/DELETE。
+   * owner-aware 入口只负责创建（NEW_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link #acceptOnThread}，不保留以
+   * THREAD target 借 owner 路由发送的兼容分支。
    */
-  @Transactional
-  public void authorizeThread(OwnerRef owner, UUID threadId) {
-    Objects.requireNonNull(owner, "owner");
-    Objects.requireNonNull(threadId, "threadId");
-    // 授权只读取 threadId；cursor 由预览在授权后通过只读快照独立校验。
-    authorize(owner, new AcceptCommandsTarget.Thread(threadId, new UUID(0, 0), 1));
+  private static void requireCreationTarget(AcceptCommandsTarget target) {
+    if (!(target instanceof AcceptCommandsTarget.NewSession)
+        && !(target instanceof AcceptCommandsTarget.NewThread)) {
+      throw new IllegalArgumentException(
+          "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD creation");
+    }
   }
 
   /**
    * 调用 Runtime 前完成 owner 授权：NEW_SESSION 对新 Session 只要求 owner 存在且身份可绑定，但对已有 Session（包括 Runtime 精确
-   * replay）要求目标 Session 已由该 owner 持有；NEW_THREAD/THREAD 始终要求目标 Session 已由该 owner 持有。
+   * replay）要求目标 Session 已由该 owner 持有；NEW_THREAD 始终要求目标 Session 已由该 owner 持有。
    */
   private void authorize(OwnerRef owner, AcceptCommandsTarget target) {
     switch (owner) {
@@ -166,7 +162,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
-   * sessionId； THREAD 在同一外事务内读取 Thread 的 Session 归属。
+   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}），因此这里不再有 THREAD 分支。
    */
   private void requireTargetOwnership(OwnerRef owner, AcceptCommandsTarget target) {
     switch (target) {
@@ -177,8 +173,8 @@ public class HarnessCommandAcceptanceOrchestrator {
       }
       case AcceptCommandsTarget.NewThread newThread -> requireOwnedSession(
           owner, newThread.sessionId());
-      case AcceptCommandsTarget.Thread thread -> requireOwnedSession(
-          owner, findThreadSessionId(thread.threadId()));
+      case AcceptCommandsTarget.Thread ignored -> throw new IllegalStateException(
+          "owner-aware authorization requires a creation target");
     }
   }
 
@@ -195,13 +191,6 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
   private boolean sessionExists(UUID sessionId) {
     return requireStore().transaction(tx -> tx.findSession(sessionId).isPresent());
-  }
-
-  /** THREAD target 不携带 sessionId：在同一外事务内读取其 Session 归属以完成授权。 */
-  private UUID findThreadSessionId(UUID threadId) {
-    return requireStore()
-        .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
-        .orElseThrow(() -> new IllegalArgumentException("Thread does not exist"));
   }
 
   /** Chat owner 行以 KEY SHARE 锁定：阻止 Chat 删除但允许同 Chat 的并发接受；缺失即归属目标不存在。 */

@@ -17,13 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -168,7 +168,7 @@ public class SubagentTaskRunner implements SubagentRunner {
             command(
                 request.invocationId(),
                 0,
-                new UserMessageCommandPayload(AgentMessage.user(request.prompt())))));
+                new CustomMessageCommandPayload(AgentMessage.user(request.prompt())))));
   }
 
   /**
@@ -189,7 +189,7 @@ public class SubagentTaskRunner implements SubagentRunner {
             new SetAgentCommandPayload(settings.agentName()),
             new SetModelCommandPayload(settings.model()),
             new SetEnvironmentCommandPayload(settings.environmentName()),
-            new UserMessageCommandPayload(AgentMessage.user(request.prompt())));
+            new CustomMessageCommandPayload(AgentMessage.user(request.prompt())));
     List<NewThreadCommand> commands = new ArrayList<>(payloads.size());
     for (int i = 0; i < payloads.size(); i++) {
       commands.add(command(request.invocationId(), i, payloads.get(i)));
