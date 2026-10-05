@@ -23,6 +23,12 @@ describe('thread status formatting', () => {
     expect(formatThreadStatusLabel('UNRECOGNIZED')).toBe('UNRECOGNIZED')
   })
 
+  it('uses the approval label for both waiting-approval status names', () => {
+    // WAITING_APPROVAL 与 TOOL_WAITING_APPROVAL 对用户都是等待决策，不能显示成正在运行。
+    expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('等待审批')
+    expect(formatThreadStatusLabel('TOOL_WAITING_APPROVAL')).toBe('等待审批')
+  })
+
   // 缺失或无效窗口不能制造上下文占用事实；用量摘要仍应稳定显示。
   it.each([undefined, 0, -1, NaN, Infinity])('omits invalid context window %s', (contextWindow) => {
     const model = buildThreadStatusModel({ contextWindow })

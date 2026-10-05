@@ -1439,6 +1439,7 @@ export function useAgentPaneController({
     focusOnEscape: focused,
     composerRef,
     onPreviewReadinessChange: setComposerReadiness,
+    displayOnly: Boolean(capabilities?.readOnly),
     settings: !owner || owner.type === 'ISSUE_AGENT' || activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadWorkspacePage } from '@/features/ai/thread/ThreadWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
@@ -16,6 +16,7 @@ import type {
 import { setLocale } from '@/shared/i18n'
 
 const CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000999'
+const OTHER_CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000998'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
   const manager = { subscribe: vi.fn(() => () => undefined) }
@@ -150,12 +151,73 @@ function renderPage(initialEntry: string) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
-          <Route path="/threads/:threadId" element={<ThreadWorkspacePage />} />
+          <Route path="/threads/:threadId" element={<ThreadRouteHarness />} />
           <Route path="/chats" element={<div data-testid="chats-page">Chats List</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+}
+
+function ThreadRouteHarness() {
+  const navigate = useNavigate()
+  return (
+    <>
+      <button type="button" onClick={() => navigate(`/threads/${OTHER_CHILD_THREAD_ID}`)}>
+        打开另一个 Thread
+      </button>
+      <ThreadWorkspacePage />
+    </>
+  )
+}
+
+function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
+  return {
+    entryId,
+    sessionId: 'session-child',
+    parentEntryId: null,
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({
+      message: { role: 'USER', contents: [{ type: 'text', text }] },
+    }),
+    createTime: '2026-07-28T10:00:00Z',
+  }
+}
+
+function snapshotFor(
+  targetThreadId: string,
+  overrides: Partial<HarnessThreadSnapshotDTO> = {},
+): HarnessThreadSnapshotDTO {
+  return {
+    ...snapshotWithPendingTool(targetThreadId),
+    thread: thread({
+      threadId: targetThreadId,
+      name: targetThreadId === OTHER_CHILD_THREAD_ID ? 'Idle Child' : 'Waiting Parent',
+      status: targetThreadId === OTHER_CHILD_THREAD_ID ? 'IDLE' : 'WAITING_APPROVAL',
+    }),
+    entries: [
+      userEntry(
+        targetThreadId === OTHER_CHILD_THREAD_ID ? 'child only' : 'parent only',
+        `entry-${targetThreadId}`,
+      ),
+    ],
+    queuedCommands: targetThreadId === OTHER_CHILD_THREAD_ID
+      ? []
+      : [{
+          threadId: targetThreadId,
+          sequence: '1',
+          type: 'USER_MESSAGE',
+          state: 'QUEUED',
+          idempotencyKey: `queued-${targetThreadId}`,
+          payloadJson: JSON.stringify({
+            message: { role: 'USER', contents: [{ type: 'text', text: 'parent queued' }] },
+          }),
+          cancelledAt: null,
+          createTime: '2026-07-28T10:00:02Z',
+        }],
+    toolInvocations: [],
+    ...overrides,
+  }
 }
 
 describe('ThreadWorkspacePage', () => {
@@ -291,5 +353,60 @@ describe('ThreadWorkspacePage', () => {
     expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
     expect(harnessService.getThreadSnapshot).not.toHaveBeenCalledWith('foreign-thread-999')
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
+  })
+
+  it('hides the read-only composer and isolates two child snapshots when the route changes', async () => {
+    // 只读观察页不能留下可输入的父式 composer；切换 child 后旧消息、排队和审批都不得残留。
+    const user = userEvent.setup()
+    localStorage.setItem(
+      'kk-studio.composer-draft.thread:00000000-0000-0000-0000-000000000999',
+      JSON.stringify([{ type: 'TEXT', text: 'stale child draft' }]),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => {
+      if (threadId === OTHER_CHILD_THREAD_ID) {
+        return snapshotFor(OTHER_CHILD_THREAD_ID)
+      }
+      return snapshotFor(CHILD_THREAD_ID, {
+        toolInvocations: snapshotWithPendingTool(CHILD_THREAD_ID).toolInvocations,
+        entries: [
+          userEntry('parent only', 'entry-parent'),
+          ...snapshotWithPendingTool(CHILD_THREAD_ID).entries,
+        ],
+      })
+    })
+
+    renderPage(`/threads/${CHILD_THREAD_ID}`)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发送' })).not.toBeInTheDocument()
+    expect(screen.getByText('parent only')).toBeInTheDocument()
+    expect(screen.getByText('parent queued')).toBeInTheDocument()
+    expect(screen.getByText('等待审批')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '允许' }))
+    await waitFor(() => {
+      expect(harnessService.decideApproval).toHaveBeenCalledWith(
+        CHILD_THREAD_ID,
+        'inv-bash-1',
+        expect.objectContaining({ decision: 'ALLOW' }),
+      )
+    })
+
+    await user.click(screen.getByRole('button', { name: '打开另一个 Thread' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Idle Child').length).toBeGreaterThan(0)
+    })
+    expect(screen.queryByText('parent only')).not.toBeInTheDocument()
+    expect(screen.queryByText('parent queued')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
+    expect(screen.queryByText('等待审批')).not.toBeInTheDocument()
+    expect(screen.queryByText('stale child draft')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(screen.getByText('child only')).toBeInTheDocument()
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(OTHER_CHILD_THREAD_ID)
   })
 })
