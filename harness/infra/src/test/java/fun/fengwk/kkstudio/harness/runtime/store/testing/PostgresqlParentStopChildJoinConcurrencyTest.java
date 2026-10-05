@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -79,9 +80,10 @@ import java.util.function.Function;
  * <ul>
  *   <li><b>Tree Lock 互斥与阻塞</b>：PG 事务级 advisory 锁 {@code lockTree(rootThreadId)} 保证同一执行树的父级 Stop 与子级
  *       Terminal Apply 严格互斥串行化，子级 processor 必须阻塞等待父级 Stop 事务提交；
- *   <li><b>Stop 优先场景下的交付冻结</b>：父级 Stop 提交后，子级后续执行观察到 STOPPED 边界，Join 凭据交付被冻结（不向父级注入活跃命令，不重复交付）；
- *   <li><b>Terminal 优先场景下的交付取消</b>：子级 Terminal Apply 先提交完成 Join 交付（注入 NOTIFICATION）后，父级 Stop
- *       能精确取消该入队命令并保持版本与事实一致；
+ *   <li><b>Stop 优先场景下的交付物化</b>：父级 Stop 提交后，子级后续执行观察到 STOPPED 边界，Join 凭据恰好交付一次并被物化为父级历史 NOTIFICATION
+ *       Entry（保留通知、不唤醒模型、不重复交付）；
+ *   <li><b>Terminal 优先场景下的通知保留</b>：子级 Terminal Apply 先提交完成 Join 交付（入队 NOTIFICATION）后，父级 Stop 在 Stop
+ *       事务内将该通知物化为历史 Entry 并标记 APPLIED，保持版本、交付序列与事实一致；
  *   <li><b>无 Arbitrary Sleep 与确定性 Barrier</b>：全流程通过 {@link CountDownLatch} 编排并发交错时序；
  *   <li><b>全事务原子回滚</b>：子级 Terminal 崩溃或父级 Stop CAS 冲突时，整个 PostgreSQL 事务完整回滚，释放锁且无孤儿或污染数据残留。
  * </ul>
@@ -319,7 +321,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       throws Exception {
     // 测试意图：验证在真实 PostgreSQL 事务中，父线程 Stop 率先获取 Tree Advisory Lock 时，
     // 并发执行的子线程 ThreadProcessor 在尝试获取同树祖先锁时会被 PostgreSQL 事务锁强制阻塞；
-    // 直到父级 Stop 事务提交后，子级 Processor 解除阻塞继续执行，并确认 Join 凭据未向已停止的父级重复或错误注入活跃命令。
+    // 直到父级 Stop 事务提交后，子级 Processor 解除阻塞继续执行，并确认 Join 凭据被物化为已停止父级历史且不重复交付。
     Instant now = T1;
     // 子线程处于 RUNNING 状态，父级 Stop 可顺利停止并取消子级
     ExecutionTreeFixture fixture = seedParentAndChild(now, false);
@@ -391,13 +393,16 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       ThreadProcessResult childResult = childFuture.get(10, TimeUnit.SECONDS);
       assertNotNull(childResult);
 
-      // 验证 PostgreSQL 中的最终状态
+      // 验证 PostgreSQL 中的最终状态：父线程 STOPPED，已停止父级收到的交付通知按 authoritative 语义直接物化为
+      // 历史 NOTIFICATION Entry（不唤醒模型、不进入活跃队列），显式停止边界作为其祖先保留在路径上。
       ThreadState parentState =
           store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+      assertEquals(ThreadExecutionControl.STOPPED, parentState.executionControl());
       EntryPath parentPath = store.transaction(tx -> tx.loadEntryPath(parentState.headEntryId()));
-      TurnEndPayload parentEnd =
-          assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
-      assertEquals(TurnEndOutcome.STOPPED, parentEnd.outcome());
+      NotificationPayload parentNotification =
+          assertInstanceOf(NotificationPayload.class, parentPath.head().payload());
+      assertEquals(fixture.childThreadId(), parentNotification.sourceThreadId());
+      TurnEndPayload parentEnd = stoppedBoundary(parentPath);
       assertEquals(TurnEndReason.USER_STOP, parentEnd.reason());
 
       // 子线程同样被递归 Stop
@@ -419,12 +424,16 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
               || parentCommands.stream().allMatch(c -> c.state() == ThreadCommandState.CANCELLED),
           "Parent commands must not have active custom messages after stop");
 
-      // Join 记录未交付给父级活跃队列（deliveryCommandSequence 为空或被 hold）
+      // Join 凭据恰好交付一次并物化为已停止父级历史；不产生可唤醒模型的活跃命令
       ThreadJoin join =
           store.transaction(tx -> tx.findJoin(fixture.joinInvocationId()).orElseThrow());
-      assertNull(
-          join.deliveryCommandSequence(),
-          "Join must not deliver active sequence to stopped parent");
+      assertEquals(1L, join.deliveryCommandSequence());
+      assertEquals(
+          1L,
+          parentPath.entries().stream()
+              .filter(entry -> entry.payload() instanceof NotificationPayload)
+              .count(),
+          "stopped parent must materialize exactly one delivery notification");
     } finally {
       scheduler.shutdownNow();
     }
@@ -434,8 +443,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
   void childTerminalApplyDeliversReceiptOnceThenParentStopCancelsQueuedDeliveryOnPostgres() {
     // 测试意图：验证子线程率先执行 Terminal Apply 并成功闭合 Turn 时：
     // 1. 在同一个 PostgreSQL 事务内Join 凭据被原子匹配并向父级注入唯一的 NOTIFICATION 回执命令；
-    // 2. 紧接着父线程执行 Stop 时，父级在原子 Stop 事务内将该已入队但未消费的回执命令置为 CANCELLED，
-    //    且 Join 凭据的 deliveryCommandSequence 保持原值，不发生重复交付或序列错乱。
+    // 2. 紧接着父线程执行 Stop 时，父级在原子 Stop 事务内将该已入队但未消费的回执命令物化为历史 NOTIFICATION
+    //    Entry 并标记 APPLIED（保留通知、不唤醒模型），且 Join 凭据的 deliveryCommandSequence 保持原值，不发生重复交付或序列错乱。
     Instant now = T1;
     ExecutionTreeFixture fixture = seedParentAndChild(now, true);
 
@@ -496,23 +505,27 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
               new StopCommand(fixture.parentThreadId(), stopRequestId, parentState.version()));
       assertFalse(stopResult.replayed());
 
-      // 验证 PostgreSQL 数据库中的最终状态：父线程已 STOPPED，已投递的 NOTIFICATION 被标记为 CANCELLED
+      // 验证 PostgreSQL 数据库中的最终状态：父线程 STOPPED，已入队的系统通知在 Stop 事务内被物化为历史
+      // NOTIFICATION Entry 并标记 APPLIED（保留通知、不唤醒模型），停止边界保留在通知之前。
       ThreadState stoppedParent =
           store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+      assertEquals(ThreadExecutionControl.STOPPED, stoppedParent.executionControl());
       EntryPath parentPath = store.transaction(tx -> tx.loadEntryPath(stoppedParent.headEntryId()));
-      TurnEndPayload parentEnd =
-          assertInstanceOf(TurnEndPayload.class, parentPath.head().payload());
-      assertEquals(TurnEndOutcome.STOPPED, parentEnd.outcome());
+      NotificationPayload parentNotification =
+          assertInstanceOf(NotificationPayload.class, parentPath.head().payload());
+      assertEquals(fixture.childThreadId(), parentNotification.sourceThreadId());
+      TurnEndPayload parentEnd = stoppedBoundary(parentPath);
       assertEquals(stopRequestId, parentEnd.closeRequestId());
 
-      ThreadCommand cancelledCmd =
+      ThreadCommand appliedCmd =
           store.transaction(
               tx ->
                   tx.findCommandByIdempotencyKey(
                           fixture.parentThreadId(), fixture.joinInvocationId())
                       .orElseThrow());
-      assertEquals(ThreadCommandState.CANCELLED, cancelledCmd.state());
-      assertEquals(stopRequestId, cancelledCmd.stopRequestId());
+      assertEquals(ThreadCommandState.APPLIED, appliedCmd.state());
+      assertEquals(parentPath.head().id(), appliedCmd.appliedEntryId());
+      assertNull(appliedCmd.stopRequestId());
 
       // Join 凭据交付序列号依然是 1（精确一次交付，没有二次修改）
       ThreadJoin finalJoin =
@@ -583,7 +596,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
               });
       assertTrue(allParentCommands.size() <= 1, "Parent must not receive duplicate join commands");
 
-      // 校验历史中同一 invocationId 的 command 记录至多 1 条
+      // 校验同一 invocationId 的交付命令至多 1 条，且从未重复物化为多条通知历史
       var customCmd =
           store.transaction(
               tx ->
@@ -591,9 +604,20 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                       fixture.parentThreadId(), fixture.joinInvocationId()));
       if (customCmd.isPresent()) {
         assertTrue(
-            customCmd.get().state() == ThreadCommandState.CANCELLED
-                || customCmd.get().state() == ThreadCommandState.QUEUED);
+            customCmd.get().state() == ThreadCommandState.APPLIED
+                || customCmd.get().state() == ThreadCommandState.QUEUED
+                || customCmd.get().state() == ThreadCommandState.CANCELLED);
       }
+      ThreadState finalParent =
+          store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+      EntryPath finalParentPath =
+          store.transaction(tx -> tx.loadEntryPath(finalParent.headEntryId()));
+      assertTrue(
+          finalParentPath.entries().stream()
+                  .filter(entry -> entry.payload() instanceof NotificationPayload)
+                  .count()
+              <= 1,
+          "Parent history must not contain duplicate delivery notifications");
     } finally {
       scheduler.shutdownNow();
     }
@@ -706,5 +730,18 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store.transaction(tx -> tx.findThread(fixture.childThreadId()).orElseThrow());
     assertEquals(0L, child.version());
     assertEquals(fixture.userMsgId(), child.headEntryId());
+  }
+
+  /** 返回路径上最后一个 STOPPED TURN_END；不存在则断言失败。 */
+  private static TurnEndPayload stoppedBoundary(EntryPath path) {
+    TurnEndPayload boundary = null;
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof TurnEndPayload end
+          && end.outcome() == TurnEndOutcome.STOPPED) {
+        boundary = end;
+      }
+    }
+    assertNotNull(boundary, "path must retain a STOPPED TURN_END boundary");
+    return boundary;
   }
 }
