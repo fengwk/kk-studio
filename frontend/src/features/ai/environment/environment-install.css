@@ -34,13 +34,6 @@
   min-width: 0;
 }
 
-.environment-install-modal .install-field + .form-group,
-.environment-install-modal .form-group + .form-group,
-.environment-install-modal .form-group + .ui-checkbox,
-.environment-install-modal .ui-checkbox + .install-field {
-  margin-top: 16px;
-}
-
 .environment-install-modal .confirm-modal-description {
   margin-bottom: 8px;
 }
