@@ -37,9 +37,9 @@ No interactive prompts. Unknown and duplicate options fail closed.
 Fixed layout: ~/.kk-studio (0700), daemon.json and daemon.token (0600),
 lib/kk-studio-daemon.jar, logs/ (macOS), backups/ (private unique backups).
 Uninstall removes only the owned service and program; config/token/data remain.
-After install, confirm the environment reports READY in Studio.
-No automatic rollback: after publication failures, inspect status/logs and use
-the reported backup for manual recovery or retry install with corrected inputs.
+After install, return to Studio and confirm the environment reports READY.
+No automatic rollback: after publication failures, use the reported backup and
+one status or log command for manual recovery, or retry install with corrected inputs.
 
 Linux uses systemd --user; macOS uses the current user's GUI LaunchAgent.
 Status exits 0 when the unit is active / LaunchAgent is loaded, 1 if absent,
@@ -49,7 +49,21 @@ the startup and stability windows (non-negative integers; 0 checks immediately).
 EOF
 }
 
-fail() { echo "ERROR: $*" >&2; exit 1; }
+fail() {
+  local action=安装 detail=$*
+  if [ "$1" = "--uninstall" ]; then
+    action=卸载
+    shift
+    detail=$*
+  fi
+  echo "${action}失败：${detail}" >&2
+  if [ "$action" = 卸载 ]; then
+    echo "下一步：按上面的原因处理后再重试卸载。需要诊断时运行 bash install.sh status。" >&2
+  else
+    echo "下一步：按上面的原因修正后重试安装。需要诊断时运行 bash install.sh status。" >&2
+  fi
+  exit 1
+}
 require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 absolute_path() {
   case "$1" in /*) ;; *) fail "$2 must be an absolute path" ;; esac
@@ -119,20 +133,13 @@ cleanup() {
   for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do rm -f "$path"; done
   if [ -n "$DOWNLOAD_DIR" ]; then rm -rf "$DOWNLOAD_DIR"; fi
   if [ "$code" -ne 0 ] && [ "$PUBLISHED" = true ]; then
-    echo "ERROR: installation failed after publication; no automatic rollback." >&2
-    echo "Published installation: $INSTALL_ROOT; service definition: $SERVICE_PATH" >&2
-    echo "Prior managed files backup: ${BACKUP_DIR:-none (first installation)}" >&2
-    echo "Inspect: bash install.sh status" >&2
+    echo "安装失败：发布后启动或注册未完成。未自动回滚，配置和数据未自动恢复。" >&2
+    echo "备份：${BACKUP_DIR:-无（首次安装）}" >&2
     if [ "$HOST_OS" = Linux ]; then
-      echo "Logs: journalctl --user -u $SERVICE_NAME; systemctl --user status $SERVICE_NAME" >&2
-      echo "Before manual recovery: systemctl --user stop $SERVICE_NAME" >&2
+      echo "下一步：运行 journalctl --user -u $SERVICE_NAME -n 50 查看原因。需要诊断时运行 bash install.sh status。" >&2
     else
-      echo "Logs: $STDOUT_LOG and $STDERR_LOG; launchctl print $LAUNCHD_TARGET" >&2
-      echo "Before manual recovery: launchctl bootout $LAUNCHD_TARGET (if loaded)" >&2
+      echo "下一步：查看日志 $STDERR_LOG。需要诊断时运行 bash install.sh status。" >&2
     fi
-    echo "Inspect the private backup. Manual restore destinations: kk-studio-daemon.jar -> $INSTALLED_JAR; daemon.json -> $INSTALLED_CONFIG; daemon.token -> $INSTALLED_TOKEN; service definition -> $SERVICE_PATH." >&2
-    echo "Keep config/token mode 0600 and private directories 0700; reload/restart the user service after manual recovery." >&2
-    echo "Alternatively correct the staged inputs and retry install. Config/token/data are not automatically reverted." >&2
   fi
   exit "$code"
 }
@@ -142,33 +149,13 @@ trap 'exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
-  echo "ERROR: refusing unmanaged service: $reason" >&2
-  echo "Requested service definition: $SERVICE_PATH" >&2
-  echo "Actual service definition: $actual_path" >&2
-  echo "Inspect/export the definition before any manual action; do not fabricate the ownership marker." >&2
-  printf 'Inspect: ls -ld %q; cat %q\n' "$actual_path" "$actual_path" >&2
+  echo "安装失败：拒绝操作非受管服务（$reason）。未自动回滚，未知文件未变更。" >&2
+  echo "服务定义：$actual_path" >&2
   if [ "$HOST_OS" = Linux ]; then
-    echo "Inspect: systemctl --user cat $SERVICE_NAME; systemctl --user status $SERVICE_NAME" >&2
-    echo "Manual stop/disable (only after confirming ownership): systemctl --user disable --now $SERVICE_NAME" >&2
+    echo "下一步：运行 systemctl --user status $SERVICE_NAME 确认归属后再处理。不要伪造所有权标记，不要改动未知文件。" >&2
   else
-    echo "Inspect: launchctl print $LAUNCHD_TARGET; plutil -lint \"$SERVICE_PATH\"" >&2
-    echo "Manual stop (only after confirming ownership): launchctl bootout $LAUNCHD_TARGET" >&2
+    echo "下一步：运行 launchctl print $LAUNCHD_TARGET 确认归属后再处理。不要伪造所有权标记，不要改动未知文件。" >&2
   fi
-  # These are literal instructions, not executed shell expressions.
-  # shellcheck disable=SC2016
-  printf 'Manual export (only after inspection): backup=$(umask 077; mktemp -d "$HOME/daemon-service-backup.XXXXXXXX"); cp -p %q "$backup/"\n' "$actual_path" >&2
-  case "$actual_path" in
-    "$HOME/"*)
-      # shellcheck disable=SC2016
-      printf 'Manual move (only a confirmed user-owned definition, never its unknown data): mv %q "$backup/"\n' "$actual_path" >&2 ;;
-    *) echo "Manual cleanup: this definition is outside HOME; ask its administrator/owner to resolve the conflict. Do not move/delete system files." >&2 ;;
-  esac
-  if [ "$HOST_OS" = Linux ]; then
-    echo "Reload: systemctl --user daemon-reload" >&2
-  else
-    echo "After the job is unloaded, retry the intended command." >&2
-  fi
-  echo "Preserve unknown JAR/config/token/data; then retry the intended install/uninstall command." >&2
   exit 1
 }
 require_ownership() {
@@ -216,12 +203,13 @@ launchd_loaded() { launchctl print "$LAUNCHD_TARGET" >/dev/null 2>&1; }
 stop_launchd() {
   local attempt
   if launchd_loaded; then
-    launchctl bootout "$LAUNCHD_TARGET" || fail "cannot bootout $LAUNCHD_TARGET; nothing was replaced or removed"
+    launchctl bootout "$LAUNCHD_TARGET" ||
+      fail ${1:+"$1"} "无法停止服务，未替换或删除任何文件。"
     for ((attempt=0; attempt<=VERIFY_TIMEOUT_SECONDS; attempt++)); do
       if ! launchd_loaded; then return 0; fi
       if (( attempt < VERIFY_TIMEOUT_SECONDS )); then sleep 1; fi
     done
-    fail "$LAUNCHD_TARGET is still loaded after bootout; nothing was replaced or removed"
+    fail ${1:+"$1"} "服务停止后仍处于加载状态，未替换或删除任何文件。"
   fi
 }
 resolve_java_home() {
@@ -229,15 +217,15 @@ resolve_java_home() {
   candidate=$OPT_JAVA_HOME
   if [ -z "$candidate" ]; then candidate=${JAVA_HOME_21:-${JAVA_HOME:-}}; fi
   if [ -z "$candidate" ]; then
-    java_path=$(command -v java) || fail "JDK 21 not found; set JAVA_HOME_21 or --java-home"
+    java_path=$(command -v java) || fail "未找到 JDK 21。请设置 JAVA_HOME_21 或 --java-home，或将 java 加入 PATH。"
     candidate=$(cd "$(dirname "$java_path")/.." && pwd -P)
   fi
   absolute_path "$candidate" "Java home"
   # Only the runtime is needed: the released JAR is never compiled here.
-  [ -x "$candidate/bin/java" ] || fail "JDK 21 requires an executable bin/java at $candidate/bin/java"
+  [ -x "$candidate/bin/java" ] || fail "所选 JDK 21 缺少可执行的 bin/java：$candidate/bin/java"
   version=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS "$candidate/bin/java" -version 2>&1) ||
-    fail "cannot execute the selected Java at $candidate/bin/java"
-  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "JDK 21 is required (selected Java is not JDK 21)" ;; esac
+    fail "无法执行所选 Java：$candidate/bin/java"
+  case "${version%%$'\n'*}" in *'version "21"'* | *'version "21.'*) ;; *) fail "需要 JDK 21（当前 Java 不是 JDK 21）" ;; esac
   SELECTED_JAVA_HOME=$candidate
 }
 release_curl() {
@@ -247,7 +235,7 @@ download_daemon() {
   local effective_url asset checksum expected actual pattern
   require_cmd curl
   effective_url=$(release_curl --output /dev/null --write-out '%{url_effective}' "$RELEASE_BASE/latest") ||
-    fail "cannot resolve latest official release"
+    fail "无法下载：不能解析最新正式版本。请检查网络后重试。"
   case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
     *) fail "latest release did not resolve to an official immutable release tag" ;; esac
   [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
@@ -257,17 +245,17 @@ download_daemon() {
   DOWNLOADED_JAR="$DOWNLOAD_DIR/$asset"
   checksum="$DOWNLOADED_JAR.sha256"
   release_curl --output "$DOWNLOADED_JAR" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
-    fail "cannot download daemon release JAR"
+    fail "无法下载：正式版本 JAR 获取失败。请检查网络后重试。"
   release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
-    fail "cannot download daemon release SHA256"
+    fail "无法下载：正式版本 SHA256 获取失败。请检查网络后重试。"
   expected=$(cat "$checksum")
   pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
-  [[ $expected =~ $pattern ]] || fail "invalid daemon release SHA256 file"
+  [[ $expected =~ $pattern ]] || fail "校验失败：SHA256 文件格式无效。"
   expected=${BASH_REMATCH[1]}
   if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$DOWNLOADED_JAR");
   else require_cmd shasum; actual=$(shasum -a 256 "$DOWNLOADED_JAR"); fi
   expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
-  [ "${actual%% *}" = "$expected" ] || fail "daemon release SHA256 mismatch"
+  [ "${actual%% *}" = "$expected" ] || fail "校验失败：SHA256 与正式版本不一致。"
 }
 # Do not echo arbitrary JAR diagnostics. The release may print one stable, value-free
 # `Invalid daemon configuration:` line naming the field path and rule; surface only that
@@ -299,10 +287,10 @@ recheck_inputs() {
 }
 preflight() {
   local output detail
-  [ -s "$DOWNLOADED_JAR" ] || fail "downloaded JAR is empty"
+  [ -s "$DOWNLOADED_JAR" ] || fail "校验失败：下载的 JAR 为空。"
   output=$(env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
     "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --version 2>&1) ||
-    fail "downloaded daemon JAR is not executable"
+    fail "校验失败：下载的 JAR 无法执行。"
   [ "$output" = "kk-studio-daemon ${RELEASE_TAG#v}" ] || fail "daemon --version does not match resolved release tag"
   recheck_inputs
   # Validate exactly the secure snapshot that will be published, not inputs reread later.
@@ -313,8 +301,8 @@ preflight() {
   TOKEN_FILE="$DOWNLOAD_DIR/daemon.token"
   if ! env -u JAVA_TOOL_OPTIONS -u _JAVA_OPTIONS -u JDK_JAVA_OPTIONS \
     "$SELECTED_JAVA_HOME/bin/java" -jar "$DOWNLOADED_JAR" --check-config "$CONFIG_FILE" >"$DOWNLOAD_DIR/preflight.log" 2>&1; then
-    detail=$(preflight_failure_detail) && fail "$detail"
-    fail "downloaded release rejected --check-config or staged configuration/token; correct inputs or publish a release supporting --check-config, then retry. Existing installation unchanged"
+    detail=$(preflight_failure_detail) && fail "配置校验失败：$detail 现有安装未改动。"
+    fail "配置校验失败：当前版本拒绝 --check-config 或暂存的配置与令牌。请修正输入，或使用支持 --check-config 的版本后重试。现有安装未改动。"
   fi
   output=$(cat "$DOWNLOAD_DIR/preflight.log")
   [ "$output" = "Daemon configuration is valid" ] ||
@@ -417,21 +405,21 @@ verify_running() {
       if systemctl --user is-active --quiet "$SERVICE_NAME"; then active=true; fi
     elif pid=$(launchctl kickstart -p "$LAUNCHD_TARGET" 2>/dev/null); then
       pid=${pid//[[:space:]]/}
-      case "$pid" in '' | *[!0-9]*) fail "LaunchAgent did not report a numeric process id" ;; esac
+      case "$pid" in '' | *[!0-9]*) fail "服务启动失败：LaunchAgent 没有报告数字进程号。" ;; esac
       if kill -0 "$pid" 2>/dev/null; then active=true; fi
     fi
     if [ "$active" = true ]; then
       for ((stable=0; stable<VERIFY_STABLE_SECONDS; stable++)); do
         sleep 1
         if [ "$HOST_OS" = Linux ]; then
-          systemctl --user is-active --quiet "$SERVICE_NAME" || fail "service did not stay active"
-        else kill -0 "$pid" 2>/dev/null || fail "LaunchAgent did not stay alive"; fi
+          systemctl --user is-active --quiet "$SERVICE_NAME" || fail "服务启动失败：服务未能保持运行。"
+        else kill -0 "$pid" 2>/dev/null || fail "服务启动失败：LaunchAgent 未能保持运行。"; fi
       done
       return 0
     fi
     if (( attempt < VERIFY_TIMEOUT_SECONDS )); then sleep 1; fi
   done
-  fail "service is not running after start"
+  fail "服务启动失败：服务启动后没有保持运行。"
 }
 cmd_install() {
   local option value
@@ -487,16 +475,15 @@ cmd_install() {
     systemctl --user restart "$SERVICE_NAME"
   else launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH"; fi
   verify_running
-  echo "Installed: $INSTALLED_JAR"
-  echo "Configuration: $INSTALLED_CONFIG"
-  echo "Service: $SERVICE_PATH"
-  echo "Next: confirm the environment reports READY in Studio."
-  if [ -n "$BACKUP_DIR" ]; then echo "Prior managed files backup: $BACKUP_DIR"; fi
+  echo "KK Studio 环境安装完成，服务已启动。"
+  echo
+  echo "请返回 Studio，确认环境状态为 READY。"
+  if [ -n "$BACKUP_DIR" ]; then echo "原安装已备份：$BACKUP_DIR"; fi
 }
 cmd_status() {
   require_manager
   require_ownership
-  [ -f "$SERVICE_PATH" ] || { echo "daemon is not installed: $SERVICE_PATH" >&2; return 1; }
+  [ -f "$SERVICE_PATH" ] || { echo "未安装：找不到受管服务定义 $SERVICE_PATH" >&2; return 1; }
   check_managed_paths
   if [ "$HOST_OS" = Linux ]; then
     local code=0
@@ -518,16 +505,17 @@ cmd_uninstall() {
   require_ownership
   check_managed_paths
   if [ ! -f "$SERVICE_PATH" ]; then
-    echo "daemon is not installed; preserved all files under $INSTALL_ROOT"
+    echo "KK Studio 环境未安装受管服务。配置、数据和备份均已保留。"
     return 0
   fi
   if [ "$HOST_OS" = Linux ]; then
-    systemctl --user disable --now "$SERVICE_NAME" || fail "cannot stop/disable service; nothing was removed"
-  else stop_launchd; fi
+    systemctl --user disable --now "$SERVICE_NAME" || fail --uninstall "无法停止或禁用服务，未删除任何文件"
+  else stop_launchd --uninstall; fi
   rm -f "$SERVICE_PATH" "$INSTALLED_JAR"
   if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload; fi
-  echo "Removed: $SERVICE_PATH and $INSTALLED_JAR"
-  echo "Preserved: config/token/data/logs/backups under $INSTALL_ROOT"
+  echo "KK Studio 环境已卸载，受管服务和程序已移除。"
+  echo
+  echo "配置、数据和备份已保留。"
 }
 main() {
   local action=${1:-help}

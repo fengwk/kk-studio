@@ -155,7 +155,7 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
             "Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr",
             staged,
         )
-        self.assertIn("unrecognized output", staged)
+        self.assertIn("输出无法识别", staged)
 
     def test_task_is_owned_by_an_exact_per_user_marker(self):
         """A SID-scoped name plus exact Description marker prevents cross-user clobbering."""
@@ -167,7 +167,7 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         )
         body = function_body("Assert-ManagedTask")
         self.assertIn("$Task.Description -ne $script:TaskDescription", body)
-        self.assertIn("refusing to touch unmanaged Scheduled Task", body)
+        self.assertIn("拒绝操作非受管计划任务", body)
 
     def test_scheduled_action_executes_java_directly_without_wrapper_or_redirection(self):
         """Task Scheduler must own java.exe itself so lifecycle state is not a shell process."""
@@ -311,14 +311,16 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
                       '"backups"', "Guid", "Assert-PrivateFile", "Copy-PrivateFile", "Export-ScheduledTask"):
             self.assertIn(value, backup)
         body = function_body("Invoke-Install")
-        self.assertIn("No automatic rollback", body)
-        self.assertIn("Targets:", body)
-        self.assertIn("Backup:", body)
+        self.assertIn("未自动回滚", body)
+        self.assertIn("备份：", body)
+        self.assertNotIn("Targets:", body)
         self.assertNotIn("Publish-PrivateFile", body[body.index("    catch {"):])
         conflict = function_body("Assert-ManagedTask")
-        for value in ("missing exact ownership marker", "Export-ScheduledTask", "Stop-ScheduledTask",
-                      "Disable-ScheduledTask", "Unregister-ScheduledTask", "Get-ConflictBackupCommands", "retry install"):
+        for value in ("缺少精确所有权标记", "Get-ScheduledTask", "不要伪造所有权标记"):
             self.assertIn(value, conflict)
+        for removed in ("Export-ScheduledTask", "Stop-ScheduledTask", "Unregister-ScheduledTask",
+                        "Get-ConflictBackupCommands"):
+            self.assertNotIn(removed, conflict)
 
     def test_uninstall_stops_and_unregisters_before_removing_the_jar(self):
         """Stop or unregister failure must leave the managed JAR in place."""

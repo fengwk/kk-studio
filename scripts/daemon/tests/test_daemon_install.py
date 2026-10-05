@@ -35,7 +35,10 @@ class UnixInstallContracts:
         self.assert_private(fixture.jar, 0o644)
         self.assert_private(fixture.service, 0o644)
         self.assertFalse((fixture.home / ".local").exists())
-        self.assertIn("READY in Studio", result.stdout)
+        self.assertIn("KK Studio 环境安装完成，服务已启动。", result.stdout)
+        self.assertIn("请返回 Studio，确认环境状态为 READY。", result.stdout)
+        self.assertNotIn("Installed:", result.stdout)
+        self.assertNotIn(str(fixture.jar), result.stdout)
         self.assert_no_secret(fixture, result)
         self.assert_clean(fixture)
         checks = [args for args in fixture.calls("java") if "--check-config" in args]
@@ -91,7 +94,7 @@ class UnixInstallContracts:
                 self.assert_clean(fixture)
                 if mode == "old-jar":
                     self.assertIn("--check-config", result.stderr)
-                    self.assertIn("retry", result.stderr)
+                    self.assertIn("重试", result.stderr)
 
     def test_schema_and_optional_bash_preflight_belong_to_jar(self):
         fixture = self.fixture()
@@ -285,20 +288,16 @@ class UnixInstallContracts:
                     result = fixture.install() if action == "install" else fixture.run(action)
                     self.assertNotEqual(0, result.returncode)
                     lines = result.stderr.splitlines()
-                    self.assertEqual(f"ERROR: refusing unmanaged service: {reason}", lines[0])
-                    self.assertIn(f"Requested service definition: {fixture.service}", lines)
-                    self.assertIn(f"Actual service definition: {fixture.service}", lines)
-                    self.assertIn(f"Inspect: ls -ld {fixture.service}; cat {fixture.service}", lines)
-                    self.assertIn("mktemp -d", result.stderr)
-                    self.assertIn("cp -p", result.stderr)
-                    self.assertIn(f'mv {fixture.service} "$backup/"', result.stderr)
-                    self.assertIn("Preserve unknown JAR/config/token/data; then retry", result.stderr)
+                    self.assertEqual(f"安装失败：拒绝操作非受管服务（{reason}）。未自动回滚，未知文件未变更。", lines[0])
+                    self.assertIn(f"服务定义：{fixture.service}", lines)
+                    self.assertNotIn("mktemp -d", result.stderr)
+                    self.assertNotIn("cp -p", result.stderr)
+                    self.assertNotIn("mv ", result.stderr)
                     if fixture.operating_system == "Linux":
-                        self.assertIn(f"systemctl --user disable --now {SERVICE_NAME}", result.stderr)
-                        self.assertIn("Reload: systemctl --user daemon-reload", result.stderr)
+                        self.assertIn(f"下一步：运行 systemctl --user status {SERVICE_NAME} 确认归属后再处理。", result.stderr)
                     else:
-                        self.assertIn(f"Manual stop (only after confirming ownership): launchctl bootout {fixture.target}",
-                                      result.stderr)
+                        self.assertIn(f"下一步：运行 launchctl print {fixture.target} 确认归属后再处理。", result.stderr)
+                        self.assertNotIn("launchctl bootout", result.stderr)
                         self.assertNotIn("launchctl disable", result.stderr)
                         self.assertNotIn("launchctl enable", result.stderr)
                     self.assertNotIn("curl", fixture.tools())
@@ -317,7 +316,7 @@ class UnixInstallContracts:
                 fixture.reset_record()
                 result = fixture.install(env={"FAKE_JAVA_MODE": mode})
                 self.assertNotEqual(0, result.returncode)
-                self.assertIn(f"ERROR: {marker}", result.stderr.splitlines())
+                self.assertIn(f"安装失败：配置校验失败：{marker} 现有安装未改动。", result.stderr.splitlines())
                 self.assertNotIn("at java.base", result.stderr)
                 self.assertEqual(before, fixture.snapshot())
                 self.assert_no_switch(fixture)
@@ -332,7 +331,8 @@ class UnixInstallContracts:
                 self.assertFalse(any(line.startswith("Invalid daemon configuration:")
                                      for line in result.stderr.splitlines()))
                 self.assertNotIn("unknown option", result.stderr)
-                self.assertIn("rejected --check-config", result.stderr)
+                self.assertIn("配置校验失败", result.stderr)
+                self.assertIn("--check-config", result.stderr)
                 self.assertEqual(before, fixture.snapshot())
                 self.assert_no_switch(fixture)
                 self.assert_clean(fixture)
@@ -380,7 +380,7 @@ else:
                 self.assertNotIn("curl", fixture.tools())
                 self.assert_no_switch(fixture)
                 if target_kind == "service":
-                    for text in ("belongs to another user", str(target), "Manual", "retry"):
+                    for text in ("belongs to another user", str(target), "未自动回滚", "下一步"):
                         self.assertIn(text, result.stderr)
 
     def test_partial_publication_failure_reports_original_backup_and_cleans_staging(self):
@@ -400,7 +400,7 @@ os.execv({native_mv!r}, [{native_mv!r}] + sys.argv[1:])
         self.assertNotEqual(0, result.returncode)
         backup = next((fixture.install_root / "backups").iterdir())
         self.assertIn(str(backup), result.stderr)
-        self.assertIn("after publication", result.stderr)
+        self.assertIn("发布后启动或注册未完成", result.stderr)
         self.assertEqual("published-new-jar", fixture.jar.read_text())
         self.assertEqual(before[str(fixture.config)], fixture.config.read_bytes())
         self.assertEqual(before[str(fixture.token)], fixture.token.read_bytes())
@@ -500,7 +500,7 @@ class TestLinuxInstall(UnixInstallContracts, FixtureTestCase):
         result = fixture.install(env={"FAKE_FRAGMENT_PATH": "/etc/systemd/user/kk-studio-daemon.service"})
         self.assertNotEqual(0, result.returncode)
         self.assertIn("/etc/systemd/user/kk-studio-daemon.service", result.stderr)
-        self.assertIn("Manual", result.stderr)
+        self.assertIn("未自动回滚", result.stderr)
         self.assertNotIn("curl", fixture.tools())
 
     def test_different_or_missing_fragment_preserves_managed_files(self):
@@ -587,9 +587,9 @@ class TestLinuxInstall(UnixInstallContracts, FixtureTestCase):
             })
             self.assertNotEqual(0, result.returncode)
             backup = next((fixture.install_root / "backups").iterdir())
-            for expected in ("after publication", "no automatic rollback", str(backup),
-                             str(fixture.install_root), "journalctl", "manual", "retry"):
+            for expected in ("发布后启动或注册未完成", "未自动回滚", str(backup), "journalctl"):
                 self.assertIn(expected, result.stderr)
+            self.assertNotIn("systemctl --user stop", result.stderr)
             self.assertEqual(before[str(fixture.jar)], (backup / fixture.jar.name).read_bytes())
             self.assertEqual("new-jar", fixture.jar.read_text())
             self.assert_no_secret(fixture, result)
@@ -643,7 +643,7 @@ class TestInstallInterface(FixtureTestCase):
             self.assert_ok(result)
             self.assertIn("--config-file", result.stdout)
             self.assertIn("--token-file", result.stdout)
-            self.assertIn("READY in Studio", result.stdout)
+            self.assertIn("confirm the environment reports READY", result.stdout)
             for old in ("upgrade", "--from-source", "--gateway-uri", "--version",
                         "--registration-token", "interactive prompts via",
                         "javac", "compiler", "default Bash"):
