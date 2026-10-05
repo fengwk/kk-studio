@@ -68,8 +68,9 @@ configured (or default) Bash from the daemon config; no PATH Bash is assumed her
 Fixed layout: %USERPROFILE%\.kk-studio\daemon.json, daemon.token, lib, logs, backups.
 Task: kk-studio-environment-daemon-<current-user-SID>
 Install replaces program/config/token and restarts, preserving runtime data.
-Private backups precede replacement. Failures require manual restoration; no automatic rollback.
+Private backups precede replacement. Failures do not roll back automatically.
 Uninstall is idempotent and preserves config/token/data/backups.
+After install, return to Studio and confirm the environment reports READY.
 Status exits 0 when Running, 1 when absent, 3 otherwise.
 
 The task executes java.exe directly with only --config (UTF-8 Base64 machine encoding).
@@ -81,8 +82,14 @@ DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 are nonnegat
 }
 
 function Throw-Failure {
-    param([Parameter(Mandatory = $true)][string] $Message)
-    throw [System.InvalidOperationException]::new($Message)
+    param(
+        [Parameter(Mandatory = $true)][string] $Message,
+        [ValidateSet("安装", "卸载")][string] $Action = "安装"
+    )
+    $next = if ($Action -eq "卸载") { "处理后再重试卸载" } else { "修正后重试安装" }
+    throw [System.InvalidOperationException]::new(
+        "${Action}失败：${Message}`n下一步：按上面的原因${next}。需要诊断时运行 .\install.ps1 status。"
+    )
 }
 
 function Assert-NoControlCharacters {
@@ -309,12 +316,8 @@ function Assert-ManagedLayout {
     param([bool] $HasTask)
     if (-not $HasTask -and (Test-Path -LiteralPath $script:InstalledJar)) {
         $path = ConvertTo-PowerShellLiteral -Value $script:InstalledJar
-        Throw-Failure ("Unowned program conflict: $($script:InstalledJar). No managed task exists.`n" +
-            "Inspect: Get-Item -LiteralPath $path; Get-FileHash -LiteralPath $path`n" +
-            (Get-ConflictBackupCommands) + "`n" +
-            "After inspection, preserve the unknown program: Move-Item -LiteralPath $path " +
-            "-Destination (Join-Path `$backup 'kk-studio-daemon.jar'). " +
-            "Do not delete unknown artifacts/data. Then retry install.")
+        Throw-Failure ("拒绝覆盖无受管任务的程序（$($script:InstalledJar)）。未自动回滚，未知文件未变更。" +
+            "`n检查：Get-FileHash -LiteralPath $path")
     }
     foreach ($directory in @($script:InstallRoot, (Split-Path -Parent $script:InstalledJar),
         (Join-Path $script:InstallRoot "logs"), (Join-Path $script:InstallRoot "backups"))) {
@@ -331,19 +334,6 @@ function Assert-ManagedLayout {
 function ConvertTo-PowerShellLiteral {
     param([Parameter(Mandatory = $true)][string] $Value)
     return "'" + $Value.Replace("'", "''") + "'"
-}
-
-function Get-ConflictBackupCommands {
-    # Print executable recovery instructions, never execute them or export an unknown task.
-    return ("Create a unique owner-private backup before export/move:`n" +
-        "`$backup = Join-Path `$env:USERPROFILE ('kk-studio-conflict-' + [Guid]::NewGuid().ToString('N')); " +
-        "New-Item -ItemType Directory -Path `$backup; " +
-        "`$owner = [Security.Principal.WindowsIdentity]::GetCurrent().User; " +
-        "`$acl = [Security.AccessControl.DirectorySecurity]::new(); " +
-        "`$acl.SetOwner(`$owner); `$acl.SetAccessRuleProtection(`$true, `$false); " +
-        "`$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(" +
-        "`$owner, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow')); " +
-        "Set-Acl -LiteralPath `$backup -AclObject `$acl")
 }
 
 function Backup-ManagedFiles {
@@ -536,7 +526,7 @@ function Assert-Jdk21 {
     $output = $result.Stdout + $result.Stderr
     if ($output -notmatch 'version\s+"21(?:[.\-+][^"]*)?"') {
         $firstLine = ($output -split "\r?\n", 2)[0]
-        Throw-Failure "JDK 21 is required (found: $firstLine)"
+        Throw-Failure "需要 JDK 21（当前为：$firstLine）"
     }
     return $resolved
 }
@@ -559,10 +549,7 @@ function Resolve-JavaHome {
         $bin = Split-Path -Parent $javaCommand.Source
         return Assert-Jdk21 -Candidate (Split-Path -Parent $bin)
     }
-    Throw-Failure (
-        "JDK 21 not found: set JAVA_HOME_21 or JAVA_HOME, pass -JavaHome, " +
-        "or put java.exe on PATH"
-    )
+    Throw-Failure "未找到 JDK 21。请设置 JAVA_HOME_21 或 JAVA_HOME，传入 -JavaHome，或将 java.exe 加入 PATH。"
 }
 
 function Resolve-InstallInputs {
@@ -667,11 +654,11 @@ function Prepare-StagedJar {
     # configuration or credential values.
     $detail = Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr
     if ($null -ne $detail) {
-        Throw-Failure "$detail Existing installation unchanged."
+        Throw-Failure "配置校验失败：$detail 现有安装未改动。"
     }
     Throw-Failure (
-        "release --check-config failed (exit code $($result.ExitCode)) with unrecognized output; " +
-        "the downloaded release may predate the unified --config contract. Existing installation unchanged."
+        "配置校验失败：--check-config 未通过（退出码 $($result.ExitCode)），且输出无法识别。" +
+        "下载的版本可能早于统一 --config 约定。现有安装未改动。"
     )
 }
 
@@ -688,9 +675,15 @@ function Get-ReleaseJar {
     try {
         [Net.ServicePointManager]::SecurityProtocol =
             $savedProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $release = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
-            -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" }
+        try {
+            $release = Invoke-RestMethod `
+                -Uri "https://api.github.com/repos/fengwk/kk-studio/releases/latest" `
+                -Headers @{ Accept = "application/vnd.github+json"; "User-Agent" = "kk-studio-installer" }
+        }
+        catch {
+            if ($_.Exception -is [System.InvalidOperationException]) { throw }
+            Throw-Failure "无法下载：不能解析最新正式版本。请检查网络后重试。"
+        }
         $tag = $release.tag_name
         Assert-ReleaseTag -Tag $tag
         $script:ResolvedReleaseTag = $tag
@@ -702,19 +695,25 @@ function Get-ReleaseJar {
         New-PrivateDirectory -Path $script:DownloadDirectory
         $script:BuiltJar = Join-Path $script:DownloadDirectory $asset
         $checksumPath = "$($script:BuiltJar).sha256"
-        Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset" `
-            -OutFile $script:BuiltJar | Out-Null
-        Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset.sha256" `
-            -OutFile $checksumPath | Out-Null
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset" `
+                -OutFile $script:BuiltJar | Out-Null
+            Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset.sha256" `
+                -OutFile $checksumPath | Out-Null
+        }
+        catch {
+            if ($_.Exception -is [System.InvalidOperationException]) { throw }
+            Throw-Failure "无法下载：正式版本获取失败。请检查网络后重试。"
+        }
         $checksum = [IO.File]::ReadAllText($checksumPath)
         $pattern = "\A([0-9a-fA-F]{64})  " + [regex]::Escape($asset) + "\r?\n\z"
         if ($checksum -cnotmatch $pattern) {
-            Throw-Failure "invalid release checksum: expected exactly one matching asset"
+            Throw-Failure "校验失败：SHA256 文件格式无效。"
         }
         $expectedHash = $Matches[1]
         $actualHash = (Get-FileHash -LiteralPath $script:BuiltJar -Algorithm SHA256).Hash
         if ($actualHash -ne $expectedHash) {
-            Throw-Failure "release checksum mismatch"
+            Throw-Failure "校验失败：SHA256 与正式版本不一致。"
         }
     }
     finally {
@@ -836,16 +835,9 @@ function Assert-ManagedTask {
     param([Parameter(Mandatory = $true)] $Task)
     if ($Task.Description -ne $script:TaskDescription) {
         $name = ConvertTo-PowerShellLiteral -Value $script:TaskName
-        Throw-Failure ("refusing to touch unmanaged Scheduled Task \$($script:TaskName): " +
-            "missing exact ownership marker. Refusing automatic modification of this task.`n" +
-            "Inspect: Get-ScheduledTask -TaskName $name -TaskPath '\' | Format-List *`n" +
-            (Get-ConflictBackupCommands) + "`n" +
-            "Export-ScheduledTask -TaskName $name -TaskPath '\' | Set-Content (Join-Path `$backup 'task.xml')`n" +
-            "After reviewing the export, manually Stop-ScheduledTask -TaskName $name -TaskPath '\'; " +
-            "Disable-ScheduledTask -TaskName $name -TaskPath '\'; " +
-            "Unregister-ScheduledTask -TaskName $name -TaskPath '\' -Confirm:`$false. " +
-            "Do not delete its program/data or fabricate an ownership marker. " +
-            "Task Scheduler changes take effect immediately; retry install after the conflicting task is removed.")
+        Throw-Failure ("拒绝操作非受管计划任务 \$($script:TaskName)（缺少精确所有权标记）。未自动回滚，未知文件未变更。" +
+            "`n检查：Get-ScheduledTask -TaskName $name -TaskPath '\' | Format-List TaskName, State, Description" +
+            "`n不要伪造所有权标记，也不要删除未知程序或数据。")
     }
 }
 
@@ -872,9 +864,7 @@ function Wait-TaskNotRunning {
             Start-Sleep -Seconds 1
         }
     }
-    Throw-Failure (
-        "$($script:TaskName) is still Running after stop; no managed file was replaced"
-    )
+    Throw-Failure "$($script:TaskName) 停止后仍在运行，未替换任何受管文件。" -Action "安装"
 }
 
 function Stop-DaemonTaskIfRunning {
@@ -903,8 +893,7 @@ function Start-AndVerifyDaemonTask {
                 $task = Find-DaemonTask
                 if ($null -eq $task -or [string] $task.State -ne "Running") {
                     Throw-Failure (
-                        "$($script:TaskName) did not stay Running for " +
-                        "$($script:VerifyStableSeconds)s after start"
+                        "服务启动失败：$($script:TaskName) 启动后未持续运行 $($script:VerifyStableSeconds) 秒。"
                     )
                 }
                 Assert-ManagedTask -Task $task
@@ -915,7 +904,7 @@ function Start-AndVerifyDaemonTask {
             Start-Sleep -Seconds 1
         }
     }
-    Throw-Failure "$($script:TaskName) is not Running after start"
+    Throw-Failure "服务启动失败：$($script:TaskName) 启动后未进入 Running。"
 }
 
 function Assert-NoInstallOptions {
@@ -962,28 +951,22 @@ function Invoke-Install {
         Start-AndVerifyDaemonTask
     }
     catch {
-        $backup = if ($null -eq $script:BackupDirectory) { "none (first install)" } else { $script:BackupDirectory }
-        $recovery = if ($null -eq $script:BackupDirectory) {
-            "No previous files exist to restore. Inspect these targets and task first; " +
-            "use uninstall for a registered managed task, or preserve an unowned lib JAR " +
-            "in a unique private backup using the conflict instructions, then retry install."
-        } else {
-            "Stop the task, manually copy backed-up files to these targets and restore task.xml " +
-            "(if present) with Register-ScheduledTask -Xml (Get-Content -Raw -Encoding UTF8 -LiteralPath " +
-            (ConvertTo-PowerShellLiteral -Value (Join-Path $script:BackupDirectory "task.xml")) +
-            ") -TaskName '$($script:TaskName)' -TaskPath '\' -Force; " +
-            "Start-ScheduledTask -TaskName '$($script:TaskName)' -TaskPath '\'."
+        $backup = if ($null -eq $script:BackupDirectory) { "无（首次安装）" } else { $script:BackupDirectory }
+        $cause = $_.Exception.Message
+        if ($cause -match "^安装失败：") {
+            throw [System.InvalidOperationException]::new(
+                "$cause`n未自动回滚，配置和数据未自动恢复。备份：$backup" +
+                "`n检查：Get-ScheduledTaskInfo -TaskName '$($script:TaskName)' -TaskPath '\'"
+            )
         }
-        Throw-Failure ("Installation failed: $($_.Exception.Message)`nBackup: $backup`n" +
-            "Targets: $($script:InstalledJar), $($script:InstalledConfig), $($script:InstalledToken)`n" +
-            "Run .\install.ps1 status; inspect Get-ScheduledTaskInfo -TaskName '$($script:TaskName)'. " +
-            "Task Scheduler does not capture stdout/stderr. Inspect " +
-            "Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational if enabled. " +
-            "$recovery No automatic rollback was attempted.")
+        Throw-Failure ("发布后启动或注册未完成（$cause）。未自动回滚，配置和数据未自动恢复。" +
+            "`n备份：$backup" +
+            "`n检查：Get-ScheduledTaskInfo -TaskName '$($script:TaskName)' -TaskPath '\'")
     }
-    Write-Host "==> $($script:TaskName) is Running; confirm Environment READY in Studio"
-    Write-Host "Root: $($script:InstallRoot)"
-    if ($null -ne $script:BackupDirectory) { Write-Host "Backup: $($script:BackupDirectory)" }
+    Write-Host "KK Studio 环境安装完成，服务已启动。"
+    Write-Host ""
+    Write-Host "请返回 Studio，确认环境状态为 READY。"
+    if ($null -ne $script:BackupDirectory) { Write-Host "原安装已备份：$($script:BackupDirectory)" }
     return 0
 }
 
@@ -993,7 +976,7 @@ function Invoke-Status {
     $task = Find-DaemonTask
     if ($null -eq $task) {
         [Console]::Error.WriteLine(
-            "kk-studio daemon is not installed: $($script:TaskName)"
+            "未安装：找不到受管计划任务 $($script:TaskName)"
         )
         return 1
     }
@@ -1001,7 +984,7 @@ function Invoke-Status {
         Assert-ManagedTask -Task $task
     }
     catch {
-        [Console]::Error.WriteLine("ERROR: $($_.Exception.Message)")
+        [Console]::Error.WriteLine($_.Exception.Message)
         return 1
     }
 
@@ -1027,7 +1010,7 @@ function Invoke-Uninstall {
     Initialize-HostContext
     $task = Find-DaemonTask
     if ($null -eq $task) {
-        Write-Host "Task absent; preserved all remaining files: $($script:InstallRoot)"
+        Write-Host "KK Studio 环境未安装受管服务。配置、数据和备份均已保留。"
         return 0
     }
     Assert-ManagedTask -Task $task
@@ -1039,7 +1022,9 @@ function Invoke-Uninstall {
         $null = Assert-PrivateFile -Path $script:InstalledJar -ExpectedOwnerSid $script:CurrentSid
         Remove-Item -LiteralPath $script:InstalledJar -Force
     }
-    Write-Host "Removed managed task/program; preserved config/token/data/backups: $($script:InstallRoot)"
+    Write-Host "KK Studio 环境已卸载，受管服务和程序已移除。"
+    Write-Host ""
+    Write-Host "配置、数据和备份已保留。"
     return 0
 }
 
@@ -1067,7 +1052,7 @@ if ($MyInvocation.InvocationName -ne ".") {
         exit $exitCode
     }
     catch {
-        [Console]::Error.WriteLine("ERROR: $($_.Exception.Message)")
+        [Console]::Error.WriteLine($_.Exception.Message)
         exit 1
     }
 }

@@ -79,7 +79,7 @@ class TestMacosInstall(UnixInstallContracts, FixtureTestCase):
             self.assertIn("loaded but its definition is absent", result.stderr)
             self.assertIn(fixture.target, result.stderr)
             self.assertIn(str(fixture.plist), result.stderr)
-            self.assertIn("retry", result.stderr)
+            self.assertIn("下一步", result.stderr)
             self.assertNotIn("curl", fixture.tools())
             self.assert_no_switch(fixture)
 
@@ -126,9 +126,9 @@ class TestMacosInstall(UnixInstallContracts, FixtureTestCase):
             result = fixture.install(env={"FAKE_LAUNCHCTL_MODE": mode, "FAKE_JAR_BODY": "new-jar"})
             self.assertNotEqual(0, result.returncode)
             backup = next((fixture.install_root / "backups").iterdir())
-            for expected in ("after publication", "no automatic rollback", str(backup),
-                             str(fixture.stderr_log), "bootout", "manual", "retry"):
+            for expected in ("发布后启动或注册未完成", "未自动回滚", str(backup), str(fixture.stderr_log)):
                 self.assertIn(expected, result.stderr)
+            self.assertNotIn("launchctl bootout", result.stderr)
             self.assertEqual(before[str(fixture.config)], (backup / "daemon.json").read_bytes())
             self.assertEqual("new-jar", fixture.jar.read_text())
             self.assert_clean(fixture)
