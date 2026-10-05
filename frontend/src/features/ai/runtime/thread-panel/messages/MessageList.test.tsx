@@ -202,4 +202,77 @@ describe('MessageList tool renderer dispatch', () => {
     rerender(<MessageList messages={[call, result]} />)
     expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
   })
+
+  it('colors each sibling independently: success, error, and waiting approval', () => {
+    // 同一 batch 的 transient result 只配对自身调用；成功、错误和等待审批不能互相染色。
+    const succeededCall: ToolDialogueMessage = {
+      ...message,
+      id: '40:tool-call:call-ok:0',
+      phase: 'call',
+      status: 'done',
+      toolCallId: 'call-ok',
+      toolName: 'bash',
+      rendererKey: 'bash',
+      arguments: '{"command":"ls"}',
+      text: '',
+    }
+    const succeededResult: ToolDialogueMessage = {
+      ...message,
+      id: 'transient:tool-result:inv-ok:1',
+      phase: 'result',
+      status: 'done',
+      toolCallId: 'call-ok',
+      toolName: 'bash',
+      rendererKey: 'bash',
+      arguments: '{"command":"ls"}',
+      text: 'listed files',
+    }
+    const failedCall: ToolDialogueMessage = {
+      ...message,
+      id: '40:tool-call:call-bad:1',
+      phase: 'call',
+      status: 'error',
+      toolCallId: 'call-bad',
+      text: '',
+    }
+    const failedResult: ToolDialogueMessage = {
+      ...message,
+      id: 'transient:tool-result:inv-bad:1',
+      phase: 'result',
+      status: 'error',
+      toolCallId: 'call-bad',
+      text: 'listed files failed',
+      errorMessage: 'listed files failed',
+    }
+    const waitingCall: ToolDialogueMessage = {
+      ...message,
+      id: '40:tool-call:call-ask:2',
+      phase: 'call',
+      status: 'streaming',
+      toolCallId: 'call-ask',
+      text: '',
+      approval: { required: true, decision: null, decisionId: null, reason: null },
+    }
+    const { container } = render(
+      <MessageList
+        messages={[
+          succeededCall,
+          succeededResult,
+          failedCall,
+          failedResult,
+          waitingCall,
+        ]}
+        onDecideApproval={vi.fn()}
+      />,
+    )
+    const cards = container.querySelectorAll('.thread-turn-tool')
+    expect(cards).toHaveLength(3)
+    expect(cards[0]).toHaveClass('tool-state-success')
+    expect(cards[1]).toHaveClass('tool-state-error')
+    expect(cards[2]).toHaveClass('tool-state-pending')
+    expect(screen.getByText('listed files failed')).toBeInTheDocument()
+    expect(screen.getByText('listed files')).toBeInTheDocument()
+    expect(screen.getAllByText('listed files')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+  })
 })
