@@ -6,7 +6,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf -- "$stage"' EXIT
 chmod 700 "$stage"
 stage="$(cd -- "$stage" && pwd -P)"
-@@STAGING@@
-curl -fsSL @@INSTALLER@@ -o "$stage/install.sh"
-bash "$stage/install.sh" @@ACTION@@@@PARAMETERS@@
+%s
+curl -fsSL %s -o "$stage/install.sh"
+bash "$stage/install.sh" %s%s
 KK_STUDIO_INSTALL

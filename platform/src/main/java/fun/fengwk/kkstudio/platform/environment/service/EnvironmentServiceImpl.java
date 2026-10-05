@@ -244,29 +244,34 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   @Override
-  public String installCommand(EnvironmentId id, String code) {
-    Environment env = requireInstallable(id, null);
+  public String installationScript(EnvironmentId id, String code) {
+    Environment env = readableInstallTarget(id);
     EnvironmentInstallCodes.verify(env.getId(), env.getRegistrationToken(), code, clock.instant());
-    return EnvironmentInstallCommands.install(env.getInstallConfig(), env.getRegistrationToken());
+    return EnvironmentInstallScripts.install(env.getInstallConfig(), env.getRegistrationToken());
   }
 
+  /** 签发必须校验期望版本；下载只读取当前行，不接收版本。 */
   private Environment requireInstallable(EnvironmentId id, String expectedVersion) {
-    Objects.requireNonNull(id, "id");
-    Environment env = environmentRepository.getById(id.value());
-    if (env == null || env.getInstallConfig() == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
-    }
-    if (expectedVersion != null
-        && env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
+    Environment env = readableInstallTarget(id);
+    if (env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
     return env;
   }
 
+  private Environment readableInstallTarget(EnvironmentId id) {
+    Objects.requireNonNull(id, "id");
+    Environment env = environmentRepository.getById(id.value());
+    if (env == null || env.getInstallConfig() == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
+    return env;
+  }
+
   @Override
-  public String uninstallCommand(String operatingSystem) {
-    return EnvironmentInstallCommands.uninstall(operatingSystem);
+  public String uninstallationScript(String operatingSystem) {
+    return EnvironmentInstallScripts.uninstall(operatingSystem);
   }
 
   @Override

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,16 +28,16 @@ import java.util.Map;
 import java.util.Set;
 
 /** 生成命令必须保留凭据字节、私有暂存、失败清理和退出码，且不能把凭据放进子进程参数。 */
-class EnvironmentInstallCommandsTest {
+class EnvironmentInstallScriptsTest {
   private static final ObjectMapper JSON = new ObjectMapper();
 
   @ParameterizedTest
   @ValueSource(strings = {"linux", "macos"})
   void executesUnixInstallWithExactBytesAndPrivateFiles(String operatingSystem) throws Exception {
     assumeFalse(isWindows());
-    EnvironmentInstallConfigDTO config = config(operatingSystem, "/opt/jdk-21/汉字 '`" );
+    EnvironmentInstallConfigDTO config = config(operatingSystem, "/opt/jdk-21/汉字 '`");
     String token = "private-汉字'\"$`$(touch NEVER)";
-    Execution execution = execute(EnvironmentInstallCommands.install(config, token), 0);
+    Execution execution = execute(EnvironmentInstallScripts.install(config, token), 0);
     assertEquals(0, execution.status());
     assertFalse((execution.stdout() + execution.stderr()).contains(token));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
@@ -62,7 +63,7 @@ class EnvironmentInstallCommandsTest {
   void cleansAfterInstallerFailureAndOmitsMissingJavaHome() throws Exception {
     assumeFalse(isWindows());
     EnvironmentInstallConfigDTO config = config("linux", null);
-    Execution execution = execute(EnvironmentInstallCommands.install(config, "private"), 17);
+    Execution execution = execute(EnvironmentInstallScripts.install(config, "private"), 17);
     assertEquals(17, execution.status());
     assertFalse(texts(execution.record().get("args")).contains("--java-home"));
     assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
@@ -75,7 +76,10 @@ class EnvironmentInstallCommandsTest {
     try {
       writeExecutable(dir.resolve("curl"), "#!/bin/bash\nexit 8\n");
       ProcessResult result =
-          run(EnvironmentInstallCommands.install(config("linux", "/opt/jdk"), "private"), dir, Map.of());
+          run(
+              EnvironmentInstallScripts.install(config("linux", "/opt/jdk"), "private"),
+              dir,
+              Map.of());
       assertEquals(8, result.status());
       assertEquals(List.of("curl"), names(dir));
       assertFalse((result.stdout() + result.stderr()).contains("private"));
@@ -88,7 +92,7 @@ class EnvironmentInstallCommandsTest {
   @ValueSource(strings = {"linux", "macos"})
   void executesUnixUninstallWithoutCredentials(String operatingSystem) throws Exception {
     assumeFalse(isWindows());
-    Execution execution = execute(EnvironmentInstallCommands.uninstall(operatingSystem), 0);
+    Execution execution = execute(EnvironmentInstallScripts.uninstall(operatingSystem), 0);
     assertEquals(0, execution.status());
     assertEquals(List.of("uninstall"), texts(execution.record().get("args")));
     assertFalse(execution.record().has("token"));
@@ -97,7 +101,7 @@ class EnvironmentInstallCommandsTest {
   @Test
   void windowsCommandProtectsAclBeforeWritingCredentials() {
     EnvironmentInstallConfigDTO config = config("windows", "C:\\Program Files\\Java\\it's");
-    String command = EnvironmentInstallCommands.install(config, "private-'$`");
+    String command = EnvironmentInstallScripts.install(config, "private-'$`");
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
     assertTrue(command.contains("[Security.AccessControl.FileSecurity]::new()"));
@@ -119,28 +123,32 @@ class EnvironmentInstallCommandsTest {
             "throw 'Daemon command failed; review installer output and host prerequisites.'"));
     assertTrue(command.contains("finally"));
     assertTrue(command.contains("Remove-Item -LiteralPath $stage -Recurse -Force"));
+    assertTrue(command.contains("'private-''$`'"));
+    assertTrue(command.contains("汉字"));
     String invocation =
         command.lines().filter(line -> line.contains("& powershell")).findFirst().orElseThrow();
     assertTrue(
         invocation.contains(
             "-File $installer install -ConfigFile $config -TokenFile $token -JavaHome 'C:\\Program Files\\Java\\it''s'"));
     assertFalse(invocation.contains("private"));
-    String uninstall = EnvironmentInstallCommands.uninstall("windows");
+    String uninstall = EnvironmentInstallScripts.uninstall("windows");
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
     assertFalse(
-        EnvironmentInstallCommands.install(config("windows", null), "private").contains("-JavaHome"));
+        EnvironmentInstallScripts.install(config("windows", null), "private")
+            .contains("-JavaHome"));
   }
 
   @Test
   void executesWindowsInstallAndUninstallWithPwsh() throws Exception {
-    org.junit.jupiter.api.Assumptions.assumeTrue(
-        Files.isExecutable(Path.of("/usr/bin/pwsh")), "pwsh is required to execute the Windows command");
+    assumeTrue(
+        Files.isExecutable(Path.of("/usr/bin/pwsh")),
+        "pwsh is required to execute the Windows command");
     Path dir = Files.createTempDirectory("kk-windows-command-");
     try {
       String install =
-          EnvironmentInstallCommands.install(config("windows", "C:\\Java\\jdk"), "private");
+          EnvironmentInstallScripts.install(config("windows", "C:\\Java\\jdk"), "private");
       ProcessResult installed = runPwsh(rewriteWindowsDownload(install), dir, true);
       assertEquals(1, installed.status(), installed.stdout() + installed.stderr());
       assertFalse((installed.stdout() + installed.stderr()).contains("private"));
@@ -148,7 +156,8 @@ class EnvironmentInstallCommandsTest {
       assertTrue(names(dir).stream().noneMatch(name -> name.length() == 32));
 
       ProcessResult removed =
-          runPwsh(rewriteWindowsDownload(EnvironmentInstallCommands.uninstall("windows")), dir, false);
+          runPwsh(
+              rewriteWindowsDownload(EnvironmentInstallScripts.uninstall("windows")), dir, false);
       assertEquals(0, removed.status(), removed.stdout() + removed.stderr());
       assertEquals("uninstall", Files.readString(dir.resolve("ran.txt")).strip());
     } finally {
@@ -159,9 +168,14 @@ class EnvironmentInstallCommandsTest {
   @Test
   void rejectsBlankTokenControlCharactersAndUnknownOperatingSystem() {
     EnvironmentInstallConfigDTO config = config("linux", null);
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCommands.install(config, " \n"));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCommands.uninstall("solaris"));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCommands.install(null, "token"));
+    assertThrows(
+        AiValidationException.class, () -> EnvironmentInstallScripts.install(config, " \n"));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallScripts.install(config, "token\u2028"));
+    assertThrows(AiValidationException.class, () -> EnvironmentInstallScripts.uninstall("solaris"));
+    assertThrows(
+        AiValidationException.class, () -> EnvironmentInstallScripts.install(null, "token"));
   }
 
   private static Execution execute(String command, int exit) throws Exception {
@@ -260,7 +274,8 @@ class EnvironmentInstallCommandsTest {
         "daemon",
         Map.of(
             "studioUrl", "https://studio.example.com/",
-            "note", "汉字 ' \" $ ` $(touch NEVER) KK_STUDIO_INSTALL",
+            "note",
+                "汉字 ' \" $ ` $(touch NEVER) %s @@ACTION@@ @@PARAMETERS@@ @@INSTALLER@@ @@STAGING@@",
             "bashExecutable", "/bin/汉字 '$`"));
     return EnvironmentInstallConfigs.parse(JSON.valueToTree(body));
   }
