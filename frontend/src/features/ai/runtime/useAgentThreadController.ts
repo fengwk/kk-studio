@@ -17,6 +17,7 @@ import {
   restoreThreadGoalText,
   saveThreadDraftParts,
   saveThreadGoalText,
+  type DraftSaveOutcome,
   type ThreadDraftRecord,
 } from '@/features/ai/runtime/thread-draft-store'
 import {
@@ -188,9 +189,10 @@ export function useAgentThreadController(
   // 本 UI 已观察到的恢复 generation（记录中已合并的 Stop 回执），只由 loadThreadDraft 与
   // applyStopReceipt 返回的 record 更新。所有整份草稿写入都携带它，存储层据此拒绝陈旧覆盖写。
   const observedStopRequestIdsRef = useRef<readonly string[]>([])
-  // 编辑区是否存在未落盘的输入（写入被拒或保存失败）。为 true 时绝不拿记录覆盖编辑区，
-  // 只能把恢复内容与当前输入合并后落盘。
-  const unsavedEditRef = useRef(false)
+  // 每个字段各自的「最新写入 token + 是否未落盘」：旧 completion（乱序、旧 Thread、旧版本）
+  // 既不得把新编辑标成已保存，也不得清掉尚未落盘的编辑。两字段互不影响。
+  const partsWriteRef = useRef({ token: 0, dirty: false })
+  const goalWriteRef = useRef({ token: 0, dirty: false })
   const attemptedReceiptSignatureRef = useRef<string | null>(null)
   const [draftRestoreError, setDraftRestoreError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -286,7 +288,8 @@ export function useAgentThreadController(
     failedReceiptsRef.current = []
     appliedReceiptKeysRef.current = new Set()
     observedStopRequestIdsRef.current = []
-    unsavedEditRef.current = false
+    partsWriteRef.current = { token: 0, dirty: false }
+    goalWriteRef.current = { token: 0, dirty: false }
     attemptedReceiptSignatureRef.current = null
     setDraftRestoreError(null)
 
@@ -311,14 +314,38 @@ export function useAgentThreadController(
         if (!active || boundThreadIdRef.current !== threadId || record == null) {
           return
         }
-        observedStopRequestIdsRef.current = record.appliedStopRequestIds
-        if (!hasMessageContent(draftRef.current)) {
+        // 记录是权威：编辑区为空才采纳内容；用户先编辑过就保留用户输入。
+        const adoptParts = !hasMessageContent(draftRef.current)
+        const adoptGoal = (goalDraftRef.current ?? '').length === 0
+        if (adoptParts) {
           draftRef.current = record.parts
           setDraftState(record.parts)
         }
-        if ((goalDraftRef.current ?? '').length === 0) {
+        if (adoptGoal) {
           goalDraftRef.current = record.goalText
           setGoalDraftState(record.goalText)
+        }
+        // generation 只有真的采纳了记录内容（或记录里该字段本就没有内容可丢、内容已与编辑区一致）
+        // 时才推进：只推进 generation 而不采纳内容，会让后续整份写入把已恢复文本永久覆盖掉。
+        const partsAccounted = adoptParts
+          || !hasMessageContent(record.parts)
+          || partsKey(record.parts) === partsKey(draftRef.current)
+        const goalAccounted = adoptGoal
+          || (record.goalText ?? '').length === 0
+          || record.goalText === goalDraftRef.current
+        if (partsAccounted && goalAccounted) {
+          observedStopRequestIdsRef.current = record.appliedStopRequestIds
+          return
+        }
+        if (!partsAccounted) {
+          partsWriteRef.current.dirty = true
+        }
+        if (!goalAccounted) {
+          goalWriteRef.current.dirty = true
+        }
+        if (record.appliedStopRequestIds.length > 0) {
+          // 有已恢复内容没被采纳：保留原 generation 并提示，等待既有回执通道合并进编辑区。
+          setDraftRestoreError(translate('ai.runtime.action.draftWriteConflict'))
         }
       })
       .catch(() => {
@@ -470,38 +497,56 @@ export function useAgentThreadController(
    * 草稿写入口。`edit` 落盘到该 Thread 的持久记录；`history`（上下键浏览）与
    * `restore`（Stop 回执已原子落盘）只更新内存，避免重复写与重复回填。
    */
+  /** 编辑区是否存在未落盘的输入：存在时绝不拿记录覆盖编辑区。 */
+  function hasUnsavedDraft(): boolean {
+    return partsWriteRef.current.dirty || goalWriteRef.current.dirty
+  }
+
   /**
-   * 整份草稿/Goal 写入都携带已观察的恢复 generation；保存失败必须可见，写入被判定为陈旧时
-   * 保留用户输入并走上报 + 恢复通道，而不是静默丢掉编辑。
+   * 整份字段写入的公共收尾：写入携带已观察的恢复 generation，完成回调先过
+   * originThreadId + epoch 栅栏（旧 Thread 的晚期完成绝不改新 Thread 的 refs / 提示）与
+   * 字段内 token 栅栏（旧 completion 绝不把新编辑标成已保存），再决定收尾。
    */
-  function persistParts(parts: ComposerPart[]): void {
-    void saveThreadDraftParts(threadId, parts, observedStopRequestIdsRef.current)
+  function persistDraftField(
+    field: { token: number; dirty: boolean },
+    save: () => Promise<DraftSaveOutcome>,
+  ): void {
+    const originThreadId = threadId
+    const originEpoch = bindingEpochRef.current
+    const token = field.token + 1
+    field.token = token
+    // 该字段最新一次写入的完成才代表编辑区内容已落盘；写入在途时仍按记录权威（同链 FIFO
+    // 保证在途写入先于任何后续合并落盘，记录不会缺它的内容）。
+    void save()
       .then((outcome) => {
+        if (!isStillBound(originThreadId, originEpoch) || field.token !== token) {
+          return
+        }
         if (outcome.status === 'STALE') {
+          // 被拒：编辑区内容确定不在记录里，标记未落盘。
+          field.dirty = true
           handleDraftWriteConflict()
           return
         }
-        unsavedEditRef.current = false
+        field.dirty = false
       })
       .catch(() => {
-        unsavedEditRef.current = true
+        if (!isStillBound(originThreadId, originEpoch) || field.token !== token) {
+          return
+        }
+        field.dirty = true
         setActionError(t('ai.runtime.action.draftSaveFailed'))
       })
   }
 
+  function persistParts(parts: ComposerPart[]): void {
+    persistDraftField(partsWriteRef.current, () =>
+      saveThreadDraftParts(threadId, parts, observedStopRequestIdsRef.current))
+  }
+
   function persistGoalText(goalText: string | null): void {
-    void saveThreadGoalText(threadId, goalText, observedStopRequestIdsRef.current)
-      .then((outcome) => {
-        if (outcome.status === 'STALE') {
-          handleDraftWriteConflict()
-          return
-        }
-        unsavedEditRef.current = false
-      })
-      .catch(() => {
-        unsavedEditRef.current = true
-        setActionError(t('ai.runtime.action.draftSaveFailed'))
-      })
+    persistDraftField(goalWriteRef.current, () =>
+      saveThreadGoalText(threadId, goalText, observedStopRequestIdsRef.current))
   }
 
   function setDraft(
@@ -531,13 +576,14 @@ export function useAgentThreadController(
    */
   async function restorePendingDraft(
     originThreadId: string,
+    originEpoch: number,
     pending: BoundPendingMessage,
-    stillBound: boolean,
   ): Promise<void> {
     try {
       if (pending.kind === 'MESSAGE') {
         const restored = await restoreThreadDraftParts(originThreadId, pending.localDraft)
-        if (restored && stillBound && !hasMessageContent(draftRef.current)) {
+        // await 之后重新校验身份：原 Thread 的失败消息绝不回填进新 Thread 的编辑区。
+        if (restored && isStillBound(originThreadId, originEpoch) && !hasMessageContent(draftRef.current)) {
           draftRef.current = pending.localDraft
           setDraftState(pending.localDraft)
         }
@@ -548,13 +594,15 @@ export function useAgentThreadController(
         return
       }
       const restored = await restoreThreadGoalText(originThreadId, goalText)
-      if (restored && stillBound && (goalDraftRef.current ?? '').length === 0) {
+      if (restored && isStillBound(originThreadId, originEpoch) && (goalDraftRef.current ?? '').length === 0) {
         goalDraftRef.current = goalText
         setGoalDraftState(goalText)
       }
     } catch {
-      // 未消费的输入没能回到编辑区：明确告知用户，而不是当作已恢复。
-      setActionError(t('ai.runtime.action.draftRestoreFailed'))
+      if (isStillBound(originThreadId, originEpoch)) {
+        // 未消费的输入没能回到编辑区：明确告知用户，而不是当作已恢复。
+        setActionError(t('ai.runtime.action.draftRestoreFailed'))
+      }
     }
   }
 
@@ -659,7 +707,7 @@ export function useAgentThreadController(
           }
         }
         // 失败草稿写回该 Thread 自己的持久记录：非当前绑定的 Thread 也不会污染当前输入框。
-        await restorePendingDraft(originThreadId, currentPending, stillBound)
+        await restorePendingDraft(originThreadId, originEpoch, currentPending)
       } else {
         const unknownPending: BoundPendingMessage = {
           ...currentPending,
@@ -679,7 +727,7 @@ export function useAgentThreadController(
           pendingMessageRef.current = unknownPending
           setPendingMessage(unknownPending)
         }
-        await restorePendingDraft(originThreadId, currentPending, stillBound)
+        await restorePendingDraft(originThreadId, originEpoch, currentPending)
       }
     } finally {
       inFlightBindingsRef.current.delete(originBindingKey)
@@ -906,10 +954,11 @@ export function useAgentThreadController(
           // 本标签页此前已把这条回执写进编辑区：再次投递既不重复追加，也不回退用户随后的编辑。
           continue
         }
-        if (!unsavedEditRef.current && draftRevisionRef.current === revisionBefore) {
+        if (!hasUnsavedDraft() && draftRevisionRef.current === revisionBefore) {
           // 编辑区没有未落盘的输入：无论是本次事务合并还是别的标签页已合并，记录都是权威结果。
           applyRecordToEditor(record)
-          unsavedEditRef.current = false
+          partsWriteRef.current.dirty = false
+          goalWriteRef.current.dirty = false
           continue
         }
         // 合并期间用户又编辑过：不拿迟到结果覆盖用户输入，而是把回执内容与当前输入
@@ -923,6 +972,10 @@ export function useAgentThreadController(
       } catch {
         failed.push(receipt)
       }
+    }
+    if (!isStillBound(boundThreadId, epoch)) {
+      // 旧 Thread 晚到的回执收尾不得污染新 Thread 的重试状态与提示。
+      return failed.length === 0
     }
     if (failed.length > 0) {
       // 未恢复的回执不视为已处理：保留原回执，明确提示，等待可见的手动重试。
@@ -945,7 +998,6 @@ export function useAgentThreadController(
    * 绝不静默丢弃编辑，也不覆盖记录里已恢复的内容。
    */
   function handleDraftWriteConflict(): void {
-    unsavedEditRef.current = true
     setDraftRestoreError(t('ai.runtime.action.draftWriteConflict'))
     const unobserved = stopReceipts.filter(
       (receipt) => !observedStopRequestIdsRef.current.includes(receipt.stopRequestId),
@@ -1047,7 +1099,7 @@ export function useAgentThreadController(
           // 未确认落地且未被本次回执取消的 Goal 目标文本不能丢：写回该 Thread 的编辑区记录。
           const clearedKey = goalCommandKey(cleared)
           if (cleared.kind === 'GOAL' && (clearedKey == null || !cancelledKeys.has(clearedKey))) {
-            await restorePendingDraft(operationThreadId, cleared, true)
+            await restorePendingDraft(operationThreadId, operationEpoch, cleared)
           }
         }
         await Promise.all([
@@ -1060,9 +1112,8 @@ export function useAgentThreadController(
       .catch((error: unknown) => {
         const stillBound = isCurrentBound()
         if (isConflictError(error)) {
-          // 已知 409：操作未被接受（version 过期 / 未静默 /
-          // 终态 apply 待处理 / id 被复用）。清除它；下一次 stop 会针对
-          // 刷新的 snapshot 铸造新操作。
+          // 已知 409：操作未被接受（version 过期 / 未静默 / id 被复用）。
+          // 清除它；下一次 stop 会针对刷新的 snapshot 铸造新操作。
           clearPendingStop(operationThreadId)
           if (stillBound) {
             pendingStopRef.current = null
