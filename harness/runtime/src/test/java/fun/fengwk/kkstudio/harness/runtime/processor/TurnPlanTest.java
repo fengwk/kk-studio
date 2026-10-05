@@ -167,7 +167,8 @@ class TurnPlanTest {
                         0L,
                         ids(7_000L),
                         NOW,
-                        null));
+                        null,
+                        false));
 
     assertEquals("STOP turns are never planned by the processor", error.getMessage());
   }
@@ -195,7 +196,8 @@ class TurnPlanTest {
                 1L,
                 ids(7_100L),
                 NOW,
-                null);
+                null,
+                false);
 
     assertEquals(List.of(custom), plan.consumedCommands());
     assertEquals(2, plan.candidateEntries().size());

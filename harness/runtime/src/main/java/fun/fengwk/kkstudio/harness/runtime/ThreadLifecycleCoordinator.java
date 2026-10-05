@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -16,8 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -25,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,7 +28,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
@@ -48,23 +42,8 @@ public final class ThreadLifecycleCoordinator {
       The delegated task has reached its suggested turn budget. Wrap up your current work and report the result, including any incomplete work, to the requesting agent.""";
   public static final String DEFAULT_MAX_TURNS_REMINDER_TAG = "task-budget";
 
-  private final ThreadContextProbe threadContextProbe;
-  private final AutomaticCompactionPlanner automaticCompactionPlanner;
-  private final Supplier<CompactionConfig> compactionConfigSupplier;
-  private final Clock clock;
-
-  public ThreadLifecycleCoordinator(
-      ThreadContextProbe threadContextProbe,
-      AutomaticCompactionPlanner automaticCompactionPlanner,
-      Supplier<CompactionConfig> compactionConfigSupplier,
-      Clock clock) {
-    this.threadContextProbe = Objects.requireNonNull(threadContextProbe, "threadContextProbe");
-    this.automaticCompactionPlanner =
-        Objects.requireNonNull(automaticCompactionPlanner, "automaticCompactionPlanner");
-    this.compactionConfigSupplier =
-        Objects.requireNonNull(compactionConfigSupplier, "compactionConfigSupplier");
-    this.clock = Objects.requireNonNull(clock, "clock");
-  }
+  /** 无状态协调器：所有操作都以显式事务句柄与显式时钟驱动。 */
+  public ThreadLifecycleCoordinator() {}
 
   /**
    * 获取指定 Thread 所在执行树的根锁，并按规范锁序锁定祖先链全部 Session（KEY SHARE）与 Thread（FOR UPDATE）。
@@ -256,40 +235,6 @@ public final class ThreadLifecycleCoordinator {
     tx.updateCommands(applied);
     ThreadState advanced = parent.reserveCommandSequencesAndAdvanceHead(count, head, now);
     tx.updateThread(advanced);
-  }
-
-  /** 判断 Thread 本地是否仍有未完成的命令、Invocation、续写或压缩义务。 */
-  public boolean hasLocalWork(HarnessStore.Transaction tx, ThreadState thread) {
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    boolean hasQueuedDemand = hasQueuedDemand(queued);
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    ThreadContext context = threadContextProbe.probe(tx, thread, path);
-    return switch (context) {
-      case ThreadContext.ModelTerminalPending ignored -> true;
-      case ThreadContext.ModelActive ignored -> true;
-      case ThreadContext.ToolTerminalPending ignored -> true;
-      case ThreadContext.ToolActive ignored -> true;
-      case ThreadContext.ContinuationDue ignored -> true;
-      case ThreadContext.IdleOrHistorical ignored -> {
-        CompactionConfig compactionConfig =
-            compactionConfigSupplier != null ? compactionConfigSupplier.get() : null;
-        boolean compactionDue =
-            compactionConfig != null
-                && automaticCompactionPlanner.plan(thread, path, compactionConfig, hasQueuedDemand)
-                    != null;
-        // 已物化在输入水位之后的尾部系统通知同样构成尚未处理的本地工作；不能只看 QUEUED 行。
-        yield hasQueuedDemand || path.hasTrailingNotifications() || compactionDue;
-      }
-    };
-  }
-
-  private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
-    for (ThreadCommand command : queued) {
-      if (command.type().isMessage() || command.type().isNotification()) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /** 在已确定继续运行的边界把 max-turn 短预算提醒作为 NOTIFICATION 物化到历史（按 Join 幂等，不分配邮箱 sequence）。 */
