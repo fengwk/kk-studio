@@ -266,7 +266,9 @@ integrations、storageMedia、advanced 七个 section。strict codec 与 record 
 aiRuntime 包含重试策略、压缩保留量、可空 `compactionFallbackModel` 和 subagent 限额。
 
 network 提供唯一的 Backend 全局 HTTP 代理：`proxyUrl` 为无认证的 `http://host:port`，
-null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`。
+null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `localhost,127.*,::1`，
+支持主机、域名后缀、IP、可选端口、`*` 与 IPv4/IPv6 CIDR（CIDR 只按目标 URL 中的数值 IP
+逐位匹配，不为域名解析 DNS）。
 设置在启动时冻结，保存后重启各 Backend 节点生效；模型、Git、MCP、集成、媒体与 S3
 统一使用该策略，无模块覆盖，也不回退宿主代理环境。媒体 CONNECT 仍固定到已校验的公网 IP，
 Host/SNI 与证书校验保留原域名。Daemon 与浏览器的网络策略独立。

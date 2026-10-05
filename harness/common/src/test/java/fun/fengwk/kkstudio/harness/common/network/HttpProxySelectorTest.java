@@ -103,6 +103,122 @@ class HttpProxySelectorTest {
     assertEquals(Proxy.Type.HTTP, select(selector, "http://127.2.3.4").type());
   }
 
+  /** 意图：IPv4 CIDR 匹配上下界与紧邻外部，/0、/32 及主机位非零时只比较 prefix 位。 */
+  @Test
+  void bypassMatchesIpv4CidrBoundsAndHostBits() {
+    ProxySelector private16 = HttpProxySelector.fixed(URL, "192.168.0.0/16");
+    assertDirect(private16, "http://192.168.0.0");
+    assertDirect(private16, "https://192.168.255.255");
+    assertEquals(Proxy.Type.HTTP, select(private16, "http://192.169.0.0").type());
+    assertEquals(Proxy.Type.HTTP, select(private16, "http://192.167.255.255").type());
+
+    // 100.64.0.0/10 是运营商级 NAT 段，边界按位比较而非按十进制前缀。
+    ProxySelector cgnat = HttpProxySelector.fixed(URL, "100.64.0.0/10");
+    assertDirect(cgnat, "http://100.64.0.0");
+    assertDirect(cgnat, "http://100.127.255.255");
+    assertEquals(Proxy.Type.HTTP, select(cgnat, "http://100.128.0.0").type());
+    assertEquals(Proxy.Type.HTTP, select(cgnat, "http://100.63.255.255").type());
+
+    ProxySelector all4 = HttpProxySelector.fixed(URL, "0.0.0.0/0");
+    assertDirect(all4, "http://8.8.8.8");
+    assertDirect(all4, "http://10.0.0.0");
+
+    ProxySelector single = HttpProxySelector.fixed(URL, "10.0.0.0/32");
+    assertDirect(single, "http://10.0.0.0");
+    assertEquals(Proxy.Type.HTTP, select(single, "http://10.0.0.1").type());
+
+    // 主机位非 0 不需要规范化为网络地址，只比较前 16 位。
+    ProxySelector hostBits = HttpProxySelector.fixed(URL, "192.168.1.5/16");
+    assertDirect(hostBits, "http://192.168.99.99");
+    assertEquals(Proxy.Type.HTTP, select(hostBits, "http://192.169.0.1").type());
+  }
+
+  /** 意图：IPv6 CIDR 支持 /0、/128、非整字节前缀，并归一化大小写与压缩写法。 */
+  @Test
+  void bypassMatchesIpv6CidrAcrossPrefixWidths() {
+    ProxySelector doc = HttpProxySelector.fixed(URL, "2001:db8::/32");
+    assertDirect(doc, "http://[2001:db8::1]");
+    assertDirect(doc, "https://[2001:DB8:0:0:0:0:0:1]");
+    assertEquals(Proxy.Type.HTTP, select(doc, "http://[2001:db9::1]").type());
+
+    assertDirect(HttpProxySelector.fixed(URL, "::/0"), "http://[2001:db8::1]");
+    ProxySelector single = HttpProxySelector.fixed(URL, "2001:db8::1/128");
+    assertDirect(single, "http://[2001:db8::1]");
+    assertEquals(Proxy.Type.HTTP, select(single, "http://[2001:db8::2]").type());
+
+    // /126 只覆盖最后一个字节的高 6 位，验证非整字节掩码。
+    ProxySelector bits = HttpProxySelector.fixed(URL, "2001:db8::/126");
+    assertDirect(bits, "http://[2001:db8::3]");
+    assertEquals(Proxy.Type.HTTP, select(bits, "http://[2001:db8::4]").type());
+  }
+
+  /** 意图：地址族不误匹配；IPv4-mapped IPv6 保持 IPv6 族，/120 不等价于 IPv4 /16。 */
+  @Test
+  void cidrKeepsAddressFamilyAndMappedIpv6() {
+    assertEquals(
+        Proxy.Type.HTTP,
+        select(HttpProxySelector.fixed(URL, "0.0.0.0/0"), "http://[2001:db8::1]").type());
+    assertEquals(
+        Proxy.Type.HTTP, select(HttpProxySelector.fixed(URL, "::/0"), "http://8.8.8.8").type());
+    // 域名永远不会命中 CIDR，也不触发目标 DNS。
+    assertEquals(
+        Proxy.Type.HTTP,
+        select(HttpProxySelector.fixed(URL, "::/0"), "http://remote.invalid").type());
+    assertEquals(
+        Proxy.Type.HTTP,
+        select(HttpProxySelector.fixed(URL, "10.0.0.0/8"), "http://remote.invalid").type());
+
+    ProxySelector mapped = HttpProxySelector.fixed(URL, "::ffff:192.168.0.0/120");
+    assertDirect(mapped, "http://[::ffff:192.168.0.5]");
+    assertEquals(Proxy.Type.HTTP, select(mapped, "http://[::ffff:192.168.1.5]").type());
+    assertEquals(Proxy.Type.HTTP, select(mapped, "http://192.168.0.5").type());
+    // 反向：IPv4 /16 不匹配映射形式的目标。
+    assertEquals(
+        Proxy.Type.HTTP,
+        select(HttpProxySelector.fixed(URL, "192.168.0.0/16"), "http://[::ffff:192.168.0.5]")
+            .type());
+  }
+
+  /** 意图：用户真实 no_proxy 混合域名与 CIDR 初始化成功；CIDR 覆盖 OS 回退且适用各端口与协议。 */
+  @Test
+  void cidrInteroperatesWithHostsAndEnvironmentFallback() {
+    String userNoProxy =
+        "localhost,127.0.0.1,localaddress,.localdomain.com,.kk1.fun,192.168.0.0/16,"
+            + "100.64.0.0/10,.local,.minimaxi.com,langbase.netease.com,.internal";
+    ProxySelector selector = HttpProxySelector.fixed(URL, userNoProxy);
+    for (String host :
+        List.of(
+            "localhost",
+            "127.0.0.1",
+            "localaddress",
+            "a.localdomain.com",
+            "api.kk1.fun",
+            "192.168.10.20",
+            "100.100.0.1",
+            "x.local",
+            "api.minimaxi.com",
+            "langbase.netease.com",
+            "svc.internal")) {
+      assertDirect(selector, "http://" + host);
+    }
+    for (String host : List.of("127.0.0.2", "192.169.0.1", "100.128.0.1", "public.invalid")) {
+      assertEquals(Proxy.Type.HTTP, select(selector, "http://" + host).type(), host);
+    }
+
+    // 环境形式同样接受 CIDR：命中时 DIRECT，未命中才委托 fallback（含 https 与 WebSocket）。
+    RecordingFallback fallback = new RecordingFallback();
+    ProxySelector environment =
+        HttpProxySelector.fromEnvironment(
+            Map.of("no_proxy", "192.168.0.0/16,100.64.0.0/10,2001:db8::/32"), fallback);
+    assertDirect(environment, "http://192.168.1.1");
+    assertDirect(environment, "wss://100.64.5.5");
+    assertDirect(environment, "https://[2001:db8::9]");
+    assertEquals(0, fallback.calls);
+    assertEquals(fallback.proxy, select(environment, "http://192.169.0.1"));
+    assertEquals(fallback.proxy, select(environment, "https://100.128.0.1"));
+    assertEquals(2, fallback.calls);
+  }
+
   /** 意图：所有非法配置都在构建时拒绝，异常消息及 cause 不泄漏原始输入。 */
   @Test
   void invalidConfigurationIsRedactedAndFailsClosed() {
@@ -133,7 +249,24 @@ class HttpProxySelectorTest {
             ",",
             "host,",
             " ",
-            "10.0.0.0/8",
+            "10.0.0.0/33",
+            "10.0.0.0/",
+            "/8",
+            "10.0.0.0/8/8",
+            "10.0.0/8",
+            "1.2.3.x/8",
+            "10.0.0.256/8",
+            "10.0.0.0.0/8",
+            "10.0.0.0/abc",
+            "10.0.0.0/-1",
+            "10.0.0.0/8:80",
+            "host/8",
+            "*.example.com/24",
+            "2001:db8::/129",
+            "::ffff:1.2.3.4/129",
+            "1:2:3:4:5:6:7:8:9/64",
+            "fe80::1%eth0/64",
+            "[::1]/128",
             "foo*bar",
             "*.*",
             ".*",
