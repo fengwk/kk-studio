@@ -191,6 +191,39 @@ describe('buildToolMessageView', () => {
       expect(view.visualState).toBe('error')
     })
 
+    it('shows a succeeded invocation result while its waiting sibling stays pending', () => {
+      // 结果来自 invocation overlay，而不是 durable tool result；成功与等待必须分开着色。
+      const succeeded = buildToolMessageView({
+        message: message({ status: 'done', toolCallId: 'call-ok' }),
+        result: message({
+          id: 'transient-ok',
+          phase: 'result',
+          status: 'done',
+          text: 'listed files',
+          toolCallId: 'call-ok',
+        }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+      const waiting = buildToolMessageView({
+        message: message({
+          id: 'call-ask',
+          status: 'streaming',
+          toolCallId: 'call-ask',
+          approval: { required: true, decision: null, decisionId: null, reason: null },
+        }),
+        approvalPending: false,
+        requestedExpanded: false,
+        hasCustomRenderer: false,
+      })
+
+      expect(succeeded.visualState).toBe('success')
+      expect(succeeded.context.text).toBe('listed files')
+      expect(waiting.visualState).toBe('pending')
+      expect(waiting.resultMessage).toBeUndefined()
+    })
+
     it('derives success from a standalone result with missing status', () => {
       const view = buildToolMessageView({
         message: message({ phase: 'result', status: undefined, text: 'ok' }),

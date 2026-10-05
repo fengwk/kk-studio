@@ -93,6 +93,12 @@ NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequ
 
 Stop 复用 stopRequestId 处理未知结果，取消的排队消息回到 Composer。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
+`/threads/:threadId` 是无 owner 的只读观察页，只展示该 Thread 的快照，不提供消息输入。
+工具卡片按各自 invocation 的结果判定终态：同批其他调用尚未物化 durable 结果时，
+已完成调用仍显示其结果，等待审批的调用保持未决。结果配对使用
+`assistantEntryId:callIndex`，相同 toolCallId 的历史结果不会占用当前调用。
+终态结果优先于尚未结束时的 partial。Thread 处于等待审批时，
+活动条显示“等待审批”，其余非空闲状态仍显示正在工作。
 `/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
 [Harness Builtin](harness-builtin.md#goal用户拥有的目标与-agent-进度声明)。
 
