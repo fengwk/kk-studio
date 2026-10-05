@@ -91,7 +91,7 @@ class HarnessRuntimeResponseMapperTest {
     ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
     ThreadSnapshot continuing = HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(3));
     List<HarnessThreadTreeNodeDTO> nodes =
-        HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waiting, continuing));
+        HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(parent, continuing));
 
     assertEquals(2, nodes.size());
     HarnessThreadTreeNodeDTO node = nodes.get(0);
