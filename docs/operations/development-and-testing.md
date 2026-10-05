@@ -268,7 +268,10 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
 payload 只含 settings、不物化任何委派运行树元数据。
 受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立 Thread 面板查看进度并处理工具审批，
-不依赖 Chat 归属，也不开放无 owner 的会话命令发送。
+不依赖 Chat 归属。该页只观察 URL 指定的 Thread：不渲染消息输入、发送、新建、设置或目标命令，
+也不开放无 owner 的会话命令发送；已有工具审批仍提交到该 Thread。
+同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
+等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
 通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
 这些是 jsdom 回归，不替代真实浏览器验证。
@@ -378,6 +381,11 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
   `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
   物化门禁；该 case 需要 `host-mock`，不是 `requires=-`。
+- `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
+  `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
+  查询不改变 head 或版本；非法 UUID 为 400，缺失 Thread 为 404。
+  根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
+  跨 Session 的多层父子树与锁序由内存及 PostgreSQL 契约测试覆盖。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此

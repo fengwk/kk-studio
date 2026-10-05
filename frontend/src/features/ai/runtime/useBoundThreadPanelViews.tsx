@@ -156,7 +156,11 @@ export function buildBoundThreadTranscript(options: {
     messagesLoading: boolean
     messagesError: unknown
     approvalPending: boolean
-    decideApproval: (invocationId: string, decision: 'ALLOW' | 'DENY') => Promise<void>
+    decideApproval: (
+      invocationId: string,
+      decision: 'ALLOW' | 'DENY',
+      targetThreadId?: string,
+    ) => Promise<void>
   }
   threadId: string
   initialConversationScrollTop: number | null
@@ -180,7 +184,11 @@ export function buildBoundThreadTranscript(options: {
         options.onDenyApproval?.()
       }
       // 返回精确的决策请求：审批条据此在本地 pending 与 settle 之间同步反馈。
-      return controller.decideApproval(message.invocationId, decision)
+      return controller.decideApproval(
+        message.invocationId,
+        decision,
+        message.threadId || options.threadId,
+      )
     },
   }
 }

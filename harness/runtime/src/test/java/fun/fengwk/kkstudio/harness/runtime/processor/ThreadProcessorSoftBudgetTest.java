@@ -11,7 +11,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tooledRequest;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -58,6 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -78,7 +78,7 @@ import java.util.UUID;
  *       continueModel=true 时），同事务入队 SystemReminder 命令并推进 join.reminderTurn；
  *   <li><b>终态空闲不注入</b>（no idle reminder）：模型直接完成且走向真正 IDLE 时，绝不追加多余轮次；
  *   <li><b>重试幂等性</b>（retry idempotence）：在同一阈值重试或重复触发时，不重复入队相同 reminder 命令且不倒退；
- *   <li><b>多命令共享轮次</b>（multi-input shared turn）：多条命令合并在单次 INPUT turn 执行时，按实际 TurnStart 起始精准计数；
+ *   <li><b>源命令轮次</b>：join 从自己的源命令所在 TURN_START 起计数，尚未应用的后续命令不计入；
  *   <li><b>父线程停止门禁</b>（parent stopped fence）：父级处于 STOPPED 终界时不向子线程注入提醒；
  *   <li><b>非工作轮次排除</b>（compaction and stop exclusion）：COMPACTION 与 STOP 轮次不计入 maxTurns 预算；
  *   <li><b>模型自主续写边界</b>（model continue plan boundary）：ModelResponsePlan.Continue 达到预算时同样注入提醒。
@@ -178,28 +178,12 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
         (TextMessageContent) reminderPayload.message().contents().get(0);
     assertTrue(reminderText.text().contains("reached its suggested turn budget"));
 
-    // Turn 3: 启动 CONTINUATION Turn 处理 Tool 2 结果（提醒命令仍保留在队列中）
+    // Turn 3: 安全边界直接把已入队提醒转成 INPUT，而不是先空转一次 CONTINUATION。
     fixture.resolver.results.add(
         new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
-    List<ThreadCommand> queuedDuringContinuation = loadQueuedCommands(fixture.store, childId);
-    assertEquals(1, queuedDuringContinuation.size());
+    assertTrue(loadQueuedCommands(fixture.store, childId).isEmpty());
 
-    // Model 3 给出阶段响应（无工具调用，continueModel=false）
-    ModelInvocation model3 = loadOpenModel(fixture.store, childId);
-    transitionModelToSucceeded(fixture.store, model3, "Tool 2 output understood.");
-    requestThreadWork(fixture.store, childId);
-
-    // Apply Model 3：Turn 3 关闭。由于队列中存在未消费的提醒命令，Thread 不会进入 IDLE，而是自唤醒
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
-    ThreadState stateAfterModel3 = thread(fixture.store, childId);
-    assertEquals(ThreadLifecycleStatus.ACTIVE, stateAfterModel3.status());
-    assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, childId)));
-
-    // Turn 4: INPUT Turn 消费该 SystemReminder 命令
-    fixture.resolver.results.add(
-        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
     EntryPath childPathAfterReminder = path(fixture.store, childId);
     assertTrue(
         childPathAfterReminder.entries().stream()
@@ -208,12 +192,11 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                     e.payload() instanceof CustomMessagePayload cmp
                         && SystemReminder.isReminder(cmp.message())));
 
-    // Model 4 给出最终收敛总结（无工具调用）
     ModelInvocation model4 = loadOpenModel(fixture.store, childId);
     transitionModelToSucceeded(fixture.store, model4, "Phase report completed.");
     requestThreadWork(fixture.store, childId);
 
-    // Apply Model 4：此时队列已空，子线程完成并原子推进为 IDLE，交付结果给父级
+    // 关闭已消费提醒的 INPUT：队列为空，子线程进入 IDLE，并向父线程交付一次。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
     ThreadState finalChildState = thread(fixture.store, childId);
     assertEquals(ThreadLifecycleStatus.IDLE, finalChildState.status());
@@ -221,6 +204,46 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     ThreadJoin finalJoin = fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
     assertTrue(finalJoin.matched());
     assertEquals(finalChildState.headEntryId(), finalJoin.resultHeadEntryId());
+    assertEquals(1, countReminders(path(fixture.store, childId)));
+  }
+
+  /** 测试意图：同一 join 达到预算后只入队一条稳定提醒；后续真正继续的轮次不再入队，最终 Idle 也只交付一次。 */
+  @Test
+  void oneJoinEnqueuesOnlyOneReminderAcrossLaterContinuationBoundaries() {
+    Fixture fixture = fixture();
+    UUID sessionId = createSession(fixture.store);
+    UUID rootEntryId = createRootEntry(fixture.store, sessionId);
+    UUID parentId =
+        createThread(
+            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+    UUID childId =
+        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+    seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task")));
+    requestThreadWork(fixture.store, childId);
+    UUID invocationId = UUID.randomUUID();
+    insertJoin(fixture, invocationId, parentId, childId, 1L, 1);
+
+    driveToolBoundary(fixture, childId, "call-1");
+    ThreadCommand first = loadQueuedCommands(fixture.store, childId).getFirst();
+    long reminderTurn = join(fixture, invocationId).reminderTurn();
+    assertTrue(reminderTurn > 0);
+
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    ModelInvocation continued = loadOpenModel(fixture.store, childId);
+    transitionModelToToolCall(fixture.store, continued, "call-2");
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    succeedToolsByAssistant(fixture.store, childId);
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    assertTrue(loadQueuedCommands(fixture.store, childId).isEmpty());
+    assertEquals(reminderTurn, join(fixture, invocationId).reminderTurn());
+    assertEquals(first.idempotencyKey(), appliedReminder(fixture, childId).idempotencyKey());
+    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(fixture.store, childId).status());
+    assertEquals(1, countReminders(path(fixture.store, childId)));
+    assertTrue(loadQueuedCommands(fixture.store, childId).isEmpty());
   }
 
   @Test
@@ -370,7 +393,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
   @Test
   void multiInputSharedTurnCountsCorrectly() {
-    // 测试意图：验证当批次中包含多条命令且共享同一 TURN_START 时，轮数计数从源命令所在的实际 TURN_START 统计。
+    // 测试意图：尚未应用的后续命令不提前计入；轮数从该 join 源命令实际所在的 TURN_START 开始。
     Fixture fixture = fixture();
     UUID sessionId = createSession(fixture.store);
     UUID rootEntryId = createRootEntry(fixture.store, sessionId);
@@ -776,6 +799,73 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
         SystemReminder.isReminder(((CustomMessageCommandPayload) reminderCmd.payload()).message()));
   }
 
+  /** 测试意图：同一 invocation 恢复后是新的 join，即使旧 join 已提醒过，新 join 在继续边界仍可提醒一次。 */
+  @Test
+  void resumedJoinCanRemindAgain() {
+    Fixture fixture = fixture();
+    UUID sessionId = createSession(fixture.store);
+    UUID rootEntryId = createRootEntry(fixture.store, sessionId);
+    UUID parentId =
+        createThread(
+            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+    UUID childId =
+        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+    seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("first")));
+    requestThreadWork(fixture.store, childId);
+    UUID firstJoin = UUID.randomUUID();
+    insertJoin(fixture, firstJoin, parentId, childId, 1L, 1);
+    driveToolBoundary(fixture, childId, "call-1");
+    assertEquals(1, loadQueuedCommands(fixture.store, childId).size());
+    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(fixture.store, childId).status());
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    ModelInvocation reminded = loadOpenModel(fixture.store, childId);
+    transitionModelToSucceeded(fixture.store, reminded, "old reminder consumed");
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    assertEquals(ThreadLifecycleStatus.IDLE, thread(fixture.store, childId).status());
+
+    long resumedSource = thread(fixture.store, childId).nextCommandSequence();
+    seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("resume")));
+    requestThreadWork(fixture.store, childId);
+    UUID resumedJoin = UUID.randomUUID();
+    insertJoin(fixture, resumedJoin, parentId, childId, resumedSource, 1);
+
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
+    assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
+    ModelInvocation resumed = loadOpenModel(fixture.store, childId);
+    transitionModelToToolCall(fixture.store, resumed, "call-2");
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
+    succeedToolsByAssistant(fixture.store, childId);
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
+    assertEquals(1, loadQueuedCommands(fixture.store, childId).size());
+    assertTrue(join(fixture, resumedJoin).reminderTurn() > 0);
+
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
+    assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
+    ModelInvocation resumedModel = loadOpenModel(fixture.store, childId);
+    transitionModelToSucceeded(fixture.store, resumedModel, "resumed reminder consumed");
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
+
+    assertEquals(ThreadLifecycleStatus.IDLE, thread(fixture.store, childId).status());
+    ThreadJoin completedFirst = join(fixture, firstJoin);
+    ThreadJoin completedResume = join(fixture, resumedJoin);
+    assertTrue(completedFirst.matched());
+    assertTrue(completedResume.matched());
+    assertEquals(1L, completedFirst.reminderTurn());
+    assertTrue(completedResume.reminderTurn() > 0);
+    assertNotNull(completedFirst.deliveryCommandSequence());
+    assertNotNull(completedResume.deliveryCommandSequence());
+    assertEquals(2, loadQueuedCommands(fixture.store, parentId).size());
+    assertEquals(2, countReminders(path(fixture.store, childId)));
+  }
+
   // --- Helper Methods ---
 
   private UUID createSession(HarnessStore store) {
@@ -894,6 +984,91 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
           tool.id(),
           new ToolResult(tool.call().id(), List.of(new TextResultContent("tool ok")), false, "{}"));
     }
+  }
+
+  private void insertJoin(
+      Fixture fixture,
+      UUID invocationId,
+      UUID parentId,
+      UUID childId,
+      long sourceSequence,
+      Integer maxTurns) {
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(
+              new ThreadJoin(
+                  invocationId,
+                  CREATION_REQUEST_HASH,
+                  parentId,
+                  childId,
+                  sourceSequence,
+                  0L,
+                  "test-agent",
+                  maxTurns,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW));
+          return null;
+        });
+  }
+
+  /** 父线程完成消息也会占用全局 THREAD claim；测试只验证子线程时先移除父 work。 */
+  private static ThreadProcessResult claimChild(Fixture fixture, UUID childId) {
+    UUID parentId = thread(fixture.store, childId).parentThreadId();
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(parentId);
+          tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, parentId));
+          return null;
+        });
+    return fixture.nextClaim(childId);
+  }
+
+  private ThreadJoin join(Fixture fixture, UUID invocationId) {
+    return fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+  }
+
+  private void driveToolBoundary(Fixture fixture, UUID childId, String callId) {
+    fixture.resolver.results.add(
+        new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    ModelInvocation model = loadOpenModel(fixture.store, childId);
+    transitionModelToToolCall(fixture.store, model, callId);
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+    succeedToolsByAssistant(fixture.store, childId);
+    requestThreadWork(fixture.store, childId);
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
+  }
+
+  private ThreadCommand appliedReminder(Fixture fixture, UUID threadId) {
+    return fixture.store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          return tx.loadCommandsByThread(threadId).stream()
+              .filter(command -> command.state() == ThreadCommandState.APPLIED)
+              .filter(
+                  command ->
+                      command.payload() instanceof CustomMessageCommandPayload payload
+                          && SystemReminder.isReminder(payload.message()))
+              .findFirst()
+              .orElseThrow();
+        });
+  }
+
+  private static int countReminders(EntryPath path) {
+    int count = 0;
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof CustomMessagePayload payload
+          && SystemReminder.isReminder(payload.message())) {
+        count++;
+      }
+    }
+    return count;
   }
 
   private List<ThreadCommand> loadQueuedCommands(HarnessStore store, UUID threadId) {

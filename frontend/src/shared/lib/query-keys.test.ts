@@ -6,6 +6,10 @@ describe('queryKeys', () => {
     expect(queryKeys.threads.snapshot('thread-1')).toEqual(['threads', 'snapshot', 'thread-1'])
   })
 
+  it('keeps the agent relationship tree key distinct from the Thread snapshot', () => {
+    expect(queryKeys.threads.tree('thread-1')).toEqual(['threads', 'tree', 'thread-1'])
+  })
+
   it('keeps Chat-scoped Thread lists and chat details in distinct cache scopes', () => {
     expect(queryKeys.chats.detail('chat-1')).toEqual(['chats', 'detail', 'chat-1'])
     expect(queryKeys.chats.threads('chat-1')).toEqual(['chats', 'threads', 'chat-1'])

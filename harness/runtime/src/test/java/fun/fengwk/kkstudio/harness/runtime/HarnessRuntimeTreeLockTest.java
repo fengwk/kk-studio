@@ -195,8 +195,7 @@ class HarnessRuntimeTreeLockTest {
     HarnessRuntime recordingRuntime =
         HarnessRuntimeTestSupport.runtime(recordingStore(store, locks), clock);
 
-    ThreadState updated =
-        recordingRuntime.setThreadYolo(new SetThreadYoloCommand(childId, 0L, true));
+    ThreadState updated = recordingRuntime.setThreadYolo(new SetThreadYoloCommand(childId, true));
     assertTrue(updated.yoloEnabled());
     assertEquals(List.of("lockTree:" + baseline.threadId(), "lockThread:" + childId), locks);
   }

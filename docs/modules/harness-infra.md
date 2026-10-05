@@ -21,7 +21,7 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 持有执行树锁时，生命周期交付允许回写同树 Command；其他逆序请求立即失败。
 
-执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。
+执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内收集全部后代，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
 
 `lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countActiveSubagentThreads` 跨所有根统计 `parent_thread_id` 非空且非 `IDLE` 的 Thread，原子执行全局并发准入；已活跃子线程追加输入不重复占额度。普通执行推进和无父 one-shot 不取全局准入锁。
 

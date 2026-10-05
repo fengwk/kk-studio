@@ -129,6 +129,25 @@ export interface HarnessSessionEntryDTO {
 }
 
 /**
+ * 父子 Agent 关系树的一个节点。
+ * 从任意 Thread 查询时返回其真实 root 的整棵树，包含运行中、空闲和已结束节点。
+ * outcome 仅在 IDLE 且 head 回合已结束时有值，否则为 null。
+ * turnCount / toolCallCount 是当前 branch root-to-head 累计，不含 COMPACTION / STOP。
+ */
+export interface HarnessThreadTreeNodeDTO {
+  threadId: string
+  parentThreadId: string | null
+  name: string
+  agentName: string
+  model: HarnessModelSelectionDTO
+  status: string
+  processing: boolean
+  turnCount: number
+  toolCallCount: number
+  outcome: string | null
+}
+
+/**
  * HarnessThread 查询投影；id 均为 canonical UUID string，version 是持久快照游标。
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
@@ -213,11 +232,9 @@ export type HarnessCommandCreateDTO =
   | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
 
 /**
- * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标
- * （同值请求在任何 CAS 之前即成功 no-op）。
+ * Thread YOLO policy 直接更新请求。它只提交目标策略，不携带 Thread version CAS。
  */
 export interface HarnessThreadYoloUpdateDTO {
-  expectedVersion: string
   yoloEnabled: boolean
 }
 

@@ -43,17 +43,17 @@ import java.util.UUID;
  *
  * <p>测试意图：Issue+Agent 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project 启动策略与 Issue
  * 工作流统一维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo} 必须以 409 拒绝且不触达 {@link
- * HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走原 CAS 更新路径。
+ * HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走直接策略更新路径。
  *
  * <p>归属判定使用真实 Spring {@link ProjectThreadOwnerResolver} bean 与真实归属行，仅 {@link HarnessRuntime} 用 mock
- * 以便断言拒绝路径零调用。
+ * 以便断言拒绝路径零调用。非 Issue 归属 Thread 直接更新 YOLO，不携带 version CAS。
  */
 class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostgresTestSupport {
 
   private static final String AGENT_NAME = "default-assistant";
   private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  private static final String YOLO_BODY = "{\"expectedVersion\":\"0\",\"yoloEnabled\":true}";
+  private static final String YOLO_BODY = "{\"yoloEnabled\":true}";
 
   @Autowired private ProjectThreadOwnerResolver projectThreadOwnerResolver;
   @Autowired private ProjectService projectService;
@@ -145,7 +145,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     assertFalse(threadYoloEnabled(siblingThreadId), "兄弟 Branch 的 YOLO 不得被覆盖");
   }
 
-  /** 意图：非 Issue 归属的普通 Thread（其 Session 没有任何 owner relation）仍走原有 CAS 更新路径，并返回权威 Thread。 */
+  /** 意图：非 Issue 归属的普通 Thread（其 Session 没有任何 owner relation）仍直接更新 YOLO，并返回权威 Thread。 */
   @Test
   void allowsYoloToggleOnThreadWithoutIssueAgentOwnership() throws Exception {
     UUID threadId = insertStandaloneThread();
