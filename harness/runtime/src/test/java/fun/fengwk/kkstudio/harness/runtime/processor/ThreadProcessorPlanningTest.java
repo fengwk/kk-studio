@@ -85,9 +85,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
   }
 
+  /** 测试意图：INPUT 收获快照内全部 queued Command（不再在首条 user-like 后截断），按 sequence 有序物化，且顺序稳定。 */
   @Test
-  void inputConsumesExactlyOnePreexistingUserMessage() {
-    // INPUT 只消费到首条 user-like，后续消息保持 QUEUED（不把整个 queued snapshot 写进同一 INPUT）。
+  void inputConsumesWholeQueuedSnapshotInOrder() {
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
     UUID first =
@@ -106,13 +106,13 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(3, path.entries().size());
+    assertEquals(4, path.entries().size());
     MessagePayload user = (MessagePayload) path.head().payload();
-    assertEquals("first", ((TextMessageContent) user.message().contents().getFirst()).text());
+    assertEquals("second", ((TextMessageContent) user.message().contents().getFirst()).text());
     assertEquals(
         ThreadCommandState.APPLIED, command(fixture.store, baseline.threadId(), first).state());
     assertEquals(
-        ThreadCommandState.QUEUED, command(fixture.store, baseline.threadId(), second).state());
+        ThreadCommandState.APPLIED, command(fixture.store, baseline.threadId(), second).state());
   }
 
   /** 已关闭的 continuation 边界优先消费 queued user-like：claim1 直接启动 INPUT，不先空转一次 CONTINUATION。 */
@@ -140,8 +140,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   }
 
   /**
-   * 测试意图：续作边界按 FIFO 消费 settings 前缀直到第一条 user-like，且 USER/CUSTOM/GOAL 都恰好消费一次； 其后的 settings 保持
-   * QUEUED。无 queued 消息时仍启动 CONTINUATION。
+   * 测试意图：INPUT 全快照有序消费 setup 前缀、USER、CUSTOM、GOAL（每条恰好一次，包含消息之后的 settings）；无 queued 消息时仍启动
+   * CONTINUATION。
    */
   @Test
   void continuationDueConsumesOrderedPrefixExactlyOnceAndKeepsPlainContinuation() {
@@ -176,7 +176,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
-        ThreadCommandState.QUEUED,
+        ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), trailingEnvironment).state());
 
     Fixture customFixture = fixture();
@@ -251,7 +251,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
         path.entries().get(5).id(),
-        command(fixture.store, baseline.threadId(), modelCommand).appliedTurnStartEntryId());
+        command(fixture.store, baseline.threadId(), modelCommand).appliedEntryId());
     assertEquals(1, fixture.resolver.calls);
   }
 
@@ -304,7 +304,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         command(fixture.store, baseline.threadId(), modelCommand).state());
     assertEquals(
         path.entries().get(5).id(),
-        command(fixture.store, baseline.threadId(), modelCommand).appliedTurnStartEntryId());
+        command(fixture.store, baseline.threadId(), modelCommand).appliedEntryId());
   }
 
   @Test
@@ -486,9 +486,12 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
-  /** 续作边界的 INPUT 被 reject 但队列里仍有第二条 USER：commit 必须先请求 THREAD 再 complete，后续 claim 才能消费它。 */
+  /**
+   * 续作边界的 INPUT 被 reject 时已消费整个 queued 快照：两条 USER 都标记 APPLIED，无 deferred demand 也不触发 compaction
+   * 时不保留 THREAD Work，且 commit 仍以 claim fence 收尾。
+   */
   @Test
-  void rejectedInputWithRemainingQueuedMessageKeepsThreadWork() {
+  void rejectedInputConsumesWholeSnapshotAndLeavesNoWake() {
     Fixture fixture = fixture();
     var baseline = seedClosedTurn(fixture.store, true);
     UUID first =
@@ -508,23 +511,20 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(9, path.entries().size());
+    assertEquals(10, path.entries().size());
     TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
     assertEquals(TurnStartReason.INPUT, turnStart.reason());
-    AssistantErrorPayload error = (AssistantErrorPayload) path.entries().get(7).payload();
+    AssistantErrorPayload error = (AssistantErrorPayload) path.entries().get(8).payload();
     assertEquals("CONFIG_ERROR", error.error().code());
-    TurnEndPayload end = (TurnEndPayload) path.entries().get(8).payload();
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(9).payload();
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
     assertEquals(TurnEndReason.TURN_FAILED, end.reason());
     assertEquals(
         ThreadCommandState.APPLIED, command(fixture.store, baseline.threadId(), first).state());
     assertEquals(
-        ThreadCommandState.QUEUED, command(fixture.store, baseline.threadId(), second).state());
-    // deferred wake：THREAD Work 保留（lease 已清）。
-    Work threadWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-    assertNotNull(threadWork);
-    assertNull(threadWork.leaseToken());
+        ThreadCommandState.APPLIED, command(fixture.store, baseline.threadId(), second).state());
+    // 全快照已消费且无 compaction obligation -> 不保留 THREAD Work。
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);
   }
 

@@ -138,19 +138,7 @@ class ThreadJoinTest {
     String maxLenAgent = "x".repeat(256);
     ThreadJoin join2 =
         new ThreadJoin(
-            id(1),
-            VALID_HASH,
-            id(2),
-            id(3),
-            1L,
-            maxLenAgent,
-            null,
-            0L,
-            null,
-            null,
-            null,
-            T0,
-            T0);
+            id(1), VALID_HASH, id(2), id(3), 1L, maxLenAgent, null, 0L, null, null, null, T0, T0);
     assertEquals(maxLenAgent, join2.agent());
   }
 
@@ -160,36 +148,12 @@ class ThreadJoinTest {
     assertDoesNotThrow(
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                null,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", null, 0L, null, null, null, T0, T0));
 
     assertDoesNotThrow(
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                null,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T1));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", null, 0L, null, null, null, T0, T1));
   }
 
   @Test
@@ -211,37 +175,13 @@ class ThreadJoinTest {
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                null,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, null, T0));
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                null));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, null));
   }
 
   @Test
@@ -341,57 +281,21 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                0L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), 0L, "agent", 10, 0L, null, null, null, T0, T0));
 
     // sourceCommandSequence = -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                -1L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), -1L, "agent", 10, 0L, null, null, null, T0, T0));
 
     // reminderTurn = -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                10,
-                -1L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, -1L, null, null, null, T0, T0));
   }
 
   @Test
@@ -447,19 +351,7 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                -5,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", -5, 0L, null, null, null, T0, T0));
   }
 
   @Test

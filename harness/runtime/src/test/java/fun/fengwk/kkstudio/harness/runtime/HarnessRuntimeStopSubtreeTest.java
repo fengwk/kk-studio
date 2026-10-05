@@ -23,11 +23,11 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -38,9 +38,9 @@ import java.util.UUID;
 /**
  * Stop 的子树范围、每节点持久回执与 Join 结算契约。
  *
- * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，不按 Join 完成状态过滤；祖先保持不动。每个受影响节点
- * 持久保存自己的 {@link StoppedThreadReceipt}，旧 stopRequestId 的重放直接返回持久保存的整批回执且不停止其后启动的新工作。子 Join 在停止边界冻结为
- * 终止结果；父 Thread 仍 RUNNABLE 时收到系统通知，父也在停止集合内时通知直接固化到历史。
+ * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，不按 Join
+ * 完成状态过滤；祖先保持不动。每个受影响节点 持久保存自己的 {@link StoppedThreadReceipt}，旧 stopRequestId
+ * 的重放直接返回持久保存的整批回执且不停止其后启动的新工作。子 Join 在停止边界冻结为 终止结果；父 Thread 仍 RUNNABLE 时收到系统通知，父也在停止集合内时通知直接固化到历史。
  */
 class HarnessRuntimeStopSubtreeTest {
 
@@ -59,8 +59,7 @@ class HarnessRuntimeStopSubtreeTest {
     UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
     UUID grandChild = createChildThread(child, root.sessionId(), root.rootEntryId());
 
-    StopResult result =
-        runtime.stop(new StopCommand(root.threadId(), TestIds.id(11), 0L));
+    StopResult result = runtime.stop(new StopCommand(root.threadId(), TestIds.id(11), 0L));
 
     assertFalse(result.replayed());
     assertEquals(3, result.stoppedThreads().size());
@@ -83,14 +82,19 @@ class HarnessRuntimeStopSubtreeTest {
     assertEquals(1L, version(grandChild));
     for (StoppedThreadReceipt receipt : result.stoppedThreads()) {
       assertNotNull(receipt.stoppedTurnEndEntryId());
-      assertEquals(TestIds.id(11), receipt.stopRequestId());
     }
+    assertEquals(TestIds.id(11), targetReceipt(result).stopRequestId());
     assertEquals(
         List.of(root.threadId(), child, grandChild).stream().sorted().toList(),
+        result.stoppedThreads().stream().map(StoppedThreadReceipt::threadId).sorted().toList());
+    // 每个后代使用由根请求派生的确定性 stopRequestId。
+    assertEquals(
+        StopControl.deriveChildStopRequestId(TestIds.id(11), child),
         result.stoppedThreads().stream()
-            .map(StoppedThreadReceipt::threadId)
-            .sorted()
-            .toList());
+            .filter(receipt -> receipt.threadId().equals(child))
+            .findFirst()
+            .orElseThrow()
+            .stopRequestId());
   }
 
   @Test
@@ -126,10 +130,7 @@ class HarnessRuntimeStopSubtreeTest {
             .map(StoppedThreadReceipt::threadId)
             .sorted()
             .toList(),
-        replay.stoppedThreads().stream()
-            .map(StoppedThreadReceipt::threadId)
-            .sorted()
-            .toList());
+        replay.stoppedThreads().stream().map(StoppedThreadReceipt::threadId).sorted().toList());
     assertEquals(childVersionAfterStop, version(child));
 
     // 旧请求重放不得停止其后新建的后代。
@@ -158,7 +159,8 @@ class HarnessRuntimeStopSubtreeTest {
     assertNotNull(join.deliveryCommandSequence());
 
     // 父仍 RUNNABLE：通知以命令交付并请求父 Thread Work。
-    List<ThreadCommand> parentCommands = store.transaction(tx -> tx.loadCommandsByThread(root.threadId()));
+    List<ThreadCommand> parentCommands =
+        store.transaction(tx -> tx.loadCommandsByThread(root.threadId()));
     assertEquals(1, parentCommands.size());
     assertTrue(parentCommands.getFirst().payload() instanceof NotificationCommandPayload);
     assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());
@@ -181,7 +183,13 @@ class HarnessRuntimeStopSubtreeTest {
 
     // 父也在停止集合内：通知直接固化到历史，不留下 queued 命令。
     assertTrue(rootPathContainsNotification(root.threadId()));
-    assertTrue(store.transaction(tx -> tx.loadQueuedCommands(root.threadId())).isEmpty());
+    boolean noQueuedCommands =
+        store.transaction(
+            tx -> {
+              tx.lockThread(root.threadId());
+              return tx.loadQueuedCommands(root.threadId()).isEmpty();
+            });
+    assertTrue(noQueuedCommands);
     assertEquals(ThreadExecutionControl.STOPPED, result.thread().executionControl());
   }
 
@@ -197,8 +205,7 @@ class HarnessRuntimeStopSubtreeTest {
 
     assertTrue(store.transaction(tx -> tx.findJoin(joinId).orElseThrow()).matched());
     assertEquals(
-        ThreadJoinOutcome.CANCELLED,
-        runtime.projectJoinReceipt(joinId).orElseThrow().outcome());
+        ThreadJoinOutcome.CANCELLED, runtime.projectJoinReceipt(joinId).orElseThrow().outcome());
   }
 
   private long version(UUID threadId) {

@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
@@ -259,8 +259,8 @@ public interface HarnessStore {
     void updateJoin(ThreadJoin join);
 
     /**
-     * 持久保存一次 Stop 产生的完整回执集合（请求目标与全部后代各一条）。要求每条回执的 Thread 已在本事务锁定；回执身份 {@code
-     * (threadId, stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootStopRequestId} 是本次
+     * 持久保存一次 Stop 产生的完整回执集合（请求目标与全部后代各一条）。要求每条回执的 Thread 已在本事务锁定；回执身份 {@code (threadId,
+     * stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootStopRequestId} 是本次
      * Stop 的根请求 ID，用于精确重放旧范围而不以当前树重算。
      */
     void insertStopReceipts(UUID rootStopRequestId, List<StoppedThreadReceipt> receipts);
@@ -324,12 +324,12 @@ public interface HarnessStore {
 
     /**
      * 批量更新 Command 的生命周期。threadId / payload / idempotencyKey / requestHash / sequence / createdAt
-     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedEntryId）或 CANCELLED（设置 stopRequestId 与
-     * cancelledAt 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
-     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedEntryId 必须指向存在的 Entry、属于 Command
-     * Thread 的 Session，且被引用 Entry 的 ownerThreadId（若为 TURN_START）等于 command 的 threadId。要求每行已在本事务锁定
-     * （{@link #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的 thread 已在本事务锁定（锁序 Thread
-     * -&gt; commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 / applied 引用违反或行不存在抛 {@link
+     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedEntryId）或 CANCELLED（设置 stopRequestId 与 cancelledAt
+     * 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
+     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedEntryId 必须指向存在的 Entry、属于 Command Thread
+     * 的 Session，且被引用 Entry 的 ownerThreadId（若为 TURN_START）等于 command 的 threadId。要求每行已在本事务锁定 （{@link
+     * #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的 thread 已在本事务锁定（锁序 Thread -&gt;
+     * commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 / applied 引用违反或行不存在抛 {@link
      * IllegalArgumentException}。
      */
     void updateCommands(List<ThreadCommand> commands);
@@ -505,10 +505,10 @@ public interface HarnessStore {
     // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
 
     /**
-     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work / Join / Stop 回执。要求所有 Thread 已按
-     * UUID 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work 的规范顺序锁定子事实，再按 FK
-     * 顺序删除，避免多 Thread 深删发生锁 rank 回退，也避免与运行时 callback 的 Model/Tool -&gt; Work 锁序形成死锁。Entry 仍由
-     * Session 级删除原语处理。
+     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work / Join / Stop 回执。要求所有
+     * Thread 已按 UUID 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work
+     * 的规范顺序锁定子事实，再按 FK 顺序删除，避免多 Thread 深删发生锁 rank 回退，也避免与运行时 callback 的 Model/Tool -&gt; Work
+     * 锁序形成死锁。Entry 仍由 Session 级删除原语处理。
      */
     int deleteThreads(List<UUID> threadIds);
 

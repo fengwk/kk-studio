@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,6 +47,7 @@ class StopRecordsTest {
           "main",
           false,
           ThreadExecutionControl.RUNNABLE,
+          0,
           1,
           0,
           Instant.ofEpochMilli(1),
@@ -81,44 +81,40 @@ class StopRecordsTest {
 
   @Test
   void stopResultRejectsInvalidShapes() {
-    assertThrows(NullPointerException.class, () -> new StopResult(true, null, null, 0, List.of()));
-    assertThrows(
-        IllegalArgumentException.class, () -> new StopResult(false, THREAD, null, -1, List.of()));
-    assertThrows(NullPointerException.class, () -> new StopResult(false, THREAD, null, 0, null));
+    assertThrows(NullPointerException.class, () -> new StopResult(true, null, List.of()));
+    assertThrows(NullPointerException.class, () -> new StopResult(false, THREAD, null));
   }
 
   @Test
   void stopResultValidShapesRoundTrip() {
-    // turnEnd 为 null 只描述 legacy queued-only receipt 的形状：显式 Stop（含 idle）现在都写停止边界。
-    StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
-    assertFalse(queuedOnlyReceipt.replayed());
-    assertEquals(THREAD, queuedOnlyReceipt.thread());
-    assertNull(targetReceipt(queuedOnlyReceipt).stoppedTurnEndEntryId());
-    assertEquals(0, targetReceipt(queuedOnlyReceipt).cancelledCommandCount());
-
-    StopResult stopped = new StopResult(false, THREAD, id(3L), 2, List.of());
+    StoppedThreadReceipt receipt =
+        new StoppedThreadReceipt(THREAD.id(), id(4L), id(3L), 2, List.of());
+    StopResult stopped = new StopResult(false, THREAD, List.of(receipt));
     assertFalse(stopped.replayed());
+    assertEquals(THREAD, stopped.thread());
     assertEquals(id(3L), targetReceipt(stopped).stoppedTurnEndEntryId());
     assertEquals(2, targetReceipt(stopped).cancelledCommandCount());
+    assertEquals(1, stopped.stoppedThreads().size());
 
-    // live receipt replay：replayed=true 且 stoppedTurnEndEntryId 非 null（queued-only replay 则可为
-    // null）。
-    StopResult replayed = new StopResult(true, THREAD, id(3L), 0, List.of());
+    // replay：replayed=true 且返回持久保存的同一集合，thread 仍是请求目标的权威投影。
+    StopResult replayed = new StopResult(true, THREAD, List.of(receipt));
     assertTrue(replayed.replayed());
     assertEquals(id(3L), targetReceipt(replayed).stoppedTurnEndEntryId());
   }
 
   @Test
   void stopCommitCarriesEveryLocalCancellation() {
-    StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
+    StopResult result =
+        new StopResult(
+            false,
+            THREAD,
+            List.of(new StoppedThreadReceipt(THREAD.id(), id(4L), id(3L), 0, List.of())));
     // Commit 同时承载任意数量的 Model / Tool 本地取消（父与多子混合执行），不做单类型截断。
-    StopControl.Commit commit =
-        new StopControl.Commit(queuedOnlyReceipt, List.of(id(1L)), List.of(id(2L)));
+    StopControl.Commit commit = new StopControl.Commit(result, List.of(id(1L)), List.of(id(2L)));
     assertEquals(List.of(id(1L)), commit.modelExecutionIds());
     assertEquals(List.of(id(2L)), commit.toolExecutionIds());
     assertThrows(NullPointerException.class, () -> new StopControl.Commit(null, null, List.of()));
-    assertThrows(
-        NullPointerException.class, () -> new StopControl.Commit(queuedOnlyReceipt, null, null));
+    assertThrows(NullPointerException.class, () -> new StopControl.Commit(result, null, null));
   }
 
   /** stopRequestId 作为 closeRequestId 原样持久化到 STOPPED TURN_END，并端到端贯穿一次真实 Stop 事务。 */

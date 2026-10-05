@@ -14,10 +14,7 @@ import java.util.UUID;
  * {notificationId,kind,sourceThreadId,message}}，与历史 payload 同形。普通 HTTP 客户端不允许提交该类型。
  */
 public record NotificationCommandPayload(
-    UUID notificationId,
-    NotificationKind kind,
-    UUID sourceThreadId,
-    AgentMessage message)
+    UUID notificationId, NotificationKind kind, UUID sourceThreadId, AgentMessage message)
     implements ThreadCommandPayload {
 
   public NotificationCommandPayload {

@@ -41,7 +41,7 @@ class ThreadCommandTest {
             "payload",
             "idempotencyKey",
             "requestHash",
-            "appliedTurnStartEntryId",
+            "appliedEntryId",
             "stopRequestId",
             "cancelledAt",
             "createdAt"),
@@ -100,7 +100,7 @@ class ThreadCommandTest {
     ThreadCommand queued = command(1L, 1L, 1L, null, null, null);
     ThreadCommand applied = queued.markApplied(id(99));
     assertEquals(ThreadCommandState.APPLIED, applied.state());
-    assertEquals(id(99), applied.appliedTurnStartEntryId());
+    assertEquals(id(99), applied.appliedEntryId());
     assertNull(applied.stopRequestId());
     assertNull(applied.cancelledAt());
     // identity 不变
@@ -119,7 +119,7 @@ class ThreadCommandTest {
     assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
     assertEquals(STOP_REQUEST, cancelled.stopRequestId());
     assertEquals(CANCELLED, cancelled.cancelledAt());
-    assertNull(cancelled.appliedTurnStartEntryId());
+    assertNull(cancelled.appliedEntryId());
   }
 
   @Test
@@ -149,7 +149,7 @@ class ThreadCommandTest {
       long id,
       long threadId,
       long sequence,
-      UUID appliedTurnStartEntryId,
+      UUID appliedEntryId,
       UUID stopRequestId,
       Instant cancelledAt) {
     return new ThreadCommand(
@@ -158,7 +158,7 @@ class ThreadCommandTest {
         payload(),
         id(id),
         HASH,
-        appliedTurnStartEntryId,
+        appliedEntryId,
         stopRequestId,
         cancelledAt,
         CREATED);

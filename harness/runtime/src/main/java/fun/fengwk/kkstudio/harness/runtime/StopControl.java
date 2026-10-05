@@ -67,9 +67,9 @@ import java.util.function.Consumer;
  * Session 级精确 replay、Command 取消、Model/Tool 收敛、Entry append、Thread version 一次递增、子 Join 结算与父
  * 通知交付，以及最终的 Work fencing。
  *
- * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，为每个受影响节点持久保存
- * {@link StoppedThreadReceipt}。旧 stopRequestId 的重放直接返回持久保存的整批回执，不以当前树重算旧范围、不停止之后启动的新工作。
- * 输入水位不因 Stop 前进；各节点自己的停止边界与被取消的人类输入写入其回执。
+ * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，为每个受影响节点持久保存 {@link
+ * StoppedThreadReceipt}。旧 stopRequestId 的重放直接返回持久保存的整批回执，不以当前树重算旧范围、不停止之后启动的新工作。 输入水位不因 Stop
+ * 前进；各节点自己的停止边界与被取消的人类输入写入其回执。
  */
 final class StopControl {
 
@@ -225,8 +225,7 @@ final class StopControl {
 
     // durable receipt replay 先于 version CAS：返回持久保存的旧范围，不以当前树重算，也不停止其后启动的新工作。
     if (tx.findStopReceipt(command.threadId(), command.stopRequestId()).isPresent()) {
-      List<StoppedThreadReceipt> stored =
-          tx.loadStopReceiptsByRootRequest(command.stopRequestId());
+      List<StoppedThreadReceipt> stored = tx.loadStopReceiptsByRootRequest(command.stopRequestId());
       return new Commit(new StopResult(true, lockedTarget, stored), List.of(), List.of());
     }
 
@@ -247,7 +246,8 @@ final class StopControl {
       ThreadState locked = lockedThreads.get(candidate.thread().id());
       if (candidate.isTarget()
           || tx.findStopReceipt(locked.id(), candidate.stopRequestId()).isEmpty()) {
-        toStop.add(new ThreadStopCandidate(locked, candidate.stopRequestId(), candidate.isTarget()));
+        toStop.add(
+            new ThreadStopCandidate(locked, candidate.stopRequestId(), candidate.isTarget()));
       }
     }
 
@@ -365,14 +365,14 @@ final class StopControl {
 
       NodeStop node =
           switch (ctx.context()) {
-            case ThreadContext.IdleOrHistorical ignored ->
-                stopIdle(tx, ctx.thread(), ctx.path(), ctx.stopRequestId(), now);
-            case ThreadContext.ContinuationDue ignored ->
-                stopContinuation(tx, ctx.thread(), ctx.path(), ctx.stopRequestId(), now);
-            case ThreadContext.ModelActive active ->
-                stopModel(tx, ctx.thread(), ctx.path(), active.model(), ctx.stopRequestId(), now);
-            case ThreadContext.ToolActive active ->
-                stopTools(tx, ctx.thread(), ctx.path(), active, ctx.stopRequestId(), now);
+            case ThreadContext.IdleOrHistorical ignored -> stopIdle(
+                tx, ctx.thread(), ctx.path(), ctx.stopRequestId(), now);
+            case ThreadContext.ContinuationDue ignored -> stopContinuation(
+                tx, ctx.thread(), ctx.path(), ctx.stopRequestId(), now);
+            case ThreadContext.ModelActive active -> stopModel(
+                tx, ctx.thread(), ctx.path(), active.model(), ctx.stopRequestId(), now);
+            case ThreadContext.ToolActive active -> stopTools(
+                tx, ctx.thread(), ctx.path(), active, ctx.stopRequestId(), now);
             case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
                 "terminal Model context escaped the Stop guard");
             case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
@@ -424,7 +424,6 @@ final class StopControl {
    * 在 Thread 锁内做 Stop 的 durable receipt 查找已由 {@link HarnessStore.Transaction#findStopReceipt} 覆盖；
    * replay 返回持久保存的整批回执，不触碰 version、不写 marker。
    */
-
   private static List<WorkTarget> workTargets(ThreadState thread, ThreadContext context) {
     List<WorkTarget> targets = new ArrayList<>();
     targets.add(new WorkTarget(WorkTargetType.THREAD, thread.id()));
@@ -586,8 +585,8 @@ final class StopControl {
   }
 
   /**
-   * open Turn 属于其它 Thread 时本 Thread 既没有自己的 live 执行，也没有本 Thread 自己的停止边界可写（Turn 与停止边界的所有权都归
-   * 拥有它的 Thread），因此只把执行控制置为 STOPPED。
+   * open Turn 属于其它 Thread 时本 Thread 既没有自己的 live 执行，也没有本 Thread 自己的停止边界可写（Turn 与停止边界的所有权都归 拥有它的
+   * Thread），因此只把执行控制置为 STOPPED。
    */
   private static ThreadState touchVersionAsStopped(
       HarnessStore.Transaction tx, ThreadState thread, Instant now) {

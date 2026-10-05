@@ -1635,19 +1635,19 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
+          // 必须先按 UUID 升序完成全部 Thread 行锁，再插入 Join（store 强制严格升序锁序）。
+          for (UUID threadId :
+              List.of(rootA, childA1, childA2, grandChildA1, childB1).stream()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList()) {
+            tx.lockThread(threadId);
+          }
           // root one-shot ticket（parentThreadId 为 null）不占全局 subagent 额度
-          tx.lockThread(rootA);
           tx.insertJoin(initialJoin(ticketAId, null, rootA, 1L));
-
-          tx.lockThread(childA1);
           tx.insertJoin(initialJoin(joinA1Id, rootA, childA1, 1L));
           // 更深的后代 Join（父为 childA1）同样计入全局未完成计数
           tx.insertJoin(initialJoin(grandChildJoinId, childA1, grandChildA1, 1L));
-
-          tx.lockThread(childA2);
           tx.insertJoin(initialJoin(joinA2Id, rootA, childA2, 1L));
-
-          tx.lockThread(childB1);
           tx.insertJoin(initialJoin(joinB1Id, rootB, childB1, 1L));
         });
 

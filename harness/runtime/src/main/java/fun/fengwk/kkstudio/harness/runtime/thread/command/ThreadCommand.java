@@ -43,8 +43,7 @@ public record ThreadCommand(
           "appliedEntryId and stopRequestId must not both be present");
     }
     if (appliedEntryId != null && cancelledAt != null) {
-      throw new IllegalArgumentException(
-          "appliedEntryId and cancelledAt must not both be present");
+      throw new IllegalArgumentException("appliedEntryId and cancelledAt must not both be present");
     }
     if (stopRequestId != null && cancelledAt == null) {
       throw new IllegalArgumentException(
@@ -77,8 +76,8 @@ public record ThreadCommand(
 
   /**
    * 纯 QUEUED -&gt; APPLIED 迁移：附加该 command 应用到的 TURN_START Entry id 并清空 cancel marker。 只有 QUEUED 状态的
-   * command 可被 markApplied；{@code appliedEntryId} 不得为 null。用户输入/配置引用其 TURN_START Entry，
-   * 通知引用自身的 NOTIFICATION Entry。
+   * command 可被 markApplied；{@code appliedEntryId} 不得为 null。用户输入/配置引用其 TURN_START Entry， 通知引用自身的
+   * NOTIFICATION Entry。
    */
   public ThreadCommand markApplied(UUID appliedEntryId) {
     if (state() != ThreadCommandState.QUEUED) {

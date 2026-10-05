@@ -74,9 +74,7 @@ public record EntryPath(List<Entry> entries) {
     return entries.get(entries.size() - 1);
   }
 
-  /**
-   * 返回跳过尾部 {@link NotificationPayload} 后的最近 Entry：系统通知可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。
-   */
+  /** 返回跳过尾部 {@link NotificationPayload} 后的最近 Entry：系统通知可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。 */
   public Entry headIgnoringTrailingNotifications() {
     for (int i = entries.size() - 1; i >= 0; i--) {
       Entry entry = entries.get(i);
@@ -85,6 +83,11 @@ public record EntryPath(List<Entry> entries) {
       }
     }
     return root();
+  }
+
+  /** 是否存在尾部系统通知（head 本身为 NOTIFICATION）：这类已物化但尚未被普通 INPUT 接纳的通知在 RUNNABLE 时仍需安排输入处理。 */
+  public boolean hasTrailingNotifications() {
+    return head().payload() instanceof NotificationPayload;
   }
 
   /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */

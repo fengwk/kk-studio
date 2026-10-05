@@ -449,7 +449,8 @@ final class HarnessRuntimeTestSupport {
 
   /** {@code ask_user} TOOL baseline：默认根 Thread、IDLE 状态与标准冻结问卷。 */
   static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
-    return seedAskUserBaseline(store, null, ThreadExecutionControl.RUNNABLE, ASK_USER_QUESTIONNAIRE);
+    return seedAskUserBaseline(
+        store, null, ThreadExecutionControl.RUNNABLE, ASK_USER_QUESTIONNAIRE);
   }
 
   /**
