@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -413,9 +414,9 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
   }
 
-  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 执行 CAS 更新并返回权威当前 Thread。 */
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 直接更新并返回权威当前 Thread。 */
   @Test
-  void yoloCarriesVersionCasAndReturnsCurrentThread() throws Exception {
+  void yoloUpdatesPolicyAndReturnsCurrentThread() throws Exception {
     when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
@@ -425,7 +426,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.status").value("IDLE"));
@@ -434,7 +435,27 @@ class StudioHarnessThreadControllerTest {
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
     verify(runtime).setThreadYolo(captor.capture());
     verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
-    assertEquals(3L, captor.getValue().expectedVersion());
+    assertTrue(captor.getValue().enabled());
+  }
+
+  /** 非布尔值、缺失策略与未知字段均在控制面变更之前拒绝。 */
+  @Test
+  void yoloRejectsMalformedPolicyRequestsBeforeRuntimeMutation() throws Exception {
+    for (String body :
+        List.of(
+            "{}",
+            "{\"yoloEnabled\":null}",
+            "{\"yoloEnabled\":\"true\"}",
+            "{\"yoloEnabled\":1}",
+            "{\"yoloEnabled\":true,\"expectedVersion\":\"0\"}")) {
+      mockMvc
+          .perform(
+              put("/api/harness/threads/" + idText(1) + "/yolo")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
+    verifyNoInteractions(runtime, projectThreadOwnerResolver);
   }
 
   /**
@@ -448,7 +469,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isConflict());
 
     // 拒绝必须发生在 runtime 变更之前：归属检查不依赖 Run 状态，也不允许经 CAS 绕过 Project 策略。
@@ -466,7 +487,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/" + idText(1) + "/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isNotFound());
   }
 
@@ -477,7 +498,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             put("/api/harness/threads/not-a-uuid/yolo")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+                .content("{\"yoloEnabled\":true}"))
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(projectThreadOwnerResolver);

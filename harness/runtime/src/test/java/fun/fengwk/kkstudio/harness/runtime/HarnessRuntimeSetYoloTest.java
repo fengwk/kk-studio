@@ -7,7 +7,6 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Test
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.util.UUID;
 
 /**
- * {@link HarnessRuntime#setThreadYolo}：直接 YOLO 控制的同值 no-op 先于 version CAS、STALE_VERSION 冲突、 version
- * 精确 +1，且绝不创建 Command / Entry / Work（不唤醒 processors）。
+ * {@link HarnessRuntime#setThreadYolo}：单字段幂等策略，不与完整 Thread version 做 CAS。同值 no-op 不推进
+ * version；值变化时精确 +1，且绝不创建 Command / Entry / Work（不唤醒 processors）。
  */
 class HarnessRuntimeSetYoloTest {
 
@@ -37,14 +36,14 @@ class HarnessRuntimeSetYoloTest {
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
 
-  /** 同值请求在任何 version CAS 之前按原样返回当前 Thread：过期 expectedVersion 不冲突，时间/version 零触碰。 */
+  /** 同值请求按原样返回当前 Thread：时间与 version 零触碰，不创建任何运行副作用。 */
   @Test
-  void sameValueIsNoOpBeforeVersionCasWithoutTouchingTimestamps() {
+  void sameValueIsNoOpWithoutTouchingTimestamps() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     clock.advance(T1);
 
     ThreadState result =
-        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 999, false));
+        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), false));
 
     assertFalse(result.yoloEnabled());
     assertEquals(0L, result.version());
@@ -56,33 +55,35 @@ class HarnessRuntimeSetYoloTest {
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
 
-  /** 值不同且 version 不匹配：STALE_VERSION 冲突，整事务零 mutation。 */
+  /** 无关的 version 推进（含处理器进行中的 touchVersion）不得拒绝 YOLO：值变化仍成功，且只在最新锁定行上精确 +1。 */
   @Test
-  void changedValueWithStaleVersionConflictsWithoutMutation() {
+  void unrelatedVersionAdvanceDoesNotRejectYoloUpdate() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    clock.advance(T1);
+    store.transaction(
+        tx -> {
+          ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.updateThread(locked.touchVersion(T1));
+          return null;
+        });
+    clock.advance(T3);
 
-    HarnessRuntimeConflictException failure =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, true)));
+    ThreadState enabled =
+        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
 
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, failure.reason());
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertFalse(stored.yoloEnabled());
-    assertEquals(0L, stored.version());
-    assertEquals(T0, stored.updatedAt());
+    assertTrue(enabled.yoloEnabled());
+    assertEquals(2L, enabled.version());
+    assertEquals(T3, enabled.updatedAt());
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
 
-  /** 值不同且 version 精确匹配：一次调用更新 yoloEnabled 且 version 精确 +1，重复调用逐次推进。 */
+  /** 值变化时更新 yoloEnabled 且 version 精确 +1，重复调用逐次推进。 */
   @Test
   void changedValueUpdatesYoloAndBumpsVersionExactlyOncePerCall() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     clock.advance(T1);
 
     ThreadState enabled =
-        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 0, true));
+        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
     assertTrue(enabled.yoloEnabled());
     assertEquals(1L, enabled.version());
     assertEquals(T1, enabled.updatedAt());
@@ -90,7 +91,7 @@ class HarnessRuntimeSetYoloTest {
 
     clock.advance(T3);
     ThreadState disabled =
-        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), 1, false));
+        runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), false));
     assertFalse(disabled.yoloEnabled());
     assertEquals(2L, disabled.version());
     assertEquals(T3, disabled.updatedAt());

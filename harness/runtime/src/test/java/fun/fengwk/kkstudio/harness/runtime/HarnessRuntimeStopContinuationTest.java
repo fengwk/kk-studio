@@ -61,7 +61,7 @@ class HarnessRuntimeStopContinuationTest {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
     // chain.threadId 是 owner-aware 分类器下该 CONTINUATION obligation 的唯一 owner；直接在其上冻结 YOLO。
     UUID threadId = chain.threadId();
-    runtime.setThreadYolo(new SetThreadYoloCommand(threadId, 1, true));
+    runtime.setThreadYolo(new SetThreadYoloCommand(threadId, true));
     // 配置 Command 本会被 CONTINUATION 计划应用进 TURN_START settings；Stop 必须取消它而不是应用。
     seedQueuedCommand(
         store, threadId, 1L, new SetAgentCommandPayload("other-agent"), TestIds.id(1));

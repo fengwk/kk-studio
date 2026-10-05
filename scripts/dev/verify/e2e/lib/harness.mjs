@@ -15,7 +15,7 @@ import {
  * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
  * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
  * - GET  /api/harness/threads/{id}             一致快照（单事务）
- * - PUT  /api/harness/threads/{id}/yolo        {expectedVersion,yoloEnabled}（version CAS）
+ * - PUT  /api/harness/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
  * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
  * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
@@ -502,18 +502,15 @@ export function setEnvironmentCommand(environmentName, idempotencyKey) {
 }
 
 /**
- * 直接更新 Thread YOLO policy（PUT /yolo，version CAS）：同值请求在任何 CAS 之前即成功 no-op；
- * 值变化且 version 不匹配 => 409 STALE_VERSION。返回权威 Thread DTO。
+ * 直接更新 Thread YOLO policy（PUT /yolo）：只提交目标策略，不携带 Thread version。
+ * 同值请求是 no-op；值变化时 version 精确 +1。返回权威 Thread DTO。
  */
-export async function setThreadYolo(ctx, threadId, { expectedVersion, yoloEnabled }) {
+export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
   assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
   const { status, json } = await ctx.call(
     'PUT',
     `/api/harness/threads/${encodeURIComponent(threadId)}/yolo`,
-    {
-      expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
-      yoloEnabled,
-    },
+    { yoloEnabled },
   )
   assert(status === 200, `set thread yolo status ${status}: ${JSON.stringify(json)}`)
   const updated = envelopeData(json)

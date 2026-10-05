@@ -157,7 +157,7 @@ public class StudioHarnessThreadController {
   }
 
   /**
-   * 直接更新 Thread YOLO policy（version CAS）：相同值在任何 CAS 之前 no-op 成功，值变化时 version 精确 +1；不创建
+   * 直接更新 Thread YOLO policy：相同值 no-op 成功，值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建
    * Command/Entry/Work、不唤醒 processors。返回权威当前 Thread（与 stop 一致）。
    *
    * <p>Chat/Canvas Thread 是本控制面的归属范围；属于 Issue Agent Session 的 Thread（含其任何分支，且不要求存在活动 Run） 的 YOLO 由
