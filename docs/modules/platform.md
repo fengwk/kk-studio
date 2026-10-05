@@ -89,7 +89,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 
 Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
-宿主派发准入保留为 Runtime 的通用端口 [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java)（未注入宿主策略时默认 `ALLOW_ALL`）：它只在 `READY -> DISPATCHING` 意图事务内、Harness 行锁之前运行，宿主可结合自身行锁复验产品事实，拒绝只重排 Work 并保留 Invocation，外部调用在提交后启动。Issue 不再注入按归属/阶段拦截的准入实现：需要终止在途 Run 时由业务显式调用 Stop，已删除的 Runtime 业务派发门禁不参与收尾。
+宿主派发准入保留为 Runtime 的通用端口 [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java)（未注入宿主策略时默认 `ALLOW_ALL`）：它只在 `READY -> DISPATCHING` 意图事务内、Harness 行锁之前运行，宿主可结合自身行锁复验产品事实，拒绝只重排 Work 并保留 Invocation，外部调用在提交后启动。Issue 不注入按归属/阶段拦截的准入实现：需要终止在途 Run 时由业务显式调用 Stop，Runtime 不为产品 Gate 新增派发过滤。
 
 ## Model 与 Tool 执行
 

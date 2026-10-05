@@ -84,7 +84,7 @@ Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A
 Pane target 与布局独立：NEW_SESSION_DRAFT 携 root settings 创建 Session；
 NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequence 提交。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
-受控 Issue Pane 固定 Agent。配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
+已有 Thread（含 Issue 和子任务 Thread）可调整 Agent。配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送，YOLO 走独立控制入口。
 
 命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
@@ -92,11 +92,16 @@ NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequ
 恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
 明确 409 保留草稿，只有同分支纯消息的 STALE_COMMAND_CURSOR 才有限更新 cursor 重试。
 
-Stop 复用 stopRequestId 处理未知结果，按逐 Thread `stoppedThreads` 回执把被取消的 `USER_MESSAGE` / `GOAL`
-放回对应 Composer；`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
+Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
+逐 Thread `stoppedThreads` 回执把被取消的 `USER_MESSAGE` 放回对应 Composer，`GOAL` 放回目标编辑区；
+`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
+IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 snapshot 共用幂等恢复通道。
+恢复 generation 拒绝跨标签页的陈旧覆盖写，失败明确提示并支持手动重试。
+NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键历史或草稿。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
-`/threads/:threadId` 是无 owner 的只读观察页，只展示该 Thread 的快照，不提供消息输入。
-已绑定 Thread 的标题提供“Agent 关系”入口，主 Chat、Issue Agent 和只读观察页都可打开。
+`/threads/:threadId` 是无 owner 的交互页，提供消息、设置、预览、Goal、Stop 与审批；
+对已完成子任务的继续对话不会再次交付旧 Join。
+已绑定 Thread 的标题提供“Agent 关系”入口，主 Chat、Issue Agent 和独立 Thread 页都可打开。
 面板默认收起，展开后按当前 Thread 每 5 秒读取 `GET /harness/threads/{id}/tree`，
 返回值是该 Thread 真实 root 的整棵关系，包含运行中、空闲和已结束后代。
 每行展示名称、Agent、模型、状态或终态、回合数和工具调用数，并在新标签打开对应 Thread。

@@ -85,7 +85,7 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请�
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。创建型 batch 携带 owner 与 target，owner-free 续写面以 path `threadId` + 精确 cursor 定位且不携带二者。
-- Stop 回执以 `(threadId, stopRequestId)` 为身份并逐 Thread 输出；可恢复人工输入只含 `USER_MESSAGE` / `GOAL`，`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令只计入 `cancelledCommandCount`。
+- Stop 回执以 `(threadId, stopRequestId)` 为身份并逐 Thread 输出；可恢复人工输入只含 `USER_MESSAGE` / `GOAL`。取消的 `CUSTOM_MESSAGE` 与配置命令只计入取消数量；`NOTIFICATION` 保留为历史，不计入取消数量。
 - 常规 DTO 不回显 credential、secret 或对象存储内部标识；配置同步的显式 YAML 导出包含所需凭据，响应禁止缓存。Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 
 ## 从哪里改
