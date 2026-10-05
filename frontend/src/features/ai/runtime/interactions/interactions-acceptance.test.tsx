@@ -176,7 +176,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
   })
 
   // 场景 3: 取消竞争 (409 冲突)
-  it('Scenario 3: 取消竞争 — 遇到 409 冲突后不可恢复，保留草稿查看且禁止继续提交', async () => {
+  it('Scenario 3: 取消竞争 — 遇到 409 冲突后提示事项已变更，保留草稿查看且禁止继续提交', async () => {
     vi.spyOn(interactionService, 'submitToolInput').mockRejectedValue(
       new ApiError('Turn was stopped or conflict', 409),
     )
@@ -205,7 +205,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
 
     await waitFor(() => {
-      expect(screen.getByText(/操作冲突或已取消，不可恢复/)).toBeInTheDocument()
+      expect(screen.getByText(/此事项已变更，请刷新查看最新状态/)).toBeInTheDocument()
     })
 
     // 草稿保留作查看：选项依旧高亮选中

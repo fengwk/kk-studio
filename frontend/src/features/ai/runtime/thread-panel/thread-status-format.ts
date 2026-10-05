@@ -1,6 +1,13 @@
-import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import {
+  calculateCacheHitRate,
+  calculateDecodeTokensPerSecond,
+  formatTurnUsageText,
+} from '@/features/ai/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
+
+/** Footer 唯一一行的字段分隔符；可见文本与用量摘要共用同一常量，避免格式漂移。 */
+export const FOOTER_SEGMENT_SEPARATOR = ' | '
 
 /**
  * Footer 展示所需的 Environment 身份。
@@ -45,17 +52,15 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const binding = input.environment
   const environmentName = binding ? clean(binding.environmentName || binding.environmentId) : ''
   if (environmentName) {
-    const text = input.environmentReady === false
-      ? translate('ai.runtime.status.environmentUnavailableText', {
-        name: environmentName,
-      })
-      : translate('ai.runtime.status.environmentText', {
-        name: environmentName,
-      })
+    const unavailable = input.environmentReady === false
     segments.push({
       key: 'environment',
-      text,
-      title: text,
+      text: unavailable
+        ? translate('ai.runtime.status.environmentUnavailableText', { name: environmentName })
+        : translate('ai.runtime.status.environmentText', { name: environmentName }),
+      title: unavailable
+        ? translate('ai.runtime.status.environmentUnavailableTitle', { name: environmentName })
+        : translate('ai.runtime.status.environmentTitle', { name: environmentName }),
     })
   } else {
     const noneText = translate('ai.runtime.status.environmentNoneText')
@@ -73,29 +78,47 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   const usedContext = usage.contextInputTokens
   const hasContext = usedContext != null && Number.isFinite(usedContext) && usedContext >= 0
   if (contextWindow != null) {
-    const text = translate('ai.runtime.status.contextText', {
-      used: hasContext ? formatCompactNumber(usedContext) : '—',
-      total: formatCompactNumber(contextWindow),
-    })
     segments.push({
       key: 'context',
-      text,
-      title: translate('ai.runtime.status.contextTitle', {
-        used: hasContext ? String(usedContext) : '—',
-        total: String(contextWindow),
+      text: translate('ai.runtime.status.contextText', {
+        used: hasContext ? formatCompactNumber(usedContext) : '—',
+        total: formatCompactNumber(contextWindow),
       }),
+      title: hasContext
+        ? translate('ai.runtime.status.contextTitleKnown', {
+          used: String(usedContext),
+          total: String(contextWindow),
+        })
+        : translate('ai.runtime.status.contextTitleUnknown', {
+          total: String(contextWindow),
+        }),
     })
   }
 
-  // 累计用量与回合摘要共用格式，避免缓存率和速率口径漂移。
-  const usageText = formatTurnUsageText(usage)
+  // 累计用量与回合摘要共用格式；hover 用同一份事实给出简明读数。
   segments.push({
     key: 'usage',
-    text: usageText,
-    title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
+    text: formatTurnUsageText(usage, FOOTER_SEGMENT_SEPARATOR),
+    title: buildBranchUsageTitle(usage),
   })
 
   return { segments }
+}
+
+/** 累计用量 hover 读数：完整数字 + 与可见摘要同源的 cache/速率，未知即如实标注无数据。 */
+function buildBranchUsageTitle(usage: TurnUsage): string {
+  const cacheHitRate = calculateCacheHitRate(usage)
+  const speed = calculateDecodeTokensPerSecond(usage)
+  const noData = translate('ai.runtime.status.noData')
+  return translate('ai.runtime.status.branchUsageTitle', {
+    input: String(usage.input),
+    output: String(usage.output),
+    cacheRead: String(usage.cacheRead),
+    cacheWrite: String(usage.cacheWrite),
+    cost: usage.cost.toFixed(3),
+    cache: cacheHitRate != null ? `${cacheHitRate}%` : noData,
+    speed: speed != null ? `${speed} tok/s` : noData,
+  })
 }
 
 const EMPTY_USAGE: TurnUsage = {

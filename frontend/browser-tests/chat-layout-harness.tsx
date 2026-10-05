@@ -157,7 +157,7 @@ export function ChatLayoutHarnessApp() {
                   </div>
                 )}
               </div>
-              {/* 测试 ThreadStatusFooter 稳定两行单行截断与省略 */}
+              {/* 测试 ThreadStatusFooter 唯一一行的字段分隔、超宽省略与完整 hover 事实 */}
               <footer data-testid={`pane-${index + 1}-footer`} style={{ marginTop: 'auto' }}>
                 {index === 0 && (
                   <ThreadStatusFooter

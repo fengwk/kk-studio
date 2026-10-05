@@ -5632,9 +5632,6 @@ select.settings-input option {
   border-top: 1px solid var(--border);
   background: var(--bg);
   padding: 6px 16px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
 }
 
@@ -8492,7 +8489,7 @@ select.settings-input option {
   font-size: 22px;
   font-weight: 700;
   margin: 0;
-  color: var(--text, #111827);
+  color: var(--fg);
 }
 
 .interactions-count-badge {
@@ -8502,8 +8499,8 @@ select.settings-input option {
   padding: 2px 8px;
   font-size: 12px;
   font-weight: 600;
-  background: var(--surface-muted, #f3f4f6);
-  color: var(--text-muted, #6b7280);
+  background: var(--surface-soft);
+  color: var(--fg-muted);
   border-radius: 12px;
 }
 
@@ -8521,7 +8518,7 @@ select.settings-input option {
   justify-content: center;
   min-height: 280px;
   gap: 12px;
-  color: var(--text-muted, #6b7280);
+  color: var(--fg-muted);
 }
 
 .interactions-list {
@@ -8531,26 +8528,29 @@ select.settings-input option {
 }
 
 .interaction-feed-item {
-  background: var(--surface, #ffffff);
-  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 16px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow-wrap: anywhere;
 }
 
 .interaction-item-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
+  border-bottom: 1px solid var(--border);
 }
 
 .interaction-item-meta {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .interaction-status-tag {
@@ -8558,13 +8558,18 @@ select.settings-input option {
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 4px;
-  background: var(--surface-muted, #e0f2fe);
-  color: var(--primary, #0284c7);
+  background: var(--surface-soft);
+  color: var(--fg-muted);
+}
+
+.interaction-status-tag.waiting_input {
+  background: var(--info-soft);
+  color: var(--info);
 }
 
 .interaction-status-tag.waiting_approval {
-  background: #fef3c7;
-  color: #b45309;
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .interaction-source-link {
@@ -8572,7 +8577,7 @@ select.settings-input option {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--text-muted, #6b7280);
+  color: var(--fg-muted);
   background: none;
   border: none;
   cursor: pointer;
@@ -8582,20 +8587,26 @@ select.settings-input option {
 }
 
 .interaction-source-link:hover {
-  background: var(--surface-muted, #f3f4f6);
-  color: var(--text, #111827);
+  background: var(--surface-hover);
+  color: var(--fg);
+}
+
+.interaction-source-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .interaction-agent-badge {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--surface-muted, #f3f4f6);
+  background: var(--surface-soft);
 }
 
 .interaction-create-time {
+  flex-shrink: 0;
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--fg-dim);
 }
 
 /* Questionnaire Card */
@@ -8623,21 +8634,22 @@ select.settings-input option {
   gap: 8px;
   font-weight: 600;
   font-size: 14px;
-  color: var(--text, #1f2937);
+  color: var(--fg);
 }
 
 .interaction-question-type-tag {
+  flex-shrink: 0;
   font-size: 11px;
   font-weight: 500;
   padding: 1px 6px;
-  background: var(--surface-muted, #f3f4f6);
-  color: var(--text-muted, #6b7280);
+  background: var(--surface-soft);
+  color: var(--fg-muted);
   border-radius: 3px;
 }
 
 .interaction-options-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
   gap: 8px;
 }
 
@@ -8646,22 +8658,35 @@ select.settings-input option {
   flex-direction: column;
   align-items: flex-start;
   padding: 10px 12px;
-  border: 1px solid var(--border, #d1d5db);
-  background: var(--surface, #ffffff);
+  border: 1px solid var(--border);
+  background: var(--surface);
   border-radius: 6px;
   cursor: pointer;
   text-align: left;
+  color: var(--fg);
   transition: border-color 0.15s, background-color 0.15s;
 }
 
-.interaction-option-btn:hover:not(:disabled) {
-  border-color: var(--primary, #3b82f6);
-  background: var(--surface-hover, #f9fafb);
+/* 悬停仅作用于未选项，保持选中状态清晰。 */
+.interaction-option-btn:hover:not(:disabled):not(.is-selected) {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.interaction-option-btn:focus-visible {
+  outline: none;
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .interaction-option-btn.is-selected {
-  border-color: var(--primary, #3b82f6);
-  background: var(--primary-subtle, #eff6ff);
+  border-color: var(--green-primary);
+  background: var(--green-soft);
+}
+
+.interaction-option-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .interaction-option-label-row {
@@ -8677,36 +8702,37 @@ select.settings-input option {
   justify-content: center;
   width: 16px;
   height: 16px;
-  border: 1px solid var(--border, #9ca3af);
+  border: 1px solid var(--border-hover);
   border-radius: 3px;
   flex-shrink: 0;
 }
 
 .interaction-option-btn.is-selected .interaction-option-indicator {
-  background: var(--primary, #3b82f6);
-  border-color: var(--primary, #3b82f6);
-  color: #fff;
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+  color: var(--green-on);
 }
 
 .interaction-option-label {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text, #111827);
+  color: var(--fg);
   flex: 1;
 }
 
 .interaction-recommended-tag {
+  flex-shrink: 0;
   font-size: 10px;
   font-weight: 600;
   padding: 1px 5px;
-  background: #fef08a;
-  color: #854d0e;
+  background: var(--warning-soft);
+  color: var(--warning);
   border-radius: 3px;
 }
 
 .interaction-option-desc {
   font-size: 11px;
-  color: var(--text-muted, #6b7280);
+  color: var(--fg-muted);
   margin-top: 4px;
   padding-left: 24px;
 }
@@ -8719,25 +8745,30 @@ select.settings-input option {
   width: 100%;
   padding: 8px 12px;
   font-size: 13px;
-  border: 1px solid var(--border, #d1d5db);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--surface, #ffffff);
-  color: var(--text, #111827);
+  background: var(--surface);
+  color: var(--fg);
   box-sizing: border-box;
+}
+
+.interaction-custom-input::placeholder {
+  color: var(--fg-dim);
 }
 
 .interaction-custom-input:focus {
   outline: none;
-  border-color: var(--primary, #3b82f6);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .interaction-actions-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding-top: 12px;
-  border-top: 1px solid var(--border-subtle, #f3f4f6);
+  border-top: 1px solid var(--border);
 }
 
 .interaction-actions-right {
@@ -8751,17 +8782,17 @@ select.settings-input option {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #b91c1c;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
   font-size: 13px;
   border-radius: 6px;
 }
 
 .interaction-error-banner.is-non-recoverable {
-  background: #fff7ed;
-  border-color: #ffedd5;
-  color: #c2410c;
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
 }
 
 .interaction-retry-inline-btn {
@@ -8771,8 +8802,8 @@ select.settings-input option {
   gap: 4px;
   font-size: 12px;
   background: none;
-  border: 1px solid #b91c1c;
-  color: #b91c1c;
+  border: 1px solid var(--danger);
+  color: var(--danger);
   border-radius: 4px;
   padding: 2px 8px;
   cursor: pointer;
@@ -8789,13 +8820,13 @@ select.settings-input option {
 }
 
 .interaction-questionnaire-badge.completed {
-  background: #ecfdf5;
-  color: #047857;
+  background: var(--green-soft);
+  color: var(--green-primary);
 }
 
 .interaction-questionnaire-badge.declined {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .interaction-completed-answers {
@@ -8808,10 +8839,10 @@ select.settings-input option {
 .interaction-answer-tag {
   font-size: 12px;
   padding: 2px 8px;
-  background: var(--surface-muted, #f3f4f6);
-  border: 1px solid var(--border, #e5e7eb);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--text, #374151);
+  color: var(--fg);
 }
 
 /* Approval Card */
@@ -8833,16 +8864,17 @@ select.settings-input option {
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text, #111827);
+  color: var(--fg);
 }
 
 .interaction-approval-icon {
-  color: #f59e0b;
+  flex-shrink: 0;
+  color: var(--warning);
 }
 
 .interaction-approval-reason {
   font-size: 13px;
-  color: var(--text-muted, #4b5563);
+  color: var(--fg-muted);
 }
 
 .interaction-approval-arguments {
@@ -8853,23 +8885,38 @@ select.settings-input option {
 .interaction-raw-pre {
   margin: 0;
   padding: 8px 12px;
-  background: var(--code-bg, #f8fafc);
-  border: 1px solid var(--border, #e2e8f0);
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--mono);
+  color: var(--fg);
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.interaction-allow-btn {
-  background: #10b981 !important;
-  border-color: #059669 !important;
-  color: #fff !important;
 }
 
 .interactions-load-more-row {
   display: flex;
   justify-content: center;
   padding: 12px 0;
+}
+
+@media (max-width: 480px) {
+  .interactions-page-layout {
+    padding: 16px 12px;
+  }
+
+  .interactions-page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .interaction-feed-item {
+    padding: 12px 14px;
+  }
+
+  .interaction-item-header {
+    flex-wrap: wrap;
+  }
 }
