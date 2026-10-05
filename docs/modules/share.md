@@ -39,6 +39,9 @@ Web 的 HTTP mapper 全局默认是 `NON_NULL` 与 `STRICT_DUPLICATE_DETECTION`�
 | [`IssueRunDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/IssueRunDTO.java) | `agentName`、`endEntryId`、`finalAnswerEntryId`、`nextState`、`error`、`endedAt` |
 | [`IssueRunSummaryDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/IssueRunSummaryDTO.java) | `agentName`、`endedAt` |
 | [`IssueEvidenceDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/IssueEvidenceDTO.java) | `actorAgentName`、`runId` |
+| [`HarnessThreadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadDTO.java) | `parentThreadId` |
+| [`HarnessThreadSnapshotDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadSnapshotDTO.java) | `modelInvocation` |
+| [`HarnessStoppedThreadReceiptDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessStoppedThreadReceiptDTO.java) | `stoppedTurnEndEntryId` |
 
 请求 DTO 同受这条规则约束：[`CreateProjectRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/CreateProjectRequestDTO.java) 的 `description`/`yoloEnabled`、[`UpdateProjectRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/UpdateProjectRequestDTO.java) 的 `title`/`description`、[`CreateIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/CreateIssueRequestDTO.java) 与 [`UpdateIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/UpdateIssueRequestDTO.java) 的可空字段、[`PauseIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/PauseIssueRequestDTO.java)/[`StopIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/StopIssueRequestDTO.java) 的 `detail`、[`ResolveUnknownIssueRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/ResolveUnknownIssueRequestDTO.java) 的 `verification` 与 [`AppendIssueActivityRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/project/AppendIssueActivityRequestDTO.java) 的 `kind` 都用 `@JsonInclude(ALWAYS)` 显式发 null。
 
@@ -61,14 +64,14 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [ai.chat](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/chat/) | Chat 的创建、更新与投影 |
 | [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、保存的安装设置（`installConfig` 与共享 Daemon 配置模型）、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [ai.interaction](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/interaction/) | 统一交互（问卷等待与工具审批等待）DTO、交互 owner、分页与人工输入提交回执 |
-| [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
+| [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch（创建型与 owner-free Thread 续写）、Invocation、approval、Stop 回执、compaction |
 | [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource 输入、Function 定义/运行/未决决议、冲突与引用投影 |
 | [project](../../share/src/main/java/fun/fengwk/kkstudio/share/project/) | Project/Issue Snapshot、Issue 详情、工作流配置、阶段预算、Agent Thread、Run、时间线 Activity、公开 Evidence 与操作请求 |
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
 | [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 七个 settings section、schema 与 update request |
 | [configsync](../../share/src/main/java/fun/fengwk/kkstudio/share/configsync/) | 七类配置引用、依赖清单、YAML 导入/导出与跳过原因 |
 
-只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整七 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
+只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document revision、实体 UPSERT/REMOVE、Function Run 投影与派生引用组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings、未物化的 attempt failure 与该 Thread 自己的 Stop 回执；Project Snapshot 包含项目资料、未归档 Issue 与当前/最近 Run 摘要；Issue Detail 组合 Issue 资料、当前 Run、最新 Run、阶段预算、Agent 绑定 Thread、活动时间线与已发布证据。Settings DTO 包含完整七 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
 Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空的活动 frozen request；完整 schema/request JSON 按字符串展示，secret 与 Base64 正文在输出边界去除。
 
@@ -81,7 +84,8 @@ Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，携带下一次请�
 - durable 版本与序号在 wire 上永远是十进字符串；`ModelRef` 是 `providerName/modelName`，只在第一个 `/` 处分割，因此模型名本身可以包含斜杠而 provider 名不能。
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
-- 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。
+- 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。创建型 batch 携带 owner 与 target，owner-free 续写面以 path `threadId` + 精确 cursor 定位且不携带二者。
+- Stop 回执以 `(threadId, stopRequestId)` 为身份并逐 Thread 输出；可恢复人工输入只含 `USER_MESSAGE` / `GOAL`，`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令只计入 `cancelledCommandCount`。
 - 常规 DTO 不回显 credential、secret 或对象存储内部标识；配置同步的显式 YAML 导出包含所需凭据，响应禁止缓存。Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 
 ## 从哪里改

@@ -58,8 +58,9 @@ Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
 [`thread-events.ts`](../../frontend/src/features/ai/runtime/thread-events.ts) 将 Entry、活动
-Invocation 与 attempt failure 投影为时间线记录。委派进度同样来自 Thread Snapshot：
-`processing` 等价于 status 非 IDLE，WAITING_CHILDREN 表示本地静止而直接孩子仍活动。
+Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于阶段仍在处理中
+（`IDLE` 与 `STOPPED` 为 false），`executionControl` 是持久执行控制（`RUNNABLE` / `STOPPED`）；
+两者只描述该 Thread 自身，委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
 
 ### Thread Debug
 
@@ -68,7 +69,7 @@ Debug 主区域包含下一次请求预览、事件与详情：宽 Pane 三列�
 诊断 GET 区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，
 包含发送/过滤工具、稳定 Skill 路径与冻结请求，排除 credential、认证 header 和 Base64 正文。
 
-已有 Chat Thread 的预览按钮通过 Composer.preparePreview 冻结草稿和附件身份，
+已有空闲 Thread 的预览按钮通过 Composer.preparePreview 冻结草稿和附件身份，
 先读取最新 Snapshot，复验设置基线、空闲、队列和活动 Invocation，再用精确 cursor 请求
 provider-request-preview。成功展示点击时协议 JSON（可能包含内联媒体）。
 等待期间草稿或目标变更、组件卸载使迟到结果失效；请求单飞，409 使用 PREVIEW reason
@@ -91,7 +92,8 @@ NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequ
 恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
 明确 409 保留草稿，只有同分支纯消息的 STALE_COMMAND_CURSOR 才有限更新 cursor 重试。
 
-Stop 复用 stopRequestId 处理未知结果，取消的排队消息回到 Composer。
+Stop 复用 stopRequestId 处理未知结果，按逐 Thread `stoppedThreads` 回执把被取消的 `USER_MESSAGE` / `GOAL`
+放回对应 Composer；`CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
 `/threads/:threadId` 是无 owner 的只读观察页，只展示该 Thread 的快照，不提供消息输入。
 已绑定 Thread 的标题提供“Agent 关系”入口，主 Chat、Issue Agent 和只读观察页都可打开。
