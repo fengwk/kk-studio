@@ -184,7 +184,7 @@ describe('EnvironmentsPage', () => {
     await user.click(screen.getByRole('button', { name: '确认' }))
 
     expect(environmentService.createEnvironment).toHaveBeenCalledWith({ name: 'new-env' })
-    expect(await screen.findByRole('dialog', { name: '安装 / 覆盖' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '安装/覆盖环境' })).toBeInTheDocument()
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
     expect(clipboard.writeText).not.toHaveBeenCalled()
     expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
