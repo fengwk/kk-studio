@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import type { EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 import { detectInstallOS, generateInstallCommand, generateUninstallCommand, validateInstallConfig } from './install-command'
+
+const origin = 'https://studio.example.com'
+const environmentId = "env/汉字'$(touch NEVER)"
+const installCode = "code'$(touch NEVER)"
 
 const config = (): EnvironmentInstallConfigDTO => ({
   operatingSystem: 'linux',
   // Backend forbids $ % ~ in javaHome; quotes/backticks still exercise shell escaping.
   javaHome: "/opt/jdk-21/汉字 '`",
   daemon: {
-    studioUrl: 'https://studio.example.com/',
+    studioUrl: 'https://daemon.example.com/',
     note: "汉字 ' \" $ ` $(touch NEVER) KK_STUDIO_INSTALL",
     bashExecutable: "/bin/汉字 '$`",
     lsp: {
@@ -27,48 +31,40 @@ const config = (): EnvironmentInstallConfigDTO => ({
   },
 })
 
-function expectedDaemon(input: EnvironmentInstallConfigDTO) {
-  return JSON.parse(JSON.stringify(validateInstallConfig(input).daemon))
-}
-
-// Execute the actual pasted wrapper with a fake download and an installer recorder.
-// Verifies credential bytes, sibling staging, permissions, argv/environment and cleanup.
-function execute(command: string, exit = 0) {
+/** 用假 curl 执行实际粘贴的一行命令，记录请求 URL 并回放远端脚本。 */
+function execute(command: string, script: string, exit = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'kk-command-'))
-  const result = join(dir, 'record.json')
-  const recorder = `#!/bin/bash
-python3 - "$@" <<'PY'
-import json, os, sys, stat
-args = sys.argv[1:]
-data = {'args': args, 'env': dict(os.environ)}
-if args[0] == 'install':
-    c = args[args.index('--config-file') + 1]
-    t = args[args.index('--token-file') + 1]
-    data.update(config=json.load(open(c)), token=open(t).read(), stage=os.path.dirname(c),
-                sibling=os.path.dirname(c) == os.path.dirname(t),
-                modes=[stat.S_IMODE(os.stat(p).st_mode) for p in [os.path.dirname(c), c, t]])
-json.dump(data, open(os.environ['RECORD'], 'w'))
-PY
-exit ${exit}
-`
-  writeFileSync(join(dir, 'recorder'), recorder)
+  const requested = join(dir, 'requested.txt')
+  const body = join(dir, 'body.sh')
+  writeFileSync(body, script)
   writeFileSync(
     join(dir, 'curl'),
-    '#!/bin/bash\nwhile [[ "$1" != "-o" ]]; do shift; done\ncp "$FIXTURE" "$2"\n',
+    `#!/bin/bash
+set -euo pipefail
+url=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|-f|-s|-S|-L) shift ;;
+    -fsSL) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+printf '%s' "$url" > "$REQUESTED"
+cat "$FIXTURE"
+exit ${exit}
+`,
     { mode: 0o700 },
   )
   try {
-    const run = spawnSync('bash', [], {
-      input: command, encoding: 'utf8', cwd: dir,
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TMPDIR: '.', RECORD: result,
-        FIXTURE: join(dir, 'recorder'),
-        // A broken/xtrace-enabled parent must not print or intercept credentials.
-        SHELLOPTS: 'xtrace', 'BASH_FUNC_printf%%': '() { echo unsafe >&2; exit 42; }' },
+    const run = spawnSync('bash', [], { input: command,
+      encoding: 'utf8', cwd: dir,
+      env: {
+        ...process.env, PATH: `${dir}:${process.env.PATH}`, REQUESTED: requested, FIXTURE: body,
+      },
     })
-    const record = JSON.parse(readFileSync(result, 'utf8'))
+    const url = existsSync(requested) ? readFileSync(requested, 'utf8') : ''
     expect(existsSync(join(dir, 'NEVER'))).toBe(false)
-    if (record.stage) expect(existsSync(record.stage)).toBe(false)
-    return { run, record }
+    return { run, url, dir }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -76,50 +72,41 @@ exit ${exit}
 
 describe('install command', () => {
   it.skipIf(process.platform === 'win32').each(['linux', 'macos'] as const)(
-    'executes safe %s installation with exact bytes and no secret child args/env',
+    'runs a one-line %s install that fetches the encoded environment URL and executes the remote script',
     os => {
       const input = { ...config(), operatingSystem: os }
-      const token = "private-汉字'\"$`$(touch NEVER)"
-      const { run, record } = execute(generateInstallCommand(input, token))
+      const command = generateInstallCommand(origin, environmentId, os, installCode)
+      const expected = `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`
+      expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
+      expect(command).not.toContain('\n')
+      expect(command).not.toContain(input.daemon.studioUrl)
+      expect(command).not.toContain('registrationToken')
+      const { run, url } = execute(command, 'echo installed\n')
       expect(run.status).toBe(0)
-      expect(run.stdout + run.stderr).not.toContain(token)
-      expect(record.config).toEqual(expectedDaemon(input))
-      expect(record.token).toBe(token)
-      expect(record.sibling).toBe(true)
-      expect(isAbsolute(record.stage)).toBe(true)
-      expect(record.modes).toEqual([0o700, 0o600, 0o600])
-      expect(record.args).toEqual([
-        'install', '--config-file', `${record.stage}/daemon.json`, '--token-file',
-        `${record.stage}/daemon.token`, '--java-home', input.javaHome,
-      ])
-      expect(JSON.stringify([record.args, record.env])).not.toContain(token)
+      expect(run.stdout.trim()).toBe('installed')
+      expect(url).toBe(expected)
+      expect(existsSync(join(process.cwd(), 'NEVER'))).toBe(false)
     },
   )
 
   it.skipIf(process.platform === 'win32')(
-    'cleans staged files after child failure and supports omitted Java home',
+    'returns the remote script status and does not treat a curl failure as success',
     () => {
-      const input = config()
-      input.javaHome = null
-      const { run, record } = execute(generateInstallCommand(input, 'private'), 17)
-      expect(run.status).toBe(17)
-      expect(record.args).not.toContain('--java-home')
-    },
-  )
+      const command = generateInstallCommand(origin, 'env-1', 'linux', 'code-1')
+      const failed = execute(command, 'echo ran; exit 17\n')
+      expect(failed.run.status).toBe(17)
+      expect(failed.run.stdout).toContain('ran')
 
-  it.skipIf(process.platform === 'win32')(
-    'cleans credential files on download failure without invoking an installer',
-    () => {
       const dir = mkdtempSync(join(tmpdir(), 'kk-download-failure-'))
       try {
         writeFileSync(join(dir, 'curl'), '#!/bin/bash\nexit 8\n', { mode: 0o700 })
-        const run = spawnSync('bash', [], {
-          input: generateInstallCommand(config(), 'private'), encoding: 'utf8', cwd: dir,
-          env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TMPDIR: dir },
+        const run = spawnSync('bash', [], { input: command,
+          encoding: 'utf8', cwd: dir,
+          env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
         })
         expect(run.status).toBe(8)
         expect(readdirSync(dir)).toEqual(['curl'])
-        expect(run.stdout + run.stderr).not.toContain('private')
+        expect(run.stdout + run.stderr).not.toContain('token')
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
@@ -127,49 +114,40 @@ describe('install command', () => {
   )
 
   it.skipIf(process.platform === 'win32').each(['linux', 'macos'] as const)(
-    'executes %s uninstall without config/token parameters',
+    'runs a one-line %s uninstall against the saved operating system',
     os => {
-      const { run, record } = execute(generateUninstallCommand(os))
+      const command = generateUninstallCommand(os, origin)
+      expect(command).toBe(
+        `(set -o pipefail; curl -fsSL $'https://studio.example.com/api/harness/environments/uninstall/${os}' | bash)`,
+      )
+      const { run, url } = execute(command, 'echo uninstalled\n')
       expect(run.status).toBe(0)
-      expect(record.args).toEqual(['uninstall'])
+      expect(url).toBe(`https://studio.example.com/api/harness/environments/uninstall/${os}`)
     },
   )
 
-  it('stages Windows credentials only after protected ACLs, without the .NET Framework-only overload', () => {
+  it('quotes the Windows download and does not stage credentials on the client', () => {
     const input = config()
     input.operatingSystem = 'windows'
     input.javaHome = "C:\\Program Files\\Java\\it's"
-    const command = generateInstallCommand(input, "private-'$`")
-    // Directory and file ACLs both disable inheritance and target the current SID.
-    expect(command).toContain('function Set-KkPrivateAcl')
-    expect(command).toContain('[Security.AccessControl.DirectorySecurity]::new()')
-    expect(command).toContain('[Security.AccessControl.FileSecurity]::new()')
-    expect(command).toContain('$acl.SetAccessRuleProtection($true, $false)')
-    expect(command).not.toContain('[IO.Directory]::CreateDirectory')
-    expect(command).toContain('New-Item -ItemType Directory -Path $stage')
-    expect(command).toContain('[IO.FileMode]::CreateNew')
-    expect(command).toContain('New-Object Text.UTF8Encoding($false)')
-    // Every credential file gets its own protected ACL before any bytes are written.
-    expect(command.indexOf('Set-KkPrivateAcl -Path $stage -Directory'))
-      .toBeLessThan(command.indexOf('WriteAllText($config'))
-    expect(command.indexOf('Set-KkPrivateAcl -Path $path'))
-      .toBeLessThan(command.indexOf('WriteAllText($config'))
-    expect(command.indexOf('Set-KkPrivateAcl -Path $path'))
-      .toBeLessThan(command.indexOf('WriteAllText($token'))
-    expect(command).toContain('Set-PSDebug -Off')
-    expect(command).toContain("throw 'Daemon command failed; review installer output and host prerequisites.'")
-    expect(command).toContain('finally')
-    expect(command).toContain('Remove-Item -LiteralPath $stage -Recurse -Force')
-    const invocation = command.split('\n').find(line => line.includes('& powershell'))!
-    expect(invocation).toContain("-File $installer install -ConfigFile $config -TokenFile $token -JavaHome 'C:\\Program Files\\Java\\it''s'")
-    expect(invocation).not.toContain('private')
-    // Uninstall reuses the private staging but writes no credentials.
-    const uninstall = generateUninstallCommand('windows')
-    expect(uninstall).not.toContain('WriteAllText')
-    expect(uninstall).toContain('Set-KkPrivateAcl -Path $stage -Directory')
-    expect(uninstall).toContain('-File $installer uninstall')
-    input.javaHome = null
-    expect(generateInstallCommand(input, 'private')).not.toContain('-JavaHome')
+    const command = generateInstallCommand(origin, environmentId, 'windows', installCode)
+    const encoded = encodeURIComponent(environmentId).replaceAll("'", "''")
+    const encodedCode = encodeURIComponent(installCode).replaceAll("'", "''")
+    expect(command).not.toContain('\n')
+    expect(command).toContain('Invoke-WebRequest -UseBasicParsing')
+    expect(command).toContain('-ErrorAction Stop')
+    expect(command).toContain('[scriptblock]::Create($script)')
+    expect(command).toContain(`'https://studio.example.com/api/harness/environments/${encoded}/install?code=${encodedCode}'`)
+    expect(command).not.toContain('registrationToken')
+    expect(command).not.toContain('WriteAllText')
+    expect(command).not.toContain('Set-Acl')
+    expect(command).not.toContain('-JavaHome')
+    expect(command).not.toContain(input.javaHome!)
+    const uninstall = generateUninstallCommand('windows', origin)
+    expect(uninstall).toContain(
+      "'https://studio.example.com/api/harness/environments/uninstall/windows'",
+    )
+    expect(uninstall).not.toContain('registrationToken')
   })
 
   it('normalizes like the shared codec: origin, note, extension case and marker trim', () => {
@@ -299,21 +277,34 @@ describe('install command', () => {
       expect(servers[id]).toEqual({
         command: ['server'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [],
       })
-      expect(generateInstallCommand(input, 'private-prototype')).toContain(
-        JSON.stringify(normalized.daemon),
-      )
+      const command = generateInstallCommand(origin, id, 'linux', 'code-1')
+      expect(command).toContain(encodeURIComponent(id).replaceAll("'", "\\'"))
+      expect(command).not.toContain(JSON.stringify(normalized.daemon))
     },
   )
 
-  it('bounds and validates LSP map and rejects heredoc/control injection', () => {
+  it('bounds and validates LSP map and rejects control or origin injection', () => {
     const input = config()
     for (const lsp of [{ servers: {} }, { servers: [] }, { servers: { 'bad id': { command: ['x'], extensions: ['.a'] } } },
       { servers: {}, other: true }]) {
       input.daemon.lsp = lsp as EnvironmentInstallConfigDTO['daemon']['lsp']
       expect(() => validateInstallConfig(input)).toThrow(/^Invalid /)
     }
-    expect(() => generateInstallCommand(config(), "x\nKK_STUDIO_INSTALL\n$(touch NEVER)"))
-      .toThrow('registrationToken')
-    expect(() => generateUninstallCommand('wrong' as 'linux')).toThrow('operatingSystem')
+    expect(() => generateInstallCommand(origin, "x\n$(touch NEVER)", 'linux', 'code-1'))
+      .toThrow('environmentId')
+    expect(() => generateInstallCommand(origin, 'env-1', 'linux', "x\n$(touch NEVER)"))
+      .toThrow('installCode')
+    expect(() => generateInstallCommand('https://evil.example/path', 'env-1', 'linux', 'code-1'))
+      .toThrow('downloadOrigin')
+    expect(() => generateInstallCommand('https://user:pass@studio.example.com', 'env-1', 'linux', 'code-1'))
+      .toThrow('downloadOrigin')
+    expect(() => generateInstallCommand(origin, 'env-1', 'wrong' as 'linux', 'code-1')).toThrow('operatingSystem')
+    expect(() => generateUninstallCommand('wrong' as 'linux', origin)).toThrow('operatingSystem')
+    const injected = generateInstallCommand(origin, "a'$(touch NEVER)b", 'linux', "c'$(touch NEVER)")
+    expect(injected).toContain(encodeURIComponent("a'$(touch NEVER)b").replaceAll("'", "\\'"))
+    expect(injected).toContain(`code=${encodeURIComponent("c'$(touch NEVER)").replaceAll("'", "\\'")}`)
+    expect(injected).not.toContain('$(touch NEVER)')
+    expect(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
+      .toBe(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
   })
 })

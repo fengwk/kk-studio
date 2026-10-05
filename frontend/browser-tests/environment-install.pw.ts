@@ -32,6 +32,9 @@ async function api(page: Page) {
       card = { ...card, installConfig: body.installConfig, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: card })
     }
+    if (path.endsWith('/install-code')) {
+      return route.fulfill({ json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' } })
+    }
     if (path.endsWith('/token')) return route.fulfill({ json: { id: card.id, version: card.version, registrationToken: token } })
     if (path.endsWith('/registration-token')) {
       card = { ...card, version: String(Number(card.version) + 1) }
@@ -74,15 +77,17 @@ for (const width of [1280, 390, 320]) {
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
-    await expect(page.getByRole('status')).toContainText('安装命令已复制')
+    await expect(page.getByRole('status')).toContainText('安装命令已复制，5分钟内有效')
     await expect(page.getByRole('status')).toHaveCSS('opacity', '1')
     await expect(modal.getByRole('status')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`install-toast-${width}.png`), fullPage: true })
     const command = await page.evaluate(() => navigator.clipboard.readText())
-    expect(command).toContain("bash <<'KK_STUDIO_INSTALL'")
-    expect(command).toContain('daemon.token')
-    expect(command).toContain(token)
-    expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(1)
+    const pageOrigin = new URL(page.url()).origin
+    const url = `${pageOrigin}/api/harness/environments/env-1/install?code=browser-install-code`
+    expect(command).toBe(`(set -o pipefail; curl -fsSL $'${url}' | bash)`)
+    expect(command).not.toContain(token)
+    expect(mock.calls.filter(c => c.endsWith('/install-code'))).toHaveLength(1)
+    expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(0)
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
     await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
@@ -187,7 +192,7 @@ test('CAS conflict preserves draft; clipboard rejection explicitly says saved, n
   mock.conflictNext()
   await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
   await expect(page.getByRole('alertdialog', { name: '数据已发生变化' })).toBeVisible()
-  expect(mock.calls.some(c => c.endsWith('/token'))).toBe(false)
+  expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(0)
   await page.getByRole('alertdialog').getByRole('button', { name: '刷新', exact: true }).click()
   await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await expect(modal.getByLabel('Studio 地址')).toHaveValue('https://draft.example.com')

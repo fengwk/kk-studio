@@ -11,7 +11,7 @@ import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: { getEnvironment: vi.fn(), saveInstallConfig: vi.fn(), getRegistrationToken: vi.fn() },
+  environmentService: { getEnvironment: vi.fn(), saveInstallConfig: vi.fn(), createInstallCode: vi.fn() },
 }))
 vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
@@ -56,36 +56,43 @@ describe('EnvironmentInstallModal', () => {
     vi.resetAllMocks()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8' })
-    vi.mocked(environmentService.getRegistrationToken).mockResolvedValue({ id: card.id, version: '8', registrationToken: "private-'$`汉字" })
+    vi.mocked(environmentService.createInstallCode).mockResolvedValue({
+      code: "short-code'汉字", expiresAt: '2026-10-05T09:05:00.000Z',
+    })
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
   })
 
-  it('loads saved defaults from latest metadata, saves then explicitly reads token and copies returned settings', async () => {
+  it('loads saved defaults, saves, then copies the stable environment script URL', async () => {
     const user = userEvent.setup()
     const { queryClient } = open()
     await waitFor(() => expect(origin()).toHaveValue(saved.daemon.studioUrl))
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'windows')
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.getEnvironment).toHaveBeenCalled()
     await user.click(screen.getByText(/可选：Java/))
     expect(screen.getByRole('textbox', { name: 'Java home (JDK 21)' })).toHaveValue('C:\\Java\\21')
     expect(screen.getByRole('textbox', { name: '备注' })).toHaveValue('saved note')
     expect(screen.getByRole('checkbox')).toBeChecked()
     expect(screen.getByRole('textbox', { name: 'LSP servers (JSON)' }))
       .toHaveValue(JSON.stringify(savedNormalized.daemon.lsp!.servers, null, 2))
-    // Returned canonical config, not unsaved browser form, drives generation.
+    // Returned canonical OS, not the unsaved browser form, selects the script URL.
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
     await user.click(copyButton())
-    expect(await screen.findByText('安装命令已复制。')).toBeInTheDocument()
+    expect(await screen.findByText('安装命令已复制，5分钟内有效。')).toBeInTheDocument()
     expect(screen.getByRole('status').closest('[role="dialog"]')).toBeNull()
     expect(within(screen.getByRole('dialog')).queryByRole('status')).toBeNull()
     expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', savedNormalized)
-    expect(environmentService.getRegistrationToken).toHaveBeenCalledWith('env-1')
+    expect(environmentService.createInstallCode).toHaveBeenCalledWith('env-1', '8')
     expect(vi.mocked(environmentService.saveInstallConfig).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(environmentService.getRegistrationToken).mock.invocationCallOrder[0]!)
-    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain('https://canonical.example.com')
-    expect(document.body.textContent).not.toContain("private-'$`汉字")
-    expect(JSON.stringify([queryClient.getQueryCache().getAll(), localStorage])).not.toContain('private')
+      .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
+    const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
+    expect(copied).toBe(
+      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/harness/environments/env-1/install?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
+    )
+    expect(copied).not.toContain('canonical.example.com')
+    expect(copied).not.toContain('registrationToken')
+    expect(document.body.textContent).not.toContain('registrationToken')
+    expect(JSON.stringify([queryClient.getQueryCache().getAll(), localStorage])).not.toContain('registrationToken')
     await user.click(copyButton())
     expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('8')
   })
@@ -107,7 +114,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('save failed')
     expect(origin()).toHaveValue('https://draft.example.com')
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
   })
 
@@ -120,7 +127,7 @@ describe('EnvironmentInstallModal', () => {
     await user.clear(origin()); await user.type(origin(), 'https://draft.example.com')
     await user.click(copyButton())
     const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.getEnvironment).toHaveBeenCalled()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, version: '12' })
     await user.click(within(conflict).getByRole('button', { name: '刷新' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
@@ -129,37 +136,38 @@ describe('EnvironmentInstallModal', () => {
     expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('12')
   })
 
-  it('never generates a command when the token version moved past the saved config', async () => {
+  it('issues a new install code after token rotation without putting the long-lived token in the command', async () => {
     const user = userEvent.setup()
-    vi.mocked(environmentService.getEnvironment)
-      .mockResolvedValueOnce(card)
-      // Rebase after the mismatch reads a fresh version without touching the draft.
-      .mockResolvedValue({ ...card, version: '12' })
-    vi.mocked(environmentService.getRegistrationToken).mockResolvedValueOnce({
-      id: card.id, version: '9', registrationToken: 'private',
-    })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.click(copyButton())
-    expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但环境在读取凭据时已发生变化')
-    expect(copyTextToClipboard).not.toHaveBeenCalled()
-    expect(screen.queryByText('安装命令已复制。')).toBeNull()
-    // An explicit retry uses the refreshed version instead of the stale one.
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1))
+    const first = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
+    vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({
+      ...card, version: '9', registrationToken: 'rotated-long-token',
+    })
+    vi.mocked(environmentService.createInstallCode).mockResolvedValue({
+      code: 'fresh-code', expiresAt: '2026-10-05T09:10:00.000Z',
+    })
     await user.click(copyButton())
-    await waitFor(() => expect(vi.mocked(copyTextToClipboard)).toHaveBeenCalled())
-    expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('12')
+    await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
+    const second = vi.mocked(copyTextToClipboard).mock.calls[1]![0]
+    expect(second).not.toBe(first)
+    expect(second).toContain('code=fresh-code')
+    expect(second).not.toContain('rotated-long-token')
+    expect(environmentService.createInstallCode).toHaveBeenLastCalledWith('env-1', '9')
   })
 
-  it.each(['token', 'clipboard', 'missing-config'] as const)('explains settings saved but not copied on %s failure', async failure => {
+  it.each(['code', 'clipboard', 'missing-config'] as const)('explains settings saved but not copied on %s failure', async failure => {
     const user = userEvent.setup()
-    if (failure === 'token') vi.mocked(environmentService.getRegistrationToken).mockRejectedValue(new Error('token unavailable'))
+    if (failure === 'code') vi.mocked(environmentService.createInstallCode).mockRejectedValue(new Error('code unavailable'))
     if (failure === 'clipboard') vi.mocked(copyTextToClipboard).mockResolvedValue(false)
     if (failure === 'missing-config') vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, installConfig: null, version: '8' })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但命令生成或复制失败')
-    expect(screen.queryByText('安装命令已复制。')).toBeNull()
+    expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
   })
 
   it('reopens with current remote defaults rather than stale list card metadata', async () => {
@@ -173,34 +181,29 @@ describe('EnvironmentInstallModal', () => {
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
   })
 
-  it.each(['metadata', 'save', 'token', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
+  it.each(['metadata', 'save', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
     const user = userEvent.setup()
     const metadata = deferred<EnvironmentCardDTO>()
     const save = deferred<EnvironmentCardDTO>()
-    const token = deferred<{ id: string; version: string; registrationToken: string }>()
     const clipboard = deferred<boolean>()
     if (phase === 'metadata') vi.mocked(environmentService.getEnvironment).mockReturnValue(metadata.promise)
     if (phase === 'save') vi.mocked(environmentService.saveInstallConfig).mockReturnValue(save.promise)
-    if (phase === 'token') vi.mocked(environmentService.getRegistrationToken).mockReturnValue(token.promise)
     if (phase === 'clipboard') vi.mocked(copyTextToClipboard).mockReturnValue(clipboard.promise)
     const view = open()
     if (phase !== 'metadata') {
       await waitFor(() => expect(copyButton()).toBeEnabled())
       await user.click(copyButton())
-      if (phase === 'token') await waitFor(() => expect(environmentService.getRegistrationToken).toHaveBeenCalled())
       if (phase === 'clipboard') {
         await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
         // 剪贴板尚未确认时，不能抢先宣布复制成功。
-        expect(screen.queryByText('安装命令已复制。')).toBeNull()
+        expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
       }
     }
     view.unmount()
     await act(async () => {
-      metadata.resolve(card); save.resolve(card)
-      token.resolve({ id: card.id, version: '8', registrationToken: 'private' }); clipboard.resolve(true)
+      metadata.resolve(card); save.resolve(card); clipboard.resolve(true)
     })
-    if (phase === 'save' || phase === 'metadata') expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
-    if (phase === 'token') expect(copyTextToClipboard).not.toHaveBeenCalled()
+    if (phase === 'save' || phase === 'metadata') expect(copyTextToClipboard).not.toHaveBeenCalled()
     expect(screen.queryByRole('status')).toBeNull()
   })
 
@@ -350,7 +353,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.getEnvironment).toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
     const real = JSON.stringify({
       jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'] },
@@ -382,7 +385,7 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
     expect(editor).toHaveValue('{}')
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.getEnvironment).toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
   })
 
@@ -434,10 +437,13 @@ describe('EnvironmentInstallModal', () => {
     await chooseSelectOption(user, '操作系统', 'Windows')
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
-    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain('-File $installer uninstall')
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain(
+      `${window.location.origin}/api/harness/environments/uninstall/windows`,
+    )
     expect(environmentService.getEnvironment).not.toHaveBeenCalled()
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).not.toContain('code=')
     vi.mocked(copyTextToClipboard).mockResolvedValue(false)
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('复制失败')
