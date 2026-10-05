@@ -103,6 +103,16 @@ export interface EnvironmentRegistrationTokenDTO {
   version: CatalogVersion
 }
 
+/**
+ * 5 分钟安装 code。只用于下载安装脚本，不是长期 registrationToken。
+ * 有效期内可重复使用；过期或 token 轮换后需重新签发。
+ */
+export interface EnvironmentInstallCodeDTO {
+  code: string
+  /** ISO-8601 过期时间。 */
+  expiresAt: InstantTimestamp
+}
+
 export interface EnvironmentCreateDTO {
   name: string
 }

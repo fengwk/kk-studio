@@ -4,8 +4,6 @@ import type {
   InstallOperatingSystem,
 } from '@/shared/api/contracts/ai-environment'
 
-const installerBase = 'https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon'
-
 /**
  * 安装设置校验失败。只携带字段路径；`message` 不含输入值，供非 UI 调用方使用，
  * 组件通过 `field` 渲染字段级 i18n 文案而不直接展示英文 message。
@@ -207,104 +205,67 @@ export function detectInstallOS(platform: string): InstallOperatingSystem {
   return /win/i.test(platform) ? 'windows' : /mac/i.test(platform) ? 'macos' : 'linux'
 }
 
-const sh = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+/**
+ * URL 已百分号编码。bash `$'...'` 把编码结果里的单引号写成 `\'`，`%` 保持连续字面量。
+ * PowerShell 单引号内的单引号写成 `''`。
+ */
+const sh = (value: string) => `$'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
 const ps = (value: string) => `'${value.replaceAll("'", "''")}'`
 
-function bashBlock(body: string): string {
-  let delimiter = 'KK_STUDIO_INSTALL'
-  while (body.split('\n').includes(delimiter)) delimiter += '_'
-  return `bash <<'${delimiter}'\n${body}\n${delimiter}`
+/** 当前页面 origin：无 userinfo/path/query/fragment。与 studioUrl 无关。 */
+function downloadOrigin(value: string): string {
+  const raw = nonblankText(value, 'downloadOrigin')
+  if (/[\s\\]/.test(raw) || [...raw].some(char => char.codePointAt(0)! > 0x7e)) fail('downloadOrigin')
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return fail('downloadOrigin')
+  }
+  if (url.origin !== raw || (url.protocol !== 'http:' && url.protocol !== 'https:')
+    || url.username !== '' || url.password !== '' || url.port === '0') {
+    fail('downloadOrigin')
+  }
+  return url.origin
 }
 
-function unixCommand(
-  action: 'install' | 'uninstall',
-  config?: EnvironmentInstallConfigDTO,
-  token?: string,
-): string {
-  const files = config
-    ? `builtin printf '%s' ${sh(JSON.stringify(config.daemon))} > "$stage/daemon.json"
-builtin printf '%s' ${sh(token!)} > "$stage/daemon.token"
-chmod 600 "$stage/daemon.json" "$stage/daemon.token"
-`
-    : ''
-  return bashBlock(`set +vx
-set -euo pipefail
-umask 077
-stage="$(mktemp -d)"
-trap 'rm -rf -- "$stage"' EXIT
-chmod 700 "$stage"
-stage="$(cd -- "$stage" && pwd -P)"
-${files}curl -fsSL ${sh(`${installerBase}/install.sh`)} -o "$stage/install.sh"
-bash "$stage/install.sh" ${action}${config ? ` --config-file "$stage/daemon.json" --token-file "$stage/daemon.token"${config.javaHome ? ` --java-home ${sh(config.javaHome)}` : ''}` : ''}`)
+function scriptUrl(originValue: string, path: string): string {
+  return `${downloadOrigin(originValue)}${path}`
+}
+
+/** 一行：pipefail 下 curl 失败不会被空 bash 吃掉，远端脚本状态原样返回。 */
+function unixCommand(url: string): string {
+  return `(set -o pipefail; curl -fsSL ${sh(url)} | bash)`
 }
 
 /**
- * Windows staging：先建空目录并设置 current-SID 私有 ACL，再以 CreateNew 建空文件、
- * 逐个设置禁用继承的私有 ACL，最后才写入凭据。`CreateDirectory($path,$acl)` 仅
- * .NET Framework 提供，PowerShell 7 不可用，因此改走 Set-Acl。
+ * 一行：先完整下载（PS5.1/7 的 -UseBasicParsing + ErrorAction Stop），再在内存里执行。
+ * 不在客户端写暂存文件。
  */
-function windowsCommand(
-  action: 'install' | 'uninstall',
-  config?: EnvironmentInstallConfigDTO,
-  token?: string,
+function windowsCommand(url: string): string {
+  const quoted = ps(url)
+  return `$ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script))`
+}
+
+/** 安装脚本由服务端按已保存配置生成；URL 只带 5 分钟 code，不带长期 token。 */
+export function generateInstallCommand(
+  origin: string,
+  environmentId: string,
+  os: InstallOperatingSystem,
+  code: string,
 ): string {
-  const staging = config
-    ? `  $config = Join-Path $stage 'daemon.json'
-  $token = Join-Path $stage 'daemon.token'
-  foreach ($path in @($config, $token)) {
-    $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew)
-    $stream.Dispose()
-    Set-KkPrivateAcl -Path $path
-  }
-  $utf8 = New-Object Text.UTF8Encoding($false)
-  [IO.File]::WriteAllText($config, ${ps(JSON.stringify(config.daemon))}, $utf8)
-  [IO.File]::WriteAllText($token, ${ps(token!)}, $utf8)
-`
-    : ''
-  const parameters = config
-    ? ` -ConfigFile $config -TokenFile $token${config.javaHome ? ` -JavaHome ${ps(config.javaHome)}` : ''}`
-    : ''
-  return `& {
-function Set-KkPrivateAcl([string]$Path, [switch]$Directory) {
-  $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User
-  $acl = if ($Directory) { [Security.AccessControl.DirectorySecurity]::new() } else { [Security.AccessControl.FileSecurity]::new() }
-  $acl.SetOwner($owner)
-  $acl.SetAccessRuleProtection($true, $false)
-  $inheritance = if ($Directory) { 'ContainerInherit, ObjectInherit' } else { 'None' }
-  $rule = [Security.AccessControl.FileSystemAccessRule]::new($owner, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]$inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
-  $acl.AddAccessRule($rule)
-  Set-Acl -LiteralPath $Path -AclObject $acl
-}
-Set-PSDebug -Off
-$ErrorActionPreference = 'Stop'
-$stage = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
-try {
-  New-Item -ItemType Directory -Path $stage | Out-Null
-  Set-KkPrivateAcl -Path $stage -Directory
-${staging}  $installer = Join-Path $stage 'install.ps1'
-  Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${installerBase}/install.ps1`)} -OutFile $installer
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $installer ${action}${parameters}
-  if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
-}
-catch {
-  # Fixed message: never surface a staging exception that could quote credential-bearing source.
-  throw 'Daemon command failed; review installer output and host prerequisites.'
-}
-finally {
-  if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
-}
-}`
-}
-
-export function generateInstallCommand(input: EnvironmentInstallConfigDTO, token: string): string {
-  const config = validateInstallConfig(input)
-  nonblankText(token, 'registrationToken')
-  return config.operatingSystem === 'windows'
-    ? windowsCommand('install', config, token)
-    : unixCommand('install', config, token)
-}
-
-export function generateUninstallCommand(os: InstallOperatingSystem): string {
+  nonblankText(environmentId, 'environmentId')
+  nonblankText(code, 'installCode')
   if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
-  return os === 'windows' ? windowsCommand('uninstall') : unixCommand('uninstall')
+  const url = scriptUrl(
+    origin,
+    `/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
+  )
+  return os === 'windows' ? windowsCommand(url) : unixCommand(url)
+}
+
+export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
+  if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
+  const url = scriptUrl(origin, `/api/harness/environments/uninstall/${encodeURIComponent(os)}`)
+  return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }

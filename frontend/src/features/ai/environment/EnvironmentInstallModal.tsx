@@ -181,8 +181,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
     let saved = false
     try {
       let command: string
+      const downloadOrigin = window.location.origin
       if (uninstall) {
-        command = generateUninstallCommand(os)
+        command = generateUninstallCommand(os, downloadOrigin)
       } else {
         let parsedLsp: EnvironmentInstallConfigDTO['daemon']['lsp']
         if (lspEnabled) {
@@ -212,15 +213,14 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         if (!active.current) return
         setVersion(savedCard.version)
         if (savedCard.installConfig == null) throw new InstallConfigError('installConfig')
-        const token = await environmentService.getRegistrationToken(environment.id)
+        const issued = await environmentService.createInstallCode(savedCard.id, savedCard.version)
         if (!active.current) return
-        if (token.version !== savedCard.version) {
-          // Saved settings exist, but the environment changed while reading the credential.
-          setError(t('ai.environment.install.savedStale'))
-          await rebaseVersion()
-          return
-        }
-        command = generateInstallCommand(savedCard.installConfig, token.registrationToken)
+        command = generateInstallCommand(
+          downloadOrigin,
+          savedCard.id,
+          savedCard.installConfig.operatingSystem,
+          issued.code,
+        )
       }
       if (!active.current) return
       const copied = await copyTextToClipboard(command)
