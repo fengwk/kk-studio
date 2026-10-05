@@ -125,10 +125,8 @@ describe('ThreadComposer and commands', () => {
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
-    const blank = threadCommandsForTarget(
-      { kind: 'NEW_SESSION_DRAFT' },
-      { owner: { type: 'CHAT', chatId: 'chat-1' } },
-    )
+    // 命令可用性只由目标 kind 与显式能力决定，不再接受 owner 选项。
+    const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/debug`/`/compact`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
@@ -159,19 +157,22 @@ describe('ThreadComposer and commands', () => {
     expect(filterThreadCommands('missing')).toEqual([])
   })
 
-  it('keeps navigation commands disabled for controlled Issue threads', () => {
-    const chatBound = threadCommandsForTarget(
+  it('exposes navigation and goal commands for bound threads without owner gating', () => {
+    // 原 owner 裁剪（受控 Issue 线程隐藏导航命令）已删除：既有 Thread 的
+    // 命令可用性只由目标 kind 与显式能力选项决定，owner 不参与裁剪。
+    const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
+    expect(bound.find((command) => command.id === 'thread')?.disabled).toBe(false)
+    expect(bound.find((command) => command.id === 'new')?.disabled).toBe(false)
+    expect(bound.find((command) => command.id === 'goal')?.disabled).toBe(false)
+
+    // 显式能力选项仍然生效：禁止分支时导航命令被禁用，goal 不受影响。
+    const noBranching = threadCommandsForTarget(
       { kind: 'BOUND_THREAD', threadId: 't1' },
-      { owner: { type: 'CHAT', chatId: 'chat-1' } },
+      { allowBranching: false },
     )
-    const issueBound = threadCommandsForTarget(
-      { kind: 'BOUND_THREAD', threadId: 't1' },
-      { owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }, allowBranching: false },
-    )
-    expect(chatBound.find((command) => command.id === 'thread')?.disabled).toBe(false)
-    expect(issueBound.some((command) => command.id === 'thread')).toBe(false)
-    expect(issueBound.some((command) => command.id === 'new')).toBe(false)
-    expect(issueBound.some((command) => command.id === 'goal')).toBe(false)
+    expect(noBranching.find((command) => command.id === 'thread')?.disabled).toBe(true)
+    expect(noBranching.find((command) => command.id === 'new')?.disabled).toBe(true)
+    expect(noBranching.find((command) => command.id === 'goal')?.disabled).toBe(false)
   })
 
   it('uses slash as a text-only shortcut without consuming attachments', () => {

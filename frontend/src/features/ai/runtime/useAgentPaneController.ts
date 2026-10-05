@@ -232,7 +232,6 @@ export function useAgentPaneController({
     setPreviewError(null)
   }, [boundThreadId])
   const branchPanel = useBoundBranchPanel({
-    owner,
     threadId: boundThreadId,
   })
   const controller = branchPanel.controller
@@ -466,9 +465,6 @@ export function useAgentPaneController({
     name: string | null,
     backTo: RenameTarget['backTo'] = null,
   ): void {
-    if (!owner || owner.type === 'ISSUE_AGENT') {
-      return
-    }
     setRenameTargetState({ kind, id, name, backTo })
     setRenameError(null)
     setRenamePending(false)
@@ -495,9 +491,6 @@ export function useAgentPaneController({
   }
 
   function openRenameForTarget(kind: RenameKind): void {
-    if (!owner || owner.type === 'ISSUE_AGENT') {
-      return
-    }
     if (hasPendingOperation()) {
       setActionError(t('ai.runtime.action.operationPending'))
       return
@@ -524,7 +517,7 @@ export function useAgentPaneController({
   }
 
   async function submitRename(name: string): Promise<void> {
-    if (!owner || owner.type === 'ISSUE_AGENT' || renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
+    if (renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
       return
     }
     const trimmed = name.trim()
@@ -658,7 +651,8 @@ export function useAgentPaneController({
 
   const changeTarget = useCallback(
     (next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean => {
-      if (!owner || owner.type === 'ISSUE_AGENT') {
+      // 容器与列表属于 owner 范围：无 owner 的面板没有可导航的 Session/Thread 容器。
+      if (!owner) {
         return false
       }
       if (hasPendingOperation()) {
@@ -752,17 +746,21 @@ export function useAgentPaneController({
     if (capabilities?.readOnly) {
       return
     }
-    if (owner?.type !== 'CHAT') {
-      return
-    }
     if (hasPendingOperation()) {
       setActionError(t('ai.runtime.action.operationPending'))
       return
     }
-    const currentThread = isBoundTarget(target) ? controller.thread : null
-    const effectiveBase = isBoundTarget(target)
-      ? branchPanel.effectiveBase
-      : entryBaseDraft
+    // 既有 Thread 走通用 thread command batch：与普通消息共用同一 CAS 游标与未决重试通道。
+    if (isBoundTarget(target)) {
+      onFocus?.()
+      void controller.submitGoal(goalText)
+      setInteraction(null)
+      return
+    }
+    if (!owner) {
+      return
+    }
+    const effectiveBase = entryBaseDraft
     const draft = activeDraft
     if (!draft || !effectiveBase) {
       setActionError(t('ai.runtime.action.threadNotLoaded'))
@@ -777,7 +775,6 @@ export function useAgentPaneController({
         base: effectiveBase,
         goalText,
         localParts: frozenParts,
-        thread: currentThread,
       })
       onFocus?.()
       startGoalAcceptance(frozen)
@@ -887,7 +884,7 @@ export function useAgentPaneController({
   }
 
   function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
-    if (capabilities?.readOnly || !owner || (owner.type === 'ISSUE_AGENT' && !onSubmitInstruction)) {
+    if (capabilities?.readOnly) {
       return
     }
     if (onSubmitInstruction) {
@@ -960,8 +957,7 @@ export function useAgentPaneController({
   }
 
   async function handlePreview() {
-    if (owner?.type !== 'CHAT' || capabilities?.readOnly
-      || onSubmitInstruction || capabilities?.allowGenericChat === false) {
+    if (capabilities?.readOnly || onSubmitInstruction || capabilities?.allowGenericChat === false) {
       return
     }
     if (!isBoundTarget(target)) {
@@ -1048,7 +1044,6 @@ export function useAgentPaneController({
 
       // 用 fresh thread.headEntryId 和 nextCommandSequence 重建 plan.request target
       const plan = buildMessageBatchPlan({
-        owner,
         thread: freshSnapshot.thread,
         effectiveBase: frozenEffectiveBase,
         draft: frozenBranchDraft,
@@ -1082,11 +1077,6 @@ export function useAgentPaneController({
 
   function handleCommand(command: ThreadCommand): void {
     onFocus?.()
-    if ((!owner || owner.type === 'ISSUE_AGENT')
-      && command.id !== 'debug' && command.id !== 'shortcuts'
-      && (command.id !== 'stop' || !onStop)) {
-      return
-    }
     if (command.disabled) {
       if (command.disabledReason) {
         setActionError(command.disabledReason)
@@ -1174,9 +1164,6 @@ export function useAgentPaneController({
         openRenameForTarget('thread')
         return
       case 'goal':
-        if (owner?.type !== 'CHAT') {
-          return
-        }
         setInteraction('goal')
         return
       case 'compact':
@@ -1203,7 +1190,7 @@ export function useAgentPaneController({
   }
 
   function selectAgent(agentName: string): void {
-    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowSwitchAgent === false) {
+    if (capabilities?.allowSwitchAgent === false) {
       setActionError(t('ai.runtime.action.agentSwitchDisabled'))
       return
     }
@@ -1235,7 +1222,7 @@ export function useAgentPaneController({
   }
 
   function selectEntry(entry: HarnessSessionEntryDTO): void {
-    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
@@ -1249,7 +1236,7 @@ export function useAgentPaneController({
   }
 
   function selectSession(session: RuntimeSessionSummaryDTO): void {
-    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
@@ -1258,7 +1245,7 @@ export function useAgentPaneController({
   }
 
   function selectThread(thread: RuntimeThreadSummaryDTO): void {
-    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
       return
     }
@@ -1287,14 +1274,12 @@ export function useAgentPaneController({
     || controller.approvalPending
     || controller.replayPending
 
-  const canExposePreview = owner?.type === 'CHAT' && isBoundTarget(target)
+  const canExposePreview = isBoundTarget(target)
     && !onSubmitInstruction && capabilities?.allowGenericChat !== false
 
   const { previewDisabled, previewDisabledReason } = useMemo(() => {
     if (
-      !owner
-      || owner.type !== 'CHAT'
-      || onSubmitInstruction != null
+      onSubmitInstruction != null
       || capabilities?.allowGenericChat === false
       || !isBoundTarget(target)
     ) {
@@ -1361,7 +1346,6 @@ export function useAgentPaneController({
     controller.queuedCommands.length,
     controller.working,
     onSubmitInstruction,
-    owner,
     pending,
     previewLoading,
     t,
@@ -1391,9 +1375,8 @@ export function useAgentPaneController({
     {
       manualCompaction: isBoundTarget(target) ? controller.manualCompaction : null,
       allowNewSession: capabilities?.allowNewSession,
-      readOnly: capabilities?.readOnly ?? (!owner ? true : undefined),
+      readOnly: capabilities?.readOnly,
       canBranchFromRoot,
-      owner,
       allowSwitchAgent: capabilities?.allowSwitchAgent,
       allowBranching: capabilities?.allowBranching,
     },
@@ -1413,15 +1396,15 @@ export function useAgentPaneController({
   }, [target, controller.entries, boundGoal])
 
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
+  const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
   const composer: ChatPanelComposerInput = {
     scope: composerScope,
     parts: composerDraft,
     pending,
     disabled:
       Boolean(capabilities?.readOnly)
-      || !owner
       || pending
-      || (owner.type === 'ISSUE_AGENT' && (!isBoundTarget(target) || !onSubmitInstruction))
+      || (onSubmitInstruction != null && !isBoundTarget(target))
       || (!onSubmitInstruction && capabilities?.allowGenericChat === false)
       || (!onSubmitInstruction && (isBoundTarget(target)
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
@@ -1440,7 +1423,7 @@ export function useAgentPaneController({
     composerRef,
     onPreviewReadinessChange: setComposerReadiness,
     displayOnly: Boolean(capabilities?.readOnly),
-    settings: !owner || owner.type === 'ISSUE_AGENT' || activeDraft == null ? undefined : {
+    settings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,
       yoloEnabled: activeDraft.yoloEnabled,
@@ -1529,6 +1512,12 @@ export function useAgentPaneController({
     boundLabels,
     boundGoal,
     boundGoalProgress,
+    goalDraft,
+    setGoalDraft: (text: string) => {
+      if (isBoundTarget(target)) {
+        controller.setGoalDraft(text)
+      }
+    },
     submitGoal,
     clearGoal,
     composer,

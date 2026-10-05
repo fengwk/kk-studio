@@ -7,14 +7,12 @@ import {
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
 import {
+  buildGoalBatchPlan,
   buildMessageBatchPlan,
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-import type {
-  AgentRuntimeOwnerDTO,
-  HarnessThreadDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import {
   useAgentThreadController,
 } from '@/features/ai/runtime/useAgentThreadController'
@@ -70,11 +68,11 @@ function compareDecimalVersions(a: string, b: string): number {
 /**
  * 绑定 Thread 面板的共享编排（Bound Chat 与 Canvas Bound 同一事实源）：
  *
- * - `buildBatchRef` 转发 + `useAgentThreadController` 的循环桥接（submit handler
- *   事件驱动地读取最新 batch 构建器）；
+ * - `buildBatchRef` / `buildGoalBatchRef` 转发 + `useAgentThreadController` 的循环桥接
+ *   （submit handler 事件驱动地读取最新 batch 构建器）；
  * - branch base/draft 从 snapshot 初始化、thread 重绑重置，以及 queued SET_*
  *   pending projection 出的 effectiveBase；
- * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
+ * - 通过 `buildMessageBatchPlan` / `buildGoalBatchPlan` 构建原子 thread command batch；
  * - agent/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
  * - YOLO 走单字段策略控制面：写请求串行并合并快速连点（latest wins），
  *   重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
@@ -88,21 +86,21 @@ function compareDecimalVersions(a: string, b: string): number {
  * 在调用组件中。
  */
 export function useBoundBranchPanel({
-  owner,
   threadId,
   initialParts = [],
 }: {
-  owner?: AgentRuntimeOwnerDTO
   threadId: string
   initialParts?: ComposerPart[]
 }) {
   // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
   // 并在提交事件到达前由下方 effect 更新。
   const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
+  const buildGoalBatchRef = useRef<((goalText: string | null) => CommandBatchPlan | null) | null>(null)
   const controller = useAgentThreadController(
     threadId,
     initialParts,
     (parts) => buildBatchRef.current?.(parts) ?? null,
+    (goalText) => buildGoalBatchRef.current?.(goalText) ?? null,
   )
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
@@ -181,22 +179,36 @@ export function useBoundBranchPanel({
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
-      if (owner == null || boundThread == null || boundBranchState == null || effectiveBase == null) {
+      if (boundThread == null || boundBranchState == null || effectiveBase == null) {
         return null
       }
       return buildMessageBatchPlan({
-        owner,
         thread: boundThread,
         effectiveBase,
         draft: boundBranchState.draft,
         parts,
       })
     },
-    [boundBranchState, boundThread, effectiveBase, owner],
+    [boundBranchState, boundThread, effectiveBase],
+  )
+  const buildGoalBatch = useCallback(
+    (goalText: string | null): CommandBatchPlan | null => {
+      if (boundThread == null || boundBranchState == null || effectiveBase == null) {
+        return null
+      }
+      return buildGoalBatchPlan({
+        thread: boundThread,
+        effectiveBase,
+        draft: boundBranchState.draft,
+        goalText,
+      })
+    },
+    [boundBranchState, boundThread, effectiveBase],
   )
   useEffect(() => {
-    // Ref 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
+    // Refs 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
     buildBatchRef.current = buildBatch
+    buildGoalBatchRef.current = buildGoalBatch
   })
 
   const dirty =
@@ -402,5 +414,6 @@ export function useBoundBranchPanel({
     selectEnvironment,
     resetDraftFromThread,
     buildBatch,
+    buildGoalBatch,
   }
 }

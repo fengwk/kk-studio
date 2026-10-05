@@ -37,11 +37,26 @@ export type EntryType =
   | 'MESSAGE'
   | 'CUSTOM'
   | 'CUSTOM_MESSAGE'
+  | 'NOTIFICATION'
   | 'MODEL_ATTEMPT_FAILURE'
   | 'ASSISTANT_ERROR'
   | 'ASSISTANT_ABORTED'
   | 'COMPACTION'
   | 'TURN_END'
+
+/** 系统结果通知的分类；对模型只是上下文，不是更高权限指令。 */
+export type NotificationKind = 'SUBAGENT_RESULT' | 'TASK_BUDGET'
+
+/**
+ * NOTIFICATION Entry / command 的稳定 payload：历史 JSON 与 command JSON 同形。
+ * message 是标准 USER AgentMessage（durable 形态），只作为上下文来源，不代表人类输入。
+ */
+export interface HarnessNotificationPayloadDTO {
+  notificationId: string
+  kind: NotificationKind
+  sourceThreadId: string
+  message: { role: string; contents: unknown[] }
+}
 
 /** 候选 Tool 的发送状态与最终 definition 事实。 */
 export interface HarnessModelRequestDebugToolDTO {
@@ -152,9 +167,11 @@ export interface HarnessThreadTreeNodeDTO {
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
  * branch=branch-<uuid 前 8 位>；可经 PUT /harness/threads/{id}/name 修改）；
- * status/processing 是派生的展示字段：status 由后端综合该 Thread 自身执行与整棵委派子树的活性
- * 派生（子树仍活跃时为 WAITING_CHILDREN，仅当整棵子树静止才是 IDLE），processing 恒等于
- * `status !== 'IDLE'`；前端不再自行聚合 task 状态。
+ * status/processing 是派生的展示字段：status 描述该 Thread 自身执行阶段
+ * （IDLE / STOPPED / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING），
+ * 不递归投影子树忙碌；processing 对 IDLE/STOPPED 为 false，其余为 true。
+ * executionControl 是持久执行控制（RUNNABLE / STOPPED），与本地运行阶段无关：
+ * 本地已 IDLE 也可能仍有活跃后代需要停止。
  * branchSettings 是 head Entry branch 的完整 settings 快照。
  */
 export interface HarnessThreadDTO {
@@ -173,10 +190,12 @@ export interface HarnessThreadDTO {
   nextCommandSequence: string
   /** PostgreSQL 权威持久投影游标（非负十进制 bigint 字符串）。 */
   version: string
-  /** 展示状态（派生）：IDLE / CONTINUATION_DUE / QUEUED / WAITING_CHILDREN / MODEL_* / TOOL_* / APPLYING。 */
+  /** 展示状态（派生）：IDLE / STOPPED / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING。 */
   status: string
-  /** 是否仍在处理（派生字段），恒等于 `status !== 'IDLE'`。 */
+  /** 是否仍在处理（派生字段），IDLE 与 STOPPED 为 false。 */
   processing: boolean
+  /** 持久执行控制：RUNNABLE / STOPPED。 */
+  executionControl: string
   /** head Entry branch 的完整 settings 快照。 */
   branchSettings: HarnessBranchSettingsDTO
   createTime: BackendDateTime
@@ -245,22 +264,35 @@ export interface HarnessThreadStopDTO {
 }
 
 /**
- * 停止结果；status 为 STOPPED / IDLE / REPLAYED。IDLE 表示没有 Turn 被停止，但排队中的
- * commands 可能已被取消；仅 STOPPED/REPLAYED 时 stoppedTurnEndEntryId 才非 null。
+ * 停止结果；status 为 STOPPED / REPLAYED。thread 是请求目标的权威当前投影；
+ * stoppedThreads 是本次完整受影响集合（含目标自身与全部后代）的持久回执，
+ * 精确重放时返回原回执集合。
  */
 export interface HarnessThreadStopResultDTO {
   status: string
   thread: HarnessThreadDTO
-  stoppedTurnEndEntryId: string | null
-  cancelledCommandCount: number
-  cancelledUserMessages: HarnessCancelledUserMessageDTO[]
+  stoppedThreads: HarnessStoppedThreadReceiptDTO[]
 }
 
-/** Stop 取消的一条 user-like 消息；messageJson 为 canonical AgentMessage JSON。 */
-export interface HarnessCancelledUserMessageDTO {
+/** Stop 取消的一条人工输入；type 只可能是 USER_MESSAGE / GOAL。 */
+export interface HarnessCancelledInputDTO {
   sequence: string
   idempotencyKey: string
-  messageJson: string
+  type: 'USER_MESSAGE' | 'GOAL'
+  /** canonical ThreadCommandPayload JSON（USER_MESSAGE: {message}；GOAL: {text}）。 */
+  payloadJson: string
+}
+
+/**
+ * 一次 Stop 在某个受影响 Thread 上留下的持久回执；身份是 (threadId, stopRequestId)。
+ * cancelledInputs 只含可恢复的人工输入，按 sequence 升序。
+ */
+export interface HarnessStoppedThreadReceiptDTO {
+  threadId: string
+  stopRequestId: string
+  stoppedTurnEndEntryId?: string | null
+  cancelledCommandCount: number
+  cancelledInputs: HarnessCancelledInputDTO[]
 }
 
 /**
@@ -354,6 +386,11 @@ export interface HarnessThreadSnapshotDTO {
   toolInvocations: ToolInvocationDTO[]
   modelAttemptFailures: ModelAttemptFailureDTO[]
   manualCompaction: ManualCompactionDTO
+  /**
+   * 该 Thread 自己的、包含可恢复人工输入的持久 Stop 回执。它与 Stop 响应走同一
+   * 应用渠道，供刷新或未打开子页时恢复草稿；按 (threadId, stopRequestId) 幂等。
+   */
+  stopReceipts: HarnessStoppedThreadReceiptDTO[]
 }
 
 export interface ManualCompactionDTO {
@@ -381,21 +418,30 @@ export interface NewThreadCommandTargetDTO {
   yoloEnabled: boolean
 }
 
-export interface ThreadCommandTargetDTO {
-  type: 'THREAD'
-  threadId: string
-  expectedHeadEntryId: string
-  expectedNextCommandSequence: string
-}
-
+/** 创建型命令批次 target：NEW_SESSION / NEW_THREAD，都需要产品 owner。 */
 export type AgentCommandTargetDTO =
   | NewSessionCommandTargetDTO
   | NewThreadCommandTargetDTO
-  | ThreadCommandTargetDTO
 
+/** 创建型命令批次请求（POST /harness/command-batches）。 */
 export interface AgentCommandBatchRequestDTO {
   owner: AgentRuntimeOwnerDTO
   target: AgentCommandTargetDTO
+  commands: HarnessCommandCreateDTO[]
+}
+
+/**
+ * 既有 Thread 的通用命令写请求：只携带精确 CAS 游标与有序命令。
+ *
+ * POST /harness/threads/{threadId}/command-batches
+ * POST /harness/threads/{threadId}/provider-request-preview
+ *
+ * 不携带 owner 或 target：服务端从 path 解析 Session，owner 只用于 NEW_SESSION /
+ * NEW_THREAD 创建与容器列表。
+ */
+export interface ThreadCommandBatchRequestDTO {
+  expectedHeadEntryId: string
+  expectedNextCommandSequence: string
   commands: HarnessCommandCreateDTO[]
 }
 
@@ -416,9 +462,9 @@ export interface RuntimeThreadSummaryDTO {
   name: string
   createdAt: BackendDateTime
   updatedAt: BackendDateTime
-  /** 该 Thread 执行状态的派生展示值（含委派子树活性：子树活跃时为 WAITING_CHILDREN）。 */
+  /** 该 Thread 自身执行状态的派生展示值（不递归子树活性）。 */
   status: string
-  /** 是否仍在处理（派生字段），恒等于 `status !== 'IDLE'`。 */
+  /** 是否仍在处理（派生字段），IDLE 与 STOPPED 为 false。 */
   processing: boolean
   model: HarnessModelSelectionDTO
   headMessagePreview: string | null

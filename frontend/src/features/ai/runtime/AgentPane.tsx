@@ -85,8 +85,7 @@ export function AgentPane({
     : null
 
   const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
-  const boundWorkingLabel = boundStatus === 'WAITING_CHILDREN'
-    || boundStatus === 'QUEUED'
+  const boundWorkingLabel = boundStatus === 'QUEUED'
     || boundStatus === 'WAITING_APPROVAL'
     || boundStatus === 'TOOL_WAITING_APPROVAL'
     ? formatThreadStatusLabel(boundStatus, t)
@@ -226,7 +225,7 @@ export function AgentPane({
             className="agent-pane-thread-rename"
             aria-label={t('ai.runtime.rename.titleAria')}
             title={t('ai.runtime.rename.titleAria')}
-            disabled={!owner || owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
+            disabled={name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
             onClick={() => {
               if (name != null && pane.target.kind === 'BOUND_THREAD') {
                 pane.renameThread(pane.target.threadId, name)
@@ -287,6 +286,8 @@ export function AgentPane({
           progress={pane.boundGoalProgress}
           busy={pane.pending}
           readOnly={Boolean(capabilities?.readOnly)}
+          draftText={pane.goalDraft ?? undefined}
+          onDraftTextChange={pane.setGoalDraft}
           onSubmitGoal={(goalText) => pane.submitGoal(goalText)}
           onClearGoal={() => pane.clearGoal()}
           onClose={pane.closeInteraction}

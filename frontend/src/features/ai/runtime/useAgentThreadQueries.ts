@@ -37,6 +37,7 @@ export function useAgentThreadQueries(threadId: string) {
     () => snapshot?.modelAttemptFailures ?? [],
     [snapshot],
   )
+  const stopReceipts = useMemo(() => snapshot?.stopReceipts ?? [], [snapshot])
 
   return {
     agentsQuery,
@@ -51,6 +52,7 @@ export function useAgentThreadQueries(threadId: string) {
     modelInvocation,
     toolInvocations,
     modelAttemptFailures,
+    stopReceipts,
     manualCompaction: snapshot?.manualCompaction ?? {
       available: false,
       disabledReason: 'Thread snapshot is not loaded',

@@ -131,6 +131,51 @@ export function projectUnknownEntry(entry: HarnessSessionEntryDTO): EntryEventDi
   )
 }
 
+/**
+ * 系统结果通知（NOTIFICATION）：它是 runtime 的上下文事实，不是人类输入。
+ * 使用独立系统样式渲染，既不进入 composer 草稿，也不进入队列与上下键消息历史。
+ */
+export function projectNotificationEntry(
+  entry: HarnessSessionEntryDTO,
+  payload: unknown,
+): EntryEventDialogueMessage {
+  const record = payload != null && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const kind = record.kind === 'TASK_BUDGET' ? 'TASK_BUDGET' : 'SUBAGENT_RESULT'
+  const message = record.message
+  const text = message != null && typeof message === 'object' && !Array.isArray(message)
+    ? messageContentsText((message as Record<string, unknown>).contents)
+    : ''
+  return event(
+    entry,
+    'notification',
+    translate(`ai.runtime.notification.entry.${kind}Title`),
+    text || translate('ai.runtime.notification.entry.emptyText'),
+  )
+}
+
+/** NOTIFICATION 的 message 是 USER AgentMessage；只提取文本内容作为展示事实。 */
+function messageContentsText(contents: unknown): string {
+  if (!Array.isArray(contents)) {
+    return ''
+  }
+  return contents
+    .map((content) => {
+      if (content == null || typeof content !== 'object' || Array.isArray(content)) {
+        return ''
+      }
+      const record = content as Record<string, unknown>
+      if (record.type !== 'text') {
+        return ''
+      }
+      return typeof record.text === 'string' ? record.text : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+}
+
 function event(
   entry: HarnessSessionEntryDTO,
   kind: EntryEventKind,

@@ -10,7 +10,14 @@ import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn
 import type { ThreadCommand } from '@/features/ai/runtime'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
-import { prependCancelledMessages } from '@/features/ai/runtime/cancelled-message-parts'
+import {
+  applyStopReceipt,
+  loadThreadDraft,
+  restoreThreadDraftParts,
+  restoreThreadGoalText,
+  saveThreadDraftParts,
+  saveThreadGoalText,
+} from '@/features/ai/runtime/thread-draft-store'
 import {
   clearPendingStop,
   loadPendingStop,
@@ -24,7 +31,10 @@ import {
   sameBatchRequestIdentity,
   type BoundPendingMessage,
 } from '@/features/ai/runtime/agent-pane/pane-target'
-import { isDefiniteAcceptanceFailure } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
+import {
+  isDefiniteAcceptanceFailure,
+  normalizeGoalText,
+} from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
 import {
   createDecisionId,
   createStopRequestId,
@@ -43,18 +53,13 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
-import {
-  clearStoredComposerDraft,
-  restoreComposerDraft,
-  storeComposerDraft,
-  type ComposerDraftChangeSource,
-} from '@/features/ai/composer/composer-draft'
 import { isConflictError, isConflictReason } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
-  AgentCommandBatchRequestDTO,
   HarnessCommandCreateDTO,
   HarnessThreadSnapshotDTO,
+  HarnessStoppedThreadReceiptDTO,
+  ThreadCommandBatchRequestDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
@@ -91,22 +96,20 @@ const MAX_STALE_MESSAGE_CURSOR_RETRIES = 2
 export function canRetryStaleMessageBatch(
   planOrRequest:
     | CommandBatchPlan
-    | AgentCommandBatchRequestDTO
-    | { request: AgentCommandBatchRequestDTO; targetDraft?: BranchDraft },
+    | ThreadCommandBatchRequestDTO
+    | { request: ThreadCommandBatchRequestDTO; targetDraft?: BranchDraft },
   snapshot: HarnessThreadSnapshotDTO,
 ): boolean {
-  const request: AgentCommandBatchRequestDTO = 'request' in planOrRequest ? planOrRequest.request : planOrRequest
-  const target = request.target
+  const request: ThreadCommandBatchRequestDTO = 'request' in planOrRequest ? planOrRequest.request : planOrRequest
   if (
-    target.type !== 'THREAD'
-    || request.commands.length === 0
+    request.commands.length === 0
     || request.commands.some((command: HarnessCommandCreateDTO) => command.type !== 'USER_MESSAGE')
   ) {
     return false
   }
   if (
-    snapshot.thread.headEntryId === target.expectedHeadEntryId
-    && snapshot.thread.nextCommandSequence === target.expectedNextCommandSequence
+    snapshot.thread.headEntryId === request.expectedHeadEntryId
+    && snapshot.thread.nextCommandSequence === request.expectedNextCommandSequence
   ) {
     return false
   }
@@ -119,8 +122,8 @@ export function canRetryStaleMessageBatch(
       return false
     }
   }
-  return snapshot.thread.headEntryId === target.expectedHeadEntryId
-    || snapshot.entries.some((entry) => entry.entryId === target.expectedHeadEntryId)
+  return snapshot.thread.headEntryId === request.expectedHeadEntryId
+    || snapshot.entries.some((entry) => entry.entryId === request.expectedHeadEntryId)
 }
 
 /**
@@ -150,6 +153,7 @@ export function useAgentThreadController(
   threadId: string,
   initialParts: ComposerPart[] = [],
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
+  buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
 ) {
   const { t } = useI18n()
   const boundThreadIdRef = useRef(threadId)
@@ -161,11 +165,12 @@ export function useAgentThreadController(
   const isStillBound = (originThreadId: string, originEpoch: number) =>
     boundThreadIdRef.current === originThreadId && bindingEpochRef.current === originEpoch
 
-  const draftStorageScope = `thread:${threadId}`
-  const [draft, setDraftState] = useState<ComposerPart[]>(
-    () => restoreComposerDraft(draftStorageScope, initialParts),
-  )
+  // composer 草稿与 Goal 编辑区文本都以该 Thread 的持久记录为权威；记录同时保存
+  // 已合并的 Stop 回执身份，保证 Stop 响应与 snapshot 两条通道不会重复回填。
+  const [draft, setDraftState] = useState<ComposerPart[]>(() => initialParts)
   const draftRef = useRef<ComposerPart[]>(draft)
+  const [goalDraft, setGoalDraftState] = useState<string | null>(null)
+  const goalDraftRef = useRef<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   // 维护局部的 in-flight 计数与按绑定隔离的在途标识，保证跨 Thread 与重叠调用下状态准确。
@@ -188,7 +193,6 @@ export function useAgentThreadController(
 
   const initializedReplayThreadRef = useRef<string | null>(null)
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
-  const appliedStopRequestIdsRef = useRef(new Set<string>())
   // 当含混的 Stop 操作尚待重试或失效时为 true：切换 Thread 时面板
   // 绝不能悄悄丢弃这次精确重试。
   const [stopReplayPending, setStopReplayPending] = useState(false)
@@ -206,6 +210,7 @@ export function useAgentThreadController(
     modelInvocation,
     toolInvocations,
     modelAttemptFailures,
+    stopReceipts,
     manualCompaction,
     snapshotQuery,
   } = useAgentThreadQueries(threadId)
@@ -248,16 +253,12 @@ export function useAgentThreadController(
     if (initializedReplayThreadRef.current === threadId) {
       return
     }
-    const restoredDraft = restoreComposerDraft(draftStorageScope, initialParts)
-    setDraftState(restoredDraft)
-    draftRef.current = restoredDraft
-    storeComposerDraft(draftStorageScope, restoredDraft)
+    initializedReplayThreadRef.current = threadId
 
     const restoredPending = threadId ? loadBoundPendingMessage(threadId) : null
     pendingMessageRef.current = restoredPending
     setPendingMessage(restoredPending)
 
-    initializedReplayThreadRef.current = threadId
     setInFlightSubmissions(0)
     setActionError(null)
     setConflict(null)
@@ -265,9 +266,32 @@ export function useAgentThreadController(
     const restoredStop = loadPendingStop(threadId)
     pendingStopRef.current = restoredStop
     setStopReplayPending(restoredStop != null)
-    appliedStopRequestIdsRef.current.clear()
     decisionIdByInvocation.current.clear()
-  }, [draftStorageScope, initialParts, threadId])
+
+    // 草稿（composer + Goal 编辑区）以该 Thread 的持久记录为权威；记录尚未到达前
+    // 保留初始值，且绝不覆盖用户已经开始编辑的内容。
+    let active = true
+    void loadThreadDraft(threadId)
+      .then((record) => {
+        if (!active || boundThreadIdRef.current !== threadId || record == null) {
+          return
+        }
+        if (!hasMessageContent(draftRef.current)) {
+          draftRef.current = record.parts
+          setDraftState(record.parts)
+        }
+        if ((goalDraftRef.current ?? '').length === 0) {
+          goalDraftRef.current = record.goalText
+          setGoalDraftState(record.goalText)
+        }
+      })
+      .catch(() => {
+        // IndexedDB 不可用时保留内存草稿；不回退到假设性的第二份存储。
+      })
+    return () => {
+      active = false
+    }
+  }, [threadId])
 
   const approvalMutation = useMutation({
     mutationFn: ({
@@ -403,22 +427,65 @@ export function useAgentThreadController(
     setActionError(errorMessage(error))
   }
 
+  /**
+   * 草稿写入口。`edit` 落盘到该 Thread 的持久记录；`history`（上下键浏览）与
+   * `restore`（Stop 回执已原子落盘）只更新内存，避免重复写与重复回填。
+   */
   function setDraft(
     next: ComposerPart[],
-    source: ComposerDraftChangeSource = 'edit',
+    source: 'edit' | 'history' | 'restore' = 'edit',
   ) {
     if (source === 'edit') {
-      storeComposerDraft(draftStorageScope, next)
+      void saveThreadDraftParts(threadId, next).catch(() => undefined)
     }
     draftRef.current = next
     setDraftState(next)
+  }
+
+  function setGoalDraft(next: string | null, source: 'edit' | 'restore' = 'edit') {
+    if (source === 'edit') {
+      void saveThreadGoalText(threadId, next).catch(() => undefined)
+    }
+    goalDraftRef.current = next
+    setGoalDraftState(next)
+  }
+
+  /**
+   * Stop 或确定失败后把未消费的本地草稿恢复到对应编辑区。已有内容的编辑器绝不覆盖；
+   * 非当前绑定的 Thread 只写它自己的持久记录，子 Thread 草稿不会进入父输入框。
+   */
+  async function restorePendingDraft(
+    originThreadId: string,
+    pending: BoundPendingMessage,
+    stillBound: boolean,
+  ): Promise<void> {
+    try {
+      if (pending.kind === 'MESSAGE') {
+        const restored = await restoreThreadDraftParts(originThreadId, pending.localDraft)
+        if (restored && stillBound && !hasMessageContent(draftRef.current)) {
+          draftRef.current = pending.localDraft
+          setDraftState(pending.localDraft)
+        }
+        return
+      }
+      const goalText = pending.goalText
+      if (goalText == null) {
+        return
+      }
+      const restored = await restoreThreadGoalText(originThreadId, goalText)
+      if (restored && stillBound && (goalDraftRef.current ?? '').length === 0) {
+        goalDraftRef.current = goalText
+        setGoalDraftState(goalText)
+      }
+    } catch {
+      // IndexedDB 不可用时保留内存状态。
+    }
   }
 
   async function executePendingMessage(initialPending: BoundPendingMessage): Promise<void> {
     const originThreadId = threadId
     const originEpoch = bindingEpochRef.current
     const originBindingKey = `${originThreadId}:${originEpoch}`
-    const originScope = `thread:${originThreadId}`
     let currentPending = initialPending
     let currentRequest = initialPending.request
 
@@ -430,7 +497,7 @@ export function useAgentThreadController(
     try {
       for (let retryCount = 0; ; retryCount += 1) {
         try {
-          await harnessService.acceptCommandBatch(currentRequest)
+          await harnessService.acceptThreadCommandBatch(originThreadId, currentRequest)
           clearBoundPendingMessage(originThreadId, currentRequest)
           if (isCurrentBound()) {
             const existingStored = loadBoundPendingMessage(originThreadId)
@@ -476,12 +543,8 @@ export function useAgentThreadController(
               queryClient.setQueryData(queryKeys.threads.snapshot(originThreadId), latest)
               currentRequest = {
                 ...currentRequest,
-                target: {
-                  type: 'THREAD',
-                  threadId: originThreadId,
-                  expectedHeadEntryId: latest.thread.headEntryId,
-                  expectedNextCommandSequence: latest.thread.nextCommandSequence,
-                },
+                expectedHeadEntryId: latest.thread.headEntryId,
+                expectedNextCommandSequence: latest.thread.nextCommandSequence,
               }
               const updatedPending: BoundPendingMessage = {
                 ...currentPending,
@@ -518,18 +581,9 @@ export function useAgentThreadController(
             pendingMessageRef.current = null
             setPendingMessage(null)
           }
-          if (!hasMessageContent(draftRef.current)) {
-            storeComposerDraft(originScope, currentPending.localDraft)
-            draftRef.current = currentPending.localDraft
-            setDraftState(currentPending.localDraft)
-          }
-        } else {
-          // 不在当前 binding：绝不可修改当前 UI/ref，原 Thread 失败草稿安全持久化
-          const originDraft = restoreComposerDraft(originScope, [])
-          if (!hasMessageContent(originDraft)) {
-            storeComposerDraft(originScope, currentPending.localDraft)
-          }
         }
+        // 失败草稿写回该 Thread 自己的持久记录：非当前绑定的 Thread 也不会污染当前输入框。
+        await restorePendingDraft(originThreadId, currentPending, stillBound)
       } else {
         const unknownPending: BoundPendingMessage = {
           ...currentPending,
@@ -545,22 +599,11 @@ export function useAgentThreadController(
             // best-effort writeback for unknown mark
           }
         }
-        if (stillBound) {
-          if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
-            pendingMessageRef.current = unknownPending
-            setPendingMessage(unknownPending)
-          }
-          if (!hasMessageContent(draftRef.current)) {
-            storeComposerDraft(originScope, currentPending.localDraft)
-            draftRef.current = currentPending.localDraft
-            setDraftState(currentPending.localDraft)
-          }
-        } else {
-          const originDraft = restoreComposerDraft(originScope, [])
-          if (!hasMessageContent(originDraft)) {
-            storeComposerDraft(originScope, currentPending.localDraft)
-          }
+        if (stillBound && (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest))) {
+          pendingMessageRef.current = unknownPending
+          setPendingMessage(unknownPending)
         }
+        await restorePendingDraft(originThreadId, currentPending, stillBound)
       }
     } finally {
       inFlightBindingsRef.current.delete(originBindingKey)
@@ -601,7 +644,9 @@ export function useAgentThreadController(
       threadId,
       request: plan.request,
       targetDraft: plan.targetDraft,
+      kind: 'MESSAGE',
       localDraft,
+      goalText: null,
       unknownOutcome: false,
     }
     try {
@@ -612,9 +657,61 @@ export function useAgentThreadController(
     }
     pendingMessageRef.current = boundPending
     setPendingMessage(boundPending)
-    clearStoredComposerDraft(draftStorageScope)
+    void saveThreadDraftParts(threadId, []).catch(() => undefined)
     draftRef.current = []
     setDraftState([])
+
+    return executePendingMessage(boundPending)
+  }
+
+  /**
+   * 既有 Thread 的 Goal 写入：与普通消息共用同一 thread command batch 与未决重试通道，
+   * 但提交后清空 Goal 编辑区，未知结果或 Stop 回执则把目标文本恢复到该编辑区。
+   */
+  function submitGoal(rawGoalText: string | null): Promise<void> {
+    if (isCurrentBindingInFlight()) {
+      return Promise.resolve()
+    }
+    if (!bound || buildGoalBatch == null) {
+      setActionError(t('ai.runtime.action.threadNotLoaded'))
+      return Promise.resolve()
+    }
+    let goalText: string | null
+    try {
+      goalText = normalizeGoalText(rawGoalText)
+    } catch (error) {
+      setActionError(errorMessage(error))
+      return Promise.resolve()
+    }
+    const plan = buildGoalBatch(goalText)
+    if (plan == null) {
+      return Promise.resolve()
+    }
+    if (pendingMessageRef.current?.unknownOutcome) {
+      setActionError(t('ai.runtime.action.operationPending'))
+      return Promise.resolve()
+    }
+    setActionError(null)
+    setConflict(null)
+
+    const boundPending: BoundPendingMessage = {
+      threadId,
+      request: plan.request,
+      targetDraft: plan.targetDraft,
+      kind: 'GOAL',
+      localDraft: [],
+      goalText,
+      unknownOutcome: false,
+    }
+    try {
+      saveBoundPendingMessage(threadId, boundPending)
+    } catch {
+      setActionError(t('ai.runtime.action.storageFailed'))
+      return Promise.resolve()
+    }
+    pendingMessageRef.current = boundPending
+    setPendingMessage(boundPending)
+    setGoalDraft(null)
 
     return executePendingMessage(boundPending)
   }
@@ -687,6 +784,42 @@ export function useAgentThreadController(
     return false
   }
 
+  /**
+   * 按 (threadId, stopRequestId) 原子幂等合并一批 Stop 回执。只有当前绑定 Thread 的
+   * 编辑区会被更新；后代 Thread 的回执写它们各自的持久记录，绝不进入父输入框。
+   */
+  async function applyStopReceipts(
+    receipts: readonly HarnessStoppedThreadReceiptDTO[],
+    boundThreadId: string,
+  ): Promise<void> {
+    for (const receipt of receipts) {
+      const isBoundReceipt = receipt.threadId === boundThreadId
+        && isStillBound(boundThreadId, bindingEpochRef.current)
+      try {
+        const merged = await applyStopReceipt(
+          receipt,
+          isBoundReceipt && hasMessageContent(draftRef.current) ? draftRef.current : undefined,
+        )
+        if (!merged.applied || !isBoundReceipt) {
+          continue
+        }
+        draftRef.current = merged.parts
+        setDraftState(merged.parts)
+        if (merged.goalText !== goalDraftRef.current) {
+          goalDraftRef.current = merged.goalText
+          setGoalDraftState(merged.goalText)
+        }
+      } catch {
+        // 单条回执合并失败不阻断 Stop 其余收尾；同一回执会经快照通道再次投递。
+      }
+    }
+  }
+
+  function goalCommandKey(pending: BoundPendingMessage): string | null {
+    const goalCommand = pending.request.commands.find((command) => command.type === 'GOAL')
+    return goalCommand?.idempotencyKey ?? null
+  }
+
   function stopThread(): Promise<void> {
     if (!thread || !requireBoundThread('ai.runtime.action.stopFailed')) {
       return Promise.resolve()
@@ -731,7 +864,7 @@ export function useAgentThreadController(
       .then(async (result) => {
         if (!isCurrentBound()) {
           // 导航门控正常情况下不会发生；若宿主强制重绑，保留旧 Thread sidecar，
-          // 让用户返回后用同一 id replay 并把 cancelled messages 恢复到正确 Composer。
+          // 让用户返回后用同一 id replay，并从快照回执恢复草稿。
           await Promise.all([
             queryClient.invalidateQueries({
               queryKey: queryKeys.threads.snapshot(operationThreadId),
@@ -740,25 +873,25 @@ export function useAgentThreadController(
           ])
           return
         }
-        // Stop 成功（或服务器重放了完全相同的先前 Stop）：操作已了结，
-        // 下一次 stop 会铸造全新 id。
-        if (!appliedStopRequestIdsRef.current.has(operation.stopRequestId)) {
-          const restored = prependCancelledMessages(
-            result.cancelledUserMessages,
-            draftRef.current,
-          )
-          if (partsKey(restored) !== partsKey(draftRef.current)) {
-            setDraft(restored)
-          }
-          appliedStopRequestIdsRef.current.add(operation.stopRequestId)
-        }
+        // Stop 成功（或服务器重放了完全相同的先前 Stop）：完整受影响集合的持久回执
+        // 按 (threadId, stopRequestId) 原子幂等合并；子 Thread 草稿只写它自己的记录。
+        const receipts = result.stoppedThreads ?? []
+        const cancelledKeys = new Set(receipts.flatMap((receipt) =>
+          (receipt.cancelledInputs ?? []).map((input) => input.idempotencyKey)))
+        await applyStopReceipts(receipts, operationThreadId)
         pendingStopRef.current = null
         setStopReplayPending(false)
         clearPendingStop(operationThreadId)
         if (isCurrentBound() && pendingMessageRef.current != null) {
-          clearBoundPendingMessage(operationThreadId, pendingMessageRef.current.request)
+          const cleared = pendingMessageRef.current
+          clearBoundPendingMessage(operationThreadId, cleared.request)
           pendingMessageRef.current = null
           setPendingMessage(null)
+          // 未确认落地且未被本次回执取消的 Goal 目标文本不能丢：写回该 Thread 的编辑区记录。
+          const clearedKey = goalCommandKey(cleared)
+          if (cleared.kind === 'GOAL' && (clearedKey == null || !cancelledKeys.has(clearedKey))) {
+            await restorePendingDraft(operationThreadId, cleared, true)
+          }
         }
         await Promise.all([
           queryClient.invalidateQueries({
@@ -830,6 +963,20 @@ export function useAgentThreadController(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread?.headEntryId, thread?.version, thread?.threadId])
 
+  // 快照通道补偿：刷新、多标签或 Stop 响应丢失后，用该 Thread 自己的持久回执恢复草稿。
+  // 与 Stop 响应共用同一次原子幂等合并，因此同一回执不会重复回填。
+  const stopReceiptSignature = stopReceipts
+    .map((receipt) => `${receipt.threadId}:${receipt.stopRequestId}`)
+    .join('|')
+  useEffect(() => {
+    if (!threadId || stopReceiptSignature.length === 0) {
+      return
+    }
+    void applyStopReceipts(stopReceipts, threadId)
+    // 只按回执身份补偿；applyStopReceipts 每次渲染都是新引用。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stopReceiptSignature, threadId])
+
   return {
     sessionId,
     agents,
@@ -847,6 +994,7 @@ export function useAgentThreadController(
     messagesError: snapshotQuery.error,
     bodyRef,
     draft,
+    goalDraft,
     queuedCommands,
     // 重叠提交通过本地计数保持 pending 准确，而不是仅依赖 mutation observer。
     pending: inFlightSubmissions > 0,
@@ -857,7 +1005,9 @@ export function useAgentThreadController(
     conflict,
     dismissConflict: () => setConflict(null),
     setDraft,
+    setGoalDraft,
     submitMessage,
+    submitGoal,
     stopThread,
     compactThread,
     compactPending: compactMutation.isPending,

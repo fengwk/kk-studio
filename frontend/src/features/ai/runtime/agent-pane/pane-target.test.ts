@@ -272,24 +272,29 @@ describe('PaneTarget durable-local FSM', () => {
       storage.setItem(key, JSON.stringify({ ...valid, ...changes }))
     }
     const validRequest = valid.request
-    for (const target of [
-      {
+    // NEW_THREAD 创建 target 仍被 PendingAcceptance 接受（创建批次才需要 owner/target）。
+    setRequest({
+      ...validRequest,
+      target: {
         type: 'NEW_THREAD',
         sessionId: 's1',
         startEntryId: 'e1',
         threadId: 't1',
         yoloEnabled: false,
       },
-      {
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    // 既有 Thread 的旧 THREAD target 不再属于创建批次，必须 fail-closed 拒绝。
+    setRequest({
+      ...validRequest,
+      target: {
         type: 'THREAD',
         threadId: 't1',
         expectedHeadEntryId: 'e1',
         expectedNextCommandSequence: '1',
       },
-    ]) {
-      setRequest({ ...validRequest, target })
-      expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
-    }
+    })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     for (const command of [
       { type: 'SET_AGENT', idempotencyKey: 'c1', agentName: 'assistant' },
       {
@@ -371,16 +376,6 @@ describe('PaneTarget durable-local FSM', () => {
     setRequest({
       ...validRequest,
       target: { type: 'NEW_THREAD', sessionId: 's1', startEntryId: '', threadId: 't1', yoloEnabled: false },
-    })
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-    setRequest({
-      ...validRequest,
-      target: {
-        type: 'THREAD',
-        threadId: 't1',
-        expectedHeadEntryId: '',
-        expectedNextCommandSequence: '1',
-      },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({ branchDraft: { ...valid.branchDraft, model: null } })
@@ -788,6 +783,8 @@ describe('PaneTarget durable-local FSM', () => {
     const threadId = 't-image-test-1'
     const validPending: BoundPendingMessage = {
       threadId,
+      kind: 'MESSAGE',
+      goalText: null,
       unknownOutcome: false,
       targetDraft: {
         agentName: 'assistant',
@@ -807,13 +804,9 @@ describe('PaneTarget durable-local FSM', () => {
         createResourcePart('blob-res-1', 'chart.png', 'data:image/png;base64,aaa', 'ORIGINAL'),
       ],
       request: {
-        owner: { type: 'CHAT', chatId: 'c1' },
-        target: {
-          type: 'THREAD',
-          threadId,
-          expectedHeadEntryId: 'h1',
-          expectedNextCommandSequence: '2',
-        },
+        // 既有 Thread 的未决写入只携带 CAS 游标与有序命令，绝不携带 owner/target/threadId。
+        expectedHeadEntryId: 'h1',
+        expectedNextCommandSequence: '2',
         commands: [
           {
             type: 'USER_MESSAGE',

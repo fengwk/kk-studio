@@ -3,6 +3,7 @@ import {
   acceptanceCompletionApplies,
   acceptanceConflictReason,
   buildAcceptanceRequest,
+  buildThreadCommandBatchRequest,
   copyBranchDraft,
   createBranchSettings,
   isDefiniteAcceptanceFailure,
@@ -41,6 +42,7 @@ const thread: HarnessThreadDTO = {
   version: '7',
   status: 'IDLE',
   processing: false,
+  executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',
     model: { providerName: 'provider', modelName: 'model', variant: 'default' },
@@ -104,23 +106,11 @@ describe('AgentPane acceptance pipeline', () => {
     })
   })
 
-  it('uses the same setting diff for NEW_THREAD and THREAD targets', () => {
+  it('routes NEW_THREAD creation through settings diff and existing threads through the owner-free batch contract', () => {
     const draft = { ...baseDraft, agentName: 'coder', yoloEnabled: true }
     const entry = buildAcceptanceRequest({
       owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' },
-      draft,
-      base: baseDraft,
-      parts: [createTextPart('continue')],
-      createId: (() => {
-        let index = 0
-        return () => `id-${index++}`
-      })(),
-    })
-    const bound = buildAcceptanceRequest({
-      owner: { type: 'CHAT', chatId: 'chat-1' },
-      target: { kind: 'BOUND_THREAD', threadId: thread.threadId },
-      thread,
       draft,
       base: baseDraft,
       parts: [createTextPart('continue')],
@@ -134,20 +124,31 @@ describe('AgentPane acceptance pipeline', () => {
       'SET_AGENT',
       'USER_MESSAGE',
     ])
-    expect(bound.request.commands.map((command) => command.type)).toEqual([
-      'SET_AGENT',
-      'USER_MESSAGE',
-    ])
     expect(entry.request.target).toMatchObject({
       type: 'NEW_THREAD',
       sessionId: 's1',
       startEntryId: 'e1',
     })
-    expect(bound.request.target).toEqual({
-      type: 'THREAD',
-      threadId: thread.threadId,
+
+    // 既有 Thread 不再伪造创建批次，必须走无 owner/target 的 thread command batch 契约。
+    expect(() => buildAcceptanceRequest({
+      owner: { type: 'CHAT', chatId: 'chat-1' },
+      target: { kind: 'BOUND_THREAD', threadId: thread.threadId },
+      draft,
+      base: baseDraft,
+      parts: [createTextPart('continue')],
+    })).toThrow('Existing threads submit through the thread command batch contract')
+
+    // 无 owner / 无 target 的 CAS 请求由 buildThreadCommandBatchRequest 生成。
+    const commands = [{
+      type: 'SET_AGENT' as const,
+      idempotencyKey: 'existing-thread-1',
+      agentName: 'coder',
+    }]
+    expect(buildThreadCommandBatchRequest(thread, commands)).toEqual({
       expectedHeadEntryId: thread.headEntryId,
       expectedNextCommandSequence: thread.nextCommandSequence,
+      commands,
     })
   })
 
@@ -285,7 +286,7 @@ describe('AgentPane acceptance pipeline', () => {
         : kind === 'NEW_THREAD_DRAFT'
           ? { kind, sessionId: 's1', startEntryId: 'e1' }
           : { kind, threadId: thread.threadId }
-      const commands = threadCommandsForTarget(target, { owner: { type: 'CHAT', chatId: 'chat-1' } })
+      const commands = threadCommandsForTarget(target)
       expect(commands.filter((command) => !command.disabled).map((command) => command.id))
         .toEqual(expected[kind])
     }
