@@ -4,6 +4,7 @@ import type {
   HarnessBranchSettingsDTO,
   HarnessCommandCreateDTO,
   HarnessThreadDTO,
+  ThreadCommandBatchRequestDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -23,6 +24,10 @@ import {
   type PaneTarget,
 } from '@/features/ai/runtime/agent-pane/pane-target'
 
+/**
+ * 只有容器创建（NEW_SESSION / NEW_THREAD）需要产品 owner；既有 Thread 的发送、Goal、
+ * 设置、预览一律走 {@link buildThreadCommandBatchRequest} 的无 owner 契约。
+ */
 export interface AcceptanceBuildInput {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
@@ -32,7 +37,6 @@ export interface AcceptanceBuildInput {
   parts: ComposerPart[]
   /** Browser-local draft identity restored after a definite failure or explicit abandon. */
   localParts?: ComposerPart[]
-  thread?: HarnessThreadDTO | null
   createId?: () => string
 }
 
@@ -43,7 +47,6 @@ export interface GoalAcceptanceBuildInput {
   base: BranchDraft
   goalText: string | null
   localParts?: ComposerPart[]
-  thread?: HarnessThreadDTO | null
   createId?: () => string
 }
 
@@ -78,13 +81,11 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
 }
 
 /**
- * Builds the complete frozen request before the network call. NEW_SESSION intentionally
- * contains only USER_MESSAGE: the final draft is encoded directly in rootSettings.
+ * Builds the complete frozen creation request before the network call. NEW_SESSION
+ * intentionally contains only USER_MESSAGE: the final draft is encoded directly in
+ * rootSettings.
  */
 export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenCommandBatchRequest {
-  if (input.owner.type === 'ISSUE_AGENT') {
-    throw new Error('Controlled Issue threads cannot accept generic command batches')
-  }
   const createId = input.createId ?? createIdempotencyKey
   const payloadParts = trimMessageParts(input.parts)
   const composerParts = trimMessageParts(input.localParts ?? input.parts)
@@ -111,7 +112,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
           ...buildBranchDiffCommands(input.base, input.draft, createId),
           message,
         ]
-  const target = buildTarget(input.target, input.draft, input.thread)
+  const target = buildCreationTarget(input.target, input.draft)
   const request: AgentCommandBatchRequestDTO = {
     owner: { ...input.owner },
     target,
@@ -136,22 +137,8 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
 }
 
 export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): FrozenCommandBatchRequest {
-  if (input.owner.type !== 'CHAT') {
-    throw new Error('Goal commands require a Chat owner')
-  }
   const createId = input.createId ?? createIdempotencyKey
-  const text = input.goalText
-  if (text !== null) {
-    if (typeof text !== 'string' || text.trim().length === 0) {
-      throw new Error('Goal text must not be empty')
-    }
-    if (text !== text.trim()) {
-      throw new Error('Goal text must not contain surrounding whitespace')
-    }
-    if (Array.from(text).length > 2000) {
-      throw new Error('Goal text must be <= 2000 code points')
-    }
-  }
+  const text = normalizeGoalText(input.goalText)
   const goalCommand: HarnessCommandCreateDTO = {
     type: 'GOAL',
     idempotencyKey: createId(),
@@ -164,7 +151,7 @@ export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): Fro
           ...buildBranchDiffCommands(input.base, input.draft, createId),
           goalCommand,
         ]
-  const target = buildTarget(input.target, input.draft, input.thread)
+  const target = buildCreationTarget(input.target, input.draft)
   const request: AgentCommandBatchRequestDTO = {
     owner: { ...input.owner },
     target,
@@ -187,11 +174,39 @@ export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): Fro
   }
 }
 
-function buildTarget(
-  target: PaneTarget,
-  draft: BranchDraft,
-  thread: HarnessThreadDTO | null | undefined,
-) {
+/**
+ * 既有 Thread 的通用写请求：服务端从 path 解析 Session，客户端只提交精确 CAS 游标与命令。
+ * head/nextCommandSequence 必须来自 freshly 读取的权威 snapshot。
+ */
+export function buildThreadCommandBatchRequest(
+  thread: HarnessThreadDTO,
+  commands: HarnessCommandCreateDTO[],
+): ThreadCommandBatchRequestDTO {
+  return {
+    expectedHeadEntryId: thread.headEntryId,
+    expectedNextCommandSequence: thread.nextCommandSequence,
+    commands,
+  }
+}
+
+/** Goal 文本的 canonical 校验：非空、无首尾空白、≤2000 code points；null 表示清除。 */
+export function normalizeGoalText(text: string | null): string | null {
+  if (text === null) {
+    return null
+  }
+  if (typeof text !== 'string' || text.trim().length === 0) {
+    throw new Error('Goal text must not be empty')
+  }
+  if (text !== text.trim()) {
+    throw new Error('Goal text must not contain surrounding whitespace')
+  }
+  if (Array.from(text).length > 2000) {
+    throw new Error('Goal text must be <= 2000 code points')
+  }
+  return text
+}
+
+function buildCreationTarget(target: PaneTarget, draft: BranchDraft) {
   if (target.kind === 'NEW_SESSION_DRAFT') {
     return {
       type: 'NEW_SESSION' as const,
@@ -210,15 +225,7 @@ function buildTarget(
       yoloEnabled: draft.yoloEnabled,
     }
   }
-  if (thread == null || thread.threadId !== target.threadId) {
-    throw new Error('Bound Thread snapshot is not available')
-  }
-  return {
-    type: 'THREAD' as const,
-    threadId: thread.threadId,
-    expectedHeadEntryId: thread.headEntryId,
-    expectedNextCommandSequence: thread.nextCommandSequence,
-  }
+  throw new Error('Existing threads submit through the thread command batch contract')
 }
 
 export function copyBranchDraft(draft: BranchDraft): BranchDraft {

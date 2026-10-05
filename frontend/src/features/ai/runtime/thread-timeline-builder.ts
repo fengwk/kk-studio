@@ -32,7 +32,8 @@ import { translate } from '@/shared/i18n'
 /**
  * Thread transcript 投影：
  * 持久路径的 Entries 是 transcript 的唯一权威来源；
- * 仅 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令会作为装饰性 overlay 渲染；
+ * 仅 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令会作为装饰性 overlay 渲染；NOTIFICATION
+ * 等系统事实只出现在持久 transcript 中，不进入可编辑队列、草稿与上下键历史；
  * 活动 ModelInvocation 的 checkpoint/stream 以及 ToolInvocation 的 partial，作为
  * 瞬态 overlay 渲染，直到对应的持久 Entry 到达为止。
  */
@@ -73,6 +74,10 @@ export function buildThreadTimeline(
 
   for (const command of queuedCommands) {
     if (command.state !== 'QUEUED') {
+      continue
+    }
+    // 系统结果通知是 runtime 上下文事实，不是可编辑的人类输入：不进入队列、草稿与上下键历史。
+    if (command.type === 'NOTIFICATION') {
       continue
     }
     const queuedMessage = extractQueuedMessage(command.payloadJson)

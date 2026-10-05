@@ -44,7 +44,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getThreadSnapshot: vi.fn(),
-    acceptCommandBatch: vi.fn(),
+    acceptThreadCommandBatch: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
@@ -89,6 +89,7 @@ function threadFixture(
     version: '0',
     status: 'IDLE',
     processing: false,
+    executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-02T00:00:00Z',
@@ -108,6 +109,7 @@ function snapshotOf(
     modelInvocation: null,
     toolInvocations: [],
     modelAttemptFailures: [],
+    stopReceipts: [],
     ...extras,
   }
 }
@@ -289,7 +291,9 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture(THREAD_ID)),
     )
-    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue([] as HarnessThreadCommandDTO[])
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
+      [] as HarnessThreadCommandDTO[],
+    )
     // 直接控制面默认回显请求值（同值 no-op 由服务端保证，这里仅回显）。
     vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
       Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled })),
@@ -302,7 +306,7 @@ describe('useBoundBranchPanel', () => {
         queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
       }),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -315,19 +319,24 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
 
-    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
-    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(batch.target.expectedHeadEntryId).toBe('e-assistant')
-    expect(batch.target.expectedNextCommandSequence).toBe('1')
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    // 既有 Thread 的写请求以 path 上的 threadId 定位，body 只携带 CAS 游标与有序命令。
+    expect(batchThreadId).toBe(THREAD_ID)
+    expect(request.expectedHeadEntryId).toBe('e-assistant')
+    expect(request.expectedNextCommandSequence).toBe('1')
+    // 已迁移到 owner-free 契约：请求体不再伪造 owner/target。
+    expect(request).not.toHaveProperty('owner')
+    expect(request).not.toHaveProperty('target')
     // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_AGENT reversal。
-    expect(batch.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
-    expect(batch.commands[0]).toMatchObject({
+    expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+    expect(request.commands[0]).toMatchObject({
       contents: [{ type: 'TEXT', text: 'hello world' }],
     })
   })
 
   it('applies draft-local selections with freeze rules and emits the fixed minimal diff order in one batch', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -355,7 +364,8 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
 
-    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
     // buildBranchDiffCommands 的固定顺序：AGENT/MODEL/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
@@ -374,7 +384,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_MODEL+USER_MESSAGE', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -400,8 +410,9 @@ describe('useBoundBranchPanel', () => {
 
     await send(result)
 
-    expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
-    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
     expect(batch.commands.map((cmd) => cmd.type)).toEqual([
       'SET_AGENT',
       'SET_MODEL',
@@ -415,7 +426,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('rejects selectAgent when agent model or variant is unresolvable without mutating draft', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -436,7 +447,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('resets manual model modification when reselecting the same agent', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -458,7 +469,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -482,7 +493,8 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.yoloError).toBeNull()
 
     await send(result)
-    const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
     // 未发送的 agent 编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
@@ -494,7 +506,7 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new Error('STALE_VERSION: version 2 does not match expected 0'),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -529,7 +541,7 @@ describe('useBoundBranchPanel', () => {
         }),
       )
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -578,7 +590,7 @@ describe('useBoundBranchPanel', () => {
         )
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -629,7 +641,7 @@ describe('useBoundBranchPanel', () => {
       ),
     )
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -692,7 +704,7 @@ describe('useBoundBranchPanel', () => {
           resolve(threadFixture(threadId, { yoloEnabled: true, version: '1' }))
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -752,7 +764,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -798,7 +810,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -836,7 +848,7 @@ describe('useBoundBranchPanel', () => {
     })
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -866,7 +878,7 @@ describe('useBoundBranchPanel', () => {
     await act(async () => {
       await result.current.controller.submitMessage([createTextPart('hello world')])
     })
-    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
 
     // 新 snapshot 到达后，从新 Thread 重新初始化，旧编辑不泄漏。
     await act(async () => {
@@ -894,7 +906,7 @@ describe('useBoundBranchPanel', () => {
 
   it('surfaces raw string and fallback yolo rejection payloads and dismisses them', async () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce('plain string failure')
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -923,7 +935,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('ignores yolo toggles while no snapshot is bound yet', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     act(() => {
@@ -938,7 +950,7 @@ describe('useBoundBranchPanel', () => {
 
   it('follows the base from a newer snapshot while preserving the local draft', async () => {
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -974,7 +986,7 @@ describe('useBoundBranchPanel', () => {
       }),
     )
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -1001,7 +1013,7 @@ describe('useBoundBranchPanel', () => {
 
   it('follows an external YOLO policy change without discarding unsent model edits', async () => {
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
@@ -1019,7 +1031,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('reloads base and draft from an authoritative thread DTO and ignores foreign threads', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 

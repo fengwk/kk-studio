@@ -99,8 +99,8 @@ describe('ThreadWidgetStack', () => {
   })
 
   it('renders localized status text when working with workingLabel', () => {
-    // 测试意图：当线程处于等待子 Thread或排队中状态时，若 working=true，ThreadWidgetStack 必须优先展示格式化后的本地化文案。
-    const waitingLabel = formatThreadStatusLabel('WAITING_CHILDREN')
+    // 测试意图：当线程处于等待审批/排队等 busy 状态时，若 working=true，ThreadWidgetStack 必须优先展示格式化后的本地化文案。
+    const waitingLabel = formatThreadStatusLabel('WAITING_APPROVAL')
     const { rerender } = render(
       <ThreadWidgetStack
         working
@@ -108,7 +108,7 @@ describe('ThreadWidgetStack', () => {
         queuedMessages={[]}
       />,
     )
-    expect(screen.getByText('等待子 Thread')).toBeInTheDocument()
+    expect(screen.getByText('等待审批')).toBeInTheDocument()
 
     const queuedLabel = formatThreadStatusLabel('QUEUED')
     rerender(
@@ -123,7 +123,7 @@ describe('ThreadWidgetStack', () => {
 
   it('keeps stack empty when not working even if workingLabel is provided', () => {
     // 测试意图：即使传入了 workingLabel，如果 working=false 且无队列消息，组件仍应处于空闲隐藏状态，不展示工作条。
-    const label = formatThreadStatusLabel('WAITING_CHILDREN')
+    const label = formatThreadStatusLabel('STOPPED')
     const { container } = render(
       <ThreadWidgetStack
         working={false}
@@ -132,6 +132,6 @@ describe('ThreadWidgetStack', () => {
       />,
     )
     expect(container).toBeEmptyDOMElement()
-    expect(screen.queryByText('等待子 Thread')).not.toBeInTheDocument()
+    expect(screen.queryByText('已停止')).not.toBeInTheDocument()
   })
 })

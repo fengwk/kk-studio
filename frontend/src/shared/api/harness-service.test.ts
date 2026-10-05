@@ -18,10 +18,10 @@ function createClient(): HttpClient & {
 
 describe('harnessService', () => {
   /**
-   * 测试意图：验证所有命令批提交流程通过统一的 POST /harness/command-batches 端点处理，
-   * 确保收敛后的客户端路由与后端新契约完全一致。
+   * 测试意图：验证容器创建（NEW_SESSION / NEW_THREAD）仍通过 POST /harness/command-batches 处理，
+   * 创建请求必须携带产品 owner 与创建 target。
    */
-  it('submits command batches via POST /harness/command-batches', async () => {
+  it('submits creation command batches via POST /harness/command-batches', async () => {
     const http = createClient()
     const service = createHarnessService(http)
     const request = {
@@ -45,6 +45,69 @@ describe('harnessService', () => {
     }
     await service.acceptCommandBatch(request)
     expect(http.post).toHaveBeenCalledWith('/harness/command-batches', request)
+  })
+
+  /**
+   * 测试意图：既有 Thread 的通用写入口是 POST /harness/threads/{threadId}/command-batches，
+   * threadId 必须被转义；请求体只含 CAS 游标与有序命令，绝不携带 owner 或 target。
+   */
+  it('submits existing-thread command batches via POST /harness/threads/{threadId}/command-batches', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    const request = {
+      expectedHeadEntryId: 'head-1',
+      expectedNextCommandSequence: '7',
+      commands: [{
+        type: 'GOAL' as const,
+        idempotencyKey: 'goal-1',
+        text: 'finish the task',
+      }],
+    }
+
+    await service.acceptThreadCommandBatch('thread /1', request)
+
+    expect(http.post).toHaveBeenCalledWith(
+      '/harness/threads/thread%20%2F1/command-batches',
+      request,
+    )
+    const [, body] = http.post.mock.calls[0]!
+    // owner/target 只属于创建批次；既有 Thread 批次体必须恰为 CAS 游标 + commands。
+    expect(Object.keys(body as object).sort()).toEqual([
+      'commands',
+      'expectedHeadEntryId',
+      'expectedNextCommandSequence',
+    ])
+  })
+
+  /**
+   * 测试意图：既有 Thread 的 Provider 请求预览走 per-thread 端点，threadId 被转义，
+   * 请求体同样不带 owner/target。
+   */
+  it('previews existing-thread provider requests via POST /harness/threads/{threadId}/provider-request-preview', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    const request = {
+      expectedHeadEntryId: 'head-1',
+      expectedNextCommandSequence: '3',
+      commands: [{
+        type: 'USER_MESSAGE' as const,
+        idempotencyKey: 'msg-1',
+        contents: [{ type: 'TEXT' as const, text: 'hello' }],
+      }],
+    }
+
+    await service.previewProviderRequest('thread /1', request)
+
+    expect(http.post).toHaveBeenCalledWith(
+      '/harness/threads/thread%20%2F1/provider-request-preview',
+      request,
+    )
+    const [, body] = http.post.mock.calls[0]!
+    expect(Object.keys(body as object).sort()).toEqual([
+      'commands',
+      'expectedHeadEntryId',
+      'expectedNextCommandSequence',
+    ])
   })
 
   /**

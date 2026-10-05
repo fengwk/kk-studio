@@ -9,10 +9,6 @@ interface ManualCompactionAvailability {
   disabledReason: string | null
 }
 
-interface ThreadCommandOwner {
-  type: 'CHAT' | 'ISSUE_AGENT'
-}
-
 export type ThreadCommandId =
   | 'thread'
   | 'agent'
@@ -97,7 +93,6 @@ export interface ThreadCommandOptions {
   allowNewSession?: boolean
   readOnly?: boolean
   canBranchFromRoot?: boolean
-  owner?: ThreadCommandOwner
   allowSwitchAgent?: boolean
   allowBranching?: boolean
 }
@@ -106,7 +101,8 @@ function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
   return (
     value != null
     && typeof value === 'object'
-    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value || 'owner' in value || 'allowSwitchAgent' in value || 'allowBranching' in value)
+    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value
+      || 'allowSwitchAgent' in value || 'allowBranching' in value)
   )
 }
 
@@ -119,15 +115,8 @@ export function threadCommandsForTarget(
     : { manualCompaction: manualCompactionOrOptions }
   const manualCompaction = options.manualCompaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
-
-  // Ordinary Chat only: hide Goal for controlled Issue owners.
-  // Default fail-closed: if owner is absent or unknown, goal command is not exposed.
-  const isGoalAllowed = options.owner?.type === 'CHAT'
-  const commandList = options.owner?.type === 'ISSUE_AGENT'
-    ? THREAD_COMMANDS.filter((item) => item.id === 'stop' || item.id === 'debug' || item.id === 'shortcuts')
-    : isGoalAllowed
-    ? THREAD_COMMANDS
-    : THREAD_COMMANDS.filter((item) => item.id !== 'goal')
+  // 命令可用性只由目标 kind 与显式能力决定；owner 不参与既有 Thread 的能力裁剪。
+  const commandList = THREAD_COMMANDS
 
   return commandList.map((item) => {
     const targetEnabled = enabled.has(item.id)

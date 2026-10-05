@@ -2654,6 +2654,29 @@ div.is-error {
   white-space: nowrap;
 }
 
+/* NOTIFICATION 是系统结果通知，不是对话正文：用居中的弱化系统卡片区分。 */
+.thread-block-entry.kind-notification {
+  border-left: 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: transparent;
+  padding: 6px 10px;
+}
+
+.thread-block-entry.kind-notification .thread-entry-icon {
+  margin-top: 1px;
+  color: var(--fg-dim);
+}
+
+.thread-block-entry.kind-notification .thread-entry-title {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.thread-block-entry.kind-notification .thread-entry-text {
+  margin-top: 1px;
+}
+
 .thread-entry-row {
   display: flex;
   align-items: flex-start;
