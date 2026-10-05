@@ -278,7 +278,7 @@ registerCase({
   id: 'thread.provider_request_preview_guard',
   level: 'L1',
   title: '发送前请求预览不接受不准确的游标或无法规划的草稿',
-  docs: 'POST /api/harness/threads/{threadId}/provider-request-preview 使用同一 command batch wire；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
+  docs: 'POST /api/harness/threads/{threadId}/provider-request-preview 使用 owner-free 的 HarnessThreadCommandBatchDTO wire（{expectedHeadEntryId,expectedNextCommandSequence,commands}，无 owner/target）；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -301,18 +301,15 @@ registerCase({
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const endpoint = `/api/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`
+    // 预览面 owner-free：body 只带精确 cursor 与有序命令，不携带 owner/target。
     const draft = {
-      owner,
-      target: threadTarget({
-        threadId,
-        expectedHeadEntryId: thread.headEntryId,
-        expectedNextCommandSequence: thread.nextCommandSequence,
-      }),
+      expectedHeadEntryId: thread.headEntryId,
+      expectedNextCommandSequence: thread.nextCommandSequence,
       commands: [userMessageCommand('preview only', cid())],
     }
     const stale = await expectHttpError(() => ctx.call('POST', endpoint, {
       ...draft,
-      target: { ...draft.target, expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n) },
+      expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n),
     }), { status: 409 })
     assert(JSON.parse(stale.body).errors?.reason === 'PREVIEW_STALE_CURSOR', 'preview stale cursor reason missing or mismatched')
     const planning = await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
@@ -1215,7 +1212,7 @@ registerCase({
   id: 'thread.stop_idle_boundary',
   level: 'L1',
   title: 'IDLE stop 写入持久 STOP barrier 且同 stopRequestId exact replay',
-  docs: 'POST /stop body={stopRequestId,expectedVersion}；本线程无 open Turn 时写入完整 STOP barrier Turn（TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, continueModel=false, USER_STOP, closeRequestId)）=> status=STOPPED、stoppedTurnEndEntryId=该 TURN_END 且成为新 head、cancelledCommandCount=0、version 恰好 +1；同 stopRequestId + 原 expectedVersion 再次调用 => status=REPLAYED、同 stoppedTurnEndEntryId、version/head/Entry 集合不变（不写第二条 barrier）；未使用过的 stopRequestId 配 stale version => 409。真实 live Turn 的 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
+  docs: 'POST /stop body={stopRequestId,expectedVersion}；本线程无 open Turn 时写入完整 STOP barrier Turn（TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, continueModel=false, USER_STOP, closeRequestId)）=> status=STOPPED、thread.executionControl=STOPPED、stoppedThreads[] 含目标 Thread 回执（threadId/stopRequestId 为请求值、stoppedTurnEndEntryId=该 TURN_END 且成为新 head、cancelledCommandCount=0、cancelledInputs=[]）、version 恰好 +1；同 stopRequestId + 原 expectedVersion 再次调用 => status=REPLAYED、同回执 stoppedTurnEndEntryId、version/head/Entry 集合不变（不写第二条 barrier）；未使用过的 stopRequestId 配 stale version => 409。真实 live Turn 的 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1250,21 +1247,26 @@ registerCase({
     })
     // IDLE stop 不是 no-op：它写入 durable STOP barrier Turn，并恰好递增一次 version。
     assert(first.status === 'STOPPED', JSON.stringify(first))
-    assert(first.stoppedTurnEndEntryId != null, JSON.stringify(first))
-    assert(first.cancelledCommandCount === 0, JSON.stringify(first))
+    assert(first.thread.executionControl === 'STOPPED', JSON.stringify(first.thread))
+    const firstReceipt = first.stoppedThreads.find((receipt) => receipt.threadId === threadId)
+    assert(firstReceipt, `target receipt missing: ${JSON.stringify(first)}`)
+    assert(firstReceipt.stopRequestId === stopRequestId, JSON.stringify(firstReceipt))
+    assert(firstReceipt.stoppedTurnEndEntryId != null, JSON.stringify(firstReceipt))
+    assert(firstReceipt.cancelledCommandCount === 0, JSON.stringify(firstReceipt))
+    assert(firstReceipt.cancelledInputs.length === 0, JSON.stringify(firstReceipt))
     assert(
       Number(first.thread.version) === Number(thread.version) + 1,
       `idle stop must bump version by one: ${JSON.stringify({ thread, first })}`,
     )
     assert(
-      String(first.thread.headEntryId) === String(first.stoppedTurnEndEntryId),
+      String(first.thread.headEntryId) === String(firstReceipt.stoppedTurnEndEntryId),
       `stop barrier TURN_END must become the new head: ${JSON.stringify(first)}`,
     )
 
     // barrier Turn 结构：TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED)。
     const entries = await listSessionEntries(ctx, sessionId)
     const barrierEnd = entries.find(
-      (entry) => String(entry.entryId) === String(first.stoppedTurnEndEntryId),
+      (entry) => String(entry.entryId) === String(firstReceipt.stoppedTurnEndEntryId),
     )
     assert(
       barrierEnd && String(barrierEnd.entryType || '').toUpperCase() === 'TURN_END',
@@ -1308,11 +1310,13 @@ registerCase({
       expectedVersion: thread.version,
     })
     assert(again.status === 'REPLAYED', JSON.stringify(again))
+    const againReceipt = again.stoppedThreads.find((receipt) => receipt.threadId === threadId)
+    assert(againReceipt, `replay target receipt missing: ${JSON.stringify(again)}`)
     assert(
-      String(again.stoppedTurnEndEntryId) === String(first.stoppedTurnEndEntryId),
+      String(againReceipt.stoppedTurnEndEntryId) === String(firstReceipt.stoppedTurnEndEntryId),
       `replay must identify the same stopped TURN_END: ${JSON.stringify({ first, again })}`,
     )
-    assert(again.cancelledCommandCount === 0, JSON.stringify(again))
+    assert(againReceipt.cancelledCommandCount === 0, JSON.stringify(againReceipt))
     assert(
       String(again.thread.version) === String(first.thread.version)
         && String(again.thread.headEntryId) === String(first.thread.headEntryId),
