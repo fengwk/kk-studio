@@ -516,7 +516,6 @@ const CORE_STATE_ENUMS = [
       'PARTIAL_COMMAND_REPLAY',
       'COMMAND_REPLAY_ORDER_MISMATCH',
       'THREAD_ID_REUSED',
-      'TERMINAL_APPLY_PENDING',
       'STOP_REQUEST_ID_REUSED',
       'APPROVAL_NOT_APPLICABLE',
       'APPROVAL_DECISION_MISMATCH',
@@ -531,8 +530,8 @@ const CORE_STATE_ENUMS = [
     enumName: 'ThreadRuntimeStatus',
     constants: [
       'IDLE',
+      'STOPPED',
       'QUEUED',
-      'WAITING_CHILDREN',
       'CONTINUATION_DUE',
       'MODEL_READY',
       'MODEL_DISPATCHING',
