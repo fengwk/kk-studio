@@ -1987,23 +1987,18 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     expect(unboundResult.current.environmentReady).toBeUndefined()
   })
 
-  it('rejects submissions with attachments when controlled by onSubmitInstruction', async () => {
-    // 测试意图：验证在宿主受控指令模式下，提交含有附件的草稿会被明确拦截拒绝并设置 actionError，而非静默丢弃附件
-    const onSubmitInstruction = vi.fn()
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-
+  it('carries composer attachments on an owner-free bound thread through the generic command batch', async () => {
+    // 测试意图：宿主不再有受控指令回调；无 owner 的既有 Thread 提交含附件的草稿时，
+    // 附件随 USER_MESSAGE 命令批次原样发出，既不静默丢弃也不落到创建入口。
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(
       () =>
         useAgentPaneController({
-          owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
-          paneId: 'p-controlled',
-          initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
-          agents: [],
+          paneId: THREAD_ID,
+          agents,
           environments: [],
           defaults: {},
-          onSubmitInstruction,
+          focused: false,
         }),
       {
         wrapper: ({ children }) => (
@@ -2011,50 +2006,53 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
         ),
       },
     )
+    await waitFor(() => expect(result.current.composer.disabled).toBe(false))
 
-    act(() => {
+    await act(async () => {
       result.current.composer.onSubmit([
         { type: 'text', partId: 'p-1', text: 'Here is document' },
         { type: 'attachment', partId: 'p-2', uploadId: 'up-123', filename: 'doc.pdf' },
       ])
     })
 
-    expect(result.current.error).toBe(
-      '受控 Issue 模式暂不支持附件上传，请通过公开证据上传或在正文中说明',
-    )
-    expect(onSubmitInstruction).not.toHaveBeenCalled()
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(threadId).toBe(THREAD_ID)
+    expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+    const contents = (request.commands[0] as { contents: Array<Record<string, unknown>> }).contents
+    expect(contents.find((content) => content.type === 'ATTACHMENT')).toMatchObject({
+      type: 'ATTACHMENT',
+      uploadId: 'up-123',
+    })
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
-  it('does not admit unbound Issue creation or generic commands even through controller callbacks', () => {
-    // 测试意图：绕开按钮直接调用回调时，受控 Issue 仍不能创建 Session、发送批次或预览。
+  it('keeps container creation and unready preview inert when an owner-free pane is driven by callbacks', async () => {
+    // 测试意图：绕开按钮直接调用回调时，Issue 容器面板也不能创建 Session 或预览未就绪草稿；
+    // 容器创建仍属于 owner 范围，既有 Thread 的写入完全由通用交互承担。
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(() => useAgentPaneController({
-      owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
-      paneId: 'issue-probe',
+      paneId: THREAD_ID,
       agents,
       environments: [],
       defaults: {},
       focused: false,
-      onSubmitInstruction: vi.fn(),
     }), {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     })
-    expect(result.current.composer.disabled).toBe(true)
-    // 新契约：预览只由 Debug 标题按钮触发，受控 Issue 的标题按钮恒为不可用。
-    expect(result.current.previewDisabled).toBe(true)
-    expect(result.current.previewDisabledReason).toBe('当前不支持预览')
+    await waitFor(() => expect(result.current.composer.disabled).toBe(false))
+
     act(() => {
       void result.current.handlePreview()
-      result.current.composer.onSubmit([createTextPart('not a new session')])
       result.current.composer.onCommand(testCommand('new'))
-      result.current.composer.onCommand(testCommand('compact'))
-      result.current.composer.onCommand(testCommand('rename-thread'))
     })
-    expect(result.current.target.kind).toBe('NEW_SESSION_DRAFT')
+
+    expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    // 空草稿没有可预览内容：按钮禁用，且绝不发出预览请求。
+    expect(result.current.previewDisabled).toBe(true)
+    expect(result.current.previewDisabledReason).toBe('草稿为空')
     expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
-    expect(harnessService.compactThread).not.toHaveBeenCalled()
-    expect(harnessService.renameThread).not.toHaveBeenCalled()
   })
 
 /** Debug 视图的结构化投影：它就绪时 Debug 区才渲染「下一次请求预览」标题按钮。 */
@@ -2252,32 +2250,34 @@ async function toggleYolo(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
-    it('keeps the Debug preview trigger disabled for a controlled Issue even on its bound thread', async () => {
-      // 测试意图：受控 Issue 宿主既不暴露预览回调也不允许预览，
-      // Debug 标题按钮必须以「当前不支持预览」禁用，且点击不产生任何预览请求。
+    it('enables the Debug preview trigger for an owner-free bound thread', async () => {
+      // 测试意图：Issue 容器不再封锁预览；无 owner 的既有 Thread 在 Debug 视图下，
+      // 标题按钮只要草稿就绪即可点击，并真实发出 per-thread 预览请求（请求体无 owner）。
       const user = userEvent.setup()
       mockDebugProjection()
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce(previewResponse({
+        bodyJson: '{"messages":[{"role":"user","content":"preview owner-free"}]}',
+      }))
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       render(
         <QueryClientProvider client={client}>
-          <AgentPane
-            owner={{ type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' }}
-            paneId="issue-pane"
-            agents={agents}
-            initialTarget={{ kind: 'BOUND_THREAD', threadId: THREAD_ID }}
-            capabilities={{ allowGenericChat: false, allowBranching: false }}
-            onSubmitInstruction={vi.fn()}
-          />
+          <AgentPane paneId={THREAD_ID} agents={agents} environments={[]} focused />
         </QueryClientProvider>,
       )
-      const composer = await screen.findByLabelText('给 AI 发送消息')
-      await user.click(composer)
-      await user.keyboard('/debug{Enter}')
+      const composer = await openDebugView(user)
+      expect(await screen.findByRole('button', { name: '下一次请求预览 (草稿为空)' })).toBeDisabled()
 
-      const trigger = await screen.findByRole('button', { name: '下一次请求预览 (当前不支持预览)' })
-      expect(trigger).toBeDisabled()
+      await user.click(composer)
+      await user.type(composer, 'preview owner-free')
+      const trigger = await screen.findByRole('button', { name: '下一次请求预览' })
+      expect(trigger).toBeEnabled()
       await user.click(trigger)
-      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      const [threadId, request] = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]!
+      expect(threadId).toBe(THREAD_ID)
+      expect(request).not.toHaveProperty('owner')
+      expect(request).not.toHaveProperty('target')
     })
 
     it('hides the Debug preview trigger for a new session draft target', async () => {

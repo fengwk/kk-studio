@@ -2507,10 +2507,6 @@ export const aiCatalog = {
     'en-US': 'Branch switching and forking are not available in this mode',
     'zh-CN': '当前模式不支持分支切换或分叉',
   },
-  'ai.runtime.action.genericChatDisabled': {
-    'en-US': 'Generic chat is not allowed in this mode',
-    'zh-CN': '当前模式不支持通用 Chat 发送',
-  },
   'ai.runtime.action.firstSendFailed': {
     'en-US': 'First send failed',
     'zh-CN': '首发失败',

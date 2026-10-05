@@ -25,7 +25,6 @@ import type {
 } from '@/features/ai/runtime/thread-panel'
 import {
   hasMessageContent,
-  partsToText,
   partsKey,
   slashQueryOf,
   trimMessageParts,
@@ -118,7 +117,6 @@ export interface AgentPaneCapabilities {
   readOnly?: boolean
   allowSwitchAgent?: boolean
   allowBranching?: boolean
-  allowGenericChat?: boolean
 }
 
 export interface AgentPaneDefaults {
@@ -137,8 +135,6 @@ export interface UseAgentPaneControllerOptions {
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
-  onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
-  onStop?: () => Promise<void> | void
 }
 
 export function useAgentPaneController({
@@ -152,8 +148,6 @@ export function useAgentPaneController({
   initialTarget,
   onTargetConsumed,
   capabilities,
-  onSubmitInstruction,
-  onStop,
 }: UseAgentPaneControllerOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -887,38 +881,6 @@ export function useAgentPaneController({
     if (capabilities?.readOnly) {
       return
     }
-    if (onSubmitInstruction) {
-      if (!isBoundTarget(target)) {
-        return
-      }
-      const partsToSubmit = payloadParts ?? parts
-      const hasNonTextParts = partsToSubmit.some((p) => p.type !== 'text')
-      if (hasNonTextParts) {
-        setActionError('受控 Issue 模式暂不支持附件上传，请通过公开证据上传或在正文中说明')
-        return
-      }
-      const text = partsToText(partsToSubmit).trim()
-      if (!text) {
-        return
-      }
-      onFocus?.()
-      void (async () => {
-        try {
-          await onSubmitInstruction(text, partsToSubmit)
-          setParts([])
-          if (isBoundTarget(target)) {
-            controller.setDraft([])
-          }
-        } catch (error) {
-          setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
-        }
-      })()
-      return
-    }
-    if (capabilities?.allowGenericChat === false) {
-      setActionError(t('ai.runtime.action.genericChatDisabled'))
-      return
-    }
     if (isBoundTarget(target)) {
       void controller.submitMessage(payloadParts, localDraftParts)
       return
@@ -957,7 +919,7 @@ export function useAgentPaneController({
   }
 
   async function handlePreview() {
-    if (capabilities?.readOnly || onSubmitInstruction || capabilities?.allowGenericChat === false) {
+    if (capabilities?.readOnly) {
       return
     }
     if (!isBoundTarget(target)) {
@@ -1170,17 +1132,6 @@ export function useAgentPaneController({
         controller.runCommand(command)
         return
       case 'stop':
-        if (onStop) {
-          onFocus?.()
-          void (async () => {
-            try {
-              await onStop()
-            } catch (error) {
-              setActionError(errorMessage(error, t('ai.runtime.action.stopFailed')))
-            }
-          })()
-          return
-        }
         controller.runCommand(command)
         return
       case 'models':
@@ -1275,14 +1226,9 @@ export function useAgentPaneController({
     || controller.replayPending
 
   const canExposePreview = isBoundTarget(target)
-    && !onSubmitInstruction && capabilities?.allowGenericChat !== false
 
   const { previewDisabled, previewDisabledReason } = useMemo(() => {
-    if (
-      onSubmitInstruction != null
-      || capabilities?.allowGenericChat === false
-      || !isBoundTarget(target)
-    ) {
+    if (!isBoundTarget(target)) {
       return {
         previewDisabled: true,
         previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
@@ -1339,13 +1285,11 @@ export function useAgentPaneController({
       previewDisabledReason: null,
     }
   }, [
-    capabilities?.allowGenericChat,
     capabilities?.readOnly,
     composerReadiness,
     controller.disabled,
     controller.queuedCommands.length,
     controller.working,
-    onSubmitInstruction,
     pending,
     previewLoading,
     t,
@@ -1404,11 +1348,9 @@ export function useAgentPaneController({
     disabled:
       Boolean(capabilities?.readOnly)
       || pending
-      || (onSubmitInstruction != null && !isBoundTarget(target))
-      || (!onSubmitInstruction && capabilities?.allowGenericChat === false)
-      || (!onSubmitInstruction && (isBoundTarget(target)
+      || (isBoundTarget(target)
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
-        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null))),
+        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null)),
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')
