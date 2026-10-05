@@ -46,18 +46,14 @@ public interface EnvironmentService {
   /** 幂等只读当前 registrationToken；不轮换、不更新 version/updateTime。 */
   EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);
 
-  /**
-   * 签发五分钟安装 code。校验当前版本和已保存安装设置，不写库、不轮换 token。
-   */
+  /** 签发五分钟安装 code。校验当前版本和已保存安装设置，不写库、不轮换 token。 */
   EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion);
 
-  /**
-   * 校验安装 code 后按稳定身份渲染安装命令。每次读取当前配置与 token；code 缺失、到期、篡改或 token 已轮换均失败。
-   */
-  String installCommand(EnvironmentId id, String code);
+  /** 校验安装 code 后按稳定身份渲染安装命令。每次读取当前配置与 token；code 缺失、到期、篡改或 token 已轮换均失败。 */
+  String installationScript(EnvironmentId id, String code);
 
-  /** 按操作系统返回卸载命令；不需要 token，也不读取或修改 Environment。 */
-  String uninstallCommand(String operatingSystem);
+  /** 按操作系统返回卸载脚本；不需要 token，也不读取或修改 Environment。 */
+  String uninstallationScript(String operatingSystem);
 
   /**
    * 配置同步导入：原子更新 token 与安装设置（保持 UUID 身份），null 清空设置。

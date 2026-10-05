@@ -41,11 +41,20 @@ class EnvironmentInstallCodesTest {
     assertThrows(
         AiValidationException.class,
         () -> EnvironmentInstallCodes.verify(ID, "token", code + "x", NOW));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", null, NOW));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", "no-dot", NOW));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", "1.2.3", NOW));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", "abc.sig", NOW));
-    assertThrows(AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", "1.@@@", NOW));
+    assertThrows(
+        AiValidationException.class, () -> EnvironmentInstallCodes.verify(ID, "token", null, NOW));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallCodes.verify(ID, "token", "no-dot", NOW));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallCodes.verify(ID, "token", "1.2.3", NOW));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallCodes.verify(ID, "token", "abc.sig", NOW));
+    assertThrows(
+        AiValidationException.class,
+        () -> EnvironmentInstallCodes.verify(ID, "token", "1.@@@", NOW));
     assertDoesNotThrow(() -> EnvironmentInstallCodes.verify(ID, "token", code, NOW));
   }
 }

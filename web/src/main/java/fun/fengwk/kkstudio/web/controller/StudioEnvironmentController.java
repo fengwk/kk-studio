@@ -86,15 +86,15 @@ public class StudioEnvironmentController {
 
   /** 校验 code 后按稳定 Environment 身份返回完整安装脚本。响应不经 Result 包装。 */
   @GetMapping(value = "/{environmentId}/install", produces = MediaType.TEXT_PLAIN_VALUE)
-  public ResponseEntity<String> installCommand(
+  public ResponseEntity<String> installationScript(
       @PathVariable String environmentId, @RequestParam String code) {
-    return script(environmentService.installCommand(parseEnvironmentId(environmentId), code));
+    return script(environmentService.installationScript(parseEnvironmentId(environmentId), code));
   }
 
   /** 按操作系统返回卸载脚本；不读取 token，也不改变 Environment。 */
   @GetMapping(value = "/uninstall/{operatingSystem}", produces = MediaType.TEXT_PLAIN_VALUE)
-  public ResponseEntity<String> uninstallCommand(@PathVariable String operatingSystem) {
-    return script(environmentService.uninstallCommand(operatingSystem));
+  public ResponseEntity<String> uninstallationScript(@PathVariable String operatingSystem) {
+    return script(environmentService.uninstallationScript(operatingSystem));
   }
 
   /** 幂等只读当前 registrationToken；不轮换、不改变 version/updateTime。 */

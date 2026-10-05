@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -366,7 +367,7 @@ class EnvironmentServiceImplTest {
 
   /** 测试意图：同一 Environment 身份的安装命令在轮换前后仍按 id 读取，但渲染当前 token，且不额外写库。 */
   @Test
-  void installCommandUsesCurrentTokenForStableEnvironmentId() {
+  void installationScriptUsesCurrentTokenForStableEnvironmentId() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentServiceImpl service = service(repo);
     Environment env = environment("secret-token", 4L);
@@ -379,14 +380,14 @@ class EnvironmentServiceImplTest {
     when(repo.getById(ENV_ID)).thenReturn(env);
 
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
-    String before = service.installCommand(EnvironmentId.of(ENV_ID), issued.getCode());
+    String before = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
     env.setRegistrationToken("rotated-token");
     env.setVersion(5L);
     assertThrows(
         AiValidationException.class,
-        () -> service.installCommand(EnvironmentId.of(ENV_ID), issued.getCode()));
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()));
     String after =
-        service.installCommand(
+        service.installationScript(
             EnvironmentId.of(ENV_ID),
             service.issueInstallCode(EnvironmentId.of(ENV_ID), "5").getCode());
 
@@ -395,42 +396,49 @@ class EnvironmentServiceImplTest {
     assertTrue(after.contains("rotated-token"));
     assertFalse(after.contains("secret-token"));
     assertEquals(ENV_ID, env.getId());
-    assertEquals(NOW.plus(java.time.Duration.ofMinutes(5)), issued.getExpiresAt());
+    assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
     verify(repo, never()).updateById(any(), anyLong());
     verify(repo, never()).getByRegistrationToken(any());
     assertThrows(
-        AiValidationException.class, () -> service.installCommand(EnvironmentId.of(ENV_ID), null));
+        AiValidationException.class,
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
+    assertThrows(
+        AiValidationException.class,
+        () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), null));
+    assertThrows(
+        AiValidationException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), " "));
     String tampered = issued.getCode().substring(0, issued.getCode().length() - 1) + "A";
     assertThrows(
-        AiValidationException.class, () -> service.installCommand(EnvironmentId.of(ENV_ID), tampered));
+        AiValidationException.class,
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), tampered));
   }
 
   /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
   @Test
-  void installCommandRejectsUnknownIdAndMissingConfig() {
+  void installationScriptRejectsUnknownIdAndMissingConfig() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentServiceImpl service = service(repo);
     when(repo.getById(ENV_ID)).thenReturn(null);
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> service.installCommand(EnvironmentId.of(ENV_ID), "1.bad"));
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
 
     Environment env = environment("saved", 1L);
     when(repo.getById(ENV_ID)).thenReturn(env);
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> service.installCommand(EnvironmentId.of(ENV_ID), "1.bad"));
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
     verify(repo, never()).updateById(any(), anyLong());
   }
 
   /** 测试意图：卸载命令只校验操作系统，不查询仓库。 */
   @Test
-  void uninstallCommandDoesNotTouchRepository() {
+  void uninstallationScriptDoesNotTouchRepository() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentServiceImpl service = service(repo);
 
-    assertTrue(service.uninstallCommand("macos").contains("uninstall"));
-    assertThrows(AiValidationException.class, () -> service.uninstallCommand("unknown"));
+    assertTrue(service.uninstallationScript("macos").contains("uninstall"));
+    assertThrows(AiValidationException.class, () -> service.uninstallationScript("unknown"));
     verify(repo, never()).getByRegistrationToken(any());
   }
 

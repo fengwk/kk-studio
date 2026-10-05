@@ -3,14 +3,16 @@ package fun.fengwk.kkstudio.platform.environment.service;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 /** 用当前 registrationToken 签发五分钟安装 code；不存储、不缓存，token 轮换后旧签名自然失效。 */
 public final class EnvironmentInstallCodes {
@@ -21,7 +23,8 @@ public final class EnvironmentInstallCodes {
 
   private EnvironmentInstallCodes() {}
 
-  public static EnvironmentInstallCodeDTO issue(UUID environmentId, String registrationToken, Instant now) {
+  public static EnvironmentInstallCodeDTO issue(
+      UUID environmentId, String registrationToken, Instant now) {
     long expires = now.plus(LIFETIME).getEpochSecond();
     EnvironmentInstallCodeDTO dto = new EnvironmentInstallCodeDTO();
     dto.setCode(expires + "." + sign(environmentId, registrationToken, expires));
@@ -29,7 +32,8 @@ public final class EnvironmentInstallCodes {
     return dto;
   }
 
-  public static void verify(UUID environmentId, String registrationToken, String code, Instant now) {
+  public static void verify(
+      UUID environmentId, String registrationToken, String code, Instant now) {
     int split = code == null ? -1 : code.indexOf('.');
     if (split <= 0 || split != code.lastIndexOf('.')) {
       throw invalid();
@@ -39,7 +43,7 @@ public final class EnvironmentInstallCodes {
     try {
       expires = Long.parseLong(code.substring(0, split));
       signature = DECODER.decode(code.substring(split + 1));
-    } catch (RuntimeException error) {
+    } catch (IllegalArgumentException error) {
       throw invalid();
     }
     byte[] expected = signBytes(environmentId, registrationToken, expires);
@@ -57,7 +61,7 @@ public final class EnvironmentInstallCodes {
       Mac mac = Mac.getInstance("HmacSHA256");
       mac.init(new SecretKeySpec(registrationToken.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
       return mac.doFinal(payload(environmentId, expires).getBytes(StandardCharsets.UTF_8));
-    } catch (Exception error) {
+    } catch (GeneralSecurityException error) {
       throw new IllegalStateException("cannot sign install code", error);
     }
   }
