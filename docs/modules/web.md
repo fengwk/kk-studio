@@ -40,7 +40,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | MCP | `/api/ai/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth |
 | Chat | `/api/ai/chats` | CRUD 与归属 Session |
-| Harness command | `/api/harness/command-batches` | Chat 命令持久接受，返回 202 |
+| Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries、name |
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
 | Interaction | `/api/interactions` | 等待分页与 `/{interactionId}/input` 人工提交 |
@@ -54,24 +54,36 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/harness/environments` | Card、注册令牌查询/轮换、安装设置保存、运维 events |
 
-命令 202 表示数据库已接受，执行由 dispatcher 异步推进。公开 command-batches 接纳 Chat；
+命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
+`/api/harness/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD`；
+`ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/harness/threads/{threadId}/command-batches`
+服务既有 Thread 的 owner-free 续写（path `threadId` + 精确 cursor，body 不带 owner 与 target）。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 
 Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串，
-以及 NEW_SESSION/NEW_THREAD/THREAD 各自互斥字段。
-产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL。
+以及创建型 `NEW_SESSION`/`NEW_THREAD` 各自互斥字段与续写面的精确 cursor。
+产品命令批为 SET_AGENT → SET_MODEL → SET_ENVIRONMENT 可选前缀和末尾 USER_MESSAGE/GOAL；
+`CUSTOM_MESSAGE`、`NOTIFICATION` 与 `SET_CONTRIBUTOR_STATE` 不在产品 HTTP 面。
 附件在接受事务转为 Resource，图片档位随消息冻结。
 Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
 完整执行语义见 [Harness Runtime](harness-runtime.md)。
+
+Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread 的产品归属拒绝。
+`GET /api/harness/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
+派生的 `thread.status` / `processing`（只描述该 Thread 自身，不递归子树）与 `stopReceipts`；
+`POST /api/harness/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
+回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
+逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
+仅含 `USER_MESSAGE` / `GOAL` 的 `cancelledInputs`）。
 
 ### 请求诊断与预览
 
 `GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`providerName` / `modelName` / `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 GET model-request-debug 返回下一次结构化预览与可空的活动冻结请求，排除 credential 和 Base64。
-POST provider-request-preview 使用已有空闲 Chat Thread 的精确 head/sequence，
-只读检查 READY 附件后规划并编码当前请求体。它保留命令、游标和上传未消费状态，
+POST provider-request-preview 接受与 owner-free 续写面同形的请求（path `threadId` + 精确 head/sequence，
+body 不带 owner），只读检查 READY 附件后规划并编码当前请求体。它保留命令、游标和上传未消费状态，
 且不调用 transport；可能包含内联媒体的 JSON 仅代表点击时快照。
 PREVIEW_* reason 区分 stale cursor、queued、busy、compaction、attachment、planning、
 provider、unsupported 与 encoding 拒绝；客户端按 reason 恢复。

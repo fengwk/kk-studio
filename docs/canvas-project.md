@@ -201,7 +201,8 @@ INIT 可达，INIT 须存在到 DONE 的正常路径。
 
 workflow 整体保存时锁定 Project、检查版本，并要求项目无活动 Run。保存校验编码、
 合法边、可达性与引用；包含已归档 Issue 在内的当前阶段及阻塞恢复点都须保留。
-Agent 在执行接受时解析，Environment 在每个 live turn 解析，缺失引用明确拒绝。
+Agent 与阶段 Environment 由 Project 在执行接受时以显式命令提交并冻结，缺失引用明确拒绝；
+live turn 不再按 workflow 反查。
 合法动作由当前状态、workflow、Run 与门禁共同决定，见 [Project](modules/project.md)。
 
 ### Thread、阶段预算与 Run
@@ -216,10 +217,11 @@ Issue A
 返工与重开复用该 Thread。每个绑定拥有独立 Harness Session，提供历史与附件授权
 范围；Thread 解析 Session，Run 冻结 Session/Thread 和历史区间。
 
-每个 live turn 读取当前 Issue 和阶段职责，阶段 Environment 未配置时本轮留空。
-这些事实作为当前请求上下文进入模型，历史 BranchSettings 保持其原有记录。
-Issue Thread 的输入、Stop、配置和派发经过产品编排；通用 Chat 接口拒绝绕过 Run
-门禁的控制操作。Project YOLO 只在首次创建绑定 Thread 时写入，已有 Thread 保持自己的策略。
+阶段职责与上下文的刷新由业务在每次新 Run 接受时显式提交，运行中的 turn 不复查 Issue 状态；
+阶段 Environment 未配置时本轮不选择环境。当前请求上下文来自冻结的 `ProjectRunScope`，
+历史 BranchSettings 保持其原有记录。Issue Thread 的输入、Stop、配置与派发经过 Issue 工作流
+编排；公共 batch 创建面拒绝 `ISSUE_AGENT` owner。Project YOLO 只在首次创建绑定 Thread 时写入，
+已有 Thread 保持自己的策略。
 
 阶段额度按 `(issueId,state)` 授权：
 
@@ -258,8 +260,9 @@ UNKNOWN 核查记录提交后转为 USER 暂停，执行需再显式恢复。直
 
 ### 接受、交接与报告
 
-Run 接受在同一物理事务内完成状态和额度检查、Thread 选择或创建、起点冻结、Run 与
-RUN 活动插入、Harness 初始命令接受及 Work 登记。首次创建先写 Harness Session、
+Run 接受在同一物理事务内完成状态和额度检查、Thread 选择或创建、起点冻结、显式
+Agent/Model/Environment/contributor state 命令与任务输入提交、Run 与 RUN 活动插入、
+Harness 命令接受及 Work 登记。首次创建先写 Harness Session、
 ROOT 和 Thread，再写产品绑定与 Run，满足即时外键；失败时全部回滚。
 
 进入有 Agent 的阶段登记 Work。Agent 正常结束且未交接时，Run 终结并保持当前阶段；
@@ -272,8 +275,9 @@ Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先�
 ```text
 接受 next_state
   -> 处理剩余输入、问答与在途调用，到安全点
+  -> root Join 冻结 terminalEntryId / finalAnswerEntryId
   -> 事务复验 Run ID/version、历史区间、合法边与门禁
-  -> 冻结报告，Run=COMPLETED
+  -> 冻结报告，Run=COMPLETED，写 active=false scope
   -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
 ```
 
@@ -281,8 +285,9 @@ Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先�
 旧 Run 和迟到 callback 通过执行身份与版本围栏拒绝。崩溃恢复继续原 Run，沿用原额度。
 
 Run 区间为 `(start_entry_id,end_entry_id]`，沿 Entry 父链解释；最终回答必须是区间内
-真实可见 Entry，缺少报告时展示终态原因。Issue 的要求由需求和阶段定义，Agent 交接
-走 `issue_transition`；Issue owner 的分支 `GOAL` 命令被拒绝。
+真实可见 Entry（取自 root Join 冻结的 `finalAnswerEntryId`），缺少报告时展示终态原因。
+Issue 的要求由需求和阶段定义，Agent 交接走 `issue_transition`；Issue Run 的任务输入是
+可信 `CUSTOM_MESSAGE`，其 owner 命令不出现在公共 batch 端点。
 
 ## 活动、证据与人工交互
 
@@ -299,9 +304,10 @@ Evidence 独立持有 Blob，`(issueId,blobId)` 唯一，首次发布时 retain�
 文本文件交付需先物化为 Blob。公开证据展示与 Agent Session 的读取授权分别校验，
 未授权资源访问拒绝。
 
-Agent 本轮收到当前 Issue、阶段职责、合法后继与 Environment。当前 Project 工具目录
-提供 `issue_transition`；UI 从 Activity 和证据展示交接材料。Agent 的 `read` 按当前
-Session Blob 引用授权，资源 URI 只用于定位。
+Agent 从 Run 接受时冻结的 `ProjectRunScope` 收到本次 Issue、阶段职责、合法后继与
+Environment，不按 live turn 重读；当前 Project 工具目录提供 `issue_transition`（作用域写）。
+UI 从 Activity 和证据展示交接材料。Agent 的 `read` 按当前 Session Blob 引用授权，资源
+URI 只用于定位。
 
 ### 问答、审批与待处理入口
 
@@ -333,8 +339,8 @@ Chat 和 Issue 复用 Harness ToolInvocation 的持久等待。`ask_user` 接受
 选项为空时使用自定义回答。
 
 用户在 Pane 卡片明确提交回答或拒答。拒答形成 `{"declined":true}` 工具结果；Stop
-取消等待，迟到回复被拒绝。委派子 Thread 也可等待回答，祖先通过 WAITING_CHILDREN
-与后续 Work 对账恢复。
+取消等待，迟到回复被拒绝。委派子 Thread 也可等待回答，祖先按自身状态与执行树
+对账恢复，不递归投影子树等待。
 
 | Invocation 状态 | 展示与接受 |
 | --- | --- |

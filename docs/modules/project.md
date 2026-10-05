@@ -36,9 +36,7 @@ PostgreSQL 持久化与 REST 调度，经
 | 端口 | 宿主必须提供的语义 | 事务要求 |
 | --- | --- | --- |
 | [`EvidenceBlobPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/EvidenceBlobPort.java) | 锁定并消费一次已 READY 上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用 | 必须加入调用方已有事务；失败不得吞成「不可用」 |
-| [`HarnessCommandAcceptancePort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/HarnessCommandAcceptancePort.java) | 以 `Issue + Agent` owner 接受 Harness 命令并返回 root entry | 与调用方写入同一事务 |
 | [`AgentBranchSettingsPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/AgentBranchSettingsPort.java) | 按宿主 Agent/Model catalog 物化分支设置 | 只读 |
-| [`DelegatedWorkActivityPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/DelegatedWorkActivityPort.java) | 查询 Thread 委派子树是否仍有未交付工作：宿主按 Thread 持久 `status` 非 `IDLE` 判定，为真时禁止 Run 提前收尾 | 加入协调器已有事务读取 |
 | [`IssueAgentSessionDeletionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueAgentSessionDeletionPort.java) | 深删除该 `Issue + Agent` 名下的 Harness Session 与 Blob 引用 | 在调用方锁序内，逐 owner 调用 |
 
 端口用领域类型声明语义。宿主适配器将平台异常译为 Project 错误，例如上传不存在为
@@ -72,8 +70,20 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
 Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` Thread 时随 `NEW_SESSION` 写入；
-修改项目开关不改写既有 Thread。阶段 Environment 则在每个 live turn 由 Platform 从当前 workflow
-解析，未配置时本 turn 不选择环境；它不是重写 Thread `BranchSettings` 的命令。两者的作用域不同。
+修改项目开关不改写既有 Thread。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_MODEL` /
+`SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE` 与末尾任务输入；阶段 Environment 就来自该 Run 的
+显式命令，Platform 不再按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
+Thread `BranchSettings` 的带外重写。
+
+`branch` 上的 [`ProjectRunScope`](../../project/src/main/java/fun/fengwk/kkstudio/project/turn/ProjectRunScope.java)
+以 contributor `project` / customType `run` / schemaVersion 1 冻结本次 Run 的 issue/project/stage 上下文与
+`sourceThreadId`，并显式记录 `active`：Run 接受时为 true，结束时在同一业务锁内接受一条同一 runId、
+`active=false` 的纯 `SET_CONTRIBUTOR_STATE` 快照；projector 对已关闭 scope 输出空，业务写工具拒绝
+已关闭 scope，新 Run 的 true 快照按命令顺序覆盖旧 scope。`issue_transition` 从冻结 scope 取得 runId，
+在业务锁内校验 Run/Issue/阶段/版本与调用 Thread 身份，fork 不凭继承 scope 获权。Run 完成只认本次
+root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED` 分别
+完成 / 失败 / 取消），既不按快照最新 head 猜测，也不等待永久子树 idle；工具 UNKNOWN 只作为模型反馈，
+不再升级为人工核查暂停。
 
 ## 用例事务与持久化
 
