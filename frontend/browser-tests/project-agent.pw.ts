@@ -115,12 +115,22 @@ function createThreadSnapshot() {
       },
       entries: [
         {
-          entryId: 'e1',
+          entryId: 'e0',
           threadId: VALID_THREAD_ID,
           parentEntryId: null,
-          entryType: 'SYSTEM',
-          payloadJson: JSON.stringify({ text: 'You are an architect agent.' }),
+          entryType: 'ROOT',
+          payloadJson: '{}',
           createTime: '2026-09-20T00:00:00Z',
+        },
+        {
+          entryId: 'e1',
+          threadId: VALID_THREAD_ID,
+          parentEntryId: 'e0',
+          entryType: 'MESSAGE',
+          payloadJson: JSON.stringify({
+            message: { role: 'USER', contents: [{ type: 'text', text: '梳理鉴权模块的现有边界' }] },
+          }),
+          createTime: '2026-09-20T00:00:01Z',
         },
       ],
       queuedCommands: [],
@@ -186,7 +196,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                         idempotencyKey: 'cmd-restored-1',
                         type: 'USER_MESSAGE',
                         payloadJson: JSON.stringify({
-                          message: { role: 'USER', contents: [{ type: 'TEXT', text: cancelledText }] },
+                          message: { role: 'USER', contents: [{ type: 'text', text: cancelledText }] },
                         }),
                       },
                     ],
@@ -307,6 +317,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(dock).toBeVisible()
     await expect(dock.locator('.badge-agent')).toHaveText('architect')
     await expect(dock.getByRole('heading', { name: 'Architecture Thread' })).toBeVisible()
+    await expect(dock.getByText('梳理鉴权模块的现有边界')).toBeVisible()
 
     // 6. 通用输入：消息走 per-thread 命令批次，不再变成 Issue INSTRUCTION
     const composer = dock.getByLabel('给 AI 发送消息')
@@ -360,7 +371,9 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     expect(Object.keys(stopRequests[0] ?? {}).sort()).toEqual(['expectedVersion', 'stopRequestId'])
     expect(stopRequests[0]?.expectedVersion).toBe('1')
     expect(issueStops).toEqual([])
-    await expect(composer).toContainText(cancelledText)
+    // 回退到编辑区的是原始人类输入本身，绝不是 durable payload JSON 转储。
+    await expect(composer).toHaveText(cancelledText)
+    await expect(composer).not.toContainText('"contents"')
     await page.screenshot({ path: resolve(reportsDir, 'project-agent-stop-restores-draft.png') })
 
     // 9. 关闭 Agent 视图
