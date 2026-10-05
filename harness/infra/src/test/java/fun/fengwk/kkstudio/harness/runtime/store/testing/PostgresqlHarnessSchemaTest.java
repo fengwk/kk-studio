@@ -19,8 +19,8 @@ class PostgresqlHarnessSchemaTest {
   /**
    * Harness runtime 协议恰好九张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该九表。
    *
-   * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余），
-   * {@code harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
+   * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
+   * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
    */
   private static final List<String> RUNTIME_TABLES =
       List.of(
@@ -120,7 +120,8 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void threadStopReceiptTableStoresRootedReceiptSetOnly() {
-    // 测试意图：验证 harness_thread_stop_receipt 列、集合身份 (root_thread_id, root_stop_request_id) 与 FK 严格与契约对齐。
+    // 测试意图：验证 harness_thread_stop_receipt 列、集合身份 (root_thread_id, root_stop_request_id) 与 FK
+    // 严格与契约对齐。
     List<String> columns =
         jdbc.queryForList(
             """
@@ -223,6 +224,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_tool_invocation_pending",
             "idx_harness_work_available",
             "idx_harness_work_lease_until",
+            "pk_harness_thread_stop_receipt",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
             "uk_harness_model_invocation_result",
@@ -951,7 +953,8 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void harnessThreadJoinFinalAnswerRequiresTerminalAndForeignKeys() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_final_answer（final answer 必须已有 terminal）
+    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_final_answer（final answer 必须已有
+    // terminal）
     // 以及 terminal_entry_id / final_answer_entry_id 的外键门禁。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000040");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000041");
@@ -1052,8 +1055,7 @@ class PostgresqlHarnessSchemaTest {
                     terminalEntryId,
                     UUID.fromString("00000000-0000-0000-0000-000000000098")),
             "fk_harness_thread_join_final_answer_entry must reject non-existent entry");
-    assertTrue(
-        exFinalAnswerFk.getMessage().contains("fk_harness_thread_join_final_answer_entry"));
+    assertTrue(exFinalAnswerFk.getMessage().contains("fk_harness_thread_join_final_answer_entry"));
 
     // 4. 正向验证：terminal 与 final answer 同时存在（未交付）合法
     assertDoesNotThrow(
