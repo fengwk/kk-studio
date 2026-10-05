@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
@@ -217,7 +218,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     }
 
     ProjectRunScope scope = runScope(issue, stage, agentName, runId, threadId);
-    List<NewThreadCommand> commands = buildRunCommands(settings, scope);
+    List<NewThreadCommand> commands = buildRunCommands(settings, scope, stage.environment());
     NewThreadCommand taskInput = commands.getLast();
     ThreadJoinRequest join =
         new ThreadJoinRequest(runId, null, null, taskInput.requestHash(), agentName, null, 1, 1, 1);
@@ -432,6 +433,7 @@ public class IssueRunServiceImpl implements IssueRunService {
     run.setError(null);
     updateRun(run, expectedVersion);
     persistIssue(issue, locked.issueVersion());
+    closeRunScope(run);
     return issueRunRepository.getById(runId);
   }
 
@@ -535,6 +537,49 @@ public class IssueRunServiceImpl implements IssueRunService {
     run.setEndedAt(Instant.now());
     run.setError(error);
     updateRun(run, expectedVersion);
+    closeRunScope(run);
+  }
+
+  /**
+   * 在本 Run 进入终态的业务锁内闭合 branch scope：读取接受该 Run 时冻结的 SET_CONTRIBUTOR_STATE 源命令，翻成同一 {@code runId} 的
+   * {@code active=false} 副本，并以纯设置批次写回同一 Thread——不产生用户消息、也不唤醒模型。
+   *
+   * <p>因为同一 Thread 的命令按 sequence 有序，新 Run 的 {@code active=true} 快照必然排在旧 Run 的 {@code false} 之后；旧
+   * Run 收尾必须持有活动 Run 锁，因此不可能在关闭后覆盖新 Run 的 scope。
+   */
+  private void closeRunScope(IssueRun run) {
+    HarnessRuntime runtime = requireRuntime();
+    UUID threadId = run.getThreadId();
+    ThreadCommand source =
+        runtime
+            .findThreadCommand(threadId, commandKey(run.getId(), "contributor-state"))
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "frozen run scope command is missing for run " + run.getId()));
+    if (!(source.payload() instanceof SetContributorStateCommandPayload frozen)) {
+      throw new IllegalStateException("run scope source command is not SET_CONTRIBUTOR_STATE");
+    }
+    ProjectRunScope scope = RUN_SCOPE_CODEC.decode(frozen.state().dataJson());
+    if (!scope.runId().equals(run.getId()) || !scope.sourceThreadId().equals(threadId)) {
+      throw new IllegalStateException("frozen run scope does not match the closing run");
+    }
+    NewThreadCommand closeCommand =
+        new NewThreadCommand(
+            new SetContributorStateCommandPayload(
+                new CustomEntryPayload(
+                    ProjectRunScope.CONTRIBUTOR_ID,
+                    ProjectRunScope.CUSTOM_TYPE,
+                    ProjectRunScope.SCHEMA_VERSION,
+                    RUN_SCOPE_CODEC.encode(scope.closed()))),
+            commandKey(run.getId(), "scope-closed"));
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                threadId, snapshot.thread().headEntryId(), snapshot.thread().nextCommandSequence()),
+            List.of(closeCommand)),
+        AcceptancePreflight.IDENTITY);
   }
 
   private void applyPauseGate(
@@ -702,13 +747,17 @@ public class IssueRunServiceImpl implements IssueRunService {
   /**
    * 每次 Run 显式提交的完整命令批：先按固定顺序设置 Agent/Model/Environment 并冻结本次 Run 的 contributor state， 最后以恰一条
    * CUSTOM_MESSAGE（可信调用方输入，而非人类 USER_MESSAGE）启动任务。
+   *
+   * <p>Environment 取当前 stage 的显式选择（含 null 清除），而不是 Agent 默认 settings 的 environmentName，否则工作流里配置的
+   * stage 环境会被 Agent 默认值悄悄覆盖；Agent 与 Model 仍以本 Run 明确物化的 run 配置为准。
    */
-  private List<NewThreadCommand> buildRunCommands(BranchSettings settings, ProjectRunScope scope) {
+  private List<NewThreadCommand> buildRunCommands(
+      BranchSettings settings, ProjectRunScope scope, String environmentName) {
     UUID runId = scope.runId();
     return List.of(
         command(new SetAgentCommandPayload(settings.agentName()), runId, "agent"),
         command(new SetModelCommandPayload(settings.model()), runId, "model"),
-        command(new SetEnvironmentCommandPayload(settings.environmentName()), runId, "environment"),
+        command(new SetEnvironmentCommandPayload(environmentName), runId, "environment"),
         command(
             new SetContributorStateCommandPayload(
                 new CustomEntryPayload(

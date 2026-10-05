@@ -20,9 +20,17 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -40,6 +48,8 @@ import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -200,14 +210,15 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   }
 
   /**
-   * 读取本次 Run 冻结在本 Thread 上的 {@code project/run} contributor state JSON：SET_CONTRIBUTOR_STATE 命令的
-   * durable payload 就是接受该 Run 时冻结的业务身份，测试据此以真实来源驱动 {@code issue_transition}，而不是自己重算 scope。
+   * 读取本 Thread 上最新一次冻结的 {@code project/run} contributor state JSON：SET_CONTRIBUTOR_STATE 命令的
+   * durable payload 就是接受该 Run（或闭合 scope）时写下的业务身份，测试据此以真实来源驱动业务工具，而不是自己重算 scope。
    */
   protected String frozenRunScopeJson(UUID threadId) {
     Map<String, Object> row =
         jdbc.queryForMap(
             "select command_type, payload::text as payload from harness_thread_command"
-                + " where thread_id = ? and command_type = 'SET_CONTRIBUTOR_STATE'",
+                + " where thread_id = ? and command_type = 'SET_CONTRIBUTOR_STATE'"
+                + " order by sequence desc limit 1",
             threadId);
     ThreadCommandPayload payload =
         new ThreadCommandPayloadJsonCodec()
@@ -215,6 +226,31 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 ThreadCommandType.valueOf((String) row.get("command_type")),
                 (String) row.get("payload"));
     return ((SetContributorStateCommandPayload) payload).state().dataJson();
+  }
+
+  /** 该 Thread 上最新一次冻结的 Run scope：Run 进入终态后这里读到的是 {@code active=false} 的关闭副本。 */
+  protected ProjectRunScope latestRunScope(UUID threadId) {
+    return new ProjectRunScopeJsonCodec().decode(frozenRunScopeJson(threadId));
+  }
+
+  /** 读取本 Thread 上指定类型命令的 durable payload，用于断言显式 Run 配置与 scope 闭合写入的实际内容。 */
+  protected String commandPayload(UUID threadId, String commandType) {
+    return jdbc.queryForObject(
+        "select payload::text from harness_thread_command where thread_id = ? and command_type = ?",
+        String.class,
+        threadId,
+        commandType);
+  }
+
+  /** 本 Thread 上最新一次 scope 冻结命令的序号：用于断言关闭旧 scope 后新 Run 的 active=true 严格在其之后。 */
+  protected long latestRunScopeSequence(UUID threadId) {
+    Long value =
+        jdbc.queryForObject(
+            "select max(sequence) from harness_thread_command where thread_id = ? and command_type ="
+                + " 'SET_CONTRIBUTOR_STATE'",
+            Long.class,
+            threadId);
+    return value == null ? 0L : value;
   }
 
   /** 冻结本次 Run 的 root Join 结果：terminal 与 final 指向同一 Entry，模拟 Harness 执行终止后写回的固定 join 凭据。 */
@@ -237,6 +273,44 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     }
   }
 
+  /**
+   * 向该 Thread 追加一个终态 {@code TURN_END} Entry 并推进 head，返回新 head Entry id。
+   *
+   * <p>Join 冻结的 terminal 必须是真实存在的终态边界；本方法用真实 Harness 行构造该事实，供收尾用例区分 COMPLETED/ERROR/CANCELLED。
+   */
+  protected UUID appendTurnEndEntry(UUID threadId, TurnEndOutcome outcome) {
+    UUID sessionId =
+        jdbc.queryForObject(
+            "select session_id from harness_thread where id = ?", UUID.class, threadId);
+    UUID parentEntryId = headEntry(threadId);
+    UUID entryId = UUID.randomUUID();
+    TurnEndReason reason =
+        switch (outcome) {
+          case COMPLETED -> null;
+          case FAILED -> TurnEndReason.TURN_FAILED;
+          case STOPPED -> TurnEndReason.USER_STOP;
+          case CANCELLED -> TurnEndReason.CANCELLED;
+        };
+    UUID closeRequestId = outcome == TurnEndOutcome.STOPPED ? UUID.randomUUID() : null;
+    TurnEndPayload payload =
+        new TurnEndPayload(parentEntryId, outcome, false, reason, closeRequestId);
+    Timestamp now = Timestamp.from(Instant.now());
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, ?, 'TURN_END', ?::jsonb, ?)",
+        entryId,
+        sessionId,
+        parentEntryId,
+        HarnessRuntimeTestConfiguration.ENTRY_CODEC.encode(payload),
+        now);
+    jdbc.update(
+        "update harness_thread set head_entry_id = ?, updated_at = ? where id = ?",
+        entryId,
+        now,
+        threadId);
+    return entryId;
+  }
+
   protected long count(String sql, Object... args) {
     Long value = jdbc.queryForObject(sql, Long.class, args);
     return value == null ? 0L : value;
@@ -256,6 +330,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
     private static final ThreadCommandPayloadJsonCodec COMMAND_CODEC =
         new ThreadCommandPayloadJsonCodec();
+
+    private static final HistoryEntryPayloadJsonCodec ENTRY_CODEC =
+        new HistoryEntryPayloadJsonCodec();
 
     /**
      * 受控 Harness 存储假件：只实现归属校验读取（Session / Thread 解析），事实直接来自真实 Harness 行。
@@ -367,6 +444,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   acceptAndJoin(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
       when(runtime.findJoin(any(UUID.class)))
           .thenAnswer(invocation -> findJoin(jdbc, invocation.getArgument(0)));
+      when(runtime.projectJoinReceipt(any(UUID.class)))
+          .thenAnswer(invocation -> projectJoinReceipt(jdbc, invocation.getArgument(0)));
       when(runtime.getThreadSnapshot(any(UUID.class)))
           .thenAnswer(invocation -> snapshot(jdbc, invocation.getArgument(0)));
       return runtime;
@@ -429,6 +508,45 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   : ((Number) row.get("delivery_command_sequence")).longValue(),
               ((Timestamp) row.get("created_at")).toInstant(),
               ((Timestamp) row.get("updated_at")).toInstant()));
+    }
+
+    /**
+     * 从真实 Join 与终态 Entry 投影只读 receipt：终态 Entry 是 {@code TURN_END} 时按其 outcome 映射为
+     * COMPLETED/ERROR/CANCELLED；测试用普通 MESSAGE 作为终态时按正常完成处理，便于专注业务收尾。
+     */
+    private static Optional<ThreadJoinReceipt> projectJoinReceipt(
+        JdbcTemplate jdbc, UUID invocationId) {
+      Optional<ThreadJoin> found = findJoin(jdbc, invocationId);
+      if (found.isEmpty() || !found.get().matched()) {
+        return Optional.empty();
+      }
+      ThreadJoin join = found.get();
+      ThreadJoinOutcome outcome = ThreadJoinOutcome.COMPLETED;
+      Map<String, Object> terminal =
+          queryThread(
+              jdbc,
+              "select entry_type, payload::text as payload from harness_entry where id = ?",
+              join.terminalEntryId());
+      if (terminal != null && EntryType.TURN_END.name().equals(terminal.get("entry_type"))) {
+        EntryPayload payload =
+            ENTRY_CODEC.decode(EntryType.TURN_END, (String) terminal.get("payload"));
+        outcome =
+            switch (((TurnEndPayload) payload).outcome()) {
+              case COMPLETED -> ThreadJoinOutcome.COMPLETED;
+              case FAILED -> ThreadJoinOutcome.ERROR;
+              case STOPPED, CANCELLED -> ThreadJoinOutcome.CANCELLED;
+            };
+      }
+      return Optional.of(
+          new ThreadJoinReceipt(
+              join.invocationId(),
+              join.childThreadId(),
+              join.agent(),
+              outcome,
+              "",
+              null,
+              null,
+              null));
     }
 
     private static AcceptedCommands accept(JdbcTemplate jdbc, AcceptCommandsCommand command) {

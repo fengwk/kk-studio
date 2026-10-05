@@ -1,10 +1,13 @@
 package fun.fengwk.kkstudio.project.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -18,18 +21,23 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
@@ -46,7 +54,9 @@ import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -64,7 +74,7 @@ class IssueRunServiceImplTest {
   private static final String WORKFLOW =
       """
       {"states":[{"state":"INIT","name":"待开始","next":["DESIGN"]},\
-      {"state":"DESIGN","name":"设计","agent":"worker","instructions":"完成可交付方案","maxRuns":3,\
+      {"state":"DESIGN","name":"设计","agent":"worker","environment":"stage-env","instructions":"完成可交付方案","maxRuns":3,\
       "next":["DONE"]},\
       {"state":"BLOCKED","name":"业务阻塞"},\
       {"state":"DONE","name":"完成"}]}""";
@@ -167,7 +177,10 @@ class IssueRunServiceImplTest {
         commands.stream().map(command -> command.payload().type()).toList());
     assertInstanceOf(SetAgentCommandPayload.class, commands.get(0).payload());
     assertInstanceOf(SetModelCommandPayload.class, commands.get(1).payload());
-    assertInstanceOf(SetEnvironmentCommandPayload.class, commands.get(2).payload());
+    // SET_ENVIRONMENT 取当前 stage 的显式环境，而不是 Agent 默认 settings 的 environmentName（此处为 null）。
+    SetEnvironmentCommandPayload environment =
+        assertInstanceOf(SetEnvironmentCommandPayload.class, commands.get(2).payload());
+    assertEquals("stage-env", environment.environmentName());
     assertInstanceOf(CustomMessageCommandPayload.class, commands.get(4).payload());
 
     // runId 在接受源输入前分配，必须同时是 Run 主键与 root Join ticket 的 invocationId。
@@ -192,7 +205,111 @@ class IssueRunServiceImplTest {
     assertEquals(target.threadId(), scope.sourceThreadId());
     assertEquals("DESIGN", scope.stage());
     assertEquals("worker", scope.agentName());
+    assertTrue(scope.active());
     assertEquals(rootEntryId, run.getStartEntryId());
+  }
+
+  /**
+   * 测试意图：Run 进入终态时必须在同一业务锁内闭合 branch scope——读取冻结的 SET_CONTRIBUTOR_STATE 源命令，翻成同一 runId 的
+   * active=false 副本，并以纯设置批次（单条、无用户消息）写回同一 Thread，不向模型发送伪用户输入。
+   */
+  @Test
+  void completeRunClosesFrozenRunScopeWithoutUserMessage() {
+    UUID threadId = UUID.randomUUID();
+    UUID runId = UUID.randomUUID();
+    UUID startEntryId = UUID.randomUUID();
+    UUID endEntryId = UUID.randomUUID();
+    IssueRun run =
+        IssueRun.builder()
+            .id(runId)
+            .issueId(ISSUE_ID)
+            .ordinal(0)
+            .state("DESIGN")
+            .sessionId(UUID.randomUUID())
+            .threadId(threadId)
+            .status(IssueRunStatus.RUNNING)
+            .startEntryId(startEntryId)
+            .observedActivitySequence(0)
+            .remainingExecutionMs(1000L)
+            .activeSince(Instant.now())
+            .version(3L)
+            .build();
+    ProjectRunScope frozen =
+        new ProjectRunScope(
+            runId,
+            ISSUE_ID,
+            PROJECT_ID,
+            threadId,
+            7L,
+            "修复登录",
+            null,
+            "DESIGN",
+            "设计",
+            null,
+            List.of("DONE"),
+            "worker");
+    ThreadCommand source =
+        new ThreadCommand(
+            threadId,
+            4L,
+            new SetContributorStateCommandPayload(
+                new CustomEntryPayload(
+                    ProjectRunScope.CONTRIBUTOR_ID,
+                    ProjectRunScope.CUSTOM_TYPE,
+                    ProjectRunScope.SCHEMA_VERSION,
+                    new ProjectRunScopeJsonCodec().encode(frozen))),
+            UUID.randomUUID(),
+            "0".repeat(64),
+            startEntryId,
+            null,
+            null,
+            Instant.now());
+    Entry startEntry = mock(Entry.class);
+    when(startEntry.id()).thenReturn(startEntryId);
+    Entry endEntry = mock(Entry.class);
+    when(endEntry.id()).thenReturn(endEntryId);
+    EntryPath path = mock(EntryPath.class);
+    when(path.entries()).thenReturn(List.of(startEntry, endEntry));
+    ThreadState thread = mock(ThreadState.class);
+    when(thread.headEntryId()).thenReturn(endEntryId);
+    when(thread.nextCommandSequence()).thenReturn(5L);
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread);
+    when(snapshot.entryPath()).thenReturn(path);
+
+    when(issueRunRepository.getById(runId)).thenReturn(run);
+    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue());
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project());
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue());
+    when(issueRunRepository.lockById(runId)).thenReturn(run);
+    when(issueActivityRepository.insert(any())).thenReturn(true);
+    when(issueRunRepository.updateById(any(), anyLong())).thenReturn(true);
+    when(issueRepository.updateById(any(), anyLong())).thenReturn(true);
+    when(runtimes.getIfAvailable()).thenReturn(runtime);
+    when(runtime.findThreadCommand(eq(threadId), any())).thenReturn(Optional.of(source));
+    when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+    when(runtime.acceptCommands(any(), any())).thenReturn(mock(AcceptedCommands.class));
+
+    service.completeRun(runId, 3L, "complete-1", endEntryId, null, null);
+
+    ArgumentCaptor<AcceptCommandsCommand> captor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(captor.capture(), any());
+    AcceptCommandsTarget.Thread target =
+        assertInstanceOf(AcceptCommandsTarget.Thread.class, captor.getValue().target());
+    assertEquals(threadId, target.threadId());
+    assertEquals(endEntryId, target.expectedHeadEntryId());
+    assertEquals(5L, target.expectedNextCommandSequence());
+    List<NewThreadCommand> commands = captor.getValue().commands();
+    // 纯设置批次：单条 SET_CONTRIBUTOR_STATE，没有末尾用户消息，不唤醒模型。
+    assertEquals(1, commands.size());
+    SetContributorStateCommandPayload close =
+        assertInstanceOf(SetContributorStateCommandPayload.class, commands.get(0).payload());
+    ProjectRunScope closed = new ProjectRunScopeJsonCodec().decode(close.state().dataJson());
+    assertEquals(runId, closed.runId());
+    assertFalse(closed.active());
+    assertEquals(IssueRunStatus.COMPLETED, run.getStatus());
+    assertEquals(endEntryId, run.getEndEntryId());
   }
 
   private static Issue issue() {
