@@ -1677,31 +1677,47 @@ export const aiCatalog = {
   },
   'ai.runtime.status.environmentUnavailableText': {
     'en-US': 'env:{{name}} (unavailable)',
-    'zh-CN': 'env:{{name}} (unavailable)',
+    'zh-CN': 'env:{{name}}（不可用）',
   },
   'ai.runtime.status.environmentText': {
     'en-US': 'env:{{name}}',
     'zh-CN': 'env:{{name}}',
   },
+  'ai.runtime.status.environmentTitle': {
+    'en-US': 'Environment: {{name}}',
+    'zh-CN': '环境：{{name}}',
+  },
+  'ai.runtime.status.environmentUnavailableTitle': {
+    'en-US': 'Environment: {{name}} (unavailable)',
+    'zh-CN': '环境：{{name}}（不可用）',
+  },
   'ai.runtime.status.environmentNoneText': {
     'en-US': 'No environment',
     'zh-CN': '未选择环境',
   },
+  'ai.runtime.status.noData': {
+    'en-US': 'No data',
+    'zh-CN': '暂无数据',
+  },
   'ai.runtime.status.branchUsageTitle': {
-    'en-US': 'Cumulative branch usage (including the first request; cache is the cumulative input cache hit rate): {{usage}}',
-    'zh-CN': '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：{{usage}}',
+    'en-US': 'Cumulative usage\nUncached input: {{input}} tokens; output: {{output}} tokens\nCache read: {{cacheRead}} tokens; write: {{cacheWrite}} tokens\nCost: ${{cost}}; cache hit: {{cache}}\nAverage generation speed: {{speed}}',
+    'zh-CN': '累计用量\n未缓存输入：{{input}} tokens；输出：{{output}} tokens\n缓存读取：{{cacheRead}} tokens；写入：{{cacheWrite}} tokens\n费用：${{cost}}；缓存命中：{{cache}}\n平均生成速度：{{speed}}',
   },
   'ai.runtime.status.contextText': {
     'en-US': 'ctx {{used}}/{{total}}',
     'zh-CN': 'ctx {{used}}/{{total}}',
   },
-  'ai.runtime.status.contextTitle': {
-    'en-US': 'Estimated context tokens from latest model invocation: {{used}} / {{total}} (not exact for next pending request)',
-    'zh-CN': '最新模型调用已知上下文输入估计：{{used}} / {{total}} tokens（非待发请求精确值）',
+  'ai.runtime.status.contextTitleKnown': {
+    'en-US': 'Last request context: ~{{used}} / {{total}} tokens',
+    'zh-CN': '上次请求上下文：约 {{used}} / {{total}} tokens',
+  },
+  'ai.runtime.status.contextTitleUnknown': {
+    'en-US': 'Last request context: no data (limit {{total}} tokens)',
+    'zh-CN': '上次请求上下文：暂无数据（上限 {{total}} tokens）',
   },
   'ai.runtime.usage.metaTooltip': {
-    'en-US': '↑Uncached prompt · ↓Completion · R Cache read (not reasoning) · W Cache write · $ Total cost (reasoning included) · cache hit rate · tok/s decode speed. Note: R is prompt cache read, not reasoning tokens.',
-    'zh-CN': '↑未缓存输入 · ↓普通输出 · R缓存读取(非推理) · W缓存写入 · $总费用(含推理) · cache缓存命中率 · tok/s解码速率。注：R表示缓存读取不是推理，推理费用已包含在总费用中。',
+    'en-US': '↑ Uncached input · ↓ Output · R Cache read · W Cache write · $ Cost · cache Cache hit rate · tok/s Generation speed',
+    'zh-CN': '↑ 未缓存输入 · ↓ 输出 · R 缓存读取 · W 缓存写入 · $ 费用 · cache 缓存命中率 · tok/s 生成速度',
   },
   'ai.runtime.notification.permissionTitle': {
     'en-US': 'Approval requested',
@@ -3127,9 +3143,17 @@ export const aiCatalog = {
     'en-US': 'Chat',
     'zh-CN': '对话',
   },
+  'ai.interaction.openChatSource': {
+    'en-US': 'Open chat',
+    'zh-CN': '打开对话',
+  },
   'ai.interaction.sourceIssue': {
-    'en-US': 'Issue Agent',
-    'zh-CN': 'Issue Agent',
+    'en-US': 'Task chat',
+    'zh-CN': '任务对话',
+  },
+  'ai.interaction.openIssueSource': {
+    'en-US': 'Open task chat',
+    'zh-CN': '打开任务对话',
   },
   'ai.interaction.submit': {
     'en-US': 'Submit Answers',
@@ -3168,8 +3192,8 @@ export const aiCatalog = {
     'zh-CN': '多选',
   },
   'ai.interaction.nonRecoverable': {
-    'en-US': 'Conflict or cancelled, non-recoverable. Please refresh.',
-    'zh-CN': '操作冲突或已取消，不可恢复，请刷新查看最新状态。',
+    'en-US': 'This item has changed. Refresh to see the latest status.',
+    'zh-CN': '此事项已变更，请刷新查看最新状态。',
   },
   'ai.interaction.allow': {
     'en-US': 'Allow',

@@ -312,34 +312,47 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
   })
 
-  test('ThreadStatusFooter and MetaMessageBlock maintain single-line ellipsis without wrapping or horizontal page overflow', async ({
+  test('ThreadStatusFooter keeps a single pipe-separated line with ellipsis and complete hover facts', async ({
     page,
   }) => {
     // 确保 reports/layout 目录存在
     fs.mkdirSync(REPORTS_DIR, { recursive: true })
 
-    // 1. 桌面视口 1280x800（验证 split-2 与分屏 split-3 下单行省略截断）
+    // 1. 桌面视口 1280x800（验证 split-2 与分屏 split-3 下单行字段分隔与省略截断）
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/browser-tests/chat-layout-harness.html')
 
     const pane1Footer = page.locator('[data-testid="pane-1-footer"]')
     await expect(pane1Footer).toBeVisible()
 
-    // 验证 Footer 两行结构及文本
+    // 全部事实落在唯一一行，字段由竖线分隔
     const pane1Lines = pane1Footer.locator('.thread-status-line')
-    await expect(pane1Lines).toHaveCount(2)
-    await expect(pane1Lines.nth(0)).toHaveText('env:production · ctx 16k/128k')
-    await expect(pane1Lines.nth(1)).toHaveText('↑12k · ↓800 · R4.0k · $0.042 · cache 25% · 475 tok/s')
+    await expect(pane1Lines).toHaveCount(1)
+    await expect(pane1Lines.nth(0)).toHaveText(
+      'env:production | ctx 16k/128k | ↑12k | ↓800 | R4.0k | $0.042 | cache 25% | 475 tok/s',
+    )
+
+    // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明
+    const pane1Title = (await pane1Lines.nth(0).getAttribute('title')) ?? ''
+    expect(pane1Title).toContain('环境：production')
+    expect(pane1Title).toContain('上次请求上下文：约 16000 / 128000 tokens')
+    expect(pane1Title).toContain('累计用量')
+    expect(pane1Title).toContain('未缓存输入：12000 tokens；输出：800 tokens')
+    expect(pane1Title).toContain('缓存读取：4000 tokens；写入：0 tokens')
+    expect(pane1Title).toContain('费用：$0.042；缓存命中：25%')
+    expect(pane1Title).toContain('平均生成速度：475 tok/s')
+    expect(pane1Title).not.toContain('含首次请求')
+    expect(pane1Title).not.toContain('非待发请求精确值')
 
     // 切换到 3 分屏，使每列宽度约束至 ~400px，验证桌面分屏场景下的真实截断
     await selectLayoutOption(page, 'split-3', '3')
     const pane2Footer = page.locator('[data-testid="pane-2-footer"]')
     await expect(pane2Footer).toBeVisible()
     const pane2Lines = pane2Footer.locator('.thread-status-line')
-    await expect(pane2Lines).toHaveCount(2)
+    await expect(pane2Lines).toHaveCount(1)
 
-    // Pane 2 摘要在 split-3 宽度下内容超出，验证真实 overflow：scrollWidth > clientWidth 且单行 ellipsis
-    const pane2UsageOverflow = await pane2Lines.nth(1).evaluate((el) => {
+    // 长环境名与长用量在 split-3 宽度下内容超出，验证真实 overflow：scrollWidth > clientWidth 且单行 ellipsis
+    const pane2UsageOverflow = await pane2Lines.evaluate((el) => {
       const style = window.getComputedStyle(el)
       return {
         whiteSpace: style.whiteSpace,
@@ -355,6 +368,17 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(pane2UsageOverflow.overflow).toBe('hidden')
     expect(pane2UsageOverflow.scrollWidth).toBeGreaterThan(pane2UsageOverflow.clientWidth)
     expect(pane2UsageOverflow.clientHeight).toBeLessThanOrEqual(24)
+
+    // 长环境名同样需要在唯一一行中保留并可通过 hover 读到
+    const pane2Title = (await pane2Lines.getAttribute('title')) ?? ''
+    expect(pane2Title).toContain('环境：production-us-east-long-cluster-primary-node')
+    expect(pane2Title).toContain('未缓存输入：123456 tokens；输出：654321 tokens')
+
+    // 无环境且无闭合回合用量时，零事实与占位符仍稳定落在唯一一行
+    const pane3Line = page.locator('[data-testid="pane-3-footer"] .thread-status-line')
+    await expect(pane3Line).toHaveCount(1)
+    await expect(pane3Line).toHaveText('未选择环境 | ↑0 | ↓0 | $0.000 | cache — | — tok/s')
+    expect((await pane3Line.getAttribute('title')) ?? '').toContain('平均生成速度：暂无数据')
 
     // 桌面分屏截图
     await page.screenshot({
@@ -394,7 +418,9 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(metaUsageStyle.scrollWidth).toBeGreaterThan(metaUsageStyle.clientWidth)
     expect(metaUsageStyle.clientHeight).toBeLessThanOrEqual(24)
     expect(metaUsageStyle.title).toContain('↑12k')
-    expect(metaUsageStyle.title).toContain('注：R表示缓存读取不是推理')
+    expect(metaUsageStyle.title).toContain('tok/s 生成速度')
+    // 图例只保留短对照，不再夹带内部实现说明。
+    expect(metaUsageStyle.title).not.toContain('注：')
 
     // 基础 meta 样式保留换行；省略规则只作用于回合用量。
     const metaInfo = page.locator('[data-testid="base-meta-style"] .thread-meta-text')
@@ -406,8 +432,8 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(metaInfoStyle.whiteSpace).toBe('pre-wrap')
     expect(metaInfoStyle.clientHeight).toBeGreaterThan(24)
 
-    // 普通摘要在 375px 下可完整容纳；长摘要必须真实触发截断。
-    const pane1Usage375 = await pane1Lines.nth(1).evaluate((el) => {
+    // 唯一一行在 375px 下必然超出，验证单行省略与高度约束。
+    const pane1Usage375 = await pane1Lines.nth(0).evaluate((el) => {
       const style = window.getComputedStyle(el)
       return {
         whiteSpace: style.whiteSpace,
@@ -422,7 +448,8 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(pane1Usage375.textOverflow).toBe('ellipsis')
     expect(pane1Usage375.overflow).toBe('hidden')
     expect(pane1Usage375.clientHeight).toBeLessThanOrEqual(24)
-    const pane2Usage375 = await pane2Lines.nth(1).evaluate((el) => ({
+    expect(pane1Usage375.scrollWidth).toBeGreaterThan(pane1Usage375.clientWidth)
+    const pane2Usage375 = await pane2Lines.evaluate((el) => ({
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
       clientHeight: el.clientHeight,
@@ -458,7 +485,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(metaUsage320.clientHeight).toBeLessThanOrEqual(24)
     expect(metaUsage320.scrollWidth).toBeGreaterThan(metaUsage320.clientWidth)
 
-    const pane1Usage320 = await pane1Lines.nth(1).evaluate((el) => ({
+    const pane1Usage320 = await pane1Lines.nth(0).evaluate((el) => ({
       clientHeight: el.clientHeight,
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,

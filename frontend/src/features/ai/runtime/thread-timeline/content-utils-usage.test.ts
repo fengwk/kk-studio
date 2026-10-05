@@ -266,5 +266,19 @@ describe('content-utils usage & speed & cache calculations', () => {
       })
       expect(text).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
     })
+
+    // Footer 需要竖线分隔的同一份事实；分隔符只影响连接符，不改变数值与省略规则。
+    it('applies an explicit separator without changing the facts', () => {
+      const text = formatTurnUsageText({
+        input: 100,
+        output: 50,
+        cacheRead: 50,
+        cacheWrite: 0,
+        cost: 0.005,
+        decodeTokens: 50,
+        decodeDurationMillis: 1000,
+      }, ' | ')
+      expect(text).toBe('↑100 | ↓50 | R50 | $0.005 | cache 33% | 50 tok/s')
+    })
   })
 })
