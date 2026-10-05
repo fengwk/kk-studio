@@ -1770,8 +1770,8 @@ registerCase({
 registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
-  title: 'Thread YOLO 直接控制面（version CAS 与同值 no-op）',
-  docs: 'PUT /api/harness/threads/{id}/yolo {expectedVersion,yoloEnabled} => 200 权威 Thread；同值请求在任何 CAS 之前 no-op 成功（过期 version 不冲突、version 零触碰）；值变化时 version 精确 +1，过期 version => 409 STALE_VERSION；不创建 Command/Entry/Work',
+  title: 'Thread YOLO 直接控制面（单字段幂等与同值 no-op）',
+  docs: 'PUT /api/harness/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1793,10 +1793,7 @@ registerCase({
     assert(thread.yoloEnabled === false, JSON.stringify(thread))
 
     // 变化 + 精确 version：version +1，返回权威 Thread。
-    const enabled = await setThreadYolo(ctx, threadId, {
-      expectedVersion: thread.version,
-      yoloEnabled: true,
-    })
+    const enabled = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
     assert(enabled.yoloEnabled === true, JSON.stringify(enabled))
     assert(
       String(Number(enabled.version)) === String(Number(thread.version) + 1),
@@ -1804,29 +1801,13 @@ registerCase({
     )
     assert(enabled.headEntryId === thread.headEntryId, JSON.stringify(enabled))
 
-    // 同值 no-op 先于 version CAS：携带过期 expectedVersion 仍 200，version/head 零触碰。
-    const sameValue = await setThreadYolo(ctx, threadId, {
-      expectedVersion: '999999999',
-      yoloEnabled: true,
-    })
+    // 同值 no-op：不读取请求 version，version/head 零触碰。
+    const sameValue = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
     assert(sameValue.yoloEnabled === true, JSON.stringify(sameValue))
     assert(String(sameValue.version) === String(enabled.version), JSON.stringify(sameValue))
 
-    // 变化 + 过期 version：409 STALE_VERSION。
-    await expectHttpError(
-      () =>
-        setThreadYolo(ctx, threadId, {
-          expectedVersion: thread.version,
-          yoloEnabled: false,
-        }),
-      { status: 409, messageIncludes: /version/i },
-    )
-
     // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
-    const disabled = await setThreadYolo(ctx, threadId, {
-      expectedVersion: enabled.version,
-      yoloEnabled: false,
-    })
+    const disabled = await setThreadYolo(ctx, threadId, { yoloEnabled: false })
     assert(disabled.yoloEnabled === false, JSON.stringify(disabled))
     assert(
       String(Number(disabled.version)) === String(Number(enabled.version) + 1),

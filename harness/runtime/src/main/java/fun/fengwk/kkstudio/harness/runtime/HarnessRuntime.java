@@ -278,8 +278,8 @@ public final class HarnessRuntime {
    * 在一个短 transaction 内直接更新 Thread 的 YOLO runtime policy。
    *
    * <p>锁 Thread 后先比较当前值：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求
-   * Work），否则必须匹配 {@code expectedVersion}（否则 STALE_VERSION），随后在一个原子步骤中更新 {@code yoloEnabled} 且
-   * version 精确 +1。本操作绝不唤醒 processors。
+   * Work），否则在最新锁定行上更新 {@code yoloEnabled} 且 version 精确 +1。无关的执行 version
+   * 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的 WAITING_APPROVAL。
    */
   public ThreadState setThreadYolo(SetThreadYoloCommand command) {
     Objects.requireNonNull(command, "command");
@@ -294,16 +294,6 @@ public final class HarnessRuntime {
                               "thread " + command.threadId() + " does not exist"));
           if (thread.yoloEnabled() == command.enabled()) {
             return thread;
-          }
-          if (thread.version() != command.expectedVersion()) {
-            throw conflict(
-                HarnessRuntimeConflictException.Reason.STALE_VERSION,
-                "thread "
-                    + thread.id()
-                    + " version "
-                    + thread.version()
-                    + " does not match expected "
-                    + command.expectedVersion());
           }
           ThreadState updated = thread.setYoloEnabled(command.enabled(), clock.instant());
           tx.updateThread(updated);

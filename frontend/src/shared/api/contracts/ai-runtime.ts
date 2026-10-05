@@ -213,11 +213,9 @@ export type HarnessCommandCreateDTO =
   | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
 
 /**
- * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标
- * （同值请求在任何 CAS 之前即成功 no-op）。
+ * Thread YOLO policy 直接更新请求。它只提交目标策略，不携带 Thread version CAS。
  */
 export interface HarnessThreadYoloUpdateDTO {
-  expectedVersion: string
   yoloEnabled: boolean
 }
 

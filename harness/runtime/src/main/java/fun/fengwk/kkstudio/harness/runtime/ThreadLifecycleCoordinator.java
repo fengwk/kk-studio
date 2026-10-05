@@ -467,12 +467,14 @@ public final class ThreadLifecycleCoordinator {
         }
       }
 
+      if (join.reminderTurn() > 0) {
+        continue;
+      }
       int actualTurns = countActualTurns(tx, path, join);
-      if (actualTurns >= join.maxTurns() && actualTurns > join.reminderTurn()) {
+      if (actualTurns >= join.maxTurns()) {
         UUID idempotencyKey =
             UUID.nameUUIDFromBytes(
-                ("reminder:" + join.invocationId() + ":" + actualTurns)
-                    .getBytes(StandardCharsets.UTF_8));
+                ("reminder:" + join.invocationId()).getBytes(StandardCharsets.UTF_8));
         if (tx.findCommandByIdempotencyKey(current.id(), idempotencyKey).isPresent()) {
           continue;
         }
