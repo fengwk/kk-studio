@@ -280,11 +280,10 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) | 准入 `Started` / `Busy` / `Rejected` / `Indeterminate` + 两阶段激活 `start -> activate` |
 | [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`，`start` 返回 `Started` / `RetryLater` / `Rejected` / `Indeterminate` |
 | [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool outcome Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容；缺失时资源结果降级为 metadata-only 文本 |
-| [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java) | 宿主派发准入：`executeIfAdmitted(request, intent)` 在同一物理事务内以宿主自己的行锁复验产品事实，只有通过才执行 `READY -> DISPATCHING` 意图；返回空表示宿主拒绝（`ALLOW_ALL` 为无宿主策略部署的默认实现） |
 | [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) | 有损 `MODEL_DELTA` / `TOOL_PARTIAL` 投影写入，`append` 与 `appendAll` 同为 best-effort，失败不回滚 checkpoint 或终态 |
 | [`ResourceStore`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/resource/ResourceStore.java) | 内容寻址二进制对象存取；不是运行时正确性的一部分 |
 
-`ModelProcessor` / `ToolProcessor` 只在「会写下 `READY -> DISPATCHING`」的短事务里询问 [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java)：请求在任何 Harness 行锁之前发出，宿主先取自己的行锁再在同一物理事务内执行状态转换意图，外部 Provider / Tool Gateway 调用仍在提交之后；宿主拒绝时 invocation 事实一概不变，只按 `admissionDeferral` durable 重排 Work。在途、等待态、终态与 THREAD claim 结构性不询问，因此暂停不会阻断执行收敛。
+`ModelProcessor` / `ToolProcessor` 在各自的 lease 所有权短事务内（锁 `Work` 行并通过所有权围栏）直接持久 `READY -> DISPATCHING`，`Provider` / `Tool Gateway` 调用在提交之后，因此不会持锁等待外部 HTTP。Runtime 不反查 owner、Issue 归属或阶段等产品门禁：在途、等待态、终态与 THREAD claim 都只收敛或物化 durable 事实，恢复与收敛不因产品暂停而被阻断；需要终止在途执行时由业务显式调用 Stop。
 
 三种准入结论各自对应唯一的 durable 后续：`Busy` / `RetryLater` 表示肯定未开始，安全 reschedule；`Rejected` 是确定性失败；`Indeterminate` 表示可能已开始，收敛为 `UNKNOWN`，严禁盲目重放。`Started` 必须先落 `RUNNING` 再 `activate`，因此 Gateway 打开回调门控必然晚于持久化事实，过早回调只会被缓冲，陈旧或重复回调由所有权围栏拦截。
 
@@ -292,7 +291,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 
 `ModelUsage` 记录七个非负维度（`inputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`、`cacheWriteLongTokens`、`reasoningTokens`、`providerTotalTokens`），前六类是互斥计费类别；`ModelCost` 以 scale 12 HALF_UP 逐项计价，并在构造时校验总额严格等于六项之和。[`PromptCacheAffinityKeyFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) 从 session、provider 连接代际与 wire model、唯一的 `systemInstruction` 全文、按序工具名/描述/schema 派生 `pc2-` 前缀的长度前缀数据帧亲和键（动态历史与采样参数不参与），[`PromptCacheRequestFinalizer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java) 在规划阶段冻结调用方显式声明的缓存策略意图。SYSTEM / TOOLS 根据已知静态前缀筛选，支持 CONVERSATION 就保留该意图，不能因历史尚未物化而关闭缓存。执行期在真实消息物化后筛选实际断点；持久 `NONE` 始终保持禁用，不根据当前能力自动重新开启。
 
-运行时策略全部通过构造注入的配置对象给出，不在模块内缓存或自建线程：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)（lease 配置、统一的 resolve 失败延迟、现读的压缩配置）、[`ModelProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorConfig.java)（lease、现读重试策略、dispatch 失败延迟、宿主拒绝后的 `admissionDeferral`、`StreamFlushConfig`、可选的历史 action resolver）、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java)（另加 preflight 失败延迟与 `admissionDeferral`）。[`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java) 要求 heartbeat 间隔严格小于租约时长，保证两次续租之间租约不会自然过期。
+运行时策略全部通过构造注入的配置对象给出，不在模块内缓存或自建线程：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)（lease 配置、统一的 resolve 失败延迟、现读的压缩配置）、[`ModelProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorConfig.java)（lease、现读重试策略、dispatch 失败延迟、`StreamFlushConfig`、可选的历史 action resolver）、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java)（另加 preflight 失败延迟）。[`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java) 要求 heartbeat 间隔严格小于租约时长，保证两次续租之间租约不会自然过期。
 
 ## 包架构
 
@@ -318,7 +317,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | `runtime.model.provider` | 供应商中立的请求/响应/流事件、`ProviderAdapter`、`ProviderReplayState`、`ContextPressureDetector` | 与具体协议实现解耦；wire 编码与 SSE 解析归 `harness-provider` |
 | `runtime.model.provider.codec` | `ProviderRequest`、`ProviderResponse`、replay state 与工具诊断的编解码；顶层精确字段集合，观测计时 `decodeDurationMillis` 必填但可为 null | 只依赖 Jackson 与纯 model 类型 |
 | `runtime.permission` | `PermissionEvaluator`、规则模型与 `BashSurfaceAnalyzer` | 只产出策略候选；真实路径、符号链接与沙箱由 Environment Daemon 负责 |
-| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink`、`WorkDispatchAdmission` 与 `WorkDispatchRequest` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
+| `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
 | `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码；Tool partial 携带重投递复用的 canonical eventId | 有损 live overlay，恢复与审计以 durable Snapshot/Entry 为准 |
 | `runtime.resource` | `ResourceStore` 内容寻址资源存取端口 | 基础设施能力，不参与 Agent Loop 正确性判定 |
