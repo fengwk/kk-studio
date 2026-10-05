@@ -186,8 +186,8 @@ export const settingsCatalog = {
     'zh-CN': '代理绕过规则',
   },
   'settings.field.network.noProxyHosts.hint': {
-    'en-US': 'Comma-separated rules, e.g. localhost,127.*,::1,minio,*.internal.',
-    'zh-CN': '绕过规则以逗号分隔，例如 localhost,127.*,::1,minio,*.internal。',
+    'en-US': 'Comma-separated rules, e.g. localhost,127.*,::1,192.168.0.0/16,minio,*.internal. IPv4/IPv6 CIDR matches only the target URL numeric IP, not resolved hostnames.',
+    'zh-CN': '绕过规则以逗号分隔，例如 localhost,127.*,::1,192.168.0.0/16,minio,*.internal；IPv4/IPv6 CIDR 只匹配目标 URL 中的数值 IP，不解析主机名。',
   },
   'settings.tabs.storageMedia': {
     'en-US': 'Storage & Media',

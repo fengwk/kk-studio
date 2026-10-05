@@ -39,7 +39,8 @@ public final class HttpProxySelector extends ProxySelector {
    * 固定 Backend 策略；null 地址强制直连，绝不读取环境或默认 selector。
    *
    * <p>地址必须是 http://host:port（不接受尾部 /）。bypass 是逗号分隔的主机/域名后缀、
-   * .domain、*.domain、127.*、IPv4、IPv6（可加方括号）或 *；可附 :port， IPv6 带端口必须加方括号。空字符串合法，null 与不支持的语法拒绝。
+   * .domain、*.domain、127.*、IPv4、IPv6（可加方括号）或 *；可附 :port，IPv6 带端口必须加方括号。 IPv4/IPv6 CIDR（{@code
+   * address/prefix}）只按目标 URL 中的数值 IP 逐位匹配，不解析域名。空字符串合法，null 与不支持的语法拒绝。
    */
   public static ProxySelector fixed(String proxyUrl, String noProxyHosts) {
     List<Bypass> bypass = parseBypass(noProxyHosts);
@@ -112,40 +113,117 @@ public final class HttpProxySelector extends ProxySelector {
     }
     List<Bypass> rules = new ArrayList<>();
     for (String item : value.split(",", -1)) {
-      String host = item.trim();
+      String rule = item.trim();
+      if (rule.indexOf('/') >= 0) {
+        rules.add(parseCidr(rule));
+        continue;
+      }
       int port = -1;
-      if (host.startsWith("[")) {
-        int closing = host.indexOf(']');
+      if (rule.startsWith("[")) {
+        int closing = rule.indexOf(']');
         if (closing < 0) {
           throw invalid();
         }
-        String suffix = host.substring(closing + 1);
+        String suffix = rule.substring(closing + 1);
         if (!suffix.isEmpty()) {
           if (!suffix.startsWith(":")) {
             throw invalid();
           }
           port = parsePort(suffix.substring(1));
         }
-        host = host.substring(1, closing);
-        if (!host.contains(":")) {
+        rule = rule.substring(1, closing);
+        if (!rule.contains(":")) {
           throw invalid();
         }
-      } else if (host.indexOf(':') >= 0 && host.indexOf(':') == host.lastIndexOf(':')) {
-        int colon = host.indexOf(':');
-        port = parsePort(host.substring(colon + 1));
-        host = host.substring(0, colon);
+      } else if (rule.indexOf(':') >= 0 && rule.indexOf(':') == rule.lastIndexOf(':')) {
+        int colon = rule.indexOf(':');
+        port = parsePort(rule.substring(colon + 1));
+        rule = rule.substring(0, colon);
       }
-      if (host.startsWith("*.")) {
-        host = host.substring(2);
-        rejectNonDomainSuffix(host);
-      } else if (host.startsWith(".")) {
-        host = host.substring(1);
-        rejectNonDomainSuffix(host);
+      if (rule.startsWith("*.")) {
+        rule = rule.substring(2);
+        rejectNonDomainSuffix(rule);
+      } else if (rule.startsWith(".")) {
+        rule = rule.substring(1);
+        rejectNonDomainSuffix(rule);
       }
-      boolean prefix = host.equals("127.*");
-      rules.add(new Bypass(prefix ? "127." : normalizeHost(host), port, prefix));
+      boolean prefix = rule.equals("127.*");
+      rules.add(new HostRule(prefix ? "127." : normalizeHost(rule), port, prefix));
     }
     return List.copyOf(rules);
+  }
+
+  /**
+   * 严格解析 {@code address/prefix}：IPv4 /0..32、IPv6 /0..128。地址必须是数值字面量，不接受 hostname、wildcard、 zone
+   * ID、方括号或端口；主机位可不为 0，匹配时只比较 prefix 位。
+   */
+  private static CidrRule parseCidr(String value) {
+    int slash = value.indexOf('/');
+    if (slash != value.lastIndexOf('/')) {
+      throw invalid();
+    }
+    String address = value.substring(0, slash);
+    String prefixText = value.substring(slash + 1);
+    if (address.isEmpty() || !prefixText.matches("[0-9]{1,3}")) {
+      throw invalid();
+    }
+    int prefix = Integer.parseInt(prefixText);
+    if (address.indexOf(':') >= 0) {
+      if (address.indexOf('[') >= 0 || address.indexOf(']') >= 0) {
+        throw invalid();
+      }
+      // 仅数字 IPv6 字面量可进入此调用；不会触发主机名 DNS 查询。
+      if (!address.matches("[0-9a-fA-F:.]+")) {
+        throw invalid();
+      }
+      byte[] network = ipv6Bytes(address);
+      if (network == null || prefix > 128) {
+        throw invalid();
+      }
+      return new CidrRule(network, prefix);
+    }
+    byte[] network = ipv4Bytes(address);
+    if (network == null || prefix > 32) {
+      throw invalid();
+    }
+    return new CidrRule(network, prefix);
+  }
+
+  /** 严格十进制 IPv4：恰好 4 个 0..255 octet，不接受缩略或非数字形式。 */
+  private static byte[] ipv4Bytes(String value) {
+    String[] octets = value.split("\\.", -1);
+    if (octets.length != 4) {
+      return null;
+    }
+    byte[] bytes = new byte[4];
+    for (int i = 0; i < octets.length; i++) {
+      if (!octets[i].matches("[0-9]{1,3}")) {
+        return null;
+      }
+      int octet = Integer.parseInt(octets[i]);
+      if (octet > 255) {
+        return null;
+      }
+      bytes[i] = (byte) octet;
+    }
+    return bytes;
+  }
+
+  /** 解析纯数字 IPv6；IPv4-mapped 被 JDK 折叠为 4 字节时显式还原为 16 字节，保持 IPv6 地址族。 */
+  private static byte[] ipv6Bytes(String value) {
+    try {
+      byte[] bytes = InetAddress.getByName(value).getAddress();
+      if (bytes.length == 16) {
+        return bytes;
+      }
+      byte[] mapped = new byte[16];
+      mapped[10] = (byte) 0xff;
+      mapped[11] = (byte) 0xff;
+      System.arraycopy(bytes, 0, mapped, 12, 4);
+      return mapped;
+    } catch (UnknownHostException error) {
+      return null;
+    }
   }
 
   private static int parsePort(String value) {
@@ -208,9 +286,10 @@ public final class HttpProxySelector extends ProxySelector {
       throw new IllegalArgumentException("HTTP URI host is required");
     }
     String host = normalizeHost(uri.getHost());
+    String literal = stripBrackets(uri.getHost());
     int port = uri.getPort() == -1 ? (secure ? 443 : 80) : uri.getPort();
     for (Bypass rule : bypass) {
-      if (rule.matches(host, port)) {
+      if (rule.matches(host, literal, port)) {
         return DIRECT;
       }
     }
@@ -248,16 +327,51 @@ public final class HttpProxySelector extends ProxySelector {
     return uri;
   }
 
-  private record Bypass(String host, int port, boolean prefix) {
-    boolean matches(String target, int targetPort) {
-      return (port == -1 || port == targetPort)
-          && (host.equals("*")
-              || host.equals(target)
+  /** 绕过规则匹配：{@code host} 是归一化域名/字面量，{@code literal} 是剥离方括号的原始 URI host。 */
+  private interface Bypass {
+    boolean matches(String host, String literal, int port);
+  }
+
+  /** 主机、域名后缀与 127.* 规则；保留原有可选端口语义。 */
+  private record HostRule(String host, int port, boolean prefix) implements Bypass {
+    @Override
+    public boolean matches(String host, String literal, int port) {
+      return (this.port == -1 || this.port == port)
+          && (this.host.equals("*")
+              || this.host.equals(host)
               || (prefix
-                  ? target.matches("127\\.[0-9]+\\.[0-9]+\\.[0-9]+")
-                  : !host.contains(":")
-                      && !host.matches("[0-9.]+")
-                      && target.endsWith("." + host)));
+                  ? host.matches("127\\.[0-9]+\\.[0-9]+\\.[0-9]+")
+                  : !this.host.contains(":")
+                      && !this.host.matches("[0-9.]+")
+                      && host.endsWith("." + this.host)));
     }
+  }
+
+  /** IPv4/IPv6 CIDR 规则，只匹配目标 URL 中数值 IP 的相同地址族，且不受端口限制。 */
+  private record CidrRule(byte[] network, int prefix) implements Bypass {
+    @Override
+    public boolean matches(String host, String literal, int port) {
+      byte[] address = numericBytes(literal);
+      if (address == null || address.length != network.length) {
+        return false;
+      }
+      int fullBytes = prefix / 8;
+      for (int i = 0; i < fullBytes; i++) {
+        if (network[i] != address[i]) {
+          return false;
+        }
+      }
+      int remaining = prefix % 8;
+      if (remaining == 0) {
+        return true;
+      }
+      int mask = 0xff << (8 - remaining);
+      return (network[fullBytes] & mask) == (address[fullBytes] & mask);
+    }
+  }
+
+  /** 仅对数值 IP 返回地址字节，域名或非数值 host 返回 null；不做 DNS 解析。 */
+  private static byte[] numericBytes(String host) {
+    return host.indexOf(':') >= 0 ? ipv6Bytes(host) : ipv4Bytes(host);
   }
 }

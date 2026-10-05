@@ -25,6 +25,23 @@ class SystemSettingsNetworkTest {
         () -> new SystemSettings.Network("http://proxy:3128", "localhost,127.*,::1"));
   }
 
+  /** 意图：Backend 系统设置接受与 Daemon 相同的 IPv4/IPv6 CIDR 语法，非法规则报精确字段错误。 */
+  @Test
+  void acceptsCidrBypassAndRejectsMalformedWithFieldError() {
+    SystemSettings.Network network =
+        new SystemSettings.Network(
+            "http://proxy:3128", "localhost,192.168.0.0/16,100.64.0.0/10,2001:db8::/32");
+    assertEquals("localhost,192.168.0.0/16,100.64.0.0/10,2001:db8::/32", network.noProxyHosts());
+    assertDoesNotThrow(() -> new SystemSettings.Network(null, "0.0.0.0/0,::/0"));
+    for (String bypass : List.of("192.168.0.0/33", "10.0.0.0/", "host/8", "2001:db8::/129")) {
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class, () -> new SystemSettings.Network(null, bypass));
+      assertEquals("network.noProxyHosts is invalid", error.getMessage());
+      assertNull(error.getCause());
+    }
+  }
+
   @Test
   void rejectsInvalidProxyUrlsWithoutEchoingInputOrCause() {
     // 完整 URL + 显式端口；认证、TLS-to-proxy、SOCKS、path/query/fragment 一律 fail-closed。

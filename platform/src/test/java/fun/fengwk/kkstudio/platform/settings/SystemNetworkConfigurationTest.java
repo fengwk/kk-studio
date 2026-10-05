@@ -100,6 +100,32 @@ class SystemNetworkConfigurationTest {
     }
   }
 
+  /** 意图：Backend 装配接受 CIDR 绕过；内网数值 IP 明确 DIRECT，外部目标走配置代理。 */
+  @Test
+  void cidrBypassSelectsDirectForInternalNumericIps() {
+    ProxySelector previous = ProxySelector.getDefault();
+    try {
+      runner(snapshot("http://127.0.0.1:9999", "192.168.0.0/16,100.64.0.0/10,::1"))
+          .run(
+              context -> {
+                assertThat(context).hasNotFailed();
+                ProxySelector selector =
+                    context.getBean("systemProxySelector", ProxySelector.class);
+                assertEquals(
+                    Proxy.NO_PROXY, selector.select(URI.create("http://192.168.10.1")).getFirst());
+                assertEquals(
+                    Proxy.NO_PROXY, selector.select(URI.create("https://100.100.0.1")).getFirst());
+                assertEquals(
+                    Proxy.NO_PROXY, selector.select(URI.create("http://[::1]")).getFirst());
+                assertEquals(
+                    Proxy.Type.HTTP,
+                    selector.select(URI.create("http://203.0.113.1")).getFirst().type());
+              });
+    } finally {
+      ProxySelector.setDefault(previous);
+    }
+  }
+
   private static ApplicationContextRunner runner(SystemSettingsSnapshot snapshot) {
     return new ApplicationContextRunner()
         .withUserConfiguration(EarlyClients.class, SystemNetworkConfiguration.class)
