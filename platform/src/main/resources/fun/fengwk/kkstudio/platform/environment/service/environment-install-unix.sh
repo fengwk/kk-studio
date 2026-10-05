@@ -1,3 +1,4 @@
+set +vx
 bash <<'KK_STUDIO_INSTALL'
 set +vx
 set -euo pipefail

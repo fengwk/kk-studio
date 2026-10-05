@@ -2640,8 +2640,8 @@ export const aiCatalog = {
     'zh-CN': '安装命令已复制，5分钟内有效。',
   },
   'ai.environment.install.savedCopyFailed': {
-    'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",
-    'zh-CN': "配置已保存，但命令生成或复制失败。请检查剪贴板权限后重试。尚未部署。",
+    'en-US': "Settings saved, but command generation or copying failed. Check your connection and clipboard permissions, then retry. Nothing has been deployed.",
+    'zh-CN': "配置已保存，但命令生成或复制失败。请检查网络和剪贴板权限后重试。尚未部署。",
   },
   'ai.environment.install.uninstallCopied': {
     'en-US': 'Uninstall command copied.',

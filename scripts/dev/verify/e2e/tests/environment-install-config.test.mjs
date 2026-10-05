@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { HttpError } from '../lib/http.mjs'
 
-import '../cases/environment-install-config.mjs'
+import { linuxInstallConfig } from '../cases/environment-install-config.mjs'
 import { ALL_CASES, getCase } from '../lib/registry.mjs'
 
 const CASE_ID = 'environment.install_config_cas_roundtrip'
@@ -208,3 +208,54 @@ test('environment install-script case checks code, headers and rotation without 
   )
   assert.ok(!calls.some((call) => call.includes('spawn') || call.includes('exec')))
 })
+
+for (const failure of ['http', 'timeout']) {
+  test(`install-script ${failure} failure omits code and response credentials and still cleans up`, async () => {
+    const card = {
+      id: '00000000-0000-4000-8000-000000000def',
+      version: '0',
+      installConfig: null,
+    }
+    const token = 'synthetic-registration-token'
+    const code = 'synthetic-install-code'
+    const cardPath = `/api/harness/environments/${card.id}`
+    let deleted = false
+    const ctx = {
+      async call(method, path, body) {
+        if (method === 'POST' && path === '/api/harness/environments') {
+          return { json: { data: { ...card, registrationToken: token } } }
+        }
+        if (method === 'PUT' && path === `${cardPath}/install-config`) {
+          card.version = '1'
+          card.installConfig = linuxInstallConfig()
+          return { json: { data: card } }
+        }
+        if (method === 'POST' && path === `${cardPath}/install-code`) {
+          if (body.expectedVersion !== card.version) throw new HttpError(409, 'version conflict', path)
+          return {
+            json: { data: { code, expiresAt: new Date(Date.now() + 300_000).toISOString() } },
+            headers: new Headers({ 'cache-control': 'no-store' }),
+          }
+        }
+        if (method === 'GET' && path === cardPath) return { json: { data: card } }
+        if (method === 'GET' && path.startsWith(`${cardPath}/install?`)) {
+          if (failure === 'http') throw new HttpError(500, token, path)
+          throw new Error(`timeout GET ${path}`)
+        }
+        if (method === 'DELETE' && path.startsWith(`${cardPath}?`)) {
+          deleted = true
+          return { json: null }
+        }
+        assert.fail(`unexpected call ${method} ${path.split('?')[0]}`)
+      },
+    }
+    await assert.rejects(() => getCase(SCRIPT_CASE_ID).run(ctx), error => {
+      if (failure === 'http') assert.equal(error.status, 500)
+      const report = JSON.stringify({ message: error.message, stack: error.stack, body: error.body, path: error.path })
+      assert.equal(report.includes(code), false)
+      assert.equal(report.includes(token), false)
+      return true
+    })
+    assert.equal(deleted, true)
+  })
+}

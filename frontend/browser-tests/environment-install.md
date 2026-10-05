@@ -18,35 +18,19 @@ npm run test:install:browser
 Unix 测试在一次性临时目录中执行实际生成的一行命令，用假 curl 替代网络，
 记录请求 URL，并验证远端脚本成功、脚本失败和 curl 失败都返回非零。
 它不调用真实安装器或操作 `HOME/.kk-studio`。Windows 测试只在 Windows
-运行，使用原生 PS5.1 执行同一下载入口，验证下载失败、脚本失败和 UTF-8 脚本可执行；
-非 Windows 主机明确跳过。真实发布安装器的预检与服务生命周期由父任务验证。
+运行，使用 PowerShell 5.1 和 7 执行同一下载入口，验证下载失败、脚本失败和 UTF-8 脚本可执行；
+非 Windows 主机明确跳过。发布安装器的预检与服务生命周期由 `scripts/daemon/tests/` 验证。
 
 Windows 原生执行入口：`npm test -- src/features/ai/environment/install-command.windows.test.ts`。
 Unix 用例在 Windows 上跳过，不用 Git Bash 代替原生 PowerShell 下载入口。
 
-## Windows CI 接线（由父任务写入 workflow）
+## Windows 原生验证
 
-本目录不修改 `.github/workflows`。父任务在 Windows runner 上增加一个前端作业即可
-自动执行 Windows 原生命令测试（无需后端、模型或宿主服务）：
+`docker-publish` 的 main/validate-only 门禁和 `daemon-release` 均在 Windows runner
+执行 `npm run test:install:windows`。本地运行需同时安装 PowerShell 5.1 和 7。
+测试以假下载替代网络，不启动后端、模型或宿主服务；客户端不写暂存文件。
+后端生成脚本的凭据字节、ACL 和清理边界由原生 `EnvironmentInstallScriptsTest` 验证。
 
-```yaml
-windows-install-command:
-  runs-on: windows-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '22'
-    - working-directory: frontend
-      run: npm ci
-    - working-directory: frontend
-      run: npm run test:install:windows
-```
-
-该用例调用系统自带 `powershell.exe`（PS5.1），以假下载替代网络，执行生成的一行命令：
-下载失败非零、远端脚本失败非零、UTF-8 脚本在内存中可执行。客户端不再写暂存文件。
-
-
-浏览器覆盖 1280×900 / 390×900 下的卡片、已保存默认值、可折叠字段、保存复制、重新打开、
+浏览器覆盖 1280×900 / 390×900 / 320×900 下的卡片、已保存默认值、可折叠字段、保存复制、重新打开、
 卸载范围说明、创建自动打开、Token 轮换、CAS 草稿保留及剪贴板拒绝。
 报告和截图位于 `.reports/install-browser/`，截图只包含非敏感的表单输入。

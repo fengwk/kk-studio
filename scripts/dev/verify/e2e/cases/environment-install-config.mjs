@@ -195,7 +195,19 @@ function assertUninstallScript(script, secrets) {
   assertScriptOmits(script, 'jdtls', 'saved config field')
 }
 
-/** 只报告状态，避免 expectHttpError 把可能含 code 的响应正文写进失败 artifact。 */
+/** 下载失败只保留状态和端点，避免 code、响应正文进入失败报告。 */
+async function downloadInstallationScript(ctx, path) {
+  try {
+    return await ctx.call('GET', path)
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw new HttpError(error.status, 'install script download failed', path.split('?')[0])
+    }
+    throw new Error('install script download failed before a usable HTTP response')
+  }
+}
+
+/** 只报告状态，不回显错误响应正文。 */
 async function expectStatus(fn, status) {
   try {
     await fn()
@@ -274,8 +286,8 @@ registerCase({
         'environment detail must not include registrationToken',
       )
 
-      const { json: script, headers: scriptHeaders } = await ctx.call(
-        'GET',
+      const { json: script, headers: scriptHeaders } = await downloadInstallationScript(
+        ctx,
         `${cardPath}/install?code=${encodeURIComponent(code)}`,
       )
       assert(typeof script === 'string', 'install download must be text, not a JSON envelope')
@@ -294,9 +306,12 @@ registerCase({
       )
       assertInstallScript(script, { token, config })
 
-      await expectStatus(() => ctx.call('GET', `${cardPath}/install`), 400)
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install`), 400)
       await expectStatus(
-        () => ctx.call('GET', `${cardPath}/install?code=${encodeURIComponent(`${code}x`)}`),
+        () => downloadInstallationScript(
+          ctx,
+          `${cardPath}/install?code=${encodeURIComponent(`${code}x`)}`,
+        ),
         400,
       )
 
@@ -315,7 +330,7 @@ registerCase({
       assertInstallConfig(rotated.installConfig)
 
       await expectStatus(
-        () => ctx.call('GET', `${cardPath}/install?code=${encodeURIComponent(code)}`),
+        () => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(code)}`),
         400,
       )
 
@@ -330,8 +345,8 @@ registerCase({
       assert(typeof refreshedCode === 'string' && refreshedCode.length > 0 && refreshedCode !== code, 'rotation must require a new install code')
       assertExpiresNearFiveMinutes(refreshed.expiresAt, Date.now())
 
-      const { json: refreshedScript, headers: refreshedScriptHeaders } = await ctx.call(
-        'GET',
+      const { json: refreshedScript, headers: refreshedScriptHeaders } = await downloadInstallationScript(
+        ctx,
         `${cardPath}/install?code=${encodeURIComponent(refreshedCode)}`,
       )
       assertNoStore(refreshedScriptHeaders, 'refreshed install download')

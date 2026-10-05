@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,7 +41,7 @@ class EnvironmentInstallScriptsTest {
     String token = "private-汉字'\"$`$(touch NEVER)";
     Execution execution = execute(EnvironmentInstallScripts.install(config, token), 0);
     assertEquals(0, execution.status());
-    assertFalse((execution.stdout() + execution.stderr()).contains(token));
+    assertFalse((execution.stdout() + execution.stderr()).contains("private-"));
     assertEquals(expectedDaemon(config), execution.record().get("config"));
     assertEquals(token, execution.record().get("token").asText());
     assertTrue(execution.record().get("sibling").asBoolean());
@@ -58,7 +57,11 @@ class EnvironmentInstallScriptsTest {
             "--java-home",
             config.getJavaHome()),
         texts(execution.record().get("args")));
-    assertFalse(execution.record().toString().contains(token));
+    assertFalse(
+        texts(execution.record().get("args")).stream().anyMatch(value -> value.contains(token)));
+    assertFalse(
+        execution.record().get("env").properties().stream()
+            .anyMatch(entry -> entry.getValue().asText().contains(token)));
     assertFalse(Files.exists(Path.of(execution.record().get("stage").asText())));
   }
 
@@ -149,7 +152,7 @@ class EnvironmentInstallScriptsTest {
   @EnabledOnOs(OS.WINDOWS)
   void executesWindowsInstallAndUninstall(String shell) throws Exception {
     Path executable = Path.of(shell + ".exe");
-    assumeTrue(windowsCommandExists(executable), shell + " is not installed");
+    assertTrue(windowsCommandExists(executable), shell + " is not installed");
     Path dir = Files.createTempDirectory("kk-windows-command-");
     Path recordPath = dir.resolve("record.json");
     Path fixture = dir.resolve("recorder.ps1");
@@ -165,7 +168,7 @@ class EnvironmentInstallScriptsTest {
               fixture,
               recordPath);
       assertEquals(1, failed.status(), failed.stdout() + failed.stderr());
-      assertFalse((failed.stdout() + failed.stderr()).contains(token));
+      assertFalse((failed.stdout() + failed.stderr()).contains("private-"));
       JsonNode record = JSON.readTree(Files.readString(recordPath));
       assertEquals("install", record.get("action").asText());
       assertEquals(token, record.get("token").asText());
@@ -182,7 +185,9 @@ class EnvironmentInstallScriptsTest {
         assertEquals(0, acl.get("foreign").asInt());
         assertTrue(acl.get("readable").asInt() >= 1);
       }
-      assertFalse(record.get("environment").toString().contains(token));
+      assertFalse(
+          record.get("environment").properties().stream()
+              .anyMatch(entry -> entry.getValue().asText().contains(token)));
       assertFalse(Files.exists(Path.of(record.get("stage").asText())));
       assertFalse(Files.exists(dir.resolve("NEVER")));
 
@@ -247,7 +252,7 @@ class EnvironmentInstallScriptsTest {
                   "TMPDIR", ".",
                   "RECORD", result.toString(),
                   "FIXTURE", dir.resolve("recorder").toString(),
-                  "SHELLOPTS", "xtrace",
+                  "SHELLOPTS", "xtrace:verbose",
                   "BASH_FUNC_printf%%", "() { echo unsafe >&2; exit 42; }"));
       return new Execution(run, JSON.readTree(Files.readString(result)));
     } finally {

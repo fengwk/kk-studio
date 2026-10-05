@@ -58,9 +58,9 @@ fail() {
   fi
   echo "${action}失败：${detail}" >&2
   if [ "$action" = 卸载 ]; then
-    echo "下一步：按上面的原因处理后再重试卸载。需要诊断时运行 bash install.sh status。" >&2
+    echo "下一步：处理上述问题后，重新复制并执行卸载命令。" >&2
   else
-    echo "下一步：按上面的原因修正后重试安装。需要诊断时运行 bash install.sh status。" >&2
+    echo "下一步：修正上述问题后，重新复制并执行安装命令。" >&2
   fi
   exit 1
 }
@@ -136,9 +136,9 @@ cleanup() {
     echo "安装失败：发布后启动或注册未完成。未自动回滚，配置和数据未自动恢复。" >&2
     echo "备份：${BACKUP_DIR:-无（首次安装）}" >&2
     if [ "$HOST_OS" = Linux ]; then
-      echo "下一步：运行 journalctl --user -u $SERVICE_NAME -n 50 查看原因。需要诊断时运行 bash install.sh status。" >&2
+      echo "下一步：运行 journalctl --user -u $SERVICE_NAME -n 50 --no-pager 查看原因。" >&2
     else
-      echo "下一步：查看日志 $STDERR_LOG。需要诊断时运行 bash install.sh status。" >&2
+      echo "下一步：查看日志 $STDERR_LOG。" >&2
     fi
   fi
   exit "$code"

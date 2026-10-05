@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -295,6 +296,42 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.timeZone").doesNotExist())
         .andExpect(jsonPath("$.data.note").doesNotExist())
         .andExpect(jsonPath("$.data.rootPath").doesNotExist());
+  }
+
+  /** 签发响应保留 JSON 信封和 ISO 过期时间，不返回长期凭据。 */
+  @Test
+  void installCodeResponseUsesNoStoreAndIsoExpiry() throws Exception {
+    EnvironmentInstallCodeDTO issued = new EnvironmentInstallCodeDTO();
+    issued.setCode("short-code");
+    issued.setExpiresAt(Instant.parse("2026-10-05T00:05:00Z"));
+    when(environmentService.issueInstallCode(EnvironmentId.of(ENV_ID), "4")).thenReturn(issued);
+
+    mockMvc
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/install-code")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"4\"}"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(jsonPath("$.data.code").value("short-code"))
+        .andExpect(jsonPath("$.data.expiresAt").value("2026-10-05T00:05:00Z"))
+        .andExpect(jsonPath("$.data.registrationToken").doesNotExist());
+    verify(environmentService).issueInstallCode(EnvironmentId.of(ENV_ID), "4");
+  }
+
+  /** 错误 code 必须保持 HTTP 400，不能按成功脚本返回。 */
+  @Test
+  void invalidInstallCodeReturnsValidationError() throws Exception {
+    when(environmentService.installationScript(EnvironmentId.of(ENV_ID), "expired-code"))
+        .thenThrow(
+            new AiValidationException("code", "install code is missing, expired or invalid"));
+
+    mockMvc
+        .perform(
+            get("/api/harness/environments/" + ENV_ID + "/install").param("code", "expired-code"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.resource").value("code"))
+        .andExpect(content().string(not(containsString("expired-code"))));
   }
 
   /** 意图：安装与卸载脚本以纯文本返回，带禁止缓存和禁止嗅探头，且不被 Result JSON 包装。 */

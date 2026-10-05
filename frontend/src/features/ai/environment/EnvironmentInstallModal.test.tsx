@@ -127,7 +127,7 @@ describe('EnvironmentInstallModal', () => {
     await user.clear(origin()); await user.type(origin(), 'https://draft.example.com')
     await user.click(copyButton())
     const conflict = await screen.findByRole('alertdialog', { name: '数据已发生变化' })
-    expect(environmentService.getEnvironment).toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue({ ...card, version: '12' })
     await user.click(within(conflict).getByRole('button', { name: '刷新' }))
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
@@ -181,18 +181,21 @@ describe('EnvironmentInstallModal', () => {
     expect(screen.getByLabelText('操作系统')).toHaveAttribute('data-value', 'macos')
   })
 
-  it.each(['metadata', 'save', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
+  it.each(['metadata', 'save', 'code', 'clipboard'] as const)('ignores stale %s completion after unmount', async phase => {
     const user = userEvent.setup()
     const metadata = deferred<EnvironmentCardDTO>()
     const save = deferred<EnvironmentCardDTO>()
+    const code = deferred<{ code: string; expiresAt: string }>()
     const clipboard = deferred<boolean>()
     if (phase === 'metadata') vi.mocked(environmentService.getEnvironment).mockReturnValue(metadata.promise)
     if (phase === 'save') vi.mocked(environmentService.saveInstallConfig).mockReturnValue(save.promise)
+    if (phase === 'code') vi.mocked(environmentService.createInstallCode).mockReturnValue(code.promise)
     if (phase === 'clipboard') vi.mocked(copyTextToClipboard).mockReturnValue(clipboard.promise)
     const view = open()
     if (phase !== 'metadata') {
       await waitFor(() => expect(copyButton()).toBeEnabled())
       await user.click(copyButton())
+      if (phase === 'code') await waitFor(() => expect(environmentService.createInstallCode).toHaveBeenCalled())
       if (phase === 'clipboard') {
         await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
         // 剪贴板尚未确认时，不能抢先宣布复制成功。
@@ -201,9 +204,11 @@ describe('EnvironmentInstallModal', () => {
     }
     view.unmount()
     await act(async () => {
-      metadata.resolve(card); save.resolve(card); clipboard.resolve(true)
+      metadata.resolve(card); save.resolve(card)
+      code.resolve({ code: 'short-code', expiresAt: '2026-10-05T09:05:00Z' }); clipboard.resolve(true)
     })
     if (phase === 'save' || phase === 'metadata') expect(copyTextToClipboard).not.toHaveBeenCalled()
+    if (phase === 'code') expect(copyTextToClipboard).not.toHaveBeenCalled()
     expect(screen.queryByRole('status')).toBeNull()
   })
 
@@ -353,7 +358,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.getEnvironment).toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
     const real = JSON.stringify({
       jdtls: { command: ['/usr/bin/jdtls'], extensions: ['.java'] },
@@ -385,7 +390,7 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/LSP servers 配置无效/))
     expect(editor).toHaveValue('{}')
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
-    expect(environmentService.getEnvironment).toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
   })
 

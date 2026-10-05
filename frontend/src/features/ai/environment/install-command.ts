@@ -235,10 +235,10 @@ function unixCommand(url: string): string {
   return `(set -o pipefail; curl -fsSL ${sh(url)} | bash)`
 }
 
-/** 一行：先完整下载，再在局部作用域执行；不改调用方会话。 */
+/** 一行：下载前关闭调试输出；变量与错误策略在局部作用域隔离。 */
 function windowsCommand(url: string): string {
   const quoted = ps(url)
-  return `& { $ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script)) }`
+  return `& { Set-PSDebug -Off; $ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script)) }`
 }
 export function generateInstallCommand(
   origin: string,

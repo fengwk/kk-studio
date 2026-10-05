@@ -40,7 +40,7 @@ RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "daemon-release.y
 
 
 def script_text():
-    return INSTALL_SCRIPT.read_text(encoding="utf-8")
+    return INSTALL_SCRIPT.read_text(encoding="utf-8-sig")
 
 
 def function_body(name):
@@ -70,6 +70,8 @@ class TestWindowsInstallerSurface(unittest.TestCase):
         """Windows PowerShell 5.1 and strict terminating-error behavior are release requirements."""
         text = script_text()
         self.assertTrue(INSTALL_SCRIPT.is_file())
+        # PS 5.1 must decode the Chinese messages as UTF-8, not the host ANSI code page.
+        self.assertTrue(INSTALL_SCRIPT.read_bytes().startswith(b"\xef\xbb\xbf"))
         self.assertTrue(text.startswith("#Requires -Version 5.1\n"))
         self.assertIn("Set-StrictMode -Version Latest", text)
         self.assertIn('$ErrorActionPreference = "Stop"', text)
