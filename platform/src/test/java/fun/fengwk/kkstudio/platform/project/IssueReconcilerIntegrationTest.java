@@ -453,7 +453,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
-  /** 测试意图：活动执行时长耗尽时用显式 Stop（当前 Thread 版本 CAS、稳定 requestId）结束执行，并在同一事务失败收尾，不再等待业务派发门禁把执行收敛成 idle。 */
+  /**
+   * 测试意图：活动执行时长耗尽时用显式 Stop（当前 Thread 版本 CAS、稳定 requestId）结束执行，并在同一事务失败收尾； 收尾区间必须取 Stop 回执的权威
+   * head（本次已提交的停止边界），而不是 Stop 之前的旧快照 head，且区间是真实 Entry 路径。
+   */
   @Test
   void activeRunBudgetExhaustedStopsThreadAndFailsRun() {
     String agent = createAgent();
@@ -465,6 +468,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         "update project_issue_run set remaining_execution_ms = 100, active_since ="
             + " current_timestamp - interval '10 seconds' where id = ?",
         run.getId());
+    UUID headBeforeStop =
+        jdbc.queryForObject(
+            "select head_entry_id from harness_thread where id = ?", UUID.class, run.getThreadId());
 
     IssueWorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
@@ -472,12 +478,39 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, outcome);
     // 业务预算要求停止：必须对当前 Thread 发起显式 Stop，而不是写通用 Pause 后等 idle。
     verify(harnessRuntime).stop(any(StopCommand.class));
+    UUID endEntryId =
+        jdbc.queryForObject(
+            "select end_entry_id from project_issue_run where id = ?", UUID.class, run.getId());
+    // Stop 已在本次事务写入 STOPPED TURN_END 并推进 head：收尾区间必须以该新 head 为界，不能沿用旧快照 head。
+    assertNotNull(endEntryId);
+    assertNotEquals(headBeforeStop, endEntryId);
+    assertEquals(
+        headBeforeStop,
+        jdbc.queryForObject(
+            "select parent_entry_id from harness_entry where id = ?", UUID.class, endEntryId));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from harness_entry where id = ? and entry_type = 'TURN_END' and"
+                + " payload->>'outcome' = 'STOPPED'",
+            endEntryId));
+    // 区间必须是真实父链：从 Run 起点能沿父链走到收尾 Entry。
+    assertEquals(
+        1L,
+        count(
+            "with recursive path(id, parent_entry_id) as ("
+                + " select id, parent_entry_id from harness_entry where id = ?"
+                + " union all"
+                + " select e.id, e.parent_entry_id from harness_entry e join path p"
+                + " on e.id = p.parent_entry_id)"
+                + " select count(*) from path where id = ?",
+            endEntryId,
+            run.getStartEntryId()));
     assertEquals(
         1L,
         count(
             "select count(*) from project_issue_run where id = ? and status = 'FAILED' and error ="
-                + " 'Run active execution budget is exhausted' and end_entry_id is not null and"
-                + " ended_at is not null",
+                + " 'Run active execution budget is exhausted' and ended_at is not null",
             run.getId()));
     assertEquals(
         1L,
@@ -508,8 +541,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         run.getId());
     ModelInvocation activeModel = mock(ModelInvocation.class);
     when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
-    ThreadSnapshot inFlight = overlay(run.getThreadId(), List.of(), activeModel, List.of());
-    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlight);
+    UUID snapshotHead = createSnapshot(run.getThreadId()).thread().headEntryId();
+    // 每次读取都按真实 DB 重建快照并注入在途模型：Stop 写入新的 STOPPED 边界后，收尾区间校验才能读到真实父链。
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId()))
+        .thenAnswer(invocation -> overlay(run.getThreadId(), List.of(), activeModel, List.of()));
 
     IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
 
@@ -520,6 +555,18 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from project_issue_run where id = ? and status = 'FAILED'",
             run.getId()));
+    // 收尾区间取 Stop 回执 head，而不是调用前快照的 head。
+    UUID endEntryId =
+        jdbc.queryForObject(
+            "select end_entry_id from project_issue_run where id = ?", UUID.class, run.getId());
+    assertNotNull(endEntryId);
+    assertNotEquals(snapshotHead, endEntryId);
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from harness_entry where id = ? and entry_type = 'TURN_END' and"
+                + " payload->>'outcome' = 'STOPPED'",
+            endEntryId));
   }
 
   /** 测试意图：在完全静止点且存在交接意图（next_state）的活动 Run，reconcile 会正常收尾该 Run 并推进 Issue 状态到目标阶段。 */
