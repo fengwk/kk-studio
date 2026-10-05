@@ -35,6 +35,10 @@ public final class ProjectRunContextProjector implements ContextProjector {
     } catch (IllegalArgumentException error) {
       throw new IllegalStateException("invalid project run scope", error);
     }
+    if (!scope.active()) {
+      // 已关闭的 Run 不再投影任何 Issue 上下文：branch 上后写的 scope 才代表当前生命周期位置。
+      return List.of();
+    }
     return List.of(new ContextFragment(scope.contextSection()));
   }
 }
