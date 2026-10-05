@@ -2575,9 +2575,21 @@ export const aiCatalog = {
     'en-US': "Studio address",
     'zh-CN': "Studio 地址",
   },
+  'ai.environment.install.title': {
+    'en-US': 'Install/overwrite environment',
+    'zh-CN': '安装/覆盖环境',
+  },
+  'ai.environment.install.uninstallTitle': {
+    'en-US': 'Uninstall environment',
+    'zh-CN': '卸载环境',
+  },
   'ai.environment.install.originHelp': {
-    'en-US': "HTTP(S) base host, e.g. https://studio.example.com; optional port, no path or query.",
-    'zh-CN': "HTTP(S) base 主机，例如 https://studio.example.com，可带端口，不含路径或查询参数。",
+    'en-US': 'No path or query.',
+    'zh-CN': '不含路径或查询参数。',
+  },
+  'ai.environment.install.originPlaceholder': {
+    'en-US': 'https://studio.example.com',
+    'zh-CN': 'https://studio.example.com',
   },
   'ai.environment.install.optional': {
     'en-US': "Optional: Java, Bash, note and LSP servers",
@@ -2596,8 +2608,8 @@ export const aiCatalog = {
     'zh-CN': "启用 LSP servers",
   },
   'ai.environment.install.lspHelp': {
-    'en-US': 'Only command, extensions, rootMarkers and firstMatchMarkers are supported. command and extensions are required; extensions must start with a dot. Install language servers yourself; Studio does not install them.',
-    'zh-CN': '只支持 command、extensions、rootMarkers 和 firstMatchMarkers。command 与 extensions 必填，extensions 需以 . 开头。语言服务器需自行安装，Studio 不代装。',
+    'en-US': 'Install the language server on the target host first.',
+    'zh-CN': '请先在目标主机安装对应的语言服务器。',
   },
   'ai.environment.install.saveCopy': {
     'en-US': "Save and copy installation command",
@@ -2608,16 +2620,24 @@ export const aiCatalog = {
     'zh-CN': "复制卸载命令",
   },
   'ai.environment.install.notice': {
-    'en-US': "The command contains credentials. Keep it private. Requires JDK 21 and Bash. Run it on the target host to deploy; saving does not apply settings. Overwrite restarts the single daemon for the current OS user, interrupts tool calls in the environment it is currently bound to, and connects it to the selected environment, preserving runtime data.",
-    'zh-CN': "命令包含凭据，请勿分享。需要 JDK 21 和 Bash。在目标主机执行才会部署，保存不代表已应用。覆盖会重启当前系统用户唯一的 Daemon，中断其当前绑定环境的工具调用，并连接到所选环境，保留运行数据。",
+    'en-US': 'Copy the command and run it in a terminal on the target host.',
+    'zh-CN': '复制命令后，在目标主机的终端执行。',
+  },
+  'ai.environment.install.noticeDetail': {
+    'en-US': 'Requires JDK 21 and Bash. Overwriting restarts the service and connects to this environment, interrupting tool calls in progress. Existing data is kept.',
+    'zh-CN': '需要 JDK 21 和 Bash。覆盖安装会重启服务并连接到此环境，中断当前工具调用；已有数据保留。',
+  },
+  'ai.environment.install.credentialNote': {
+    'en-US': 'The command contains credentials. Do not share it.',
+    'zh-CN': '命令含凭据，请勿分享。',
   },
   'ai.environment.install.uninstallNotice': {
-    'en-US': "Uninstall removes the managed service and program for the current OS user’s single daemon at HOME/.kk-studio, which may not be the environment in this card. Local config, token, data and logs are preserved, and no Studio environment record is deleted.",
-    'zh-CN': "卸载会移除当前系统用户 HOME/.kk-studio 下唯一 Daemon 的托管服务和程序，该 Daemon 不一定是此卡片对应的环境。保留本地配置、Token、数据和日志，不删除任何 Studio 环境记录。",
+    'en-US': 'Run the command on the host you want to uninstall. The environment service is removed, and local configuration and data are kept. The environment record in Studio is not deleted.',
+    'zh-CN': '在需要卸载的主机上执行命令。环境服务会被移除，本地配置和数据保留；Studio 中的环境记录不会删除。',
   },
   'ai.environment.install.savedCopied': {
-    'en-US': "Settings saved and command copied. Execute on the target host to apply.",
-    'zh-CN': "配置已保存，命令已复制。在目标主机执行后才会应用。",
+    'en-US': 'Installation command copied.',
+    'zh-CN': '安装命令已复制。',
   },
   'ai.environment.install.savedCopyFailed': {
     'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",
@@ -2628,8 +2648,8 @@ export const aiCatalog = {
     'zh-CN': "配置已保存，但环境在读取凭据时已发生变化，未生成命令。请重试以重新保存并复制。",
   },
   'ai.environment.install.uninstallCopied': {
-    'en-US': "Uninstall command copied. No environment record was changed.",
-    'zh-CN': "卸载命令已复制，未修改环境记录。",
+    'en-US': 'Uninstall command copied.',
+    'zh-CN': '卸载命令已复制。',
   },
   'ai.environment.install.clipboardFailed': {
     'en-US': "Copy failed. Check clipboard permissions and retry.",
