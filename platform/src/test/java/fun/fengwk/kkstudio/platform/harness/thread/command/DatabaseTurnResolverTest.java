@@ -2466,7 +2466,8 @@ class DatabaseTurnResolverTest {
         "设计",
         "完成可交付方案",
         List.of("REVIEW"),
-        "assistant");
+        "assistant",
+        true);
   }
 
   /** 测试意图：业务工具不再由运行时按 owner 注入；Agent 配置显式声明 issue_transition 即可获得该受控工具。 */
@@ -2586,12 +2587,13 @@ class DatabaseTurnResolverTest {
   /** 测试意图：Agent 仍不能声明 INTERNAL 工具；只有 SELECTABLE 贡献（如显式的 issue_transition）才能被选择。 */
   @Test
   void rejectsInternalToolDeclaredByAgent() {
+    // 工具标识符遵循 lowercase dotted/dashed 约定，因此内部工具用 dashed 名声明后仍必须被拒绝。
     Fixture fixture =
         new Fixture(
-            List.of("secret_tool"),
+            List.of("secret-tool"),
             List.of(),
-            List.of(hostDescriptor("secret_tool")),
-            Set.of("secret_tool"),
+            List.of(hostDescriptor("secret-tool")),
+            Set.of("secret-tool"),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
@@ -2600,7 +2602,7 @@ class DatabaseTurnResolverTest {
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals(
-        "internal tool cannot be selected by an Agent: secret_tool", rejected.error().message());
+        "internal tool cannot be selected by an Agent: secret-tool", rejected.error().message());
   }
 
   /** 测试意图：压缩路径只冻结 execution model 与预算，不注入任何工具，也不注入 Agent 组合指令。 */

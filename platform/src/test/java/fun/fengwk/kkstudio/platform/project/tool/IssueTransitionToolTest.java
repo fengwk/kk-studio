@@ -62,7 +62,8 @@ class IssueTransitionToolTest {
                   "n",
                   null,
                   List.of(),
-                  "designer"));
+                  "designer",
+                  true));
 
   private final IssueTransitionService service = mock(IssueTransitionService.class);
   private final IssueTransitionTool tool = new IssueTransitionTool(service);

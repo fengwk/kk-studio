@@ -247,7 +247,8 @@ class IssueRunServiceImplTest {
             "设计",
             null,
             List.of("DONE"),
-            "worker");
+            "worker",
+            true);
     ThreadCommand source =
         new ThreadCommand(
             threadId,

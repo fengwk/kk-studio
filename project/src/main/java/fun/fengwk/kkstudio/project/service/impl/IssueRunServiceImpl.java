@@ -237,6 +237,13 @@ public class IssueRunServiceImpl implements IssueRunService {
     }
 
     long ordinal = issue.getNextRunOrdinal();
+    // 指示游标沿用上一个 Run 的既有活动事实位置：上一个 Run 未在安全点观察到的业务指示不会被匹配收尾吞掉，会由本次 Run
+    // 在安全点投递；没有历史 Run 时才从当前活动流尾部开始。
+    IssueRun previousRun = issueRunRepository.getLatestByIssueId(issueId);
+    long observedActivitySequence =
+        previousRun != null
+            ? previousRun.getObservedActivitySequence()
+            : issue.getNextActivitySequence() - 1;
     IssueRun run =
         IssueRun.builder()
             .id(runId)
@@ -247,7 +254,7 @@ public class IssueRunServiceImpl implements IssueRunService {
             .threadId(threadId)
             .status(IssueRunStatus.RUNNING)
             .startEntryId(startEntryId)
-            .observedActivitySequence(issue.getNextActivitySequence() - 1)
+            .observedActivitySequence(observedActivitySequence)
             .remainingExecutionMs(DEFAULT_RUN_EXECUTION_BUDGET_MS)
             .activeSince(Instant.now())
             .build();
@@ -741,7 +748,8 @@ public class IssueRunServiceImpl implements IssueRunService {
         stage.name(),
         stage.instructions(),
         stage.next().stream().map(ProjectStateCode::value).toList(),
-        agentName);
+        agentName,
+        true);
   }
 
   /**

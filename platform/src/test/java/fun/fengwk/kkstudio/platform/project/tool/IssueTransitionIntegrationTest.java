@@ -170,7 +170,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     AiValidationException rejected =
         assertThrows(AiValidationException.class, () -> accept(fixture, "REVIEW"));
 
-    assertTrue(rejected.getMessage().contains("no active run"), rejected.getMessage());
+    assertTrue(rejected.getMessage().contains("already been closed"), rejected.getMessage());
     assertNull(nextState(fixture.run().getId()));
   }
 }
