@@ -28,7 +28,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -37,7 +39,10 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -192,6 +197,54 @@ public final class HarnessRuntime {
   public List<UUID> findAncestorChain(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(tx -> tx.findAncestorChain(threadId));
+  }
+
+  /**
+   * 读取目标 Thread 所属执行树的一致快照：从任意节点回溯真实根，再按不可变 {@code parentThreadId} 收集全部后代。
+   *
+   * <p>一次事务先取该根的树锁并重读确认，再按 UUID 升序锁定全部 Thread 后生成快照；不按 Session 成员替代永久父子关系。目标不存在抛 {@link
+   * HarnessRuntimeNotFoundException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
+   */
+  public List<ThreadSnapshot> getThreadTree(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(
+        tx -> {
+          List<UUID> hint = tx.findAncestorChain(threadId);
+          if (hint.isEmpty()) {
+            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
+          }
+          UUID rootId = hint.get(hint.size() - 1);
+          tx.lockTree(rootId);
+          List<UUID> confirmed = tx.findAncestorChain(threadId);
+          if (!hint.equals(confirmed) || confirmed.isEmpty()) {
+            throw new IllegalStateException("execution tree changed while acquiring its lock");
+          }
+          Map<UUID, ThreadState> discovered = new LinkedHashMap<>();
+          collectTree(tx, confirmed.get(confirmed.size() - 1), discovered);
+          List<UUID> lockOrder = new ArrayList<>(discovered.keySet());
+          lockOrder.sort(UuidOrder.COMPARATOR);
+          List<ThreadState> locked = new ArrayList<>(lockOrder.size());
+          for (UUID id : lockOrder) {
+            locked.add(
+                tx.lockThread(id)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException(
+                                "thread " + id + " disappeared while locking its execution tree")));
+          }
+          ThreadContextProbe probe = new ThreadContextProbe();
+          List<ThreadSnapshot> snapshots = new ArrayList<>(locked.size());
+          for (ThreadState thread : locked) {
+            List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+            EntryPath path = tx.loadEntryPath(thread.headEntryId());
+            // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
+            snapshots.add(snapshot(thread, path, queued, probe.probe(tx, thread, path)));
+          }
+          snapshots.sort(
+              Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
+                  .thenComparing(snapshot -> snapshot.thread().id(), UuidOrder.COMPARATOR));
+          return List.copyOf(snapshots);
+        });
   }
 
   /**
@@ -458,33 +511,62 @@ public final class HarnessRuntime {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "thread " + threadId + " does not exist"));
-          List<ThreadCommand> queued = tx.loadQueuedCommands(threadId);
-          LockedThreadContext locked = ThreadContextLock.load(tx, thread);
-          return switch (locked.context()) {
-            case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
-                thread, locked.path(), queued, null, List.of(), List.of());
-            case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
-                thread, locked.path(), queued, null, List.of(), List.of());
-            case ThreadContext.ModelActive active -> new ThreadSnapshot(
-                thread,
-                locked.path(),
-                queued,
-                active.model(),
-                List.of(),
-                projectModelAttemptFailures(active.model(), locked.path()));
-            case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
-                thread,
-                locked.path(),
-                queued,
-                pending.model(),
-                List.of(),
-                projectModelAttemptFailures(pending.model(), locked.path()));
-            case ThreadContext.ToolActive active -> new ThreadSnapshot(
-                thread, locked.path(), queued, active.model(), active.siblings(), List.of());
-            case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
-                thread, locked.path(), queued, pending.model(), pending.siblings(), List.of());
-          };
+          return snapshotLockedThread(tx, thread);
         });
+  }
+
+  /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 所在执行树锁与 Thread 行锁。 */
+  private static ThreadSnapshot snapshotLockedThread(
+      HarnessStore.Transaction tx, ThreadState thread) {
+    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    LockedThreadContext locked = ThreadContextLock.load(tx, thread);
+    return snapshot(thread, locked.path(), queued, locked.context());
+  }
+
+  private static ThreadSnapshot snapshot(
+      ThreadState thread, EntryPath path, List<ThreadCommand> queued, ThreadContext context) {
+    return switch (context) {
+      case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
+          thread, path, queued, null, List.of(), List.of());
+      case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
+          thread, path, queued, null, List.of(), List.of());
+      case ThreadContext.ModelActive active -> new ThreadSnapshot(
+          thread,
+          path,
+          queued,
+          active.model(),
+          List.of(),
+          projectModelAttemptFailures(active.model(), path));
+      case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
+          thread,
+          path,
+          queued,
+          pending.model(),
+          List.of(),
+          projectModelAttemptFailures(pending.model(), path));
+      case ThreadContext.ToolActive active -> new ThreadSnapshot(
+          thread, path, queued, active.model(), active.siblings(), List.of());
+      case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
+          thread, path, queued, pending.model(), pending.siblings(), List.of());
+    };
+  }
+
+  /** 按永久 {@code parentThreadId} 深度优先收集整棵树；重复出现即环路，fail closed。 */
+  private static void collectTree(
+      HarnessStore.Transaction tx, UUID threadId, Map<UUID, ThreadState> discovered) {
+    if (discovered.containsKey(threadId)) {
+      throw new IllegalStateException("thread parent cycle at " + threadId);
+    }
+    ThreadState thread =
+        tx.findThread(threadId)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "thread " + threadId + " disappeared while reading its execution tree"));
+    discovered.put(threadId, thread);
+    for (ThreadState child : tx.listChildren(threadId)) {
+      collectTree(tx, child.id(), discovered);
+    }
   }
 
   /** 读取 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）；Session 不存在抛 NotFound。 */

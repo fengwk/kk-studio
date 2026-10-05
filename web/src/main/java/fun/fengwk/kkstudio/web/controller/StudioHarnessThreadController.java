@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
@@ -43,6 +44,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.security.Principal;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -82,6 +84,21 @@ public class StudioHarnessThreadController {
     this.projectThreadOwnerResolver =
         Objects.requireNonNull(projectThreadOwnerResolver, "projectThreadOwnerResolver");
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
+  }
+
+  /**
+   * 查询目标 Thread 所属执行树：任意节点返回同一真实根下的完整节点列表。
+   *
+   * <p>纯查询，不创建 Command / Entry / Work，也不触碰 version。可见性与 Thread 快照相同。
+   */
+  @GetMapping("/{threadId}/tree")
+  public Result<List<HarnessThreadTreeNodeDTO>> getTree(@PathVariable String threadId) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () ->
+                HarnessRuntimeResponseMapper.toThreadTreeDtos(
+                    runtime.getThreadTree(
+                        HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId")))));
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */

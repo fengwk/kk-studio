@@ -11,7 +11,7 @@
 ```text
 acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
 stop / decideToolApproval / submitToolInput / listPendingInteractions / setThreadYolo / renameThread / renameSession
-manualCompactionAvailability / compactThread / getThreadSnapshot
+manualCompactionAvailability / compactThread / getThreadSnapshot / getThreadTree
 findJoin / projectJoinReceipt / findAncestorChain
 ```
 
@@ -78,6 +78,8 @@ yoloEnabled / status / nextCommandSequence / version / createdAt / updatedAt
 会话显示名由服务端在创建时派生、不进入 creation request hash：Session 取初始批次末尾 user-like 消息的首个非空文本（折叠单行、前 40 个码点，无省略号），无文本回退 `session-` + Session UUID 前 8 位；ROOT Thread 恒为 `main`；分支 Thread 恒为 `branch-` + Thread UUID 前 8 位。手工名称统一经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/Names.java) 折叠空白并要求非空、至多 256 个码点（超长报错，绝不截断）。
 
 `getThreadSnapshot` 在单事务内锁 Thread、读取待处理命令与 `EntryPath`，再用分类器投影出最小适用状态：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
+
+`getThreadTree` 读取目标 Thread 所属的整棵执行树。它先用 `findAncestorChain` 找到真实根，不存在则 `HarnessRuntimeNotFoundException`；再取该根的树锁并重读确认，然后只按不可变 `parentThreadId` 用 `listChildren` 收集全部后代。同 Session 里另一棵 `parentThreadId = null` 的分支不会进入结果。收集完成后按 UUID 升序锁定全部 Thread，在树锁保护下只读探测各节点的 Invocation，并复用快照构造；返回顺序是 `createdAt` 再 UUID。查询不写 Command、Entry、Work，也不推进 version。节点上的 `turnCount` 只计当前 root-to-head 的 `INPUT` / `CONTINUATION`，`COMPACTION` 与 `STOP` 不计；`toolCallCount` 只计该路径上 ASSISTANT `MESSAGE` 的 ToolCall；`outcome` 只在运行时状态为 `IDLE` 且当前 head 是 `TURN_END` 时取 `COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`，否则为 null。状态仍是 `ThreadSnapshot.runtimeStatus()` 的细分值，不退回持久化的 `ACTIVE`。
 
 ### 发送前请求预览
 

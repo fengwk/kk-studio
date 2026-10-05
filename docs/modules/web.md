@@ -42,7 +42,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Chat | `/api/ai/chats` | CRUD 与归属 Session |
 | Harness command | `/api/harness/command-batches` | Chat 命令持久接受，返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries、name |
-| Thread | `/api/harness/threads/{threadId}` | Snapshot、name、Debug、协议预览、compact、yolo、stop、tool approval |
+| Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
 | Interaction | `/api/interactions` | 等待分页与 `/{interactionId}/input` 人工提交 |
 | Harness resource | `/api/harness/resources/{sha256}` | 内容寻址 Resource 下载 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
@@ -66,6 +66,8 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 完整执行语义见 [Harness Runtime](harness-runtime.md)。
 
 ### 请求诊断与预览
+
+`GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`providerName` / `modelName` / `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 GET model-request-debug 返回下一次结构化预览与可空的活动冻结请求，排除 credential 和 Base64。
 POST provider-request-preview 使用已有空闲 Chat Thread 的精确 head/sequence，
