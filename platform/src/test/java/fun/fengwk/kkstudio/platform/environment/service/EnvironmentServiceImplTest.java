@@ -379,6 +379,9 @@ class EnvironmentServiceImplTest {
     env.setInstallConfig(config);
     when(repo.getById(ENV_ID)).thenReturn(env);
 
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
     String before = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
     env.setRegistrationToken("rotated-token");
