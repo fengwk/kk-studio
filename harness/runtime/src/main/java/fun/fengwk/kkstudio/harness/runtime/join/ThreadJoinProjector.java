@@ -155,12 +155,12 @@ public final class ThreadJoinProjector {
   }
 
   /**
-   * 正常完成只读取 join 冻结的 {@code finalAnswerEntryId}：该条目必须是切片内的 ASSISTANT MESSAGE；其文本为空时返回空串（由渲染层
-   * 回退为明确占位），绝不借用更早的助手文本。
+   * 正常完成只读取 join 冻结的 {@code finalAnswerEntryId}：没有最终回答则返回 null；存在时必须是切片内的 ASSISTANT
+   * MESSAGE，文本为空时保留空串，绝不借用更早的助手文本。
    */
   private static String extractFinalAnswerText(EntryPath path, UUID finalAnswerEntryId) {
     if (finalAnswerEntryId == null) {
-      throw new IllegalStateException("completed join requires a frozen final answer entry id");
+      return null;
     }
     for (Entry entry : path.entries()) {
       if (entry.id().equals(finalAnswerEntryId)) {
