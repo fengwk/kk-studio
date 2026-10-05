@@ -402,7 +402,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
   }
 
   /**
-   * 两线程同时接受同一请求键：只创建一条活动、一个 Run 和一条 Harness 命令，双方都返回同一个 Run。
+   * 两线程同时接受同一请求键：只创建一条活动、一个 Run 与一个显式命令批，双方都返回同一个 Run。
    *
    * <p>锁前 receipt 检查不能关闭这个窗口；锁内再次检查后，后到请求必须重放而不是版本冲突。
    */
@@ -426,7 +426,10 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
-    assertEquals(1L, count("select count(*) from harness_thread_command"));
+    // 每次接受显式提交 5 条命令（SET_AGENT/SET_MODEL/SET_ENVIRONMENT/SET_CONTRIBUTOR_STATE/CUSTOM_MESSAGE）与 1 条
+    // root Join。
+    assertEquals(5L, count("select count(*) from harness_thread_command"));
+    assertEquals(1L, count("select count(*) from harness_thread_join"));
   }
 
   /**

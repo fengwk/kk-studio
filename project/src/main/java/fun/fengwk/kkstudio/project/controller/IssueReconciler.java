@@ -8,23 +8,24 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -38,9 +39,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.port.DelegatedWorkActivityPort;
 import fun.fengwk.kkstudio.project.port.EvidenceBlobPort;
-import fun.fengwk.kkstudio.project.port.HarnessCommandAcceptancePort;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
@@ -56,8 +55,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -76,10 +73,10 @@ import java.util.UUID;
  *       延后，丢失通知由轮询恢复。
  *   <li><b>安全等待</b>：区分真正在途执行与静止等待（问答/审批等待）；只有完全静止且无等待工具才继续推进，静止等待进入 WAITING 并停止活动计时。
  *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时先关停派发门禁，在途执行收敛为静止后再安全失败收尾，绝不杀死在途副作用。
- *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞与控制暂停一致关闭派发门禁，阻止自动派发与 WAITING 恢复。
+ *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞关闭派发门禁，阻止自动派发与 WAITING 恢复；Issue 控制暂停只阻止新 Run 调度，不再挂起已接受的 Thread。
  *   <li><b>指示不丢</b>：交接与正常收尾前必须投递全部定向指示，扫描至事实流尾，普通评论与系统事件不卡游标。
- *   <li><b>结果未定</b>：工具 UNKNOWN 不是静止点。排队命令、非终态模型与在途工具仍延后；只有这些都已收敛、仅余结果未定的工具时，才按 markUnknown
- *       收尾并保留人工核查，绝不自动完成或交接。
+ *   <li><b>完成只认 root Join</b>：Run 结束只读取本次 root Join 冻结的 terminal/final-answer entry，既不按快照最新 head
+ *       猜测，也不等待永久子树 idle；工具结果未定只是 Loop 反馈，不再升级为阻塞 Thread 的人工核查门禁。
  *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，只发布该最终答复明确引用且来源 Session 持有的
  *       Resource；无交接时保持当前阶段，之后的催促按额度新建 Run。
  *   <li><b>迟到回调拒绝</b>：旧 Run 仅在静止点安全收尾，绝不提交旧交接目标推进当前阶段。
@@ -95,7 +92,6 @@ public class IssueReconciler {
 
   private static final String BUDGET_REASON = "Run active execution budget is exhausted";
   private static final String STALE_REASON = "Run no longer matches the current issue stage";
-  private static final int UNKNOWN_REASON_LIMIT = 512;
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
@@ -108,8 +104,6 @@ public class IssueReconciler {
   private final IssueEvidenceService issueEvidenceService;
   private final EvidenceBlobPort evidenceBlobPort;
   private final IssueWorkStore issueWorkStore;
-  private final HarnessCommandAcceptancePort commandAcceptancePort;
-  private final DelegatedWorkActivityPort delegatedWorkActivityPort;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueControllerProperties properties;
@@ -128,8 +122,6 @@ public class IssueReconciler {
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
-      HarnessCommandAcceptancePort commandAcceptancePort,
-      DelegatedWorkActivityPort delegatedWorkActivityPort,
       ObjectProvider<HarnessRuntime> runtimes,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties) {
@@ -145,8 +137,6 @@ public class IssueReconciler {
         issueEvidenceService,
         evidenceBlobPort,
         issueWorkStore,
-        commandAcceptancePort,
-        delegatedWorkActivityPort,
         runtimes,
         workflowCodec,
         properties,
@@ -165,8 +155,6 @@ public class IssueReconciler {
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
-      HarnessCommandAcceptancePort commandAcceptancePort,
-      DelegatedWorkActivityPort delegatedWorkActivityPort,
       ObjectProvider<HarnessRuntime> runtimes,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties,
@@ -186,10 +174,6 @@ public class IssueReconciler {
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
     this.evidenceBlobPort = Objects.requireNonNull(evidenceBlobPort, "evidenceBlobPort");
     this.issueWorkStore = Objects.requireNonNull(issueWorkStore, "issueWorkStore");
-    this.commandAcceptancePort =
-        Objects.requireNonNull(commandAcceptancePort, "commandAcceptancePort");
-    this.delegatedWorkActivityPort =
-        Objects.requireNonNull(delegatedWorkActivityPort, "delegatedWorkActivityPort");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
@@ -257,26 +241,18 @@ public class IssueReconciler {
       }
       IssueActivity deliverable = nextDeliverableInstruction(run);
       if (deliverable != null) {
-        deliverInstruction(issue, run, binding, staleSnapshot, deliverable);
+        deliverInstruction(issue, run, staleSnapshot, deliverable);
         return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
       }
-      String staleUnknown = unknownToolReason(staleSnapshot);
-      if (staleUnknown != null) {
-        return unknownRun(run, staleSnapshot.thread().headEntryId(), staleUnknown, claim);
-      }
-      if (hasProgress(run, staleSnapshot)) {
-        UUID finalAnswerId =
-            findFinalAnswerEntryId(
-                staleSnapshot.entryPath(),
-                run.getStartEntryId(),
-                staleSnapshot.thread().headEntryId());
-        publishEvidence(issue, run, binding, staleSnapshot, finalAnswerId);
+      ThreadJoin staleJoin = matchedJoin(run.getId());
+      if (staleJoin != null) {
+        publishEvidence(issue, run, binding, staleSnapshot, staleJoin.finalAnswerEntryId());
         issueRunService.completeRun(
             run.getId(),
             run.getVersion(),
             completeKey(run),
-            staleSnapshot.thread().headEntryId(),
-            finalAnswerId,
+            staleJoin.terminalEntryId(),
+            staleJoin.finalAnswerEntryId(),
             null);
         return finish(
             claim, true, properties.getActiveDelay(), IssueReconcileOutcome.STALE_RUN_CLOSED);
@@ -290,11 +266,6 @@ public class IssueReconciler {
     }
 
     ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
-    String unknownReason = isProcessing(snapshot) ? null : unknownToolReason(snapshot);
-    if (unknownReason != null) {
-      // 外部副作用结果未定优先于额度与静态收尾：按既有 UNKNOWN 入口收敛并保留人工核查。
-      return unknownRun(run, snapshot.thread().headEntryId(), unknownReason, claim);
-    }
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
       if (isProcessing(snapshot)) {
         if (!issue.isPaused()) {
@@ -323,11 +294,12 @@ public class IssueReconciler {
           claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
 
-    boolean gateClosed = issue.isGateClosed();
+    // Issue 控制暂停只阻止新 Run 调度，不挂起已接受的 Thread；只有业务阻塞或安全工具等待才暂停本 Run。
+    boolean blocked = issue.isBlocked();
     boolean waitingTool = hasWaitingTool(snapshot);
 
     if (run.getStatus() == IssueRunStatus.WAITING) {
-      if (gateClosed || waitingTool) {
+      if (blocked || waitingTool) {
         return finish(
             claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
       }
@@ -336,8 +308,8 @@ public class IssueReconciler {
       return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.RUN_RESUMED);
     }
 
-    if (gateClosed || waitingTool) {
-      // 门禁关闭或工具等待：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
+    if (blocked || waitingTool) {
+      // 阻塞或工具等待：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
       issueRunService.waitRun(run.getId(), run.getVersion());
       return finish(
           claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
@@ -345,42 +317,36 @@ public class IssueReconciler {
 
     IssueActivity deliverable = nextDeliverableInstruction(run);
     if (deliverable != null) {
-      deliverInstruction(issue, run, binding, snapshot, deliverable);
+      deliverInstruction(issue, run, snapshot, deliverable);
       return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
     }
 
+    // Run 完成只认本次 root Join 冻结的结果：不按快照最新 head 猜测，也不等待永久子树 idle。
+    ThreadJoin join = matchedJoin(run.getId());
+    if (join == null) {
+      return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_IDLE);
+    }
+    publishEvidence(issue, run, binding, snapshot, join.finalAnswerEntryId());
     if (run.getNextState() != null) {
-      // 交接只在完全静止点提交：没有 queued command、没有在途模型/工具调用、没有未投递指示。
-      UUID finalAnswerId =
-          findFinalAnswerEntryId(
-              snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
-      publishEvidence(issue, run, binding, snapshot, finalAnswerId);
+      // 交接只在 root Join 已冻结结果后提交：没有 queued command、没有在途模型/工具调用、没有未投递指示。
       issueRunService.completeRun(
           run.getId(),
           run.getVersion(),
           completeKey(run),
-          snapshot.thread().headEntryId(),
-          finalAnswerId,
+          join.terminalEntryId(),
+          join.finalAnswerEntryId(),
           run.getNextState());
       return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.RUN_HANDED_OFF);
     }
-
-    if (hasProgress(run, snapshot)) {
-      UUID finalAnswerId =
-          findFinalAnswerEntryId(
-              snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
-      publishEvidence(issue, run, binding, snapshot, finalAnswerId);
-      issueRunService.completeRun(
-          run.getId(),
-          run.getVersion(),
-          completeKey(run),
-          snapshot.thread().headEntryId(),
-          finalAnswerId,
-          null);
-      // 保持当前阶段：下一次催促必须重新检查额度后新建 Run。
-      return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.RUN_COMPLETED);
-    }
-    return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_IDLE);
+    issueRunService.completeRun(
+        run.getId(),
+        run.getVersion(),
+        completeKey(run),
+        join.terminalEntryId(),
+        join.finalAnswerEntryId(),
+        null);
+    // 保持当前阶段：下一次催促必须重新检查额度后新建 Run。
+    return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.RUN_COMPLETED);
   }
 
   private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, IssueWorkClaim claim) {
@@ -511,52 +477,6 @@ public class IssueReconciler {
     return finish(claim, true, properties.getBlockedDelay(), outcome);
   }
 
-  /** 结果未定的工具调用走既有 UNKNOWN 收尾：不发布证据、不完成、不交接，人工核查后才能重试。 */
-  private IssueReconcileOutcome unknownRun(
-      IssueRun run, UUID endEntryId, String reason, IssueWorkClaim claim) {
-    issueRunService.markUnknown(
-        run.getId(), run.getVersion(), unknownKey(run, endEntryId), endEntryId, reason);
-    return finish(claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.RUN_UNKNOWN);
-  }
-
-  private boolean hasProgress(IssueRun run, ThreadSnapshot snapshot) {
-    if (snapshot == null || snapshot.entryPath() == null) {
-      return false;
-    }
-    EntryPath path = snapshot.entryPath();
-    List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
-    int start = entryIds.indexOf(run.getStartEntryId());
-    return start >= 0 && entryIds.size() - 1 > start;
-  }
-
-  /** 从历史区间中查找最后一个可见 ASSISTANT 回答 Entry。 */
-  private static UUID findFinalAnswerEntryId(EntryPath path, UUID startEntryId, UUID endEntryId) {
-    if (path == null || path.entries() == null) {
-      return null;
-    }
-    List<Entry> entries = path.entries();
-    List<UUID> entryIds = entries.stream().map(Entry::id).toList();
-    int start = entryIds.indexOf(startEntryId);
-    int end = entryIds.indexOf(endEntryId);
-    if (start < 0 || end <= start) {
-      return null;
-    }
-    for (int i = end; i > start; i--) {
-      Entry entry = entries.get(i);
-      if (entry != null) {
-        if (entry.payload() instanceof MessagePayload msg
-            && msg.message().role() == AgentMessageRole.ASSISTANT) {
-          return entry.id();
-        }
-        if (entry.payload() instanceof AssistantAbortedPayload aborted
-            && aborted.message().role() == AgentMessageRole.ASSISTANT) {
-          return entry.id();
-        }
-      }
-    }
-    return null;
-  }
-
   /**
    * 只发布最终 assistant 答复明确引用、且来源 Run Session 当前持有的 Resource。
    *
@@ -639,7 +559,8 @@ public class IssueReconciler {
   /**
    * 在途命令、模型或工具仍未静止时，Run 不得投递指示或收尾。
    *
-   * <p>{@code UNKNOWN} 不在这里：它是已收敛但结果未定的终态，由 {@link #unknownToolReason} 进入人工核查，而不是无限延后。
+   * <p>结果未定（UNKNOWN）的工具是已收敛的 Loop 反馈，会由 Runtime 交给下一轮模型，因此这里不再把它升级为阻塞 Thread 的人工核查门禁； 永久子树的忙碌也不阻塞本
+   * Run 收尾。
    */
   private boolean isProcessing(ThreadSnapshot snapshot) {
     if (snapshot == null) {
@@ -667,48 +588,12 @@ public class IssueReconciler {
         return true;
       }
     }
-    return delegatedWorkActivityPort.hasPendingDelegatedWork(snapshot.thread().id());
+    return false;
   }
 
-  /**
-   * 列举结果未定的工具调用。没有 UNKNOWN 时返回 {@code null}。
-   *
-   * <p>原因按工具名与调用标识排序，保证同一次事实的幂等键稳定。
-   */
-  private static String unknownToolReason(ThreadSnapshot snapshot) {
-    if (snapshot == null || snapshot.toolSiblings() == null) {
-      return null;
-    }
-    List<String> labels = new ArrayList<>();
-    for (ToolInvocation tool : snapshot.toolSiblings()) {
-      if (tool != null && tool.status() == ToolInvocationStatus.UNKNOWN) {
-        labels.add(toolLabel(tool));
-      }
-    }
-    if (labels.isEmpty()) {
-      return null;
-    }
-    labels.sort(Comparator.naturalOrder());
-    String joined = String.join(", ", labels);
-    String reason = "Tool invocation outcome unknown: " + joined;
-    if (reason.length() <= UNKNOWN_REASON_LIMIT) {
-      return reason;
-    }
-    return reason.substring(0, UNKNOWN_REASON_LIMIT);
-  }
-
-  private static String toolLabel(ToolInvocation tool) {
-    // 架构守卫只允许 project 导入 harness.runtime：用 var 推断 harness.tool.ToolCall，避免引入宿主/额外模块导入。
-    var call = tool.call();
-    String name =
-        call == null || call.toolName() == null || call.toolName().isBlank()
-            ? "tool"
-            : call.toolName();
-    String id =
-        call == null || call.id() == null || call.id().isBlank()
-            ? String.valueOf(tool.id())
-            : call.id();
-    return name + "#" + id;
+  /** 本次 Run 的 root Join 已冻结结果时返回它，否则返回 {@code null}。 */
+  private ThreadJoin matchedJoin(UUID invocationId) {
+    return requireRuntime().findJoin(invocationId).filter(ThreadJoin::matched).orElse(null);
   }
 
   /** 判断是否存在处于安全等待点（等待输入或等待审批）的工具调用。 */
@@ -769,31 +654,27 @@ public class IssueReconciler {
     run.setVersion(expectedVersion + 1);
   }
 
-  /** 把定向指示作为 USER 消息投递给明确的当前 Run；幂等键由 Issue 事实位置确定，重放不会重复入队。 */
+  /** 把来自人的定向指示作为 USER_MESSAGE 投递给明确的当前 Run；幂等键由 Issue 事实位置确定，重放不会重复入队。 */
   private void deliverInstruction(
-      Issue issue,
-      IssueRun run,
-      IssueAgentThread binding,
-      ThreadSnapshot snapshot,
-      IssueActivity activity) {
+      Issue issue, IssueRun run, ThreadSnapshot snapshot, IssueActivity activity) {
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent(activity.getBody())));
-    CustomMessageCommandPayload payload = new CustomMessageCommandPayload(message);
+    UserMessageCommandPayload payload = new UserMessageCommandPayload(message);
     UUID idempotencyKey =
         UUID.nameUUIDFromBytes(
             ("issue-instruction:" + issue.getId() + ":" + activity.getSequence())
                 .getBytes(StandardCharsets.UTF_8));
     NewThreadCommand command = new NewThreadCommand(payload, idempotencyKey);
-    commandAcceptancePort.acceptIssueAgentCommands(
-        issue.getId(),
-        binding.agentName(),
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                run.getThreadId(),
-                snapshot.thread().headEntryId(),
-                snapshot.thread().nextCommandSequence()),
-            List.of(command)));
+    requireRuntime()
+        .acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(
+                    run.getThreadId(),
+                    snapshot.thread().headEntryId(),
+                    snapshot.thread().nextCommandSequence()),
+                List.of(command)),
+            AcceptancePreflight.IDENTITY);
     advanceObservedSequence(run, activity.getSequence());
   }
 
@@ -829,10 +710,6 @@ public class IssueReconciler {
 
   private static String failKey(IssueRun run, UUID endEntryId) {
     return "reconciler-fail:" + run.getId() + ":" + endEntryId;
-  }
-
-  private static String unknownKey(IssueRun run, UUID endEntryId) {
-    return "reconciler-unknown:" + run.getId() + ":" + endEntryId;
   }
 
   /**

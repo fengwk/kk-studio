@@ -18,24 +18,26 @@ import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * {@link IssueTransitionService} 的交接登记契约：只把目标写入活动 Run 的 {@code next_state}，同目标幂等、异目标与非法边拒绝，
- * 身份/门禁不满足时在写前失败关闭。
+ * {@link IssueTransitionService} 的交接登记契约：以冻结快照里的 runId 定位，但只信任数据库中的当前 Run；同目标幂等、异目标与非法边拒绝， 旧 Run /
+ * 别的 Thread / 继承 scope 的 fork 都在写前失败关闭。只把目标写入活动 Run 的 {@code next_state}，不改写 Issue 阶段。
  */
 class IssueTransitionServiceTest {
 
   private static final UUID THREAD_ID = new UUID(0L, 1L);
+  private static final UUID OTHER_THREAD_ID = new UUID(0L, 77L);
   private static final UUID SESSION_ID = new UUID(0L, 2L);
   private static final UUID ISSUE_ID = new UUID(0L, 3L);
   private static final UUID PROJECT_ID = new UUID(0L, 4L);
@@ -62,22 +64,20 @@ class IssueTransitionServiceTest {
           + "{\"state\":\"DONE\",\"name\":\"完成\"}"
           + "]}";
 
-  private final IssueAgentThreadRepository bindings = mock(IssueAgentThreadRepository.class);
   private final ProjectRepository projects = mock(ProjectRepository.class);
   private final IssueRepository issues = mock(IssueRepository.class);
   private final IssueRunRepository runs = mock(IssueRunRepository.class);
   private final IssueTransitionService service =
-      new IssueTransitionService(bindings, projects, issues, runs, new ProjectWorkflowJsonCodec());
+      new IssueTransitionService(projects, issues, runs, new ProjectWorkflowJsonCodec());
 
   private IssueRun run;
 
   IssueTransitionServiceTest() {
     useIssue("DESIGN");
-    when(bindings.findByThreadId(THREAD_ID))
-        .thenReturn(new IssueAgentThread(ISSUE_ID, "designer", THREAD_ID));
     when(projects.lockForKeyShare(PROJECT_ID)).thenReturn(project());
     run = activeRun(null);
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(run);
+    when(runs.getById(RUN_ID)).thenReturn(run);
+    when(runs.lockById(RUN_ID)).thenReturn(run);
     when(runs.updateById(any(), anyLong())).thenReturn(true);
   }
 
@@ -105,14 +105,46 @@ class IssueTransitionServiceTest {
         .build();
   }
 
+  /** 冻结快照：runId/issueId/stage/sourceThreadId 是接受方冻结的业务身份，工具执行期只从 branch state 读取。 */
+  private static String scopeJson(UUID sourceThreadId, String stage) {
+    return new ProjectRunScopeJsonCodec()
+        .encode(
+            new ProjectRunScope(
+                RUN_ID,
+                ISSUE_ID,
+                PROJECT_ID,
+                sourceThreadId,
+                1L,
+                "t",
+                null,
+                stage,
+                "n",
+                null,
+                List.of(),
+                "designer"));
+  }
+
+  private static String scopeJson() {
+    return scopeJson(THREAD_ID, "DESIGN");
+  }
+
   private AiValidationException reject(String toState) {
-    return assertThrows(AiValidationException.class, () -> service.accept(THREAD_ID, toState));
+    return acceptFrom(THREAD_ID, scopeJson(), toState);
+  }
+
+  private AiValidationException acceptFrom(
+      UUID callingThreadId, String runScopeJson, String toState) {
+    return assertThrows(
+        AiValidationException.class,
+        () ->
+            service.accept(callingThreadId, ProjectRunScope.SCHEMA_VERSION, runScopeJson, toState));
   }
 
   /** 测试意图：合法交接只登记 Run 的 next_state —— Issue 阶段与 Issue 行都不在本调用中被改写。 */
   @Test
   void acceptsLegalHandoffWithoutChangingTheIssueStage() {
-    IssueTransitionService.IssueTransitionResult result = service.accept(THREAD_ID, "REVIEW");
+    IssueTransitionService.IssueTransitionResult result =
+        service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
 
     assertEquals("DESIGN", result.fromState());
     assertEquals("REVIEW", result.toState());
@@ -127,9 +159,10 @@ class IssueTransitionServiceTest {
   /** 测试意图：同一目标的重复调用是丢响应后的幂等重放，不重复写行、不推进版本。 */
   @Test
   void replaysSameTargetWithoutWriting() {
-    service.accept(THREAD_ID, "REVIEW");
+    service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
 
-    IssueTransitionService.IssueTransitionResult replay = service.accept(THREAD_ID, "REVIEW");
+    IssueTransitionService.IssueTransitionResult replay =
+        service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW");
 
     assertTrue(replay.replayed());
     assertEquals("REVIEW", replay.toState());
@@ -139,7 +172,7 @@ class IssueTransitionServiceTest {
   /** 测试意图：已接受目标后不接受第二个不同目标，避免收尾时出现两个互相矛盾的交接意图。 */
   @Test
   void rejectsDifferentTargetAfterAcceptance() {
-    service.accept(THREAD_ID, "REVISE");
+    service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVISE");
 
     // REVISE 与 REVIEW 都是 DESIGN 的合法目标，但已接受一个后必须拒绝另一个，避免出现两个互相矛盾的交接意图。
     assertTrue(reject("REVIEW").getMessage().contains("already accepted"));
@@ -157,28 +190,33 @@ class IssueTransitionServiceTest {
     verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：交接只能由绑定该 Issue+Agent 的 Thread 发起。 */
+  /** 测试意图：fork 继承 branch scope 但没有业务执行身份 —— sourceThreadId 与调用 Thread 不一致时在写前拒绝。 */
   @Test
-  void rejectsUnboundThread() {
-    UUID unbound = new UUID(0L, 99L);
+  void rejectsForkInheritedScope() {
     assertTrue(
-        assertThrows(AiValidationException.class, () -> service.accept(unbound, "REVIEW"))
+        acceptFrom(OTHER_THREAD_ID, scopeJson(), "REVIEW")
             .getMessage()
-            .contains("only available on an issue agent thread"));
+            .contains("only available on the run's own thread"));
+    verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：归档或控制暂停的 Issue 不接受新的交接意图；暂停期间保留既有目标由收尾路径处理。 */
+  /** 测试意图：不兼容的 scope schema 版本与损坏快照都确定性拒绝，绝不静默当成"没有上下文"。 */
   @Test
-  void rejectsArchivedOrPausedIssue() {
+  void rejectsUnsupportedVersionAndInvalidScope() {
+    assertThrows(
+        AiValidationException.class,
+        () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION + 1, scopeJson(), "REVIEW"));
+    assertTrue(
+        acceptFrom(THREAD_ID, "{oops}", "REVIEW").getMessage().contains("invalid run context"));
+  }
+
+  /** 测试意图：归档的 Issue 不接受新的交接意图。 */
+  @Test
+  void rejectsArchivedIssue() {
     Issue archived = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).state("DESIGN").build();
     archived.setArchivedAt(Instant.now());
     when(issues.lockById(ISSUE_ID)).thenReturn(archived);
     assertEquals("Issue is archived", reject("REVIEW").getMessage());
-
-    Issue paused = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).state("DESIGN").build();
-    paused.setPauseReason("USER");
-    when(issues.lockById(ISSUE_ID)).thenReturn(paused);
-    assertTrue(reject("REVIEW").getMessage().contains("Issue is paused"));
     verify(runs, never()).updateById(any(), anyLong());
   }
 
@@ -186,36 +224,38 @@ class IssueTransitionServiceTest {
   @Test
   void rejectsIssueWithoutWorkStage() {
     useIssue("INIT");
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(run);
+    run.setState("INIT");
+    when(runs.lockById(RUN_ID)).thenReturn(run);
 
-    assertTrue(reject("DESIGN").getMessage().contains("not in an executable work stage: INIT"));
+    assertTrue(
+        acceptFrom(THREAD_ID, scopeJson(THREAD_ID, "INIT"), "DESIGN")
+            .getMessage()
+            .contains("not in an executable work stage: INIT"));
     verify(runs, never()).updateById(any(), anyLong());
   }
 
   /** 测试意图：终态或无活动 Run 的 Issue 不接受交接（旧 Run 的迟到调用不借新权限）。 */
   @Test
   void rejectsWhenThereIsNoActiveRun() {
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(null);
-    assertTrue(reject("REVIEW").getMessage().contains("no active run"));
-
     IssueRun terminal = activeRun(null);
     terminal.setStatus(IssueRunStatus.COMPLETED);
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(terminal);
+    when(runs.lockById(RUN_ID)).thenReturn(terminal);
+
     assertTrue(reject("REVIEW").getMessage().contains("no active run"));
     verify(runs, never()).updateById(any(), anyLong());
   }
 
-  /** 测试意图：活动 Run 属于别的 Thread 或阶段与 Issue 不一致时，调用方不是当前执行身份，交接必须拒绝。 */
+  /** 测试意图：活动 Run 属于别的 Thread 或阶段与 Issue/scope 不一致时，调用方不是当前执行身份，交接必须拒绝。 */
   @Test
   void rejectsForeignOrStaleRunIdentity() {
     IssueRun otherThread = activeRun(null);
-    otherThread.setThreadId(new UUID(0L, 77L));
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(otherThread);
+    otherThread.setThreadId(OTHER_THREAD_ID);
+    when(runs.lockById(RUN_ID)).thenReturn(otherThread);
     assertTrue(reject("REVIEW").getMessage().contains("different thread"));
 
     IssueRun staleState = activeRun(null);
     staleState.setState("REVIEW");
-    when(runs.lockActiveByIssueId(ISSUE_ID)).thenReturn(staleState);
+    when(runs.lockById(RUN_ID)).thenReturn(staleState);
     assertTrue(reject("REVIEW").getMessage().contains("does not match the current issue stage"));
     verify(runs, never()).updateById(any(), anyLong());
   }
@@ -226,7 +266,9 @@ class IssueTransitionServiceTest {
     when(runs.updateById(any(), anyLong())).thenReturn(false);
 
     AiVersionConflictException conflict =
-        assertThrows(AiVersionConflictException.class, () -> service.accept(THREAD_ID, "REVIEW"));
+        assertThrows(
+            AiVersionConflictException.class,
+            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
     assertEquals("issue_run", conflict.resource());
   }
 
@@ -235,7 +277,9 @@ class IssueTransitionServiceTest {
   void throwsWhenOwnedRowsAreMissing() {
     when(issues.getById(ISSUE_ID)).thenReturn(null);
     IllegalStateException missing =
-        assertThrows(IllegalStateException.class, () -> service.accept(THREAD_ID, "REVIEW"));
+        assertThrows(
+            IllegalStateException.class,
+            () -> service.accept(THREAD_ID, ProjectRunScope.SCHEMA_VERSION, scopeJson(), "REVIEW"));
     assertEquals("Project thread ownership is inconsistent", missing.getMessage());
   }
 }

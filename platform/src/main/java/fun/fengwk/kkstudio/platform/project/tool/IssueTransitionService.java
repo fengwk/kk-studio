@@ -11,26 +11,28 @@ import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@code issue_transition} 的事务边界：校验当前 Run 身份与合法边后，把交接目标写入 {@code project_issue_run.next_state}。
+ * {@code issue_transition} 的事务边界：以 Run 冻结快照里的 runId 为入口，校验当前 Run 有效、Issue 阶段与调用 Thread 身份后， 把交接目标写入
+ * {@code project_issue_run.next_state}。
  *
- * <p>交接请求只登记意图，绝不直接改变 {@code Issue.state}：真正推进阶段仍由收尾路径在安全点复核 Run 身份/版本/合法边/门禁后完成（设计 §4.5）。因此本服务：
+ * <p>授权只以数据库中的当前 Run 为准，绝不相信 prompt 中的 runId 或继承来的 branch 快照：runId 只是定位符，真正的边界是 「活动 Run 仍存在且
+ * active、其 Thread 就是调用 Thread、其 Issue/阶段与 scope/当前 Issue 一致」。因此：
  *
  * <ul>
- *   <li>按锁序 Project SHARE → Issue UPDATE → 活动 Run 读取并锁定，避免与接受/收尾路径并发写同一 Run。
- *   <li>要求调用 Thread 就是该 Issue 活动 Run 的 Thread，且 Run 阶段与当前 Issue 阶段一致：旧 Run、别的 Agent Thread 与同名阶段
- *       的迟到调用都在写前被拒绝。
+ *   <li>按锁序 Project SHARE → Issue UPDATE → Run UPDATE 读写，避免与接受/收尾路径并发写同一 Run。
+ *   <li>要求 {@code callingThreadId == scope.sourceThreadId} 且等于 Run 的 Thread：旧 Run、别的 Agent Thread
+ *       以及继承 scope 的 fork 都在写前被拒绝。
  *   <li>只接受当前阶段 workflow {@code next} 白名单中启用的目标；同目标的重复调用是无写操作的幂等重放，异目标在已接受后确定性拒绝。
  *   <li>写入失败（版本 CAS 冲突）整体回滚，绝不留下部分交接事实。
  * </ul>
@@ -38,21 +40,18 @@ import java.util.UUID;
 public class IssueTransitionService {
 
   private static final String INCONSISTENT_OWNERSHIP = "Project thread ownership is inconsistent";
+  private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
 
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
   private final ProjectWorkflowJsonCodec workflowCodec;
 
   public IssueTransitionService(
-      IssueAgentThreadRepository issueAgentThreadRepository,
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository,
       ProjectWorkflowJsonCodec workflowCodec) {
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
     this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
@@ -61,24 +60,25 @@ public class IssueTransitionService {
 
   /** 接受一次阶段交接请求；返回已登记的目标与是否为幂等重放。 */
   @Transactional
-  public IssueTransitionResult accept(UUID threadId, String toState) {
-    Objects.requireNonNull(threadId, "threadId");
-    if (toState == null || toState.isBlank() || !toState.equals(toState.strip())) {
-      throw new AiValidationException("issue_run", "to_state must be a non-blank state code");
-    }
-    ProjectStateCode target;
-    try {
-      target = ProjectStateCode.of(toState);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException("issue_run", "invalid to_state: " + toState);
-    }
-
-    IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(threadId);
-    if (binding == null) {
+  public IssueTransitionResult accept(
+      UUID callingThreadId, int scopeSchemaVersion, String runScopeJson, String toState) {
+    Objects.requireNonNull(callingThreadId, "callingThreadId");
+    if (scopeSchemaVersion != ProjectRunScope.SCHEMA_VERSION) {
       throw new AiValidationException(
-          "issue_agent_thread", "issue_transition is only available on an issue agent thread");
+          "issue_run", "unsupported run context schema version: " + scopeSchemaVersion);
     }
-    Issue peek = issueRepository.getById(binding.issueId());
+    ProjectRunScope scope = decodeScope(runScopeJson);
+    if (!scope.sourceThreadId().equals(callingThreadId)) {
+      throw new AiValidationException(
+          "issue_run", "issue_transition is only available on the run's own thread");
+    }
+    ProjectStateCode target = requireTarget(toState);
+
+    IssueRun runPeek = issueRunRepository.getById(scope.runId());
+    if (runPeek == null || !runPeek.getIssueId().equals(scope.issueId())) {
+      throw inconsistent();
+    }
+    Issue peek = issueRepository.getById(scope.issueId());
     if (peek == null) {
       throw inconsistent();
     }
@@ -86,16 +86,28 @@ public class IssueTransitionService {
     if (project == null) {
       throw inconsistent();
     }
-    Issue issue = issueRepository.lockById(binding.issueId());
+    Issue issue = issueRepository.lockById(scope.issueId());
     if (issue == null) {
       throw inconsistent();
     }
     if (issue.isArchived()) {
       throw new AiValidationException("issue", "Issue is archived");
     }
-    if (issue.isPaused()) {
+    IssueRun run = issueRunRepository.lockById(scope.runId());
+    if (run == null || !run.isActive()) {
       throw new AiValidationException(
-          "issue", "Issue is paused; a human must resume it before a handoff can be accepted");
+          "issue_run", "Issue has no active run; a handoff cannot be accepted");
+    }
+    if (!run.getThreadId().equals(callingThreadId)) {
+      throw new AiValidationException("issue_run", "the active run belongs to a different thread");
+    }
+    if (!run.getState().equals(issue.getState()) || !run.getState().equals(scope.stage())) {
+      throw new AiValidationException(
+          "issue_run",
+          "the active run stage "
+              + run.getState()
+              + " does not match the current issue stage "
+              + issue.getState());
     }
 
     ProjectWorkflow workflow;
@@ -112,23 +124,6 @@ public class IssueTransitionService {
     if (source == null || ProjectWorkflowReservedState.isReserved(from)) {
       throw new AiValidationException(
           "issue_run", "Issue is not in an executable work stage: " + issue.getState());
-    }
-
-    IssueRun run = issueRunRepository.lockActiveByIssueId(issue.getId());
-    if (run == null || !run.isActive()) {
-      throw new AiValidationException(
-          "issue_run", "Issue has no active run; a handoff cannot be accepted");
-    }
-    if (!run.getThreadId().equals(threadId)) {
-      throw new AiValidationException("issue_run", "the active run belongs to a different thread");
-    }
-    if (!run.getState().equals(issue.getState())) {
-      throw new AiValidationException(
-          "issue_run",
-          "the active run stage "
-              + run.getState()
-              + " does not match the current issue stage "
-              + issue.getState());
     }
 
     if (run.getNextState() != null) {
@@ -160,6 +155,25 @@ public class IssueTransitionService {
           "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
     }
     return new IssueTransitionResult(from.value(), target.value(), run.getId(), false);
+  }
+
+  private static ProjectRunScope decodeScope(String runScopeJson) {
+    try {
+      return RUN_SCOPE_CODEC.decode(runScopeJson);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("issue_run", "invalid run context: " + error.getMessage());
+    }
+  }
+
+  private static ProjectStateCode requireTarget(String toState) {
+    if (toState == null || toState.isBlank() || !toState.equals(toState.strip())) {
+      throw new AiValidationException("issue_run", "to_state must be a non-blank state code");
+    }
+    try {
+      return ProjectStateCode.of(toState);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("issue_run", "invalid to_state: " + toState);
+    }
   }
 
   private static IllegalStateException inconsistent() {

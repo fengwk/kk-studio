@@ -19,43 +19,40 @@ import fun.fengwk.kkstudio.platform.project.ProjectTestSupport;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
- * 交接登记与 Turn 事实解析的真实 PostgreSQL 验收：稳定 Thread 绑定、活动 Run 与队列阶段在真实约束下共同决定控制面。
+ * 交接登记的真实 PostgreSQL 验收：只以 Run 冻结在本 Thread 上的 {@code project/run} 身份为入口，活动 Run 与当前 Issue 阶段
+ * 在真实约束下共同决定控制面。
  *
- * <p>测试意图：覆盖交接意图只落 {@code project_issue_run.next_state}（Issue 阶段不变）、同目标幂等重放不推进版本、异目标与非法边在写前
- * 拒绝且无部分写、归属按 Thread 反查（跨 Agent/跨 Session/未绑定 Thread 的确定性结论）、Run 收尾后与暂停门禁下的迟到交接被拒绝。 Harness
- * Session/Thread 行由基座受控假件在同一事务写入，因此断言的是真实行与真实外键。
+ * <p>测试意图：覆盖交接意图只落 {@code project_issue_run.next_state}（Issue 阶段不变）、同目标幂等重放不推进版本、异目标与非法边在
+ * 写前拒绝且无部分写、调用 Thread 必须是 Run 自己的 Thread（fork/旧 Run 被拒绝）、Run 收尾后迟到交接被拒绝。 Harness Session/Thread
+ * 行由基座受控假件在同一事务写入，因此断言的是真实行与真实外键。
  */
 class IssueTransitionIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueTransitionService issueTransitionService;
-  @Autowired private ProjectIssueTurnResolver projectIssueTurnResolver;
   @Autowired private HarnessCatalog harnessCatalog;
   @Autowired private ApplicationContext applicationContext;
 
-  /** 测试意图：生产组合根里受控组件各只有一个 Bean、事务边界真的生效（否则锁序与 CAS 都失去意义），且工具只以 INTERNAL 可见性发布 （Agent 无法自行选择）。 */
+  /** 测试意图：生产组合根里受控组件各只有一个 Bean、事务边界真的生效（否则锁序与 CAS 都失去意义），且工具以 SELECTABLE 发布、由 Agent 显式声明。 */
   @Test
   void composesExactlyOneControlledDefinition() {
-    assertEquals(1, applicationContext.getBeanNamesForType(ProjectIssueTurnResolver.class).length);
     assertEquals(1, applicationContext.getBeanNamesForType(IssueTransitionService.class).length);
     assertEquals(1, applicationContext.getBeanNamesForType(IssueTransitionTool.class).length);
-    assertTrue(AopUtils.isAopProxy(projectIssueTurnResolver), "只读事务代理必须生效");
     assertTrue(AopUtils.isAopProxy(issueTransitionService), "交接事务代理必须生效");
 
     ToolContribution tool = harnessCatalog.findTool(IssueTransitionTool.NAME).orElseThrow();
     assertEquals("project", tool.id().contributorId().value());
-    assertEquals(ToolVisibility.INTERNAL, tool.definition().visibility());
+    assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
     assertTrue(
         harnessCatalog.selectableTools().stream()
-            .noneMatch(candidate -> candidate.id().equals(tool.id())));
+            .anyMatch(candidate -> candidate.id().equals(tool.id())));
   }
 
-  /** 建一个 Issue 处于 DESIGN 阶段、已有活动 Run 的场景，返回该 Run 与设计 Agent 名称。 */
+  /** 建一个 Issue 处于 DESIGN 阶段、已有活动 Run 的场景，返回该 Run。 */
   private RunFixture designRun(String title) {
     String designAgent = createAgent();
     String reviewAgent = createAgent();
@@ -63,10 +60,17 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueService.transition(issue.getId(), issue.getVersion(), key("start"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    return new RunFixture(issue.getId(), designAgent, reviewAgent, run);
+    return new RunFixture(issue.getId(), run);
   }
 
-  private record RunFixture(UUID issueId, String designAgent, String reviewAgent, IssueRun run) {}
+  private record RunFixture(UUID issueId, IssueRun run) {}
+
+  /** 以 Run 自己 Thread 上真实冻结的 scope 调用业务工具。 */
+  private IssueTransitionService.IssueTransitionResult accept(RunFixture fixture, String toState) {
+    UUID threadId = fixture.run().getThreadId();
+    return issueTransitionService.accept(
+        threadId, ProjectRunScope.SCHEMA_VERSION, frozenRunScopeJson(threadId), toState);
+  }
 
   private String nextState(UUID runId) {
     return jdbc.queryForObject(
@@ -85,8 +89,7 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
   void registersHandoffOnTheActiveRunOnly() {
     RunFixture fixture = designRun("交接登记");
 
-    IssueTransitionService.IssueTransitionResult accepted =
-        issueTransitionService.accept(fixture.run().getThreadId(), "REVIEW");
+    IssueTransitionService.IssueTransitionResult accepted = accept(fixture, "REVIEW");
 
     assertFalse(accepted.replayed());
     assertEquals("DESIGN", accepted.fromState());
@@ -102,19 +105,16 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
   void replaysSameTargetAndRejectsAConflictingOne() {
     RunFixture fixture = designRun("交接幂等");
     UUID runId = fixture.run().getId();
-    issueTransitionService.accept(fixture.run().getThreadId(), "REVIEW");
+    accept(fixture, "REVIEW");
     long acceptedVersion = runVersion(runId);
 
-    IssueTransitionService.IssueTransitionResult replay =
-        issueTransitionService.accept(fixture.run().getThreadId(), "REVIEW");
+    IssueTransitionService.IssueTransitionResult replay = accept(fixture, "REVIEW");
 
     assertTrue(replay.replayed());
     assertEquals(acceptedVersion, runVersion(runId));
 
     AiValidationException conflict =
-        assertThrows(
-            AiValidationException.class,
-            () -> issueTransitionService.accept(fixture.run().getThreadId(), "DONE"));
+        assertThrows(AiValidationException.class, () -> accept(fixture, "DONE"));
     assertTrue(conflict.getMessage().contains("already accepted"), conflict.getMessage());
     assertEquals("REVIEW", nextState(runId));
     assertEquals(acceptedVersion, runVersion(runId));
@@ -126,51 +126,30 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     RunFixture fixture = designRun("非法交接");
 
     AiValidationException rejected =
-        assertThrows(
-            AiValidationException.class,
-            () -> issueTransitionService.accept(fixture.run().getThreadId(), "DONE"));
+        assertThrows(AiValidationException.class, () -> accept(fixture, "DONE"));
 
     assertTrue(rejected.getMessage().contains("cannot transition to DONE"), rejected.getMessage());
     assertNull(nextState(fixture.run().getId()));
   }
 
-  /** 测试意图：Turn 事实按 Harness Thread 反查稳定归属；跨 Agent、跨 Session 与未绑定 Thread 都有确定性结论。 */
+  /** 测试意图：继承来的 scope 不能在别的 Thread 上使用——fork 出来的分支即使持有同一 scope 也被拒绝。 */
   @Test
-  void resolvesTurnFactsByStableThreadBinding() {
-    RunFixture fixture = designRun("Turn 事实");
+  void rejectsHandoffFromAForkedThread() {
+    RunFixture fixture = designRun("fork 拒交接");
+    UUID runThreadId = fixture.run().getThreadId();
 
-    ProjectIssueTurnFacts facts =
-        projectIssueTurnResolver
-            .resolve(
-                fixture.run().getThreadId(), fixture.designAgent(), fixture.run().getSessionId())
-            .orElseThrow();
+    AiValidationException rejected =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                issueTransitionService.accept(
+                    UUID.randomUUID(),
+                    ProjectRunScope.SCHEMA_VERSION,
+                    frozenRunScopeJson(runThreadId),
+                    "REVIEW"));
 
-    assertEquals(fixture.issueId(), facts.issueId());
-    assertEquals(fixture.run().getId(), facts.runId());
-    assertEquals("DESIGN", facts.stage());
-    assertEquals("设计", facts.stageName());
-    assertEquals("完成可交付方案", facts.stageInstructions());
-    assertEquals(List.of("REVIEW"), facts.nextStates());
-    assertNull(facts.environmentName());
-    assertEquals(fixture.designAgent(), facts.agentName());
-
-    // 同一 Thread 不能被另一个 Agent 借用。
-    assertThrows(
-        ProjectIssueTurnRejection.class,
-        () ->
-            projectIssueTurnResolver.resolve(
-                fixture.run().getThreadId(), fixture.reviewAgent(), fixture.run().getSessionId()));
-    // 同一 Thread 也不能被另一个 Session 上下文解析。
-    assertThrows(
-        ProjectIssueTurnRejection.class,
-        () ->
-            projectIssueTurnResolver.resolve(
-                fixture.run().getThreadId(), fixture.designAgent(), UUID.randomUUID()));
-    // 未绑定归属的 Thread 是普通 branch。
-    assertTrue(
-        projectIssueTurnResolver
-            .resolve(UUID.randomUUID(), fixture.designAgent(), fixture.run().getSessionId())
-            .isEmpty());
+    assertTrue(rejected.getMessage().contains("run's own thread"), rejected.getMessage());
+    assertNull(nextState(fixture.run().getId()));
   }
 
   /** 测试意图：Run 收尾后不再接受交接（旧 Run 的迟到调用不借新一 Run 的权限）。 */
@@ -189,28 +168,9 @@ class IssueTransitionIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
 
     AiValidationException rejected =
-        assertThrows(
-            AiValidationException.class,
-            () -> issueTransitionService.accept(fixture.run().getThreadId(), "REVIEW"));
+        assertThrows(AiValidationException.class, () -> accept(fixture, "REVIEW"));
 
     assertTrue(rejected.getMessage().contains("no active run"), rejected.getMessage());
-    assertNull(nextState(fixture.run().getId()));
-  }
-
-  /** 测试意图：控制暂停门禁关闭时不接受新的交接意图，暂停期间已登记的目标由收尾路径保留。 */
-  @Test
-  void rejectsHandoffWhileThePauseGateIsClosed() {
-    RunFixture fixture = designRun("暂停交接");
-    Issue current = issueService.getIssue(fixture.issueId());
-    issueService.pauseIssue(
-        fixture.issueId(), current.getVersion(), key("pause"), PauseReason.USER, "human stop");
-
-    AiValidationException rejected =
-        assertThrows(
-            AiValidationException.class,
-            () -> issueTransitionService.accept(fixture.run().getThreadId(), "REVIEW"));
-
-    assertTrue(rejected.getMessage().contains("paused"), rejected.getMessage());
     assertNull(nextState(fixture.run().getId()));
   }
 }
