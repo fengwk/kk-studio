@@ -133,6 +133,22 @@ for (const width of [1280, 390, 320]) {
       expect(await field.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
       expect(await field.evaluate(element => getComputedStyle(element, '::placeholder').color)).toBe(gray)
     }
+    // 字段只使用 modal-body 的统一 row-gap，不能再叠加相邻 margin。
+    const spacing = await modal.evaluate(element => {
+      const body = element.querySelector('.modal-body')!
+      const labels = ['Java home (JDK 21)', 'Bash 可执行文件', '备注']
+      const groups = labels.map(label => [...element.querySelectorAll('.form-group')]
+        .find(group => group.querySelector(':scope > span')?.textContent === label)!)
+      const gap = Number.parseFloat(getComputedStyle(body).rowGap)
+      return {
+        gap,
+        margins: groups.map(group => Number.parseFloat(getComputedStyle(group).marginTop)),
+        distances: groups.slice(1).map((group, index) => group.getBoundingClientRect().top - groups[index]!.getBoundingClientRect().bottom),
+      }
+    })
+    expect(spacing.gap).toBe(18)
+    expect(spacing.margins).toEqual([0, 0, 0])
+    expect(spacing.distances.every(distance => Math.abs(distance - spacing.gap) <= 1)).toBe(true)
     const lsp = modal.locator('label.ui-checkbox', { hasText: '启用 LSP servers' })
     await expect(lsp).toBeVisible()
     await lsp.scrollIntoViewIfNeeded()
