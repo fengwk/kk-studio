@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.StopCommand;
+import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -476,6 +478,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           .thenAnswer(invocation -> projectJoinReceipt(jdbc, invocation.getArgument(0)));
       when(runtime.getThreadSnapshot(any(UUID.class)))
           .thenAnswer(invocation -> snapshot(jdbc, invocation.getArgument(0)));
+      when(runtime.stop(any(StopCommand.class)))
+          .thenAnswer(invocation -> stop(jdbc, invocation.getArgument(0)));
       return runtime;
     }
 
@@ -722,6 +726,52 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       when(snapshot.thread()).thenReturn(thread);
       when(snapshot.entryPath()).thenReturn(path);
       return snapshot;
+    }
+
+    /**
+     * 模拟真实 Stop：在同一 Thread 上写入 STOPPED TURN_END 边界并推进 head，再以该新 head 投影权威 ThreadState。
+     *
+     * <p>调用方收尾必须引用返回 head（而非 Stop 之前的快照 head），否则会丢失本次停止已提交的区间末端。同一 stopRequestId 重放时复用既有边界。
+     */
+    private static StopResult stop(JdbcTemplate jdbc, StopCommand command) {
+      UUID threadId = command.threadId();
+      List<Map<String, Object>> existing =
+          jdbc.queryForList(
+              "select id from harness_entry where session_id = (select session_id from"
+                  + " harness_thread where id = ?) and payload->>'closeRequestId' = ?",
+              threadId,
+              command.stopRequestId().toString());
+      if (existing.isEmpty()) {
+        UUID sessionId =
+            jdbc.queryForObject(
+                "select session_id from harness_thread where id = ?", UUID.class, threadId);
+        UUID headEntryId =
+            jdbc.queryForObject(
+                "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
+        UUID entryId = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        TurnEndPayload payload =
+            new TurnEndPayload(
+                headEntryId,
+                TurnEndOutcome.STOPPED,
+                false,
+                TurnEndReason.USER_STOP,
+                command.stopRequestId());
+        jdbc.update(
+            "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+                + " created_at) values (?, ?, ?, 'TURN_END', ?::jsonb, ?)",
+            entryId,
+            sessionId,
+            headEntryId,
+            ENTRY_CODEC.encode(payload),
+            now);
+        jdbc.update(
+            "update harness_thread set head_entry_id = ?, updated_at = ? where id = ?",
+            entryId,
+            now,
+            threadId);
+      }
+      return new StopResult(false, snapshot(jdbc, threadId).thread(), List.of());
     }
 
     /** 按真实父链构造 root-to-head 路径：Entry id 全部来自 harness_entry 行，不伪造历史顺序。 */
