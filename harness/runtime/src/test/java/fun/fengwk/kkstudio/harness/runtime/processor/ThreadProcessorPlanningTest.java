@@ -12,8 +12,11 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedClosedTurn;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedCommand;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.successResponse;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.threadState;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,10 +36,13 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -45,6 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -765,5 +772,106 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
+  }
+
+  /** N1：自有邮箱中的 NOTIFICATION 命令可独立规划 INPUT——从 READY 起步跑到 terminal；输入水位只由 INPUT 推进。 */
+  @Test
+  void notificationOnlyInputRunsFromReadyToTerminalAndAdvancesWatermarkOnInputOnly() {
+    Fixture fixture = fixture();
+    var baseline = seedClosedTurn(fixture.store, false);
+    UUID notification =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new NotificationCommandPayload(
+                UUID.randomUUID(),
+                NotificationKind.SUBAGENT_RESULT,
+                UUID.randomUUID(),
+                userMessage("child done")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    // claim1：notification-only INPUT 规划并物化通知 Entry，模型 invocation 以 READY 起步。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath afterPlan = path(fixture.store, baseline.threadId());
+    TurnStartPayload turnStart =
+        (TurnStartPayload) afterPlan.openTurnStart().orElseThrow().payload();
+    assertEquals(TurnStartReason.INPUT, turnStart.reason());
+    assertTrue(
+        afterPlan.entries().stream().anyMatch(e -> e.payload() instanceof NotificationPayload));
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        command(fixture.store, baseline.threadId(), notification).state());
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).inputThroughSequence());
+    ModelInvocation planned =
+        fixture.store.transaction(
+            tx ->
+                tx.findModelInvocationByTurn(
+                        baseline.threadId(), afterPlan.openTurnStart().orElseThrow().id())
+                    .orElseThrow());
+    assertEquals(ModelInvocationStatus.READY, planned.status());
+
+    // claim2：模型 SUCCEEDED 后一个 claim 应用 terminal，跑到 COMPLETED 终止 turn。
+    transitionModel(fixture.store, planned.id(), model -> model.beginDispatch(NOW));
+    transitionModel(fixture.store, planned.id(), model -> model.markRunning(NOW));
+    transitionModel(
+        fixture.store,
+        planned.id(),
+        model -> model.succeed(successResponse(List.of(), "bash"), NOW));
+    requestThreadWork(fixture.store, baseline.threadId());
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath finalPath = path(fixture.store, baseline.threadId());
+    assertEquals(TurnEndOutcome.COMPLETED, ((TurnEndPayload) finalPath.head().payload()).outcome());
+    // terminal apply 不改变输入水位：仍停在 INPUT 的 cutoff。
+    assertEquals(1L, thread(fixture.store, baseline.threadId()).inputThroughSequence());
+  }
+
+  /** N1：fork 继承含通知的历史但自有邮箱为空时，不产生输入需求、不调用 resolver、不误唤醒。 */
+  @Test
+  void forkedThreadWithoutOwnMailboxDoesNotSpuriouslyWake() {
+    Fixture fixture = fixture();
+    var baseline = seedClosedTurn(fixture.store, false);
+    UUID notificationEntryId =
+        fixture.store.transaction(
+            tx -> {
+              UUID entryId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      entryId,
+                      baseline.sessionId(),
+                      baseline.turnEndEntryId(),
+                      new NotificationPayload(
+                          UUID.randomUUID(),
+                          NotificationKind.SUBAGENT_RESULT,
+                          UUID.randomUUID(),
+                          userMessage("inherited")),
+                      NOW));
+              UUID forkedId = tx.nextId();
+              tx.insertThread(threadState(forkedId, baseline.sessionId(), entryId, NOW));
+              return entryId;
+            });
+
+    UUID forkedThreadId =
+        fixture.store.transaction(
+            tx -> {
+              ThreadState state =
+                  tx.listThreadsBySession(baseline.sessionId()).stream()
+                      .filter(candidate -> candidate.headEntryId().equals(notificationEntryId))
+                      .findFirst()
+                      .orElseThrow();
+              tx.lockThread(state.id());
+              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, state.id()), NOW);
+              return state.id();
+            });
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(forkedThreadId));
+    assertEquals(0, fixture.resolver.calls);
+    // head 未推进、未新增 Entry、未启动模型。
+    EntryPath path = path(fixture.store, forkedThreadId);
+    assertEquals(notificationEntryId, path.head().id());
+    assertEquals(0L, thread(fixture.store, forkedThreadId).inputThroughSequence());
+    assertTrue(
+        fixture.store.<Boolean>transaction(
+            tx -> tx.findModelInvocationByTurn(forkedThreadId, notificationEntryId).isEmpty()));
   }
 }
