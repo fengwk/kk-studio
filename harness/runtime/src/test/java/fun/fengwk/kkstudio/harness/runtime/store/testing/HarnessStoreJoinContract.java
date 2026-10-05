@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
@@ -19,12 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Instant;
 import java.util.List;
@@ -1949,5 +1954,143 @@ public abstract class HarnessStoreJoinContract {
     assertEquals(2, deleted);
     assertTrue(store.transaction(tx -> tx.findThread(rootA)).isEmpty());
     assertTrue(store.transaction(tx -> tx.findThread(rootB)).isEmpty());
+  }
+
+  @Test
+  void updateJoinValidatesTerminalOwnershipAndFinalAnswerPlacement() {
+    // 测试意图：冻结 Join 回执时 terminal 必须落在子线程分支、TurnEnd 必须归子线程所有，
+    // 且 ASSISTANT final answer 必须位于源命令应用 Entry 之后。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    ChildTurn earlier =
+        insertCompletedChildTurn(childId, baseline.sessionId(), baseline.rootEntryId());
+    ChildTurn source = insertCompletedChildTurn(childId, baseline.sessionId(), earlier.turnEndId());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          ThreadCommand queued = queuedCommand(tx, childId, 1L);
+          tx.updateCommands(List.of(queued.markApplied(source.turnStartId())));
+        });
+
+    // 正向：terminal 为子线程 Turn 的 TURN_END，final answer 为源应用之后的 ASSISTANT。
+    UUID acceptedInvocation = TestIds.id(200);
+    insertJoin(childId, acceptedInvocation, 1L);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(
+              tx.findJoin(acceptedInvocation)
+                  .orElseThrow()
+                  .match(source.turnEndId(), source.assistantId(), T2));
+        });
+    ThreadJoin stored = store.transaction(tx -> tx.findJoin(acceptedInvocation).orElseThrow());
+    assertEquals(source.turnEndId(), stored.terminalEntryId());
+    assertEquals(source.assistantId(), stored.finalAnswerEntryId());
+
+    // 负向：final answer 位于源应用 Entry 之前（更早 Turn 的 ASSISTANT，位于 terminal 路径但早于源）。
+    UUID earlyInvocation = TestIds.id(201);
+    insertJoin(childId, earlyInvocation, 1L);
+    assertJoinRejected(
+        "join final answer entry must follow the applied source entry",
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(
+                      tx.findJoin(earlyInvocation)
+                          .orElseThrow()
+                          .match(source.turnEndId(), earlier.assistantId(), T2));
+                }));
+
+    // 负向：terminal TURN_END 由其它线程拥有。
+    ChildTurn foreignTurn =
+        insertCompletedChildTurn(baseline.threadId(), baseline.sessionId(), source.turnEndId());
+    UUID foreignInvocation = TestIds.id(202);
+    insertJoin(childId, foreignInvocation, 1L);
+    assertJoinRejected(
+        "join terminal turn must be owned by the child thread",
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(
+                      tx.findJoin(foreignInvocation)
+                          .orElseThrow()
+                          .match(foreignTurn.turnEndId(), foreignTurn.assistantId(), T2));
+                }));
+
+    // 负向：源命令尚未 APPLIED 时不允许冻结 ASSISTANT final answer。
+    insertCommand(childId, 2L, TestIds.id(2));
+    UUID unappliedInvocation = TestIds.id(203);
+    insertJoin(childId, unappliedInvocation, 2L);
+    assertJoinRejected(
+        "join final answer requires an applied source command",
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(
+                      tx.findJoin(unappliedInvocation)
+                          .orElseThrow()
+                          .match(source.turnEndId(), source.assistantId(), T2));
+                }));
+  }
+
+  /** 断言 Join 更新被拒绝且异常信息包含给定片段。 */
+  private static void assertJoinRejected(String fragment, Runnable action) {
+    IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, action::run);
+    assertTrue(ex.getMessage().contains(fragment), () -> "unexpected message: " + ex.getMessage());
+  }
+
+  /** 子线程自有 Turn 的三个定位 Entry（TURN_START / ASSISTANT 结果 / TURN_END）。 */
+  private record ChildTurn(UUID turnStartId, UUID assistantId, UUID turnEndId) {}
+
+  /** 在 {@code parentEntryId} 下插入一个结构合法的 COMPLETED Turn，其 TURN_START 由 {@code ownerThreadId} 拥有。 */
+  private ChildTurn insertCompletedChildTurn(
+      UUID ownerThreadId, UUID sessionId, UUID parentEntryId) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(turnStartEntry(turnStartId, sessionId, parentEntryId, ownerThreadId, T1));
+          UUID userId = tx.nextId();
+          tx.insertEntry(new Entry(userId, sessionId, turnStartId, userMessagePayload(), T1));
+          UUID assistantId = tx.nextId();
+          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T1));
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  assistantId,
+                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          return new ChildTurn(turnStartId, assistantId, turnEndId);
+        });
+  }
+
+  /** 按 sequence 取队列命令。 */
+  private static ThreadCommand queuedCommand(
+      HarnessStore.Transaction tx, UUID threadId, long sequence) {
+    return tx.loadQueuedCommands(threadId).stream()
+        .filter(command -> command.sequence() == sequence)
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /** 写入一个未匹配的 Join 回执。 */
+  private void insertJoin(UUID childThreadId, UUID invocationId, long sourceCommandSequence) {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childThreadId);
+          tx.insertJoin(
+              initialJoin(invocationId, baseline.threadId(), childThreadId, sourceCommandSequence));
+        });
   }
 }
