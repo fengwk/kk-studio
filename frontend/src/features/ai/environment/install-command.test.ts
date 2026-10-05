@@ -134,6 +134,8 @@ describe('install command', () => {
     const encoded = encodeURIComponent(environmentId).replaceAll("'", "''")
     const encodedCode = encodeURIComponent(installCode).replaceAll("'", "''")
     expect(command).not.toContain('\n')
+    expect(command.startsWith('& { ')).toBe(true)
+    expect(command.endsWith(' }')).toBe(true)
     expect(command).toContain('Invoke-WebRequest -UseBasicParsing')
     expect(command).toContain('-ErrorAction Stop')
     expect(command).toContain('[scriptblock]::Create($script)')

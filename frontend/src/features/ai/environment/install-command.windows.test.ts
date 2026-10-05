@@ -34,7 +34,10 @@ ${payload}
       writeFileSync(
         scriptPath,
         `\ufefffunction Invoke-WebRequest { param([switch]$UseBasicParsing, $Uri) ${download} }
+$ErrorActionPreference = 'Continue'
+$script = 'outer'
 ${command}
+if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'caller scope changed' }
 `,
       )
       return spawnSync(
