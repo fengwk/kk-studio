@@ -459,7 +459,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           jdbc.queryForObject(
               "select max(sequence) from harness_thread_command where thread_id = ?",
               Long.class,
-              join.childThreadId());
+              accepted.thread().id());
       Timestamp now = Timestamp.from(Instant.now());
       jdbc.update(
           "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id,"
@@ -469,7 +469,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           join.invocationId(),
           join.requestHash(),
           join.parentThreadId(),
-          join.childThreadId(),
+          accepted.thread().id(),
           sourceSequence,
           join.agent(),
           join.maxTurns(),
