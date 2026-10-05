@@ -58,6 +58,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread",
           "harness_thread_command",
           "harness_thread_join",
+          "harness_thread_stop_receipt",
           "harness_tool_invocation",
           "harness_work",
           "mcp_server",
@@ -89,7 +90,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work");
 
-  /** 所有允许使用 harness_ 前缀的基础设施表：执行协议七表 + 异步委派记录表。 */
+  /** 所有允许使用 harness_ 前缀的基础设施表：执行协议七表 + 异步委派记录表 + 停止回执表。 */
   private static final Set<String> HARNESS_PREFIXED_TABLES =
       Set.of(
           "harness_session",
@@ -99,7 +100,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
-          "harness_thread_join");
+          "harness_thread_join",
+          "harness_thread_stop_receipt");
 
   /** Canvas 完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
   private static final Set<String> CANVAS_UUID_ID_TABLES =
@@ -440,7 +442,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "creation_request_hash",
         "name",
         "yolo_enabled",
-        "status",
+        "execution_control",
+        "input_through_sequence",
         "next_command_sequence",
         "version",
         "created_at",
@@ -453,7 +456,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "payload",
         "idempotency_key",
         "request_hash",
-        "applied_turn_start_entry_id",
+        "applied_entry_id",
         "stop_request_id",
         "cancelled_at",
         "created_at");
@@ -535,6 +538,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_model_invocation.result",
             "harness_model_invocation.stream_checkpoint",
             "harness_thread_command.payload",
+            "harness_thread_stop_receipt.cancelled_inputs",
             "harness_tool_invocation.approval",
             "harness_tool_invocation.binding",
             "harness_tool_invocation.call",
@@ -549,7 +553,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "skill_package.skills",
             "system_setting.config"),
         jsonbColumns,
-        "jsonb columns must exactly match the 31 declared structured payloads");
+        "jsonb columns must exactly match the 32 declared structured payloads");
 
     // 自由文本字段不受列宽限制，使用 text
     assertColumnType("text", "agent_provider", "description");
@@ -639,6 +643,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_thread_command.created_at",
             "harness_thread_join.created_at",
             "harness_thread_join.updated_at",
+            "harness_thread_stop_receipt.created_at",
             "harness_tool_invocation.created_at",
             "harness_tool_invocation.updated_at",
             "harness_work.available_at",
@@ -683,7 +688,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 75 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 76 timestamptz(3) columns");
 
     assertEquals(
         128L,
@@ -938,11 +943,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_head",
             "fk_harness_thread_join_child_thread",
             "fk_harness_thread_join_delivery_command",
+            "fk_harness_thread_join_final_answer_entry",
             "fk_harness_thread_join_parent_thread",
-            "fk_harness_thread_join_result_head",
             "fk_harness_thread_join_source_command",
+            "fk_harness_thread_join_terminal_entry",
             "fk_harness_thread_parent",
             "fk_harness_thread_session",
+            "fk_harness_thread_stop_receipt_root_thread",
+            "fk_harness_thread_stop_receipt_thread",
+            "fk_harness_thread_stop_receipt_turn_end",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model",
             "fk_harness_work_environment",
@@ -970,7 +979,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 58 declared foreign keys must exist in public schema");
+        "all 62 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1057,15 +1066,19 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_head",
             "fk_harness_thread_join_child_thread",
             "fk_harness_thread_join_delivery_command",
+            "fk_harness_thread_join_final_answer_entry",
             "fk_harness_thread_join_parent_thread",
-            "fk_harness_thread_join_result_head",
             "fk_harness_thread_join_source_command",
+            "fk_harness_thread_join_terminal_entry",
             "fk_harness_thread_parent",
             "fk_harness_thread_session",
+            "fk_harness_thread_stop_receipt_root_thread",
+            "fk_harness_thread_stop_receipt_thread",
+            "fk_harness_thread_stop_receipt_turn_end",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model"),
         noActionFks,
-        "exact set of 20 NO ACTION foreign keys");
+        "exact set of 24 NO ACTION foreign keys");
   }
 
   @Test
@@ -1288,11 +1301,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " name, yolo_enabled, status, next_command_sequence, version, created_at,"
-                    + " updated_at)"
+                    + " name, yolo_enabled, execution_control, input_through_sequence,"
+                    + " next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', 'schema-structure-test-thread', false, 'IDLE', 1, 0, current_timestamp, current_timestamp)")) {
+                    + "', 'schema-structure-test-thread', false, 'RUNNABLE', 0, 1, 0,"
+                    + " current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       session.setObject(2, "schema-structure-test-session");
       assertEquals(1, session.executeUpdate());
@@ -1420,26 +1434,26 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "parent_thread_id",
         "child_thread_id",
         "source_command_sequence",
-        "after_version",
         "agent",
         "max_turns",
         "reminder_turn",
-        "matched_idle_version",
-        "result_head_entry_id",
+        "terminal_entry_id",
+        "final_answer_entry_id",
         "delivery_command_sequence",
         "created_at",
         "updated_at");
     assertColumnType("uuid", "harness_thread_join", "invocation_id");
     assertColumnType("uuid", "harness_thread_join", "parent_thread_id");
     assertColumnType("uuid", "harness_thread_join", "child_thread_id");
-    assertColumnType("bigint", "harness_thread_join", "after_version");
     assertColumnType("integer", "harness_thread_join", "max_turns");
+    assertColumnType("uuid", "harness_thread_join", "terminal_entry_id");
+    assertColumnType("uuid", "harness_thread_join", "final_answer_entry_id");
     assertColumnType("bigint", "harness_thread_join", "delivery_command_sequence");
   }
 
   /**
-   * 测试意图：递归生命周期 status 只接受声明的三种状态，parent_thread_id 禁止自引用，真实父关系由立即校验的外键保护 —— 父被删除时不允许静默丢失子 Thread
-   * 归属。
+   * 测试意图：execution_control 只接受声明的两种状态（RUNNABLE/STOPPED），parent_thread_id 禁止自引用，真实父关系由立即校验的外键保护 ——
+   * 父被删除时不允许静默丢失子 Thread 归属。
    */
   @Test
   void harnessThreadLifecycleAndParentRelationAreStrict() throws SQLException {
@@ -1453,11 +1467,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       insertThreadRow(conn, parentThreadId, sessionId, rootEntryId);
       assertTransactionConstraintViolation(
           conn,
-          "ck_harness_thread_status",
+          "ck_harness_thread_execution_control",
           () -> {
             try (PreparedStatement ps =
                 conn.prepareStatement(
-                    "update harness_thread set status = 'RUNNING' where id = ?")) {
+                    "update harness_thread set execution_control = 'RUNNING' where id = ?")) {
               ps.setObject(1, parentThreadId);
               ps.executeUpdate();
             }
@@ -1476,7 +1490,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       insertThreadRow(conn, childThreadId, childSessionId, childRootEntryId);
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "update harness_thread set parent_thread_id = ?, status = 'WAITING_CHILDREN' where id = ?")) {
+              "update harness_thread set parent_thread_id = ?, execution_control = 'STOPPED'"
+                  + " where id = ?")) {
         ps.setObject(1, parentThreadId);
         ps.setObject(2, childThreadId);
         assertEquals(1, ps.executeUpdate());
