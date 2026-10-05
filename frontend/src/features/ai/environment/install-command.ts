@@ -205,14 +205,11 @@ export function detectInstallOS(platform: string): InstallOperatingSystem {
   return /win/i.test(platform) ? 'windows' : /mac/i.test(platform) ? 'macos' : 'linux'
 }
 
-/**
- * URL 已百分号编码。bash `$'...'` 把编码结果里的单引号写成 `\'`，`%` 保持连续字面量。
- * PowerShell 单引号内的单引号写成 `''`。
- */
+/** bash `$'...'` 与 PowerShell 单引号，都把已编码 URL 当作字面量。 */
 const sh = (value: string) => `$'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`
 const ps = (value: string) => `'${value.replaceAll("'", "''")}'`
 
-/** 当前页面 origin：无 userinfo/path/query/fragment。与 studioUrl 无关。 */
+/** 严格 origin：无 userinfo、path、query、fragment。 */
 function downloadOrigin(value: string): string {
   const raw = nonblankText(value, 'downloadOrigin')
   if (/[\s\\]/.test(raw) || [...raw].some(char => char.codePointAt(0)! > 0x7e)) fail('downloadOrigin')
@@ -233,21 +230,16 @@ function scriptUrl(originValue: string, path: string): string {
   return `${downloadOrigin(originValue)}${path}`
 }
 
-/** 一行：pipefail 下 curl 失败不会被空 bash 吃掉，远端脚本状态原样返回。 */
+/** 一行：curl 失败或远端脚本失败都返回非零。 */
 function unixCommand(url: string): string {
   return `(set -o pipefail; curl -fsSL ${sh(url)} | bash)`
 }
 
-/**
- * 一行：先完整下载（PS5.1/7 的 -UseBasicParsing + ErrorAction Stop），再在内存里执行。
- * 不在客户端写暂存文件。
- */
+/** 一行：先完整下载，再在局部作用域执行；不改调用方会话。 */
 function windowsCommand(url: string): string {
   const quoted = ps(url)
-  return `$ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script))`
+  return `& { $ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script)) }`
 }
-
-/** 安装脚本由服务端按已保存配置生成；URL 只带 5 分钟 code，不带长期 token。 */
 export function generateInstallCommand(
   origin: string,
   environmentId: string,
