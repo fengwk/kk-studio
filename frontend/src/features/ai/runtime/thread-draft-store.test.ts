@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 
@@ -104,6 +104,12 @@ async function readRecord(forThreadId: string): Promise<ThreadDraftRecord> {
   return record
 }
 
+/** 第二个 store 实例：与首个实例各自持有写链，用来真实模拟同库的两个标签页。 */
+async function importTwoTabStore() {
+  vi.resetModules()
+  return import('@/features/ai/runtime/thread-draft-store')
+}
+
 function occurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
@@ -116,7 +122,7 @@ describe('thread draft store', () => {
     const text = createTextPart('hello')
     const resource = createResourcePart(BLOB_ID, 'report.pdf', 'preview')
     const attachment = createAttachmentPart('upload-1', 'local.png')
-    await saveThreadDraftParts(threadId, [text, attachment, resource])
+    await saveThreadDraftParts(threadId, [text, attachment, resource], [])
 
     const record = await readRecord(threadId)
     expect(record.parts).toEqual([text, resource])
@@ -124,7 +130,7 @@ describe('thread draft store', () => {
     expect(record.goalText).toBeNull()
     expect(record.appliedStopRequestIds).toEqual([])
 
-    await saveThreadGoalText(threadId, 'goal text')
+    await saveThreadGoalText(threadId, 'goal text', [])
     const withGoal = await readRecord(threadId)
     expect(withGoal.goalText).toBe('goal text')
     expect(withGoal.parts).toEqual([text, resource])
@@ -132,21 +138,24 @@ describe('thread draft store', () => {
 
   it('keeps parts, goal text and applied receipt ids independent across saves', async () => {
     // 测试意图：三者同属一条记录但语义独立；任一次保存都不得清掉另外两个字段。
-    await saveThreadDraftParts(threadId, [createTextPart('draft')])
-    await saveThreadGoalText(threadId, 'goal')
-    await applyStopReceipt(
+    await saveThreadDraftParts(threadId, [createTextPart('draft')], [])
+    await saveThreadGoalText(threadId, 'goal', [])
+    const merged = await applyStopReceipt(
       stopReceipt(threadId, 'stop-1', [cancelledGoal(1, 'receipt goal')]),
     )
+    // 合并完成后本 UI 观察到这次回执的 generation，后续写入携带它。
+    const observed = merged.appliedStopRequestIds
 
     // 保存 Goal 文本不影响 composer 草稿与已合并回执身份。
-    await saveThreadGoalText(threadId, 'edited goal')
+    expect(await saveThreadGoalText(threadId, 'edited goal', observed)).toEqual({ status: 'SAVED' })
     const afterGoalSave = await readRecord(threadId)
     expect(afterGoalSave.goalText).toBe('edited goal')
     expect(partsToText(afterGoalSave.parts)).toBe('draft')
     expect(afterGoalSave.appliedStopRequestIds).toEqual(['stop-1'])
 
     // 保存 composer 草稿不影响 Goal 文本与已合并回执身份。
-    await saveThreadDraftParts(threadId, [createTextPart('edited draft')])
+    expect(await saveThreadDraftParts(threadId, [createTextPart('edited draft')], observed))
+      .toEqual({ status: 'SAVED' })
     const afterPartsSave = await readRecord(threadId)
     expect(partsToText(afterPartsSave.parts)).toBe('edited draft')
     expect(afterPartsSave.goalText).toBe('edited goal')
@@ -163,7 +172,7 @@ describe('thread draft store', () => {
     expect(partsToText((await readRecord(untouchedThreadId)).parts)).toBe('failed message')
 
     // 只有空白文本的草稿同样没有可发送内容。
-    await saveThreadDraftParts(threadId, [createTextPart('   ')])
+    await saveThreadDraftParts(threadId, [createTextPart('   ')], [])
     expect(await restoreThreadDraftParts(threadId, failedParts)).toBe(true)
     expect(partsToText((await readRecord(threadId)).parts)).toBe('failed message')
 
@@ -192,7 +201,7 @@ describe('thread draft store', () => {
 
   it('merges a stop receipt into the existing draft and goal editor', async () => {
     // 测试意图：回执一旦应用，取消的 USER_MESSAGE 前置于草稿、GOAL 进入 Goal 编辑区，并记录回执身份。
-    await saveThreadDraftParts(threadId, [createTextPart('draft')])
+    await saveThreadDraftParts(threadId, [createTextPart('draft')], [])
     const merged = await applyStopReceipt(
       stopReceipt(threadId, 'stop-1', [
         cancelledUserMessage(1, 'cancelled message'),
@@ -250,7 +259,7 @@ describe('thread draft store', () => {
     // 测试意图：子 Thread 的 Stop 回执写它自己的记录，绝不进入父 Thread 的输入框。
     const parentThreadId = nextThreadId('parent')
     const childThreadId = nextThreadId('child')
-    await saveThreadDraftParts(parentThreadId, [createTextPart('parent draft')])
+    await saveThreadDraftParts(parentThreadId, [createTextPart('parent draft')], [])
 
     const childRecord = await applyStopReceipt(
       stopReceipt(childThreadId, 'stop-child', [cancelledUserMessage(1, 'child cancelled')]),
@@ -270,7 +279,7 @@ describe('thread draft store', () => {
   it('ignores any caller-supplied draft snapshot and merges on the persisted record', async () => {
     // 测试意图：跨标签页场景下调用方的 draft 快照可能已经过期；合并只能以持久记录为事实源，
     // 绝不用过期整份快照覆盖另一个标签页已经落盘的新输入。
-    await saveThreadDraftParts(threadId, [createTextPart('newer draft from another tab')])
+    await saveThreadDraftParts(threadId, [createTextPart('newer draft from another tab')], [])
 
     const merged = await applyStopReceipt(
       stopReceipt(threadId, 'stop-record-only', [cancelledUserMessage(1, 'cancelled')]),
@@ -283,7 +292,7 @@ describe('thread draft store', () => {
   it('lets two tabs apply the same receipt with their own pending edits without duplication or loss', async () => {
     // 测试意图：两个标签页各自已有编辑并同时投递同一回执时，只有一个标签页完成合并，
     // 另一个拿到同一份记录用于同步；最终记录既包含双方编辑，也只包含一份回填内容。
-    await saveThreadDraftParts(threadId, [createTextPart('tab A edit')])
+    await saveThreadDraftParts(threadId, [createTextPart('tab A edit')], [])
 
     const [tabA, tabB] = await Promise.all([
       applyStopReceipt(stopReceipt(threadId, 'stop-shared', [cancelledUserMessage(1, 'cancelled once')])),
@@ -293,17 +302,93 @@ describe('thread draft store', () => {
     expect(occurrences(partsToText(tabA.parts), 'cancelled once')).toBe(1)
     expect(occurrences(partsToText(tabB.parts), 'cancelled once')).toBe(1)
 
-    // 标签页 B 在同步到回执内容后继续编辑（同链保存），不得丢掉回填内容。
-    await saveThreadDraftParts(threadId, [
-      createTextPart('tab B edit'),
-      createTextPart('\n\ncancelled once'),
-    ])
+    // 标签页 B 在同步到回执内容后继续编辑（同链保存，携带已观察 generation），不得丢掉回填内容。
+    const saved = await saveThreadDraftParts(
+      threadId,
+      [createTextPart('tab B edit'), createTextPart('\n\ncancelled once')],
+      tabB.appliedStopRequestIds,
+    )
+    expect(saved).toEqual({ status: 'SAVED' })
 
     const record = await readRecord(threadId)
     const text = partsToText(record.parts)
     expect(occurrences(text, 'cancelled once')).toBe(1)
     expect(text).toContain('tab B edit')
     expect(record.appliedStopRequestIds).toEqual(['stop-shared'])
+  })
+
+  it('keeps same-tab serialized edits correct around a receipt merge', async () => {
+    // 测试意图：同一条写链上的编辑严格按调用顺序提交。合并前入队的编辑先于合并提交（不会被误判为
+    // 陈旧），合并基于它落盘后的记录；合并后的编辑携带新观察到的 generation，双方内容都保留。
+    const inFlight = saveThreadDraftParts(threadId, [createTextPart('in-flight edit')], [])
+    const merge = applyStopReceipt(
+      stopReceipt(threadId, 'stop-in-flight', [cancelledUserMessage(1, 'cancelled')]),
+    )
+
+    expect(await inFlight).toEqual({ status: 'SAVED' })
+    const merged = await merge
+    expect(partsToText(merged.parts)).toBe('cancelled\n\nin-flight edit')
+
+    expect(await saveThreadDraftParts(
+      threadId,
+      [createTextPart('cancelled\n\nin-flight edit\n\nafter')],
+      merged.appliedStopRequestIds,
+    )).toEqual({ status: 'SAVED' })
+
+    const record = await readRecord(threadId)
+    expect(partsToText(record.parts)).toBe('cancelled\n\nin-flight edit\n\nafter')
+    expect(record.appliedStopRequestIds).toEqual(['stop-in-flight'])
+  })
+
+  it('rejects a stale save committing after another tab merged a receipt, keeping restored text and ids together', async () => {
+    // 测试意图：另一个标签页已合并回执后，本标签页在合并之前捕获的整份旧草稿仍会提交。
+    // 若放行这次覆盖写，记录里会只剩回执 id 而恢复文本永久丢失（此后也不会再回填）。
+    // 两个标签页共享同一 IndexedDB，但写链各自独立：用两个模块实例真实模拟。
+    const otherTab = await importTwoTabStore()
+    expect(await otherTab.saveThreadDraftParts(threadId, [createTextPart('old draft')], []))
+      .toEqual({ status: 'SAVED' })
+
+    const merged = await applyStopReceipt(
+      stopReceipt(threadId, 'stop-cross-tab', [cancelledUserMessage(1, 'cancelled')]),
+    )
+    expect(partsToText(merged.parts)).toBe('cancelled\n\nold draft')
+
+    // 陈旧整份写入（内容来自合并之前，且尚未观察该回执）随后提交。
+    const outcome = await otherTab.saveThreadDraftParts(threadId, [createTextPart('old draft + stale edit')], [])
+    expect(outcome.status).toBe('STALE')
+    if (outcome.status !== 'STALE') {
+      throw new Error('expected a stale save outcome')
+    }
+    expect(outcome.record.appliedStopRequestIds).toEqual(['stop-cross-tab'])
+    expect(partsToText(outcome.record.parts)).toBe('cancelled\n\nold draft')
+
+    // 持久记录不可分离：回执 id 存在就一定有对应恢复文本；刷新（重新读取）仍可读到。
+    const record = await readRecord(threadId)
+    expect(record.appliedStopRequestIds).toEqual(['stop-cross-tab'])
+    expect(partsToText(record.parts)).toBe('cancelled\n\nold draft')
+  })
+
+  it('protects the goal editor text from the same stale overwrite', async () => {
+    // 测试意图：Goal 编辑区的陈旧覆盖写同样不得把已恢复的 Goal 文本与回执身份拆开。
+    const otherTab = await importTwoTabStore()
+    expect(await otherTab.saveThreadGoalText(threadId, 'old goal', [])).toEqual({ status: 'SAVED' })
+
+    const merged = await applyStopReceipt(
+      stopReceipt(threadId, 'stop-cross-tab-goal', [cancelledGoal(1, 'cancelled goal')]),
+    )
+    expect(merged.goalText).toBe('cancelled goal\n\nold goal')
+
+    const outcome = await otherTab.saveThreadGoalText(threadId, 'stale goal', [])
+    expect(outcome.status).toBe('STALE')
+    if (outcome.status !== 'STALE') {
+      throw new Error('expected a stale save outcome')
+    }
+    expect(outcome.record.appliedStopRequestIds).toEqual(['stop-cross-tab-goal'])
+    expect(outcome.record.goalText).toBe('cancelled goal\n\nold goal')
+
+    const record = await readRecord(threadId)
+    expect(record.appliedStopRequestIds).toEqual(['stop-cross-tab-goal'])
+    expect(record.goalText).toBe('cancelled goal\n\nold goal')
   })
 
   it('serializes concurrent receipt merges for the same thread', async () => {
@@ -329,7 +414,7 @@ describe('thread draft store', () => {
     })
 
     await expect(loadThreadDraft(threadId)).rejects.toThrow()
-    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')])).rejects.toThrow()
+    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')], [])).rejects.toThrow()
   })
 
   it('rejects when the IndexedDB transaction fails so callers can surface it', async () => {
@@ -340,15 +425,15 @@ describe('thread draft store', () => {
       value: createMockIDBFactory({ shouldFailTransaction: true }),
     })
 
-    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')])).rejects.toThrow()
+    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')], [])).rejects.toThrow()
   })
 
   it('applies a receipt to the record cleared by the queued send-time draft clear', async () => {
     // 测试意图：发送时的草稿清空是排队写入；紧随其后的回执合并必须基于清空后的记录，
     // 否则已发送的消息会被当作未消费草稿重新回填到输入框。
-    await saveThreadDraftParts(threadId, [createTextPart('sent draft')])
+    await saveThreadDraftParts(threadId, [createTextPart('sent draft')], [])
 
-    const cleared = saveThreadDraftParts(threadId, [])
+    const cleared = saveThreadDraftParts(threadId, [], [])
     const merged = applyStopReceipt(
       stopReceipt(threadId, 'stop-after-send', [cancelledUserMessage(1, 'cancelled after send')]),
     )

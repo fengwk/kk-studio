@@ -19,7 +19,8 @@ import {
   type StopReceiptMergeResult,
   type ThreadDraftRecord,
 } from '@/features/ai/runtime/thread-draft-store'
-import { translate } from '@/shared/i18n'
+import { translate as t } from '@/shared/i18n'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
@@ -84,6 +85,19 @@ function wrapper({ children }: { children: ReactNode }) {
       </ApplicationEventProvider>
     </QueryClientProvider>
   )
+}
+
+/** 需要显式触发快照重取的用例用同一个 client 渲染。 */
+function clientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={realtimeSockets.factory}>
+          {children}
+        </ApplicationEventProvider>
+      </QueryClientProvider>
+    )
+  }
 }
 
 const assistantAgentEntry = {
@@ -387,7 +401,7 @@ describe('useAgentThreadController draft restore', () => {
     // Stop 已完成（不是 stopFailed），只有草稿恢复失败对用户可见。
     expect(result.current.pendingMessage).toBeNull()
     expect(result.current.actionError).toBeNull()
-    expect(result.current.draftRestoreError).toBe(translate('ai.runtime.action.draftRestoreFailed'))
+    expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftRestoreFailed'))
     expect(partsToText(result.current.draft)).toBe('draft before stop')
 
     applyStopReceiptMock.mockResolvedValue(
@@ -410,7 +424,7 @@ describe('useAgentThreadController draft restore', () => {
 
     const { result, rerender } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
     await waitFor(() =>
-      expect(result.current.draftRestoreError).toBe(translate('ai.runtime.action.draftRestoreFailed')))
+      expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftRestoreFailed')))
     expect(applyStopReceiptMock).toHaveBeenCalledTimes(1)
 
     rerender()
@@ -431,6 +445,95 @@ describe('useAgentThreadController draft restore', () => {
     expect(partsToText(result.current.draft)).toBe('cancelled once')
   })
 
+  it('carries the observed receipt generation on every draft write', async () => {
+    // 已观察 generation 只来自 loadThreadDraft / applyStopReceipt 的 record：写入必须原样携带，
+    // 存储层才能拒绝尚未观察新回执的陈旧覆盖写。
+    loadThreadDraftMock.mockResolvedValueOnce(
+      recordOf(THREAD_ID, [createTextPart('loaded draft')], ['stop-loaded']),
+    )
+
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('edited draft')]))
+    await waitFor(() =>
+      expect(saveThreadDraftPartsMock).toHaveBeenCalledWith(
+        THREAD_ID,
+        [expect.objectContaining({ type: 'text', text: 'edited draft' })],
+        ['stop-loaded'],
+      ))
+  })
+
+  it('keeps the edit, prompts, then merges the restored input once the snapshot brings the receipt', async () => {
+    // 另一处已合并了本 UI 尚未观察到的恢复内容：陈旧的整份写入被拒。
+    // 编辑必须保留在 UI、明确提示；快照随后带来该回执时，经已有恢复通道把恢复内容合并回来
+    // （generation 同步补齐），两者都落盘。
+    const receipt = stopReceipt(THREAD_ID, 'stop-stale', [cancelledUserMessage(1, 'cancelled')])
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValueOnce(snapshotOf(threadFixture()))
+    saveThreadDraftPartsMock.mockResolvedValueOnce({
+      status: 'STALE',
+      record: recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-stale']),
+    })
+    applyStopReceiptMock.mockResolvedValue(
+      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-stale']),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), {
+      wrapper: clientWrapper(client),
+    })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('local edit')]))
+    await waitFor(() =>
+      expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftWriteConflict')))
+    expect(partsToText(result.current.draft)).toBe('local edit')
+
+    // 快照重取带来该回执：恢复内容与本地输入一起进入编辑区并按补齐后的 generation 落盘。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(), { stopReceipts: [receipt] }),
+    )
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: queryKeys.threads.snapshot(THREAD_ID) })
+    })
+
+    await waitFor(() => expect(partsToText(result.current.draft)).toBe('cancelled\n\nlocal edit'))
+    await waitFor(() => expect(result.current.draftRestoreError).toBeNull())
+    expect(saveThreadDraftPartsMock).toHaveBeenLastCalledWith(
+      THREAD_ID,
+      [expect.objectContaining({ type: 'text', text: 'cancelled\n\nlocal edit' })],
+      ['stop-stale'],
+    )
+  })
+
+  it('keeps the prompt and the edit when a rejected save has no receipt to resync from', async () => {
+    // 没有可用于重建恢复内容的回执：不写记录、不改 generation，保留编辑并保持提示等待重试。
+    saveThreadDraftPartsMock.mockResolvedValue({
+      status: 'STALE',
+      record: recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-elsewhere']),
+    })
+
+    const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    act(() => result.current.setDraft([createTextPart('local edit')]))
+    await waitFor(() =>
+      expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftWriteConflict')))
+    expect(partsToText(result.current.draft)).toBe('local edit')
+
+    // 后续编辑仍会尝试写入（不被永久阻塞），且仍携带未补齐的 generation。
+    act(() => result.current.setDraft([createTextPart('local edit 2')]))
+    await waitFor(() => expect(saveThreadDraftPartsMock).toHaveBeenCalledTimes(2))
+    expect(saveThreadDraftPartsMock).toHaveBeenLastCalledWith(
+      THREAD_ID,
+      [expect.objectContaining({ type: 'text', text: 'local edit 2' })],
+      [],
+    )
+    expect(partsToText(result.current.draft)).toBe('local edit 2')
+  })
+
   it('reports a draft save failure instead of pretending the draft is persisted', async () => {
     saveThreadDraftPartsMock.mockRejectedValueOnce(new Error('quota exceeded'))
 
@@ -438,13 +541,13 @@ describe('useAgentThreadController draft restore', () => {
     await waitFor(() => expect(result.current.disabled).toBe(false))
 
     act(() => result.current.setDraft([createTextPart('unsaved edit')]))
-    await waitFor(() => expect(result.current.actionError).toBe(translate('ai.runtime.action.draftSaveFailed')))
+    await waitFor(() => expect(result.current.actionError).toBe(t('ai.runtime.action.draftSaveFailed')))
   })
 
   it('reports a draft load failure instead of showing a possibly stale editor', async () => {
     loadThreadDraftMock.mockRejectedValueOnce(new Error('IndexedDB open failed'))
 
     const { result } = renderHook(() => useAgentThreadController(THREAD_ID), { wrapper })
-    await waitFor(() => expect(result.current.actionError).toBe(translate('ai.runtime.action.draftLoadFailed')))
+    await waitFor(() => expect(result.current.actionError).toBe(t('ai.runtime.action.draftLoadFailed')))
   })
 })
