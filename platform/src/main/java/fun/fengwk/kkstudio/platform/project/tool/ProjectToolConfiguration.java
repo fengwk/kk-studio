@@ -11,44 +11,23 @@ import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 /**
- * Project Issue Agent 交接工具与 Turn 事实解析的 Spring 装配。
+ * Project Issue 交接工具、Run 上下文投影与 Thread 归属判定的 Spring 装配。
  *
- * <p>依赖都是 Project 域自身的仓库端口与 workflow 领域编解码器；没有 Harness Runtime 或其它域的对象，因为 Turn 规划与交接都只读写 Project
+ * <p>依赖都是 Project 域自身的仓库端口与 workflow 领域编解码器；没有 Harness Runtime 或其它域的对象，因为工具执行与上下文投影都只读写 Project
  * 事实。缺失依赖时启动期明确失败，不做静默降级。
  */
 @Configuration(proxyBeanMethods = false)
 public class ProjectToolConfiguration {
 
-  @Bean(name = "projectIssueTurnResolver")
-  @ConditionalOnMissingBean(name = "projectIssueTurnResolver")
-  public ProjectIssueTurnResolver projectIssueTurnResolver(
-      IssueAgentThreadRepository issueAgentThreadRepository,
-      IssueRepository issueRepository,
-      ProjectRepository projectRepository,
-      IssueRunRepository issueRunRepository,
-      ProjectWorkflowJsonCodec workflowCodec) {
-    return new DatabaseProjectIssueTurnResolver(
-        issueAgentThreadRepository,
-        issueRepository,
-        projectRepository,
-        issueRunRepository,
-        workflowCodec);
-  }
-
   @Bean(name = "issueTransitionService")
   @ConditionalOnMissingBean(name = "issueTransitionService")
   public IssueTransitionService issueTransitionService(
-      IssueAgentThreadRepository issueAgentThreadRepository,
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository,
       ProjectWorkflowJsonCodec workflowCodec) {
     return new IssueTransitionService(
-        issueAgentThreadRepository,
-        projectRepository,
-        issueRepository,
-        issueRunRepository,
-        workflowCodec);
+        projectRepository, issueRepository, issueRunRepository, workflowCodec);
   }
 
   @Bean(name = "issueTransitionTool")

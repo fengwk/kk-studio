@@ -22,11 +22,17 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
@@ -193,6 +199,44 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     return entryId;
   }
 
+  /**
+   * 读取本次 Run 冻结在本 Thread 上的 {@code project/run} contributor state JSON：SET_CONTRIBUTOR_STATE 命令的
+   * durable payload 就是接受该 Run 时冻结的业务身份，测试据此以真实来源驱动 {@code issue_transition}，而不是自己重算 scope。
+   */
+  protected String frozenRunScopeJson(UUID threadId) {
+    Map<String, Object> row =
+        jdbc.queryForMap(
+            "select command_type, payload::text as payload from harness_thread_command"
+                + " where thread_id = ? and command_type = 'SET_CONTRIBUTOR_STATE'",
+            threadId);
+    ThreadCommandPayload payload =
+        new ThreadCommandPayloadJsonCodec()
+            .decode(
+                ThreadCommandType.valueOf((String) row.get("command_type")),
+                (String) row.get("payload"));
+    return ((SetContributorStateCommandPayload) payload).state().dataJson();
+  }
+
+  /** 冻结本次 Run 的 root Join 结果：terminal 与 final 指向同一 Entry，模拟 Harness 执行终止后写回的固定 join 凭据。 */
+  protected void matchRunJoin(UUID runId, UUID terminalEntryId) {
+    matchRunJoin(runId, terminalEntryId, terminalEntryId);
+  }
+
+  /** 冻结本次 Run 的 root Join 结果，允许 final 回答入口与 terminal 不同（如执行失败时无最终回答）。 */
+  protected void matchRunJoin(UUID runId, UUID terminalEntryId, UUID finalAnswerEntryId) {
+    int updated =
+        jdbc.update(
+            "update harness_thread_join set terminal_entry_id = ?, final_answer_entry_id = ?,"
+                + " updated_at = ? where invocation_id = ?",
+            terminalEntryId,
+            finalAnswerEntryId,
+            Timestamp.from(Instant.now()),
+            runId);
+    if (updated != 1) {
+      throw new IllegalStateException("no harness_thread_join row for run " + runId);
+    }
+  }
+
   protected long count(String sql, Object... args) {
     Long value = jdbc.queryForObject(sql, Long.class, args);
     return value == null ? 0L : value;
@@ -209,6 +253,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
    */
   @TestConfiguration(proxyBeanMethods = false)
   public static class HarnessRuntimeTestConfiguration {
+
+    private static final ThreadCommandPayloadJsonCodec COMMAND_CODEC =
+        new ThreadCommandPayloadJsonCodec();
 
     /**
      * 受控 Harness 存储假件：只实现归属校验读取（Session / Thread 解析），事实直接来自真实 Harness 行。
@@ -313,9 +360,75 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
       when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any()))
           .thenAnswer(invocation -> accept(jdbc, invocation.getArgument(0)));
+      when(runtime.acceptCommandsAndJoin(
+              any(AcceptCommandsCommand.class), any(ThreadJoinRequest.class), any()))
+          .thenAnswer(
+              invocation ->
+                  acceptAndJoin(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
+      when(runtime.findJoin(any(UUID.class)))
+          .thenAnswer(invocation -> findJoin(jdbc, invocation.getArgument(0)));
       when(runtime.getThreadSnapshot(any(UUID.class)))
           .thenAnswer(invocation -> snapshot(jdbc, invocation.getArgument(0)));
       return runtime;
+    }
+
+    /** 原子接受并发起 join：先按普通接受写入 Session/Thread/Commands，再冻结 join 契约行（terminal 留空表示尚未匹配）。 */
+    private static AcceptedCommands acceptAndJoin(
+        JdbcTemplate jdbc, AcceptCommandsCommand command, ThreadJoinRequest join) {
+      AcceptedCommands accepted = accept(jdbc, command);
+      long sourceSequence =
+          jdbc.queryForObject(
+              "select max(sequence) from harness_thread_command where thread_id = ?",
+              Long.class,
+              join.childThreadId());
+      Timestamp now = Timestamp.from(Instant.now());
+      jdbc.update(
+          "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id,"
+              + " child_thread_id, source_command_sequence, agent, max_turns, reminder_turn,"
+              + " terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at,"
+              + " updated_at) values (?, ?, ?, ?, ?, ?, ?, 0, null, null, null, ?, ?)",
+          join.invocationId(),
+          join.requestHash(),
+          join.parentThreadId(),
+          join.childThreadId(),
+          sourceSequence,
+          join.agent(),
+          join.maxTurns(),
+          now,
+          now);
+      return accepted;
+    }
+
+    /** 从真实 {@code harness_thread_join} 行读取固定 join 凭据；无行即未登记。 */
+    private static Optional<ThreadJoin> findJoin(JdbcTemplate jdbc, UUID invocationId) {
+      List<Map<String, Object>> rows =
+          jdbc.queryForList(
+              "select invocation_id, request_hash, parent_thread_id, child_thread_id,"
+                  + " source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,"
+                  + " final_answer_entry_id, delivery_command_sequence, created_at, updated_at"
+                  + " from harness_thread_join where invocation_id = ?",
+              invocationId);
+      if (rows.isEmpty()) {
+        return Optional.empty();
+      }
+      Map<String, Object> row = rows.get(0);
+      return Optional.of(
+          new ThreadJoin(
+              (UUID) row.get("invocation_id"),
+              (String) row.get("request_hash"),
+              (UUID) row.get("parent_thread_id"),
+              (UUID) row.get("child_thread_id"),
+              ((Number) row.get("source_command_sequence")).longValue(),
+              (String) row.get("agent"),
+              row.get("max_turns") == null ? null : ((Number) row.get("max_turns")).intValue(),
+              ((Number) row.get("reminder_turn")).longValue(),
+              (UUID) row.get("terminal_entry_id"),
+              (UUID) row.get("final_answer_entry_id"),
+              row.get("delivery_command_sequence") == null
+                  ? null
+                  : ((Number) row.get("delivery_command_sequence")).longValue(),
+              ((Timestamp) row.get("created_at")).toInstant(),
+              ((Timestamp) row.get("updated_at")).toInstant()));
     }
 
     private static AcceptedCommands accept(JdbcTemplate jdbc, AcceptCommandsCommand command) {
@@ -338,8 +451,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, 'IDLE', ?, 0, ?, ?)",
+                + " name, yolo_enabled, execution_control, input_through_sequence,"
+                + " next_command_sequence, version, created_at, updated_at)"
+                + " values (?, ?, ?, ?, ?, ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
@@ -384,10 +498,11 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       for (NewThreadCommand item : commands) {
         jdbc.update(
             "insert into harness_thread_command (thread_id, sequence, command_type, payload,"
-                + " idempotency_key, request_hash, created_at) values (?, ?, 'USER_MESSAGE',"
-                + " '{}'::jsonb, ?, ?, ?)",
+                + " idempotency_key, request_hash, created_at) values (?, ?, ?, ?::jsonb, ?, ?, ?)",
             threadId,
             sequence,
+            item.payload().type().name(),
+            COMMAND_CODEC.encode(item.payload()),
             item.idempotencyKey(),
             item.requestHash(),
             now);
@@ -406,8 +521,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     private static ThreadSnapshot snapshot(JdbcTemplate jdbc, UUID threadId) {
       Map<String, Object> row =
           jdbc.queryForMap(
-              "select session_id, head_entry_id, next_command_sequence, status from harness_thread"
-                  + " where id = ?",
+              "select session_id, head_entry_id, next_command_sequence, execution_control,"
+                  + " input_through_sequence from harness_thread where id = ?",
               threadId);
       UUID headEntryId = (UUID) row.get("head_entry_id");
       ThreadState thread = mock(ThreadState.class);
@@ -415,8 +530,11 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       when(thread.headEntryId()).thenReturn(headEntryId);
       when(thread.nextCommandSequence())
           .thenReturn(((Number) row.get("next_command_sequence")).longValue());
-      // 递归生命周期来自真实行：委派静止点判定只读持久 status，测试不得伪造固定值。
-      when(thread.status()).thenReturn(ThreadLifecycleStatus.valueOf((String) row.get("status")));
+      // 持久执行控制来自真实行：运行阶段判定读取的就是这一事实，测试不得伪造固定值。
+      when(thread.executionControl())
+          .thenReturn(ThreadExecutionControl.valueOf((String) row.get("execution_control")));
+      when(thread.inputThroughSequence())
+          .thenReturn(((Number) row.get("input_through_sequence")).longValue());
       EntryPath path = entryPath(jdbc, headEntryId);
       ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
       when(snapshot.thread()).thenReturn(thread);
