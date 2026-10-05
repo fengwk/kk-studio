@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -394,11 +394,13 @@ class HarnessOneShotServiceTest {
             "0".repeat(64),
             "oneshot",
             false,
-            ThreadLifecycleStatus.IDLE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
             1L,
             0L,
             NOW,
             NOW);
-    return new ThreadSnapshot(thread, mock(EntryPath.class), List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        thread, mock(EntryPath.class), List.of(), null, List.of(), List.of(), List.of());
   }
 }

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -59,6 +60,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -93,7 +95,7 @@ import java.util.stream.Collectors;
  *   <li>父暂停 + 恢复：显式 stop 的父只保存已匹配 receipt，绝不唤醒；父真实接受新输入时原子交付旧结果且恰好一次；
  *   <li>并发重复接受：同一 invocation 的并发接受只有一次真正写入，另一侧按既有 command 幂等键重放；
  *   <li>重启无 NOTIFY：接受阶段没有任何调度器在跑，durable work 行是唯一恢复面，调度器启动后自行读取并推进；
- *   <li>首 idle 固定结果：receipt 一旦匹配就冻结在 {@code resultHeadEntryId}，子执行后续历史绝不改写它；
+ *   <li>首 idle 固定结果：receipt 一旦匹配就冻结在 {@code terminalEntryId}，子执行后续历史绝不改写它；
  *   <li>忙子 resume：向仍在执行（已有未消费命令）的子追加源 prompt 立即被接受，并在真正下一次 Idle 结算；
  *   <li>三层执行树：结果沿不可变 parent 链逐级传递，每级都把下一级的报告带回自己的报告里，父级状态只由自身 durable 执行控制与本地投影表达。
  * </ul>
@@ -221,19 +223,26 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertStoppedHead(childThreadId, threadState(childThreadId).headEntryId());
     assertEquals(ThreadExecutionControl.STOPPED, threadState(childThreadId).executionControl());
 
-    // 精确的子树回执：Stop 覆盖整棵受影响执行子树（父 + 直接子），每个节点各一条回执，携带同一 stopRequestId、
-    // 各自自有停止边界与取消输入，绝不多收无关节点。
+    // 精确的子树回执：Stop 覆盖整棵受影响执行子树（父 + 直接子），每个节点各一条回执，携带各自身份的停止请求
+    // （root 用请求自身 id，子节点用 root+子身份派生的确定 id）、各自自有停止边界与取消输入，绝不多收无关节点。
     assertEquals(
         Set.of(parentThreadId, childThreadId),
         stop.stoppedThreads().stream()
             .map(StoppedThreadReceipt::threadId)
             .collect(Collectors.toSet()),
         "stop must emit exactly one receipt per stopped node of the execution subtree");
-    assertTrue(
-        stop.stoppedThreads().stream()
-            .allMatch(receipt -> receipt.stopRequestId().equals(stopRequestId)),
-        "every subtree receipt must reference the cancelled stop request");
     StoppedThreadReceipt parentReceipt = receipt(stop, parentThreadId);
+    StoppedThreadReceipt childReceipt = receipt(stop, childThreadId);
+    assertEquals(
+        stopRequestId, parentReceipt.stopRequestId(), "root receipt keeps the requested stop id");
+    assertNotEquals(
+        stopRequestId,
+        childReceipt.stopRequestId(),
+        "child receipt must not reuse the root stop id");
+    assertEquals(
+        derivedChildStopRequestId(stopRequestId, childThreadId),
+        childReceipt.stopRequestId(),
+        "child receipt carries the deterministic root+child derived stop id");
     assertEquals(parentStopBoundary, parentReceipt.stoppedTurnEndEntryId());
     assertEquals(1, parentReceipt.cancelledCommandCount());
     assertEquals(
@@ -241,7 +250,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         messageText(
             ((UserMessageCommandPayload) parentReceipt.cancelledInputs().getFirst().payload())
                 .message()));
-    StoppedThreadReceipt childReceipt = receipt(stop, childThreadId);
     assertEquals(threadState(childThreadId).headEntryId(), childReceipt.stoppedTurnEndEntryId());
     assertEquals(1, childReceipt.cancelledCommandCount());
     assertEquals(1, childReceipt.cancelledInputs().size());
@@ -542,7 +550,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 首 idle 固定结果：receipt 冻结在首次匹配时的 resultHeadEntryId；子执行随后被直接继续使用（Thread API 直达子 Thread，不受 join
+   * 首 idle 固定结果：receipt 冻结在首次匹配时的 terminalEntryId；子执行随后被直接继续使用（Thread API 直达子 Thread，不受 join
    * 是否交付影响）并产生不同报告，旧 receipt 仍然保持不变。
    */
   @Test
@@ -572,12 +580,14 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals("ACK:child work", frozen.report());
 
     ThreadJoin matched = joinOf(invocationId);
-    UUID resultHeadEntryId = matched.resultHeadEntryId();
-    long matchedIdleVersion = matched.matchedIdleVersion();
-    assertNotNull(resultHeadEntryId);
-    assertTrue(matched.afterVersion() < matchedIdleVersion);
+    UUID terminalEntryId = matched.terminalEntryId();
+    UUID finalAnswerEntryId = matched.finalAnswerEntryId();
+    assertNotNull(terminalEntryId);
     assertEquals(
-        resultHeadEntryId, threadState(childThreadId).headEntryId(), "first idle head is frozen");
+        terminalEntryId,
+        threadState(childThreadId).headEntryId(),
+        "first idle terminal head is frozen");
+    assertNotNull(finalAnswerEntryId, "a completed join freezes its final answer entry");
     assertNotNull(matched.deliveryCommandSequence());
 
     // 交付结果同样是父线程上的一条真实命令，且 idempotencyKey 就是 invocation 身份。
@@ -601,8 +611,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
     // 旧 receipt 的冻结不因后续历史而改变。
     ThreadJoin afterFollowUp = joinOf(invocationId);
-    assertEquals(resultHeadEntryId, afterFollowUp.resultHeadEntryId());
-    assertEquals(matchedIdleVersion, afterFollowUp.matchedIdleVersion());
+    assertEquals(terminalEntryId, afterFollowUp.terminalEntryId());
+    assertEquals(finalAnswerEntryId, afterFollowUp.finalAnswerEntryId());
     assertEquals("ACK:child work", receiptOf(invocationId).report());
     assertEquals(1, resultCommands(parentThreadId).size());
   }
@@ -653,7 +663,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     ThreadJoin resumedJoin = joinOf(resumeInvocationId);
     assertTrue(firstJoin.matched());
     assertTrue(resumedJoin.matched());
-    assertTrue(resumedJoin.matchedIdleVersion() >= firstJoin.matchedIdleVersion());
+    assertNotNull(resumedJoin.terminalEntryId(), "resumed join freezes its own terminal entry");
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(firstInvocationId).outcome());
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(resumeInvocationId).outcome());
     assertEquals(
@@ -1008,6 +1018,15 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
       }
     }
     throw new AssertionError("stop result carries no receipt for thread " + threadId);
+  }
+
+  /**
+   * 与 Runtime 相同的确定派生：子节点的停止请求 id = {@code nameUUID(rootStopRequestId + ":" + childThreadId)}。 每个
+   * Thread 持有独立回执身份，子节点不重用 root 的 id。
+   */
+  private static UUID derivedChildStopRequestId(UUID rootStopRequestId, UUID childThreadId) {
+    return UUID.nameUUIDFromBytes(
+        (rootStopRequestId + ":" + childThreadId).getBytes(StandardCharsets.UTF_8));
   }
 
   private static String resultMessageText(ThreadCommand command) {
