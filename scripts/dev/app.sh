@@ -170,7 +170,7 @@ BACKEND_LOG="$WORK_DIR/backend.log"
 FRONTEND_LOG="$WORK_DIR/frontend.log"
 BACKEND_PID_FILE="$WORK_DIR/backend.pid"
 FRONTEND_PID_FILE="$WORK_DIR/frontend.pid"
-BACKEND_JAR="$REPO_ROOT/web/target/kk-studio-web-1.0.4.jar"
+BACKEND_JAR="$REPO_ROOT/web/target/kk-studio-web-1.0.5.jar"
 # 产物与修订绑定：stamp 与 JAR 同目录，`mvn clean` 会同时移除二者。
 BACKEND_JAR_REVISION_STAMP="$REPO_ROOT/web/target/.kk-studio-revision"
 FRONTEND_PACKAGE_LOCK="$REPO_ROOT/frontend/package-lock.json"
