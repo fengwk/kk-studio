@@ -54,6 +54,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     compactThread: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
+    getThreadTree: vi.fn(),
   },
 }))
 
@@ -408,5 +409,64 @@ describe('ThreadWorkspacePage', () => {
     expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
     expect(screen.getByText('child only')).toBeInTheDocument()
     expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(OTHER_CHILD_THREAD_ID)
+  })
+
+  it('opens the read-only relationship tree for a child without exposing a composer', async () => {
+    // 只读观察页仍可查看真实 root 与兄弟，但不能因此恢复消息输入。
+    const user = userEvent.setup()
+    const rootId = '00000000-0000-4000-8000-000000000010'
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      {
+        threadId: rootId,
+        parentThreadId: null,
+        name: 'Root Agent',
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        status: 'WAITING_CHILDREN',
+        processing: true,
+        turnCount: 2,
+        toolCallCount: 1,
+        outcome: null,
+      },
+      {
+        threadId: CHILD_THREAD_ID,
+        parentThreadId: rootId,
+        name: 'Waiting Parent',
+        agentName: 'coder',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        status: 'WAITING_APPROVAL',
+        processing: true,
+        turnCount: 1,
+        toolCallCount: 1,
+        outcome: null,
+      },
+      {
+        threadId: OTHER_CHILD_THREAD_ID,
+        parentThreadId: rootId,
+        name: 'Idle Child',
+        agentName: 'reviewer',
+        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'default' },
+        status: 'IDLE',
+        processing: false,
+        turnCount: 1,
+        toolCallCount: 0,
+        outcome: 'FAILED',
+      },
+    ])
+
+    renderPage(`/threads/${CHILD_THREAD_ID}`)
+    const toggle = await screen.findByRole('button', { name: 'Agent 关系' })
+    expect(toggle).toBeEnabled()
+    expect(await screen.findByRole('button', { name: '允许' })).toBeEnabled()
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
+    expect(harnessService.getThreadTree).not.toHaveBeenCalled()
+
+    await user.click(toggle)
+    expect(await screen.findByRole('link', { name: 'Root Agent' })).toHaveAttribute('href', `/threads/${rootId}`)
+    expect(screen.getByRole('link', { name: 'Idle Child' })).toHaveAttribute('href', `/threads/${OTHER_CHILD_THREAD_ID}`)
+    expect(screen.getByText('失败')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
+    expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
   })
 })

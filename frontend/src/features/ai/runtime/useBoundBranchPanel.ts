@@ -21,6 +21,7 @@ import {
 import { harnessService } from '@/shared/api/harness-service'
 import { translate } from '@/shared/i18n'
 import {
+  presentConflict,
   type ConflictPresentation,
 } from '@/shared/conflict/conflict-presenter'
 
@@ -75,8 +76,8 @@ function compareDecimalVersions(a: string, b: string): number {
  *   pending projection 出的 effectiveBase；
  * - 通过 `buildMessageBatchPlan` 构建原子 message batch；
  * - agent/model 的 draft-local 编辑（agent 选择冻结其余选中值）；
- * - YOLO 走直接控制面：写请求串行并合并快速连点（每次基于最新权威 version，
- *   latest wins），重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
+ * - YOLO 走单字段策略控制面：写请求串行并合并快速连点（latest wins），
+ *   重绑时以 generation 使旧 Thread 的迟到响应/错误整体失效。
  *
  * 重绑是 render-time fail-closed：只有 branch state 与 controller snapshot 都
  * 属于当前 `threadId` 时，才返回 draft/effectiveBase 并允许 build batch；否则
@@ -352,7 +353,14 @@ export function useBoundBranchPanel({
           ? current
           : { ...current, draft: { ...current.draft, yoloEnabled: current.base.yoloEnabled } },
       )
-      setYoloError(errorMessage(error))
+      const presentation = presentConflict(error)
+      if (presentation != null) {
+        setConflict(presentation)
+        setYoloError(null)
+      } else {
+        setConflict(null)
+        setYoloError(errorMessage(error))
+      }
     }
   }
 

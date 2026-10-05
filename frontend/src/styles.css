@@ -6585,6 +6585,7 @@ select.settings-input option {
   white-space: nowrap;
 }
 
+.agent-pane-thread-tree,
 .agent-pane-thread-rename {
   width: 26px;
   height: 26px;
@@ -6598,8 +6599,14 @@ select.settings-input option {
   cursor: pointer;
 }
 
+.agent-pane-thread-tree:hover:not(:disabled),
 .agent-pane-thread-rename:hover:not(:disabled) {
   background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.agent-pane-thread-tree[aria-expanded='true'] {
+  background: var(--green-soft);
   color: var(--fg);
 }
 
@@ -6608,9 +6615,167 @@ select.settings-input option {
   cursor: not-allowed;
 }
 
+.agent-pane-thread-tree svg,
 .agent-pane-thread-rename svg {
   width: 14px;
   height: 14px;
+}
+
+/* 父子 Agent 关系树：标题下独立滚动，不替换对话或 composer。 */
+.thread-agent-tree {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-height: min(420px, 56vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.thread-agent-tree-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 4px;
+}
+
+.thread-agent-tree-toolbar h3 {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-agent-tree-refresh {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.thread-agent-tree-refresh svg {
+  width: 13px;
+  height: 13px;
+}
+
+.thread-agent-tree-state {
+  margin: 0;
+  padding: 8px 12px 12px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.thread-agent-tree-state.danger {
+  color: var(--danger);
+}
+
+.thread-agent-tree-list {
+  margin: 0;
+  min-width: 0;
+  padding: 0 0 8px;
+  overflow: auto;
+  list-style: none;
+}
+
+.thread-agent-tree-row {
+  min-width: 0;
+  max-width: 100%;
+  padding-block: 6px;
+  padding-inline-end: 12px;
+  border-top: 1px solid transparent;
+  overflow-wrap: anywhere;
+}
+
+.thread-agent-tree-row[aria-current='true'] {
+  background: var(--green-soft);
+}
+
+.thread-agent-tree-row.is-processing {
+  box-shadow: inset 2px 0 0 var(--green-primary);
+}
+
+.thread-agent-tree-row.is-failed {
+  background: var(--danger-soft);
+}
+
+.thread-agent-tree-row.is-stopped,
+.thread-agent-tree-row.is-cancelled {
+  box-shadow: inset 2px 0 0 var(--warning);
+}
+
+.thread-agent-tree-main,
+.thread-agent-tree-secondary,
+.thread-agent-tree-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.thread-agent-tree-secondary,
+.thread-agent-tree-meta {
+  flex-wrap: wrap;
+  margin: 2px 0 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.thread-agent-tree-name,
+.thread-agent-tree-model {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-agent-tree-name {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.thread-agent-tree-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--stage-dot);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.thread-agent-tree-badge.is-current {
+  background: var(--green-soft);
+  color: var(--fg);
+}
+
+.thread-agent-tree-status.is-processing {
+  color: var(--green-primary);
+  font-weight: 600;
+}
+
+.thread-agent-tree-status.is-failed {
+  color: var(--danger);
+}
+
+.thread-agent-tree-status.is-completed {
+  color: var(--fg-muted);
+}
+
+.thread-agent-tree-status.is-stopped,
+.thread-agent-tree-status.is-cancelled {
+  color: var(--warning);
 }
 
 /* 单输入重命名面板（Session / Thread 名称编辑）。 */
