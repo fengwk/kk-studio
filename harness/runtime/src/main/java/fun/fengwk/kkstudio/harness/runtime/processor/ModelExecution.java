@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -935,8 +936,11 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
     cancelBatchTimerLocked();
-    if (isRetryable(error) && config.retryPolicyProvider().retryPolicy().allowsRetry(attempt)) {
-      Duration delay = config.retryPolicyProvider().retryPolicy().delayBeforeRetry(attempt);
+    InvocationRetryDecision decision =
+        InvocationRetryDecision.decide(
+            config.retryPolicyProvider().retryPolicy(), isRetryable(error), attempt);
+    if (decision.retry()) {
+      Duration delay = decision.delay();
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
       if (committed) {
         log.info(
