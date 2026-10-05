@@ -16,8 +16,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
@@ -25,9 +27,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -404,5 +409,85 @@ class HarnessRuntimeAcceptThreadTest {
                   .map(ThreadState::id)
                   .toList();
             }));
+  }
+
+  private static NewThreadCommand setModelCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(
+        new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")), idempotencyKey);
+  }
+
+  private static ThreadJoinRequest rootTicket(UUID invocationId) {
+    return new ThreadJoinRequest(invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1);
+  }
+
+  /** 纯设置 batch 在 STOPPED 既有 Thread 上被接受：不复活为 RUNNABLE、不打开 INPUT turn / 不启动模型，仅入队等待下一 INPUT 边界收割。 */
+  @Test
+  void acceptsSettingsOnlyBatchWithoutResumingStoppedThreadOrOpeningTurn() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(9), 0));
+    ThreadState stopped = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertTrue(stopped.executionControl().isStopped());
+
+    AcceptedCommands result =
+        runtime.acceptCommands(
+            thread(
+                baseline.threadId(),
+                stopped.headEntryId(),
+                stopped.nextCommandSequence(),
+                List.of(setAgentCommand(TestIds.id(1)), setModelCommand(TestIds.id(2)))),
+            AcceptancePreflight.IDENTITY);
+
+    assertFalse(result.replayed());
+    assertEquals(2, result.acceptedCommands().size());
+    assertTrue(result.thread().executionControl().isStopped());
+    ThreadState after = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertTrue(after.executionControl().isStopped());
+    // 未打开 INPUT turn：head 不变，设置命令仅入队等待下一个 INPUT。
+    assertEquals(stopped.headEntryId(), after.headEntryId());
+    assertEquals(stopped.nextCommandSequence() + 2, after.nextCommandSequence());
+    List<ThreadCommand> queued = runtime.getThreadSnapshot(baseline.threadId()).queuedCommands();
+    assertEquals(2, queued.size());
+    assertEquals(ThreadCommandState.QUEUED, queued.getFirst().state());
+  }
+
+  /** RUNNABLE 既有 Thread 上的纯设置 batch 同样只入队、不打开 INPUT turn、不推进 head。 */
+  @Test
+  void settingsOnlyBatchOnRunnableThreadDoesNotOpenTurn() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    AcceptedCommands result =
+        runtime.acceptCommands(
+            thread(
+                baseline.threadId(),
+                baseline.rootEntryId(),
+                1,
+                List.of(setModelCommand(TestIds.id(1)))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(result.replayed());
+    ThreadState after = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals(baseline.rootEntryId(), after.headEntryId());
+    assertEquals(1L, after.version());
+    assertEquals(ThreadExecutionControl.RUNNABLE, after.executionControl());
+    assertEquals(1, runtime.getThreadSnapshot(baseline.threadId()).queuedCommands().size());
+  }
+
+  /** Join 交付只追加 NOTIFICATION：既有 Thread 的 Join 接受必须携带真实末尾任务输入。 */
+  @Test
+  void rejectsJoinAcceptanceWithoutTrailingTaskInput() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadJoinRequest join = rootTicket(TestIds.id(60));
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                runtime.acceptCommandsAndJoin(
+                    thread(
+                        baseline.threadId(),
+                        baseline.rootEntryId(),
+                        1,
+                        List.of(setModelCommand(TestIds.id(1)))),
+                    join,
+                    AcceptancePreflight.IDENTITY));
+    assertTrue(error.getMessage().contains("join acceptance requires a trailing task input"));
+    assertTrue(runtime.findJoin(join.invocationId()).isEmpty());
   }
 }

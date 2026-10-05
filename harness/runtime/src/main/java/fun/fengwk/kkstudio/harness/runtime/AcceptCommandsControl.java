@@ -312,7 +312,11 @@ final class AcceptCommandsControl {
             return attachJoin(tx, replayThreadBatch(tx, target, commands, thread, existing), join);
           }
           validateThreadBatchAdmission(target, thread);
-          validateBatchShape(target, commands);
+          validateBatchShape(target, commands, false);
+          if (join != null && !genuineUserInput) {
+            // Join 交付只会追加 NOTIFICATION；唤醒父 Thread 必须同时携带真实的末尾任务输入。
+            throw invalidBatch(target, "join acceptance requires a trailing task input");
+          }
           admitJoin(tx, thread.id(), thread.parentThreadId(), join, false);
           Instant now = clock.instant();
           Session session =
@@ -850,12 +854,20 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；任何 target 都要求<b>恰有一条</b>末尾 user-like 输入，即一条 USER/CUSTOM 消息或一条
-   * typed GOAL 命令（typed GOAL 不可与普通消息同批）。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt;
+   * SET_CONTRIBUTOR_STATE）、至多一次且全部出现在消息之前。
+   *
+   * <p>创建类 target（NEW_SESSION / NEW_THREAD）要求<b>恰有一条</b>末尾 user-like 输入；THREAD target 允许
+   * settings-only batch（0 条 user-like），最多一条 user-like 且必须位于末尾。非法 batch 是请求校验错误，抛 {@link
+   * IllegalArgumentException} 而非业务冲突。
    */
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands) {
+    validateBatchShape(target, commands, true);
+  }
+
+  private static void validateBatchShape(
+      AcceptCommandsTarget target, List<NewThreadCommand> commands, boolean requireUserLike) {
     int userLikeCount = 0;
     int lastSetOrder = -1;
     boolean sawMessage = false;
@@ -878,8 +890,18 @@ final class AcceptCommandsControl {
         userLikeCount++;
       }
     }
-    if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
-      throw invalidBatch(target, "batches must end with exactly one user-like input");
+    boolean trailingUserLike = !commands.isEmpty() && isUserLike(commands.get(commands.size() - 1));
+    if (userLikeCount > 1
+        || (requireUserLike && (userLikeCount != 1 || !trailingUserLike))
+        || (userLikeCount == 1 && !trailingUserLike)) {
+      throw invalidBatch(
+          target,
+          requireUserLike
+              ? "batches must end with exactly one user-like input"
+              : "batches may contain at most one user-like input and it must be the last command");
+    }
+    if (commands.isEmpty()) {
+      throw invalidBatch(target, "batches must not be empty");
     }
   }
 
