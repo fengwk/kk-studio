@@ -24,8 +24,6 @@ import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPa
 import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { ThreadAgentTreePanel } from '@/features/ai/runtime/ThreadAgentTreePanel'
 
-import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-
 export type { AgentPaneCapabilities, AgentPaneDefaults }
 
 export function AgentPane({
@@ -39,8 +37,6 @@ export function AgentPane({
   initialTarget,
   onTargetConsumed,
   capabilities,
-  onSubmitInstruction,
-  onStop,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -52,8 +48,6 @@ export function AgentPane({
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
-  onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
-  onStop?: () => Promise<void> | void
 }) {
   const { t } = useI18n()
   const [agentTreeOpen, setAgentTreeOpen] = useState(false)
@@ -68,8 +62,6 @@ export function AgentPane({
     initialTarget,
     onTargetConsumed,
     capabilities,
-    onSubmitInstruction,
-    onStop,
   })
   const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
