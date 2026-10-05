@@ -132,6 +132,11 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
+  /**
+   * 一次工具调用的严格身份：`${assistantEntryId}:${callIndex}`。
+   * 相同 toolCallId 可以出现在不同 assistant Entry 上，配对和去重必须使用该身份。
+   */
+  callIdentity?: string
 }
 
 export interface MetaDialogueMessage extends BaseDialogueMessage {
@@ -163,6 +168,30 @@ export type DialogueMessage =
   | ToolDialogueMessage
   | MetaDialogueMessage
   | EntryEventDialogueMessage
+
+/** 一次工具调用的严格身份。相同 toolCallId 跨 assistant Entry 时不能共用。 */
+export function toolCallIdentity(assistantEntryId: string, callIndex: number): string {
+  return `${assistantEntryId}:${callIndex}`
+}
+
+/**
+ * 判断 call/result 是否同一次调用。
+ * 任一侧带 callIdentity 时必须精确相同，并同时匹配 toolCallId 与 rendererKey。
+ * 便携 panel 双方都没有身份时，才按 toolCallId + rendererKey 配对。
+ */
+export function sameToolCall(
+  left: Pick<ToolDialogueMessage, 'callIdentity' | 'toolCallId' | 'rendererKey'>,
+  right: Pick<ToolDialogueMessage, 'callIdentity' | 'toolCallId' | 'rendererKey'>,
+): boolean {
+  if (left.callIdentity || right.callIdentity) {
+    return left.callIdentity === right.callIdentity
+      && left.toolCallId === right.toolCallId
+      && left.rendererKey === right.rendererKey
+  }
+  return Boolean(left.toolCallId)
+    && left.toolCallId === right.toolCallId
+    && left.rendererKey === right.rendererKey
+}
 
 /** 在持久 transcript 之外展示的 QUEUED mailbox 命令；sequence 保持十进制字符串。 */
 export interface QueuedThreadMessage {
