@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
@@ -76,6 +76,19 @@ function ChatWorkspaceContent({
   const targetThreadId = searchParams.get('thread')
   const { t } = useI18n()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
+  const location = useLocation()
+  const [deepLinkOwner, setDeepLinkOwner] = useState(() => ({
+    navigationKey: location.key,
+    paneId: paneState.focusedPaneId,
+  }))
+
+  // 每次导航固定目标 pane，清除 query 前的焦点变化不能转移请求。
+  if (deepLinkOwner.navigationKey !== location.key) {
+    setDeepLinkOwner({
+      navigationKey: location.key,
+      paneId: paneState.focusedPaneId,
+    })
+  }
 
   useEffect(() => {
     saveChatPaneState(chat.id, paneState)
@@ -118,8 +131,9 @@ function ChatWorkspaceContent({
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
         {visiblePanes.map((pane, index) => {
           const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
+          const isTargetPane = deepLinkOwner.paneId === pane.id
           const deepLinkTarget: PaneTarget | undefined =
-            targetThreadId && isFocused
+            targetThreadId && isTargetPane
               ? { kind: 'BOUND_THREAD', threadId: targetThreadId }
               : undefined
           return (
@@ -132,7 +146,7 @@ function ChatWorkspaceContent({
               focused={isFocused}
               onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
               initialTarget={deepLinkTarget}
-              onTargetConsumed={isFocused ? handleTargetConsumed : undefined}
+              onTargetConsumed={isTargetPane ? handleTargetConsumed : undefined}
             />
           )
         })}
