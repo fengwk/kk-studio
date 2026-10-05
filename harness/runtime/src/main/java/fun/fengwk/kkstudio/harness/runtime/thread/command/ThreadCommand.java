@@ -21,7 +21,7 @@ public record ThreadCommand(
     ThreadCommandPayload payload,
     UUID idempotencyKey,
     String requestHash,
-    UUID appliedTurnStartEntryId,
+    UUID appliedEntryId,
     UUID stopRequestId,
     Instant cancelledAt,
     Instant createdAt) {
@@ -38,13 +38,13 @@ public record ThreadCommand(
     if (requestHash == null || !REQUEST_HASH_PATTERN.matcher(requestHash).matches()) {
       throw new IllegalArgumentException("requestHash must be 64 lowercase hexadecimal characters");
     }
-    if (appliedTurnStartEntryId != null && stopRequestId != null) {
+    if (appliedEntryId != null && stopRequestId != null) {
       throw new IllegalArgumentException(
-          "appliedTurnStartEntryId and stopRequestId must not both be present");
+          "appliedEntryId and stopRequestId must not both be present");
     }
-    if (appliedTurnStartEntryId != null && cancelledAt != null) {
+    if (appliedEntryId != null && cancelledAt != null) {
       throw new IllegalArgumentException(
-          "appliedTurnStartEntryId and cancelledAt must not both be present");
+          "appliedEntryId and cancelledAt must not both be present");
     }
     if (stopRequestId != null && cancelledAt == null) {
       throw new IllegalArgumentException(
@@ -61,7 +61,7 @@ public record ThreadCommand(
 
   /** 从 durable marker 派生 QUEUED/APPLIED/CANCELLED。 */
   public ThreadCommandState state() {
-    if (appliedTurnStartEntryId != null) {
+    if (appliedEntryId != null) {
       return ThreadCommandState.APPLIED;
     }
     if (cancelledAt != null) {
@@ -77,20 +77,21 @@ public record ThreadCommand(
 
   /**
    * 纯 QUEUED -&gt; APPLIED 迁移：附加该 command 应用到的 TURN_START Entry id 并清空 cancel marker。 只有 QUEUED 状态的
-   * command 可被 markApplied；{@code turnStartEntryId} 不得为 null。
+   * command 可被 markApplied；{@code appliedEntryId} 不得为 null。用户输入/配置引用其 TURN_START Entry，
+   * 通知引用自身的 NOTIFICATION Entry。
    */
-  public ThreadCommand markApplied(UUID turnStartEntryId) {
+  public ThreadCommand markApplied(UUID appliedEntryId) {
     if (state() != ThreadCommandState.QUEUED) {
       throw new IllegalStateException("only QUEUED commands can be marked applied");
     }
-    Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
+    Objects.requireNonNull(appliedEntryId, "appliedEntryId");
     return new ThreadCommand(
         threadId,
         sequence,
         payload,
         idempotencyKey,
         requestHash,
-        turnStartEntryId,
+        appliedEntryId,
         null,
         null,
         createdAt);

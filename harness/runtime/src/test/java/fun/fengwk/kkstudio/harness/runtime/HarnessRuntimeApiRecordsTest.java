@@ -210,69 +210,67 @@ class HarnessRuntimeApiRecordsTest {
         () -> new AcceptedCommands(session, root, thread, List.of(later, inserted), false));
   }
 
-  /** CancelledUserMessage：sequence 必须为正，内容防御性拷贝。 */
+  /** CancelledThreadInput：sequence 必须为正，identity 与 payload 非空。 */
   @Test
-  void cancelledUserMessageValidatesShape() {
-    List<AgentMessageContent> contents = new ArrayList<>(List.of(new TextMessageContent("hi")));
-    CancelledUserMessage message = new CancelledUserMessage(3L, TestIds.id(7), contents);
-    contents.clear();
-    assertEquals(3L, message.sequence());
-    assertEquals(TestIds.id(7), message.idempotencyKey());
-    assertEquals(1, message.contents().size());
+  void cancelledThreadInputValidatesShape() {
+    ThreadCommandPayload payload = userMessagePayload("hi");
+    CancelledThreadInput input = new CancelledThreadInput(3L, TestIds.id(7), payload);
+    assertEquals(3L, input.sequence());
+    assertEquals(TestIds.id(7), input.idempotencyKey());
+    assertEquals(payload, input.payload());
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CancelledUserMessage(0L, TestIds.id(7), List.of()));
-    assertThrows(NullPointerException.class, () -> new CancelledUserMessage(1L, null, List.of()));
-    assertThrows(
-        NullPointerException.class, () -> new CancelledUserMessage(1L, TestIds.id(7), null));
+        () -> new CancelledThreadInput(0L, TestIds.id(7), payload));
+    assertThrows(NullPointerException.class, () -> new CancelledThreadInput(1L, null, payload));
+    assertThrows(NullPointerException.class, () -> new CancelledThreadInput(1L, TestIds.id(7), null));
   }
 
-  /** StopResult 最终形状：replayed + 可空 stoppedTurnEndEntryId + 取消回单。 */
+  /** StopResult / StoppedThreadReceipt 最终形状：replayed + 权威 Thread + 每节点持久回执。 */
   @Test
   void stopResultFinalShapeRoundTrips() {
     ThreadState thread = storeThread();
-    StopResult stopped = new StopResult(false, thread, TestIds.id(2), 1, List.of());
-    assertEquals(false, stopped.replayed());
-    assertEquals(TestIds.id(2), stopped.stoppedTurnEndEntryId());
-    assertEquals(1, stopped.cancelledCommandCount());
+    StoppedThreadReceipt receipt =
+        new StoppedThreadReceipt(
+            thread.id(),
+            TestIds.id(2),
+            TestIds.id(3),
+            1,
+            List.of(new CancelledThreadInput(1L, TestIds.id(9), userMessagePayload("x"))));
+    StopResult stopped = new StopResult(false, thread, List.of(receipt));
+    assertFalse(stopped.replayed());
+    assertEquals(thread.id(), stopped.thread().id());
+    assertEquals(TestIds.id(2), stopped.stoppedThreads().getFirst().stopRequestId());
+    assertEquals(1, stopped.stoppedThreads().getFirst().cancelledCommandCount());
 
-    StopResult queuedReplay =
-        new StopResult(
-            true,
-            thread,
-            null,
-            2,
-            List.of(
-                new CancelledUserMessage(
-                    1L, TestIds.id(9), List.<AgentMessageContent>of(new TextMessageContent("x")))));
-    assertTrue(queuedReplay.replayed());
-    assertEquals(2, queuedReplay.cancelledCommandCount());
-    assertEquals(TestIds.id(9), queuedReplay.cancelledUserMessages().getFirst().idempotencyKey());
+    StopResult replay = new StopResult(true, thread, List.of());
+    assertTrue(replay.replayed());
+
+    // cancelledCommandCount 必须非负。
     assertThrows(
-        IllegalArgumentException.class, () -> new StopResult(false, thread, null, -1, List.of()));
-    // cancelledUserMessages 必须 sequence 严格递增（不变量拒绝乱序/非单调）。
+        IllegalArgumentException.class,
+        () -> new StoppedThreadReceipt(thread.id(), TestIds.id(2), null, -1, List.of()));
+    // cancelledInputs 必须 sequence 严格递增（不变量拒绝乱序/非单调）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new StopResult(
-                false,
-                thread,
+            new StoppedThreadReceipt(
+                thread.id(),
+                TestIds.id(2),
                 null,
                 2,
                 List.of(
-                    new CancelledUserMessage(2L, TestIds.id(9), List.<AgentMessageContent>of()),
-                    new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
-    // 数量不得超过 cancelledCommandCount。
+                    new CancelledThreadInput(2L, TestIds.id(9), userMessagePayload("a")),
+                    new CancelledThreadInput(1L, TestIds.id(9), userMessagePayload("b")))));
+    // 输入数量不得超过 cancelledCommandCount。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new StopResult(
-                false,
-                thread,
+            new StoppedThreadReceipt(
+                thread.id(),
+                TestIds.id(2),
                 null,
                 0,
-                List.of(
-                    new CancelledUserMessage(1L, TestIds.id(9), List.<AgentMessageContent>of()))));
+                List.of(new CancelledThreadInput(1L, TestIds.id(9), userMessagePayload("a")))));
   }
 
   /** ThreadState 最终形状：creationRequestHash/sessionId 不可变，任何可见变更 version 严格 +1。 */
@@ -291,7 +289,8 @@ class HarnessRuntimeApiRecordsTest {
                 "not-a-hash",
                 thread.name(),
                 false,
-                thread.status(),
+                thread.executionControl(),
+                0L,
                 1,
                 0,
                 thread.createdAt(),
@@ -306,7 +305,8 @@ class HarnessRuntimeApiRecordsTest {
             thread.creationRequestHash(),
             thread.name(),
             false,
-            thread.status(),
+            thread.executionControl(),
+            0L,
             1,
             0,
             thread.createdAt(),
@@ -325,7 +325,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.creationRequestHash(),
                     thread.name(),
                     false,
-                    thread.status(),
+                    thread.executionControl(),
+                    0L,
                     1,
                     0,
                     thread.createdAt(),
@@ -343,7 +344,8 @@ class HarnessRuntimeApiRecordsTest {
                     "9999999999999999999999999999999999999999999999999999999999999999",
                     thread.name(),
                     false,
-                    thread.status(),
+                    thread.executionControl(),
+                    0L,
                     1,
                     0,
                     thread.createdAt(),
@@ -366,7 +368,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.creationRequestHash(),
                     thread.name(),
                     true,
-                    thread.status(),
+                    thread.executionControl(),
+                    0L,
                     1,
                     0,
                     thread.createdAt(),
@@ -458,22 +461,23 @@ class HarnessRuntimeApiRecordsTest {
                 null,
                 null,
                 T0));
-    ThreadSnapshot snapshot = new ThreadSnapshot(thread, path, queued, null, List.of(), List.of());
+    ThreadSnapshot snapshot =
+        new ThreadSnapshot(thread, path, queued, null, List.of(), List.of(), List.of());
     assertEquals(1, snapshot.queuedCommands().size());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.queuedCommands().add(null));
     assertThrows(UnsupportedOperationException.class, () -> snapshot.toolSiblings().add(null));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadSnapshot(null, path, queued, null, List.of(), List.of()));
+        () -> new ThreadSnapshot(null, path, queued, null, List.of(), List.of(), List.of()));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadSnapshot(thread, null, queued, null, List.of(), List.of()));
+        () -> new ThreadSnapshot(thread, null, queued, null, List.of(), List.of(), List.of()));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadSnapshot(thread, path, null, null, List.of(), List.of()));
+        () -> new ThreadSnapshot(thread, path, null, null, List.of(), List.of(), List.of()));
     assertThrows(
         NullPointerException.class,
-        () -> new ThreadSnapshot(thread, path, queued, null, null, List.of()));
+        () -> new ThreadSnapshot(thread, path, queued, null, null, List.of(), List.of()));
   }
 
   @Test

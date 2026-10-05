@@ -52,7 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -670,7 +670,8 @@ class HarnessRuntimeToolInputTest {
   void childThreadAskUserAcceptanceLeavesRecursiveAncestorsWaitingChildren() {
     UUID parentId = seedWaitingChildrenParent(store);
     ToolBaseline child =
-        seedAskUserBaseline(store, parentId, ThreadLifecycleStatus.ACTIVE, ASK_USER_QUESTIONNAIRE);
+        seedAskUserBaseline(
+            store, parentId, ThreadExecutionControl.RUNNABLE, ASK_USER_QUESTIONNAIRE);
     parkForInput(store, child, T3);
 
     // 前置：等待投影携带子线程自己的 Session/Thread 坐标，父线程处于递归等待且没有本地 Work。
@@ -679,7 +680,7 @@ class HarnessRuntimeToolInputTest {
     assertEquals(child.sessionId(), pending.sessionId());
     assertEquals("ask_user", pending.toolName());
     assertEquals(ToolInvocationStatus.WAITING_INPUT, pending.status());
-    assertEquals(ThreadLifecycleStatus.WAITING_CHILDREN, threadStatus(parentId));
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadStatus(parentId));
     assertTrue(threadWork(parentId).isEmpty());
     long parentVersion = threadVersion(parentId);
 
@@ -697,11 +698,11 @@ class HarnessRuntimeToolInputTest {
     assertEquals(TestIds.id(31), accepted.receipt().submissionId());
     // 子线程只推进一次且仍为 ACTIVE（结果物化 Work 尚未执行），THREAD Work 指向子线程自己。
     assertEquals(3L, threadVersion(child.threadId()));
-    assertEquals(ThreadLifecycleStatus.ACTIVE, threadStatus(child.threadId()));
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadStatus(child.threadId()));
     assertEquals(1L, threadWork(child.threadId()).orElseThrow().wakeVersion());
     // 祖先链不被输入接受改写：version / 递归状态 / Work 全部保持提交前的形状。
     assertEquals(parentVersion, threadVersion(parentId));
-    assertEquals(ThreadLifecycleStatus.WAITING_CHILDREN, threadStatus(parentId));
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadStatus(parentId));
     assertTrue(threadWork(parentId).isEmpty());
     // 回答已 durable：该调用不再出现在待处理投影里。
     assertTrue(
@@ -809,7 +810,7 @@ class HarnessRuntimeToolInputTest {
   void brokenFrozenQuestionnaireFailsClosedWithoutGuessingAnswers() {
     ToolBaseline baseline =
         seedAskUserBaseline(
-            store, null, ThreadLifecycleStatus.IDLE, QUESTIONNAIRE_WITHOUT_QUESTIONS);
+            store, null, ThreadExecutionControl.RUNNABLE, QUESTIONNAIRE_WITHOUT_QUESTIONS);
     ToolInvocation waiting = parkForInput(store, baseline, T3);
     long versionBefore = threadVersion(baseline.threadId());
 
@@ -832,8 +833,8 @@ class HarnessRuntimeToolInputTest {
     assertTrue(threadWork(baseline.threadId()).isEmpty());
   }
 
-  private ThreadLifecycleStatus threadStatus(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow()).status();
+  private ThreadExecutionControl threadStatus(UUID threadId) {
+    return store.transaction(tx -> tx.findThread(threadId).orElseThrow()).executionControl();
   }
 
   private long threadVersion(UUID threadId) {

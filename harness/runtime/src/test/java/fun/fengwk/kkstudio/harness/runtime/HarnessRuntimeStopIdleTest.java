@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
@@ -67,11 +68,11 @@ class HarnessRuntimeStopIdleTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertFalse(result.replayed());
-    assertEquals(0, result.cancelledCommandCount());
+    assertEquals(0, targetReceipt(result).cancelledCommandCount());
     assertEquals(1L, result.thread().version());
     UUID turnEndId =
         assertStopBarrierTurn(pathOf(baseline.threadId()), baseline.threadId(), TestIds.id(1));
-    assertEquals(turnEndId, result.stoppedTurnEndEntryId());
+    assertEquals(turnEndId, targetReceipt(result).stoppedTurnEndEntryId());
     assertEquals(turnEndId, result.thread().headEntryId());
 
     // 停止边界不是模型工作：没有排队命令、没有 Model/Tool 执行。
@@ -88,12 +89,12 @@ class HarnessRuntimeStopIdleTest {
     seedQueuedCommand(store, baseline.threadId(), 2L, userMessagePayload("b"), TestIds.id(2));
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertFalse(result.replayed());
-    assertEquals(2, result.cancelledCommandCount());
+    assertEquals(2, targetReceipt(result).cancelledCommandCount());
     // 取消 Command 与写入停止边界在同一个事务里共用一次 version 递增（绝不两次）。
     assertEquals(1L, result.thread().version());
     assertEquals(1L, result.thread().nextCommandSequence());
     assertEquals(
-        result.stoppedTurnEndEntryId(),
+        targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(pathOf(baseline.threadId()), baseline.threadId(), TestIds.id(1)));
     List<ThreadCommand> commands =
         store.transaction(
@@ -120,10 +121,10 @@ class HarnessRuntimeStopIdleTest {
     seedThreadWork(store, baseline.threadId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertFalse(result.replayed());
-    assertEquals(0, result.cancelledCommandCount());
+    assertEquals(0, targetReceipt(result).cancelledCommandCount());
     assertEquals(1L, result.thread().version());
     assertEquals(
-        result.stoppedTurnEndEntryId(),
+        targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(pathOf(baseline.threadId()), baseline.threadId(), TestIds.id(1)));
     assertFalse(
         store
@@ -138,10 +139,10 @@ class HarnessRuntimeStopIdleTest {
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("a"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertEquals(1, result.cancelledCommandCount());
+    assertEquals(1, targetReceipt(result).cancelledCommandCount());
     assertEquals(1L, result.thread().version());
     assertEquals(
-        result.stoppedTurnEndEntryId(),
+        targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(pathOf(baseline.threadId()), baseline.threadId(), TestIds.id(1)));
     assertFalse(
         store
@@ -223,7 +224,7 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(TurnEndOutcome.STOPPED, end.outcome());
     assertEquals(turnStartId, end.turnStartEntryId());
     assertEquals(TestIds.id(1), end.closeRequestId());
-    assertEquals(turnEnd.id(), result.stoppedTurnEndEntryId());
+    assertEquals(turnEnd.id(), targetReceipt(result).stoppedTurnEndEntryId());
   }
 
   /**
@@ -277,7 +278,7 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(TurnEndOutcome.STOPPED, end.outcome());
     assertEquals(turnStartId, end.turnStartEntryId());
     assertEquals(TestIds.id(1), end.closeRequestId());
-    assertEquals(path.head().id(), result.stoppedTurnEndEntryId());
+    assertEquals(path.head().id(), targetReceipt(result).stoppedTurnEndEntryId());
   }
 
   /**
@@ -316,7 +317,7 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(turnStartId, cut.turnStartEntryId());
     assertNull(cut.closeRequestId());
     assertEquals(
-        result.stoppedTurnEndEntryId(),
+        targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(path, baseline.threadId(), TestIds.id(1)));
     // 停止边界是路径末尾的 STOP turn：历史 cut 的 TURN_END 不是停止边界。
     assertEquals(
@@ -383,7 +384,7 @@ class HarnessRuntimeStopIdleTest {
                         == AgentMessageRole.ASSISTANT)
             .count());
     assertEquals(
-        result.stoppedTurnEndEntryId(),
+        targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(path, baseline.threadId(), TestIds.id(1)));
   }
 
@@ -400,9 +401,9 @@ class HarnessRuntimeStopIdleTest {
     StopResult result = runtime.stop(new StopCommand(sibling, TestIds.id(1), 0));
 
     assertFalse(result.replayed());
-    assertEquals(1, result.cancelledCommandCount());
+    assertEquals(1, targetReceipt(result).cancelledCommandCount());
     assertEquals(1L, result.thread().version());
-    assertNull(result.stoppedTurnEndEntryId());
+    assertNull(targetReceipt(result).stoppedTurnEndEntryId());
     assertEquals(owner.turnStartEntryId(), result.thread().headEntryId());
     EntryPath ownerPath = store.transaction(tx -> tx.loadEntryPath(owner.turnStartEntryId()));
     assertEquals(2, ownerPath.entries().size());

@@ -63,7 +63,15 @@ public final class TurnPlanPreview {
               now));
     }
     return new TurnPlanBuilder()
-        .build(threadId, sourcePath, TurnStartReason.INPUT, planned, UUID::randomUUID, now, null)
+        .build(
+            threadId,
+            sourcePath,
+            TurnStartReason.INPUT,
+            planned,
+            nextCommandSequence + planned.size() - 1,
+            UUID::randomUUID,
+            now,
+            null)
         .candidatePath();
   }
 }

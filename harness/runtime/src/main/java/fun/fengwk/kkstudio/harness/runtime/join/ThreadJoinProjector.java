@@ -27,13 +27,13 @@ import java.util.UUID;
 /**
  * 无状态的只读 ThreadJoin 结果凭据投影器。
  *
- * <p>未匹配的 join 返回 {@link Optional#empty()}； 已匹配的 join 以其冻结的 {@code resultHeadEntryId} 为界，通过 store
- * 加载 root-to-head 历史路径， 定位源命令的 {@code appliedTurnStartEntryId}，并仅对该切片范围内的条目推导终态与报告：
+ * <p>未匹配的 join 返回 {@link Optional#empty()}； 已匹配的 join 以其冻结的 {@code terminalEntryId} 为界，通过 store
+ * 加载 root-to-head 历史路径， 定位源命令的 {@code appliedEntryId}，并仅对该切片范围内的条目推导终态与报告：
  *
  * <ul>
- *   <li>源命令在执行前被取消（{@code cancelledAt != null} 且 {@code appliedTurnStartEntryId == null}）投影为 {@link
+ *   <li>源命令在执行前被取消（{@code cancelledAt != null} 且 {@code appliedEntryId == null}）投影为 {@link
  *       ThreadJoinOutcome#CANCELLED}，且不包含旧的助手文本；
- *   <li>源命令未被执行（无 {@code appliedTurnStartEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出
+ *   <li>源命令未被执行（无 {@code appliedEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出
  *       {@link IllegalStateException}；
  *   <li>正常完成投影为 {@link ThreadJoinOutcome#COMPLETED} 与最后一段助手产出的 report；
  *   <li>失败投影为 {@link ThreadJoinOutcome#ERROR}，分离 error 与 partialResult；
@@ -69,7 +69,7 @@ public final class ThreadJoinProjector {
                             + join.childThreadId()));
 
     String prompt = extractPrompt(sourceCommand);
-    UUID appliedStart = sourceCommand.appliedTurnStartEntryId();
+    UUID appliedStart = sourceCommand.appliedEntryId();
     if (appliedStart == null) {
       if (sourceCommand.cancelledAt() != null) {
         return Optional.of(
@@ -88,24 +88,24 @@ public final class ThreadJoinProjector {
               + join.sourceCommandSequence()
               + " on child thread "
               + join.childThreadId()
-              + " has no appliedTurnStartEntryId and is not cancelled");
+              + " has no appliedEntryId and is not cancelled");
     }
 
-    EntryPath path = tx.loadEntryPath(join.resultHeadEntryId());
+    EntryPath path = tx.loadEntryPath(join.terminalEntryId());
     int startIndex = indexOf(path, appliedStart);
     if (startIndex < 0) {
       throw new IllegalStateException(
           "applied turn start entry "
               + appliedStart
-              + " not found on result head path "
-              + join.resultHeadEntryId()
+              + " not found on terminal path "
+              + join.terminalEntryId()
               + " for child thread "
               + join.childThreadId());
     }
 
     if (!(path.head().payload() instanceof TurnEndPayload end)) {
       throw new IllegalStateException(
-          "result head entry " + join.resultHeadEntryId() + " is not a TurnEndPayload");
+          "result head entry " + join.terminalEntryId() + " is not a TurnEndPayload");
     }
 
     String lastAssistantText = extractLastAssistantText(path, startIndex);

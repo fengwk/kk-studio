@@ -846,7 +846,8 @@ create table harness_entry (
             'ASSISTANT_ERROR',
             'ASSISTANT_ABORTED',
             'COMPACTION',
-            'TURN_END'
+            'TURN_END',
+            'NOTIFICATION'
         )
     ),
     constraint ck_harness_entry_parent_shape check (
@@ -870,7 +871,7 @@ comment on table harness_entry is '不可变 Entry：append-only 树节点，ROO
 comment on column harness_entry.id is 'Entry 的全局唯一 UUID';
 comment on column harness_entry.session_id is '所属 Session';
 comment on column harness_entry.parent_entry_id is '父 Entry；ROOT 为 null，其余必须非 null 且不能指向自身';
-comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END）';
+comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/MESSAGE/CUSTOM/MODEL_ATTEMPT_FAILURE/CUSTOM_MESSAGE/ASSISTANT_ERROR/ASSISTANT_ABORTED/COMPACTION/TURN_END/NOTIFICATION）';
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度）';
 comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅 ASSISTANT MESSAGE，可空）';
@@ -893,7 +894,8 @@ create table harness_thread (
     creation_request_hash char(64) not null,
     name varchar(256) not null,
     yolo_enabled boolean not null,
-    status varchar(16) not null,
+    execution_control varchar(16) not null,
+    input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
     next_command_sequence bigint not null check (next_command_sequence >= 1),
     version bigint not null check (version >= 0),
     created_at timestamptz(3) not null,
@@ -916,13 +918,16 @@ create table harness_thread (
     constraint ck_harness_thread_name check (
         btrim(name) <> ''
     ),
-    constraint ck_harness_thread_status check (
-        status in ('IDLE', 'ACTIVE', 'WAITING_CHILDREN')
+    constraint ck_harness_thread_execution_control check (
+        execution_control in ('RUNNABLE', 'STOPPED')
+    ),
+    constraint ck_harness_thread_input_through check (
+        input_through_sequence < next_command_sequence
     ),
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，status 维护递归生命周期（IDLE/ACTIVE/WAITING_CHILDREN）；(session_id, id) 唯一供同 Session 复合引用';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
@@ -930,7 +935,8 @@ comment on column harness_thread.head_entry_id is '当前 head Entry（必须存
 comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
-comment on column harness_thread.status is '递归生命周期状态（IDLE/ACTIVE/WAITING_CHILDREN）';
+comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
+comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
@@ -952,14 +958,14 @@ create table harness_thread_command (
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     idempotency_key uuid not null,
     request_hash char(64) not null,
-    applied_turn_start_entry_id uuid,
+    applied_entry_id uuid,
     stop_request_id uuid,
     cancelled_at timestamptz(3),
     created_at timestamptz(3) not null,
     primary key (thread_id, sequence),
     constraint fk_harness_thread_command_thread foreign key (thread_id)
         references harness_thread (id),
-    constraint fk_harness_thread_command_applied foreign key (applied_turn_start_entry_id)
+    constraint fk_harness_thread_command_applied foreign key (applied_entry_id)
         references harness_entry (id),
     constraint uk_harness_thread_command_idempotency unique (thread_id, idempotency_key),
     constraint ck_harness_thread_command_type check (
@@ -969,14 +975,16 @@ create table harness_thread_command (
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_MODEL',
-            'SET_ENVIRONMENT'
+            'SET_ENVIRONMENT',
+            'NOTIFICATION',
+            'SET_CONTRIBUTOR_STATE'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (
         request_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_harness_thread_command_terminal check (
-        applied_turn_start_entry_id is null or cancelled_at is null
+        applied_entry_id is null or cancelled_at is null
     ),
     constraint ck_harness_thread_command_cancel_pair check (
         (stop_request_id is null and cancelled_at is null)
@@ -994,14 +1002,14 @@ comment on column harness_thread_command.command_type is 'Command payload 类型
 comment on column harness_thread_command.payload is '按 command_type 编码的 payload（JSON object）';
 comment on column harness_thread_command.idempotency_key is '客户端幂等键（UUID），同一 Thread 内唯一';
 comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 idempotencyKey 重放必须精确匹配';
-comment on column harness_thread_command.applied_turn_start_entry_id is 'APPLIED 时应用的 TURN_START Entry；与 cancelled_at 互斥';
+comment on column harness_thread_command.applied_entry_id is 'APPLIED 时应用的 Entry；与 cancelled_at 互斥';
 comment on column harness_thread_command.stop_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
 comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间；不得早于 created_at';
 comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
 
 create index idx_harness_thread_command_queued
     on harness_thread_command (thread_id, sequence)
-    where applied_turn_start_entry_id is null and cancelled_at is null;
+    where applied_entry_id is null and cancelled_at is null;
 
 comment on index idx_harness_thread_command_queued is '按 sequence 升序读取 QUEUED Command（for update 锁序）';
 
@@ -1227,7 +1235,7 @@ comment on index idx_harness_work_available is 'claimNextWork 按 (available_at,
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
 -- Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、
--- 子 Thread 执行边界（after_version）、匹配的首个 Idle 版本与结果 head Entry、以及交付给父
+-- 子 Thread 终止边界（terminal_entry_id/final_answer_entry_id）、以及交付给父
 -- Thread 的命令序列。无独立状态枚举，无 prompt/report 冗余复制。
 create table harness_thread_join (
     invocation_id uuid primary key,
@@ -1235,12 +1243,11 @@ create table harness_thread_join (
     parent_thread_id uuid,
     child_thread_id uuid not null,
     source_command_sequence bigint not null check (source_command_sequence > 0),
-    after_version bigint not null check (after_version >= 0),
     agent varchar(256) not null,
     max_turns integer,
     reminder_turn bigint not null default 0,
-    matched_idle_version bigint,
-    result_head_entry_id uuid,
+    terminal_entry_id uuid,
+    final_answer_entry_id uuid,
     delivery_command_sequence bigint,
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
@@ -1250,7 +1257,9 @@ create table harness_thread_join (
         references harness_thread (id),
     constraint fk_harness_thread_join_source_command foreign key (child_thread_id, source_command_sequence)
         references harness_thread_command (thread_id, sequence),
-    constraint fk_harness_thread_join_result_head foreign key (result_head_entry_id)
+    constraint fk_harness_thread_join_terminal_entry foreign key (terminal_entry_id)
+        references harness_entry (id),
+    constraint fk_harness_thread_join_final_answer_entry foreign key (final_answer_entry_id)
         references harness_entry (id),
     constraint fk_harness_thread_join_delivery_command foreign key (parent_thread_id, delivery_command_sequence)
         references harness_thread_command (thread_id, sequence),
@@ -1269,49 +1278,73 @@ create table harness_thread_join (
     constraint ck_harness_thread_join_reminder_turn check (
         reminder_turn >= 0
     ),
-    constraint ck_harness_thread_join_receipt_pair check (
-        (matched_idle_version is null and result_head_entry_id is null)
-        or (matched_idle_version is not null and result_head_entry_id is not null)
-    ),
-    constraint ck_harness_thread_join_matched_order check (
-        matched_idle_version is null or matched_idle_version > after_version
+    constraint ck_harness_thread_join_final_answer check (
+        final_answer_entry_id is null or terminal_entry_id is not null
     ),
     constraint ck_harness_thread_join_delivery check (
         delivery_command_sequence is null
-        or (delivery_command_sequence > 0 and matched_idle_version is not null and parent_thread_id is not null)
+        or (delivery_command_sequence > 0 and terminal_entry_id is not null and parent_thread_id is not null)
     ),
     constraint ck_harness_thread_join_time_order check (
         updated_at >= created_at
     )
 );
 
-comment on table harness_thread_join is 'Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、子 Thread 执行边界、匹配的 Idle 版本与结果 head、以及交付给父 Thread 的命令序列；无独立状态枚举，无 prompt/report 冗余复制';
+comment on table harness_thread_join is 'Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、子 Thread 终止边界、匹配的 terminal/final_answer Entry、以及交付给父 Thread 的命令序列；无独立状态枚举，无 prompt/report 冗余复制';
 comment on column harness_thread_join.invocation_id is 'Join 的全局唯一 UUID（主键，与发起调用的 Tool/Ticket invocation 对齐）';
 comment on column harness_thread_join.request_hash is '创建请求指纹（64 位小写 SHA-256）';
 comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可空，空表示 root one-shot completion ticket，不投递父消息）';
 comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
 comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
-comment on column harness_thread_join.after_version is '源 prompt 接受完成后的 child Thread version';
 comment on column harness_thread_join.agent is '本次执行的 Agent 名';
 comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
 comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
-comment on column harness_thread_join.matched_idle_version is '匹配的首个 Idle 时的 child Thread version（与 result_head_entry_id 同空或同非空，matched > after_version）';
-comment on column harness_thread_join.result_head_entry_id is '匹配的首个 Idle 时的 child Thread head Entry UUID（与 matched_idle_version 同空或同非空）';
-comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 CUSTOM_MESSAGE 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
+comment on column harness_thread_join.terminal_entry_id is '冻结的 terminal Entry UUID（可空，非空表示 matched）';
+comment on column harness_thread_join.final_answer_entry_id is '可空的最终回答 Entry UUID（仅 terminal_entry_id 非空时可非空）';
+comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 NOTIFICATION 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
 comment on column harness_thread_join.created_at is '创建时间（毫秒精度）';
 comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 
 create index idx_harness_thread_join_child_pending
     on harness_thread_join (child_thread_id)
-    where matched_idle_version is null;
+    where terminal_entry_id is null;
 
-comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲时检索等待匹配的 pending join';
+comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
 
 create index idx_harness_thread_join_parent_pending
     on harness_thread_join (parent_thread_id)
-    where delivery_command_sequence is null;
+    where terminal_entry_id is not null and delivery_command_sequence is null;
 
 comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
+
+create table harness_thread_stop_receipt (
+    thread_id uuid not null,
+    stop_request_id uuid not null,
+    root_stop_request_id uuid not null,
+    stopped_turn_end_entry_id uuid,
+    cancelled_command_count integer not null check (cancelled_command_count >= 0),
+    cancelled_inputs jsonb not null check (jsonb_typeof(cancelled_inputs) = 'array'),
+    created_at timestamptz(3) not null,
+    constraint pk_harness_thread_stop_receipt primary key (thread_id, stop_request_id),
+    constraint fk_harness_thread_stop_receipt_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_stop_receipt_turn_end foreign key (stopped_turn_end_entry_id)
+        references harness_entry (id)
+);
+
+comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 操作在单个 Thread 上留下的持久回执；(thread_id, stop_request_id) 唯一';
+comment on column harness_thread_stop_receipt.thread_id is '所属 Thread';
+comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID';
+comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID';
+comment on column harness_thread_stop_receipt.stopped_turn_end_entry_id is '本次 Stop 关闭活跃 turn 时产生的 TURN_END Entry（若有）';
+comment on column harness_thread_stop_receipt.cancelled_command_count is '本次 Stop 取消的 command 数量';
+comment on column harness_thread_stop_receipt.cancelled_inputs is '退回给用户的已取消输入列表（canonical JSON array of {sequence,idempotencyKey,type,payload}）';
+comment on column harness_thread_stop_receipt.created_at is '回执创建时间（毫秒精度）';
+
+create index idx_harness_thread_stop_receipt_root
+    on harness_thread_stop_receipt (root_stop_request_id);
+
+comment on index idx_harness_thread_stop_receipt_root is '按 root_stop_request_id 检索一次 Stop 产生的全部回执';
 
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts

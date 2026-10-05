@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Instant;
@@ -49,11 +49,6 @@ public abstract class HarnessStoreJoinContract {
   abstract HarnessStore createStore();
 
   private UUID createChildThread(UUID parentThreadId, UUID sessionId, UUID rootEntryId) {
-    return createChildThread(parentThreadId, sessionId, rootEntryId, ThreadLifecycleStatus.IDLE);
-  }
-
-  private UUID createChildThread(
-      UUID parentThreadId, UUID sessionId, UUID rootEntryId, ThreadLifecycleStatus status) {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
@@ -66,7 +61,8 @@ public abstract class HarnessStoreJoinContract {
                   CREATION_REQUEST_HASH,
                   "child-thread",
                   false,
-                  status,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   T0,
@@ -85,26 +81,8 @@ public abstract class HarnessStoreJoinContract {
   }
 
   private static ThreadJoin initialJoin(
-      UUID invocationId,
-      UUID parentThreadId,
-      UUID childThreadId,
-      long sourceCommandSequence,
-      long afterVersion) {
-    return new ThreadJoin(
-        invocationId,
-        REQUEST_HASH,
-        parentThreadId,
-        childThreadId,
-        sourceCommandSequence,
-        afterVersion,
-        "test-agent",
-        10,
-        0L,
-        null,
-        null,
-        null,
-        T0,
-        T0);
+      UUID invocationId, UUID parentThreadId, UUID childThreadId, long sourceCommandSequence) {
+    return initialJoin(invocationId, parentThreadId, childThreadId, sourceCommandSequence, T0, T0);
   }
 
   private static ThreadJoin initialJoin(
@@ -112,7 +90,29 @@ public abstract class HarnessStoreJoinContract {
       UUID parentThreadId,
       UUID childThreadId,
       long sourceCommandSequence,
-      long afterVersion,
+      Instant createdAt,
+      Instant updatedAt) {
+    return joinReceipts(
+        invocationId,
+        parentThreadId,
+        childThreadId,
+        sourceCommandSequence,
+        null,
+        null,
+        null,
+        createdAt,
+        updatedAt);
+  }
+
+  /** 构造携带显式 terminal / final answer / delivery 凭据的 Join，用于终止状态与不可变性校验。 */
+  private static ThreadJoin joinReceipts(
+      UUID invocationId,
+      UUID parentThreadId,
+      UUID childThreadId,
+      long sourceCommandSequence,
+      UUID terminalEntryId,
+      UUID finalAnswerEntryId,
+      Long deliveryCommandSequence,
       Instant createdAt,
       Instant updatedAt) {
     return new ThreadJoin(
@@ -121,13 +121,12 @@ public abstract class HarnessStoreJoinContract {
         parentThreadId,
         childThreadId,
         sourceCommandSequence,
-        afterVersion,
         "test-agent",
         10,
         0L,
-        null,
-        null,
-        null,
+        terminalEntryId,
+        finalAnswerEntryId,
+        deliveryCommandSequence,
         createdAt,
         updatedAt);
   }
@@ -139,7 +138,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(100);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -159,7 +158,7 @@ public abstract class HarnessStoreJoinContract {
     // 测试意图：验证 root one-shot ticket（parentThreadId 为 null）的 ThreadJoin 可成功写入并完整读取。
     insertCommand(baseline.threadId(), 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(101);
-    ThreadJoin join = initialJoin(invocationId, null, baseline.threadId(), 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, null, baseline.threadId(), 1L);
 
     inTransaction(
         store,
@@ -188,7 +187,7 @@ public abstract class HarnessStoreJoinContract {
     insertCommand(childId, 1L, TestIds.id(1));
 
     ThreadJoin invalidCreatedAt =
-        initialJoin(TestIds.id(102), baseline.threadId(), childId, 1L, 0L, T0.plusNanos(500), T1);
+        initialJoin(TestIds.id(102), baseline.threadId(), childId, 1L, T0.plusNanos(500), T1);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -200,7 +199,7 @@ public abstract class HarnessStoreJoinContract {
                 }));
 
     ThreadJoin invalidUpdatedAt =
-        initialJoin(TestIds.id(103), baseline.threadId(), childId, 1L, 0L, T0, T0.plusNanos(500));
+        initialJoin(TestIds.id(103), baseline.threadId(), childId, 1L, T0, T0.plusNanos(500));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -214,28 +213,24 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void insertJoinRejectsAlreadyMatchedOrDeliveredJoin() {
-    // 测试意图：验证 insertJoin 拒绝非初始（已 matched 或已 delivered 或带 reminder）的 Join。
+    // 测试意图：验证 insertJoin 拒绝非初始（已 matched、已 delivered 或已 remind）的 Join。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
 
+    // 已冻结 terminal 结果的 Join
     ThreadJoin matched =
-        new ThreadJoin(
+        joinReceipts(
             TestIds.id(104),
-            REQUEST_HASH,
             baseline.threadId(),
             childId,
             1L,
-            0L,
-            "test-agent",
-            10,
-            0L,
-            1L,
             baseline.rootEntryId(),
+            null,
             null,
             T0,
             T0);
-
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -244,6 +239,41 @@ public abstract class HarnessStoreJoinContract {
                 tx -> {
                   tx.lockThread(childId);
                   tx.insertJoin(matched);
+                }));
+
+    // 已冻结结果并已完成父交付的 Join
+    ThreadJoin delivered =
+        joinReceipts(
+            TestIds.id(105),
+            baseline.threadId(),
+            childId,
+            1L,
+            baseline.rootEntryId(),
+            null,
+            1L,
+            T0,
+            T0);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.insertJoin(delivered);
+                }));
+
+    // 已推进提醒轮次的 Join
+    ThreadJoin reminded =
+        initialJoin(TestIds.id(106), baseline.threadId(), childId, 1L).remind(1L, T1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.insertJoin(reminded);
                 }));
   }
 
@@ -254,7 +284,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(105);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -278,7 +308,7 @@ public abstract class HarnessStoreJoinContract {
   void insertJoinRejectsNonExistentChildThread() {
     // 测试意图：验证 insertJoin 在 childThreadId 对应线程不存在时抛出 IllegalArgumentException。
     UUID nonExistentChildId = TestIds.id(888);
-    ThreadJoin join = initialJoin(TestIds.id(106), baseline.threadId(), nonExistentChildId, 1L, 0L);
+    ThreadJoin join = initialJoin(TestIds.id(106), baseline.threadId(), nonExistentChildId, 1L);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -296,8 +326,7 @@ public abstract class HarnessStoreJoinContract {
     // 测试意图：验证 insertJoin 在 parentThreadId 非空且对应父线程不存在时抛出 IllegalArgumentException。
     UUID nonExistentParentId = TestIds.id(889);
     insertCommand(baseline.threadId(), 1L, TestIds.id(1));
-    ThreadJoin join =
-        initialJoin(TestIds.id(107), nonExistentParentId, baseline.threadId(), 1L, 0L);
+    ThreadJoin join = initialJoin(TestIds.id(107), nonExistentParentId, baseline.threadId(), 1L);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -316,7 +345,7 @@ public abstract class HarnessStoreJoinContract {
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     // 未在 childId 上插入 sequence 1 的 command
-    ThreadJoin join = initialJoin(TestIds.id(108), baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(TestIds.id(108), baseline.threadId(), childId, 1L);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -335,7 +364,7 @@ public abstract class HarnessStoreJoinContract {
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
-    ThreadJoin join = initialJoin(TestIds.id(109), baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(TestIds.id(109), baseline.threadId(), childId, 1L);
 
     assertThrows(
         IllegalStateException.class, () -> inTransaction(store, tx -> tx.insertJoin(join)));
@@ -348,7 +377,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(110);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -368,7 +397,7 @@ public abstract class HarnessStoreJoinContract {
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
-    ThreadJoin join = initialJoin(TestIds.id(998), baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(TestIds.id(998), baseline.threadId(), childId, 1L);
 
     assertThrows(
         IllegalArgumentException.class,
@@ -383,12 +412,13 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void updateJoinRejectsImmutableIdentityChanges() {
-    // 测试意图：验证 updateJoin 拒绝篡改不可变持久身份字段（如 agent、afterVersion 等）。
+    // 测试意图：验证 updateJoin 拒绝篡改不可变持久身份字段（如 agent、sourceCommandSequence 等）。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(childId, 2L, TestIds.id(2));
     UUID invocationId = TestIds.id(111);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -404,7 +434,6 @@ public abstract class HarnessStoreJoinContract {
             baseline.threadId(),
             childId,
             1L,
-            0L,
             "altered-agent",
             10,
             0L,
@@ -423,6 +452,18 @@ public abstract class HarnessStoreJoinContract {
                   tx.lockThread(childId);
                   tx.updateJoin(alteredAgent);
                 }));
+
+    ThreadJoin alteredSourceCommandSequence =
+        joinReceipts(invocationId, baseline.threadId(), childId, 2L, null, null, null, T0, T1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(alteredSourceCommandSequence);
+                }));
   }
 
   @Test
@@ -432,7 +473,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(112);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L, T1, T2);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, T1, T2);
 
     inTransaction(
         store,
@@ -460,7 +501,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(113);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -469,7 +510,7 @@ public abstract class HarnessStoreJoinContract {
           tx.insertJoin(join);
         });
 
-    // 产生子线程执行产生的结果 head entry（需在 open TURN_START 之内）
+    // 产生子线程执行产生的终态 Entry（需在 open TURN_START 之内）
     UUID turnStartId =
         store.transaction(
             tx -> {
@@ -478,11 +519,13 @@ public abstract class HarnessStoreJoinContract {
                   turnStartEntry(id, baseline.sessionId(), baseline.rootEntryId(), childId, T1));
               return id;
             });
-    UUID resultHeadId =
+    UUID terminalEntryId =
         insertChildEntry(store, baseline.sessionId(), turnStartId, userMessagePayload());
+    UUID finalAnswerEntryId =
+        insertChildEntry(store, baseline.sessionId(), terminalEntryId, userMessagePayload());
 
-    // 匹配 match
-    ThreadJoin matched = join.match(1L, resultHeadId, T1);
+    // 匹配 match：冻结 terminal Entry 与最终回答入口
+    ThreadJoin matched = join.match(terminalEntryId, finalAnswerEntryId, T1);
     inTransaction(
         store,
         tx -> {
@@ -493,8 +536,8 @@ public abstract class HarnessStoreJoinContract {
     ThreadJoin storedMatched = store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
     assertEquals(matched, storedMatched);
     assertTrue(storedMatched.matched());
-    assertEquals(1L, storedMatched.matchedIdleVersion());
-    assertEquals(resultHeadId, storedMatched.resultHeadEntryId());
+    assertEquals(terminalEntryId, storedMatched.terminalEntryId());
+    assertEquals(finalAnswerEntryId, storedMatched.finalAnswerEntryId());
 
     // 在父线程上插入 delivery command
     insertCommand(baseline.threadId(), 1L, TestIds.id(2));
@@ -514,13 +557,194 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void updateJoinMatchRejectsNonExistentResultHeadEntry() {
-    // 测试意图：验证 updateJoin 匹配时若 resultHeadEntryId 对应 Entry 不存在则抛出 IllegalArgumentException。
+  void updateJoinRejectsFrozenTerminalAndFinalAnswerChanges() {
+    // 测试意图：验证 matched 后 terminalEntryId 与 finalAnswerEntryId 均被冻结，不得再改写。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    UUID invocationId = TestIds.id(117);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(join);
+        });
+
+    Baseline other = seedThreadBaseline(store);
+    ThreadJoin matched = join.match(baseline.rootEntryId(), baseline.rootEntryId(), T1);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(matched);
+        });
+
+    // 改写 terminalEntryId
+    ThreadJoin changedTerminal =
+        joinReceipts(
+            invocationId,
+            baseline.threadId(),
+            childId,
+            1L,
+            other.rootEntryId(),
+            null,
+            null,
+            T0,
+            T2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(changedTerminal);
+                }));
+
+    // 改写 finalAnswerEntryId
+    ThreadJoin changedFinalAnswer =
+        joinReceipts(
+            invocationId,
+            baseline.threadId(),
+            childId,
+            1L,
+            baseline.rootEntryId(),
+            other.rootEntryId(),
+            null,
+            T0,
+            T2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(changedFinalAnswer);
+                }));
+  }
+
+  @Test
+  void updateJoinRejectsDeliveryCommandSequenceChange() {
+    // 测试意图：验证已写入的 deliveryCommandSequence 不可更改。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
+    insertCommand(baseline.threadId(), 2L, TestIds.id(3));
+    UUID invocationId = TestIds.id(118);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(join);
+        });
+
+    ThreadJoin delivered = join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(delivered);
+        });
+
+    ThreadJoin changedDelivery =
+        joinReceipts(
+            invocationId,
+            baseline.threadId(),
+            childId,
+            1L,
+            baseline.rootEntryId(),
+            null,
+            2L,
+            T0,
+            T3);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(changedDelivery);
+                }));
+  }
+
+  @Test
+  void updateJoinRejectsReminderAdvanceAfterMatch() {
+    // 测试意图：验证 matched 后 reminderTurn 不得再推进。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    UUID invocationId = TestIds.id(119);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(join);
+        });
+
+    ThreadJoin reminded = join.remind(1L, T1);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(reminded);
+        });
+
+    ThreadJoin matched = reminded.match(baseline.rootEntryId(), null, T2);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(matched);
+        });
+
+    ThreadJoin advancedReminder = reminded.remind(2L, T3).match(baseline.rootEntryId(), null, T3);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(advancedReminder);
+                }));
+  }
+
+  @Test
+  void joinRequiresFinalAnswerEntryToImplyTerminalEntry() {
+    // 测试意图：验证 ThreadJoin 构造时 finalAnswerEntryId 必须依附 terminalEntryId。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            joinReceipts(
+                TestIds.id(880),
+                TestIds.id(881),
+                TestIds.id(882),
+                1L,
+                null,
+                TestIds.id(883),
+                null,
+                T0,
+                T0));
+  }
+
+  @Test
+  void updateJoinMatchRejectsNonExistentTerminalEntry() {
+    // 测试意图：验证 updateJoin 匹配时若 terminalEntryId 或 finalAnswerEntryId 对应 Entry 不存在
+    // 则抛出 IllegalArgumentException。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(114);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -530,8 +754,7 @@ public abstract class HarnessStoreJoinContract {
         });
 
     UUID nonExistentEntryId = TestIds.id(987);
-    ThreadJoin matched = join.match(1L, nonExistentEntryId, T1);
-
+    ThreadJoin matchedNonExistentTerminal = join.match(nonExistentEntryId, null, T1);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -539,7 +762,19 @@ public abstract class HarnessStoreJoinContract {
                 store,
                 tx -> {
                   tx.lockThread(childId);
-                  tx.updateJoin(matched);
+                  tx.updateJoin(matchedNonExistentTerminal);
+                }));
+
+    ThreadJoin matchedNonExistentFinalAnswer =
+        join.match(baseline.rootEntryId(), nonExistentEntryId, T1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(matchedNonExistentFinalAnswer);
                 }));
   }
 
@@ -550,7 +785,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(115);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -559,7 +794,7 @@ public abstract class HarnessStoreJoinContract {
           tx.insertJoin(join);
         });
 
-    ThreadJoin matched = join.match(1L, baseline.rootEntryId(), T1);
+    ThreadJoin matched = join.match(baseline.rootEntryId(), null, T1);
     inTransaction(
         store,
         tx -> {
@@ -587,7 +822,7 @@ public abstract class HarnessStoreJoinContract {
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
     UUID invocationId = TestIds.id(116);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
     inTransaction(
         store,
@@ -618,28 +853,31 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void loadMatchableJoinsFiltersAndSortsCorrectly() {
-    // 测试意图：验证 loadMatchableJoins 只返回指定子线程且 matchedIdleVersion 为空、afterVersion < idleVersion 的
-    // join，按 (createdAt, invocationId) 升序。
+  void loadIncompleteJoinsFiltersByChildAndUnfrozenTerminalAndSortsCorrectly() {
+    // 测试意图：验证 loadIncompleteJoins 只返回指定子线程且尚未冻结 terminal（terminalEntryId 为 null）的 join，
+    // 按 (createdAt, invocationId) 升序；已 matched 的 join 与其它子线程的 join 均被排除。
     UUID childId1 =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     UUID childId2 =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId1, 1L, TestIds.id(1));
     insertCommand(childId1, 2L, TestIds.id(2));
-    insertCommand(childId2, 1L, TestIds.id(3));
+    insertCommand(childId1, 3L, TestIds.id(3));
+    insertCommand(childId1, 4L, TestIds.id(4));
+    insertCommand(childId2, 1L, TestIds.id(5));
 
     UUID id1 = TestIds.id(201);
     UUID id2 = TestIds.id(202);
     UUID id3 = TestIds.id(203);
     UUID id4 = TestIds.id(204);
+    UUID id5 = TestIds.id(205);
 
-    ThreadJoin join1 = initialJoin(id1, baseline.threadId(), childId1, 1L, 0L, T1, T1);
-    ThreadJoin join2 =
-        initialJoin(id2, baseline.threadId(), childId1, 2L, 5L, T0, T0); // afterVersion=5
-    ThreadJoin join3 =
-        initialJoin(id3, baseline.threadId(), childId1, 1L, 0L, T2, T2); // afterVersion=0
-    ThreadJoin joinOtherChild = initialJoin(id4, baseline.threadId(), childId2, 1L, 0L, T0, T0);
+    ThreadJoin join1 = initialJoin(id1, baseline.threadId(), childId1, 1L, T1, T1);
+    ThreadJoin join2 = initialJoin(id2, baseline.threadId(), childId1, 2L, T0, T0);
+    ThreadJoin join3 = initialJoin(id3, baseline.threadId(), childId1, 3L, T2, T2);
+    // 与 join3 同时创建，用于验证 invocationId 升序的稳定次序
+    ThreadJoin join4 = initialJoin(id5, baseline.threadId(), childId1, 4L, T2, T2);
+    ThreadJoin joinOtherChild = initialJoin(id4, baseline.threadId(), childId2, 1L, T0, T0);
 
     inTransaction(
         store,
@@ -648,17 +886,19 @@ public abstract class HarnessStoreJoinContract {
           tx.insertJoin(join1);
           tx.insertJoin(join2);
           tx.insertJoin(join3);
+          tx.insertJoin(join4);
           tx.lockThread(childId2);
           tx.insertJoin(joinOtherChild);
         });
 
-    // 当 idleVersion = 3 时，join2 (afterVersion=5) 不满足 afterVersion < idleVersion；joinOtherChild 属于不同
-    // child
-    List<ThreadJoin> matchable = store.transaction(tx -> tx.loadMatchableJoins(childId1, 3L));
-    assertEquals(List.of(join1, join3), matchable);
+    // joinOtherChild 属于不同 child，不参与 childId1 的 incomplete 集合
+    assertEquals(
+        List.of(join2, join1, join3, join4),
+        store.transaction(tx -> tx.loadIncompleteJoins(childId1)));
+    assertTrue(store.transaction(tx -> tx.loadIncompleteJoins(TestIds.id(999))).isEmpty());
 
-    // 将 join1 标记为 matched 后，join1 不再出现在 loadMatchableJoins
-    ThreadJoin matchedJoin1 = join1.match(2L, baseline.rootEntryId(), T3);
+    // 冻结 join1 的 terminal 结果后，join1 不再出现在 incomplete 列表
+    ThreadJoin matchedJoin1 = join1.match(baseline.rootEntryId(), null, T3);
     inTransaction(
         store,
         tx -> {
@@ -666,9 +906,8 @@ public abstract class HarnessStoreJoinContract {
           tx.updateJoin(matchedJoin1);
         });
 
-    List<ThreadJoin> matchableAfterMatch =
-        store.transaction(tx -> tx.loadMatchableJoins(childId1, 3L));
-    assertEquals(List.of(join3), matchableAfterMatch);
+    assertEquals(
+        List.of(join2, join3, join4), store.transaction(tx -> tx.loadIncompleteJoins(childId1)));
   }
 
   @Test
@@ -688,9 +927,9 @@ public abstract class HarnessStoreJoinContract {
     UUID id2 = TestIds.id(302);
     UUID id3 = TestIds.id(303);
 
-    ThreadJoin join1 = initialJoin(id1, parentId1, childId, 1L, 0L, T0, T0);
-    ThreadJoin join2 = initialJoin(id2, parentId1, childId, 2L, 0L, T1, T1);
-    ThreadJoin join3 = initialJoin(id3, parentId2, childId, 3L, 0L, T2, T2);
+    ThreadJoin join1 = initialJoin(id1, parentId1, childId, 1L, T0, T0);
+    ThreadJoin join2 = initialJoin(id2, parentId1, childId, 2L, T1, T1);
+    ThreadJoin join3 = initialJoin(id3, parentId2, childId, 3L, T2, T2);
 
     inTransaction(
         store,
@@ -705,9 +944,9 @@ public abstract class HarnessStoreJoinContract {
     assertTrue(store.transaction(tx -> tx.loadPendingDeliveries(parentId1)).isEmpty());
 
     // 匹配 join1 与 join2
-    ThreadJoin matched1 = join1.match(1L, baseline.rootEntryId(), T2);
-    ThreadJoin matched2 = join2.match(1L, baseline.rootEntryId(), T2);
-    ThreadJoin matched3 = join3.match(1L, baseline.rootEntryId(), T2);
+    ThreadJoin matched1 = join1.match(baseline.rootEntryId(), null, T2);
+    ThreadJoin matched2 = join2.match(baseline.rootEntryId(), null, T2);
+    ThreadJoin matched3 = join3.match(baseline.rootEntryId(), null, T2);
 
     inTransaction(
         store,
@@ -757,17 +996,17 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childId1);
-          ThreadJoin j1 = initialJoin(id1, baseline.threadId(), childId1, 1L, 0L);
-          ThreadJoin j2 = initialJoin(id2, baseline.threadId(), childId1, 2L, 0L);
+          ThreadJoin j1 = initialJoin(id1, baseline.threadId(), childId1, 1L);
+          ThreadJoin j2 = initialJoin(id2, baseline.threadId(), childId1, 2L);
           tx.insertJoin(j1);
           tx.insertJoin(j2);
-          tx.updateJoin(j1.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
-          tx.updateJoin(j2.match(1L, baseline.rootEntryId(), T1).delivered(2L, T2));
+          tx.updateJoin(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
+          tx.updateJoin(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
 
           tx.lockThread(childId2);
-          ThreadJoin j3 = initialJoin(id3, baseline.threadId(), childId2, 1L, 0L);
+          ThreadJoin j3 = initialJoin(id3, baseline.threadId(), childId2, 1L);
           tx.insertJoin(j3);
-          tx.updateJoin(j3.match(1L, baseline.rootEntryId(), T1).delivered(3L, T2));
+          tx.updateJoin(j3.match(baseline.rootEntryId(), null, T1).delivered(3L, T2));
         });
 
     // 未锁定 childId1 时调用 deleteJoinsByChild 抛异常
@@ -819,7 +1058,7 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childId);
-          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L));
+          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
     // 直接尝试 deleteThreads 删除 childId 抛异常
@@ -852,7 +1091,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.lockThread(childId);
           ThreadJoin join = tx.findJoin(invocationId).orElseThrow();
-          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     // 交付后但尚未调用 deleteJoinsByChild 时，deleteThreads 仍应被拒绝
@@ -893,7 +1132,7 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childId);
-          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L));
+          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
     assertThrows(
@@ -923,9 +1162,9 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childId);
-          ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+          ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
           tx.insertJoin(join);
-          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1));
+          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1));
         });
 
     // 已匹配但未交付时删除失败
@@ -972,7 +1211,7 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(rootId);
-          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L, 0L));
+          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L));
         });
 
     // 未匹配时删除根 ticket 抛出异常
@@ -993,7 +1232,7 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.lockThread(rootId);
           ThreadJoin join = tx.findJoin(ticketId).orElseThrow();
-          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1));
+          tx.updateJoin(join.match(baseline.rootEntryId(), null, T1));
         });
 
     // 匹配后成功显式清理
@@ -1103,14 +1342,14 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childA1);
-          ThreadJoin j1 = initialJoin(joinA1, rootA, childA1, 1L, 0L);
+          ThreadJoin j1 = initialJoin(joinA1, rootA, childA1, 1L);
           tx.insertJoin(j1);
-          tx.updateJoin(j1.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+          tx.updateJoin(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
 
           tx.lockThread(childA2);
-          ThreadJoin j2 = initialJoin(joinA2, rootA, childA2, 1L, 0L);
+          ThreadJoin j2 = initialJoin(joinA2, rootA, childA2, 1L);
           tx.insertJoin(j2);
-          tx.updateJoin(j2.match(1L, baseline.rootEntryId(), T1).delivered(2L, T2));
+          tx.updateJoin(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
         });
 
     // 建立隔离的 Session B 及关联事实
@@ -1125,9 +1364,9 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childB);
-          ThreadJoin jb = initialJoin(joinB, rootB, childB, 1L, 0L);
+          ThreadJoin jb = initialJoin(joinB, rootB, childB, 1L);
           tx.insertJoin(jb);
-          tx.updateJoin(jb.match(1L, baselineB.rootEntryId(), T1).delivered(1L, T2));
+          tx.updateJoin(jb.match(baselineB.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     // 对 Session A 执行完整深删除（按规范顺序：joins -> child threads -> parent -> entries -> session）
@@ -1286,138 +1525,196 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void countActiveChildrenCountsDirectNonIdleChildrenOnly() {
-    // 测试意图：验证 countActiveChildren 只统计指定父线程的直接非空闲（ACTIVE 与 WAITING_CHILDREN）子线程数量。
+  void countIncompleteChildJoinsCountsOnlyUnmatchedDirectChildJoinsOfParent() {
+    // 测试意图：验证 countIncompleteChildJoins 只统计 parentThreadId 等于入参且尚未冻结 terminal 结果的直接子 Join：
+    // 每条未匹配 Join 各占一个额度，已匹配或属于其他父 Thread 的 Join 不计入，root ticket 与不存在的父 Thread 均返回 0。
     UUID rootId = baseline.threadId();
-    UUID nonExistentId = store.transaction(HarnessStore.Transaction::nextId);
+    UUID childId1 = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID childId2 = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID grandChildId = createChildThread(childId1, baseline.sessionId(), baseline.rootEntryId());
+    UUID nonExistentParentId = store.transaction(HarnessStore.Transaction::nextId);
+
+    insertCommand(childId1, 1L, TestIds.id(1));
+    insertCommand(childId1, 2L, TestIds.id(2));
+    insertCommand(childId2, 1L, TestIds.id(3));
+    insertCommand(grandChildId, 1L, TestIds.id(4));
+    insertCommand(rootId, 1L, TestIds.id(5));
 
     store.transaction(
         tx -> {
-          // 不存在的父线程返回 0
-          assertEquals(0, tx.countActiveChildren(nonExistentId));
-          // 无子线程的根线程返回 0
-          assertEquals(0, tx.countActiveChildren(rootId));
+          // 尚无任何 Join 时，不存在的父 Thread 与尚无子 Join 的父 Thread 均返回 0
+          assertEquals(0, tx.countIncompleteChildJoins(nonExistentParentId));
+          assertEquals(0, tx.countIncompleteChildJoins(rootId));
+          assertEquals(0, tx.countIncompleteChildJoins(childId1));
           return null;
         });
 
-    UUID childIdle =
-        createChildThread(
-            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
-    UUID childActive =
-        createChildThread(
-            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
-    UUID childWaiting =
-        createChildThread(
-            rootId,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            ThreadLifecycleStatus.WAITING_CHILDREN);
-    // 间接后代（孙线程）处于 ACTIVE
-    UUID grandChildActive =
-        createChildThread(
-            childIdle, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+    UUID ticketId = TestIds.id(801);
+    UUID joinId1 = TestIds.id(802);
+    UUID joinId2 = TestIds.id(803);
+    UUID joinId3 = TestIds.id(804);
+    UUID grandChildJoinId = TestIds.id(805);
+
+    inTransaction(
+        store,
+        tx -> {
+          // root one-shot ticket（parentThreadId 为 null）不占任何父 Thread 的 child quota
+          tx.lockThread(rootId);
+          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L));
+
+          tx.lockThread(childId1);
+          tx.insertJoin(initialJoin(joinId1, rootId, childId1, 1L));
+          tx.insertJoin(initialJoin(joinId2, rootId, childId1, 2L));
+
+          tx.lockThread(childId2);
+          tx.insertJoin(initialJoin(joinId3, rootId, childId2, 1L));
+
+          tx.lockThread(grandChildId);
+          tx.insertJoin(initialJoin(grandChildJoinId, childId1, grandChildId, 1L));
+        });
 
     store.transaction(
         tx -> {
-          // root 的直接子线程中只有 childActive 与 childWaiting 处于非空闲状态（数量为 2，不含 grandChildActive）
-          assertEquals(2, tx.countActiveChildren(rootId));
-          // childIdle 的直接子线程包含 grandChildActive（数量为 1）
-          assertEquals(1, tx.countActiveChildren(childIdle));
-          // childActive 无子线程
-          assertEquals(0, tx.countActiveChildren(childActive));
+          // rootId 的直接未匹配子 Join：childId1 两条 + childId2 一条 = 3（root ticket 与孙级 Join 不计入）
+          assertEquals(3, tx.countIncompleteChildJoins(rootId));
+          // childId1 的直接未匹配子 Join 只有孙级那一条
+          assertEquals(1, tx.countIncompleteChildJoins(childId1));
+          assertEquals(0, tx.countIncompleteChildJoins(childId2));
+          assertEquals(0, tx.countIncompleteChildJoins(nonExistentParentId));
+          return null;
+        });
+
+    // 冻结 childId1 上一部分 Join 的 terminal 结果后，rootId 的计数随之下降
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId1);
+          tx.updateJoin(tx.findJoin(joinId1).orElseThrow().match(baseline.rootEntryId(), null, T1));
+        });
+
+    store.transaction(
+        tx -> {
+          assertEquals(2, tx.countIncompleteChildJoins(rootId));
+          // childId1 的孙级 Join 仍未匹配，计数不变
+          assertEquals(1, tx.countIncompleteChildJoins(childId1));
           return null;
         });
   }
 
   @Test
-  void countActiveSubagentThreadsCountsActiveExecutionChildrenAcrossAllRoots() {
-    // 测试意图：验证 countActiveSubagentThreads 全局统计所有拥有执行父关系（parentThreadId 非空）且非空闲的 Thread：
-    // 跨 root 聚合、包含 ACTIVE 与 WAITING_CHILDREN、包含更深后代，并排除 root 自身与 IDLE 子 Thread。
+  void countIncompleteSubagentJoinsCountsUnmatchedNonRootJoinsAcrossAllRoots() {
+    // 测试意图：验证 countIncompleteSubagentJoins 全局统计尚未冻结 terminal 结果且 parentThreadId 非空的 Join：
+    // 跨 root 聚合、包含更深后代，root ticket（parentThreadId 为 null）不计入，匹配或删除 Join 都会改变计数。
     Baseline other = seedThreadBaseline(store);
     UUID rootA = baseline.threadId();
     UUID rootB = other.threadId();
 
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countActiveSubagentThreads());
+          assertEquals(0, tx.countIncompleteSubagentJoins());
           return null;
         });
 
-    UUID childWaiting =
-        createChildThread(
-            rootA,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            ThreadLifecycleStatus.WAITING_CHILDREN);
-    // IDLE 子 Thread 不占计数
-    createChildThread(
-        rootA, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
-    UUID grandChildActive =
-        createChildThread(
-            childWaiting,
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            ThreadLifecycleStatus.ACTIVE);
-    UUID otherTreeChild =
-        createChildThread(
-            rootB, other.sessionId(), other.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+    UUID childA1 = createChildThread(rootA, baseline.sessionId(), baseline.rootEntryId());
+    UUID childA2 = createChildThread(rootA, baseline.sessionId(), baseline.rootEntryId());
+    UUID grandChildA1 = createChildThread(childA1, baseline.sessionId(), baseline.rootEntryId());
+    UUID childB1 = createChildThread(rootB, other.sessionId(), other.rootEntryId());
 
-    // root 自身即使 ACTIVE 也不计入全局 subagent 计数
+    insertCommand(childA1, 1L, TestIds.id(1));
+    insertCommand(childA2, 1L, TestIds.id(2));
+    insertCommand(grandChildA1, 1L, TestIds.id(3));
+    insertCommand(childB1, 1L, TestIds.id(4));
+    insertCommand(rootA, 1L, TestIds.id(5));
+
+    UUID ticketAId = TestIds.id(901);
+    UUID joinA1Id = TestIds.id(902);
+    UUID grandChildJoinId = TestIds.id(903);
+    UUID joinA2Id = TestIds.id(904);
+    UUID joinB1Id = TestIds.id(905);
+
     inTransaction(
         store,
-        tx ->
-            tx.updateThread(
-                tx.lockThread(rootA)
-                    .orElseThrow()
-                    .changeLifecycleStatus(ThreadLifecycleStatus.ACTIVE, T1)));
+        tx -> {
+          // root one-shot ticket（parentThreadId 为 null）不占全局 subagent 额度
+          tx.lockThread(rootA);
+          tx.insertJoin(initialJoin(ticketAId, null, rootA, 1L));
+
+          tx.lockThread(childA1);
+          tx.insertJoin(initialJoin(joinA1Id, rootA, childA1, 1L));
+          // 更深的后代 Join（父为 childA1）同样计入全局未完成计数
+          tx.insertJoin(initialJoin(grandChildJoinId, childA1, grandChildA1, 1L));
+
+          tx.lockThread(childA2);
+          tx.insertJoin(initialJoin(joinA2Id, rootA, childA2, 1L));
+
+          tx.lockThread(childB1);
+          tx.insertJoin(initialJoin(joinB1Id, rootB, childB1, 1L));
+        });
 
     store.transaction(
         tx -> {
-          // childWaiting(WAITING) + grandChildActive(ACTIVE) + otherTreeChild(ACTIVE) = 3
-          assertEquals(3, tx.countActiveSubagentThreads());
+          // 4 条带父未匹配 Join（跨 rootA / rootB、含孙级），root ticket 不计入
+          assertEquals(4, tx.countIncompleteSubagentJoins());
+          return null;
+        });
+
+    // 冻结 joinA1 的 terminal 结果：全局未完成计数 -1
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childA1);
+          tx.updateJoin(
+              tx.findJoin(joinA1Id).orElseThrow().match(baseline.rootEntryId(), null, T1));
+        });
+
+    store.transaction(
+        tx -> {
+          assertEquals(3, tx.countIncompleteSubagentJoins());
+          return null;
+        });
+
+    // child 与 parent 同时在删除集合内时，未匹配 Join 可随两端一起清理并立即从计数中移除
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(rootA);
+              tx.lockThread(rootA);
+              tx.lockThread(childA2);
+              return tx.deleteJoinsForThreads(List.of(rootA, childA2));
+            });
+    // 删除的是 root ticket（child 为 rootA）与 childA2 的 Join
+    assertEquals(2, deleted);
+
+    store.transaction(
+        tx -> {
+          assertEquals(2, tx.countIncompleteSubagentJoins());
           return null;
         });
 
     inTransaction(
         store,
-        tx ->
-            tx.updateThread(
-                tx.lockThread(childWaiting)
-                    .orElseThrow()
-                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2)));
+        tx -> {
+          tx.lockThread(grandChildA1);
+          tx.updateJoin(
+              tx.findJoin(grandChildJoinId).orElseThrow().match(baseline.rootEntryId(), null, T1));
+        });
 
     store.transaction(
         tx -> {
-          // 父空闲但更深的后代仍活跃：grandChildActive + otherTreeChild = 2
-          assertEquals(2, tx.countActiveSubagentThreads());
+          assertEquals(1, tx.countIncompleteSubagentJoins());
           return null;
         });
 
     inTransaction(
         store,
-        tx ->
-            tx.updateThread(
-                tx.lockThread(otherTreeChild)
-                    .orElseThrow()
-                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3)));
-
-    store.transaction(
         tx -> {
-          assertEquals(1, tx.countActiveSubagentThreads());
-          return null;
+          tx.lockThread(childB1);
+          tx.updateJoin(tx.findJoin(joinB1Id).orElseThrow().match(other.rootEntryId(), null, T1));
         });
 
-    inTransaction(
-        store,
-        tx ->
-            tx.updateThread(
-                tx.lockThread(grandChildActive)
-                    .orElseThrow()
-                    .changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3)));
-
     store.transaction(
         tx -> {
-          assertEquals(0, tx.countActiveSubagentThreads());
+          assertEquals(0, tx.countIncompleteSubagentJoins());
           return null;
         });
   }
@@ -1458,14 +1755,11 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void busyChildDuplicateJoinsQuotaCountsDistinctActivePermanentThreadsNotJoins() {
-    // 测试意图：验证并发配额原语按活跃永久线程（distinct active permanent threads）计数，
-    // 而非按未匹配 Join 记录数计数。即使忙碌子线程挂载了多个未匹配 Join，活跃线程配额计数仍为 1；
-    // 当子线程变为空闲后，活跃线程配额降为 0，即便 Join 记录仍处于未结算状态。
+  void busyChildDuplicateJoinsQuotaCountsEachUnmatchedJoinNotThreadState() {
+    // 测试意图：验证并发配额按尚未冻结 terminal 结果的 Join 计数而非线程执行控制状态：同一忙碌子线程挂载的
+    // 多条未匹配 Join 各占一个额度，全部匹配后额度清零，而子线程自身仍保持 RUNNABLE。
     UUID rootId = baseline.threadId();
-    UUID childId =
-        createChildThread(
-            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+    UUID childId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
 
     UUID inv1 = store.transaction(HarnessStore.Transaction::nextId);
     UUID inv2 = store.transaction(HarnessStore.Transaction::nextId);
@@ -1477,54 +1771,45 @@ public abstract class HarnessStoreJoinContract {
           tx.lockThread(childId);
           tx.insertCommands(
               List.of(command(childId, 1L, tx.nextId()), command(childId, 2L, tx.nextId())));
-          tx.insertJoin(initialJoin(inv1, rootId, childId, 1L, 0L));
-          tx.insertJoin(initialJoin(inv2, rootId, childId, 2L, 0L));
+          tx.insertJoin(initialJoin(inv1, rootId, childId, 1L));
+          tx.insertJoin(initialJoin(inv2, rootId, childId, 2L));
         });
 
     store.transaction(
         tx -> {
-          // 活跃子线程原语：只有 1 个活跃子线程，不受 2 条 Join 记录影响
-          assertEquals(1, tx.countActiveChildren(rootId));
-          assertEquals(1, tx.countActiveSubagentThreads());
+          // 两条未匹配 Join 各占一个额度，与子线程数量无关
+          assertEquals(2, tx.countIncompleteChildJoins(rootId));
+          assertEquals(2, tx.countIncompleteSubagentJoins());
           return null;
         });
 
-    // 子线程变为 WAITING_CHILDREN：仍被视为活跃（status != IDLE）
+    // 两条 Join 均冻结 terminal 结果后额度清零
     inTransaction(
         store,
         tx -> {
-          ThreadState child = tx.lockThread(childId).orElseThrow();
-          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, T1));
+          tx.lockThread(childId);
+          tx.updateJoin(tx.findJoin(inv1).orElseThrow().match(baseline.rootEntryId(), null, T1));
+          tx.updateJoin(tx.findJoin(inv2).orElseThrow().match(baseline.rootEntryId(), null, T2));
         });
 
     store.transaction(
         tx -> {
-          assertEquals(1, tx.countActiveChildren(rootId));
-          assertEquals(1, tx.countActiveSubagentThreads());
-          return null;
-        });
-
-    // 子线程变为 IDLE：活跃线程配额立即降为 0（即使未匹配 Join 仍存在）
-    inTransaction(
-        store,
-        tx -> {
-          ThreadState child = tx.lockThread(childId).orElseThrow();
-          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2));
-        });
-
-    store.transaction(
-        tx -> {
-          assertEquals(0, tx.countActiveChildren(rootId));
-          assertEquals(0, tx.countActiveSubagentThreads());
+          assertEquals(0, tx.countIncompleteChildJoins(rootId));
+          assertEquals(0, tx.countIncompleteSubagentJoins());
+          // 额度清零与线程执行控制状态无关：子线程持久状态仍为 RUNNABLE
+          assertEquals(
+              ThreadExecutionControl.RUNNABLE,
+              tx.findThread(childId).orElseThrow().executionControl());
           return null;
         });
   }
 
   @Test
-  void countActiveChildrenRejectsNullArgument() {
-    // 测试意图：验证 countActiveChildren 对 null 参数抛出 NullPointerException。
+  void countIncompleteChildJoinsRejectsNullArgument() {
+    // 测试意图：验证 countIncompleteChildJoins 对 null 参数抛出 NullPointerException。
     assertThrows(
-        NullPointerException.class, () -> inTransaction(store, tx -> tx.countActiveChildren(null)));
+        NullPointerException.class,
+        () -> inTransaction(store, tx -> tx.countIncompleteChildJoins(null)));
   }
 
   @Test
@@ -1540,9 +1825,9 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childA);
-          ThreadJoin j = initialJoin(joinA, rootA, childA, 1L, 0L);
+          ThreadJoin j = initialJoin(joinA, rootA, childA, 1L);
           tx.insertJoin(j);
-          tx.updateJoin(j.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+          tx.updateJoin(j.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
     Baseline baselineB = seedThreadBaseline(store);

@@ -5,20 +5,22 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -26,21 +28,25 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/** 在树锁与祖先行锁下推进递归空闲、冻结首次匹配的 join 并投递父线程消息。 */
+/**
+ * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
+ *
+ * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：Join 在源输入应用后的首次执行终止（最终回答 / 不可继续失败 /
+ * Stop）冻结一次，并与终态 Entry、父通知在同一事务提交。父 Thread 为 STOPPED 时通知直接固化到历史而不唤醒模型。
+ */
 public final class ThreadLifecycleCoordinator {
 
   public static final String DEFAULT_MAX_TURNS_REMINDER_TEXT =
       """
       The delegated task has reached its suggested turn budget. Wrap up your current work and report the result, including any incomplete work, to the requesting agent.""";
+  public static final String DEFAULT_MAX_TURNS_REMINDER_TAG = "task-budget";
 
   private final ThreadContextProbe threadContextProbe;
   private final AutomaticCompactionPlanner automaticCompactionPlanner;
@@ -112,208 +118,60 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 在关闭 Turn 时原子推进 head 与递归生命周期状态，若达到真正空闲则匹配 Join 并向祖先链递归传播。
+   * 在执行终止边界冻结本次 Thread 上尚未完成的 Join，并向父 Thread 交付系统通知。
    *
    * @param tx 当前事务句柄，不能为 null
-   * @param thread 待推进的 Thread 当前已锁定状态，不能为 null
-   * @param headEntryId 新 head Entry ID，不能为 null
-   * @param now 当前时间戳，不能为 null
-   * @return 推进后的 ThreadState
+   * @param child 已锁定且刚到达终止边界的子 Thread
+   * @param terminalEntryId 冻结的终态 Entry（首次最终回答的 TURN_END、不可继续失败或 Stop 收尾），不能为 null
+   * @param finalAnswerEntryId 可空最终回答入口；不借用源输入之前的回答
+   * @param now 当前时间
+   * @param includeUnappliedSource true 表示 Stop 场景：源输入被执行前取消也算本次结算；普通终止只结算已应用源输入的 Join
    */
-  public ThreadState advanceHeadAndPropagateIdle(
-      HarnessStore.Transaction tx, ThreadState thread, UUID headEntryId, Instant now) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(thread, "thread");
-    Objects.requireNonNull(headEntryId, "headEntryId");
-    Objects.requireNonNull(now, "now");
-
-    int activeChildren = tx.countActiveChildren(thread.id());
-    if (activeChildren > 0) {
-      ThreadState advanced =
-          advanceHeadWithStatus(thread, headEntryId, ThreadLifecycleStatus.WAITING_CHILDREN, now);
-      tx.updateThread(advanced);
-      return advanced;
-    }
-
-    ThreadState advanced =
-        advanceHeadWithStatus(thread, headEntryId, ThreadLifecycleStatus.IDLE, now);
-    tx.updateThread(advanced);
-
-    Instant mutationNow = effectiveMutationTime(now, advanced);
-    List<WorkTarget> workToRequest = new ArrayList<>();
-    matchAndDeliverJoins(tx, advanced, mutationNow, workToRequest);
-
-    if (advanced.parentThreadId() != null) {
-      ThreadState parent = tx.findThread(advanced.parentThreadId()).orElse(null);
-      if (parent != null) {
-        propagateIdleInternal(tx, parent, mutationNow, workToRequest);
-      }
-    }
-
-    workToRequest.sort(
-        Comparator.comparing(WorkTarget::type).thenComparing(WorkTarget::id, UuidOrder.COMPARATOR));
-    for (WorkTarget target : workToRequest) {
-      tx.requestWork(target, now);
-    }
-
-    return advanced;
-  }
-
-  /**
-   * 递归评估并传播 Thread 及其祖先链的空闲状态。
-   *
-   * @param tx 当前事务句柄，不能为 null
-   * @param startingThread 起始 Thread 状态，不能为 null
-   * @param now 当前时间戳，不能为 null
-   */
-  public void propagateIdle(HarnessStore.Transaction tx, ThreadState startingThread, Instant now) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(startingThread, "startingThread");
-    Objects.requireNonNull(now, "now");
-
-    List<WorkTarget> workToRequest = new ArrayList<>();
-    propagateIdleInternal(tx, startingThread, now, workToRequest);
-    workToRequest.sort(
-        Comparator.comparing(WorkTarget::type).thenComparing(WorkTarget::id, UuidOrder.COMPARATOR));
-    for (WorkTarget target : workToRequest) {
-      tx.requestWork(target, now);
-    }
-  }
-
-  private void propagateIdleInternal(
+  public static void matchAndDeliverTerminalJoins(
       HarnessStore.Transaction tx,
-      ThreadState startingThread,
+      ThreadState child,
+      UUID terminalEntryId,
+      UUID finalAnswerEntryId,
       Instant now,
-      List<WorkTarget> workToRequest) {
-    ThreadState current = startingThread;
-    while (current != null) {
-      if (hasLocalWork(tx, current)) {
-        if (current.status() != ThreadLifecycleStatus.ACTIVE) {
-          Instant mutationNow = effectiveMutationTime(now, current);
-          current = current.changeLifecycleStatus(ThreadLifecycleStatus.ACTIVE, mutationNow);
-          tx.updateThread(current);
-        }
-        break;
-      }
-
-      int activeChildren = tx.countActiveChildren(current.id());
-      if (activeChildren > 0) {
-        if (current.status() != ThreadLifecycleStatus.WAITING_CHILDREN) {
-          Instant mutationNow = effectiveMutationTime(now, current);
-          current =
-              current.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, mutationNow);
-          tx.updateThread(current);
-        }
-        break;
-      }
-
-      Instant mutationNow = effectiveMutationTime(now, current);
-      if (current.status() != ThreadLifecycleStatus.IDLE) {
-        current = current.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, mutationNow);
-        tx.updateThread(current);
-      }
-
-      matchAndDeliverJoins(tx, current, mutationNow, workToRequest);
-
-      if (current.parentThreadId() == null) {
-        break;
-      }
-      current = tx.findThread(current.parentThreadId()).orElse(null);
-    }
-  }
-
-  /** 叶到根结算已停止线程并向上收敛祖先；STOPPED 且无排队真实用户输入的父线程只匹配不投递。 */
-  public static List<ThreadState> settleStoppedTree(
-      HarnessStore.Transaction tx, List<ThreadState> orderedThreads, Instant now) {
+      boolean includeUnappliedSource) {
     Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(orderedThreads, "orderedThreads");
+    Objects.requireNonNull(child, "child");
+    Objects.requireNonNull(terminalEntryId, "terminalEntryId");
     Objects.requireNonNull(now, "now");
-
-    List<ThreadState> settled = new ArrayList<>(orderedThreads.size());
-    List<WorkTarget> workToRequest = new ArrayList<>();
-
-    for (ThreadState thread : orderedThreads) {
-      int activeChildren = tx.countActiveChildren(thread.id());
-      ThreadLifecycleStatus expectedStatus =
-          activeChildren > 0 ? ThreadLifecycleStatus.WAITING_CHILDREN : ThreadLifecycleStatus.IDLE;
-      ThreadState current = thread;
-      if (current.status() != expectedStatus) {
-        Instant mutationNow = effectiveMutationTime(now, current);
-        current = current.changeLifecycleStatus(expectedStatus, mutationNow);
-        tx.updateThread(current);
-      }
-      settled.add(current);
-      if (current.status() == ThreadLifecycleStatus.IDLE) {
-        matchAndDeliverJoins(tx, current, effectiveMutationTime(now, current), workToRequest);
-      }
-    }
-
-    // 停止子树之外的祖先按同一不变量向上收敛：ACTIVE 表示仍有本地工作，立即停止传播；WAITING_CHILDREN 在本子树空闲后若已无
-    // 活跃孩子则收敛为 IDLE 并继续向上（可能命中祖先自身的等待 join）。
-    ThreadState top =
-        orderedThreads.isEmpty() ? null : orderedThreads.get(orderedThreads.size() - 1);
-    ThreadState ancestor =
-        top == null || top.parentThreadId() == null
-            ? null
-            : tx.findThread(top.parentThreadId()).orElse(null);
-    while (ancestor != null && ancestor.status() == ThreadLifecycleStatus.WAITING_CHILDREN) {
-      if (tx.countActiveChildren(ancestor.id()) > 0) {
-        break;
-      }
-      Instant mutationNow = effectiveMutationTime(now, ancestor);
-      ancestor = ancestor.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, mutationNow);
-      tx.updateThread(ancestor);
-      matchAndDeliverJoins(tx, ancestor, mutationNow, workToRequest);
-      ancestor =
-          ancestor.parentThreadId() == null
-              ? null
-              : tx.findThread(ancestor.parentThreadId()).orElse(null);
-    }
-
-    workToRequest.sort(
-        Comparator.comparing(WorkTarget::type).thenComparing(WorkTarget::id, UuidOrder.COMPARATOR));
-    for (WorkTarget target : workToRequest) {
-      tx.requestWork(target, now);
-    }
-
-    return List.copyOf(settled);
-  }
-
-  /** 匹配指定已空闲 Thread 上的全部 matchable join，对未暂停的父 Thread 原子交付完成消息。 */
-  private static void matchAndDeliverJoins(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      Instant now,
-      List<WorkTarget> workToRequest) {
-    List<ThreadJoin> matchable = tx.loadMatchableJoins(thread.id(), thread.version());
-    if (matchable.isEmpty()) {
+    List<ThreadJoin> incomplete = tx.loadIncompleteJoins(child.id());
+    if (incomplete.isEmpty()) {
       return;
     }
-    List<ThreadJoin> matched = new ArrayList<>(matchable.size());
-    for (ThreadJoin join : matchable) {
-      Instant joinMutationNow = HarnessStoreTime.notBefore(now, join.updatedAt());
-      ThreadJoin current = join.match(thread.version(), thread.headEntryId(), joinMutationNow);
+    List<ThreadJoin> matched = new ArrayList<>(incomplete.size());
+    for (ThreadJoin join : incomplete) {
+      if (!includeUnappliedSource) {
+        ThreadCommand source =
+            tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
+        if (source == null || source.appliedEntryId() == null) {
+          // 输入尚未应用时，旧回合完成不能结算新 Join。
+          continue;
+        }
+      }
+      Instant joinNow = HarnessStoreTime.notBefore(now, join.updatedAt());
+      ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, joinNow);
       tx.updateJoin(current);
       matched.add(current);
     }
-    deliverMatchedJoins(tx, matched, now, workToRequest);
+    if (!matched.isEmpty()) {
+      deliverMatchedJoins(tx, matched, now);
+    }
   }
 
   /**
-   * 对一批已冻结的 join 执行父 Thread 交付。同一父 Thread 的多个 join 共享一次序列预留；处于暂停状态的父 Thread 只冻结结果、
-   * 不写入交付命令，待真实用户输入到达后由接受控制面刷新。
+   * 对一批刚冻结的 Join 执行父 Thread 交付：构造 NOTIFICATION 命令并预留父序列；父为 RUNNABLE 时请求 THREAD wake，父为 STOPPED 时把
+   * 通知直接固化到历史而不唤醒模型。root ticket（parentThreadId 为空）不投递父通知。
    */
   private static void deliverMatchedJoins(
-      HarnessStore.Transaction tx,
-      List<ThreadJoin> matched,
-      Instant now,
-      List<WorkTarget> workToRequest) {
+      HarnessStore.Transaction tx, List<ThreadJoin> matched, Instant now) {
     Map<UUID, ThreadState> parents = new HashMap<>();
-    Map<UUID, Boolean> paused = new HashMap<>();
     Map<UUID, Long> nextSequence = new HashMap<>();
-    Map<UUID, Integer> deliveryCounts = new LinkedHashMap<>();
-    List<ThreadJoinCompletion.Delivery> deliveries = new ArrayList<>();
-
+    Map<UUID, Integer> deliveryCounts = new HashMap<>();
+    Map<UUID, List<ThreadJoinCompletion.Delivery>> deliveriesByParent = new HashMap<>();
     for (ThreadJoin join : matched) {
       UUID parentId = join.parentThreadId();
       if (parentId == null) {
@@ -328,38 +186,79 @@ public final class ThreadLifecycleCoordinator {
                         new IllegalStateException(
                             "parent thread " + parentId + " not found while delivering join"));
         parents.put(parentId, parent);
-        paused.put(parentId, ThreadJoinCompletion.isPaused(tx, parent));
         nextSequence.put(parentId, parent.nextCommandSequence());
       }
-      if (paused.get(parentId)) {
-        continue;
-      }
       long sequence = nextSequence.get(parentId);
-      deliveries.add(ThreadJoinCompletion.buildDelivery(tx, join, parent, sequence, now));
+      ThreadJoinCompletion.Delivery delivery =
+          ThreadJoinCompletion.buildDelivery(tx, join, parent, sequence, now);
+      deliveriesByParent.computeIfAbsent(parentId, ignored -> new ArrayList<>()).add(delivery);
       nextSequence.put(parentId, sequence + 1);
       deliveryCounts.merge(parentId, 1, Integer::sum);
     }
-
-    if (deliveries.isEmpty()) {
+    if (deliveriesByParent.isEmpty()) {
       return;
     }
-    tx.insertCommands(deliveries.stream().map(ThreadJoinCompletion.Delivery::command).toList());
-    for (ThreadJoinCompletion.Delivery delivery : deliveries) {
-      tx.updateJoin(delivery.delivered());
+    List<ThreadCommand> commands = new ArrayList<>();
+    for (List<ThreadJoinCompletion.Delivery> deliveries : deliveriesByParent.values()) {
+      for (ThreadJoinCompletion.Delivery delivery : deliveries) {
+        commands.add(delivery.command());
+      }
     }
-    for (Map.Entry<UUID, Integer> entry : deliveryCounts.entrySet()) {
+    tx.insertCommands(commands);
+    for (List<ThreadJoinCompletion.Delivery> deliveries : deliveriesByParent.values()) {
+      for (ThreadJoinCompletion.Delivery delivery : deliveries) {
+        tx.updateJoin(delivery.delivered());
+      }
+    }
+    for (Map.Entry<UUID, List<ThreadJoinCompletion.Delivery>> entry :
+        deliveriesByParent.entrySet()) {
       ThreadState parent = parents.get(entry.getKey());
-      Instant mutationNow = HarnessStoreTime.notBefore(now, parent.updatedAt());
-      ThreadState advanced = parent.reserveCommandSequences(entry.getValue(), mutationNow);
-      tx.updateThread(advanced);
-      workToRequest.add(new WorkTarget(WorkTargetType.THREAD, parent.id()));
+      int count = deliveryCounts.get(entry.getKey());
+      Instant parentNow = HarnessStoreTime.notBefore(now, parent.updatedAt());
+      List<ThreadJoinCompletion.Delivery> deliveries = entry.getValue();
+      if (parent.executionControl().isStopped()) {
+        materializeNotifications(tx, parent, deliveries, count, parentNow);
+      } else {
+        ThreadState advanced = parent.reserveCommandSequences(count, parentNow);
+        tx.updateThread(advanced);
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parent.id()), now);
+      }
     }
+  }
+
+  /** 已停止父 Thread：把交付通知按序列顺序直接追加为历史 NOTIFICATION Entry 并标记命令已应用（不唤醒模型）。 */
+  private static void materializeNotifications(
+      HarnessStore.Transaction tx,
+      ThreadState parent,
+      List<ThreadJoinCompletion.Delivery> deliveries,
+      int count,
+      Instant now) {
+    List<ThreadCommand> applied = new ArrayList<>(deliveries.size());
+    UUID head = parent.headEntryId();
+    for (ThreadJoinCompletion.Delivery delivery : deliveries) {
+      NotificationCommandPayload payload = (NotificationCommandPayload) delivery.command().payload();
+      UUID entryId = tx.nextId();
+      tx.insertEntry(
+          new Entry(
+              entryId,
+              parent.sessionId(),
+              head,
+              new NotificationPayload(
+                  payload.notificationId(), payload.kind(), payload.sourceThreadId(),
+                  payload.message()),
+              now));
+      applied.add(delivery.command().markApplied(entryId));
+      head = entryId;
+    }
+    tx.updateCommands(applied);
+    ThreadState advanced = parent.reserveCommandSequencesAndAdvanceHead(count, head, now);
+    tx.updateThread(advanced);
   }
 
   /** 判断 Thread 本地是否仍有未完成的命令、Invocation、续写或压缩义务。 */
   public boolean hasLocalWork(HarnessStore.Transaction tx, ThreadState thread) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    boolean hasQueuedMsg = hasQueuedUserMessage(queued);
+    boolean hasQueuedDemand = hasQueuedDemand(queued);
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     return switch (context) {
@@ -373,76 +272,23 @@ public final class ThreadLifecycleCoordinator {
             compactionConfigSupplier != null ? compactionConfigSupplier.get() : null;
         boolean compactionDue =
             compactionConfig != null
-                && automaticCompactionPlanner.plan(thread, path, compactionConfig, hasQueuedMsg)
+                && automaticCompactionPlanner.plan(thread, path, compactionConfig, hasQueuedDemand)
                     != null;
-        yield hasQueuedMsg || compactionDue;
+        yield hasQueuedDemand || compactionDue;
       }
     };
   }
 
-  private static boolean hasQueuedUserMessage(List<ThreadCommand> queued) {
+  private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
-      if (command.type().isMessage()) {
+      if (command.type().isMessage() || command.type().isNotification()) {
         return true;
       }
     }
     return false;
   }
 
-  /**
-   * 原子推进 head 并设置递归生命周期状态（{@code version} 恰好 +1）。供 Manual Compaction 等在同一事务内把 Thread 由 IDLE 切到
-   * ACTIVE 的控制面复用。
-   */
-  public static ThreadState advanceHeadWithStatus(
-      ThreadState thread, UUID headEntryId, ThreadLifecycleStatus status, Instant now) {
-    ThreadState next =
-        new ThreadState(
-            thread.id(),
-            thread.sessionId(),
-            thread.parentThreadId(),
-            headEntryId,
-            thread.creationRequestHash(),
-            thread.name(),
-            thread.yoloEnabled(),
-            status,
-            thread.nextCommandSequence(),
-            Math.addExact(thread.version(), 1L),
-            thread.createdAt(),
-            effectiveMutationTime(now, thread));
-    ThreadState.validateTransition(thread, next);
-    return next;
-  }
-
-  /**
-   * 把指定 Thread 仍处于 {@link ThreadLifecycleStatus#IDLE} 的全部祖先原子推进为 {@link
-   * ThreadLifecycleStatus#WAITING_CHILDREN}（新出现的本地活动必须在同一事务对祖先可见）。
-   *
-   * <p>调用方必须已按规范锁序锁定整条祖先链（例如通过 {@link #lockThreadWithAncestors}），否则更新会因未持锁而失败。
-   */
-  public static void markAncestorsWaitingChildren(
-      HarnessStore.Transaction tx, UUID threadId, Instant now) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(now, "now");
-    for (UUID ancestorId : tx.findAncestorChain(threadId)) {
-      if (ancestorId.equals(threadId)) {
-        continue;
-      }
-      ThreadState ancestor = tx.lockThread(ancestorId).orElse(null);
-      if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
-        tx.updateThread(
-            ancestor.changeLifecycleStatus(
-                ThreadLifecycleStatus.WAITING_CHILDREN, effectiveMutationTime(now, ancestor)));
-      }
-    }
-  }
-
-  private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
-  }
-
-  /** 在已确定继续运行的边界原子入队预算提醒并推进 reminderTurn；终态空闲不调用。 */
+  /** 在已确定继续运行的边界把 max-turn 短预算提醒作为 NOTIFICATION 物化到历史（按 Join 幂等，不分配邮箱 sequence）。 */
   public ThreadState remindSoftBudgetIfDue(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path, Instant now) {
     Objects.requireNonNull(tx, "tx");
@@ -450,64 +296,66 @@ public final class ThreadLifecycleCoordinator {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(now, "now");
 
-    List<ThreadJoin> joins = tx.loadMatchableJoins(thread.id(), Long.MAX_VALUE);
+    List<ThreadJoin> joins = tx.loadIncompleteJoins(thread.id());
     if (joins.isEmpty()) {
       return thread;
     }
-
     ThreadState current = thread;
+    EntryPath currentPath = path;
     for (ThreadJoin join : joins) {
-      if (join.maxTurns() == null || join.maxTurns() <= 0) {
+      if (join.maxTurns() == null || join.maxTurns() <= 0 || join.reminderTurn() > 0) {
         continue;
       }
-      if (join.parentThreadId() != null) {
-        ThreadState parent = tx.findThread(join.parentThreadId()).orElse(null);
-        if (parent != null && ThreadJoinCompletion.isPaused(tx, parent)) {
-          continue;
-        }
-      }
-
-      if (join.reminderTurn() > 0) {
+      int actualTurns = countActualTurns(tx, currentPath, join);
+      if (actualTurns < join.maxTurns()) {
         continue;
       }
-      int actualTurns = countActualTurns(tx, path, join);
-      if (actualTurns >= join.maxTurns()) {
-        UUID idempotencyKey =
-            UUID.nameUUIDFromBytes(
-                ("reminder:" + join.invocationId()).getBytes(StandardCharsets.UTF_8));
-        if (tx.findCommandByIdempotencyKey(current.id(), idempotencyKey).isPresent()) {
-          continue;
-        }
-
-        CustomMessageCommandPayload payload =
-            new CustomMessageCommandPayload(
-                SystemReminder.message(DEFAULT_MAX_TURNS_REMINDER_TEXT));
-        String reqHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
-        Instant cmdMutationNow = effectiveMutationTime(now, current);
-        ThreadCommand cmd =
-            new ThreadCommand(
-                current.id(),
-                current.nextCommandSequence(),
-                payload,
-                idempotencyKey,
-                reqHash,
-                null,
-                null,
-                null,
-                cmdMutationNow);
-        tx.insertCommands(List.of(cmd));
-        current = current.reserveCommandSequences(1, cmdMutationNow);
-        tx.updateThread(current);
-
-        Instant joinMutationNow = HarnessStoreTime.notBefore(cmdMutationNow, join.updatedAt());
-        ThreadJoin reminded = join.remind(actualTurns, joinMutationNow);
-        tx.updateJoin(reminded);
+      UUID notificationId =
+          UUID.nameUUIDFromBytes(
+              (DEFAULT_MAX_TURNS_REMINDER_TAG + ":" + join.invocationId())
+                  .getBytes(StandardCharsets.UTF_8));
+      if (containsNotification(currentPath, notificationId)) {
+        continue;
       }
+      Instant mutationNow =
+          HarnessStoreTime.notBefore(now, current.updatedAt(), currentPath.head().createdAt());
+      UUID entryId = tx.nextId();
+      Entry entry =
+          new Entry(
+              entryId,
+              current.sessionId(),
+              currentPath.head().id(),
+              new NotificationPayload(
+                  notificationId,
+                  NotificationKind.TASK_BUDGET,
+                  join.childThreadId(),
+                  new AgentMessage(
+                      AgentMessageRole.USER,
+                      List.of(new TextMessageContent(DEFAULT_MAX_TURNS_REMINDER_TEXT)))),
+              mutationNow);
+      tx.insertEntry(entry);
+      current = current.advanceHead(entryId, mutationNow);
+      tx.updateThread(current);
+      List<Entry> extended = new ArrayList<>(currentPath.entries());
+      extended.add(entry);
+      currentPath = new EntryPath(extended);
+      Instant joinNow = HarnessStoreTime.notBefore(mutationNow, join.updatedAt());
+      tx.updateJoin(join.remind(actualTurns, joinNow));
     }
     return current;
   }
 
-  /** 从 join 源命令的已应用 TURN_START 起计模型工作轮，忽略 COMPACTION / STOP。 */
+  private static boolean containsNotification(EntryPath path, UUID notificationId) {
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof NotificationPayload notification
+          && notification.notificationId().equals(notificationId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 从 join 源命令的已应用 Entry 起计模型工作轮，忽略 COMPACTION / STOP。 */
   public static int countActualTurns(HarnessStore.Transaction tx, EntryPath path, ThreadJoin join) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(path, "path");
@@ -515,10 +363,10 @@ public final class ThreadLifecycleCoordinator {
 
     ThreadCommand sourceCommand =
         tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
-    if (sourceCommand == null || sourceCommand.appliedTurnStartEntryId() == null) {
+    if (sourceCommand == null || sourceCommand.appliedEntryId() == null) {
       return 0;
     }
-    UUID appliedStart = sourceCommand.appliedTurnStartEntryId();
+    UUID appliedStart = sourceCommand.appliedEntryId();
     List<Entry> entries = path.entries();
     int startIndex = -1;
     for (int i = 0; i < entries.size(); i++) {

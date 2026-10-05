@@ -1,26 +1,28 @@
 package fun.fengwk.kkstudio.harness.runtime.join;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
- * Join 结果交付的共享实现：把已匹配的 Join 投影为固定回执，渲染成 SYSTEM 提醒形态的 {@code subagent_result} 完成消息，并给出 待写入父 Thread
- * 的命令与 Join 交付事实。
+ * Join 结果交付的共享实现：把已冻结的 Join 投影为固定回执，构造一条 {@link NotificationKind#SUBAGENT_RESULT} 系统通知命令交付给父
+ * Thread，并给出待写入的 Join 交付事实。
  *
- * <p>Thread 空闲收敛、Stop 收尾结算与父 Thread 接受新输入时的挂起交付刷新共用同一实现，避免各控制面各自渲染出不同的消息形态或 不同的 requestHash。
+ * <p>执行终止边界、Join 结果冻结与父通知接受在同一事务提交；父为 STOPPED 时由调用方把通知直接固化到历史而不唤醒模型。通知内容与来源在冻结时
+ * 确定，重复交付不从子 Thread 最新 head 重建旧结果。
  */
 public final class ThreadJoinCompletion {
 
@@ -30,31 +32,9 @@ public final class ThreadJoinCompletion {
   private ThreadJoinCompletion() {}
 
   /**
-   * 判断父 Thread 是否处于暂停交付状态：head 已停在 STOPPED 停止边界，且本地没有排队中的真实用户输入。
+   * 投影 Join 结果并构造一条父 Thread 完成通知命令。
    *
-   * <p>只看 head STOPPED 会把“用户已重新排队输入、等待下一个 Turn 物化”的父 Thread 误判为暂停，使旧结果被无限冻结；只有 真正没有后续输入的 STOPPED 父
-   * Thread 才应由后续用户输入恢复交付。
-   */
-  public static boolean isPaused(HarnessStore.Transaction tx, ThreadState parent) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(parent, "parent");
-    if (!(tx.loadEntryPath(parent.headEntryId()).head().payload() instanceof TurnEndPayload end)
-        || end.outcome() != TurnEndOutcome.STOPPED) {
-      return false;
-    }
-    for (ThreadCommand command : tx.loadCommandsByThread(parent.id())) {
-      if (command.state() == ThreadCommandState.QUEUED && isGenuineUserPayload(command)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /**
-   * 投影 Join 结果并构造一条父 Thread 完成交付命令。
-   *
-   * <p>消息采用 {@link SystemReminder} 形态：交付是运行时 steering，而不是真实用户输入，因此不得参与“真实用户输入”判定，也不得解除 父 Thread
-   * 的停止暂停。requestHash 统一由 {@link ThreadCommandPayloadJsonCodec} 计算。
+   * <p>通知 identity 由 invocationId 确定派生，重复交付同一 Join 得到同一 notificationId（幂等）。
    */
   public static Delivery buildDelivery(
       HarnessStore.Transaction tx,
@@ -73,8 +53,14 @@ public final class ThreadJoinCompletion {
                 () ->
                     new IllegalStateException(
                         "cannot project receipt for matched join " + matched.invocationId()));
-    CustomMessageCommandPayload payload =
-        new CustomMessageCommandPayload(SystemReminder.message(receipt.renderCompletionXml()));
+    NotificationCommandPayload payload =
+        new NotificationCommandPayload(
+            notificationId(matched.invocationId()),
+            NotificationKind.SUBAGENT_RESULT,
+            matched.childThreadId(),
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(new TextMessageContent(receipt.renderCompletionXml()))));
     Instant parentMutationNow = HarnessStoreTime.notBefore(now, parent.updatedAt());
     Instant deliveryMutationNow =
         HarnessStoreTime.notBefore(parentMutationNow, matched.updatedAt());
@@ -83,7 +69,7 @@ public final class ThreadJoinCompletion {
             parent.id(),
             sequence,
             payload,
-            matched.invocationId(),
+            payload.notificationId(),
             ThreadCommandPayloadJsonCodec.requestHash(payload),
             null,
             null,
@@ -92,12 +78,10 @@ public final class ThreadJoinCompletion {
     return new Delivery(command, matched.delivered(sequence, deliveryMutationNow));
   }
 
-  private static boolean isGenuineUserPayload(ThreadCommand command) {
-    return switch (command.payload()) {
-      case UserMessageCommandPayload ignored -> true;
-      case GoalCommandPayload ignored -> true;
-      case CustomMessageCommandPayload custom -> !SystemReminder.isReminder(custom.message());
-      default -> false;
-    };
+  /** 由 Join invocationId 确定派生的通知 identity（同一 Join 重复交付幂等）。 */
+  public static UUID notificationId(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return UUID.nameUUIDFromBytes(
+        ("subagent-result:" + invocationId).getBytes(StandardCharsets.UTF_8));
   }
 }

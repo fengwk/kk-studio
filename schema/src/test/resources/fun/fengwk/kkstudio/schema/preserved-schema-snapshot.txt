@@ -83,17 +83,18 @@ column	harness_session	id	type=uuid notnull=t default=<null> generated= collatio
 column	harness_session	name	type=character varying(256) notnull=t default=<null> generated= collation="default"
 column	harness_thread	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread	creation_request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
+column	harness_thread	execution_control	type=character varying(16) notnull=t default=<null> generated= collation="default"
 column	harness_thread	head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread	input_through_sequence	type=bigint notnull=t default=0 generated= collation=-
 column	harness_thread	name	type=character varying(256) notnull=t default=<null> generated= collation="default"
 column	harness_thread	next_command_sequence	type=bigint notnull=t default=<null> generated= collation=-
 column	harness_thread	parent_thread_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread	session_id	type=uuid notnull=t default=<null> generated= collation=-
-column	harness_thread	status	type=character varying(16) notnull=t default=<null> generated= collation="default"
 column	harness_thread	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread	version	type=bigint notnull=t default=<null> generated= collation=-
 column	harness_thread	yolo_enabled	type=boolean notnull=t default=<null> generated= collation=-
-column	harness_thread_command	applied_turn_start_entry_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_thread_command	applied_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_command	cancelled_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	harness_thread_command	command_type	type=character varying(32) notnull=t default=<null> generated= collation="default"
 column	harness_thread_command	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
@@ -103,20 +104,26 @@ column	harness_thread_command	request_hash	type=character(64) notnull=t default=
 column	harness_thread_command	sequence	type=bigint notnull=t default=<null> generated= collation=-
 column	harness_thread_command	stop_request_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_command	thread_id	type=uuid notnull=t default=<null> generated= collation=-
-column	harness_thread_join	after_version	type=bigint notnull=t default=<null> generated= collation=-
 column	harness_thread_join	agent	type=character varying(256) notnull=t default=<null> generated= collation="default"
 column	harness_thread_join	child_thread_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread_join	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread_join	delivery_command_sequence	type=bigint notnull=f default=<null> generated= collation=-
+column	harness_thread_join	final_answer_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	invocation_id	type=uuid notnull=t default=<null> generated= collation=-
-column	harness_thread_join	matched_idle_version	type=bigint notnull=f default=<null> generated= collation=-
 column	harness_thread_join	max_turns	type=integer notnull=f default=<null> generated= collation=-
 column	harness_thread_join	parent_thread_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	reminder_turn	type=bigint notnull=t default=0 generated= collation=-
 column	harness_thread_join	request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
-column	harness_thread_join	result_head_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	source_command_sequence	type=bigint notnull=t default=<null> generated= collation=-
+column	harness_thread_join	terminal_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_join	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	cancelled_command_count	type=integer notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	cancelled_inputs	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	root_stop_request_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	stop_request_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	stopped_turn_end_entry_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_thread_stop_receipt	thread_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_tool_invocation	approval	type=jsonb notnull=f default=<null> generated= collation=-
 column	harness_tool_invocation	assistant_entry_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_tool_invocation	attempt	type=integer notnull=t default=<null> generated= collation=-
@@ -245,7 +252,7 @@ constraint	environment_connection	fk_environment_connection_environment	FOREIGN 
 constraint	harness_entry	ck_harness_entry_parent_not_self	CHECK (((parent_entry_id IS NULL) OR (parent_entry_id <> id)))
 constraint	harness_entry	ck_harness_entry_parent_shape	CHECK (((((entry_type)::text = 'ROOT'::text) AND (parent_entry_id IS NULL)) OR (((entry_type)::text <> 'ROOT'::text) AND (parent_entry_id IS NOT NULL))))
 constraint	harness_entry	ck_harness_entry_provider_replay_state	CHECK (((provider_replay_state IS NULL) OR ((jsonb_typeof(provider_replay_state) = 'object'::text) AND ((entry_type)::text = 'MESSAGE'::text) AND (((payload -> 'message'::text) ->> 'role'::text) = 'ASSISTANT'::text))))
-constraint	harness_entry	ck_harness_entry_type	CHECK (((entry_type)::text = ANY ((ARRAY['ROOT'::character varying, 'TURN_START'::character varying, 'MESSAGE'::character varying, 'CUSTOM'::character varying, 'MODEL_ATTEMPT_FAILURE'::character varying, 'CUSTOM_MESSAGE'::character varying, 'ASSISTANT_ERROR'::character varying, 'ASSISTANT_ABORTED'::character varying, 'COMPACTION'::character varying, 'TURN_END'::character varying])::text[])))
+constraint	harness_entry	ck_harness_entry_type	CHECK (((entry_type)::text = ANY ((ARRAY['ROOT'::character varying, 'TURN_START'::character varying, 'MESSAGE'::character varying, 'CUSTOM'::character varying, 'MODEL_ATTEMPT_FAILURE'::character varying, 'CUSTOM_MESSAGE'::character varying, 'ASSISTANT_ERROR'::character varying, 'ASSISTANT_ABORTED'::character varying, 'COMPACTION'::character varying, 'TURN_END'::character varying, 'NOTIFICATION'::character varying])::text[])))
 constraint	harness_entry	fk_harness_entry_parent	FOREIGN KEY (session_id, parent_entry_id) REFERENCES harness_entry(session_id, id)
 constraint	harness_entry	fk_harness_entry_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
 constraint	harness_entry	harness_entry_payload_check	CHECK ((jsonb_typeof(payload) = 'object'::text))
@@ -270,13 +277,15 @@ constraint	harness_model_invocation	uk_harness_model_invocation_turn	UNIQUE (thr
 constraint	harness_session	ck_harness_session_name	CHECK ((btrim((name)::text) <> ''::text))
 constraint	harness_session	harness_session_pkey	PRIMARY KEY (id)
 constraint	harness_thread	ck_harness_thread_creation_request_hash	CHECK ((creation_request_hash ~ '^[0-9a-f]{64}$'::text))
+constraint	harness_thread	ck_harness_thread_execution_control	CHECK (((execution_control)::text = ANY ((ARRAY['RUNNABLE'::character varying, 'STOPPED'::character varying])::text[])))
+constraint	harness_thread	ck_harness_thread_input_through	CHECK ((input_through_sequence < next_command_sequence))
 constraint	harness_thread	ck_harness_thread_name	CHECK ((btrim((name)::text) <> ''::text))
 constraint	harness_thread	ck_harness_thread_parent_not_self	CHECK (((parent_thread_id IS NULL) OR (parent_thread_id <> id)))
-constraint	harness_thread	ck_harness_thread_status	CHECK (((status)::text = ANY ((ARRAY['IDLE'::character varying, 'ACTIVE'::character varying, 'WAITING_CHILDREN'::character varying])::text[])))
 constraint	harness_thread	ck_harness_thread_time_order	CHECK ((updated_at >= created_at))
 constraint	harness_thread	fk_harness_thread_head	FOREIGN KEY (session_id, head_entry_id) REFERENCES harness_entry(session_id, id)
 constraint	harness_thread	fk_harness_thread_parent	FOREIGN KEY (parent_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread	fk_harness_thread_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
+constraint	harness_thread	harness_thread_input_through_sequence_check	CHECK ((input_through_sequence >= 0))
 constraint	harness_thread	harness_thread_next_command_sequence_check	CHECK ((next_command_sequence >= 1))
 constraint	harness_thread	harness_thread_pkey	PRIMARY KEY (id)
 constraint	harness_thread	harness_thread_version_check	CHECK ((version >= 0))
@@ -284,31 +293,35 @@ constraint	harness_thread	uk_harness_thread_session	UNIQUE (session_id, id)
 constraint	harness_thread_command	ck_harness_thread_command_cancel_pair	CHECK ((((stop_request_id IS NULL) AND (cancelled_at IS NULL)) OR ((stop_request_id IS NOT NULL) AND (cancelled_at IS NOT NULL))))
 constraint	harness_thread_command	ck_harness_thread_command_cancel_time	CHECK (((cancelled_at IS NULL) OR (cancelled_at >= created_at)))
 constraint	harness_thread_command	ck_harness_thread_command_request_hash	CHECK ((request_hash ~ '^[0-9a-f]{64}$'::text))
-constraint	harness_thread_command	ck_harness_thread_command_terminal	CHECK (((applied_turn_start_entry_id IS NULL) OR (cancelled_at IS NULL)))
-constraint	harness_thread_command	ck_harness_thread_command_type	CHECK (((command_type)::text = ANY ((ARRAY['USER_MESSAGE'::character varying, 'GOAL'::character varying, 'CUSTOM_MESSAGE'::character varying, 'SET_AGENT'::character varying, 'SET_MODEL'::character varying, 'SET_ENVIRONMENT'::character varying])::text[])))
-constraint	harness_thread_command	fk_harness_thread_command_applied	FOREIGN KEY (applied_turn_start_entry_id) REFERENCES harness_entry(id)
+constraint	harness_thread_command	ck_harness_thread_command_terminal	CHECK (((applied_entry_id IS NULL) OR (cancelled_at IS NULL)))
+constraint	harness_thread_command	ck_harness_thread_command_type	CHECK (((command_type)::text = ANY ((ARRAY['USER_MESSAGE'::character varying, 'GOAL'::character varying, 'CUSTOM_MESSAGE'::character varying, 'SET_AGENT'::character varying, 'SET_MODEL'::character varying, 'SET_ENVIRONMENT'::character varying, 'NOTIFICATION'::character varying, 'SET_CONTRIBUTOR_STATE'::character varying])::text[])))
+constraint	harness_thread_command	fk_harness_thread_command_applied	FOREIGN KEY (applied_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_command	fk_harness_thread_command_thread	FOREIGN KEY (thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_command	harness_thread_command_payload_check	CHECK ((jsonb_typeof(payload) = 'object'::text))
 constraint	harness_thread_command	harness_thread_command_pkey	PRIMARY KEY (thread_id, sequence)
 constraint	harness_thread_command	harness_thread_command_sequence_check	CHECK ((sequence > 0))
 constraint	harness_thread_command	uk_harness_thread_command_idempotency	UNIQUE (thread_id, idempotency_key)
 constraint	harness_thread_join	ck_harness_thread_join_agent	CHECK ((btrim((agent)::text) <> ''::text))
-constraint	harness_thread_join	ck_harness_thread_join_delivery	CHECK (((delivery_command_sequence IS NULL) OR ((delivery_command_sequence > 0) AND (matched_idle_version IS NOT NULL) AND (parent_thread_id IS NOT NULL))))
-constraint	harness_thread_join	ck_harness_thread_join_matched_order	CHECK (((matched_idle_version IS NULL) OR (matched_idle_version > after_version)))
+constraint	harness_thread_join	ck_harness_thread_join_delivery	CHECK (((delivery_command_sequence IS NULL) OR ((delivery_command_sequence > 0) AND (terminal_entry_id IS NOT NULL) AND (parent_thread_id IS NOT NULL))))
+constraint	harness_thread_join	ck_harness_thread_join_final_answer	CHECK (((final_answer_entry_id IS NULL) OR (terminal_entry_id IS NOT NULL)))
 constraint	harness_thread_join	ck_harness_thread_join_max_turns	CHECK (((max_turns IS NULL) OR (max_turns > 0)))
 constraint	harness_thread_join	ck_harness_thread_join_parent_not_child	CHECK (((parent_thread_id IS NULL) OR (parent_thread_id <> child_thread_id)))
-constraint	harness_thread_join	ck_harness_thread_join_receipt_pair	CHECK ((((matched_idle_version IS NULL) AND (result_head_entry_id IS NULL)) OR ((matched_idle_version IS NOT NULL) AND (result_head_entry_id IS NOT NULL))))
 constraint	harness_thread_join	ck_harness_thread_join_reminder_turn	CHECK ((reminder_turn >= 0))
 constraint	harness_thread_join	ck_harness_thread_join_request_hash	CHECK ((request_hash ~ '^[0-9a-f]{64}$'::text))
 constraint	harness_thread_join	ck_harness_thread_join_time_order	CHECK ((updated_at >= created_at))
 constraint	harness_thread_join	fk_harness_thread_join_child_thread	FOREIGN KEY (child_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_join	fk_harness_thread_join_delivery_command	FOREIGN KEY (parent_thread_id, delivery_command_sequence) REFERENCES harness_thread_command(thread_id, sequence)
+constraint	harness_thread_join	fk_harness_thread_join_final_answer_entry	FOREIGN KEY (final_answer_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	fk_harness_thread_join_parent_thread	FOREIGN KEY (parent_thread_id) REFERENCES harness_thread(id)
-constraint	harness_thread_join	fk_harness_thread_join_result_head	FOREIGN KEY (result_head_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	fk_harness_thread_join_source_command	FOREIGN KEY (child_thread_id, source_command_sequence) REFERENCES harness_thread_command(thread_id, sequence)
-constraint	harness_thread_join	harness_thread_join_after_version_check	CHECK ((after_version >= 0))
+constraint	harness_thread_join	fk_harness_thread_join_terminal_entry	FOREIGN KEY (terminal_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	harness_thread_join_pkey	PRIMARY KEY (invocation_id)
 constraint	harness_thread_join	harness_thread_join_source_command_sequence_check	CHECK ((source_command_sequence > 0))
+constraint	harness_thread_stop_receipt	fk_harness_thread_stop_receipt_thread	FOREIGN KEY (thread_id) REFERENCES harness_thread(id)
+constraint	harness_thread_stop_receipt	fk_harness_thread_stop_receipt_turn_end	FOREIGN KEY (stopped_turn_end_entry_id) REFERENCES harness_entry(id)
+constraint	harness_thread_stop_receipt	harness_thread_stop_receipt_cancelled_command_count_check	CHECK ((cancelled_command_count >= 0))
+constraint	harness_thread_stop_receipt	harness_thread_stop_receipt_cancelled_inputs_check	CHECK ((jsonb_typeof(cancelled_inputs) = 'array'::text))
+constraint	harness_thread_stop_receipt	pk_harness_thread_stop_receipt	PRIMARY KEY (thread_id, stop_request_id)
 constraint	harness_tool_invocation	ck_harness_tool_input_receipt	CHECK (((input_receipt IS NULL) OR (((status)::text = 'SUCCEEDED'::text) AND (result IS NOT NULL) AND (jsonb_typeof(input_receipt) = 'object'::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'submissionId'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'submissionId'::text)), ''::text) <> ''::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'actor'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'actor'::text)), ''::text) <> ''::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'acceptedAt'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'acceptedAt'::text)), ''::text) <> ''::text))))
 constraint	harness_tool_invocation	ck_harness_tool_invocation_effects_status	CHECK ((((status)::text = 'SUCCEEDED'::text) OR (effects = '{"version": 1, "customEntries": []}'::jsonb)))
 constraint	harness_tool_invocation	ck_harness_tool_invocation_status	CHECK (((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying, 'READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'CANCELLED'::character varying, 'UNKNOWN'::character varying])::text[])))
@@ -422,12 +435,14 @@ index	harness_thread	idx_harness_thread_parent	CREATE INDEX idx_harness_thread_p
 index	harness_thread	idx_harness_thread_session	CREATE INDEX idx_harness_thread_session ON public.harness_thread USING btree (session_id, created_at, id)
 index	harness_thread	uk_harness_thread_session	CREATE UNIQUE INDEX uk_harness_thread_session ON public.harness_thread USING btree (session_id, id)
 index	harness_thread_command	harness_thread_command_pkey	CREATE UNIQUE INDEX harness_thread_command_pkey ON public.harness_thread_command USING btree (thread_id, sequence)
-index	harness_thread_command	idx_harness_thread_command_queued	CREATE INDEX idx_harness_thread_command_queued ON public.harness_thread_command USING btree (thread_id, sequence) WHERE ((applied_turn_start_entry_id IS NULL) AND (cancelled_at IS NULL))
+index	harness_thread_command	idx_harness_thread_command_queued	CREATE INDEX idx_harness_thread_command_queued ON public.harness_thread_command USING btree (thread_id, sequence) WHERE ((applied_entry_id IS NULL) AND (cancelled_at IS NULL))
 index	harness_thread_command	idx_harness_thread_command_stop_request	CREATE INDEX idx_harness_thread_command_stop_request ON public.harness_thread_command USING btree (thread_id, stop_request_id, sequence) WHERE (stop_request_id IS NOT NULL)
 index	harness_thread_command	uk_harness_thread_command_idempotency	CREATE UNIQUE INDEX uk_harness_thread_command_idempotency ON public.harness_thread_command USING btree (thread_id, idempotency_key)
 index	harness_thread_join	harness_thread_join_pkey	CREATE UNIQUE INDEX harness_thread_join_pkey ON public.harness_thread_join USING btree (invocation_id)
-index	harness_thread_join	idx_harness_thread_join_child_pending	CREATE INDEX idx_harness_thread_join_child_pending ON public.harness_thread_join USING btree (child_thread_id) WHERE (matched_idle_version IS NULL)
-index	harness_thread_join	idx_harness_thread_join_parent_pending	CREATE INDEX idx_harness_thread_join_parent_pending ON public.harness_thread_join USING btree (parent_thread_id) WHERE (delivery_command_sequence IS NULL)
+index	harness_thread_join	idx_harness_thread_join_child_pending	CREATE INDEX idx_harness_thread_join_child_pending ON public.harness_thread_join USING btree (child_thread_id) WHERE (terminal_entry_id IS NULL)
+index	harness_thread_join	idx_harness_thread_join_parent_pending	CREATE INDEX idx_harness_thread_join_parent_pending ON public.harness_thread_join USING btree (parent_thread_id) WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL))
+index	harness_thread_stop_receipt	idx_harness_thread_stop_receipt_root	CREATE INDEX idx_harness_thread_stop_receipt_root ON public.harness_thread_stop_receipt USING btree (root_stop_request_id)
+index	harness_thread_stop_receipt	pk_harness_thread_stop_receipt	CREATE UNIQUE INDEX pk_harness_thread_stop_receipt ON public.harness_thread_stop_receipt USING btree (thread_id, stop_request_id)
 index	harness_tool_invocation	harness_tool_invocation_pkey	CREATE UNIQUE INDEX harness_tool_invocation_pkey ON public.harness_tool_invocation USING btree (id)
 index	harness_tool_invocation	idx_harness_tool_invocation_model_nonterminal	CREATE INDEX idx_harness_tool_invocation_model_nonterminal ON public.harness_tool_invocation USING btree (model_invocation_id) WHERE ((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying, 'READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying])::text[]))
 index	harness_tool_invocation	idx_harness_tool_invocation_pending	CREATE INDEX idx_harness_tool_invocation_pending ON public.harness_tool_invocation USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying])::text[]))
@@ -463,6 +478,7 @@ table	harness_session		preserved
 table	harness_thread		preserved
 table	harness_thread_command		preserved
 table	harness_thread_join		preserved
+table	harness_thread_stop_receipt		preserved
 table	harness_tool_invocation		preserved
 table	harness_work		preserved
 table	mcp_server		preserved

@@ -14,7 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -47,12 +47,15 @@ import java.util.UUID;
  */
 final class AcceptCommandsControl {
 
-  /** SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT，每类至多一次、全部在消息之前。 */
+  /**
+   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt; SET_CONTRIBUTOR_STATE，每类至多一次、全部在消息之前。
+   */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
           ThreadCommandType.SET_AGENT,
           ThreadCommandType.SET_MODEL,
-          ThreadCommandType.SET_ENVIRONMENT);
+          ThreadCommandType.SET_ENVIRONMENT,
+          ThreadCommandType.SET_CONTRIBUTOR_STATE);
 
   private final HarnessStore store;
   private final Clock clock;
@@ -159,24 +162,13 @@ final class AcceptCommandsControl {
                   creationRequestHash,
                   Names.rootThreadName(),
                   target.yoloEnabled(),
-                  ThreadLifecycleStatus.IDLE,
-                  1,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  1L,
                   0,
                   now,
                   now);
           tx.insertThread(thread);
-
-          for (UUID ancestorId : lockedAncestors.chain) {
-            ThreadState ancestor = lockedAncestors.threads.get(ancestorId);
-            if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
-              Instant mutationNow = effectiveMutationTime(now, ancestor);
-              ThreadState updated =
-                  ancestor.changeLifecycleStatus(
-                      ThreadLifecycleStatus.WAITING_CHILDREN, mutationNow);
-              tx.updateThread(updated);
-              lockedAncestors.threads.put(ancestorId, updated);
-            }
-          }
 
           return attachJoin(
               tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
@@ -255,8 +247,9 @@ final class AcceptCommandsControl {
                   creationRequestHash,
                   Names.defaultThreadName(target.threadId()),
                   target.yoloEnabled(),
-                  ThreadLifecycleStatus.IDLE,
-                  1,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  1L,
                   0,
                   now,
                   now);
@@ -374,20 +367,6 @@ final class AcceptCommandsControl {
               thread.reserveCommandSequences(allInserted.size(), parentMutationNow);
           tx.updateThread(advanced);
 
-          for (UUID ancestorId : locked.chain) {
-            if (ancestorId.equals(thread.id())) {
-              continue;
-            }
-            ThreadState ancestor = locked.threads.get(ancestorId);
-            if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
-              Instant ancestorNow = effectiveMutationTime(now, ancestor);
-              ThreadState updated =
-                  ancestor.changeLifecycleStatus(
-                      ThreadLifecycleStatus.WAITING_CHILDREN, ancestorNow);
-              tx.updateThread(updated);
-            }
-          }
-
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
           return attachJoin(
               tx,
@@ -501,13 +480,11 @@ final class AcceptCommandsControl {
       ThreadState parent =
           tx.findThread(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
-      if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())
-          || ThreadJoinCompletion.isPaused(tx, parent)) {
+      if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())) {
         throw new IllegalArgumentException("join parent no longer accepts this invocation");
       }
-      boolean newActiveChild =
-          creating || tx.findThread(childId).map(t -> t.status().isIdle()).orElse(true);
-      if (newActiveChild && tx.countActiveChildren(parentId) >= join.maxConcurrentChildren()) {
+      // task 配额按未完成 parent Join 计数：本次准入将新增一个未完成 Join。
+      if (tx.countIncompleteChildJoins(parentId) >= join.maxConcurrentChildren()) {
         throw new IllegalArgumentException("parent join quota exceeded");
       }
     }
@@ -515,12 +492,8 @@ final class AcceptCommandsControl {
     if (depth > join.maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    boolean newActiveThread =
-        creating || tx.findThread(childId).map(t -> t.status().isIdle()).orElse(true);
-    // 全局活跃子 Thread 上限（跨所有 root，不含 root 自身）：maxConcurrentThreads 来自冻结的 task 全局设置。
-    if (parentId != null
-        && newActiveThread
-        && tx.countActiveSubagentThreads() >= join.maxConcurrentThreads()) {
+    // 全局未完成执行子 Join 上限（跨所有 root，不含 root ticket）：maxConcurrentThreads 来自冻结的 task 全局设置。
+    if (parentId != null && tx.countIncompleteSubagentJoins() >= join.maxConcurrentThreads()) {
       throw new IllegalArgumentException("subagent concurrency quota exceeded");
     }
   }
@@ -555,7 +528,6 @@ final class AcceptCommandsControl {
             join.parentThreadId(),
             accepted.thread().id(),
             source.sequence(),
-            accepted.thread().version(),
             join.agent(),
             join.maxTurns(),
             0,

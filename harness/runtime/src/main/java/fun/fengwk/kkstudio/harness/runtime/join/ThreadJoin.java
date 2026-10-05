@@ -6,7 +6,12 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 一次源命令接受后的不可变 join 凭据。匹配版本和结果 head 只能同时冻结一次；父交付引用其 command sequence，不能从后续的子 Thread head 重新推导旧结果。
+ * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head
+ * 重新推导旧结果。
+ *
+ * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
+ * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId}
+ * 判定。
  */
 public record ThreadJoin(
     UUID invocationId,
@@ -14,12 +19,11 @@ public record ThreadJoin(
     UUID parentThreadId,
     UUID childThreadId,
     long sourceCommandSequence,
-    long afterVersion,
     String agent,
     Integer maxTurns,
     long reminderTurn,
-    Long matchedIdleVersion,
-    UUID resultHeadEntryId,
+    UUID terminalEntryId,
+    UUID finalAnswerEntryId,
     Long deliveryCommandSequence,
     Instant createdAt,
     Instant updatedAt) {
@@ -37,8 +41,8 @@ public record ThreadJoin(
     if (parentThreadId != null && parentThreadId.equals(childThreadId)) {
       throw new IllegalArgumentException("join parent and child must differ");
     }
-    if (sourceCommandSequence <= 0 || afterVersion < 0 || reminderTurn < 0) {
-      throw new IllegalArgumentException("invalid join command/version/reminder");
+    if (sourceCommandSequence <= 0 || reminderTurn < 0) {
+      throw new IllegalArgumentException("invalid join command/reminder");
     }
     if (agent == null || agent.isBlank() || agent.length() > 256) {
       throw new IllegalArgumentException("agent must be nonblank and at most 256 characters");
@@ -46,13 +50,12 @@ public record ThreadJoin(
     if (maxTurns != null && maxTurns <= 0) {
       throw new IllegalArgumentException("maxTurns must be positive");
     }
-    if ((matchedIdleVersion == null) != (resultHeadEntryId == null)
-        || (matchedIdleVersion != null && matchedIdleVersion <= afterVersion)) {
+    if (finalAnswerEntryId != null && terminalEntryId == null) {
       throw new IllegalArgumentException(
-          "matched receipt must be complete and newer than acceptance");
+          "a final answer entry requires a frozen terminal entry");
     }
     if (deliveryCommandSequence != null
-        && (parentThreadId == null || matchedIdleVersion == null || deliveryCommandSequence <= 0)) {
+        && (parentThreadId == null || terminalEntryId == null || deliveryCommandSequence <= 0)) {
       throw new IllegalArgumentException("delivery requires a matched parent join");
     }
     if (updatedAt.isBefore(createdAt)) {
@@ -61,12 +64,15 @@ public record ThreadJoin(
   }
 
   public boolean matched() {
-    return matchedIdleVersion != null;
+    return terminalEntryId != null;
   }
 
-  public ThreadJoin match(long idleVersion, UUID resultHead, Instant now) {
-    if (matched() || idleVersion <= afterVersion) {
-      throw new IllegalArgumentException("join already matched or idle not after acceptance");
+  /**
+   * 冻结一次结果：{@code terminalEntryId} 必填，{@code finalAnswerEntryId} 可空。已匹配的 join 不可再次冻结。
+   */
+  public ThreadJoin match(UUID terminalEntryId, UUID finalAnswerEntryId, Instant now) {
+    if (matched()) {
+      throw new IllegalArgumentException("join already matched");
     }
     return new ThreadJoin(
         invocationId,
@@ -74,12 +80,11 @@ public record ThreadJoin(
         parentThreadId,
         childThreadId,
         sourceCommandSequence,
-        afterVersion,
         agent,
         maxTurns,
         reminderTurn,
-        idleVersion,
-        Objects.requireNonNull(resultHead, "resultHead"),
+        Objects.requireNonNull(terminalEntryId, "terminalEntryId"),
+        finalAnswerEntryId,
         null,
         createdAt,
         now);
@@ -95,12 +100,11 @@ public record ThreadJoin(
         parentThreadId,
         childThreadId,
         sourceCommandSequence,
-        afterVersion,
         agent,
         maxTurns,
         reminderTurn,
-        matchedIdleVersion,
-        resultHeadEntryId,
+        terminalEntryId,
+        finalAnswerEntryId,
         sequence,
         createdAt,
         now);
@@ -116,13 +120,12 @@ public record ThreadJoin(
         parentThreadId,
         childThreadId,
         sourceCommandSequence,
-        afterVersion,
         agent,
         maxTurns,
         turn,
-        null,
-        null,
-        null,
+        terminalEntryId,
+        finalAnswerEntryId,
+        deliveryCommandSequence,
         createdAt,
         now);
   }
@@ -135,15 +138,14 @@ public record ThreadJoin(
         || !Objects.equals(old.parentThreadId, next.parentThreadId)
         || !old.childThreadId.equals(next.childThreadId)
         || old.sourceCommandSequence != next.sourceCommandSequence
-        || old.afterVersion != next.afterVersion
         || !old.agent.equals(next.agent)
         || !Objects.equals(old.maxTurns, next.maxTurns)
         || !old.createdAt.equals(next.createdAt)
         || next.updatedAt.isBefore(old.updatedAt)
         || next.reminderTurn < old.reminderTurn
         || (old.matched()
-            && (!Objects.equals(old.matchedIdleVersion, next.matchedIdleVersion)
-                || !Objects.equals(old.resultHeadEntryId, next.resultHeadEntryId)))
+            && (!Objects.equals(old.terminalEntryId, next.terminalEntryId)
+                || !Objects.equals(old.finalAnswerEntryId, next.finalAnswerEntryId)))
         || (old.deliveryCommandSequence != null
             && !old.deliveryCommandSequence.equals(next.deliveryCommandSequence))
         || (old.matched() && next.reminderTurn != old.reminderTurn)) {

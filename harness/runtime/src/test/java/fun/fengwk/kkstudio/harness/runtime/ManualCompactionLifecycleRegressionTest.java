@@ -26,7 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -40,8 +40,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 回归测试：验证后代线程手动压缩时： (a) 在同一事务中原子将后代线程生命周期状态由 IDLE 推进为 ACTIVE 并生成 ModelInvocation 与 MODEL work； (b)
- * 递归将处于 IDLE 的全部祖先线程推进为 WAITING_CHILDREN。
+ * 回归测试：验证后代线程手动压缩时： (a) 在同一事务中原子推进后代线程 head 与 version 并生成 ModelInvocation 与 MODEL work； (b)
+ * 不递归修改任何祖先线程的执行控制或 version——新模型下 Thread 只有本地 RUNNABLE / STOPPED，runtime status 由本地上下文投影，
+ * 祖先绝不因后代活动被改写。
  */
 class ManualCompactionLifecycleRegressionTest {
 
@@ -61,11 +62,11 @@ class ManualCompactionLifecycleRegressionTest {
           BigDecimal.ZERO);
 
   /**
-   * 测试意图：两级执行树（Root -> Child），Child 触发手动压缩： (a) Child 状态由 IDLE 翻转为 ACTIVE（version + 1），并同事务生成
-   * ModelInvocation 与 MODEL work； (b) IDLE 的父级 Root 线程被推进为 WAITING_CHILDREN。
+   * 测试意图：两级执行树（Root -> Child），Child 触发手动压缩： (a) Child 就地推进 head 与 version（0 -> 1），并同事务生成
+   * ModelInvocation 与 MODEL work； (b) 父级 Root 的执行控制与 version 均不被修改（新模型没有递归祖先状态传播）。
    */
   @Test
-  void twoLevelDescendantManualCompactionSetsActiveAndPropagatesWaitingChildrenToRoot() {
+  void twoLevelDescendantManualCompactionAdvancesChildWithoutMutatingRoot() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
@@ -74,22 +75,26 @@ class ManualCompactionLifecycleRegressionTest {
 
     TwoLevelBaseline baseline = seedTwoLevelTree(store);
 
-    // 初始验证：祖先 Root 与后代 Child 均处于 IDLE 状态
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(store, baseline.rootThreadId).status());
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(store, baseline.childThreadId).status());
+    // 初始验证：祖先 Root 与后代 Child 均处于 RUNNABLE
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.rootThreadId).executionControl());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.childThreadId).executionControl());
 
     CompactThreadResult result =
         runtime.compactThread(new CompactThreadCommand(baseline.childThreadId, 0));
 
-    // (a) 后代 Child 翻转为 ACTIVE，版本由 0 增加为 1
-    assertEquals(ThreadLifecycleStatus.ACTIVE, result.thread().status());
+    // (a) 后代 Child 就地推进 version 0 -> 1，执行控制保持 RUNNABLE（不再有 IDLE/ACTIVE 生命周期翻转）
+    assertEquals(ThreadExecutionControl.RUNNABLE, result.thread().executionControl());
     assertEquals(1L, result.thread().version());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(store, baseline.childThreadId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.childThreadId).executionControl());
     assertEquals(1L, thread(store, baseline.childThreadId).version());
 
-    // (b) 祖先 Root 翻转为 WAITING_CHILDREN
-    assertEquals(
-        ThreadLifecycleStatus.WAITING_CHILDREN, thread(store, baseline.rootThreadId).status());
+    // (b) 祖先 Root 不被后代活动改写：执行控制仍为 RUNNABLE，version 保持 0
+    ThreadState rootAfterCompaction = thread(store, baseline.rootThreadId);
+    assertEquals(ThreadExecutionControl.RUNNABLE, rootAfterCompaction.executionControl());
+    assertEquals(0L, rootAfterCompaction.version());
 
     // (c) 同一事务中创建了 ModelInvocation 与 MODEL work，不创建 THREAD work
     assertNotNull(result.modelInvocationId());
@@ -98,11 +103,11 @@ class ManualCompactionLifecycleRegressionTest {
   }
 
   /**
-   * 测试意图：三级执行树（Root -> Middle -> Leaf），Leaf 触发手动压缩： (a) Leaf 翻转为 ACTIVE； (b) 沿祖先链上的所有处于 IDLE
-   * 的祖先（Middle 与 Root）均被标记为 WAITING_CHILDREN。
+   * 测试意图：三级执行树（Root -> Middle -> Leaf），Leaf 触发手动压缩： (a) Leaf 就地推进 version 0 -> 1； (b) 祖先链上的 Middle
+   * 与 Root 均不被修改，保持 RUNNABLE 且 version 不变。
    */
   @Test
-  void threeLevelDescendantManualCompactionPropagatesToAllIdleAncestors() {
+  void threeLevelDescendantManualCompactionDoesNotMutateAncestors() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
@@ -111,23 +116,30 @@ class ManualCompactionLifecycleRegressionTest {
 
     ThreeLevelBaseline baseline = seedThreeLevelTree(store);
 
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(store, baseline.rootThreadId).status());
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(store, baseline.middleThreadId).status());
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(store, baseline.leafThreadId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.rootThreadId).executionControl());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.middleThreadId).executionControl());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.leafThreadId).executionControl());
 
     CompactThreadResult result =
         runtime.compactThread(new CompactThreadCommand(baseline.leafThreadId, 0));
 
-    // (a) 叶子线程翻转为 ACTIVE
-    assertEquals(ThreadLifecycleStatus.ACTIVE, result.thread().status());
+    // (a) 叶子线程就地推进 version 0 -> 1，执行控制保持 RUNNABLE
+    assertEquals(ThreadExecutionControl.RUNNABLE, result.thread().executionControl());
     assertEquals(1L, result.thread().version());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(store, baseline.leafThreadId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(store, baseline.leafThreadId).executionControl());
+    assertEquals(1L, thread(store, baseline.leafThreadId).version());
 
-    // (b) 祖先中间节点与根节点均转为 WAITING_CHILDREN
-    assertEquals(
-        ThreadLifecycleStatus.WAITING_CHILDREN, thread(store, baseline.middleThreadId).status());
-    assertEquals(
-        ThreadLifecycleStatus.WAITING_CHILDREN, thread(store, baseline.rootThreadId).status());
+    // (b) 祖先中间节点与根节点均不被后代活动改写：保持 RUNNABLE 且 version 保持 0
+    ThreadState middleAfterCompaction = thread(store, baseline.middleThreadId);
+    assertEquals(ThreadExecutionControl.RUNNABLE, middleAfterCompaction.executionControl());
+    assertEquals(0L, middleAfterCompaction.version());
+    ThreadState rootAfterCompaction = thread(store, baseline.rootThreadId);
+    assertEquals(ThreadExecutionControl.RUNNABLE, rootAfterCompaction.executionControl());
+    assertEquals(0L, rootAfterCompaction.version());
 
     // (c) ModelInvocation 与 MODEL work 存在
     assertNotNull(result.modelInvocationId());
@@ -168,7 +180,8 @@ class ManualCompactionLifecycleRegressionTest {
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "root",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   NOW,
@@ -187,7 +200,8 @@ class ManualCompactionLifecycleRegressionTest {
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "child",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   NOW,
@@ -224,7 +238,8 @@ class ManualCompactionLifecycleRegressionTest {
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "root",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   NOW,
@@ -239,7 +254,8 @@ class ManualCompactionLifecycleRegressionTest {
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "middle",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   NOW,
@@ -256,7 +272,8 @@ class ManualCompactionLifecycleRegressionTest {
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "leaf",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   NOW,

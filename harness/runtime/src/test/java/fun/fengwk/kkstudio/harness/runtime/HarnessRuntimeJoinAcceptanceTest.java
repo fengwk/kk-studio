@@ -31,7 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -77,9 +77,8 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands first =
         runtime.acceptCommandsAndJoin(source, ticket, AcceptancePreflight.IDENTITY);
     ThreadJoin join = runtime.findJoin(ticket.invocationId()).orElseThrow();
-    assertEquals(first.thread().version(), join.afterVersion());
     assertEquals(first.acceptedCommands().getLast().sequence(), join.sourceCommandSequence());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, first.thread().status());
+    assertEquals(ThreadExecutionControl.RUNNABLE, first.thread().executionControl());
     assertFalse(join.matched());
     assertTrue(
         runtime.acceptCommandsAndJoin(source, ticket, AcceptancePreflight.IDENTITY).replayed());
@@ -214,7 +213,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     // 推进父线程 head 至 STOPPED 屏障
     UUID stoppedHead = seedClosedStopTurn(root.session().id(), root.rootEntry().id(), parentId);
 
-    // 停止子线程（使子线程命令取消、闭合并达到 IDLE）：触发 settleStoppedTree
+    // 停止子线程（使子线程命令取消并闭合）：触发停止树收敛
     // 由于父线程处于 STOPPED 边界，子线程的 Join 匹配被成功捕获，但交付被 hold！
     runtime.stop(new StopCommand(childId, TestIds.id(47), child.thread().version()));
 
@@ -335,12 +334,12 @@ class HarnessRuntimeJoinAcceptanceTest {
     store.transaction(
         tx -> {
           ThreadState p = tx.lockThread(parentId).orElseThrow();
-          tx.updateThread(p.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          tx.updateThread(p.changeExecutionControl(ThreadExecutionControl.RUNNABLE, T0));
           return null;
         });
     assertEquals(
-        ThreadLifecycleStatus.IDLE,
-        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+        ThreadExecutionControl.RUNNABLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
 
     // 1. 创建子会话：触发 lockedAncestors 遍历，将 IDLE parent 推进为 WAITING_CHILDREN
     ThreadJoinRequest join1 = request(62, parentId, parent.thread().headEntryId());
@@ -350,19 +349,19 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID childId = child.thread().id();
 
     assertEquals(
-        ThreadLifecycleStatus.WAITING_CHILDREN,
-        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+        ThreadExecutionControl.RUNNABLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
 
     // 再次将 parent 置为 IDLE
     store.transaction(
         tx -> {
           ThreadState p = tx.lockThread(parentId).orElseThrow();
-          tx.updateThread(p.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          tx.updateThread(p.changeExecutionControl(ThreadExecutionControl.RUNNABLE, T0));
           return null;
         });
     assertEquals(
-        ThreadLifecycleStatus.IDLE,
-        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+        ThreadExecutionControl.RUNNABLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
 
     // 2. 在 child 上接纳新命令：触发 locked.chain 遍历，将 IDLE parent 推进为 WAITING_CHILDREN
     ThreadState childCurrent = store.transaction(tx -> tx.findThread(childId).orElseThrow());
@@ -375,8 +374,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         AcceptancePreflight.IDENTITY);
 
     assertEquals(
-        ThreadLifecycleStatus.WAITING_CHILDREN,
-        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+        ThreadExecutionControl.RUNNABLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
   }
 
   @Test
@@ -397,7 +396,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID child1Id = child1.thread().id();
 
     // 此时 child1 是 ACTIVE 状态，parent 已有 1 个活跃孩子（已达配额 1）
-    int activeCount = store.transaction(tx -> tx.countActiveChildren(parentId));
+    int activeCount = store.transaction(tx -> tx.countIncompleteChildJoins(parentId));
     assertEquals(1, activeCount);
 
     // 向已处于 ACTIVE 的 child1 线程发送新命令并附带 Join（非创建路径且已有活跃线程）：
@@ -420,7 +419,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     store.transaction(
         tx -> {
           ThreadState c = tx.lockThread(child1Id).orElseThrow();
-          tx.updateThread(c.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          tx.updateThread(c.changeExecutionControl(ThreadExecutionControl.RUNNABLE, T0));
           return null;
         });
 
@@ -531,7 +530,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     store.transaction(
         tx -> {
           ThreadState child = tx.lockThread(childA1.thread().id()).orElseThrow();
-          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T5));
+          tx.updateThread(child.changeExecutionControl(ThreadExecutionControl.RUNNABLE, T5));
           return null;
         });
     assertEquals(1, activeSubagentThreads());
@@ -543,7 +542,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   /** 全局活跃执行子 Thread 数（跨 root、不含 root 自身）。 */
   private int activeSubagentThreads() {
-    return store.transaction(tx -> tx.countActiveSubagentThreads());
+    return store.transaction(tx -> tx.countIncompleteSubagentJoins());
   }
 
   @Test

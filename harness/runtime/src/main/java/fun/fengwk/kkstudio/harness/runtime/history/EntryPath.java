@@ -74,6 +74,19 @@ public record EntryPath(List<Entry> entries) {
     return entries.get(entries.size() - 1);
   }
 
+  /**
+   * 返回跳过尾部 {@link NotificationPayload} 后的最近 Entry：系统通知可追加在回合之间，判定续写义务等回合锚点必须看到其之前的 TURN_END。
+   */
+  public Entry headIgnoringTrailingNotifications() {
+    for (int i = entries.size() - 1; i >= 0; i--) {
+      Entry entry = entries.get(i);
+      if (!(entry.payload() instanceof NotificationPayload)) {
+        return entry;
+      }
+    }
+    return root();
+  }
+
   /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */
   public BranchSettings baseSettings() {
     BranchSettings settings = ((RootPayload) root().payload()).settings();

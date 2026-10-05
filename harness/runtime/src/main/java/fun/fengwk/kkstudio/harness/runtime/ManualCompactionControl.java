@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -230,11 +229,8 @@ final class ManualCompactionControl {
               plan.sourceHeadEntryId(),
               resolvedPayload,
               mutationNow));
-      ThreadState advanced =
-          ThreadLifecycleCoordinator.advanceHeadWithStatus(
-              thread, plan.turnStartEntryId(), ThreadLifecycleStatus.ACTIVE, mutationNow);
+      ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), mutationNow);
       tx.updateThread(advanced);
-      ThreadLifecycleCoordinator.markAncestorsWaitingChildren(tx, thread.id(), mutationNow);
       UUID invocationId = tx.nextId();
       tx.insertModelInvocation(
           new ModelInvocation(
@@ -315,10 +311,10 @@ final class ManualCompactionControl {
     return locked;
   }
 
-  /** queued 快照中是否存在 user-like 输入（USER_MESSAGE 或 USER CUSTOM_MESSAGE）；SET_* 不构成用户需求。 */
+  /** queued 快照中是否存在消息或系统通知（两者都能触发下一轮 INPUT）；SET_* 不构成用户需求。 */
   private static boolean hasUserDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
-      if (command.type().isMessage()) {
+      if (command.type().isMessage() || command.type().isNotification()) {
         return true;
       }
     }

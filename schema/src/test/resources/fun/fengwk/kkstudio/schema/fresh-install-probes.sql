@@ -100,13 +100,13 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
         '{"message":{"role":"ASSISTANT"}}', now()),
     (pg_temp.uid(206), pg_temp.uid(100), pg_temp.uid(205), 'TURN_END', '{}', now());
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
-    yolo_enabled, status, next_command_sequence, version, created_at, updated_at) values
-    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', true, 'ACTIVE', 1, 0, now(), now()),
-    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', true, 'IDLE', 1, 0, now(), now()),
-    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', true, 'ACTIVE', 1, 0, now(), now()),
-    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', true, 'IDLE', 1, 0, now(), now()),
-    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', true, 'IDLE', 1, 0, now(), now()),
-    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', true, 'ACTIVE', 1, 0, now(), now());
+    yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
+    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', true, 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', true, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', true, 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', true, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', true, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', true, 'RUNNABLE', 0, 1, 0, now(), now());
 
 insert into project_issue_agent_thread (issue_id, agent_name, thread_id) values
     (pg_temp.uid(10), 'designer', pg_temp.uid(300)),
@@ -757,22 +757,22 @@ select pg_temp.rejects('a Chat Session blocks deleting its Chat',
 -- edge, atomic source-prompt receipt and delivery shape.
 -- ---------------------------------------------------------------------------
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
-    yolo_enabled, status, next_command_sequence, version, created_at, updated_at) values
+    yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
     (pg_temp.uid(310), pg_temp.uid(102), pg_temp.uid(202), repeat('1', 64), 'join-child', true,
-        'ACTIVE', 2, 0, now(), now()),
+        'RUNNABLE', 0, 2, 0, now(), now()),
     (pg_temp.uid(311), pg_temp.uid(102), pg_temp.uid(202), repeat('2', 64), 'join-parent', true,
-        'WAITING_CHILDREN', 2, 0, now(), now());
+        'STOPPED', 0, 2, 0, now(), now());
 insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key,
     request_hash, created_at) values
     (pg_temp.uid(310), 1, 'USER_MESSAGE', '{"text":"go"}', pg_temp.uid(1310), repeat('3', 64), now()),
     (pg_temp.uid(311), 1, 'CUSTOM_MESSAGE', '{"text":"done"}', pg_temp.uid(1311), repeat('4', 64), now());
 insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id,
-    source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version,
-    result_head_entry_id, delivery_command_sequence, created_at, updated_at) values
-    (pg_temp.uid(1500), repeat('5', 64), null, pg_temp.uid(310), 1, 0, 'designer', 10, 0, null,
+    source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,
+    final_answer_entry_id, delivery_command_sequence, created_at, updated_at) values
+    (pg_temp.uid(1500), repeat('5', 64), null, pg_temp.uid(310), 1, 'designer', 10, 0, null,
         null, null, now(), now()),
-    (pg_temp.uid(1501), repeat('6', 64), pg_temp.uid(311), pg_temp.uid(310), 1, 0, 'designer', 10,
-        1, 1, pg_temp.uid(202), 1, now(), now());
+    (pg_temp.uid(1501), repeat('6', 64), pg_temp.uid(311), pg_temp.uid(310), 1, 'designer', 10,
+        1, pg_temp.uid(202), pg_temp.uid(202), 1, now(), now());
 select pg_temp.assert_true('a pending join and a matched delivered join both persist',
     (select count(*) = 2 from harness_thread_join
         where invocation_id in (pg_temp.uid(1500), pg_temp.uid(1501))));
@@ -783,14 +783,14 @@ select pg_temp.assert_true('join child and parent lookup indexes exist',
     and exists(select 1 from pg_indexes where schemaname = 'public'
         and tablename = 'harness_thread_join'
         and indexname = 'idx_harness_thread_join_parent_pending'));
-select pg_temp.assert_true('recursive Thread status is required and has no default',
+select pg_temp.assert_true('execution_control is required and has no default',
     (select is_nullable = 'NO' and column_default is null from information_schema.columns
-        where table_name = 'harness_thread' and column_name = 'status'));
-select pg_temp.rejects('Thread status cannot be null',
-    $$update harness_thread set status = null where id = pg_temp.uid(310)$$, '23502');
-select pg_temp.rejects('unknown recursive lifecycle status is rejected',
-    $$update harness_thread set status = 'RUNNING' where id = pg_temp.uid(310)$$, '23514',
-    'ck_harness_thread_status');
+        where table_name = 'harness_thread' and column_name = 'execution_control'));
+select pg_temp.rejects('Thread execution_control cannot be null',
+    $$update harness_thread set execution_control = null where id = pg_temp.uid(310)$$, '23502');
+select pg_temp.rejects('unknown execution control is rejected',
+    $$update harness_thread set execution_control = 'RUNNING' where id = pg_temp.uid(310)$$, '23514',
+    'ck_harness_thread_execution_control');
 select pg_temp.rejects('a Thread cannot be its own execution parent',
     $$update harness_thread set parent_thread_id = id where id = pg_temp.uid(310)$$, '23514',
     'ck_harness_thread_parent_not_self');
@@ -801,57 +801,53 @@ select pg_temp.rejects('the execution parent must be a real Thread',
 -- so no single constraint is claimed here.
 select pg_temp.rejects('an unknown child Thread cannot be joined',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,created_at,updated_at)
-      values(pg_temp.uid(1502),repeat('7',64),null,pg_temp.uid(399),1,0,'designer',10,0,now(),now())$$,
+        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1502),repeat('7',64),null,pg_temp.uid(399),1,'designer',10,0,now(),now())$$,
     '23503');
 select pg_temp.rejects('a join must reference a real source command',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,created_at,updated_at)
-      values(pg_temp.uid(1503),repeat('7',64),null,pg_temp.uid(310),99,0,'designer',10,0,now(),now())$$,
+        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1503),repeat('7',64),null,pg_temp.uid(310),99,'designer',10,0,now(),now())$$,
     '23503', 'fk_harness_thread_join_source_command');
-select pg_temp.rejects('a matched receipt needs both idle version and result head',
+select pg_temp.rejects('a final answer entry requires a terminal entry',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,result_head_entry_id,
+        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,final_answer_entry_id,
         created_at,updated_at)
-      values(pg_temp.uid(1504),repeat('7',64),null,pg_temp.uid(310),1,0,'designer',10,0,
+      values(pg_temp.uid(1504),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,null,
         pg_temp.uid(202),now(),now())$$,
-    '23514', 'ck_harness_thread_join_receipt_pair');
-select pg_temp.rejects('matched idle version must advance past the source version',
-    $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,matched_idle_version,
-        result_head_entry_id,created_at,updated_at)
-      values(pg_temp.uid(1505),repeat('7',64),null,pg_temp.uid(310),1,0,'designer',10,0,0,
-        pg_temp.uid(202),now(),now())$$,
-    '23514', 'ck_harness_thread_join_matched_order');
+    '23514', 'ck_harness_thread_join_final_answer');
+select pg_temp.rejects('input through sequence must be less than next command sequence',
+    $$update harness_thread set input_through_sequence = 2 where id = pg_temp.uid(310)$$,
+    '23514', 'ck_harness_thread_input_through');
 select pg_temp.rejects('delivery requires a matched join with a parent Thread',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,delivery_command_sequence,
+        source_command_sequence,agent,max_turns,reminder_turn,delivery_command_sequence,
         created_at,updated_at)
-      values(pg_temp.uid(1506),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,0,'designer',10,0,1,
+      values(pg_temp.uid(1506),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,1,
         now(),now())$$,
     '23514', 'ck_harness_thread_join_delivery');
 select pg_temp.rejects('the delivery command must exist on the parent Thread',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,matched_idle_version,
-        result_head_entry_id,delivery_command_sequence,created_at,updated_at)
-      values(pg_temp.uid(1507),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,0,'designer',10,0,1,
+        source_command_sequence,agent,max_turns,reminder_turn,terminal_entry_id,
+        delivery_command_sequence,created_at,updated_at)
+      values(pg_temp.uid(1507),repeat('7',64),pg_temp.uid(311),pg_temp.uid(310),1,'designer',10,0,
         pg_temp.uid(202),99,now(),now())$$,
     '23503', 'fk_harness_thread_join_delivery_command');
 select pg_temp.rejects('a join cannot name its own child as parent',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,created_at,updated_at)
-      values(pg_temp.uid(1508),repeat('7',64),pg_temp.uid(310),pg_temp.uid(310),1,0,'designer',10,0,
+        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1508),repeat('7',64),pg_temp.uid(310),pg_temp.uid(310),1,'designer',10,0,
         now(),now())$$,
     '23514', 'ck_harness_thread_join_parent_not_child');
 select pg_temp.rejects('the soft budget must be positive when given',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,created_at,updated_at)
-      values(pg_temp.uid(1509),repeat('7',64),null,pg_temp.uid(310),1,0,'designer',0,0,now(),now())$$,
+        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1509),repeat('7',64),null,pg_temp.uid(310),1,'designer',0,0,now(),now())$$,
     '23514', 'ck_harness_thread_join_max_turns');
 select pg_temp.rejects('one durable identifier owns each join row',
     $$insert into harness_thread_join(invocation_id,request_hash,parent_thread_id,child_thread_id,
-        source_command_sequence,after_version,agent,max_turns,reminder_turn,created_at,updated_at)
-      values(pg_temp.uid(1500),repeat('7',64),null,pg_temp.uid(310),1,0,'designer',10,0,now(),now())$$,
+        source_command_sequence,agent,max_turns,reminder_turn,created_at,updated_at)
+      values(pg_temp.uid(1500),repeat('7',64),null,pg_temp.uid(310),1,'designer',10,0,now(),now())$$,
     '23505', 'harness_thread_join_pkey');
 
 -- ---------------------------------------------------------------------------

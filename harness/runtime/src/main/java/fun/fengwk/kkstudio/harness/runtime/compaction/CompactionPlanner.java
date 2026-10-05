@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
@@ -495,21 +496,24 @@ public final class CompactionPlanner {
       return role == AgentMessageRole.USER || role == AgentMessageRole.ASSISTANT;
     }
     return entry.payload() instanceof CustomMessagePayload
+        || entry.payload() instanceof NotificationPayload
         || entry.payload() instanceof AssistantAbortedPayload;
   }
 
-  /** USER 上下文消息或 CUSTOM_MESSAGE（开启一个 turn 的 user-like 消息）。 */
+  /** USER 上下文消息或 CUSTOM_MESSAGE / NOTIFICATION（开启一个 turn 的 user-like 消息）。 */
   private static boolean isUserLike(Entry entry) {
     if (entry.payload() instanceof MessagePayload message) {
       return message.message().role() == AgentMessageRole.USER;
     }
-    return entry.payload() instanceof CustomMessagePayload;
+    return entry.payload() instanceof CustomMessagePayload
+        || entry.payload() instanceof NotificationPayload;
   }
 
-  /** 对话消息（USER/ASSISTANT/TOOL 的 MESSAGE、CUSTOM_MESSAGE、AssistantAborted）——摘要范围在此停止。 */
+  /** 对话消息（USER/ASSISTANT/TOOL 的 MESSAGE、CUSTOM_MESSAGE、NOTIFICATION、AssistantAborted）——摘要范围在此停止。 */
   private static boolean isConversationMessage(Entry entry) {
     return entry.payload() instanceof MessagePayload
         || entry.payload() instanceof CustomMessagePayload
+        || entry.payload() instanceof NotificationPayload
         || entry.payload() instanceof AssistantAbortedPayload;
   }
 
@@ -539,6 +543,8 @@ public final class CompactionPlanner {
         messages.add(message.message());
       } else if (entry.payload() instanceof CustomMessagePayload message) {
         messages.add(message.message());
+      } else if (entry.payload() instanceof NotificationPayload notification) {
+        messages.add(notification.message());
       } else if (entry.payload() instanceof AssistantAbortedPayload message) {
         messages.add(message.message());
       }
@@ -561,6 +567,9 @@ public final class CompactionPlanner {
     }
     if (entry.payload() instanceof CustomMessagePayload message) {
       return contentTokens(message.message().contents());
+    }
+    if (entry.payload() instanceof NotificationPayload notification) {
+      return contentTokens(notification.message().contents());
     }
     if (entry.payload() instanceof AssistantAbortedPayload message) {
       return contentTokens(message.message().contents());

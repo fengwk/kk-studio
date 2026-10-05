@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -51,12 +51,12 @@ class ThreadSnapshotTest {
   }
 
   @Test
-  void waitingChildrenLifecycleMapsToWaitingChildrenStatus() {
-    // 测试意图：递归生命周期 WAITING_CHILDREN 优先于任何本地上下文，统一投影为 WAITING_CHILDREN。
+  void stoppedExecutionControlMapsToStoppedStatus() {
+    // 测试意图：执行控制 STOPPED 优先于任何本地上下文，统一投影为 STOPPED。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    markActive(baseline.threadId(), ThreadLifecycleStatus.WAITING_CHILDREN);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
     assertEquals(
-        ThreadRuntimeStatus.WAITING_CHILDREN,
+        ThreadRuntimeStatus.STOPPED,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
@@ -77,7 +77,6 @@ class ThreadSnapshotTest {
             ModelInvocationStatus.DISPATCHING,
             ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
-      markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
       ThreadRuntimeStatus expected =
           switch (status) {
             case READY -> ThreadRuntimeStatus.MODEL_READY;
@@ -93,7 +92,6 @@ class ThreadSnapshotTest {
   void activeLifecycleWithTerminalModelMapsToApplying() {
     // 测试意图：终态但结果尚未物化的 Model 是正常可达状态（而不是非法形状），投影为 APPLYING。
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
-    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.APPLYING,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
@@ -108,7 +106,6 @@ class ThreadSnapshotTest {
     beginDispatchTool(store, waitingApproval.toolIds().get(2));
     markRunningTool(store, waitingApproval.toolIds().get(2));
     setWaitingApproval(store, waitingApproval.toolIds().get(3));
-    markActive(waitingApproval.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
         runtime.getThreadSnapshot(waitingApproval.threadId()).runtimeStatus());
@@ -117,20 +114,17 @@ class ThreadSnapshotTest {
     beginDispatchTool(store, running.toolIds().get(1));
     beginDispatchTool(store, running.toolIds().get(2));
     markRunningTool(store, running.toolIds().get(2));
-    markActive(running.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.TOOL_RUNNING,
         runtime.getThreadSnapshot(running.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.MultiToolBaseline dispatching = seedToolBaseline(store, 2);
     beginDispatchTool(store, dispatching.toolIds().get(1));
-    markActive(dispatching.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.TOOL_DISPATCHING,
         runtime.getThreadSnapshot(dispatching.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
-    markActive(ready.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.TOOL_READY,
         runtime.getThreadSnapshot(ready.threadId()).runtimeStatus());
@@ -141,7 +135,6 @@ class ThreadSnapshotTest {
     // 测试意图：全部 sibling 都已终态但 outcome 尚未物化是正常可达状态（而非非法形状），投影为 APPLYING。
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     cancelTool(store, baseline);
-    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.APPLYING,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
@@ -152,20 +145,18 @@ class ThreadSnapshotTest {
     // 测试意图：ACTIVE 生命周期下，head 为 continueModel=true 且归属本 Thread 的 TURN_END 时投影为
     // CONTINUATION_DUE。
     HarnessRuntimeTestSupport.ContinuationBaseline baseline = seedContinuationChain(store, true);
-    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
     assertEquals(
         ThreadRuntimeStatus.CONTINUATION_DUE,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithoutLocalContextMapsToQueuedStatus() {
-    // 测试意图：ACTIVE 生命周期但本地没有 Model/Tool/continuation 时，本地分类为空闲，生命周期映射为 QUEUED
-    // （等待启动新 turn），与是否已有排队命令无关。
+  void runnableWithoutLocalContextOrQueuedCommandsMapsToIdleStatus() {
+    // 测试意图：执行控制 RUNNABLE 但本地没有 Model/Tool/continuation，且没有排队命令时投影为 IDLE。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    markActive(baseline.threadId(), ThreadLifecycleStatus.ACTIVE);
+    markActive(baseline.threadId(), ThreadExecutionControl.RUNNABLE);
     assertEquals(
-        ThreadRuntimeStatus.QUEUED, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+        ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
@@ -191,7 +182,6 @@ class ThreadSnapshotTest {
     HarnessRuntimeTestSupport.ModelBaseline owner = seedModel(store, ModelInvocationStatus.RUNNING);
     ThreadSnapshot ownerSnapshot = runtime.getThreadSnapshot(owner.threadId());
     UUID otherThreadId = seedThreadAt(store, ownerSnapshot.thread().headEntryId());
-    markActive(otherThreadId, ThreadLifecycleStatus.ACTIVE);
     ThreadSnapshot otherSnapshot = runtime.getThreadSnapshot(otherThreadId);
     ThreadSnapshot forged =
         new ThreadSnapshot(
@@ -200,16 +190,17 @@ class ThreadSnapshotTest {
             List.of(),
             ownerSnapshot.model(),
             List.of(),
+            List.of(),
             List.of());
     assertThrows(IllegalStateException.class, forged::runtimeStatus);
   }
 
-  /** 直接设置 Thread 的递归生命周期状态（种子 fixture 一律产出 IDLE）。 */
-  private void markActive(UUID threadId, ThreadLifecycleStatus status) {
+  /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */
+  private void markActive(UUID threadId, ThreadExecutionControl status) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.changeLifecycleStatus(status, T5));
+          tx.updateThread(thread.changeExecutionControl(status, T5));
           return null;
         });
   }

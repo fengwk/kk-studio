@@ -32,7 +32,6 @@ class ThreadJoinTest {
         parentThreadId,
         childThreadId,
         1L,
-        0L,
         "test-agent",
         10,
         0L,
@@ -56,12 +55,11 @@ class ThreadJoinTest {
     assertEquals(parentId, join.parentThreadId());
     assertEquals(childId, join.childThreadId());
     assertEquals(1L, join.sourceCommandSequence());
-    assertEquals(0L, join.afterVersion());
     assertEquals("test-agent", join.agent());
     assertEquals(10, join.maxTurns());
     assertEquals(0L, join.reminderTurn());
-    assertNull(join.matchedIdleVersion());
-    assertNull(join.resultHeadEntryId());
+    assertNull(join.terminalEntryId());
+    assertNull(join.finalAnswerEntryId());
     assertNull(join.deliveryCommandSequence());
     assertEquals(T0, join.createdAt());
     assertEquals(T0, join.updatedAt());
@@ -80,7 +78,6 @@ class ThreadJoinTest {
             null,
             childId,
             1L,
-            0L,
             "root-agent",
             null,
             0L,
@@ -105,6 +102,7 @@ class ThreadJoinTest {
     UUID parentId = id(21);
     UUID childId = id(22);
     UUID resultHead = id(23);
+    UUID finalAnswer = id(24);
 
     ThreadJoin delivered =
         new ThreadJoin(
@@ -113,19 +111,18 @@ class ThreadJoinTest {
             parentId,
             childId,
             1L,
-            0L,
             "test-agent",
             10,
             2L,
-            3L,
             resultHead,
+            finalAnswer,
             5L,
             T0,
             T2);
 
     assertTrue(delivered.matched());
-    assertEquals(3L, delivered.matchedIdleVersion());
-    assertEquals(resultHead, delivered.resultHeadEntryId());
+    assertEquals(resultHead, delivered.terminalEntryId());
+    assertEquals(finalAnswer, delivered.finalAnswerEntryId());
     assertEquals(5L, delivered.deliveryCommandSequence());
     assertEquals(2L, delivered.reminderTurn());
   }
@@ -135,7 +132,7 @@ class ThreadJoinTest {
     // 测试意图：验证 agent 字段在长度 1 与最大限制 256 字符时的边界行为。
     ThreadJoin join1 =
         new ThreadJoin(
-            id(1), VALID_HASH, id(2), id(3), 1L, 0L, "a", null, 0L, null, null, null, T0, T0);
+            id(1), VALID_HASH, id(2), id(3), 1L, "a", null, 0L, null, null, null, T0, T0);
     assertEquals("a", join1.agent());
 
     String maxLenAgent = "x".repeat(256);
@@ -146,7 +143,6 @@ class ThreadJoinTest {
             id(2),
             id(3),
             1L,
-            0L,
             maxLenAgent,
             null,
             0L,
@@ -169,7 +165,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 null,
                 0L,
@@ -187,7 +182,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 null,
                 0L,
@@ -205,13 +199,13 @@ class ThreadJoinTest {
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                null, VALID_HASH, id(2), id(3), 1L, 0L, "agent", 10, 0L, null, null, null, T0, T0));
+                null, VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), null, 1L, 0L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1), VALID_HASH, id(2), null, 1L, "agent", 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         NullPointerException.class,
@@ -222,7 +216,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 0L,
@@ -241,7 +234,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 0L,
@@ -259,7 +251,7 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), null, id(2), id(3), 1L, 0L, "agent", 10, 0L, null, null, null, T0, T0));
+                id(1), null, id(2), id(3), 1L, "agent", 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -270,7 +262,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 0L,
@@ -289,7 +280,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 0L,
@@ -308,7 +298,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 0L,
@@ -333,7 +322,6 @@ class ThreadJoinTest {
                     sameThreadId,
                     sameThreadId,
                     1L,
-                    0L,
                     "agent",
                     10,
                     0L,
@@ -347,7 +335,7 @@ class ThreadJoinTest {
 
   @Test
   void rejectsInvalidSequencesAndVersions() {
-    // 测试意图：验证 sourceCommandSequence <= 0、afterVersion < 0 与 reminderTurn < 0 的非法取值被拒绝。
+    // 测试意图：验证 sourceCommandSequence <= 0 与 reminderTurn < 0 的非法取值被拒绝。
     // sourceCommandSequence = 0
     assertThrows(
         IllegalArgumentException.class,
@@ -357,7 +345,6 @@ class ThreadJoinTest {
                 VALID_HASH,
                 id(2),
                 id(3),
-                0L,
                 0L,
                 "agent",
                 10,
@@ -378,27 +365,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 -1L,
-                0L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                T0,
-                T0));
-
-    // afterVersion = -1
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                -1L,
                 "agent",
                 10,
                 0L,
@@ -418,7 +384,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 10,
                 -1L,
@@ -436,19 +401,19 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, null, 10, 0L, null, null, null, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, null, 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "", 10, 0L, null, null, null, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "", 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "   ", 10, 0L, null, null, null, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "   ", 10, 0L, null, null, null, T0, T0));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -459,7 +424,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "a".repeat(257),
                 10,
                 0L,
@@ -477,7 +441,7 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "agent", 0, 0L, null, null, null, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 0, 0L, null, null, null, T0, T0));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -488,7 +452,6 @@ class ThreadJoinTest {
                 id(2),
                 id(3),
                 1L,
-                0L,
                 "agent",
                 -5,
                 0L,
@@ -501,47 +464,13 @@ class ThreadJoinTest {
 
   @Test
   void rejectsInconsistentMatchedReceipt() {
-    // 测试意图：验证 matchedIdleVersion 与 resultHeadEntryId 必须同时存在且 matchedIdleVersion > afterVersion。
-    // 有 matchedIdleVersion 但没有 resultHeadEntryId
+    // 测试意图：验证 finalAnswerEntryId 需要 terminalEntryId（最终回答入口不能脱离冻结的终止 Entry）。
+    // finalAnswerEntryId 非空但 terminalEntryId 为空
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "agent", 10, 0L, 1L, null, null, T0, T0));
-
-    // 无 matchedIdleVersion 但有 resultHeadEntryId
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                0L,
-                "agent",
-                10,
-                0L,
-                null,
-                id(4),
-                null,
-                T0,
-                T0));
-
-    // matchedIdleVersion 等于 afterVersion
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 2L, "agent", 10, 0L, 2L, id(4), null, T0, T0));
-
-    // matchedIdleVersion 小于 afterVersion
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 5L, "agent", 10, 0L, 3L, id(4), null, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, id(4), null, T0, T0));
   }
 
   @Test
@@ -552,28 +481,28 @@ class ThreadJoinTest {
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, null, id(3), 1L, 0L, "agent", null, 0L, 1L, id(4), 1L, T0, T0));
+                id(1), VALID_HASH, null, id(3), 1L, "agent", null, 0L, id(4), null, 1L, T0, T0));
 
-    // deliveryCommandSequence 非空但尚未匹配（matchedIdleVersion 为空）
+    // deliveryCommandSequence 非空但尚未匹配（terminalEntryId 为空）
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "agent", 10, 0L, null, null, 1L, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, null, null, 1L, T0, T0));
 
     // deliveryCommandSequence 为 0
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "agent", 10, 0L, 1L, id(4), 0L, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, id(4), null, 0L, T0, T0));
 
     // deliveryCommandSequence 为 -1
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ThreadJoin(
-                id(1), VALID_HASH, id(2), id(3), 1L, 0L, "agent", 10, 0L, 1L, id(4), -1L, T0, T0));
+                id(1), VALID_HASH, id(2), id(3), 1L, "agent", 10, 0L, id(4), null, -1L, T0, T0));
   }
 
   @Test
@@ -589,7 +518,6 @@ class ThreadJoinTest {
                     id(2),
                     id(3),
                     1L,
-                    0L,
                     "agent",
                     10,
                     0L,
@@ -603,15 +531,15 @@ class ThreadJoinTest {
 
   @Test
   void matchMethodLifecycle() {
-    // 测试意图：验证 match 方法正常流转，以及对重复 match、idle 版本小于等于 afterVersion 与 null resultHead 的校验拦截。
+    // 测试意图：验证 match 方法正常冻结 terminal/final answer，以及重复 match 与 null terminal 的校验拦截。
     ThreadJoin join = initialJoin(id(1), id(2), id(3));
 
     UUID resultHead = id(50);
-    ThreadJoin matched = join.match(2L, resultHead, T1);
+    ThreadJoin matched = join.match(resultHead, null, T1);
 
     assertTrue(matched.matched());
-    assertEquals(2L, matched.matchedIdleVersion());
-    assertEquals(resultHead, matched.resultHeadEntryId());
+    assertEquals(resultHead, matched.terminalEntryId());
+    assertNull(matched.finalAnswerEntryId());
     assertNull(matched.deliveryCommandSequence());
     assertEquals(T1, matched.updatedAt());
     assertEquals(join.invocationId(), matched.invocationId());
@@ -619,21 +547,16 @@ class ThreadJoinTest {
     assertEquals(join.parentThreadId(), matched.parentThreadId());
     assertEquals(join.childThreadId(), matched.childThreadId());
     assertEquals(join.sourceCommandSequence(), matched.sourceCommandSequence());
-    assertEquals(join.afterVersion(), matched.afterVersion());
     assertEquals(join.agent(), matched.agent());
     assertEquals(join.maxTurns(), matched.maxTurns());
     assertEquals(join.reminderTurn(), matched.reminderTurn());
     assertEquals(join.createdAt(), matched.createdAt());
 
     // 重复 match 抛出异常
-    assertThrows(IllegalArgumentException.class, () -> matched.match(3L, resultHead, T2));
+    assertThrows(IllegalArgumentException.class, () -> matched.match(id(51), null, T2));
 
-    // idleVersion <= afterVersion（例如 afterVersion 为 0，传入 0 或 -1）
-    assertThrows(IllegalArgumentException.class, () -> join.match(0L, resultHead, T1));
-    assertThrows(IllegalArgumentException.class, () -> join.match(-1L, resultHead, T1));
-
-    // resultHead 为 null
-    assertThrows(NullPointerException.class, () -> join.match(2L, null, T1));
+    // terminalEntryId 为 null
+    assertThrows(NullPointerException.class, () -> join.match(null, null, T1));
   }
 
   @Test
@@ -642,7 +565,7 @@ class ThreadJoinTest {
     // delivered 时抛出异常。
     ThreadJoin initial = initialJoin(id(1), id(2), id(3));
     UUID resultHead = id(50);
-    ThreadJoin matched = initial.match(2L, resultHead, T1);
+    ThreadJoin matched = initial.match(resultHead, null, T1);
 
     // 未 match 时直接 delivered 抛出异常
     assertThrows(IllegalArgumentException.class, () -> initial.delivered(10L, T1));
@@ -651,8 +574,8 @@ class ThreadJoinTest {
     ThreadJoin delivered = matched.delivered(10L, T2);
     assertEquals(10L, delivered.deliveryCommandSequence());
     assertEquals(T2, delivered.updatedAt());
-    assertEquals(matched.matchedIdleVersion(), delivered.matchedIdleVersion());
-    assertEquals(matched.resultHeadEntryId(), delivered.resultHeadEntryId());
+    assertEquals(matched.terminalEntryId(), delivered.terminalEntryId());
+    assertEquals(matched.finalAnswerEntryId(), delivered.finalAnswerEntryId());
 
     // 已 delivered 后再次调用 delivered 抛出异常
     assertThrows(IllegalArgumentException.class, () -> delivered.delivered(11L, T3));
@@ -667,8 +590,8 @@ class ThreadJoinTest {
     assertEquals(1L, reminded1.reminderTurn());
     assertEquals(T1, reminded1.updatedAt());
     assertFalse(reminded1.matched());
-    assertNull(reminded1.matchedIdleVersion());
-    assertNull(reminded1.resultHeadEntryId());
+    assertNull(reminded1.finalAnswerEntryId());
+    assertNull(reminded1.terminalEntryId());
     assertNull(reminded1.deliveryCommandSequence());
 
     ThreadJoin reminded2 = reminded1.remind(3L, T2);
@@ -681,7 +604,7 @@ class ThreadJoinTest {
     assertThrows(IllegalArgumentException.class, () -> reminded2.remind(2L, T3));
 
     // 已 matched 时拒绝 remind
-    ThreadJoin matched = reminded2.match(5L, id(99), T3);
+    ThreadJoin matched = reminded2.match(id(99), null, T3);
     assertThrows(IllegalArgumentException.class, () -> matched.remind(4L, T3));
   }
 
@@ -695,7 +618,7 @@ class ThreadJoinTest {
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, reminded));
 
     // remind -> match
-    ThreadJoin matched = reminded.match(2L, id(50), T2);
+    ThreadJoin matched = reminded.match(id(50), null, T2);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(reminded, matched));
 
     // match -> delivered
@@ -717,12 +640,11 @@ class ThreadJoinTest {
             delivered.parentThreadId(),
             delivered.childThreadId(),
             delivered.sourceCommandSequence(),
-            delivered.afterVersion(),
             delivered.agent(),
             delivered.maxTurns(),
             delivered.reminderTurn(),
-            delivered.matchedIdleVersion(),
-            delivered.resultHeadEntryId(),
+            delivered.terminalEntryId(),
+            delivered.finalAnswerEntryId(),
             delivered.deliveryCommandSequence(),
             delivered.createdAt(),
             T3.plusSeconds(1));
@@ -736,12 +658,11 @@ class ThreadJoinTest {
             initial.parentThreadId(),
             initial.childThreadId(),
             initial.sourceCommandSequence(),
-            initial.afterVersion(),
             initial.agent(),
             initial.maxTurns(),
             initial.reminderTurn(),
-            initial.matchedIdleVersion(),
-            initial.resultHeadEntryId(),
+            initial.terminalEntryId(),
+            initial.finalAnswerEntryId(),
             initial.deliveryCommandSequence(),
             initial.createdAt(),
             T2);
@@ -755,7 +676,6 @@ class ThreadJoinTest {
             null,
             id(101),
             1L,
-            0L,
             "root-agent",
             null,
             0L,
@@ -766,7 +686,7 @@ class ThreadJoinTest {
             T0);
     ThreadJoin rootReminded = rootInitial.remind(1L, T1);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(rootInitial, rootReminded));
-    ThreadJoin rootMatched = rootReminded.match(2L, id(102), T2);
+    ThreadJoin rootMatched = rootReminded.match(id(102), null, T2);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(rootReminded, rootMatched));
   }
 
@@ -781,7 +701,7 @@ class ThreadJoinTest {
   @Test
   void validateTransitionRejectsIdentityMutation() {
     // 测试意图：验证 validateTransition 严格拒绝不可变 identity
-    // 与创建时配置（invocationId、requestHash、parent/child、commandSequence、afterVersion、agent、maxTurns、createdAt）的任何变更。
+    // 与创建时配置（invocationId、requestHash、parent/child、commandSequence、agent、maxTurns、createdAt）的任何变更。
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
 
     // invocationId 篡改
@@ -792,7 +712,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -812,7 +731,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -832,7 +750,6 @@ class ThreadJoinTest {
             null,
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -848,7 +765,7 @@ class ThreadJoinTest {
     // parentThreadId 篡改（null -> 非空）
     ThreadJoin rootOld =
         new ThreadJoin(
-            id(10), VALID_HASH, null, id(11), 1L, 0L, "agent", null, 0L, null, null, null, T0, T0);
+            id(10), VALID_HASH, null, id(11), 1L, "agent", null, 0L, null, null, null, T0, T0);
     ThreadJoin mutateParentFromNull =
         new ThreadJoin(
             rootOld.invocationId(),
@@ -856,7 +773,6 @@ class ThreadJoinTest {
             id(99),
             rootOld.childThreadId(),
             rootOld.sourceCommandSequence(),
-            rootOld.afterVersion(),
             rootOld.agent(),
             rootOld.maxTurns(),
             rootOld.reminderTurn(),
@@ -877,7 +793,6 @@ class ThreadJoinTest {
             id(999),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -897,7 +812,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             id(999),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -917,7 +831,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             2L,
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -929,27 +842,6 @@ class ThreadJoinTest {
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateSeq));
 
-    // afterVersion 篡改
-    ThreadJoin mutateAfterVersion =
-        new ThreadJoin(
-            old.invocationId(),
-            old.requestHash(),
-            old.parentThreadId(),
-            old.childThreadId(),
-            old.sourceCommandSequence(),
-            1L,
-            old.agent(),
-            old.maxTurns(),
-            old.reminderTurn(),
-            null,
-            null,
-            null,
-            old.createdAt(),
-            T1);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(old, mutateAfterVersion));
-
     // agent 篡改
     ThreadJoin mutateAgent =
         new ThreadJoin(
@@ -958,7 +850,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             "other-agent",
             old.maxTurns(),
             old.reminderTurn(),
@@ -978,7 +869,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             null,
             old.reminderTurn(),
@@ -999,7 +889,6 @@ class ThreadJoinTest {
             rootOld.parentThreadId(),
             rootOld.childThreadId(),
             rootOld.sourceCommandSequence(),
-            rootOld.afterVersion(),
             rootOld.agent(),
             5,
             rootOld.reminderTurn(),
@@ -1020,7 +909,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             20,
             old.reminderTurn(),
@@ -1041,7 +929,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -1065,7 +952,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -1083,7 +969,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             old.reminderTurn(),
@@ -1105,7 +990,6 @@ class ThreadJoinTest {
             old.parentThreadId(),
             old.childThreadId(),
             old.sourceCommandSequence(),
-            old.afterVersion(),
             old.agent(),
             old.maxTurns(),
             4L,
@@ -1121,34 +1005,33 @@ class ThreadJoinTest {
 
   @Test
   void validateTransitionRejectsFrozenReceiptMutation() {
-    // 测试意图：验证已匹配（matched）后的 matchedIdleVersion 与 resultHeadEntryId 冻结不可变、matched 状态下不能再推进
+    // 测试意图：验证已匹配（matched）后的 terminalEntryId 与 finalAnswerEntryId 冻结不可变、matched 状态下不能再推进
     // reminderTurn、以及已投递的 deliveryCommandSequence 不可被篡改。
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
     UUID resultHead = id(50);
-    ThreadJoin matched = old.match(2L, resultHead, T1);
+    ThreadJoin matched = old.match(resultHead, null, T1);
 
-    // 篡改 matchedIdleVersion
-    ThreadJoin mutateIdleVersion =
+    // 篡改 finalAnswerEntryId（冻结后不得改变）
+    ThreadJoin mutateFinalAnswer =
         new ThreadJoin(
             matched.invocationId(),
             matched.requestHash(),
             matched.parentThreadId(),
             matched.childThreadId(),
             matched.sourceCommandSequence(),
-            matched.afterVersion(),
             matched.agent(),
             matched.maxTurns(),
             matched.reminderTurn(),
-            3L,
-            matched.resultHeadEntryId(),
+            matched.terminalEntryId(),
+            id(60),
             null,
             matched.createdAt(),
             T2);
     assertThrows(
         IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(matched, mutateIdleVersion));
+        () -> ThreadJoin.validateTransition(matched, mutateFinalAnswer));
 
-    // 篡改 resultHeadEntryId
+    // 篡改 terminalEntryId
     ThreadJoin mutateHead =
         new ThreadJoin(
             matched.invocationId(),
@@ -1156,12 +1039,11 @@ class ThreadJoinTest {
             matched.parentThreadId(),
             matched.childThreadId(),
             matched.sourceCommandSequence(),
-            matched.afterVersion(),
             matched.agent(),
             matched.maxTurns(),
             matched.reminderTurn(),
-            matched.matchedIdleVersion(),
             id(51),
+            null,
             null,
             matched.createdAt(),
             T2);
@@ -1176,12 +1058,11 @@ class ThreadJoinTest {
             matched.parentThreadId(),
             matched.childThreadId(),
             matched.sourceCommandSequence(),
-            matched.afterVersion(),
             matched.agent(),
             matched.maxTurns(),
             1L,
-            matched.matchedIdleVersion(),
-            matched.resultHeadEntryId(),
+            matched.terminalEntryId(),
+            null,
             null,
             matched.createdAt(),
             T2);
@@ -1198,12 +1079,11 @@ class ThreadJoinTest {
             delivered.parentThreadId(),
             delivered.childThreadId(),
             delivered.sourceCommandSequence(),
-            delivered.afterVersion(),
             delivered.agent(),
             delivered.maxTurns(),
             delivered.reminderTurn(),
-            delivered.matchedIdleVersion(),
-            delivered.resultHeadEntryId(),
+            delivered.terminalEntryId(),
+            delivered.finalAnswerEntryId(),
             11L,
             delivered.createdAt(),
             T3);
@@ -1219,12 +1099,11 @@ class ThreadJoinTest {
             delivered.parentThreadId(),
             delivered.childThreadId(),
             delivered.sourceCommandSequence(),
-            delivered.afterVersion(),
             delivered.agent(),
             delivered.maxTurns(),
             delivered.reminderTurn(),
-            delivered.matchedIdleVersion(),
-            delivered.resultHeadEntryId(),
+            delivered.terminalEntryId(),
+            delivered.finalAnswerEntryId(),
             null,
             delivered.createdAt(),
             T3);

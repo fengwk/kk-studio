@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -140,7 +140,7 @@ abstract class HarnessStoreDeletionContract {
             parentId,
             childBaseline.sessionId(),
             childBaseline.rootEntryId(),
-            ThreadLifecycleStatus.IDLE);
+            ThreadExecutionControl.RUNNABLE);
     seedCommand(childId, 1L, id(1L));
     UUID joinId = id(700L);
     seedMatchedUndeliveredJoin(joinId, parentId, childId);
@@ -195,7 +195,7 @@ abstract class HarnessStoreDeletionContract {
             parentId,
             childBaseline.sessionId(),
             childBaseline.rootEntryId(),
-            ThreadLifecycleStatus.IDLE);
+            ThreadExecutionControl.RUNNABLE);
     seedCommand(parentId, 1L, id(2L));
     seedCommand(childId, 1L, id(3L));
     UUID joinId = id(701L);
@@ -231,7 +231,7 @@ abstract class HarnessStoreDeletionContract {
 
   /** 在已有 Session 中创建一个永久子 Thread（父 Thread 可以位于另一个 Session）。 */
   private UUID createChildThread(
-      UUID parentThreadId, UUID sessionId, UUID headEntryId, ThreadLifecycleStatus status) {
+      UUID parentThreadId, UUID sessionId, UUID headEntryId, ThreadExecutionControl executionControl) {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
@@ -244,7 +244,8 @@ abstract class HarnessStoreDeletionContract {
                   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                   "child-branch",
                   false,
-                  status,
+                  executionControl,
+                  0L,
                   1L,
                   0L,
                   T0,
