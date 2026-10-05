@@ -164,6 +164,19 @@ export function AgentPane({
           </button>
         </div>
       ) : null}
+      {pane.draftRestoreError ? (
+        <div className="thread-acceptance-retry" data-testid="draft-restore-retry">
+          <span className="thread-acceptance-retry-text">{pane.draftRestoreError}</span>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={pane.pending}
+            onClick={pane.retryDraftRestore}
+          >
+            {t('ai.runtime.action.retryDraftRestore')}
+          </button>
+        </div>
+      ) : null}
       {pane.pendingMessage && pane.pendingMessage.unknownOutcome ? (
         <div className="thread-acceptance-retry" data-testid="bound-pending-controls">
           <button
