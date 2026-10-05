@@ -11,6 +11,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -23,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /**
  * 真实 PostgreSQL / Testcontainers 环境下 Stop 回执集合存储契约测试。
@@ -32,9 +41,11 @@ import java.util.UUID;
  * <ul>
  *   <li><b>根对身份与隔离</b>：回执集合以 {@code (rootThreadId, rootStopRequestId)} 标识；不同执行树复用同一请求 UUID 时各自读取
  *       只返回本树集合，派生身份不互相串回执；
- *   <li><b>往返保真</b>：{@code cancelledInputs}（USER_MESSAGE / GOAL）经 jsonb 往返后 sequence、idempotencyKey 与 payload 精确保持；
+ *   <li><b>往返保真</b>：{@code cancelledInputs}（USER_MESSAGE / GOAL）经 jsonb 往返后 sequence、idempotencyKey
+ *       与 payload 精确保持；
  *   <li><b>集合校验</b>：插入必须包含根 Thread 自身回执，且每条回执 Thread 必须位于根树内，否则拒绝；
- *   <li><b>身份不可重用与 FK</b>：{@code (threadId, stopRequestId)} 重复插入与不存在的 {@code stoppedTurnEndEntryId} 均被拒绝；
+ *   <li><b>身份不可重用与 FK</b>：{@code (threadId, stopRequestId)} 重复插入与不存在的 {@code stoppedTurnEndEntryId}
+ *       均被拒绝；
  *   <li><b>深删清理</b>：删除 Thread 时同批清理其回执，避免孤儿行。
  * </ul>
  */
@@ -54,7 +65,11 @@ class PostgresqlStopReceiptTest {
 
   /** 三层执行树：root -> child -> grandChild，共享同一 Session 与 head Entry。 */
   private record Tree(
-      UUID sessionId, UUID rootEntryId, UUID rootThreadId, UUID childThreadId, UUID grandChildThreadId) {}
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID rootThreadId,
+      UUID childThreadId,
+      UUID grandChildThreadId) {}
 
   private Tree seedTree(String label) {
     return store.transaction(
@@ -70,12 +85,7 @@ class PostgresqlStopReceiptTest {
           tx.insertThread(
               thread(childThreadId, sessionId, rootThreadId, rootEntryId, label + "-child"));
           tx.insertThread(
-              thread(
-                  grandChildThreadId,
-                  sessionId,
-                  childThreadId,
-                  rootEntryId,
-                  label + "-grand"));
+              thread(grandChildThreadId, sessionId, childThreadId, rootEntryId, label + "-grand"));
           return new Tree(sessionId, rootEntryId, rootThreadId, childThreadId, grandChildThreadId);
         });
   }
@@ -98,14 +108,20 @@ class PostgresqlStopReceiptTest {
         StoreTestSupport.T0);
   }
 
-  /** 锁定整棵树并插入给定回执集合。 */
+  /** 锁定真实执行树根、停止目标与集合内全部 Thread（升序），随后插入给定回执集合。 */
   private void insertReceipts(
       UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
-    List<UUID> threadIds = receipts.stream().map(StoppedThreadReceipt::threadId).toList();
+    List<UUID> threadIds =
+        Stream.concat(
+                Stream.of(rootThreadId), receipts.stream().map(StoppedThreadReceipt::threadId))
+            .distinct()
+            .sorted(UuidOrder.COMPARATOR)
+            .toList();
     StoreTestSupport.inTransaction(
         store,
         tx -> {
-          tx.lockTree(rootThreadId);
+          List<UUID> chain = tx.findAncestorChain(rootThreadId);
+          tx.lockTree(chain.isEmpty() ? rootThreadId : chain.get(chain.size() - 1));
           for (UUID threadId : threadIds) {
             tx.lockThread(threadId).orElseThrow();
           }
@@ -142,9 +158,7 @@ class PostgresqlStopReceiptTest {
         new StoppedThreadReceipt(tree.grandChildThreadId(), grandStopRequestId, null, 0, List.of());
 
     insertReceipts(
-        tree.rootThreadId(),
-        rootStopRequestId,
-        List.of(grandReceipt, rootReceipt, childReceipt));
+        tree.rootThreadId(), rootStopRequestId, List.of(grandReceipt, rootReceipt, childReceipt));
 
     // 单条回执读取精确往返（含 cancelledInputs 的 payload 类型与内容）。
     StoppedThreadReceipt loadedChild =
@@ -164,12 +178,13 @@ class PostgresqlStopReceiptTest {
         store.transaction(tx -> tx.loadStopReceiptsByThread(tree.childThreadId())));
 
     // 按根对读取整集合，按 Thread UUID 升序。
-    List<StoppedThreadReceipt> expected = new ArrayList<>(List.of(rootReceipt, childReceipt, grandReceipt));
-    expected.sort(
-        Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR));
+    List<StoppedThreadReceipt> expected =
+        new ArrayList<>(List.of(rootReceipt, childReceipt, grandReceipt));
+    expected.sort(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR));
     assertEquals(
         expected,
-        store.transaction(tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), rootStopRequestId)));
+        store.transaction(
+            tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), rootStopRequestId)));
   }
 
   @Test
@@ -183,14 +198,18 @@ class PostgresqlStopReceiptTest {
     StoppedThreadReceipt firstRoot =
         new StoppedThreadReceipt(first.rootThreadId(), sharedRootStopRequestId, null, 0, List.of());
     StoppedThreadReceipt firstChild =
-        new StoppedThreadReceipt(first.childThreadId(), sharedChildStopRequestId, null, 0, List.of());
+        new StoppedThreadReceipt(
+            first.childThreadId(), sharedChildStopRequestId, null, 0, List.of());
     StoppedThreadReceipt secondRoot =
-        new StoppedThreadReceipt(second.rootThreadId(), sharedRootStopRequestId, null, 0, List.of());
+        new StoppedThreadReceipt(
+            second.rootThreadId(), sharedRootStopRequestId, null, 0, List.of());
     StoppedThreadReceipt secondChild =
-        new StoppedThreadReceipt(second.childThreadId(), sharedChildStopRequestId, null, 0, List.of());
+        new StoppedThreadReceipt(
+            second.childThreadId(), sharedChildStopRequestId, null, 0, List.of());
 
     insertReceipts(first.rootThreadId(), sharedRootStopRequestId, List.of(firstRoot, firstChild));
-    insertReceipts(second.rootThreadId(), sharedRootStopRequestId, List.of(secondRoot, secondChild));
+    insertReceipts(
+        second.rootThreadId(), sharedRootStopRequestId, List.of(secondRoot, secondChild));
 
     List<StoppedThreadReceipt> firstSet =
         store.transaction(
@@ -200,10 +219,18 @@ class PostgresqlStopReceiptTest {
             tx -> tx.loadStopReceiptsByRootRequest(second.rootThreadId(), sharedRootStopRequestId));
     assertEquals(2, firstSet.size());
     assertEquals(2, secondSet.size());
-    assertTrue(firstSet.stream().allMatch(r -> r.threadId().equals(first.rootThreadId())
-        || r.threadId().equals(first.childThreadId())));
-    assertTrue(secondSet.stream().allMatch(r -> r.threadId().equals(second.rootThreadId())
-        || r.threadId().equals(second.childThreadId())));
+    assertTrue(
+        firstSet.stream()
+            .allMatch(
+                r ->
+                    r.threadId().equals(first.rootThreadId())
+                        || r.threadId().equals(first.childThreadId())));
+    assertTrue(
+        secondSet.stream()
+            .allMatch(
+                r ->
+                    r.threadId().equals(second.rootThreadId())
+                        || r.threadId().equals(second.childThreadId())));
 
     assertEquals(
         firstChild,
@@ -244,9 +271,7 @@ class PostgresqlStopReceiptTest {
     IllegalArgumentException missingRoot =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                insertReceipts(
-                    tree.rootThreadId(), rootStopRequestId, List.of(childReceipt)));
+            () -> insertReceipts(tree.rootThreadId(), rootStopRequestId, List.of(childReceipt)));
     assertTrue(missingRoot.getMessage().contains("root thread receipt"));
 
     // 混入其它树的回执。
@@ -255,10 +280,8 @@ class PostgresqlStopReceiptTest {
             IllegalArgumentException.class,
             () ->
                 insertReceipts(
-                    tree.rootThreadId(),
-                    rootStopRequestId,
-                    List.of(rootReceipt, foreignReceipt)));
-    assertTrue(foreign.getMessage().contains("not in the execution tree"));
+                    tree.rootThreadId(), rootStopRequestId, List.of(rootReceipt, foreignReceipt)));
+    assertTrue(foreign.getMessage().contains("not in the stop subtree"));
 
     // 空集合拒绝。
     assertThrows(
@@ -344,9 +367,7 @@ class PostgresqlStopReceiptTest {
     StoppedThreadReceipt grandReceipt =
         new StoppedThreadReceipt(tree.grandChildThreadId(), UUID.randomUUID(), null, 0, List.of());
     insertReceipts(
-        tree.rootThreadId(),
-        rootStopRequestId,
-        List.of(rootReceipt, childReceipt, grandReceipt));
+        tree.rootThreadId(), rootStopRequestId, List.of(rootReceipt, childReceipt, grandReceipt));
 
     // 深删 child 子树：child 与 grandChild 回执被清理，root 回执保留。
     StoreTestSupport.inTransaction(
@@ -376,5 +397,239 @@ class PostgresqlStopReceiptTest {
             Integer.class,
             rootStopRequestId);
     assertEquals(0, remaining);
+  }
+
+  @Test
+  void stopReceiptsSupportMiddleNodeTargetWithinItsSubtreeOnly() {
+    // 测试意图：Stop 目标是中间节点时，集合只包含目标子树（自身 + 后代），祖先与兄弟都不受影响也不得混入。
+    Tree tree = seedTree("middle");
+    UUID siblingThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  thread(
+                      id,
+                      tree.sessionId(),
+                      tree.rootThreadId(),
+                      tree.rootEntryId(),
+                      "middle-sibling"));
+              return id;
+            });
+    UUID subtreeStopRequestId = UUID.randomUUID();
+    UUID grandStopRequestId = UUID.randomUUID();
+    StoppedThreadReceipt childReceipt =
+        new StoppedThreadReceipt(tree.childThreadId(), subtreeStopRequestId, null, 0, List.of());
+    StoppedThreadReceipt grandReceipt =
+        new StoppedThreadReceipt(tree.grandChildThreadId(), grandStopRequestId, null, 0, List.of());
+
+    // 目标为中间节点 child：自身与后代各一条回执。
+    insertReceipts(tree.childThreadId(), subtreeStopRequestId, List.of(childReceipt, grandReceipt));
+    assertEquals(
+        2,
+        store
+            .transaction(
+                tx -> tx.loadStopReceiptsByRootRequest(tree.childThreadId(), subtreeStopRequestId))
+            .size());
+    assertTrue(
+        store
+            .transaction(
+                tx -> tx.loadStopReceiptsByRootRequest(tree.childThreadId(), subtreeStopRequestId))
+            .stream()
+            .noneMatch(receipt -> receipt.threadId().equals(tree.rootThreadId())));
+    // 祖先 root 与兄弟都不产生该根对的回执。
+    assertEquals(
+        List.of(),
+        store.transaction(
+            tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), subtreeStopRequestId)));
+    assertEquals(List.of(), store.transaction(tx -> tx.loadStopReceiptsByThread(siblingThreadId)));
+
+    // 集合混入祖先回执：祖先不是 rootThreadId 的后代，拒绝。
+    UUID ancestorMixRootRequestId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertReceipts(
+                tree.childThreadId(),
+                ancestorMixRootRequestId,
+                List.of(
+                    new StoppedThreadReceipt(
+                        tree.childThreadId(), ancestorMixRootRequestId, null, 0, List.of()),
+                    new StoppedThreadReceipt(
+                        tree.rootThreadId(), UUID.randomUUID(), null, 0, List.of()))));
+
+    // 集合混入兄弟回执：兄弟不在目标子树内，拒绝。
+    StoppedThreadReceipt siblingReceipt =
+        new StoppedThreadReceipt(siblingThreadId, UUID.randomUUID(), null, 0, List.of());
+    UUID rejectedRootRequestId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertReceipts(
+                tree.childThreadId(),
+                rejectedRootRequestId,
+                List.of(
+                    new StoppedThreadReceipt(
+                        tree.childThreadId(), rejectedRootRequestId, null, 0, List.of()),
+                    siblingReceipt)));
+  }
+
+  @Test
+  void stopReceiptRootMustCarryTheRootStopRequestId() {
+    // 测试意图：root Thread 自身的回执必须携带 rootStopRequestId，防止根对身份与根回执身份不一致。
+    Tree tree = seedTree("root-identity");
+    UUID rootStopRequestId = UUID.randomUUID();
+    UUID mismatchedStopRequestId = UUID.randomUUID();
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                insertReceipts(
+                    tree.rootThreadId(),
+                    rootStopRequestId,
+                    List.of(
+                        new StoppedThreadReceipt(
+                            tree.rootThreadId(), mismatchedStopRequestId, null, 0, List.of()))));
+    assertTrue(error.getMessage().contains("root stop request id"));
+  }
+
+  @Test
+  void stopReceiptTurnEndMustBeOwnedStoppedTurnEndOfTheSameThread() {
+    // 测试意图：stoppedTurnEndEntryId 必须是该 Thread 自己 Turn 的 STOPPED TurnEnd，而非任意存在 Entry。
+    Tree tree = seedTree("turn-end");
+    UUID rootStopRequestId = UUID.randomUUID();
+    UUID ownedStoppedEnd =
+        insertTurnEnd(tree.sessionId(), tree.rootEntryId(), tree.childThreadId(), true);
+    UUID ownedCompletedEnd =
+        insertTurnEnd(tree.sessionId(), tree.rootEntryId(), tree.childThreadId(), false);
+    UUID foreignOwnedStoppedEnd =
+        insertTurnEnd(tree.sessionId(), tree.rootEntryId(), tree.rootThreadId(), true);
+
+    // 正向：合法的自有 STOPPED TurnEnd 被接受。
+    insertReceipts(
+        tree.rootThreadId(),
+        rootStopRequestId,
+        List.of(
+            new StoppedThreadReceipt(tree.rootThreadId(), rootStopRequestId, null, 0, List.of()),
+            new StoppedThreadReceipt(
+                tree.childThreadId(), UUID.randomUUID(), ownedStoppedEnd, 0, List.of())));
+
+    // 非 STOPPED TurnEnd 被拒绝。
+    UUID completedRootRequestId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertReceipts(
+                tree.rootThreadId(),
+                completedRootRequestId,
+                List.of(
+                    new StoppedThreadReceipt(
+                        tree.rootThreadId(), completedRootRequestId, null, 0, List.of()),
+                    new StoppedThreadReceipt(
+                        tree.childThreadId(),
+                        UUID.randomUUID(),
+                        ownedCompletedEnd,
+                        0,
+                        List.of()))));
+
+    // 属于其它 Thread 的 STOPPED TurnEnd 被拒绝。
+    UUID foreignRootRequestId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertReceipts(
+                tree.rootThreadId(),
+                foreignRootRequestId,
+                List.of(
+                    new StoppedThreadReceipt(
+                        tree.rootThreadId(), foreignRootRequestId, null, 0, List.of()),
+                    new StoppedThreadReceipt(
+                        tree.childThreadId(),
+                        UUID.randomUUID(),
+                        foreignOwnedStoppedEnd,
+                        0,
+                        List.of()))));
+
+    // 非 TurnEnd 的任意 Entry 被拒绝。
+    UUID nonTurnEndRootRequestId = UUID.randomUUID();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertReceipts(
+                tree.rootThreadId(),
+                nonTurnEndRootRequestId,
+                List.of(
+                    new StoppedThreadReceipt(
+                        tree.rootThreadId(), nonTurnEndRootRequestId, null, 0, List.of()),
+                    new StoppedThreadReceipt(
+                        tree.childThreadId(),
+                        UUID.randomUUID(),
+                        tree.rootEntryId(),
+                        0,
+                        List.of()))));
+  }
+
+  /** 在 {@code parentEntryId} 下插入一个结构合法的自有 Turn 并返回其 TurnEnd id；{@code stopped} 决定 outcome。 */
+  private UUID insertTurnEnd(
+      UUID sessionId, UUID parentEntryId, UUID ownerThreadId, boolean stopped) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  sessionId,
+                  parentEntryId,
+                  new TurnStartPayload(
+                      stopped ? TurnStartReason.STOP : TurnStartReason.INPUT,
+                      StoreTestSupport.branchSettings(),
+                      ownerThreadId),
+                  StoreTestSupport.T1));
+          UUID parentId = turnStartId;
+          if (stopped) {
+            UUID barrierId = tx.nextId();
+            tx.insertEntry(
+                new Entry(
+                    barrierId,
+                    sessionId,
+                    parentId,
+                    new AssistantErrorPayload(
+                        new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user."),
+                        null),
+                    StoreTestSupport.T1));
+            parentId = barrierId;
+          } else {
+            UUID userId = tx.nextId();
+            tx.insertEntry(
+                new Entry(
+                    userId,
+                    sessionId,
+                    parentId,
+                    StoreTestSupport.userMessagePayload(),
+                    StoreTestSupport.T1));
+            UUID assistantId = tx.nextId();
+            tx.insertEntry(
+                StoreTestSupport.assistantEntry(
+                    assistantId, sessionId, userId, StoreTestSupport.T1));
+            parentId = assistantId;
+          }
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  parentId,
+                  stopped
+                      ? new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          UUID.randomUUID())
+                      : new TurnEndPayload(
+                          turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  StoreTestSupport.T1));
+          return turnEndId;
+        });
   }
 }
