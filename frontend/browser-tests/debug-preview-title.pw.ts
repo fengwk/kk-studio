@@ -333,7 +333,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
       notificationId: 'a0000000-0000-0000-0000-00000000a001',
       kind: 'SUBAGENT_RESULT',
       sourceThreadId: 'f0000000-0000-0000-0000-00000000f002',
-      message: { role: 'USER', contents: [{ type: 'TEXT', text: '子 Thread 已完成数据迁移' }] },
+      message: { role: 'USER', contents: [{ type: 'text', text: '子 Thread 已完成数据迁移' }] },
     }),
     createTime: '2026-10-01T00:00:05Z',
   }
@@ -345,7 +345,9 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   await expect(card).toBeVisible()
   await expect(card).toHaveClass(/kind-notification/)
   await expect(card).toContainText('子 Thread 结果')
-  await expect(card).toContainText('子 Thread 已完成数据迁移')
+  // 通知正文来自 message 的文本内容，而不是「没有附带文本」兜底或原始 JSON 转储。
+  await expect(card.locator('.thread-entry-text')).toHaveText('子 Thread 已完成数据迁移')
+  await expect(card).not.toContainText('没有附带文本内容')
   // 系统通知不是对话块，也不进入可编辑草稿
   await expect(card.locator('.thread-block-user')).toHaveCount(0)
   await expect(card.locator('.thread-block-assistant')).toHaveCount(0)

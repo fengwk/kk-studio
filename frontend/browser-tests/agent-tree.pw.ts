@@ -177,7 +177,7 @@ test('an idle root can still stop its running subtree in one owner-free request'
                     idempotencyKey: 'cmd-root-1',
                     type: 'USER_MESSAGE',
                     payloadJson: JSON.stringify({
-                      message: { role: 'USER', contents: [{ type: 'TEXT', text: cancelledText }] },
+                      message: { role: 'USER', contents: [{ type: 'text', text: cancelledText }] },
                     }),
                   },
                 ],
@@ -193,7 +193,7 @@ test('an idle root can still stop its running subtree in one owner-free request'
                     idempotencyKey: 'cmd-child-1',
                     type: 'USER_MESSAGE',
                     payloadJson: JSON.stringify({
-                      message: { role: 'USER', contents: [{ type: 'TEXT', text: '子 Thread 自己的草稿' }] },
+                      message: { role: 'USER', contents: [{ type: 'text', text: '子 Thread 自己的草稿' }] },
                     }),
                   },
                 ],
@@ -256,7 +256,8 @@ test('an idle root can still stop its running subtree in one owner-free request'
   await expect.poll(() => stopped).toBe(true)
 
   // 4. 根自己的未消费输入被回退到可见草稿；子 Thread 的输入只写它自己的记录。
-  await expect(editor).toContainText(cancelledText)
+  await expect(editor).toHaveText(cancelledText)
+  await expect(composer).not.toContainText('"contents"')
   expect(commandBatches).toEqual([])
   await page.screenshot({ path: resolve(reportsDir, 'idle-root-stop-subtree.png') })
 })
