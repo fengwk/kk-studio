@@ -7,28 +7,30 @@ import {
 } from './http.mjs'
 
 /**
- * Harness Runtime 单轨契约 helper（owner-aware command-batches + Session/Thread 查询）。
+ * Harness Runtime 单轨契约 helper（创建型 owner-aware batch + owner-free Thread 续写 + Session/Thread 查询）。
  *
  * 端点事实源（web 模块）：
- * - POST /api/harness/command-batches          唯一产品用户命令写入口（202 accepted）
+ * - POST /api/harness/command-batches                 创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
+ * - POST /api/harness/threads/{id}/command-batches    既有 Thread 续写：owner-free，body 只带 cursor 与 commands
+ * - POST /api/harness/threads/{id}/provider-request-preview  同一 owner-free body，200 返回发送前请求体
  * - GET  /api/ai/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
  * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
  * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
- * - GET  /api/harness/threads/{id}             一致快照（单事务）
+ * - GET  /api/harness/threads/{id}             一致快照（单事务，含 stopReceipts）
  * - PUT  /api/harness/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
- * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay）
+ * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
  * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
  * - PUT  /api/harness/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
  * - WS   /api/events/v1                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/harness/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
- * 产品 HTTP 写面只接受三种 sealed target：
+ * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
  * - NEW_THREAD{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
- * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
+ * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：helper 内部路由为 owner-free body
  * commands 必须是固定顺序 SET_AGENT,SET_MODEL,SET_ENVIRONMENT 前缀 +
- * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
+ * 恰一条末尾 USER_MESSAGE / GOAL；CUSTOM_MESSAGE、NOTIFICATION、SET_CONTRIBUTOR_STATE 在产品 HTTP 面被拒绝。
  */
 
 function positiveDecimal(value, field) {
@@ -67,7 +69,7 @@ export function threadParentIdOf(thread) {
   return parentThreadId
 }
 
-/** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段与父关系并返回 threadId。 */
+/** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段、执行控制与父关系并返回 threadId。 */
 export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
   canonicalUuid(thread.sessionId, 'sessionId')
@@ -83,8 +85,35 @@ export function threadIdOf(thread) {
     `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
   )
   nonNegativeDecimal(thread.version, 'version')
+  // 执行控制只有 RUNNABLE / STOPPED；status 只描述本 Thread 自身，本地投影不再有 WAITING_CHILDREN。
+  assert(
+    thread.executionControl === 'RUNNABLE' || thread.executionControl === 'STOPPED',
+    `executionControl must be RUNNABLE|STOPPED: ${JSON.stringify(thread)}`,
+  )
+  assert(
+    THREAD_RUNTIME_STATUSES.has(thread.status),
+    `unknown ThreadRuntimeStatus: ${JSON.stringify(thread.status)}`,
+  )
+  assert(typeof thread.processing === 'boolean', `processing must be boolean: ${JSON.stringify(thread)}`)
   return threadId
 }
+
+/** Thread 自身本地运行时状态投影全集（无 WAITING_CHILDREN；STOPPED 表示持久执行控制已停止）。 */
+const THREAD_RUNTIME_STATUSES = new Set([
+  'IDLE',
+  'QUEUED',
+  'STOPPED',
+  'CONTINUATION_DUE',
+  'MODEL_READY',
+  'MODEL_DISPATCHING',
+  'MODEL_RUNNING',
+  'APPLYING',
+  'TOOL_WAITING_APPROVAL',
+  'TOOL_WAITING_INPUT',
+  'TOOL_RUNNING',
+  'TOOL_DISPATCHING',
+  'TOOL_READY',
+])
 
 /** 创建 Chat（name-based Agent 引用；环境由 Agent 拥有，Chat 不携带任何 workspace/environment 状态）。 */
 export async function createChat(
@@ -161,7 +190,12 @@ export function newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled
   return { type: 'NEW_THREAD', sessionId, startEntryId, threadId, yoloEnabled }
 }
 
-/** THREAD target：在既有 Thread 上继续，携带精确 cursor 期望。 */
+/**
+ * THREAD target：既有 Thread 续写的 helper 路由描述符（内部转为 owner-free body）。
+ *
+ * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/harness/threads/{threadId}/command-batches}，body 只含
+ * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}，不带 owner/target/type。cursor 由服务端做精确 CAS。
+ */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
   canonicalUuid(threadId, 'target.threadId')
   canonicalUuid(expectedHeadEntryId, 'target.expectedHeadEntryId')
@@ -209,6 +243,43 @@ function assertAcceptedCommands(accepted) {
  *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
  */
 export async function acceptCommandBatch(ctx, { owner, target, commands }) {
+  assert(target?.type, `target required: ${JSON.stringify(target)}`)
+  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
+  for (const command of commands) {
+    assert(
+      command && typeof command === 'object' && command.type && command.idempotencyKey,
+      `invalid command: ${JSON.stringify(command)}`,
+    )
+  }
+
+  let accepted
+  if (target.type === 'THREAD') {
+    // 既有 Thread 续写面 owner-free：body 只带 cursor 与 commands，绝不发送 owner/target。
+    const threadId = canonicalUuid(target.threadId, 'target.threadId')
+    const body = {
+      expectedHeadEntryId: canonicalUuid(target.expectedHeadEntryId, 'target.expectedHeadEntryId'),
+      expectedNextCommandSequence: positiveDecimal(
+        target.expectedNextCommandSequence,
+        'target.expectedNextCommandSequence',
+      ),
+      commands,
+    }
+    const { status, json } = await ctx.call(
+      'POST',
+      `/api/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
+      body,
+    )
+    assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
+    accepted = envelopeData(json)
+    assertAcceptedCommands(accepted)
+    assert(
+      String(accepted.thread?.threadId) === threadId,
+      `accepted threadId ${accepted.thread?.threadId} != target ${threadId}: ${JSON.stringify(accepted)}`,
+    )
+    assertAcceptedCommandList(accepted, commands, threadId)
+    return accepted
+  }
+
   assert(
     owner?.type === 'CHAT',
     `owner.type must be CHAT: ${JSON.stringify(owner)}`,
@@ -218,21 +289,13 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     Object.keys(owner).sort().join(',') === 'chatId,type',
     `owner must contain only type and chatId: ${JSON.stringify(owner)}`,
   )
-  assert(target?.type, `target required: ${JSON.stringify(target)}`)
-  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
-  for (const command of commands) {
-    assert(
-      command && typeof command === 'object' && command.type && command.idempotencyKey,
-      `invalid command: ${JSON.stringify(command)}`,
-    )
-  }
   const { status, json } = await ctx.call('POST', '/api/harness/command-batches', {
     owner,
     target,
     commands,
   })
   assert(status === 202, `accept command batch status ${status}: ${JSON.stringify(json)}`)
-  const accepted = envelopeData(json)
+  accepted = envelopeData(json)
   assertAcceptedCommands(accepted)
   // target 一致性：threadId 恒等于 target.threadId。
   assert(
@@ -260,7 +323,12 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
       && String(accepted.thread?.sessionId) === String(accepted.session?.sessionId),
     `rootEntry/thread session must equal accepted session: ${JSON.stringify(accepted)}`,
   )
-  // acceptedCommands 与请求 commands 逐项一致。
+  assertAcceptedCommandList(accepted, commands, target.threadId)
+  return accepted
+}
+
+/** acceptedCommands 与请求 commands 逐项一致（type/idempotencyKey/threadId/positive sequence）。 */
+function assertAcceptedCommandList(accepted, commands, threadId) {
   assert(
     accepted.acceptedCommands.length === commands.length,
     `accepted command count ${accepted.acceptedCommands.length} != ${commands.length}: ${JSON.stringify(accepted)}`,
@@ -278,15 +346,14 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     )
     canonicalUuid(response.idempotencyKey, `accepted.commands[${i}].idempotencyKey`)
     assert(
-      String(response.threadId) === String(target.threadId),
-      `accepted command ${i} threadId ${response?.threadId} != target ${target.threadId}: ${JSON.stringify(accepted)}`,
+      String(response.threadId) === String(threadId),
+      `accepted command ${i} threadId ${response?.threadId} != target ${threadId}: ${JSON.stringify(accepted)}`,
     )
     assert(
       /^[1-9]\d*$/.test(String(response.sequence)),
       `accepted command ${i} sequence must be positive decimal: ${JSON.stringify(response)}`,
     )
   }
-  return accepted
 }
 
 /**
@@ -314,6 +381,43 @@ export async function createNewThread(
     target: newThreadTarget({ sessionId, startEntryId, threadId, yoloEnabled }),
     commands,
   })
+}
+
+/**
+ * 发送前请求预览：owner-free POST /api/harness/threads/{threadId}/provider-request-preview。
+ *
+ * <p>body 与既有 Thread 续写面同形（{@link HarnessThreadCommandBatchDTO} 的
+ * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}），不写 durable 状态、不消费 upload。
+ * 返回 200 的 {@code HarnessProviderRequestPreviewDTO} 或抛 {@link HttpError}（409 表示该快照下不可精确预览）。
+ */
+export async function previewProviderRequest(
+  ctx,
+  threadId,
+  { expectedHeadEntryId, expectedNextCommandSequence, commands },
+) {
+  const id = canonicalUuid(threadId, 'threadId')
+  assert(Array.isArray(commands) && commands.length > 0, 'commands required')
+  const { status, json } = await ctx.call(
+    'POST',
+    `/api/harness/threads/${encodeURIComponent(id)}/provider-request-preview`,
+    {
+      expectedHeadEntryId: canonicalUuid(expectedHeadEntryId, 'expectedHeadEntryId'),
+      expectedNextCommandSequence: positiveDecimal(
+        expectedNextCommandSequence,
+        'expectedNextCommandSequence',
+      ),
+      commands,
+    },
+  )
+  assert(status === 200, `provider request preview status ${status}: ${JSON.stringify(json)}`)
+  const preview = envelopeData(json)
+  assert(
+    preview?.kind === 'DRAFT_REQUEST_PREVIEW'
+      && typeof preview.bodyJson === 'string'
+      && typeof preview.snapshotNotice === 'string',
+    `invalid provider request preview: ${JSON.stringify(preview)}`,
+  )
+  return preview
 }
 
 // ---------- Session / Thread 查询 ----------
@@ -560,12 +664,48 @@ export async function renameThread(ctx, threadId, name) {
   return renamed
 }
 
-/** 原子 stop（stopRequestId 幂等 replay；version CAS）。 */
+/** 校验一条 StoppedThreadReceiptDTO：身份、边界、计数与仅含人类输入的 cancelledInputs。 */
+function assertStoppedThreadReceipt(receipt) {
+  canonicalUuid(receipt?.threadId, 'receipt.threadId')
+  canonicalUuid(receipt.stopRequestId, 'receipt.stopRequestId')
+  if (receipt.stoppedTurnEndEntryId != null) {
+    canonicalUuid(receipt.stoppedTurnEndEntryId, 'receipt.stoppedTurnEndEntryId')
+  }
+  assert(
+    Number.isSafeInteger(receipt.cancelledCommandCount) && receipt.cancelledCommandCount >= 0,
+    `cancelledCommandCount must be non-negative integer: ${JSON.stringify(receipt)}`,
+  )
+  assert(Array.isArray(receipt.cancelledInputs), JSON.stringify(receipt))
+  assert(
+    receipt.cancelledInputs.length <= receipt.cancelledCommandCount,
+    `cancelledInputs must not exceed cancelledCommandCount: ${JSON.stringify(receipt)}`,
+  )
+  let previous = 0n
+  for (const input of receipt.cancelledInputs) {
+    assert(/^[1-9]\d*$/.test(String(input?.sequence)), JSON.stringify(input))
+    const sequence = BigInt(input.sequence)
+    assert(sequence > previous, `cancelledInputs must be ascending: ${JSON.stringify(receipt)}`)
+    previous = sequence
+    canonicalUuid(input.idempotencyKey, 'cancelledInput.idempotencyKey')
+    assert(
+      input.type === 'USER_MESSAGE' || input.type === 'GOAL',
+      `cancelled input must be human USER_MESSAGE|GOAL: ${JSON.stringify(input)}`,
+    )
+    assert(
+      typeof input.payloadJson === 'string' && input.payloadJson.length > 0,
+      `cancelled input must carry payloadJson: ${JSON.stringify(input)}`,
+    )
+  }
+  return receipt
+}
+
+/** 原子 stop（stopRequestId 幂等 replay；version CAS）。返回 {status, thread, stoppedThreads[]}。 */
 export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion }) {
-  assert(stopRequestId && typeof stopRequestId === 'string', 'stopRequestId required')
+  const targetThreadId = canonicalUuid(threadId, 'threadId')
+  canonicalUuid(stopRequestId, 'stopRequestId')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/harness/threads/${encodeURIComponent(threadId)}/stop`,
+    `/api/harness/threads/${encodeURIComponent(targetThreadId)}/stop`,
     {
       stopRequestId,
       expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
@@ -574,13 +714,23 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
   assert(status === 200, `stop status ${status}: ${JSON.stringify(json)}`)
   const stop = envelopeData(json)
   assert(stop?.thread, `expected stop result thread: ${JSON.stringify(json)}`)
-  assert(typeof stop.status === 'string', JSON.stringify(stop))
-  if (stop.stoppedTurnEndEntryId != null) {
-    canonicalUuid(stop.stoppedTurnEndEntryId, 'stoppedTurnEndEntryId')
-  }
+  threadIdOf(stop.thread)
   assert(
-    Number.isSafeInteger(stop.cancelledCommandCount) && stop.cancelledCommandCount >= 0,
-    JSON.stringify(stop),
+    stop.status === 'STOPPED' || stop.status === 'REPLAYED',
+    `stop status must be STOPPED|REPLAYED: ${JSON.stringify(stop)}`,
+  )
+  assert(
+    Array.isArray(stop.stoppedThreads),
+    `stop must return stoppedThreads[] receipts: ${JSON.stringify(stop)}`,
+  )
+  for (const receipt of stop.stoppedThreads) {
+    assertStoppedThreadReceipt(receipt)
+  }
+  const targetReceipt = stop.stoppedThreads.find((receipt) => receipt.threadId === targetThreadId)
+  assert(targetReceipt, `stoppedThreads must contain the target Thread: ${JSON.stringify(stop)}`)
+  assert(
+    targetReceipt.stopRequestId === stopRequestId,
+    `target receipt stopRequestId must equal the request: ${JSON.stringify(stop)}`,
   )
   return stop
 }
@@ -599,8 +749,9 @@ export async function stopThreadForCleanup(
   let lastError = null
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
+    // STOPPED 的 Thread 已无本线程工作：它不再是 cleanup 目标，也不因持久停止状态被误判为 active。
     const active =
-      snapshot.thread.status !== 'IDLE'
+      (snapshot.thread.status !== 'IDLE' && snapshot.thread.status !== 'STOPPED')
       || snapshot.thread.processing
       || snapshot.queuedCommands.length > 0
       || snapshot.modelInvocation !== null

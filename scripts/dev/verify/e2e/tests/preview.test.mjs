@@ -25,6 +25,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
         thread = {
           threadId, sessionId, headEntryId: id(2), parentThreadId: null,
           name: 'main', version: '1', nextCommandSequence: '2', status: 'IDLE', processing: false,
+          executionControl: 'RUNNABLE',
         }
         return { status: 202, json: { data: {
           session: { sessionId, name: 'fixture' },
@@ -42,8 +43,11 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
         } } }
       }
       if (method === 'POST' && path.endsWith('/provider-request-preview')) {
-        assert.equal(body.target.expectedHeadEntryId, thread.headEntryId)
-        assert.equal(body.target.expectedNextCommandSequence, previews === 0 ? '3' : '2')
+        // owner-free 预览 body：cursor 直接挂在顶层，不携带 owner/target。
+        assert.equal(body.expectedHeadEntryId, thread.headEntryId)
+        assert.equal(body.expectedNextCommandSequence, previews === 0 ? '3' : '2')
+        assert.equal(Object.hasOwn(body, 'owner'), false)
+        assert.equal(Object.hasOwn(body, 'target'), false)
         const reason = reasons[previews++]
         throw new HttpError(409, JSON.stringify({
           errors: { reason, detail: 'PREVIEW_STALE_CURSOR PREVIEW_PLANNING_FAILED' },
