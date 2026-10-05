@@ -66,6 +66,11 @@ function Assert-SequenceEqual {
     }
 }
 
+function ConvertTo-FixtureText {
+    param([Parameter(Mandatory = $true)][int[]] $CodePoints)
+    return -join ($CodePoints | ForEach-Object { [char] $_ })
+}
+
 function Assert-Throws {
     param(
         [Parameter(Mandatory = $true)][scriptblock] $Action,
@@ -487,7 +492,7 @@ function Test-JdkVersionGate {
             -Message "JDK gate accepts stderr with a successful exit"
         $probeResult.Stderr = 'openjdk version "17.0.1"'
         Assert-Throws -Action { Assert-Jdk21 -Candidate $directory } `
-            -ExpectedMessage "JDK 21 is required" -Message "other major versions are rejected"
+            -ExpectedMessage "$(ConvertTo-FixtureText 0x9700,0x8981) JDK 21" -Message "other major versions are rejected"
         $probeResult.Stdout = 'openjdk version "21.0.12.1"'
         $probeResult.Stderr = "native failure"
         $probeResult.ExitCode = 23
