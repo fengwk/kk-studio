@@ -1837,6 +1837,72 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread_tree.query_contract',
+  level: 'L1',
+  title: 'Agent 关系树最小只读投影',
+  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；缺失 Agent 确定性失败，无真实 Provider 调用',
+  async run(ctx) {
+    const target = await resolveAnyCatalogTarget(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-tree-${cid().slice(0, 8)}`,
+      agentName: target.agent.name,
+      yoloEnabled: false,
+    })
+    const threadId = cid()
+    try {
+      await createNewSession(ctx, {
+        owner: chatOwner(chat.id),
+        sessionId: cid(),
+        threadId,
+        rootSettings: branchSettingsOf({ name: `missing-tree-agent-${cid()}` }, target.model),
+        yoloEnabled: false,
+        commands: [userMessageCommand('关系树投影', cid())],
+      })
+      await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+      const before = await getThreadSnapshot(ctx, threadId)
+      const { json } = await ctx.call('GET', `/api/harness/threads/${threadId}/tree`)
+      const nodes = envelopeData(json)
+      assert(Array.isArray(nodes) && nodes.length === 1, JSON.stringify(nodes))
+      const root = nodes[0]
+      assertExactFields(
+        root,
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'processing', 'turnCount', 'toolCallCount', 'outcome'],
+        'HarnessThreadTreeNodeDTO',
+      )
+      assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
+      assert(root.status === 'IDLE' && root.processing === false, JSON.stringify(root))
+      assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
+      assert(isDeepStrictEqual(root.model, before.thread.branchSettings.model), JSON.stringify(root))
+      const after = await getThreadSnapshot(ctx, threadId)
+      assert(after.thread.version === before.thread.version, 'tree query must not change version')
+      assert(after.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
+    } finally {
+      await ctx.call(
+        'DELETE',
+        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      )
+    }
+  },
+})
+
+registerCase({
+  id: 'thread_tree.invalid_and_unknown_thread',
+  level: 'L1',
+  title: 'Agent 关系树 UUID 与缺失节点校验',
+  docs: 'GET /api/harness/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
+  async run(ctx) {
+    await expectHttpError(
+      () => ctx.call('GET', '/api/harness/threads/1-1-1-1-1/tree'),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () => ctx.call('GET', '/api/harness/threads/00000000-0000-0000-0000-000000000999/tree'),
+      { status: 404 },
+    )
+  },
+})
+
+registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
