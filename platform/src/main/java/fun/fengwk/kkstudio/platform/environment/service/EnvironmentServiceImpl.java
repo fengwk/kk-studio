@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
@@ -234,6 +235,38 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setRegistrationToken(env.getRegistrationToken());
     dto.setVersion(CatalogVersions.format(env.getVersion()));
     return dto;
+  }
+
+  @Override
+  public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion) {
+    Environment env = requireInstallable(id, expectedVersion);
+    return EnvironmentInstallCodes.issue(env.getId(), env.getRegistrationToken(), clock.instant());
+  }
+
+  @Override
+  public String installCommand(EnvironmentId id, String code) {
+    Environment env = requireInstallable(id, null);
+    EnvironmentInstallCodes.verify(env.getId(), env.getRegistrationToken(), code, clock.instant());
+    return EnvironmentInstallCommands.install(env.getInstallConfig(), env.getRegistrationToken());
+  }
+
+  private Environment requireInstallable(EnvironmentId id, String expectedVersion) {
+    Objects.requireNonNull(id, "id");
+    Environment env = environmentRepository.getById(id.value());
+    if (env == null || env.getInstallConfig() == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
+    if (expectedVersion != null
+        && env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
+      throw new AiVersionConflictException(
+          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
+    }
+    return env;
+  }
+
+  @Override
+  public String uninstallCommand(String operatingSystem) {
+    return EnvironmentInstallCommands.uninstall(operatingSystem);
   }
 
   @Override

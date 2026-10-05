@@ -38,9 +38,12 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.time.Clock;
@@ -359,6 +362,85 @@ class EnvironmentServiceImplTest {
     assertEquals("stable-token", env.getRegistrationToken());
     assertEquals(3L, env.getVersion());
     assertEquals(NOW, env.getUpdateTime());
+  }
+
+  /** 测试意图：同一 Environment 身份的安装命令在轮换前后仍按 id 读取，但渲染当前 token，且不额外写库。 */
+  @Test
+  void installCommandUsesCurrentTokenForStableEnvironmentId() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentServiceImpl service = service(repo);
+    Environment env = environment("secret-token", 4L);
+    DaemonConfiguration daemon = new DaemonConfiguration();
+    daemon.setStudioUrl("https://studio.example.com");
+    EnvironmentInstallConfigDTO config = new EnvironmentInstallConfigDTO();
+    config.setOperatingSystem("linux");
+    config.setDaemon(daemon);
+    env.setInstallConfig(config);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
+    String before = service.installCommand(EnvironmentId.of(ENV_ID), issued.getCode());
+    env.setRegistrationToken("rotated-token");
+    env.setVersion(5L);
+    assertThrows(
+        AiValidationException.class,
+        () -> service.installCommand(EnvironmentId.of(ENV_ID), issued.getCode()));
+    String after =
+        service.installCommand(
+            EnvironmentId.of(ENV_ID),
+            service.issueInstallCode(EnvironmentId.of(ENV_ID), "5").getCode());
+
+    assertTrue(before.contains("secret-token"));
+    assertFalse(before.contains("rotated-token"));
+    assertTrue(after.contains("rotated-token"));
+    assertFalse(after.contains("secret-token"));
+    assertEquals(ENV_ID, env.getId());
+    assertEquals(NOW.plus(java.time.Duration.ofMinutes(5)), issued.getExpiresAt());
+    verify(repo, never()).updateById(any(), anyLong());
+    verify(repo, never()).getByRegistrationToken(any());
+    assertThrows(
+        AiValidationException.class, () -> service.installCommand(EnvironmentId.of(ENV_ID), null));
+    String tampered = issued.getCode().substring(0, issued.getCode().length() - 1) + "A";
+    assertThrows(
+        AiValidationException.class, () -> service.installCommand(EnvironmentId.of(ENV_ID), tampered));
+  }
+
+  /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
+  @Test
+  void installCommandRejectsUnknownIdAndMissingConfig() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentServiceImpl service = service(repo);
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.installCommand(EnvironmentId.of(ENV_ID), "1.bad"));
+
+    Environment env = environment("saved", 1L);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.installCommand(EnvironmentId.of(ENV_ID), "1.bad"));
+    verify(repo, never()).updateById(any(), anyLong());
+  }
+
+  /** 测试意图：卸载命令只校验操作系统，不查询仓库。 */
+  @Test
+  void uninstallCommandDoesNotTouchRepository() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentServiceImpl service = service(repo);
+
+    assertTrue(service.uninstallCommand("macos").contains("uninstall"));
+    assertThrows(AiValidationException.class, () -> service.uninstallCommand("unknown"));
+    verify(repo, never()).getByRegistrationToken(any());
+  }
+
+  private static EnvironmentServiceImpl service(EnvironmentRepository repo) {
+    return new EnvironmentServiceImpl(
+        repo,
+        mock(EnvironmentRegistry.class),
+        mock(JdbcTemplate.class),
+        mock(SystemSettingsSnapshot.class),
+        CLOCK);
   }
 
   /** 测试意图：读取不存在的 Environment 时抛出稳定的 404 语义错误，而不是返回空 token。 */

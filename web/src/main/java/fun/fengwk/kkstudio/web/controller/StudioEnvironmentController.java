@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,9 +23,12 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -41,6 +45,8 @@ import java.util.Map;
 public class StudioEnvironmentController {
 
   private static final String NO_STORE = "no-store";
+  private static final MediaType PLAIN_TEXT =
+      new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8);
 
   private final EnvironmentService environmentService;
 
@@ -65,6 +71,30 @@ public class StudioEnvironmentController {
   public Result<List<EnvironmentEventDTO>> listEnvironmentEvents(
       @PathVariable String environmentId) {
     return Results.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
+  }
+
+  /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
+  @PostMapping("/{environmentId}/install-code")
+  public ResponseEntity<Result<EnvironmentInstallCodeDTO>> issueInstallCode(
+      @PathVariable String environmentId, @RequestBody EnvironmentInstallCodeRequestDTO request) {
+    String expectedVersion = request != null ? request.getExpectedVersion() : null;
+    return noStore(
+        Results.ok(
+            environmentService.issueInstallCode(
+                parseEnvironmentId(environmentId), expectedVersion)));
+  }
+
+  /** 校验 code 后按稳定 Environment 身份返回完整安装脚本。响应不经 Result 包装。 */
+  @GetMapping(value = "/{environmentId}/install", produces = MediaType.TEXT_PLAIN_VALUE)
+  public ResponseEntity<String> installCommand(
+      @PathVariable String environmentId, @RequestParam String code) {
+    return script(environmentService.installCommand(parseEnvironmentId(environmentId), code));
+  }
+
+  /** 按操作系统返回卸载脚本；不读取 token，也不改变 Environment。 */
+  @GetMapping(value = "/uninstall/{operatingSystem}", produces = MediaType.TEXT_PLAIN_VALUE)
+  public ResponseEntity<String> uninstallCommand(@PathVariable String operatingSystem) {
+    return script(environmentService.uninstallCommand(operatingSystem));
   }
 
   /** 幂等只读当前 registrationToken；不轮换、不改变 version/updateTime。 */
@@ -106,6 +136,15 @@ public class StudioEnvironmentController {
     } catch (IllegalArgumentException e) {
       throw new AiValidationException("environmentId", "environmentId must be a canonical UUID");
     }
+  }
+
+  /** 脚本按原文字节返回，禁止缓存，并阻止浏览器按附件内容嗅探。 */
+  private static ResponseEntity<String> script(String body) {
+    return ResponseEntity.ok()
+        .contentType(PLAIN_TEXT)
+        .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
+        .header("X-Content-Type-Options", "nosniff")
+        .body(body);
   }
 
   /** 携带凭据的响应必须禁止任何中间缓存。 */

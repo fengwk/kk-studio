@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +26,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
@@ -291,6 +293,62 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.timeZone").doesNotExist())
         .andExpect(jsonPath("$.data.note").doesNotExist())
         .andExpect(jsonPath("$.data.rootPath").doesNotExist());
+  }
+
+  /** 意图：安装与卸载脚本以纯文本返回，带禁止缓存和禁止嗅探头，且不被 Result JSON 包装。 */
+  @Test
+  void installAndUninstallScriptsUsePlainTextHeaders() throws Exception {
+    when(environmentService.installCommand(eq(EnvironmentId.of(ENV_ID)), eq("valid-code")))
+        .thenReturn("echo 汉字 ' $ `");
+    when(environmentService.uninstallCommand("windows")).thenReturn("uninstall windows");
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/install").param("code", "valid-code"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+        .andExpect(content().string("echo 汉字 ' $ `"))
+        .andExpect(
+            content()
+                .string(
+                    org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"data\""))));
+    mockMvc
+        .perform(get("/api/harness/environments/uninstall/windows"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
+        .andExpect(content().string("uninstall windows"));
+  }
+
+  /** 意图：未知身份、非法身份与非法操作系统分别返回 404/400，且错误正文不回显凭据。 */
+  @Test
+  void installAndUninstallFailuresDoNotEchoCredentials() throws Exception {
+    when(environmentService.installCommand(eq(EnvironmentId.of(ENV_ID)), eq("bad-code")))
+        .thenThrow(new AiResourceNotFoundException("environment"));
+    when(environmentService.uninstallCommand("bad"))
+        .thenThrow(
+            new AiValidationException(
+                "operatingSystem", "operatingSystem must be linux, macos or windows"));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/install").param("code", "bad-code"))
+        .andExpect(status().isNotFound())
+        .andExpect(
+            content()
+                .string(
+                    org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString(ENV_ID.toString()))));
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/install"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(get("/api/harness/environments/not-a-uuid/install").param("code", "x"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.resource").value("environmentId"));
+    mockMvc
+        .perform(get("/api/harness/environments/uninstall/bad"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.resource").value("operatingSystem"));
   }
 
   /** 意图：runtime 端点已随持久 runtime 报告一起移除，访问必须 404。 */
