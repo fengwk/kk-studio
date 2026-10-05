@@ -2555,6 +2555,22 @@ export const aiCatalog = {
     'en-US': 'Send message failed',
     'zh-CN': '发送消息失败',
   },
+  'ai.runtime.action.draftSaveFailed': {
+    'en-US': 'Draft could not be saved; check browser storage and retry',
+    'zh-CN': '草稿未能保存，请检查浏览器存储后重试',
+  },
+  'ai.runtime.action.draftLoadFailed': {
+    'en-US': 'Draft could not be loaded; the editor may not show the latest draft',
+    'zh-CN': '草稿加载失败，当前编辑区可能不是最新草稿',
+  },
+  'ai.runtime.action.draftRestoreFailed': {
+    'en-US': 'Unsent input could not be restored to the editor; retry',
+    'zh-CN': '未消费的输入未能恢复到编辑区，请重试',
+  },
+  'ai.runtime.action.retryDraftRestore': {
+    'en-US': 'Retry restoring draft',
+    'zh-CN': '重试恢复草稿',
+  },
   'ai.runtime.action.stopFailed': {
     'en-US': 'Stop failed',
     'zh-CN': '停止失败',

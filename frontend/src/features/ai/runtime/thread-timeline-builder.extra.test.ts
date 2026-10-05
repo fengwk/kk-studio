@@ -190,15 +190,18 @@ describe('thread timeline edge branches', () => {
     expect(timeline.hasPendingInputs).toBe(true)
   })
 
-  it('keeps durable custom messages in transcript and queued messages in decoration order', () => {
+  it('keeps durable custom messages in transcript while queued custom messages stay out of the editable queue', () => {
+    // 契约：CUSTOM_MESSAGE 是编排产物而非人类输入，只出现在持久 transcript；
+    // 可编辑队列/上下键历史只承载 USER_MESSAGE，并按 decoration 顺序稳定排列。
     const timeline = buildThreadTimeline(
       [
         entry('custom-first', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'durable first')),
         entry('custom-user', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'durable user')),
       ],
       [
-        command('queued-first', '1', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued first'), 'QUEUED'),
-        command('queued-user', '2', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued user'), 'QUEUED'),
+        command('queued-custom', '1', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued custom'), 'QUEUED'),
+        command('queued-first', '2', 'USER_MESSAGE', customMessagePayload('USER', 'queued first'), 'QUEUED'),
+        command('queued-user', '3', 'USER_MESSAGE', customMessagePayload('USER', 'queued user'), 'QUEUED'),
       ],
       [],
     )
@@ -208,9 +211,10 @@ describe('thread timeline edge branches', () => {
       { role: 'user', text: 'durable user' },
     ])
     expect(timeline.queuedMessages).toMatchObject([
-      { role: 'user', text: 'queued first' },
-      { role: 'user', text: 'queued user' },
+      { role: 'user', text: 'queued first', sequence: '2' },
+      { role: 'user', text: 'queued user', sequence: '3' },
     ])
+    expect(timeline.queuedMessages.some((message) => message.text === 'queued custom')).toBe(false)
   })
 
   it('projects durable blob resources from lowercase runtime message contents', () => {
@@ -722,28 +726,26 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
-  it('drops QUEUED CUSTOM_MESSAGE with blank contents and falls back unknown roles to user', () => {
-    // QUEUED 命令提取防御：无文本内容不产生 queued message；
-    // CUSTOM_MESSAGE role 按生产语义统一投影为 user。
+  it('keeps queued custom messages out of the queue and pending inputs, while durable custom messages fall back to user', () => {
+    // QUEUED CUSTOM_MESSAGE 不是人类输入：既不进入可编辑队列，也不代表待处理的用户输入。
+    // 持久 CUSTOM_MESSAGE 的角色兼容语义保留：未知 role 统一投影为 user。
     const timeline = buildThreadTimeline(
-      [],
+      [entry('durable-custom', 'CUSTOM_MESSAGE', { message: { role: 'AGENT', contents: [{ type: 'text', text: 'x' }] } })],
       [
         command('blank', '1', 'CUSTOM_MESSAGE', customMessagePayload('USER', ''), 'QUEUED'),
         command(
           'weird-role',
           '2',
           'CUSTOM_MESSAGE',
-          { message: { role: 'AGENT', contents: [{ type: 'text', text: 'x' }] } },
+          { message: { role: 'AGENT', contents: [{ type: 'text', text: 'queued x' }] } },
           'QUEUED',
         ),
       ],
       [],
     )
-    expect(timeline.messages).toEqual([])
-    expect(timeline.queuedMessages).toMatchObject([
-      { idempotencyKey: 'cid-weird-role', role: 'user', text: 'x', sequence: '2' },
-    ])
-    expect(timeline.hasPendingInputs).toBe(true)
+    expect(timeline.messages).toMatchObject([{ role: 'user', text: 'x' }])
+    expect(timeline.queuedMessages).toEqual([])
+    expect(timeline.hasPendingInputs).toBe(false)
   })
 
   it('projects unsupported message entries for unknown roles with or without role name', () => {

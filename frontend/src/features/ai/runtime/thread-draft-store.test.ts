@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+
 import type {
   HarnessCancelledInputDTO,
   HarnessStoppedThreadReceiptDTO,
@@ -198,7 +200,6 @@ describe('thread draft store', () => {
       ]),
     )
 
-    expect(merged.applied).toBe(true)
     expect(merged.parts).toEqual([
       expect.objectContaining({ type: 'text', text: 'cancelled message\n\ndraft' }),
     ])
@@ -216,7 +217,6 @@ describe('thread draft store', () => {
       stopReceipt(threadId, 'stop-resource', [cancelledUserResource(1, 'report.pdf')]),
     )
 
-    expect(merged.applied).toBe(true)
     expect(merged.parts).toEqual([
       expect.objectContaining({
         type: 'resource',
@@ -232,12 +232,13 @@ describe('thread draft store', () => {
     const receipt = stopReceipt(threadId, 'stop-1', [cancelledUserMessage(1, 'cancelled message')])
 
     const first = await applyStopReceipt(receipt)
-    expect(first.applied).toBe(true)
+    expect(partsToText(first.parts)).toBe('cancelled message')
 
+    // 重复回执返回同一份记录，供尚未读到它的标签页同步，且不重复追加。
     const second = await applyStopReceipt(receipt)
-    expect(second.applied).toBe(false)
-    expect(second.parts).toEqual([])
-    expect(second.goalText).toBeNull()
+    expect(second.appliedStopRequestIds).toEqual(['stop-1'])
+    expect(partsToText(second.parts)).toBe('cancelled message')
+    expect(occurrences(partsToText(second.parts), 'cancelled message')).toBe(1)
 
     const record = await readRecord(threadId)
     expect(record.appliedStopRequestIds).toEqual(['stop-1'])
@@ -251,11 +252,10 @@ describe('thread draft store', () => {
     const childThreadId = nextThreadId('child')
     await saveThreadDraftParts(parentThreadId, [createTextPart('parent draft')])
 
-    const merged = await applyStopReceipt(
+    const childRecord = await applyStopReceipt(
       stopReceipt(childThreadId, 'stop-child', [cancelledUserMessage(1, 'child cancelled')]),
     )
-    expect(merged.applied).toBe(true)
-    expect(partsToText(merged.parts)).toBe('child cancelled')
+    expect(partsToText(childRecord.parts)).toBe('child cancelled')
 
     const parent = await readRecord(parentThreadId)
     expect(partsToText(parent.parts)).toBe('parent draft')
@@ -267,36 +267,80 @@ describe('thread draft store', () => {
     expect(child.appliedStopRequestIds).toEqual(['stop-child'])
   })
 
-  it('uses the live composer parts as the merge base when provided', async () => {
-    // 测试意图：绑定 Thread 的合并必须基于用户此刻看到的草稿（可能含未持久化的附件），而不是记录里的旧草稿。
-    await saveThreadDraftParts(threadId, [createTextPart('stale persisted draft')])
-    const liveParts = [createTextPart('live draft')]
+  it('ignores any caller-supplied draft snapshot and merges on the persisted record', async () => {
+    // 测试意图：跨标签页场景下调用方的 draft 快照可能已经过期；合并只能以持久记录为事实源，
+    // 绝不用过期整份快照覆盖另一个标签页已经落盘的新输入。
+    await saveThreadDraftParts(threadId, [createTextPart('newer draft from another tab')])
 
     const merged = await applyStopReceipt(
-      stopReceipt(threadId, 'stop-live', [cancelledUserMessage(1, 'cancelled')]),
-      liveParts,
+      stopReceipt(threadId, 'stop-record-only', [cancelledUserMessage(1, 'cancelled')]),
     )
 
-    expect(merged.applied).toBe(true)
-    expect(partsToText(merged.parts)).toBe('cancelled\n\nlive draft')
-    expect(partsToText((await readRecord(threadId)).parts)).toBe('cancelled\n\nlive draft')
+    expect(partsToText(merged.parts)).toBe('cancelled\n\nnewer draft from another tab')
+    expect(partsToText((await readRecord(threadId)).parts)).toBe('cancelled\n\nnewer draft from another tab')
+  })
+
+  it('lets two tabs apply the same receipt with their own pending edits without duplication or loss', async () => {
+    // 测试意图：两个标签页各自已有编辑并同时投递同一回执时，只有一个标签页完成合并，
+    // 另一个拿到同一份记录用于同步；最终记录既包含双方编辑，也只包含一份回填内容。
+    await saveThreadDraftParts(threadId, [createTextPart('tab A edit')])
+
+    const [tabA, tabB] = await Promise.all([
+      applyStopReceipt(stopReceipt(threadId, 'stop-shared', [cancelledUserMessage(1, 'cancelled once')])),
+      applyStopReceipt(stopReceipt(threadId, 'stop-shared', [cancelledUserMessage(1, 'cancelled once')])),
+    ])
+    // 两个标签页看到同一份记录：内容只回填一次。
+    expect(occurrences(partsToText(tabA.parts), 'cancelled once')).toBe(1)
+    expect(occurrences(partsToText(tabB.parts), 'cancelled once')).toBe(1)
+
+    // 标签页 B 在同步到回执内容后继续编辑（同链保存），不得丢掉回填内容。
+    await saveThreadDraftParts(threadId, [
+      createTextPart('tab B edit'),
+      createTextPart('\n\ncancelled once'),
+    ])
+
+    const record = await readRecord(threadId)
+    const text = partsToText(record.parts)
+    expect(occurrences(text, 'cancelled once')).toBe(1)
+    expect(text).toContain('tab B edit')
+    expect(record.appliedStopRequestIds).toEqual(['stop-shared'])
   })
 
   it('serializes concurrent receipt merges for the same thread', async () => {
     // 测试意图：两个标签页同时合并不同回执时读改写必须串行，否则后写者会丢掉先写者的回填。
-    const [first, second] = await Promise.all([
+    await Promise.all([
       applyStopReceipt(stopReceipt(threadId, 'stop-a', [cancelledUserMessage(1, 'message A')])),
       applyStopReceipt(stopReceipt(threadId, 'stop-b', [cancelledUserMessage(2, 'message B')])),
     ])
-
-    expect(first.applied).toBe(true)
-    expect(second.applied).toBe(true)
 
     const record = await readRecord(threadId)
     expect(record.appliedStopRequestIds).toEqual(['stop-a', 'stop-b'])
     const text = partsToText(record.parts)
     expect(occurrences(text, 'message A')).toBe(1)
     expect(occurrences(text, 'message B')).toBe(1)
+  })
+
+  it('rejects when IndexedDB cannot be opened instead of reporting an empty draft', async () => {
+    // 测试意图：存储资源不可用必须显式失败，绝不能以 null 静默冒充「没有草稿」。
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory({ shouldFailOpen: true }),
+    })
+
+    await expect(loadThreadDraft(threadId)).rejects.toThrow()
+    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')])).rejects.toThrow()
+  })
+
+  it('rejects when the IndexedDB transaction fails so callers can surface it', async () => {
+    // 测试意图：事务失败不得被吞掉成「保存成功」；调用方需要据此向用户暴露草稿未落盘。
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory({ shouldFailTransaction: true }),
+    })
+
+    await expect(saveThreadDraftParts(threadId, [createTextPart('draft')])).rejects.toThrow()
   })
 
   it('applies a receipt to the record cleared by the queued send-time draft clear', async () => {
@@ -309,7 +353,7 @@ describe('thread draft store', () => {
       stopReceipt(threadId, 'stop-after-send', [cancelledUserMessage(1, 'cancelled after send')]),
     )
 
-    expect((await merged).applied).toBe(true)
+    await merged
     await cleared
 
     const text = partsToText((await readRecord(threadId)).parts)

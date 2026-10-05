@@ -35,6 +35,7 @@ import {
 } from '@/features/ai/runtime/thread-draft-store'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
+import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 
 const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -1666,6 +1667,65 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/stop')
     expect(await screen.findByRole('option', { name: /^stop/ })).toHaveAttribute('aria-disabled', 'false')
+  })
+
+  it('keeps a failed draft restore visible with a manual retry that restores the cancelled input', async () => {
+    // 测试意图：Stop 已成功但取消的输入没能回到输入框时，必须给出可见的失败提示与手动重试入口；
+    // 重试成功后回填内容进入输入框，提示消失。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { executionControl: 'RUNNABLE' })),
+    )
+    vi.mocked(harnessService.stopThread).mockResolvedValueOnce({
+      status: 'STOPPED',
+      thread: thread({ executionControl: 'STOPPED' }),
+      stoppedThreads: [
+        {
+          threadId: THREAD_ID,
+          stopRequestId: 'stop-restore-1',
+          stoppedTurnEndEntryId: null,
+          cancelledCommandCount: 1,
+          cancelledInputs: [
+            {
+              sequence: '1',
+              idempotencyKey: 'c1',
+              type: 'USER_MESSAGE',
+              payloadJson:
+                '{"message":{"role":"USER","contents":[{"type":"text","text":"cancelled draft"}]}}',
+            },
+          ],
+        },
+      ],
+    } as HarnessThreadStopResultDTO)
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    // 存储事务失败：回执合并无法落盘，草稿恢复必然失败。
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory({ shouldFailTransaction: true }),
+    })
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/stop{Enter}')
+
+    const retry = await screen.findByRole('button', { name: '重试恢复草稿' })
+    expect(screen.getByText('未消费的输入未能恢复到编辑区，请重试')).toBeInTheDocument()
+
+    // 存储恢复后手动重试：取消的输入回到输入框，提示消失。
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory(),
+    })
+    await user.click(retry)
+    await waitFor(() =>
+      expect(screen.queryByTestId('draft-restore-retry')).not.toBeInTheDocument())
+    await waitFor(() => expect(composer).toHaveTextContent('cancelled draft'))
   })
 
   it('renders localized QUEUED status label when bound thread is queued', async () => {

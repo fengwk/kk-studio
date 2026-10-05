@@ -2654,6 +2654,15 @@ div.is-error {
   white-space: nowrap;
 }
 
+/* 草稿恢复失败：与 pending 控件同区展示，保留可见的手动重试入口。 */
+.thread-acceptance-retry-text {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--danger, #d9534f);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* NOTIFICATION 是系统结果通知，不是对话正文：用居中的弱化系统卡片区分。 */
 .thread-block-entry.kind-notification {
   border-left: 0;
