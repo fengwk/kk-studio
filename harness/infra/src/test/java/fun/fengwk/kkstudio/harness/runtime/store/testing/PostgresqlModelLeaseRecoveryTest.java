@@ -87,7 +87,7 @@ class PostgresqlModelLeaseRecoveryTest {
 
     InvocationRetryPolicy policy = retryOnce();
     ModelProcessor instanceA = newModelProcessor(policy);
-    ClaimedWork claimA = claimModel(modelId, "instance-a").orElseThrow();
+    ClaimedWork claimA = claimModel("instance-a").orElseThrow();
     assertEquals(ProcessResult.RESCHEDULED, instanceA.process(claimA));
 
     // 预算未被重置：RUNNING 的已确认启动记为一次已消耗 attempt，持久 attempt 保持 1，retryAt 由策略 delay 推导。
@@ -103,12 +103,12 @@ class PostgresqlModelLeaseRecoveryTest {
     // durable retryAt 之前到期边界不满足：reschedule 已释放租约且 available_at 仍在未来。
     Work rescheduled = findWork(modelTarget).orElseThrow();
     assertNull(rescheduled.leaseToken());
-    assertTrue(claimModel(modelId, "instance-a-again").isEmpty(), "not due before retryAt");
+    assertTrue(claimModel("instance-a-again").isEmpty(), "not due before retryAt");
     assertEquals(1, findModel(modelId).attempt(), "budget must not change between dispatches");
 
     // 到期后由另一实例 claim：与实例 A 无内存共享，只能读同一 durable 预算。
     forceDue(modelTarget);
-    ClaimedWork claimB = claimModel(modelId, "instance-b").orElseThrow();
+    ClaimedWork claimB = claimModel("instance-b").orElseThrow();
     assertEquals(modelId, claimB.target().id());
     beginDispatchAndRun(turn, modelId);
     ModelInvocation running = findModel(modelId);
@@ -119,7 +119,7 @@ class PostgresqlModelLeaseRecoveryTest {
 
     // 实例 B 的本地执行同样失联；预算已到上限，恢复必须如实 FAILED 而不是再次重试。
     forceLeaseExpired(modelTarget);
-    ClaimedWork claimC = claimModel(modelId, "instance-c").orElseThrow();
+    ClaimedWork claimC = claimModel("instance-c").orElseThrow();
     ModelProcessor instanceB = newModelProcessor(policy);
     assertEquals(ProcessResult.TERMINATED, instanceB.process(claimC));
 
@@ -144,8 +144,7 @@ class PostgresqlModelLeaseRecoveryTest {
 
     InvocationRetryPolicy policy = retryOnce();
     ModelProcessor instanceA = newModelProcessor(policy);
-    assertEquals(
-        ProcessResult.RESCHEDULED, instanceA.process(claimModel(modelId, "a").orElseThrow()));
+    assertEquals(ProcessResult.RESCHEDULED, instanceA.process(claimModel("a").orElseThrow()));
 
     ModelInvocation afterA = findModel(modelId);
     assertEquals(ModelInvocationStatus.READY, afterA.status());
@@ -156,16 +155,15 @@ class PostgresqlModelLeaseRecoveryTest {
     assertEquals(firstFailure.failedAt().plus(RETRY_DELAY), firstFailure.retryAt());
     assertEquals(0, modelGateway.startCalls());
 
-    assertTrue(claimModel(modelId, "a-again").isEmpty(), "not due before retryAt");
+    assertTrue(claimModel("a-again").isEmpty(), "not due before retryAt");
     forceDue(modelTarget);
-    claimModel(modelId, "b").orElseThrow();
+    claimModel("b").orElseThrow();
     beginDispatchAndRun(turn, modelId);
     assertEquals(2, findModel(modelId).attempt());
 
     forceLeaseExpired(modelTarget);
     ModelProcessor instanceB = newModelProcessor(policy);
-    assertEquals(
-        ProcessResult.TERMINATED, instanceB.process(claimModel(modelId, "c").orElseThrow()));
+    assertEquals(ProcessResult.TERMINATED, instanceB.process(claimModel("c").orElseThrow()));
 
     ModelInvocation failed = findModel(modelId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -189,8 +187,7 @@ class PostgresqlModelLeaseRecoveryTest {
     long entriesBefore = before.entries().size();
 
     ModelProcessor instance = newModelProcessor(retryOnce());
-    assertEquals(
-        ProcessResult.TERMINATED, instance.process(claimModel(modelId, "restart").orElseThrow()));
+    assertEquals(ProcessResult.TERMINATED, instance.process(claimModel("restart").orElseThrow()));
 
     ModelInvocation reused = findModel(modelId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, reused.status());
@@ -297,13 +294,11 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           var thread = tx.lockThread(turn.threadId()).orElseThrow();
+          var response = StoreTestSupport.assistantResponse();
           tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
           tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId)
-                  .orElseThrow()
-                  .succeed(StoreTestSupport.assistantResponse(), null, null, T3));
-          var response = StoreTestSupport.assistantResponse();
+              tx.lockModelInvocation(modelId).orElseThrow().succeed(response, null, null, T3));
           UUID assistantId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -340,7 +335,7 @@ class PostgresqlModelLeaseRecoveryTest {
         });
   }
 
-  private Optional<ClaimedWork> claimModel(UUID modelId, String token) {
+  private Optional<ClaimedWork> claimModel(String token) {
     return store.transaction(
         tx ->
             tx.claimNextWork(
