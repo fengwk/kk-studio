@@ -153,7 +153,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     ThreadSnapshot inFlightSnapshot =
         new ThreadSnapshot(
-            threadState, entryPath, List.of(), null, List.of(inFlightTool), List.of());
+            threadState, entryPath, List.of(), null, List.of(inFlightTool), List.of(), List.of());
     when(runtime.getThreadSnapshot(activeRun.getThreadId())).thenReturn(inFlightSnapshot);
 
     Issue fresh = issueService.getIssue(issue.getId());

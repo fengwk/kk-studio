@@ -5,23 +5,28 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 注册 Issue Agent 交接工具的 Harness Contributor。
+ * 注册 Issue Run 冻结上下文与交接工具的 Harness Contributor。
  *
- * <p>{@code issue_transition} 是 INTERNAL 工具：Agent 不能把它声明进自己的工具面（Agent 配置校验只接受 SELECTABLE 工具），只有
- * DatabaseTurnResolver 在 Issue Agent Thread 的 Turn 上按稳定归属注入它。本 Contributor 不注册 context
- * projector：Issue/阶段上下文必须按具体 Thread 解析，而 context projector 只看到 branch 历史，无法区分"哪个 Issue Agent
- * Thread"，因此上下文由 Turn 解析器直接注入。
+ * <p>{@code issue_transition} 是 SELECTABLE 工具：由 Issue Agent 的配置显式声明，运行时不再按 Thread owner 注入。上下文由
+ * {@link ProjectRunContextProjector} 从本 contributor 自己的 {@code run} custom state 投影，因此普通 Thread
+ * 不受影响， 也不存在跨 Thread 泄漏。
  */
 public final class ProjectHarnessContributor implements HarnessContributor {
 
-  public static final ContributorId ID = new ContributorId("project");
+  public static final ContributorId ID = new ContributorId(ProjectRunScope.CONTRIBUTOR_ID);
   public static final String NAME = "Project";
   public static final String VERSION = "1";
+
+  /** Contributor 内 custom entry type 与 context projector 的稳定本地贡献名。 */
+  private static final String LOCAL_ENTRY_TYPE = "issue.run";
+
+  private static final String LOCAL_RUN_CONTEXT_PROJECTOR = "issue.run.context";
 
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
@@ -40,7 +45,10 @@ public final class ProjectHarnessContributor implements HarnessContributor {
   @Override
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
+    registrar.registerCustomEntryType(LOCAL_ENTRY_TYPE, ProjectRunScope.CUSTOM_TYPE);
+    registrar.registerContextProjector(
+        LOCAL_RUN_CONTEXT_PROJECTOR, new ProjectRunContextProjector());
     registrar.registerTool(
-        IssueTransitionTool.LOCAL_NAME, issueTransitionTool, ToolVisibility.INTERNAL, 0);
+        IssueTransitionTool.LOCAL_NAME, issueTransitionTool, ToolVisibility.SELECTABLE, 0);
   }
 }
