@@ -2643,10 +2643,6 @@ export const aiCatalog = {
     'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",
     'zh-CN': "配置已保存，但命令生成或复制失败。请检查剪贴板权限后重试。尚未部署。",
   },
-  'ai.environment.install.savedStale': {
-    'en-US': "Settings saved, but the environment changed while reading the credential, so no command was generated. Retry to save and copy again.",
-    'zh-CN': "配置已保存，但环境在读取凭据时已发生变化，未生成命令。请重试以重新保存并复制。",
-  },
   'ai.environment.install.uninstallCopied': {
     'en-US': 'Uninstall command copied.',
     'zh-CN': '卸载命令已复制。',
