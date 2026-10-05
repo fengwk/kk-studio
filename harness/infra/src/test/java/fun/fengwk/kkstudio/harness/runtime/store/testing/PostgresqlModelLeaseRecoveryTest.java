@@ -114,7 +114,8 @@ class PostgresqlModelLeaseRecoveryTest {
     ModelInvocation running = findModel(modelId);
     assertEquals(ModelInvocationStatus.RUNNING, running.status());
     assertEquals(2, running.attempt());
-    assertEquals(1, running.failedAttempts().size(), "durable budget survived the instance handoff");
+    assertEquals(
+        1, running.failedAttempts().size(), "durable budget survived the instance handoff");
 
     // 实例 B 的本地执行同样失联；预算已到上限，恢复必须如实 FAILED 而不是再次重试。
     forceLeaseExpired(modelTarget);
@@ -125,16 +126,15 @@ class PostgresqlModelLeaseRecoveryTest {
     ModelInvocation failed = findModel(modelId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
     assertEquals(2, failed.attempt());
-    assertEquals(1, failed.failedAttempts().size(), "exhaustion must not re-charge nor reset attempts");
+    assertEquals(
+        1, failed.failedAttempts().size(), "exhaustion must not re-charge nor reset attempts");
     assertEquals(ProviderErrorKind.TRANSIENT, failed.error().kind());
     assertEquals(0, modelGateway.startCalls(), "recovery must never replay the Provider");
     assertTrue(findWork(modelTarget).isEmpty(), "MODEL work completes on terminal recovery");
     assertTrue(findWork(threadTarget).isPresent(), "exhausted recovery wakes THREAD");
   }
 
-  /**
-   * DISPATCHING 的未确认启动只被计费一次（{@code attempt + 1}），不会重复计费；同样跨实例共享 durable 预算并在耗尽时 FAILED。
-   */
+  /** DISPATCHING 的未确认启动只被计费一次（{@code attempt + 1}），不会重复计费；同样跨实例共享 durable 预算并在耗尽时 FAILED。 */
   @Test
   void expiredDispatchingModelRecoveryChargesUnconfirmedAttemptExactlyOnce() {
     StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
@@ -144,7 +144,8 @@ class PostgresqlModelLeaseRecoveryTest {
 
     InvocationRetryPolicy policy = retryOnce();
     ModelProcessor instanceA = newModelProcessor(policy);
-    assertEquals(ProcessResult.RESCHEDULED, instanceA.process(claimModel(modelId, "a").orElseThrow()));
+    assertEquals(
+        ProcessResult.RESCHEDULED, instanceA.process(claimModel(modelId, "a").orElseThrow()));
 
     ModelInvocation afterA = findModel(modelId);
     assertEquals(ModelInvocationStatus.READY, afterA.status());
@@ -182,18 +183,23 @@ class PostgresqlModelLeaseRecoveryTest {
     WorkTarget modelTarget = new WorkTarget(WorkTargetType.MODEL, modelId);
     requestWork(modelTarget, turn.threadId());
 
-    UUID headBefore = store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId());
+    UUID headBefore =
+        store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId());
     EntryPath before = loadPath(headBefore);
     long entriesBefore = before.entries().size();
 
     ModelProcessor instance = newModelProcessor(retryOnce());
-    assertEquals(ProcessResult.TERMINATED, instance.process(claimModel(modelId, "restart").orElseThrow()));
+    assertEquals(
+        ProcessResult.TERMINATED, instance.process(claimModel(modelId, "restart").orElseThrow()));
 
     ModelInvocation reused = findModel(modelId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, reused.status());
     assertNotNull(reused.resultEntryId());
-    assertEquals(entriesBefore, loadPath(headBefore).entries().size(), "restart must not append entries");
-    assertEquals(headBefore, store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId()));
+    assertEquals(
+        entriesBefore, loadPath(headBefore).entries().size(), "restart must not append entries");
+    assertEquals(
+        headBefore,
+        store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId()));
     assertEquals(0, modelGateway.startCalls(), "committed result must not re-run the Provider");
     assertTrue(findWork(modelTarget).isEmpty());
     assertTrue(findWork(new WorkTarget(WorkTargetType.THREAD, turn.threadId())).isEmpty());
@@ -267,10 +273,8 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.lockThread(turn.threadId()).orElseThrow();
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().markRunning(T3));
+          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
+          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           return null;
         });
     return modelId;
@@ -281,8 +285,7 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.lockThread(turn.threadId()).orElseThrow();
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
+          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
           return null;
         });
     return modelId;
@@ -322,10 +325,8 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.lockThread(turn.threadId()).orElseThrow();
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T4));
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().markRunning(T4));
+          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T4));
+          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().markRunning(T4));
           return null;
         });
   }

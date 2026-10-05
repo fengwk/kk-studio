@@ -56,8 +56,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 真实 PostgreSQL 上的 Tool 租约失联恢复与模型循环续跑验收：失联工具不再执行，只生成如实的错误 tool_result；ThreadProcessor 应用该
- * batch 并要求 {@code continueModel = true}；下一个 claim 真正创建下一轮 ModelInvocation。
+ * 真实 PostgreSQL 上的 Tool 租约失联恢复与模型循环续跑验收：失联工具不再执行，只生成如实的错误 tool_result；ThreadProcessor 应用该 batch 并要求
+ * {@code continueModel = true}；下一个 claim 真正创建下一轮 ModelInvocation。
  */
 class PostgresqlToolLeaseRecoveryContinuationTest {
 
@@ -89,7 +89,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     UUID assistantId =
         store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow().resultEntryId());
     UUID toolId =
-        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId).getFirst().id());
+        store.transaction(
+            tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId).getFirst().id());
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, toolId);
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
     requestWork(toolTarget, turn.threadId());
@@ -97,7 +98,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     // 工具执行持有者失联：不重放，只把 invocation 如实转为 UNKNOWN 并唤醒 ThreadProcessor。
     ToolProcessor toolProcessor = newToolProcessor();
     assertEquals(
-        ProcessResult.TERMINATED, toolProcessor.process(claim(WorkTargetType.TOOL, "tool-a").orElseThrow()));
+        ProcessResult.TERMINATED,
+        toolProcessor.process(claim(WorkTargetType.TOOL, "tool-a").orElseThrow()));
 
     ToolInvocation recovered = findTool(toolId);
     assertEquals(ToolInvocationStatus.UNKNOWN, recovered.status());
@@ -133,11 +135,14 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         (ToolResultMessageContent) toolResults.getFirst().message().contents().getFirst();
     assertTrue(content.error());
     assertTrue(
-        ((TextMessageContent) content.contents().getFirst()).text().contains("cannot be confirmed"));
+        ((TextMessageContent) content.contents().getFirst())
+            .text()
+            .contains("cannot be confirmed"));
     TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
     assertTrue(batchEnd.continueModel());
     assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
+    assertTrue(
+        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
     assertTrue(findWork(threadTarget).isPresent());
 
     // 下一个 claim 真正创建下一轮 ModelInvocation（而不是只留下 TURN_END）。
@@ -147,8 +152,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     UUID continuationEntryId = threadHead(turn.threadId());
     ModelInvocation continuation =
         store
-            .transaction(
-                tx -> tx.findModelInvocationByTurn(turn.threadId(), continuationEntryId))
+            .transaction(tx -> tx.findModelInvocationByTurn(turn.threadId(), continuationEntryId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, continuation.status());
     assertNotEquals(modelId, continuation.id());
@@ -158,7 +162,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private ToolProcessor newToolProcessor() {
     InvocationRetryPolicy policy =
-        new InvocationRetryPolicy(0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
+        new InvocationRetryPolicy(
+            0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
     return new ToolProcessor(
         store,
         toolGateway,
@@ -262,7 +267,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   StoreTestSupport.toolInvocation(
                       toolId, modelId, assistantId, 0, "call-0", ToolInvocationStatus.READY, T3)));
           ToolInvocation ready =
-              tx.lockToolInvocationsByAssistantEntryId(assistantId).getFirst().markApprovalNotRequired(T3);
+              tx.lockToolInvocationsByAssistantEntryId(assistantId)
+                  .getFirst()
+                  .markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(ready));
           ToolInvocation dispatching = ready.beginDispatch(T3);
           tx.updateToolInvocations(List.of(dispatching));
@@ -283,9 +290,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private Optional<ClaimedWork> claim(WorkTargetType type, String token) {
     return store.transaction(
-        tx ->
-            tx.claimNextWork(
-                type, Instant.now().truncatedTo(ChronoUnit.MILLIS), token, LEASE));
+        tx -> tx.claimNextWork(type, Instant.now().truncatedTo(ChronoUnit.MILLIS), token, LEASE));
   }
 
   private ToolInvocation findTool(UUID toolId) {
