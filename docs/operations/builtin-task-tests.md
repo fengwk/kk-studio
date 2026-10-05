@@ -10,14 +10,15 @@
 父 task 调用
   -> 同事务接受源命令、不可变父子关系、join 凭据与 Work
   -> 立即 tool_result {"thread_id":"…","status":"accepted"}
-子执行首次 Idle
-  -> 同事务冻结 receipt、向父入队 CUSTOM_MESSAGE、父重新标为活跃
-  -> 父收到 SystemReminder，内层为 <subagent_result thread_id agent state>
+子执行到达首个终态边界
+  -> 同事务冻结 terminal/final-answer 回执、向父入队 SUBAGENT_RESULT NOTIFICATION
+  -> 父 RUNNABLE 时唤醒；父 STOPPED 时通知只固化进历史
+  -> 父收到内层 <subagent_result thread_id agent state>
 ```
 
-join 保存身份、接受版本、固定回执与交付引用，不复制 prompt/报告/错误，也没有独立状态枚举。
-递归 IDLE 要求本地无工作且全部永久直接孩子 IDLE；未交付 join 数量不决定生命周期。
-显式停止的父只保存 receipt，不自动唤醒；它接受真正新输入时才原子交付旧结果。
+join 保存身份、源命令、冻结的终态/最终回答回执与交付引用，不复制 prompt/报告/错误，也没有独立状态枚举。
+Thread 的空闲只描述自身：等待子 join 不影响父的 `IDLE`，父也不空转模型或保留等待线程。
+父为 `STOPPED` 时完成通知仍持久固化、不唤醒模型；父接受新的任务输入后由 INPUT 一并消费未越过水位的通知。
 
 ## 按层运行
 
@@ -26,10 +27,10 @@ Platform 中的集成测试以及后两组需要 Docker/Testcontainers。
 容器数据库由测试创建，不得替换成部署数据库。测试模型是回显替身，不产生真实模型费用。
 
 ```bash
-# 接受、递归状态、回执、提醒与内存 Store 契约
+# 接受、终态结算、回执与内存 Store 契约
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/runtime -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='HarnessRuntimeJoinAcceptanceTest,ThreadProcessorIdleJoinDeliveryTest,ThreadProcessorSoftBudgetTest,ThreadJoin*Test,HarnessRuntimeStopRecursivePropagationTest,HarnessRuntimeStopIdleTest,InMemoryJoinTest,ModelProcessorTest,SystemReminderTest'
+  -Dtest='HarnessRuntimeJoinAcceptanceTest,ThreadLifecycleCoordinatorJoinTest,ThreadProcessorSoftBudgetTest,ThreadJoin*Test,HarnessRuntimeStopSubtreeTest,HarnessRuntimeStopReplayTest,HarnessRuntimeThreadSemanticsScenarioTest,HarnessRuntimeStopIdleTest,InMemoryJoinTest,ModelProcessorTest,SystemReminderTest'
 
 # 工具解析、即时回执、配置与 Contributor 目录
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/builtin -am test \
@@ -73,7 +74,7 @@ Docker 不可用时的跳过不算数据库事务已验证。
 
 子只持久化不可变 `parent_thread_id`，根与深度从 `findAncestorChain` 派生，不从历史文本或冗余 ROOT
 字段猜测。ROOT payload 不承载运行树元数据。继续委派可立即向忙碌子追加 prompt，按最新 settings
-收敛，下一次真实 Idle 再结算；`busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix`、
+收敛，在下一次 turn 边界消费；`busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix`、
 `resumeCursorConflictRetriesWithFreshSnapshot` 与数据库集成测试固定这条行为。
 
 ## 额度与事务回滚
@@ -89,39 +90,44 @@ Docker 不可用时的跳过不算数据库事务已验证。
 创建子必须附带 join，父与 expected head 一致，父 STOPPED 时拒绝新委派；
 重放不能改写冻结身份、版本、时间、receipt 或 reminder 进度。
 
-## 首次 Idle、receipt 与提醒
+## 首次终态结算、receipt 与提醒
 
-`ThreadProcessorIdleJoinDeliveryTest` 验证首次 Idle 与父入队同事务、多 join 按序交付、
-多层递归状态上溯和 root ticket。`ThreadJoinProjectorTest` 固定源命令的执行边界到 result head
+`ThreadLifecycleCoordinatorJoinTest` 验证源输入未应用时不结算，以及结算后只投递一次。
+`HarnessRuntimeThreadSemanticsScenarioTest`、`HarnessRuntimeStopSubtreeTest` 与 PostgreSQL 委派用例
+覆盖父 `RUNNABLE` 唤醒、父 `STOPPED` 只固化通知及多层委派。
+`ThreadJoinProjectorTest` 固定源命令的执行边界到冻结的 `terminalEntryId` / `finalAnswerEntryId`
 这一历史范围；之后子继续运行不会改写旧 receipt，不拾取旧任务的回答。
 执行前取消、运行失败、STOPPED 部分输出、缺失错误载荷各有独立投影断言。
 `HarnessOneShotServiceTest` 验证无父 root ticket 只读固定 receipt，不用新 thread head 代替结果。
 
 `ThreadJoinCompletionRendererTest` 只生成内层 `<subagent_result>`：
 任务与结果分开，失败有 `<error>` 与可选 `<partial_result>`，XML 特殊字符转义，缺文本有明确占位，
-长正文不截断。外层 USER 角色的 `<system-reminder>` 来自 Runtime 的
-[`SystemReminder`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/SystemReminder.java)，
-由 `SystemReminderTest` 验证；不能把 join renderer 用例当成外层包裹的证据。
-这是 CUSTOM_MESSAGE 的运行时提醒，不是产品 HTTP 面允许提交的普通用户命令。
+长正文不截断。该渲染结果就是 `SUBAGENT_RESULT` `NOTIFICATION` 命令的正文，由
+[`ThreadJoinCompletion`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinCompletion.java)
+构造并冻结，notificationId 由 invocationId 确定性派生，重复交付幂等、不从子最新 head 重建旧结果。
+`SystemReminderTest` 单独覆盖运行时的 system reminder 识别，与 join 交付是两条独立证据链。
+NOTIFICATION 是系统通知，不是产品 HTTP 面允许提交的普通用户输入。
 
-`ThreadProcessorSoftBudgetTest` 固定实际 turn 计数、继续边界的软预算提醒、durable 去重、
-共享 turn 只计一次、compaction/stop 不计数和父停止抑制。
-已经完成且 Idle 的子不会因“刚好到 maxTurns”被开启新 turn；软预算不是硬取消。
+`ThreadProcessorSoftBudgetTest` 固定实际 turn 计数、继续边界的 `TASK_BUDGET` 提醒、durable 去重、
+共享 turn 只计一次、compaction/stop 不计数和停止后不再提醒。
+已经到达终态的子不会因“刚好到 maxTurns”被开启新 turn；软预算不是硬取消。
 
 ## 停止、恢复和删除
 
-`HarnessRuntimeStopRecursivePropagationTest` 验证停止在同事务覆盖全部永久执行后代，
+`HarnessRuntimeStopSubtreeTest` 验证停止在同事务覆盖全部永久执行后代，
 与有无 join 无关；停止中间子只影响其子树，迟到回调被 ownership fence 拒绝。
+`HarnessRuntimeStopReplayTest` 固定同 `stopRequestId` 精确重放返回原回执、不按当前树重算范围。
 `HarnessRuntimeStopIdleTest` 验证 Idle 的 durable STOP barrier，不是按空闲时长自动取消的 watchdog。
 
 `PostgresqlParentStopChildJoinConcurrencyTest` 验证父停止与子终态的真实竞争、
 advisory 树锁阻塞、错误回滚、stale version 零写入和恰一次交付。
-`ThreadJoinDelegationPostgresIntegrationTest` 进一步验证父停止后保留 receipt、真正恢复后只交付一次，
+`ThreadJoinDelegationPostgresIntegrationTest` 进一步验证父停止后结果直接固化、接受新输入不重复交付，
 以及 dispatcher 仅靠 durable Work/Join 在无通知情况下恢复。
 
 `HarnessRuntimeResponseMapperTest`、`StudioHarnessThreadControllerTest`、
-`HarnessOwnerQueryServiceTest` 与 `IssueReconcilerIntegrationTest` 验证 WAITING_CHILDREN/QUEUED
-按递归生命周期投影为 processing，Issue Run 不在子树未收敛时结束。
+`HarnessOwnerQueryServiceTest` 与 `IssueReconcilerIntegrationTest` 验证 Thread 只按自身事实投影
+`executionControl`（`RUNNABLE`/`STOPPED`）与逐 Thread `processing`，不递归子树；Issue Run 只按
+root Join 冻结的终态回执收尾，不等待永久子树收敛。
 `SessionDeletionOrchestratorTest` 和两种 Store 契约验证整树删除及拒绝遗留子或关键 receipt 引用，
 不以静默 CASCADE 掩盖归属错误。树锁顺序是应用协议，数据库不会自动强制所有调用方遵守。
 
