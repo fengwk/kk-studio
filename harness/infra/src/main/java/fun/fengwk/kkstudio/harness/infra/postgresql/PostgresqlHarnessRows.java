@@ -1,8 +1,16 @@
 package fun.fengwk.kkstudio.harness.infra.postgresql;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -25,9 +33,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponse
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
@@ -40,6 +49,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -94,7 +105,8 @@ final class PostgresqlHarnessRows {
               resultSet.getString("creation_request_hash"),
               resultSet.getString("name"),
               resultSet.getBoolean("yolo_enabled"),
-              ThreadLifecycleStatus.valueOf(resultSet.getString("status")),
+              ThreadExecutionControl.valueOf(resultSet.getString("execution_control")),
+              resultSet.getLong("input_through_sequence"),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("version"),
               instant(resultSet, "created_at"),
@@ -109,7 +121,7 @@ final class PostgresqlHarnessRows {
             COMMAND_PAYLOADS.decode(type, resultSet.getString("payload")),
             uuid(resultSet, "idempotency_key"),
             resultSet.getString("request_hash"),
-            nullableUuid(resultSet, "applied_turn_start_entry_id"),
+            nullableUuid(resultSet, "applied_entry_id"),
             nullableUuid(resultSet, "stop_request_id"),
             nullableInstant(resultSet, "cancelled_at"),
             instant(resultSet, "created_at"));
@@ -123,15 +135,71 @@ final class PostgresqlHarnessRows {
               nullableUuid(resultSet, "parent_thread_id"),
               uuid(resultSet, "child_thread_id"),
               resultSet.getLong("source_command_sequence"),
-              resultSet.getLong("after_version"),
               resultSet.getString("agent"),
               (Integer) resultSet.getObject("max_turns"),
               resultSet.getLong("reminder_turn"),
-              (Long) resultSet.getObject("matched_idle_version"),
-              nullableUuid(resultSet, "result_head_entry_id"),
+              nullableUuid(resultSet, "terminal_entry_id"),
+              nullableUuid(resultSet, "final_answer_entry_id"),
               (Long) resultSet.getObject("delivery_command_sequence"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
+
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  static final RowMapper<StoppedThreadReceipt> STOPPED_THREAD_RECEIPT =
+      (resultSet, rowNumber) ->
+          new StoppedThreadReceipt(
+              uuid(resultSet, "thread_id"),
+              uuid(resultSet, "stop_request_id"),
+              nullableUuid(resultSet, "stopped_turn_end_entry_id"),
+              resultSet.getInt("cancelled_command_count"),
+              decodeCancelledInputs(resultSet.getString("cancelled_inputs")));
+
+  static List<CancelledThreadInput> decodeCancelledInputs(String json) {
+    if (json == null) {
+      return List.of();
+    }
+    try {
+      JsonNode root = MAPPER.readTree(json);
+      if (!(root instanceof ArrayNode arrayNode)) {
+        throw new IllegalArgumentException("cancelled_inputs must be a JSON array");
+      }
+      List<CancelledThreadInput> list = new ArrayList<>(arrayNode.size());
+      for (JsonNode item : arrayNode) {
+        long sequence = item.get("sequence").asLong();
+        UUID idempotencyKey = UUID.fromString(item.get("idempotencyKey").asText());
+        ThreadCommandType type = ThreadCommandType.valueOf(item.get("type").asText());
+        JsonNode payloadNode = item.get("payload");
+        String payloadJson = MAPPER.writeValueAsString(payloadNode);
+        ThreadCommandPayload payload = COMMAND_PAYLOADS.decode(type, payloadJson);
+        list.add(new CancelledThreadInput(sequence, idempotencyKey, payload));
+      }
+      return list;
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("malformed cancelled_inputs JSON", error);
+    }
+  }
+
+  static String encodeCancelledInputs(List<CancelledThreadInput> inputs) {
+    ArrayNode arrayNode = NODES.arrayNode();
+    for (CancelledThreadInput input : inputs) {
+      ObjectNode node = arrayNode.addObject();
+      node.put("sequence", input.sequence());
+      node.put("idempotencyKey", input.idempotencyKey().toString());
+      node.put("type", input.payload().type().name());
+      try {
+        node.set("payload", MAPPER.readTree(COMMAND_PAYLOADS.encode(input.payload())));
+      } catch (JsonProcessingException error) {
+        throw new IllegalArgumentException("cannot encode cancelled input payload", error);
+      }
+    }
+    try {
+      return MAPPER.writeValueAsString(arrayNode);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException("cannot encode cancelled_inputs JSON", error);
+    }
+  }
 
   static final RowMapper<ModelInvocation> MODEL_INVOCATION =
       (resultSet, rowNumber) ->

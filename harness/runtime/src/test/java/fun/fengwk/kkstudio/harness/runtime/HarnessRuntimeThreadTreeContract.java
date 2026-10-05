@@ -51,7 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -110,7 +110,9 @@ public abstract class HarnessRuntimeThreadTreeContract {
     assertEquals(tree.rootId(), early.thread().parentThreadId());
     assertEquals(tree.rootId(), child.thread().parentThreadId());
     assertEquals(tree.childId(), grandchild.thread().parentThreadId());
-    assertEquals(ThreadRuntimeStatus.WAITING_CHILDREN, root.runtimeStatus());
+    // 新模型下 runtime status 只由该 Thread 本地上下文投影，绝不聚合后代：Root 自身空闲且无排队命令，故投影 IDLE
+    // （不存在 WAITING_CHILDREN），后代是否活跃不影响祖先投影。
+    assertEquals(ThreadRuntimeStatus.IDLE, root.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.IDLE, early.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.MODEL_RUNNING, child.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.TOOL_WAITING_APPROVAL, grandchild.runtimeStatus());
@@ -255,7 +257,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       rootEntry,
                       "root",
                       T0,
-                      ThreadLifecycleStatus.WAITING_CHILDREN));
+                      ThreadExecutionControl.RUNNABLE));
               tx.insertThread(
                   thread(
                       unrelatedId,
@@ -264,7 +266,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       rootEntry,
                       "other",
                       T0,
-                      ThreadLifecycleStatus.IDLE));
+                      ThreadExecutionControl.RUNNABLE));
               return rootEntry;
             });
     UUID earlyEndId =
@@ -279,7 +281,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       end,
                       "early",
                       T2,
-                      ThreadLifecycleStatus.IDLE));
+                      ThreadExecutionControl.RUNNABLE));
               return end;
             });
     // 每次种子事务只写一个后代，避免 Thread/Model/Tool 锁序跨节点倒退。
@@ -324,7 +326,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID startId = tx.nextId();
     tx.insertEntry(turnStartEntry(startId, sessionId, rootId, T1, threadId));
     tx.insertThread(
-        thread(threadId, sessionId, parentId, startId, "child", T1, ThreadLifecycleStatus.ACTIVE));
+        thread(
+            threadId, sessionId, parentId, startId, "child", T1, ThreadExecutionControl.RUNNABLE));
     UUID modelId = tx.nextId();
     ModelInvocation model = modelInvocation(modelId, threadId, startId, startId, T1);
     tx.insertModelInvocation(model);
@@ -345,7 +348,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     ProviderResponse response = responseWithToolCalls("call-1");
     tx.insertEntry(mappedAssistantEntry(assistantId, sessionId, userId, T1, request, response));
     ThreadState thread =
-        thread(threadId, sessionId, parentId, startId, "grand", T1, ThreadLifecycleStatus.ACTIVE);
+        thread(
+            threadId, sessionId, parentId, startId, "grand", T1, ThreadExecutionControl.RUNNABLE);
     tx.insertThread(thread);
     UUID modelId = tx.nextId();
     ModelInvocation model =
@@ -592,7 +596,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
 
   private static ThreadState idle(
       UUID id, UUID sessionId, UUID parentId, UUID headId, String name, Instant createdAt) {
-    return thread(id, sessionId, parentId, headId, name, createdAt, ThreadLifecycleStatus.IDLE);
+    return thread(
+        id, sessionId, parentId, headId, name, createdAt, ThreadExecutionControl.RUNNABLE);
   }
 
   private static ThreadState thread(
@@ -602,7 +607,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
       UUID headId,
       String name,
       Instant createdAt,
-      ThreadLifecycleStatus status) {
+      ThreadExecutionControl executionControl) {
     return new ThreadState(
         id,
         sessionId,
@@ -611,7 +616,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
         CREATION_REQUEST_HASH,
         name,
         false,
-        status,
+        executionControl,
+        0L,
         1,
         0,
         createdAt,

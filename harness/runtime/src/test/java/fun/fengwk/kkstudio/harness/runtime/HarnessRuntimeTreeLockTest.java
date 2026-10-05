@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.lang.reflect.Proxy;
@@ -337,7 +337,8 @@ class HarnessRuntimeTreeLockTest {
                   CREATION_REQUEST_HASH,
                   "child-branch",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   now,
@@ -572,7 +573,8 @@ class HarnessRuntimeTreeLockTest {
                   CREATION_REQUEST_HASH,
                   "main",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   now,

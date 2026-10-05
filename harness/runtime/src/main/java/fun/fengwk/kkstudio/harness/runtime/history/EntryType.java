@@ -21,7 +21,9 @@ public enum EntryType {
   /** 自动压缩（compaction）turn 的摘要结果：仅出现在 COMPACTION turn 的 assistant result 位置。 */
   COMPACTION,
   /** 一次 Model response turn 的关闭结果与 continuation obligation。 */
-  TURN_END;
+  TURN_END,
+  /** 系统通知 Entry：可位于回合之间或 INPUT 输入段，对模型是上下文，不提升权限。 */
+  NOTIFICATION;
 
   /** 是否为 Session Tree 的语义根。 */
   public boolean isRoot() {

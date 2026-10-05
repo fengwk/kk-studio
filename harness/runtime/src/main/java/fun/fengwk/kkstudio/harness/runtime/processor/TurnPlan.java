@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -17,8 +18,11 @@ import java.util.UUID;
  * <p>{@code candidatePath} 是 source path + candidate Entries 的完整合法 root-to-head 链（candidate Entry
  * 已分配 稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；提交事务必须重新校验
  * source head / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交；Thread YOLO 始终以第二事务锁到的当前值 为准，不进入
- * plan。{@code preparation} 非空当且仅当 {@code reason == COMPACTION}：压缩 turn 的切分事实由纯 planner 在 plan
- * 事务内冻结，Resolver 与 ResolvedRequestValidator 据此构造并严格校验压缩请求。
+ * plan。{@code preparation} 非空当且仅当 {@code reason == COMPACTION}。
+ *
+ * <p>{@code cutoffSequence} 是本次 INPUT / CONTINUATION 冻结的已接受序列上界（{@code nextCommandSequence - 1}）；
+ * {@code appliedEntryIds} 给出每条已消费 Command 的物化坐标：用户输入/配置引用 TURN_START，系统通知引用自身 NOTIFICATION Entry。
+ * 提交时同一事务把该坐标写入 Command、推进 head、输入水位与 Invocation。
  */
 record TurnPlan(
     UUID threadId,
@@ -27,6 +31,7 @@ record TurnPlan(
     long cutoffSequence,
     List<ThreadCommand> plannedCommands,
     List<ThreadCommand> consumedCommands,
+    Map<Long, UUID> appliedEntryIds,
     List<Entry> candidateEntries,
     EntryPath candidatePath,
     UUID turnStartEntryId,
@@ -43,6 +48,7 @@ record TurnPlan(
     }
     plannedCommands = List.copyOf(plannedCommands);
     consumedCommands = List.copyOf(consumedCommands);
+    appliedEntryIds = Map.copyOf(appliedEntryIds);
     candidateEntries = List.copyOf(candidateEntries);
     candidatePath = Objects.requireNonNull(candidatePath, "candidatePath");
     Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
@@ -54,10 +60,16 @@ record TurnPlan(
     }
   }
 
-  /** continuation/compaction 保留的真实 user-like 命令仍 queued 时需要一次显式 THREAD wake。 */
+  /** 取该 sequence 已消费 Command 的物化坐标；未被消费返回 null。 */
+  UUID appliedEntryId(long sequence) {
+    return appliedEntryIds.get(sequence);
+  }
+
+  /** continuation/compaction 保留的真实输入命令（user-like 或通知）仍 queued 时需要一次显式 THREAD wake。 */
   boolean hasDeferredUserMessages() {
     for (ThreadCommand command : plannedCommands) {
-      if (command.type().isMessage() && !consumedCommands.contains(command)) {
+      if ((command.type().isMessage() || command.type().isNotification())
+          && !consumedCommands.contains(command)) {
         return true;
       }
     }

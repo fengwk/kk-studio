@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -23,7 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -257,6 +258,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
     final Map<UUID, ModelInvocation> modelInvocations = new HashMap<>();
     final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
     final Map<UUID, ThreadJoin> joins = new HashMap<>();
+    final Map<StopReceiptKey, StoppedThreadReceipt> stopReceipts = new HashMap<>();
+    final Map<UUID, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
     long nextId;
 
@@ -269,11 +272,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
       copy.modelInvocations.putAll(source.modelInvocations);
       copy.toolInvocations.putAll(source.toolInvocations);
       copy.joins.putAll(source.joins);
+      copy.stopReceipts.putAll(source.stopReceipts);
+      copy.stopReceiptsByRoot.putAll(source.stopReceiptsByRoot);
       copy.works.putAll(source.works);
       copy.nextId = source.nextId;
       return copy;
     }
   }
+
+  /** Stop 回执身份 {@code (threadId, stopRequestId)}。 */
+  private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
 
   /** 行锁 key，用于每个 transaction 的 update tracking。 */
   private enum LockRank {
@@ -856,15 +864,12 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion) {
+    public List<ThreadJoin> loadIncompleteJoins(UUID childThreadId) {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
       return state.joins.values().stream()
           .filter(
-              join ->
-                  join.childThreadId().equals(childThreadId)
-                      && join.matchedIdleVersion() == null
-                      && join.afterVersion() < idleVersion)
+              join -> join.childThreadId().equals(childThreadId) && !join.matched())
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -879,7 +884,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
           .filter(
               join ->
                   parentThreadId.equals(join.parentThreadId())
-                      && join.matchedIdleVersion() != null
+                      && join.matched()
                       && join.deliveryCommandSequence() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
@@ -888,15 +893,14 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public int countActiveChildren(UUID parentThreadId) {
+    public int countIncompleteChildJoins(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
       return (int)
-          state.threads.values().stream()
+          state.joins.values().stream()
               .filter(
-                  thread ->
-                      parentThreadId.equals(thread.parentThreadId())
-                          && thread.status() != ThreadLifecycleStatus.IDLE)
+                  join ->
+                      parentThreadId.equals(join.parentThreadId()) && !join.matched())
               .count();
     }
 
@@ -915,15 +919,72 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public int countActiveSubagentThreads() {
+    public int countIncompleteSubagentJoins() {
       checkOpen();
       return (int)
-          state.threads.values().stream()
-              .filter(
-                  thread ->
-                      thread.parentThreadId() != null
-                          && thread.status() != ThreadLifecycleStatus.IDLE)
+          state.joins.values().stream()
+              .filter(join -> join.parentThreadId() != null && !join.matched())
               .count();
+    }
+
+    @Override
+    public void insertStopReceipts(UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
+      checkOpen();
+      Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+      Objects.requireNonNull(receipts, "receipts");
+      if (receipts.isEmpty()) {
+        throw new IllegalArgumentException("stop receipts must not be empty");
+      }
+      List<StopReceiptKey> keys = new ArrayList<>(receipts.size());
+      for (StoppedThreadReceipt receipt : receipts) {
+        requireLocked(LockKey.thread(receipt.threadId()));
+        StopReceiptKey key = new StopReceiptKey(receipt.threadId(), receipt.stopRequestId());
+        if (state.stopReceipts.containsKey(key)) {
+          throw new IllegalArgumentException("stop receipt already exists: " + key);
+        }
+        if (receipt.stoppedTurnEndEntryId() != null) {
+          requireExistingEntry(receipt.stoppedTurnEndEntryId());
+        }
+        keys.add(key);
+      }
+      for (int i = 0; i < receipts.size(); i++) {
+        state.stopReceipts.put(keys.get(i), receipts.get(i));
+      }
+      state.stopReceiptsByRoot
+          .computeIfAbsent(rootStopRequestId, ignored -> new ArrayList<>())
+          .addAll(keys);
+    }
+
+    @Override
+    public Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(stopRequestId, "stopRequestId");
+      return Optional.ofNullable(state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)));
+    }
+
+    @Override
+    public List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.stopReceipts.values().stream()
+          .filter(receipt -> receipt.threadId().equals(threadId))
+          .toList();
+    }
+
+    @Override
+    public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(UUID rootStopRequestId) {
+      checkOpen();
+      Objects.requireNonNull(rootStopRequestId, "rootStopRequestId");
+      List<StopReceiptKey> keys = state.stopReceiptsByRoot.get(rootStopRequestId);
+      if (keys == null) {
+        return List.of();
+      }
+      return keys.stream()
+          .map(state.stopReceipts::get)
+          .sorted(
+              Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR))
+          .toList();
     }
 
     @Override
@@ -938,8 +999,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .orElseThrow(
                   () -> new IllegalArgumentException("join not found: " + join.invocationId()));
       ThreadJoin.validateTransition(old, join);
-      if (join.resultHeadEntryId() != null) {
-        requireExistingEntry(join.resultHeadEntryId());
+      if (join.terminalEntryId() != null) {
+        requireExistingEntry(join.terminalEntryId());
+      }
+      if (join.finalAnswerEntryId() != null) {
+        requireExistingEntry(join.finalAnswerEntryId());
       }
       if (join.deliveryCommandSequence() != null) {
         if (join.parentThreadId() == null) {

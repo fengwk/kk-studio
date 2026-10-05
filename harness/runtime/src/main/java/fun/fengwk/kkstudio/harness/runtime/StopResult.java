@@ -4,43 +4,18 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 不可变 Stop 结果。
  *
- * <p>{@code replayed=true} 表示重放了一次先前 Stop 的 durable receipt（live receipt：本 Thread 拥有并关闭的 TURN_END 的
- * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code stopRequestId} 的已取消
- * Command），本次调用不写任何 marker、不触碰 version。{@code stoppedTurnEndEntryId} 在本次 Stop 写下本 Thread 自己的停止边界时非
- * null ——包括关闭 live Turn 的 TURN_END 与 idle Stop 写入的 STOP barrier Turn 的 TURN_END。open Turn 属于其它
- * Thread 的共享历史时本 Thread 没有自己的停止边界可写（所有权各自独立），此时该字段为 null。{@code thread} 始终是当前 Thread
- * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的真实用户输入（SET_* 与运行时提醒不返回）。
+ * <p>{@code replayed=true} 表示重放了一次先前 Stop 的持久回执，本次调用不写任何 marker、不触碰 version；{@code
+ * stoppedThreads} 直接来自持久保存的旧范围，不以当前树重算。首次 Stop 时 {@code stoppedThreads} 包含本次完整受影响集合（请求目标
+ * 加上全部后代）。{@code thread} 始终是请求目标的当前权威投影。
  */
-public record StopResult(
-    boolean replayed,
-    ThreadState thread,
-    UUID stoppedTurnEndEntryId,
-    int cancelledCommandCount,
-    List<CancelledUserMessage> cancelledUserMessages) {
+public record StopResult(boolean replayed, ThreadState thread, List<StoppedThreadReceipt> stoppedThreads) {
 
   public StopResult {
     thread = Objects.requireNonNull(thread, "thread");
-    if (cancelledCommandCount < 0) {
-      throw new IllegalArgumentException("cancelledCommandCount must not be negative");
-    }
-    cancelledUserMessages =
-        List.copyOf(Objects.requireNonNull(cancelledUserMessages, "cancelledUserMessages"));
-    long previous = 0L;
-    for (CancelledUserMessage message : cancelledUserMessages) {
-      if (message.sequence() <= previous) {
-        throw new IllegalArgumentException(
-            "cancelledUserMessages sequences must be strictly increasing");
-      }
-      previous = message.sequence();
-    }
-    if (cancelledUserMessages.size() > cancelledCommandCount) {
-      throw new IllegalArgumentException(
-          "cancelledUserMessages count must not exceed cancelledCommandCount");
-    }
+    stoppedThreads = List.copyOf(Objects.requireNonNull(stoppedThreads, "stoppedThreads"));
   }
 }

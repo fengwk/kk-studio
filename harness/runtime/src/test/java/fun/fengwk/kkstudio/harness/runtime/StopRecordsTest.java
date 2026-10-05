@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
@@ -22,7 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.lang.reflect.Modifier;
@@ -46,7 +47,7 @@ class StopRecordsTest {
           CREATION_REQUEST_HASH,
           "main",
           false,
-          ThreadLifecycleStatus.ACTIVE,
+          ThreadExecutionControl.RUNNABLE,
           1,
           0,
           Instant.ofEpochMilli(1),
@@ -92,19 +93,19 @@ class StopRecordsTest {
     StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
     assertFalse(queuedOnlyReceipt.replayed());
     assertEquals(THREAD, queuedOnlyReceipt.thread());
-    assertNull(queuedOnlyReceipt.stoppedTurnEndEntryId());
-    assertEquals(0, queuedOnlyReceipt.cancelledCommandCount());
+    assertNull(targetReceipt(queuedOnlyReceipt).stoppedTurnEndEntryId());
+    assertEquals(0, targetReceipt(queuedOnlyReceipt).cancelledCommandCount());
 
     StopResult stopped = new StopResult(false, THREAD, id(3L), 2, List.of());
     assertFalse(stopped.replayed());
-    assertEquals(id(3L), stopped.stoppedTurnEndEntryId());
-    assertEquals(2, stopped.cancelledCommandCount());
+    assertEquals(id(3L), targetReceipt(stopped).stoppedTurnEndEntryId());
+    assertEquals(2, targetReceipt(stopped).cancelledCommandCount());
 
     // live receipt replay：replayed=true 且 stoppedTurnEndEntryId 非 null（queued-only replay 则可为
     // null）。
     StopResult replayed = new StopResult(true, THREAD, id(3L), 0, List.of());
     assertTrue(replayed.replayed());
-    assertEquals(id(3L), replayed.stoppedTurnEndEntryId());
+    assertEquals(id(3L), targetReceipt(replayed).stoppedTurnEndEntryId());
   }
 
   @Test

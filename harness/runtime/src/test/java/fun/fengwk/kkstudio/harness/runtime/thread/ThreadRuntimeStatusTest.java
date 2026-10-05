@@ -190,18 +190,18 @@ class ThreadRuntimeStatusTest {
   }
 
   @Test
-  void onlyIdleIsNotProcessing() {
-    // processing 是 status 的稳定派生，不再由调用方比较 magic string；除 IDLE 外（含 QUEUED 和 WAITING_CHILDREN）均为 true。
+  void onlyIdleAndStoppedAreNotProcessing() {
+    // processing 是 status 的稳定派生；IDLE 与 STOPPED 为 false，其余（含 QUEUED 与各本地阶段）为 true。
     for (ThreadRuntimeStatus status : ThreadRuntimeStatus.values()) {
-      if (status == ThreadRuntimeStatus.IDLE) {
-        assertFalse(status.isProcessing());
+      if (status == ThreadRuntimeStatus.IDLE || status == ThreadRuntimeStatus.STOPPED) {
+        assertFalse(status.isProcessing(), status.name());
       } else {
         assertTrue(status.isProcessing(), status.name());
       }
     }
     assertFalse(ThreadRuntimeStatus.IDLE.isProcessing());
+    assertFalse(ThreadRuntimeStatus.STOPPED.isProcessing());
     assertTrue(ThreadRuntimeStatus.QUEUED.isProcessing());
-    assertTrue(ThreadRuntimeStatus.WAITING_CHILDREN.isProcessing());
   }
 
   private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {

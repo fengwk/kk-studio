@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
 import java.nio.charset.StandardCharsets;
@@ -19,6 +21,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 5 类 typed Thread command payload 的严格、确定性 JSON codec。
@@ -43,6 +46,11 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
+  private static final Set<String> NOTIFICATION_FIELDS =
+      orderedSet("notificationId", "kind", "sourceThreadId", "message");
+  private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
+  private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
+      orderedSet("contributorId", "customType", "schemaVersion", "data");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -124,6 +132,8 @@ public final class ThreadCommandPayloadJsonCodec {
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
+      case NOTIFICATION -> decodeNotification(root);
+      case SET_CONTRIBUTOR_STATE -> decodeSetContributorState(root);
     };
   }
 
@@ -176,7 +186,29 @@ public final class ThreadCommandPayloadJsonCodec {
         }
         yield node;
       }
+      case NotificationCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        node.put("notificationId", value.notificationId().toString());
+        node.put("kind", value.kind().name());
+        node.put("sourceThreadId", value.sourceThreadId().toString());
+        node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
+        yield node;
+      }
+      case SetContributorStateCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        node.set("state", encodeContributorState(value.state()));
+        yield node;
+      }
     };
+  }
+
+  private static ObjectNode encodeContributorState(CustomEntryPayload state) {
+    ObjectNode node = NODES.objectNode();
+    node.put("contributorId", state.contributorId());
+    node.put("customType", state.customType());
+    node.put("schemaVersion", state.schemaVersion());
+    node.set("data", parseCanonicalObject(state.dataJson(), "state.data"));
+    return node;
   }
 
   private static ObjectNode encodeModelSelection(ModelSelection selection) {
@@ -261,6 +293,63 @@ public final class ThreadCommandPayloadJsonCodec {
         canonicalText(node, "variant", "SET_MODEL.model"));
   }
 
+  private static NotificationCommandPayload decodeNotification(JsonNode value) {
+    ObjectNode node = requireObject(value, "NOTIFICATION");
+    requireExactFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
+    return new NotificationCommandPayload(
+        requiredUuid(node, "notificationId", "NOTIFICATION"),
+        requiredNotificationKind(node, "kind", "NOTIFICATION"),
+        requiredUuid(node, "sourceThreadId", "NOTIFICATION"),
+        MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static SetContributorStateCommandPayload decodeSetContributorState(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_CONTRIBUTOR_STATE");
+    requireExactFields(node, SET_CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE");
+    ObjectNode state = requireObject(node.get("state"), "SET_CONTRIBUTOR_STATE.state");
+    requireExactFields(state, CONTRIBUTOR_STATE_FIELDS, "SET_CONTRIBUTOR_STATE.state");
+    return new SetContributorStateCommandPayload(
+        new CustomEntryPayload(
+            canonicalText(state, "contributorId", "SET_CONTRIBUTOR_STATE.state"),
+            canonicalText(state, "customType", "SET_CONTRIBUTOR_STATE.state"),
+            requiredNonNegativeInt(state, "schemaVersion", "SET_CONTRIBUTOR_STATE.state"),
+            write(requireObject(state.get("data"), "SET_CONTRIBUTOR_STATE.state.data"))));
+  }
+
+  private static UUID requiredUuid(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be a UUID string");
+    }
+    try {
+      return UUID.fromString(value.textValue());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + " must be a UUID string", error);
+    }
+  }
+
+  private static NotificationKind requiredNotificationKind(
+      ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be a notification kind");
+    }
+    try {
+      return NotificationKind.valueOf(value.textValue());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a notification kind", error);
+    }
+  }
+
+  private static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.canConvertToInt() || value.intValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
   // ---------- 通用工具方法 ----------
 
   private static String write(ObjectNode node) {
@@ -269,6 +358,20 @@ public final class ThreadCommandPayloadJsonCodec {
     } catch (JsonProcessingException error) {
       throw new IllegalStateException("cannot encode thread command payload JSON", error);
     }
+  }
+
+  /** 解析已经是 canonical 形态的 dataJson 为 object 节点；{@link CustomEntryPayload} 保证其合法性。 */
+  private static JsonNode parseCanonicalObject(String json, String context) {
+    JsonNode node;
+    try {
+      node = MAPPER.readTree(json);
+    } catch (JsonProcessingException error) {
+      throw new IllegalArgumentException(context + " must contain JSON", error);
+    }
+    if (node == null || !node.isObject()) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return node;
   }
 
   private static ObjectNode requireObject(JsonNode value, String context) {

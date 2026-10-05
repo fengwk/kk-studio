@@ -223,7 +223,7 @@ public final class ThreadProcessor {
     return switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
-        boolean hasQueuedMessage = hasQueuedUserMessage(tx.loadQueuedCommands(thread.id()));
+        boolean hasQueuedMessage = hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
         ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
         if (locked == null) {
           throw new ClaimLostSignal();
@@ -271,14 +271,14 @@ public final class ThreadProcessor {
         }
         // 压缩判断完成后，已关闭 turn 是安全边界：有序消费到第一条 user-like，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
-        if (hasQueuedUserMessage(tx.loadQueuedCommands(thread.id()))) {
+        if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
         yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
       }
       case ThreadContext.IdleOrHistorical ignored -> {
         List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-        boolean userDemand = hasQueuedUserMessage(queued);
+        boolean userDemand = hasQueuedDemand(queued);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
             automaticCompactionPlanner.plan(
@@ -289,17 +289,16 @@ public final class ThreadProcessor {
         if (userDemand) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
-        coordinator.propagateIdle(tx, thread, now);
         completeClaim(tx, claim, now);
         yield null;
       }
     };
   }
 
-  /** queued 快照中是否存在 user-like 输入（USER_MESSAGE 或 USER CUSTOM_MESSAGE）；SET_* 不构成 turn 需求。 */
-  private static boolean hasQueuedUserMessage(List<ThreadCommand> queued) {
+  /** queued 快照中是否存在需要驱动 turn 的输入（USER_MESSAGE、USER CUSTOM_MESSAGE 或系统 NOTIFICATION）；SET_* 不构成 turn 需求。 */
+  private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
-      if (command.type().isMessage()) {
+      if (command.type().isMessage() || command.type().isNotification()) {
         return true;
       }
     }
@@ -401,14 +400,20 @@ public final class ThreadProcessor {
     UUID head = resultEntryId;
     boolean toolPhase = false;
     boolean continueModel = false;
+    boolean terminal = false;
+    UUID finalAnswerEntryId = null;
     List<ToolInvocation> invocations = List.of();
     if (succeeded) {
       // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
       ModelResponsePlan plan = responsePlanner.plan(response, model.requestSpec().toolBindings());
       switch (plan) {
-        case ModelResponsePlan.Completed ignored -> head =
-            appendCompletedTurnEnd(
-                tx, sessionId, resultEntryId, model.turnStartEntryId(), false, mutationNow);
+        case ModelResponsePlan.Completed ignored -> {
+          terminal = true;
+          finalAnswerEntryId = resultEntryId;
+          head =
+              appendCompletedTurnEnd(
+                  tx, sessionId, resultEntryId, model.turnStartEntryId(), false, mutationNow);
+        }
         case ModelResponsePlan.Continue ignored -> {
           // 上游协议要求立即续写：本 turn 以 COMPLETED + continueModel=true 关闭，下一 claim 由既有 durable
           // continuation 机制启动下一轮模型调用（不在此处复制 continuation 逻辑）。
@@ -418,6 +423,7 @@ public final class ThreadProcessor {
                   tx, sessionId, resultEntryId, model.turnStartEntryId(), true, mutationNow);
         }
         case ModelResponsePlan.Failed failed -> {
+          terminal = true;
           UUID turnEndId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -475,6 +481,7 @@ public final class ThreadProcessor {
         }
       }
     } else {
+      terminal = true;
       UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -499,26 +506,26 @@ public final class ThreadProcessor {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
-      // 完全结束的 closed turn 只重建 queued user / fallback / hard-overflow obligation；soft threshold
+      // 完全结束的 closed turn 只重建 queued demand / fallback / hard-overflow obligation；soft threshold
       // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
       // obligation 并启动续写。
+      advancedThread = thread.advanceHead(head, mutationNow);
       boolean compactionDue =
           automaticCompactionPlanner.plan(
-                  thread.advanceHead(head, mutationNow),
+                  advancedThread,
                   tx.loadEntryPath(head),
                   config.compactionProvider().compactionConfig(),
                   hasQueuedMessage)
               != null;
       requestThread = continueModel || hasQueuedMessage || compactionDue;
-      if (requestThread) {
-        advancedThread = thread.advanceHead(head, mutationNow);
-        tx.updateThread(advancedThread);
-        if (continueModel) {
-          EntryPath updatedPath = tx.loadEntryPath(head);
-          coordinator.remindSoftBudgetIfDue(tx, advancedThread, updatedPath, mutationNow);
-        }
-      } else {
-        advancedThread = coordinator.advanceHeadAndPropagateIdle(tx, thread, head, mutationNow);
+      tx.updateThread(advancedThread);
+      if (continueModel) {
+        coordinator.remindSoftBudgetIfDue(tx, advancedThread, tx.loadEntryPath(head), mutationNow);
+      }
+      if (terminal) {
+        // 执行终止边界：首次最终回答 / 不可继续失败与 Join 冻结、父通知接受原子提交。
+        ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+            tx, advancedThread, head, finalAnswerEntryId, mutationNow, false);
       }
     }
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
@@ -579,7 +586,7 @@ public final class ThreadProcessor {
       CompactionStart start,
       Instant mutationNow,
       Instant workNow,
-      boolean hasQueuedUserMessage) {
+      boolean hasQueuedDemand) {
     UUID sessionId = path.root().sessionId();
     EntryPayload resultPayload;
     TurnEndOutcome outcome;
@@ -625,20 +632,15 @@ public final class ThreadProcessor {
                 thread.advanceHead(turnEndId, mutationNow),
                 tx.loadEntryPath(turnEndId),
                 config.compactionProvider().compactionConfig(),
-                hasQueuedUserMessage)
+                hasQueuedDemand)
             != null;
     boolean mechanicalWake = outcome == TurnEndOutcome.COMPLETED && continueModel;
-    boolean requestThread = hasQueuedUserMessage || compactionDue || mechanicalWake;
-    ThreadState advanced;
-    if (requestThread) {
-      advanced = thread.advanceHead(turnEndId, mutationNow);
-      tx.updateThread(advanced);
-      if (mechanicalWake) {
-        EntryPath updatedPath = tx.loadEntryPath(turnEndId);
-        coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
-      }
-    } else {
-      advanced = coordinator.advanceHeadAndPropagateIdle(tx, thread, turnEndId, mutationNow);
+    boolean requestThread = hasQueuedDemand || compactionDue || mechanicalWake;
+    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+    tx.updateThread(advanced);
+    if (mechanicalWake) {
+      EntryPath updatedPath = tx.loadEntryPath(turnEndId);
+      coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
     }
     if (tx.lockClaimedWork(claim, workNow).isEmpty()) {
       throw new ClaimLostSignal();
@@ -759,7 +761,15 @@ public final class ThreadProcessor {
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     Instant planNow = HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
-    return planBuilder.build(thread.id(), path, reason, queued, tx::nextId, planNow, preparation);
+    return planBuilder.build(
+        thread.id(),
+        path,
+        reason,
+        queued,
+        thread.nextCommandSequence() - 1,
+        tx::nextId,
+        planNow,
+        preparation);
   }
 
   /**
@@ -848,12 +858,14 @@ public final class ThreadProcessor {
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
-      consumed.add(command.markApplied(plan.turnStartEntryId()));
+      consumed.add(command.markApplied(plan.appliedEntryId(command.sequence())));
     }
     tx.updateCommands(consumed);
     UUID invocationId = null;
     if (result instanceof TurnResolver.Resolved resolved) {
-      ThreadState advanced = thread.advanceHead(plan.candidateHeadEntryId(), mutationNow);
+      ThreadState advanced =
+          thread.advanceHeadAndInputThroughSequence(
+              plan.candidateHeadEntryId(), nextWatermark(plan, thread), mutationNow);
       tx.updateThread(advanced);
       invocationId = tx.nextId();
       tx.insertModelInvocation(
@@ -906,13 +918,12 @@ public final class ThreadProcessor {
                   deferredUserDemand)
               != null;
       boolean requestThread = deferredUserDemand || compactionDue;
-      ThreadState advanced;
-      if (requestThread) {
-        advanced = thread.advanceHead(turnEndId, mutationNow);
-        tx.updateThread(advanced);
-      } else {
-        advanced = coordinator.advanceHeadAndPropagateIdle(tx, thread, turnEndId, mutationNow);
-      }
+      ThreadState advanced =
+          thread.advanceHeadAndInputThroughSequence(turnEndId, nextWatermark(plan, thread), mutationNow);
+      tx.updateThread(advanced);
+      // Rejected 是源输入的不可继续失败：执行终止边界结算本次 Join。
+      ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+          tx, advanced, turnEndId, null, mutationNow, false);
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
@@ -939,6 +950,16 @@ public final class ThreadProcessor {
    */
   static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
     return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+  }
+
+  /**
+   * INPUT / CONTINUATION 把输入水位推进到冻结 cutoff；COMPACTION 不推进水位，保留尚待处理通知的原始尾部。
+   */
+  private static long nextWatermark(TurnPlan plan, ThreadState thread) {
+    if (plan.reason() == TurnStartReason.COMPACTION) {
+      return thread.inputThroughSequence();
+    }
+    return plan.cutoffSequence();
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */

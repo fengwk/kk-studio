@@ -57,7 +57,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -449,7 +449,7 @@ final class HarnessRuntimeTestSupport {
 
   /** {@code ask_user} TOOL baseline：默认根 Thread、IDLE 状态与标准冻结问卷。 */
   static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
-    return seedAskUserBaseline(store, null, ThreadLifecycleStatus.IDLE, ASK_USER_QUESTIONNAIRE);
+    return seedAskUserBaseline(store, null, ThreadExecutionControl.RUNNABLE, ASK_USER_QUESTIONNAIRE);
   }
 
   /**
@@ -462,7 +462,7 @@ final class HarnessRuntimeTestSupport {
   static ToolBaseline seedAskUserBaseline(
       InMemoryHarnessStore store,
       UUID parentThreadId,
-      ThreadLifecycleStatus status,
+      ThreadExecutionControl status,
       String argumentsJson) {
     return store.transaction(
         tx -> {
@@ -483,6 +483,7 @@ final class HarnessRuntimeTestSupport {
                   "main",
                   false,
                   status,
+                  0L,
                   1,
                   0,
                   T0,
@@ -797,7 +798,8 @@ final class HarnessRuntimeTestSupport {
                   CREATION_REQUEST_HASH,
                   "parent",
                   false,
-                  ThreadLifecycleStatus.WAITING_CHILDREN,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1,
                   0,
                   T0,
@@ -1043,7 +1045,8 @@ final class HarnessRuntimeTestSupport {
         CREATION_REQUEST_HASH,
         name,
         yoloEnabled,
-        ThreadLifecycleStatus.IDLE,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
         1,
         0,
         T0,
@@ -1317,10 +1320,18 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** Stop 结果为 STOPPED（非 replay，且落盘了 STOPPED TURN_END）。 */
+  /** Stop 结果为 STOPPED（非 replay，且返回了请求目标自己的持久回执）。 */
   static void assertStopped(StopResult result) {
     assertFalse(result.replayed());
-    assertNotNull(result.stoppedTurnEndEntryId());
+    assertNotNull(targetReceipt(result));
+  }
+
+  /** 从 StopResult 取出请求目标自己的回执；缺失视为不变量破损。 */
+  static StoppedThreadReceipt targetReceipt(StopResult result) {
+    return result.stoppedThreads().stream()
+        .filter(receipt -> receipt.threadId().equals(result.thread().id()))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("target stop receipt missing"));
   }
 
   /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */

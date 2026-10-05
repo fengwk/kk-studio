@@ -53,7 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -97,9 +97,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task start")));
     requestThreadWork(fixture.store, childId);
@@ -115,7 +116,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   1L,
-                  0L,
                   "test-agent",
                   2,
                   0L,
@@ -199,11 +199,11 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     // 关闭已消费提醒的 INPUT：队列为空，子线程进入 IDLE，并向父线程交付一次。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
     ThreadState finalChildState = thread(fixture.store, childId);
-    assertEquals(ThreadLifecycleStatus.IDLE, finalChildState.status());
+    assertEquals(ThreadExecutionControl.RUNNABLE, finalChildState.executionControl());
 
     ThreadJoin finalJoin = fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
     assertTrue(finalJoin.matched());
-    assertEquals(finalChildState.headEntryId(), finalJoin.resultHeadEntryId());
+    assertEquals(finalChildState.headEntryId(), finalJoin.terminalEntryId());
     assertEquals(1, countReminders(path(fixture.store, childId)));
   }
 
@@ -215,9 +215,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID rootEntryId = createRootEntry(fixture.store, sessionId);
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task")));
     requestThreadWork(fixture.store, childId);
     UUID invocationId = UUID.randomUUID();
@@ -241,7 +242,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertTrue(loadQueuedCommands(fixture.store, childId).isEmpty());
     assertEquals(reminderTurn, join(fixture, invocationId).reminderTurn());
     assertEquals(first.idempotencyKey(), appliedReminder(fixture, childId).idempotencyKey());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(fixture.store, childId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(fixture.store, childId).executionControl());
     assertEquals(1, countReminders(path(fixture.store, childId)));
     assertTrue(loadQueuedCommands(fixture.store, childId).isEmpty());
   }
@@ -256,9 +258,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("instant task")));
     requestThreadWork(fixture.store, childId);
@@ -274,7 +277,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   1L,
-                  0L,
                   "instant-agent",
                   1,
                   0L,
@@ -300,7 +302,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
 
     ThreadState childState = thread(fixture.store, childId);
-    assertEquals(ThreadLifecycleStatus.IDLE, childState.status());
+    assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
 
     List<ThreadCommand> queued = loadQueuedCommands(fixture.store, childId);
     assertTrue(queued.isEmpty());
@@ -319,9 +321,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task")));
     requestThreadWork(fixture.store, childId);
@@ -337,7 +340,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   1L,
-                  0L,
                   "test-agent",
                   1,
                   0L,
@@ -400,9 +402,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     // 放入两条命令
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("msg 1")));
@@ -420,7 +423,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   2L,
-                  0L,
                   "test-agent",
                   2,
                   0L,
@@ -503,7 +505,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       CREATION_REQUEST_HASH,
                       "parent",
                       false,
-                      ThreadLifecycleStatus.IDLE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
                       1L,
                       0L,
                       NOW,
@@ -512,7 +515,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
             });
 
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task")));
     requestThreadWork(fixture.store, childId);
@@ -528,7 +532,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   1L,
-                  0L,
                   "test-agent",
                   1,
                   0L,
@@ -569,7 +572,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID rootEntryId = createRootEntry(fixture.store, sessionId);
 
     UUID childId =
-        createThread(fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     UUID turnStart1 = UUID.randomUUID();
     UUID userEntry = UUID.randomUUID();
@@ -714,7 +717,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
             null,
             childId,
             1L,
-            0L,
             "test-agent",
             3,
             0L,
@@ -744,9 +746,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("task")));
     requestThreadWork(fixture.store, childId);
@@ -762,7 +765,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   1L,
-                  0L,
                   "test-agent",
                   1,
                   0L,
@@ -807,16 +809,18 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID rootEntryId = createRootEntry(fixture.store, sessionId);
     UUID parentId =
         createThread(
-            fixture.store, sessionId, null, rootEntryId, ThreadLifecycleStatus.WAITING_CHILDREN);
+            fixture.store, sessionId, null, rootEntryId, ThreadExecutionControl.RUNNABLE);
     UUID childId =
-        createThread(fixture.store, sessionId, parentId, rootEntryId, ThreadLifecycleStatus.ACTIVE);
+        createThread(
+            fixture.store, sessionId, parentId, rootEntryId, ThreadExecutionControl.RUNNABLE);
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("first")));
     requestThreadWork(fixture.store, childId);
     UUID firstJoin = UUID.randomUUID();
     insertJoin(fixture, firstJoin, parentId, childId, 1L, 1);
     driveToolBoundary(fixture, childId, "call-1");
     assertEquals(1, loadQueuedCommands(fixture.store, childId).size());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, thread(fixture.store, childId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(fixture.store, childId).executionControl());
     fixture.resolver.results.add(
         new TurnResolver.Resolved(tooledRequest(List.of("bash")), 100_000, 16_384));
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
@@ -824,7 +828,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     transitionModelToSucceeded(fixture.store, reminded, "old reminder consumed");
     requestThreadWork(fixture.store, childId);
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(fixture.store, childId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(fixture.store, childId).executionControl());
 
     long resumedSource = thread(fixture.store, childId).nextCommandSequence();
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("resume")));
@@ -853,7 +858,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, childId);
     assertEquals(ThreadProcessResult.COMPLETED, claimChild(fixture, childId));
 
-    assertEquals(ThreadLifecycleStatus.IDLE, thread(fixture.store, childId).status());
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE, thread(fixture.store, childId).executionControl());
     ThreadJoin completedFirst = join(fixture, firstJoin);
     ThreadJoin completedResume = join(fixture, resumedJoin);
     assertTrue(completedFirst.matched());
@@ -892,7 +898,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
       UUID sessionId,
       UUID parentId,
       UUID rootEntryId,
-      ThreadLifecycleStatus status) {
+      ThreadExecutionControl status) {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
@@ -906,6 +912,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   "thread-" + threadId,
                   false,
                   status,
+                  0L,
                   1L,
                   0L,
                   NOW,
@@ -1003,7 +1010,6 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   parentId,
                   childId,
                   sourceSequence,
-                  0L,
                   "test-agent",
                   maxTurns,
                   0L,

@@ -59,6 +59,8 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("attempt", "sequence", "text", "thinking");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
   private static final Set<String> COMPACTION_FIELDS = orderedSet("summaryText");
+  private static final Set<String> NOTIFICATION_FIELDS =
+      orderedSet("notificationId", "kind", "sourceThreadId", "message");
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
@@ -105,6 +107,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case AssistantAbortedPayload value -> encodeAssistantAborted(value);
       case CompactionPayload value -> encodeCompaction(value);
       case TurnEndPayload value -> encodeTurnEnd(value);
+      case NotificationPayload value -> encodeNotification(value);
     };
   }
 
@@ -142,6 +145,7 @@ public final class HistoryEntryPayloadJsonCodec {
       case ASSISTANT_ABORTED -> decodeAssistantAborted(value);
       case COMPACTION -> decodeCompaction(value);
       case TURN_END -> decodeTurnEnd(value);
+      case NOTIFICATION -> decodeNotification(value);
     };
   }
 
@@ -270,6 +274,15 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("closeRequestId", value.closeRequestId().toString());
     }
+    return node;
+  }
+
+  private static ObjectNode encodeNotification(NotificationPayload value) {
+    ObjectNode node = NODES.objectNode();
+    node.put("notificationId", value.notificationId().toString());
+    node.put("kind", value.kind().name());
+    node.put("sourceThreadId", value.sourceThreadId().toString());
+    node.set("message", MESSAGE_CODEC.encodeNode(value.message()));
     return node;
   }
 
@@ -491,6 +504,17 @@ public final class HistoryEntryPayloadJsonCodec {
         HistoryValueCodecs.requiredBoolean(node, "continueModel", "TURN_END"),
         HistoryValueCodecs.nullableEnum(TurnEndReason.class, node, "reason", "TURN_END.reason"),
         HistoryValueCodecs.nullablePositiveId(node, "closeRequestId", "TURN_END"));
+  }
+
+  private static NotificationPayload decodeNotification(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "NOTIFICATION");
+    HistoryValueCodecs.requireExactFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
+    return new NotificationPayload(
+        HistoryValueCodecs.requiredPositiveId(node, "notificationId", "NOTIFICATION"),
+        HistoryValueCodecs.readEnum(
+            NotificationKind.class, HistoryValueCodecs.text(node, "kind"), "NOTIFICATION.kind"),
+        HistoryValueCodecs.requiredPositiveId(node, "sourceThreadId", "NOTIFICATION"),
+        MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static AssistantError decodeError(JsonNode value) {

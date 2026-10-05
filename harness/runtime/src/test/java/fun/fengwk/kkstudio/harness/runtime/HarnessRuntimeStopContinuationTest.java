@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
@@ -69,7 +70,7 @@ class HarnessRuntimeStopContinuationTest {
 
     StopResult result = runtime.stop(new StopCommand(threadId, TestIds.id(1), 2));
     assertStopped(result);
-    assertEquals(1, result.cancelledCommandCount());
+    assertEquals(1, targetReceipt(result).cancelledCommandCount());
     assertEquals(3L, result.thread().version());
     assertTrue(result.thread().yoloEnabled());
 
@@ -114,7 +115,7 @@ class HarnessRuntimeStopContinuationTest {
     HarnessRuntimeTestSupport.ContinuationBaseline chain = seedContinuationChain(store, true);
     StopResult result = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
     assertStopped(result);
-    assertEquals(0, result.cancelledCommandCount());
+    assertEquals(0, targetReceipt(result).cancelledCommandCount());
     ThreadState stored = store.transaction(tx -> tx.lockThread(chain.threadId()).orElseThrow());
     assertEquals(2L, stored.version());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
@@ -211,6 +212,6 @@ class HarnessRuntimeStopContinuationTest {
 
     StopResult replay = runtime.stop(new StopCommand(ids[0], stopRequestId, 0));
     assertTrue(replay.replayed());
-    assertEquals(first.stoppedTurnEndEntryId(), replay.stoppedTurnEndEntryId());
+    assertEquals(targetReceipt(first).stoppedTurnEndEntryId(), targetReceipt(replay).stoppedTurnEndEntryId());
   }
 }

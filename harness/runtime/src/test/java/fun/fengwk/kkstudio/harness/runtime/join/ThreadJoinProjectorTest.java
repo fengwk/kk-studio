@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -55,7 +55,7 @@ import java.util.UUID;
  *
  * <ol>
  *   <li>未匹配的 ThreadJoin 返回 empty；
- *   <li>已匹配的 ThreadJoin 严格以其冻结的 resultHeadEntryId 为 head 加载路径；
+ *   <li>已匹配的 ThreadJoin 严格以其冻结的 terminalEntryId 为 head 加载路径；
  *   <li>执行切片从源命令的 appliedTurnStartEntryId 起算，绝不取切片之前的旧助手输出；
  *   <li>执行前被取消（未产生 turnStart 或已被取消）结算为 CANCELLED 且 partial/report 为空；
  *   <li>COMPLETED、FAILED、STOPPED、CANCELLED 四种终态的 report/partial/error 映射与契约完全一致；
@@ -97,7 +97,8 @@ class ThreadJoinProjectorTest {
                   VALID_HASH,
                   "test-thread",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
                   1L,
                   0L,
                   T0,
@@ -108,7 +109,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void unmatchedJoinReturnsEmpty() {
-    // 测试意图：验证尚未匹配（matchedIdleVersion 为 null）的 join 投影返回 empty。
+    // 测试意图：验证尚未匹配（terminalEntryId 为 null）的 join 投影返回 empty。
     ThreadJoin join =
         new ThreadJoin(
             id(10),
@@ -116,7 +117,6 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
@@ -144,12 +144,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             99L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             rootEntryId,
+            null,
             null,
             T0,
             T1);
@@ -205,12 +204,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             2L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd1,
+            null,
             null,
             T0,
             T1);
@@ -249,12 +247,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             rootEntryId,
+            null,
             null,
             T0,
             T1);
@@ -269,7 +266,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void appliedTurnStartMissingFromHeadPathThrowsIllegalStateException() {
-    // 测试意图：验证当 appliedTurnStartEntryId 不在 resultHeadEntryId 路径上时判定为不变量破损，抛出
+    // 测试意图：验证当 appliedTurnStartEntryId 不在 terminalEntryId 路径上时判定为不变量破损，抛出
     // IllegalStateException（不伪造 CANCELLED）。
     UUID turnStartOrphan = id(200);
     UUID userOrphan = id(201);
@@ -308,12 +305,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             rootEntryId,
+            null,
             null,
             T0,
             T1);
@@ -390,12 +386,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd2,
+            null,
             null,
             T0,
             T1);
@@ -486,12 +481,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd2,
+            null,
             null,
             T0,
             T1);
@@ -556,12 +550,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd,
+            null,
             null,
             T0,
             T1);
@@ -630,12 +623,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd,
+            null,
             null,
             T0,
             T1);
@@ -703,12 +695,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd,
+            null,
             null,
             T0,
             T1);
@@ -793,12 +784,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd2,
+            null,
             null,
             T0,
             T1);
@@ -858,12 +848,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd,
+            null,
             null,
             T0,
             T1);
@@ -948,12 +937,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             2L,
-            0L,
             "coder",
             10,
             0L,
-            2L,
             turnEnd2,
+            null,
             null,
             T1,
             T1);
@@ -973,7 +961,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void fixedHeadSnapshotIgnoresSubsequentTurns() {
-    // 测试意图：验证 Join 冻结的 resultHeadEntryId 在子线程后续推进产生新轮次时保持固定，投影结果不受未来轮次影响。
+    // 测试意图：验证 Join 冻结的 terminalEntryId 在子线程后续推进产生新轮次时保持固定，投影结果不受未来轮次影响。
     UUID turnStart1 = id(800);
     UUID user1 = id(801);
     UUID assistant1 = id(802);
@@ -1016,12 +1004,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd1,
+            null,
             null,
             T0,
             T0);
@@ -1175,12 +1162,11 @@ class ThreadJoinProjectorTest {
                   id(11),
                   childThreadId,
                   1L,
-                  0L,
                   "coder",
                   10,
                   0L,
-                  1L,
                   turnEnd,
+                  null,
                   null,
                   T0,
                   T0);
@@ -1191,12 +1177,11 @@ class ThreadJoinProjectorTest {
                   id(11),
                   childThreadId,
                   2L,
-                  0L,
                   "coder",
                   10,
                   0L,
-                  1L,
                   turnEnd,
+                  null,
                   null,
                   T0,
                   T0);
@@ -1207,12 +1192,11 @@ class ThreadJoinProjectorTest {
                   id(11),
                   childThreadId,
                   3L,
-                  0L,
                   "coder",
                   10,
                   0L,
-                  1L,
                   turnEnd,
+                  null,
                   null,
                   T0,
                   T0);
@@ -1286,12 +1270,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             turnEnd,
+            null,
             null,
             T0,
             T0);
@@ -1308,7 +1291,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void nonTurnEndHeadThrowsIllegalStateException() {
-    // 测试意图：验证如果 resultHeadEntryId 指向非 TurnEndPayload 的条目，抛出 IllegalStateException。
+    // 测试意图：验证如果 terminalEntryId 指向非 TurnEndPayload 的条目，抛出 IllegalStateException。
     UUID turnStart = id(950);
     UUID user = id(951);
     UUID assistant = id(952);
@@ -1336,12 +1319,11 @@ class ThreadJoinProjectorTest {
             id(11),
             childThreadId,
             1L,
-            0L,
             "coder",
             10,
             0L,
-            1L,
             assistant,
+            null,
             null,
             T0,
             T0);
@@ -1480,7 +1462,6 @@ class ThreadJoinProjectorTest {
         parentThreadId,
         childThreadId,
         1L,
-        0L,
         "test-agent",
         10,
         0L,

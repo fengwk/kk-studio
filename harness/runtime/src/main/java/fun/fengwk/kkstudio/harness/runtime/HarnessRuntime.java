@@ -238,7 +238,13 @@ public final class HarnessRuntime {
             List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
             EntryPath path = tx.loadEntryPath(thread.headEntryId());
             // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
-            snapshots.add(snapshot(thread, path, queued, probe.probe(tx, thread, path)));
+            snapshots.add(
+                snapshot(
+                    thread,
+                    path,
+                    queued,
+                    probe.probe(tx, thread, path),
+                    tx.loadStopReceiptsByThread(thread.id())));
           }
           snapshots.sort(
               Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
@@ -520,34 +526,45 @@ public final class HarnessRuntime {
       HarnessStore.Transaction tx, ThreadState thread) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread);
-    return snapshot(thread, locked.path(), queued, locked.context());
+    return snapshot(
+        thread,
+        locked.path(),
+        queued,
+        locked.context(),
+        tx.loadStopReceiptsByThread(thread.id()));
   }
 
   private static ThreadSnapshot snapshot(
-      ThreadState thread, EntryPath path, List<ThreadCommand> queued, ThreadContext context) {
+      ThreadState thread,
+      EntryPath path,
+      List<ThreadCommand> queued,
+      ThreadContext context,
+      List<StoppedThreadReceipt> stopReceipts) {
     return switch (context) {
       case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
-          thread, path, queued, null, List.of(), List.of());
+          thread, path, queued, null, List.of(), List.of(), stopReceipts);
       case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
-          thread, path, queued, null, List.of(), List.of());
+          thread, path, queued, null, List.of(), List.of(), stopReceipts);
       case ThreadContext.ModelActive active -> new ThreadSnapshot(
           thread,
           path,
           queued,
           active.model(),
           List.of(),
-          projectModelAttemptFailures(active.model(), path));
+          projectModelAttemptFailures(active.model(), path),
+          stopReceipts);
       case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
           thread,
           path,
           queued,
           pending.model(),
           List.of(),
-          projectModelAttemptFailures(pending.model(), path));
+          projectModelAttemptFailures(pending.model(), path),
+          stopReceipts);
       case ThreadContext.ToolActive active -> new ThreadSnapshot(
-          thread, path, queued, active.model(), active.siblings(), List.of());
+          thread, path, queued, active.model(), active.siblings(), List.of(), stopReceipts);
       case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
-          thread, path, queued, pending.model(), pending.siblings(), List.of());
+          thread, path, queued, pending.model(), pending.siblings(), List.of(), stopReceipts);
     };
   }
 

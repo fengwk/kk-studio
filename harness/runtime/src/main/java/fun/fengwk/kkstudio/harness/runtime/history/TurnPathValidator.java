@@ -59,6 +59,10 @@ final class TurnPathValidator {
       // 判定，也不打开/关闭 turn。
       return;
     }
+    if (payload instanceof NotificationPayload) {
+      visitNotification();
+      return;
+    }
     if (payload instanceof TurnStartPayload start) {
       if (openTurnStart != null) {
         throw new IllegalArgumentException(
@@ -259,6 +263,25 @@ final class TurnPathValidator {
     assistantSeen = true;
     assistantResultEntry = entry;
     requireInput("an assistant result");
+  }
+
+  /**
+   * NOTIFICATION 的系统通知只能位于回合之间，或 INPUT 输入段（assistant 结果之前）；它计入 INPUT 输入，从而支持 notification-only 规划，
+   * 但绝不插入未闭合的 tool-call/result 中间，也不出现在 COMPACTION / STOP / CONTINUATION turn。
+   */
+  private void visitNotification() {
+    if (openTurnStart == null) {
+      // 回合之间：独立系统通知历史节点，不打开 turn，也不偿还/清除 continuation obligation。
+      return;
+    }
+    if (openReason != TurnStartReason.INPUT) {
+      throw new IllegalArgumentException(
+          "notifications are only allowed between turns or in the input section of an INPUT turn");
+    }
+    if (assistantSeen) {
+      throw new IllegalArgumentException("notifications must not follow an assistant result");
+    }
+    inputSeen = true;
   }
 
   /**

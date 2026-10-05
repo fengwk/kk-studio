@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
@@ -232,36 +233,52 @@ public interface HarnessStore {
 
     Optional<ThreadJoin> findJoin(UUID invocationId);
 
-    /** 子 Thread 空闲时读取尚未匹配且 afterVersion 小于 idleVersion 的全部 join。 */
-    List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion);
+    /** 子 Thread 上尚未冻结 terminal 结果的 Join。 */
+    List<ThreadJoin> loadIncompleteJoins(UUID childThreadId);
 
-    /** 父 Thread 恢复时读取已匹配未交付 join。 */
+    /** 父 Thread 恢复时读取已冻结结果但尚未交付的 join。 */
     List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
 
     /**
-     * 统计指定父 Thread 下当前处于活跃状态（status != IDLE，包含 ACTIVE 与 WAITING_CHILDREN）的直接子 Thread 数量；不产生锁。
+     * 统计指定父 Thread 下尚未冻结结果的直接子 Join（{@code terminalEntryId == null}）数量；不产生锁。用于子任务并发配额判定。
      *
      * @param parentThreadId 父 Thread ID，不能为 null
-     * @return 活跃的直接子 Thread 数量
+     * @return 未完成的直接子 Join 数量
      */
-    int countActiveChildren(UUID parentThreadId);
+    int countIncompleteChildJoins(UUID parentThreadId);
 
     /**
-     * 全局统计当前处于活跃状态（status != IDLE，含 ACTIVE 与 WAITING_CHILDREN）且拥有非空 parentThreadId 的 Thread 数量； 跨所有
-     * root 聚合，root 自身（parentThreadId 为空）不计入。不产生锁。用于 subagent 任务的全局并发上限判定。
+     * 全局统计尚未冻结结果且拥有非空 parentThreadId 的 Join 数量；跨所有 root 聚合，root ticket（parentThreadId 为空）不计入。
+     * 不产生锁。用于 subagent 任务的全局并发上限判定。
      *
-     * @return 全局活跃执行子 Thread 数量
+     * @return 全局未完成的执行子 Join 数量
      */
-    int countActiveSubagentThreads();
+    int countIncompleteSubagentJoins();
 
     /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
     void updateJoin(ThreadJoin join);
 
     /**
+     * 持久保存一次 Stop 产生的完整回执集合（请求目标与全部后代各一条）。要求每条回执的 Thread 已在本事务锁定；回执身份 {@code
+     * (threadId, stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootStopRequestId} 是本次
+     * Stop 的根请求 ID，用于精确重放旧范围而不以当前树重算。
+     */
+    void insertStopReceipts(UUID rootStopRequestId, List<StoppedThreadReceipt> receipts);
+
+    /** 按 {@code (threadId, stopRequestId)} 读取单条 Stop 回执；不存在返回 {@link Optional#empty()}。 */
+    Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId);
+
+    /** 读取该 Thread 自己的全部 Stop 回执，按创建顺序返回；不产生锁。返回不可变列表。 */
+    List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId);
+
+    /** 读取一次 Stop（以根 stopRequestId 标识）产生的完整回执集合，按 Thread UUID 升序返回；不产生锁。返回不可变列表。 */
+    List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(UUID rootStopRequestId);
+
+    /**
      * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；
-     * 若该子 Thread 下存在任何尚未匹配的 Join（{@code matchedIdleVersion == null}），或存在拥有非空 parentThreadId 且尚未完成向父
+     * 若该子 Thread 下存在任何尚未冻结结果的 Join（{@code terminalEntryId == null}），或存在拥有非空 parentThreadId 且尚未完成向父
      * Thread 交付结果（{@code deliveryCommandSequence == null}）的 Join，必须抛出 {@link
-     * IllegalArgumentException} 拒绝删除并回滚； 只有已成功交付给父 Thread 的子 Join 以及已匹配完成的根 completion ticket
+     * IllegalArgumentException} 拒绝删除并回滚； 只有已成功交付给父 Thread 的子 Join 以及已冻结结果的根 completion ticket
      * 方可被显式安全删除。
      */
     int deleteJoinsByChild(UUID childThreadId);
@@ -307,13 +324,13 @@ public interface HarnessStore {
 
     /**
      * 批量更新 Command 的生命周期。threadId / payload / idempotencyKey / requestHash / sequence / createdAt
-     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedTurnStartEntryId）或 CANCELLED（设置 stopRequestId 与
+     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedEntryId）或 CANCELLED（设置 stopRequestId 与
      * cancelledAt 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
-     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedTurnStartEntryId 必须指向 TURN_START
-     * Entry、属于 Command Thread 的 Session，且被引用 TURN_START 的 ownerThreadId 等于 command 的
-     * threadId。要求每行已在本事务锁定 （{@link #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的
-     * thread 已在本事务锁定（锁序 Thread -&gt; commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 /
-     * applied 引用违反或行不存在抛 {@link IllegalArgumentException}。
+     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedEntryId 必须指向存在的 Entry、属于 Command
+     * Thread 的 Session，且被引用 Entry 的 ownerThreadId（若为 TURN_START）等于 command 的 threadId。要求每行已在本事务锁定
+     * （{@link #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的 thread 已在本事务锁定（锁序 Thread
+     * -&gt; commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 / applied 引用违反或行不存在抛 {@link
+     * IllegalArgumentException}。
      */
     void updateCommands(List<ThreadCommand> commands);
 
@@ -488,8 +505,8 @@ public interface HarnessStore {
     // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
 
     /**
-     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work 行。要求所有 Thread 已按 UUID
-     * 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work 的规范顺序锁定子事实，再按 FK
+     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work / Join / Stop 回执。要求所有 Thread 已按
+     * UUID 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work 的规范顺序锁定子事实，再按 FK
      * 顺序删除，避免多 Thread 深删发生锁 rank 回退，也避免与运行时 callback 的 Model/Tool -&gt; Work 锁序形成死锁。Entry 仍由
      * Session 级删除原语处理。
      */

@@ -10,18 +10,18 @@ import java.util.Objects;
 /**
  * Thread live context 的稳定对外状态投影。
  *
- * <p>{@link #QUEUED} 与 {@link #WAITING_CHILDREN} 是结合持久化生命周期的状态扩展； 本地上下文分类器投影 {@link
- * #from(ThreadContext)} 仅反映当前线程本地执行上下文，绝不返回这两种状态。
+ * <p>{@link #QUEUED} 与 {@link #STOPPED} 是结合持久控制事实的状态扩展；本地上下文分类器投影 {@link #from(ThreadContext)}
+ * 仅反映当前线程本地执行上下文，绝不返回这两种状态。
  */
 public enum ThreadRuntimeStatus {
   /** 当前 Thread 没有活跃调用，也没有模型 continuation obligation。 */
   IDLE,
 
-  /** 本地处于空闲上下文，但存在已排队用户命令等待启动新 turn（生命周期增强状态，local-only 的 {@code from} 绝不返回）。 */
+  /** 本地处于空闲上下文，但存在已排队命令等待启动新 turn（控制增强状态，local-only 的 {@code from} 绝不返回）。 */
   QUEUED,
 
-  /** 本地无工作，但至少一个永久直接孩子非 IDLE（生命周期增强状态，local-only 的 {@code from} 绝不返回）。 */
-  WAITING_CHILDREN,
+  /** Thread 已被显式停止（{@code ThreadExecutionControl.STOPPED}），不再启动模型执行（控制增强状态，local-only 的 {@code from} 绝不返回）。 */
+  STOPPED,
 
   /** 线程存在待推进的继续义务，等待调度触发新的执行。 */
   CONTINUATION_DUE,
@@ -56,7 +56,7 @@ public enum ThreadRuntimeStatus {
   /**
    * 从已分类的 Thread context 派生状态。非法 active 形状属于不变量破坏，不做兼容降级。
    *
-   * <p>注意：该方法仅作本地 context 投影，绝不返回 {@link #QUEUED} 或 {@link #WAITING_CHILDREN}。
+   * <p>注意：该方法仅作本地 context 投影，绝不返回 {@link #QUEUED} 或 {@link #STOPPED}。
    */
   public static ThreadRuntimeStatus from(ThreadContext context) {
     Objects.requireNonNull(context, "context");
@@ -119,8 +119,8 @@ public enum ThreadRuntimeStatus {
         "TOOL_ACTIVE context must contain at least one non-terminal tool invocation");
   }
 
-  /** 只有完全静止的 IDLE 不处于 processing 状态。 */
+  /** IDLE 与 STOPPED 不处于 processing 状态；其余按本地实际阶段投影。 */
   public boolean isProcessing() {
-    return this != IDLE;
+    return this != IDLE && this != STOPPED;
   }
 }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.inTransaction;
@@ -74,7 +75,7 @@ class HarnessRuntimeStopModelTest {
 
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertStopped(result);
-    assertEquals(1, result.cancelledCommandCount());
+    assertEquals(1, targetReceipt(result).cancelledCommandCount());
     // Model row 在 stopModel 同一事务内被物理删除；改用 Entry path 验证 barrier 与 STOPPED TURN_END。
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
 

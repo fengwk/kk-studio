@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -585,7 +585,8 @@ class WorkHeartbeatTest {
                         ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                         "main",
                         false,
-                        ThreadLifecycleStatus.ACTIVE,
+                        ThreadExecutionControl.RUNNABLE,
+                        0L,
                         1,
                         0,
                         NOW,

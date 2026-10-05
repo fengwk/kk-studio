@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
@@ -173,6 +174,9 @@ public final class ModelRequestMaterializer {
             ProviderMessageProjector.ProjectedMessage.of(message.message(), replayState));
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
+      } else if (payload instanceof NotificationPayload notification) {
+        projectedMessages.add(
+            ProviderMessageProjector.ProjectedMessage.of(notification.message()));
       } else if (payload instanceof AssistantAbortedPayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
