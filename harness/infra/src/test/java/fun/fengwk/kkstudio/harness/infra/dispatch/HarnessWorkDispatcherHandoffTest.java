@@ -481,6 +481,138 @@ class HarnessWorkDispatcherHandoffTest {
     assertEquals(0, tool.attempt());
   }
 
+  /**
+   * 在途（旧 lease 过期的 RUNNING）与等待态 claim 由真实 Processor 收敛：恢复旧 lease、唤醒 THREAD 并 complete；等待态 Tool 直接
+   * complete 且保持 WAITING_INPUT；全程绝不重放 Provider / Tool。
+   */
+  @Test
+  void routesInFlightAndWaitingClaimsToTheRealProcessors() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    ThreadSeed threadSeed = seedThread(store);
+    ModelSeed modelSeed = seedModel(store);
+    ToolSeed toolSeed = seedTool(store);
+    ToolSeed waitingSeed = seedTool(store);
+    Instant started = NOW.plusSeconds(5);
+    markModelRunning(store, modelSeed.modelInvocationId(), started);
+    markToolRunning(store, toolSeed.toolInvocationId(), started);
+    parkToolForInput(store, waitingSeed.toolInvocationId(), started);
+    MutableClock clock = clock();
+    FakeModelGateway modelGateway = new FakeModelGateway();
+    FakeToolGateway toolGateway = new FakeToolGateway();
+    RealtimeEventSink sink = event -> {};
+    ProcessorLeaseConfig leaseConfig =
+        new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
+    InvocationRetryPolicy noRetry =
+        new InvocationRetryPolicy(
+            0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
+    ScheduledExecutorService processorScheduler = Executors.newScheduledThreadPool(1);
+    ownedExecutors.add(processorScheduler);
+    ThreadProcessor threadProcessor =
+        new ThreadProcessor(
+            store,
+            (threadId, path, preparation) -> {
+              throw new AssertionError("resolver must not be called for a quiescent thread");
+            },
+            new ThreadProcessorConfig(
+                leaseConfig, Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT),
+            clock,
+            processorScheduler,
+            Runnable::run);
+    ModelProcessor modelProcessor =
+        new ModelProcessor(
+            store,
+            modelGateway,
+            sink,
+            new ModelProcessorConfig(leaseConfig, () -> noRetry, Duration.ofSeconds(5)),
+            clock,
+            processorScheduler,
+            Runnable::run,
+            Runnable::run);
+    ToolProcessor toolProcessor =
+        new ToolProcessor(
+            store,
+            toolGateway,
+            sink,
+            new ToolProcessorConfig(
+                leaseConfig, () -> noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
+            clock,
+            processorScheduler,
+            Runnable::run);
+    HarnessWorkDispatcher dispatcher =
+        new HarnessWorkDispatcher(
+            store,
+            config(4),
+            clock,
+            singleThread(),
+            singleThread(),
+            new RecordingScheduler(),
+            threadProcessor,
+            modelProcessor,
+            toolProcessor);
+
+    dispatcher.start();
+    try {
+      awaitTrue(
+          () ->
+              work(store, new WorkTarget(WorkTargetType.MODEL, modelSeed.modelInvocationId()))
+                      == null
+                  && work(store, new WorkTarget(WorkTargetType.TOOL, toolSeed.toolInvocationId()))
+                      == null
+                  && work(
+                          store,
+                          new WorkTarget(WorkTargetType.TOOL, waitingSeed.toolInvocationId()))
+                      == null
+                  && work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId()))
+                      == null);
+      // 恢复只收敛 durable 事实，聚合终态不由 Gateway 产生；等待态只完成 Work 而不触碰外部执行。
+      assertTrue(modelGateway.started.isEmpty());
+      assertTrue(toolGateway.started.isEmpty());
+      assertEquals(ToolInvocationStatus.WAITING_INPUT, tool(store, waitingSeed.toolInvocationId()));
+    } finally {
+      dispatcher.stop();
+    }
+  }
+
+  private static void markModelRunning(
+      InMemoryHarnessStore store, UUID modelInvocationId, Instant now) {
+    store.transaction(
+        tx -> {
+          ModelInvocation model = tx.lockModelInvocation(modelInvocationId).orElseThrow();
+          // 分两步推进：Store 按已持久化状态校验跃迁，READY -> DISPATCHING -> RUNNING 各写一次。
+          tx.updateModelInvocation(model.beginDispatch(now));
+          tx.updateModelInvocation(model.beginDispatch(now).markRunning(now));
+          return null;
+        });
+  }
+
+  private static void markToolRunning(
+      InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+    store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
+          // preflight 通过后才是 READY -> DISPATCHING -> RUNNING：每一步都是 Store 认可的单个跃迁。
+          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now)));
+          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).beginDispatch(now)));
+          tx.updateToolInvocations(
+              List.of(tool.markApprovalNotRequired(now).beginDispatch(now).markRunning(now)));
+          return null;
+        });
+  }
+
+  private static void parkToolForInput(
+      InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+    store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
+          tx.updateToolInvocations(List.of(tool.requestInput(now)));
+          return null;
+        });
+  }
+
+  private static ToolInvocationStatus tool(HarnessStore store, UUID toolInvocationId) {
+    return store.transaction(tx -> tx.findToolInvocation(toolInvocationId).orElseThrow()).status();
+  }
+
   @Test
   void constructorsFailFastOnNullArguments() {
     HarnessWorkDispatcherConfig config = config(1);

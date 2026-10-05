@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
@@ -13,15 +12,13 @@ import java.util.Objects;
  * <p>{@code leaseConfig} 控制 claim lease 与 heartbeat；{@code retryPolicyProvider} 在每次 retryable 失败
  * retry 判定点现读（最终还受 binding 的 {@link fun.fengwk.kkstudio.harness.tool.ToolSideEffect} 约束，
  * NON_IDEMPOTENT 绝不自动重试）；{@code preflightFailureDelay} 是 preflight 抛异常 / 返回 null（确定无副作用）时的
- * reschedule 延迟；{@code dispatchBusyFallbackDelay} 是 Gateway start 抛异常（肯定未接受）时的 reschedule 延迟；
- * {@code admissionDeferral} 是宿主拒绝新的对外执行时的 durable 重排延迟（正延迟，绝不热循环）。
+ * reschedule 延迟；{@code dispatchBusyFallbackDelay} 是 Gateway start 抛异常（肯定未接受）时的 reschedule 延迟。
  */
 public record ToolProcessorConfig(
     ProcessorLeaseConfig leaseConfig,
     InvocationRetryPolicyProvider retryPolicyProvider,
     Duration preflightFailureDelay,
-    Duration dispatchBusyFallbackDelay,
-    Duration admissionDeferral) {
+    Duration dispatchBusyFallbackDelay) {
 
   public ToolProcessorConfig {
     leaseConfig = Objects.requireNonNull(leaseConfig, "leaseConfig");
@@ -29,20 +26,6 @@ public record ToolProcessorConfig(
     preflightFailureDelay = requireMillisPositive(preflightFailureDelay, "preflightFailureDelay");
     dispatchBusyFallbackDelay =
         requireMillisPositive(dispatchBusyFallbackDelay, "dispatchBusyFallbackDelay");
-    admissionDeferral = requireMillisPositive(admissionDeferral, "admissionDeferral");
-  }
-
-  public ToolProcessorConfig(
-      ProcessorLeaseConfig leaseConfig,
-      InvocationRetryPolicyProvider retryPolicyProvider,
-      Duration preflightFailureDelay,
-      Duration dispatchBusyFallbackDelay) {
-    this(
-        leaseConfig,
-        retryPolicyProvider,
-        preflightFailureDelay,
-        dispatchBusyFallbackDelay,
-        WorkDispatchAdmission.DEFAULT_DEFERRAL);
   }
 
   private static Duration requireMillisPositive(Duration value, String name) {

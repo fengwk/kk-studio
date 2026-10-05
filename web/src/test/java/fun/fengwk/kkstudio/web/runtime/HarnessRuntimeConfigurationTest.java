@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -106,7 +105,6 @@ class HarnessRuntimeConfigurationTest {
     registry.add("kk-studio.harness.dispatcher.lease-duration", () -> "45s");
     registry.add("kk-studio.harness.dispatcher.poll-interval", () -> "2s");
     registry.add("kk-studio.harness.dispatcher.rejection-delay", () -> "250ms");
-    registry.add("kk-studio.harness.dispatcher.admission-deferral", () -> "2s");
     registry.add("kk-studio.harness.dispatcher.worker.concurrency", () -> "3");
     registry.add("kk-studio.harness.dispatcher.worker.queue-capacity", () -> "5");
   }
@@ -172,7 +170,6 @@ class HarnessRuntimeConfigurationTest {
     assertEquals(Duration.ofSeconds(45), harnessDispatcherProperties.getLeaseDuration());
     assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getPollInterval());
     assertEquals(Duration.ofMillis(250), harnessDispatcherProperties.getRejectionDelay());
-    assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getAdmissionDeferral());
     assertEquals(3, harnessDispatcherProperties.getWorker().getConcurrency());
     assertEquals(5, harnessDispatcherProperties.getWorker().getQueueCapacity());
     assertNotNull(postgresqlNotificationLoop);
@@ -184,17 +181,6 @@ class HarnessRuntimeConfigurationTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
         invocationRetryPolicyProvider.retryPolicy());
-  }
-
-  /**
-   * 产品面不再装配 owner/Issue 派发门禁：上下文里没有任何 {@link WorkDispatchAdmission} bean，Dispatcher 的 {@code
-   * ObjectProvider} 回落即既有 {@link WorkDispatchAdmission#ALLOW_ALL}——纯 Harness 组合根无需宿主策略也能放行派发。
-   */
-  @Test
-  void dispatcherFallsBackToAllowAllWithoutAProductGate() {
-    assertTrue(
-        applicationContext.getBeansOfType(WorkDispatchAdmission.class).isEmpty(),
-        "web composition root must not register a product dispatch gate");
   }
 
   @Test

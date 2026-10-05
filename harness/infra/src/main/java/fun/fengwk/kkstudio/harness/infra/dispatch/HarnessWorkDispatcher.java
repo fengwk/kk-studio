@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.infra.dispatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -36,10 +35,6 @@ import java.util.function.Consumer;
  * <p>职责边界（KISS）：dispatcher 只做 Work claim、按类型路由、bounded handoff、合并 wake、periodic poll 与 stop
  * 生命周期。它绝不解释 Processor 的 typed 结果改写 durable 状态 —— handoff 类型是 {@link Consumer}，Processor 的 complete
  * / reschedule / delete 由 Processor 自己在所有权围栏保护下决定。
- *
- * <p>宿主派发准入不在 dispatcher：许可判定必须与 Processor 的 READY -&gt; DISPATCHING 持久意图同处一个物理事务，因此由 Processor 在
- * prepare 短事务内调用 {@link WorkDispatchAdmission} 与状态转换一起决策（见该端口的调用契约）；dispatcher 既不参与判定，也不可能用 claim 与
- * handoff 之间的无锁预检代替它。
  *
  * <p>Work claim 协议：每次 claim 使用 {@link HarnessStoreTime#millisecondClock} 包装后的新毫秒 now、新 UUID token
  * 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link #nodeInstanceId}，以驱动 Environment route

@@ -5,14 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -46,24 +43,18 @@ import java.util.function.BiFunction;
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内 YOLO 快照为 true 时跳过 preflight 直接 Allow（不调用 evaluator /
  * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch（Thread version 只 +1）后进入
- * admission；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1 +
- * THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code
- * preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch + version+1 后直接
- * admission。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
+ * Gateway 派发；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1
+ * + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code
+ * preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch + version+1 后直接 进入
+ * Gateway 派发。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
  * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD wake + complete，绝不重放
  * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
  *
- * <p>admission 与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation
- * guard -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
+ * <p>派发与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation guard
+ * -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
  * markRunning；Listener 回调在持久化 RUNNING 落地前由回调门控缓冲。heartbeat 只 renew 当前 Work lease；进程内 registry 以
  * invocationId 为键，{@link #cancel} 提供唯一本地取消入口，{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的
  * scheduler），closed 后 {@link #process} 拒绝新 claim。
- *
- * <p>宿主派发准入（{@link WorkDispatchAdmission}）：只有真正要写 READY -&gt; DISPATCHING 的短事务才会询问宿主（completed
- * approval 直连路径与 preflight Allow 续段），并且在同一物理事务内、在任何 Harness 行锁之前先问，由宿主先取产品行锁再执行转换 （见 {@link
- * WorkDispatchAdmission#executeIfAdmitted}）；外部 Tool 调用仍在 commit 之后。preflight 本身只是权限评估（外部调用前 不持有任何
- * Harness 事务与行锁），人工输入冻结、等待态、在途与终态都不产生新的对外执行，结构性不询问。宿主拒绝时 invocation 事实一概不变，只在所有权围栏内按 {@code
- * admissionDeferral} durable reschedule（不热循环）。
  */
 @Slf4j
 public final class ToolProcessor implements AutoCloseable {
@@ -75,12 +66,10 @@ public final class ToolProcessor implements AutoCloseable {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
-  private final WorkDispatchAdmission admission;
   private final ConcurrentHashMap<UUID, ToolExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private volatile boolean closed;
 
-  /** 没有宿主策略的纯 Harness 部署 / 测试：放行一切新的对外执行。 */
   public ToolProcessor(
       HarnessStore store,
       ToolGateway gateway,
@@ -89,26 +78,6 @@ public final class ToolProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker) {
-    this(
-        store,
-        gateway,
-        realtimeEventSink,
-        config,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        WorkDispatchAdmission.ALLOW_ALL);
-  }
-
-  public ToolProcessor(
-      HarnessStore store,
-      ToolGateway gateway,
-      RealtimeEventSink realtimeEventSink,
-      ToolProcessorConfig config,
-      Clock clock,
-      ScheduledExecutorService scheduler,
-      Executor heartbeatWorker,
-      WorkDispatchAdmission admission) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -116,7 +85,6 @@ public final class ToolProcessor implements AutoCloseable {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
-    this.admission = Objects.requireNonNull(admission, "admission");
   }
 
   /**
@@ -156,10 +124,9 @@ public final class ToolProcessor implements AutoCloseable {
         releaseExecution(active);
       }
       try {
-        Prepare prepare = store.transaction(tx -> prepare(tx, claim));
+        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, clock.instant()));
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
-          case Prepare.Rejected ignored -> deferRejected(claim);
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
           case Prepare.Input input -> requestInput(claim, input.threadId());
           case Prepare.Preflight preflight -> preflight(claim, preflight);
@@ -250,82 +217,13 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 唯一的持久意图边界：只有「READY + 已完成审批且不是人工输入工具」的 claim 会直接写 READY -&gt; DISPATCHING，因此在同一物理事务内、 且在任何
-   * Harness 行锁之前先询问宿主，由宿主先取产品行锁再执行转换；审批前的 preflight / YOLO 路径在 {@link #applyPreflightAllow}
-   * 处询问。人工输入冻结、等待态、在途与终态都不产生新的对外执行，结构性放行。
-   */
-  private Prepare prepare(HarnessStore.Transaction tx, ClaimedWork claim) {
-    Instant now = clock.instant();
-    UUID invocationId = claim.target().id();
-    ToolInvocation peek = tx.findToolInvocation(invocationId).orElse(null);
-    if (peek == null
-        || peek.status() != ToolInvocationStatus.READY
-        || peek.approval() == null
-        || HumanInputTool.isHumanInputTool(peek.binding())) {
-      return prepareLocked(tx, claim, now);
-    }
-    WorkDispatchRequest request =
-        dispatchRequest(tx, invocationId, peek.modelInvocationId(), peek.binding());
-    if (request == null) {
-      return prepareLocked(tx, claim, now);
-    }
-    return admission
-        .executeIfAdmitted(request, () -> prepareLocked(tx, claim, now))
-        .orElseGet(Prepare.Rejected::new);
-  }
-
-  /** 宿主拒绝派发：invocation 事实一概不变，只在所有权围栏内按 {@code admissionDeferral} 重排 Work，禁止热循环。 */
-  private ProcessResult deferRejected(ClaimedWork claim) {
-    Instant now = clock.instant();
-    boolean rescheduled =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  if (tx.lockClaimedWork(claim, now).isEmpty()) {
-                    return false;
-                  }
-                  tx.rescheduleWork(claim, now, config.admissionDeferral());
-                  return true;
-                }));
-    return rescheduled ? ProcessResult.RESCHEDULED : ProcessResult.LOST_OWNERSHIP;
-  }
-
-  /**
-   * 构造宿主可见的 TOOL 派发请求：坐标是 owning Thread 与其 Session（经 owning ModelInvocation 解析）；Thread 行缺失等归属损坏返回
-   * {@code null}，调用方不做宿主判定、交给锁内分支完整 no-op。
-   */
-  private static WorkDispatchRequest dispatchRequest(
-      HarnessStore.Transaction tx, UUID invocationId, UUID modelInvocationId, ToolBinding binding) {
-    return tx.findModelInvocation(modelInvocationId)
-        .flatMap(model -> tx.findThread(model.threadId()))
-        .map(
-            thread ->
-                new WorkDispatchRequest(
-                    WorkTargetType.TOOL, invocationId, thread.id(), thread.sessionId(), binding))
-        .orElse(null);
-  }
-
-  /**
-   * 构造宿主可见的 TOOL 派发请求（已知 owning Thread）：坐标就是该 Thread 与其 Session；Thread 行缺失等归属损坏返回 {@code
-   * null}，调用方绝不因此跳过宿主判定继续执行。
-   */
-  private static WorkDispatchRequest dispatchRequestOfThread(
-      HarnessStore.Transaction tx, UUID invocationId, UUID threadId, ToolBinding binding) {
-    return tx.findThread(threadId)
-        .map(
-            thread ->
-                new WorkDispatchRequest(
-                    WorkTargetType.TOOL, invocationId, thread.id(), thread.sessionId(), binding))
-        .orElse(null);
-  }
-
-  /**
    * READY：内部人工输入工具在锁内直接冻结为 WAITING_INPUT；其它调用 approval null 走 preflight（ensure 完整 lease margin
-   * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接 admission。
+   * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接进入 Gateway
+   * 派发。
    *
    * <p>YOLO 决策在锁内完成：锁 Thread 后读取的 {@code yoloEnabled} 为 true 时直接返回 {@link Prepare.Allowed}（一次
-   * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的 admission）；false 才走普通 gateway preflight。
-   * 人输入判定先于 YOLO 与 preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
+   * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的派发）；false 才走普通 gateway preflight。 人输入判定先于
+   * YOLO 与 preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
   private Prepare prepareReady(
       HarnessStore.Transaction tx,
@@ -562,10 +460,10 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * Allow（含 YOLO 直接 Allow）：在同一短事务把 READY / null approval 顺序转换 markApprovalNotRequired -&gt;
-   * beginDispatch （Store 允许同 tx 连续 update），Thread version 只 +1；然后进入 admission。二次校验失败（lost /
+   * beginDispatch （Store 允许同 tx 连续 update），Thread version 只 +1；然后进入 Gateway 派发。二次校验失败（lost /
    * 状态被并发改写）完整 no-op。
    *
-   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：admission 段在 {@link
+   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：派发段在 {@link
    * #dispatch} 中新建。
    */
   private ProcessResult applyPreflightAllow(
@@ -576,28 +474,9 @@ public final class ToolProcessor implements AutoCloseable {
       ToolInvocationRequest request,
       ToolExecution execution) {
     Instant now = clock.instant();
-    UUID invocationId = claim.target().id();
-    Boolean dispatched =
-        store.transaction(
-            tx -> {
-              WorkDispatchRequest dispatchRequest =
-                  dispatchRequestOfThread(tx, invocationId, threadId, request.binding());
-              if (dispatchRequest == null) {
-                // 归属损坏：不做宿主判定、也不允许执行（allowIntent 同样会因 Thread 缺失失败）。
-                return false;
-              }
-              // 唯一决策边界：宿主许可与 READY -> DISPATCHING 在同一物理事务；null 表示宿主拒绝。
-              return admission
-                  .executeIfAdmitted(
-                      dispatchRequest, () -> allowIntent(tx, claim, threadId, attempt, now))
-                  .orElse(null);
-            });
-    if (dispatched == null) {
-      if (execution != null) {
-        execution.abandon();
-      }
-      return deferRejected(claim);
-    }
+    boolean dispatched =
+        Boolean.TRUE.equals(
+            store.transaction(tx -> allowIntent(tx, claim, threadId, attempt, now)));
     if (!dispatched) {
       if (execution != null) {
         execution.abandon();
@@ -981,7 +860,6 @@ public final class ToolProcessor implements AutoCloseable {
 
   private sealed interface Prepare
       permits Prepare.Lost,
-          Prepare.Rejected,
           Prepare.Input,
           Prepare.Preflight,
           Prepare.Allowed,
@@ -989,9 +867,6 @@ public final class ToolProcessor implements AutoCloseable {
           Prepare.Terminated {
 
     record Lost() implements Prepare {}
-
-    /** 宿主拒绝本次新的对外执行：未做任何 Harness 变更，调用方只允许 durable reschedule。 */
-    record Rejected() implements Prepare {}
 
     /** 内部人工输入工具：READY 边界已冻结为 WAITING_INPUT，不再进入 preflight / gateway。 */
     record Input(UUID threadId) implements Prepare {}
