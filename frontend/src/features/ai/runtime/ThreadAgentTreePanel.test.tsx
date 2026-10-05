@@ -26,8 +26,8 @@ function node(overrides: Partial<HarnessThreadTreeNodeDTO>): HarnessThreadTreeNo
     name: 'Main',
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-    status: 'WAITING_CHILDREN',
-    processing: true,
+    status: 'STOPPED',
+    processing: false,
     turnCount: 3,
     toolCallCount: 2,
     outcome: null,
@@ -73,7 +73,7 @@ describe('ThreadAgentTreePanel', () => {
     expect(rows[1]).toHaveAttribute('aria-current', 'true')
     expect(rows[0]).toHaveTextContent('主 Agent')
     expect(rows[1]).toHaveTextContent('当前')
-    expect(rows[0]).toHaveTextContent('等待子 Thread')
+    expect(rows[0]).toHaveTextContent('已停止')
     expect(rows[1]).toHaveTextContent('等待审批')
     expect(rows[2]).toHaveTextContent('模型运行中')
     expect(rows[3]).toHaveTextContent('失败')
@@ -81,7 +81,8 @@ describe('ThreadAgentTreePanel', () => {
     expect(rows[1]).toHaveTextContent('2 回合')
     expect(rows[2]).toHaveTextContent('5 次工具调用')
     expect(rows[3]).toHaveTextContent('anthropic/Claude/fast')
-    expect(rows[0]).toHaveClass('is-processing')
+    expect(rows[2]).toHaveClass('is-processing')
+    expect(rows[0]).not.toHaveClass('is-processing')
     expect(rows[3]).not.toHaveClass('is-processing')
     const sameLinks = screen.getAllByRole('link', { name: 'Same' })
     expect(sameLinks).toHaveLength(2)

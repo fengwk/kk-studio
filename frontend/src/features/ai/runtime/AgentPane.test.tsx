@@ -29,6 +29,10 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
+import {
+  loadThreadDraft,
+  saveThreadDraftParts,
+} from '@/features/ai/runtime/thread-draft-store'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 
@@ -101,6 +105,7 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     acceptCommandBatch: vi.fn(),
+    acceptThreadCommandBatch: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
@@ -163,6 +168,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     version: '0',
     status: 'IDLE',
     processing: false,
+    /** 持久执行控制：RUNNABLE / STOPPED，与本地展示 status 无关。 */
+    executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -187,6 +194,7 @@ function snapshot(
     toolInvocations: [],
     modelAttemptFailures: [],
     manualCompaction: { available: false, disabledReason: 'not available' },
+    stopReceipts: [],
     ...overrides,
   }
 }
@@ -237,6 +245,7 @@ beforeEach(() => {
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.getThreadTree).mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
+  vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
     Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled, version: '1' })),
   )
@@ -407,7 +416,7 @@ describe('AgentPane orchestration', () => {
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    vi.mocked(harnessService.acceptCommandBatch).mockRejectedValueOnce(
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
       new ApiError('state changed', 409, 'CONFLICT', { reason: 'STALE_COMMAND_CURSOR' }),
     )
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1520,26 +1529,30 @@ describe('AgentPane orchestration', () => {
 
     act(() => hook.result.current.composer.onSubmit([createTextPart('下一条消息')]))
     await waitFor(() =>
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledWith(
-        expect.objectContaining({ target: expect.objectContaining({ type: 'THREAD' }) }),
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledWith(
+        THREAD_ID,
+        expect.objectContaining({
+          expectedHeadEntryId: 'head-1',
+          expectedNextCommandSequence: '1',
+          commands: [expect.objectContaining({ type: 'USER_MESSAGE' })],
+        }),
       ),
     )
+    // 既有 Thread 绝不走创建入口
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
   it('keeps the stored draft unchanged while navigating recalled history', async () => {
-    // 历史导航只更新当前受控内容；刷新恢复的持久草稿仍是用户原始编辑。
-    const draftKey = `kkstudio.ai.composer-draft.v1:thread:${THREAD_ID}`
-    const stored = JSON.stringify({
-      version: 1,
-      parts: [{ type: 'text', text: 'original draft' }],
-    })
-    localStorage.setItem(draftKey, stored)
+    // 历史导航只更新当前受控内容；Thread 草稿记录仍是用户原始编辑（刷新按该记录恢复）。
+    await saveThreadDraftParts(THREAD_ID, [createTextPart('original draft')])
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     const hook = renderController()
-    await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+    await waitFor(() => expect(hook.result.current.composer.parts).toEqual([
+      expect.objectContaining({ type: 'text', text: 'original draft' }),
+    ]))
 
     act(() =>
       hook.result.current.composer.onHistoryPartsChange?.([
@@ -1550,7 +1563,9 @@ describe('AgentPane orchestration', () => {
     expect(hook.result.current.composer.parts).toEqual([
       expect.objectContaining({ type: 'text', text: 'recalled history' }),
     ])
-    expect(localStorage.getItem(draftKey)).toBe(stored)
+    expect((await loadThreadDraft(THREAD_ID))?.parts).toEqual([
+      expect.objectContaining({ type: 'text', text: 'original draft' }),
+    ])
   })
 
   it('does not retain a background subscription for a terminal previous thread', async () => {
@@ -1626,19 +1641,31 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.error).toBe('stop failed'))
   })
 
-  it('renders localized WAITING_CHILDREN status label when bound thread is waiting for child threads', async () => {
-    // 测试意图：当绑定的 Thread 处于 WAITING_CHILDREN 状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“等待子 Thread”。
+  it('treats a STOPPED bound thread as not working and keeps the tree-wide Stop command available', async () => {
+    // 测试意图：本地 STOPPED 既不进入工作态（不展示工作条），也不得禁用 /stop：
+    // Stop 是整棵执行树的控制面，本地已静止不代表没有活跃后代需要停止。
+    const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { status: 'WAITING_CHILDREN', processing: false })),
+      snapshot(threadFixture(THREAD_ID, {
+        status: 'STOPPED',
+        processing: false,
+        executionControl: 'STOPPED',
+      })),
     )
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
-    await waitFor(() => {
-      expect(screen.getByText('等待子 Thread')).toBeInTheDocument()
-    })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
+
+    // STOPPED 不是工作态：不展示任何工作条
+    expect(screen.queryByText('Working...')).not.toBeInTheDocument()
+
+    await user.click(composer)
+    await user.keyboard('/stop')
+    expect(await screen.findByRole('option', { name: /^stop/ })).toHaveAttribute('aria-disabled', 'false')
   })
 
   it('renders localized QUEUED status label when bound thread is queued', async () => {
@@ -2250,13 +2277,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
       const [threadId, request] = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]!
       expect(threadId).toBe(THREAD_ID)
-      expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
-      expect(request.target).toEqual({
-        type: 'THREAD',
-        threadId: THREAD_ID,
-        expectedHeadEntryId: 'head-2',
-        expectedNextCommandSequence: '7',
-      })
+      // 既有 Thread 的预览是 owner-free 契约：只带 CAS 游标与命令，不携带 owner/target。
+      expect(request).not.toHaveProperty('owner')
+      expect(request).not.toHaveProperty('target')
+      expect(request.expectedHeadEntryId).toBe('head-2')
+      expect(request.expectedNextCommandSequence).toBe('7')
       expect(request.commands).toHaveLength(1)
       expect(request.commands[0]).toMatchObject({
         type: 'USER_MESSAGE',
@@ -2598,7 +2623,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         .toMatchObject({ type: 'TEXT', text: 'look at this' })
 
       // 成功预览：不提交、不重新上传、不释放
-      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+      expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
       expect(fakeStorage.completeUpload).toHaveBeenCalledTimes(1)
       expect(fakeStorage.deleteUpload).not.toHaveBeenCalled()
       expect(await screen.findByTestId('preview-request-body')).toBeInTheDocument()
@@ -2734,12 +2759,13 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
     })
   })
 
-  describe('null owner and new owner union access control barriers', () => {
-    it('defaults to bound thread target without crashing on null owner and keeps read-only state', () => {
-      // 测试意图：当 owner 未传时，不调用 ownerIdentity/访问 owner.type，避免崩溃；
-      // 目标默认为只读已知 Thread，composer 处于禁用状态。
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const { result } = renderHook(
+  describe('owner-free bound thread interactions', () => {
+    /** 无 owner 的面板：paneId 即默认绑定的 Thread，用于验证既有 Thread 不再需要 owner。 */
+    function renderOwnerlessController(capabilities?: { readOnly?: boolean }) {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      return renderHook(
         () =>
           useAgentPaneController({
             paneId: THREAD_ID,
@@ -2747,6 +2773,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
             environments: [],
             defaults: {},
             focused: false,
+            capabilities,
           }),
         {
           wrapper: ({ children }) => (
@@ -2754,82 +2781,73 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           ),
         },
       )
+    }
 
+    it('defaults to a bound thread target without an owner and becomes fully interactive', async () => {
+      // 测试意图：owner 未传时不访问 owner.type 也不崩溃，目标默认绑定 paneId 的 Thread；
+      // 既有 Thread 的 owner-free 契约下，快照就绪后 composer、settings 与预览都开放，
+      // 预览只被草稿就绪度限制，而不是被 owner 拒绝。
+      const { result } = renderOwnerlessController()
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
-      expect(result.current.composer.disabled).toBe(true)
+
+      await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
+      expect(result.current.composer.disabled).toBe(false)
+      expect(result.current.composer.settings).toBeDefined()
       expect(result.current.previewDisabled).toBe(true)
-      expect(result.current.previewDisabledReason).toBe('当前不支持预览')
-      expect(result.current.composer.settings).toBeUndefined()
+      expect(result.current.previewDisabledReason).toBe('草稿为空')
     })
 
-    it('enforces read-only controls on null owner: composer disabled, no preview, no settings', async () => {
-      // 测试意图：null owner 必须处于只读受控状态，禁用 composer，
-      // Debug 标题按钮不可预览，且直接调用预览回调也不会发请求。
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const { result } = renderHook(
-        () =>
-          useAgentPaneController({
-            paneId: THREAD_ID,
-            agents,
-            environments: [],
-            defaults: {},
-            focused: false,
-          }),
-        {
-          wrapper: ({ children }) => (
-            <QueryClientProvider client={client}>{children}</QueryClientProvider>
-          ),
-        },
-      )
+    it('submits a message and a Goal batch without an owner through the thread command batch contract', async () => {
+      // 测试意图：无 owner 的既有 Thread 仍能发送消息与 Goal；两者都走同一 per-thread
+      // 命令批次，请求体只有 CAS 游标与命令，绝不伪造 owner/target，也不触碰创建入口。
+      const { result } = renderOwnerlessController()
+      await waitFor(() => expect(result.current.composer.disabled).toBe(false))
 
-      expect(result.current.composer.disabled).toBe(true)
-      expect(result.current.previewDisabled).toBe(true)
-      expect(result.current.previewDisabledReason).toBe('当前不支持预览')
-      expect(result.current.composer.settings).toBeUndefined()
       await act(async () => {
-        await result.current.handlePreview()
+        await result.current.composer.onSubmit([createTextPart('owner-free message')])
       })
-      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+      const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+      expect(threadId).toBe(THREAD_ID)
+      expect(request).not.toHaveProperty('owner')
+      expect(request).not.toHaveProperty('target')
+      expect(request.expectedHeadEntryId).toBe('head-1')
+      expect(request.expectedNextCommandSequence).toBe('1')
+      expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+
+      act(() => result.current.submitGoal('owner-free goal'))
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
+      const goalRequest = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]![1]
+      expect(goalRequest.commands).toEqual([
+        expect.objectContaining({ type: 'GOAL', text: 'owner-free goal' }),
+      ])
     })
 
-    it('blocks all write and navigation attempts under null owner: onSubmit, submitGoal, selectAgent, branching and rename', async () => {
-      // 测试意图：绕开 UI 直接调用 controller 方法时，null owner 严禁任何写请求与分叉，绝不发起 batch。
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const { result } = renderHook(
-        () =>
-          useAgentPaneController({
-            paneId: THREAD_ID,
-            agents,
-            environments: [],
-            defaults: {},
-            focused: false,
-          }),
-        {
-          wrapper: ({ children }) => (
-            <QueryClientProvider client={client}>{children}</QueryClientProvider>
-          ),
-        },
-      )
+    it('keeps container navigation owner-scoped while thread writes no longer require an owner', async () => {
+      // 测试意图：owner 只描述容器（Session / Thread 列表与创建）；既有 Thread 的
+      // Agent 切换与重命名不再被 owner 拦截，而 Session/Thread 导航仍必须拒绝无 owner 面板。
+      const { result } = renderOwnerlessController()
+      await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
 
-      // 1. 发送消息尝试
+      // 1. 切换 Agent 不再需要 owner
+      act(() => result.current.selectAgent('assistant'))
+      expect(result.current.error).toBeNull()
+
+      // 2. 重命名不再需要 owner：打开面板后提交走真实 PUT
       act(() => {
-        result.current.composer.onSubmit([createTextPart('blocked message')])
+        result.current.openRenameWithBackTo('thread', THREAD_ID, 'thread-name', null)
       })
-      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
-
-      // 2. 提交 Goal 尝试
-      act(() => {
-        result.current.submitGoal('blocked goal')
+      expect(result.current.renameTarget).not.toBeNull()
+      await act(async () => {
+        await result.current.submitRename('renamed without owner')
       })
-      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+      await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalledWith(
+        THREAD_ID,
+        { name: 'renamed without owner' },
+      ))
 
-      // 3. 切换 Agent 尝试
-      act(() => {
-        result.current.selectAgent('assistant')
-      })
-      expect(result.current.error).toBe('当前模式不支持切换 Agent')
-
-      // 4. 分支切换与导航尝试
+      // 3. 分支切换与 Session/Thread 导航仍属于 owner 容器范围
       act(() => {
         result.current.selectEntry({
           entryId: 'e-1',
@@ -2866,71 +2884,68 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         })
       })
       expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
-
-      // 5. 目标切换与重命名尝试
       expect(result.current.target.kind).toBe('BOUND_THREAD')
-      await act(async () => {
-        await result.current.submitRename('renamed-attempt')
-      })
-      expect(harnessService.renameThread).not.toHaveBeenCalled()
     })
 
-    it('allows debug and shortcuts commands under null owner while blocking mutating commands', () => {
-      // 测试意图：null owner 保持界面历史与 debug/shortcuts 可用，但拦截 new、yolo 等写操作。
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const { result } = renderHook(
-        () =>
-          useAgentPaneController({
-            paneId: THREAD_ID,
-            agents,
-            environments: [],
-            defaults: {},
-            focused: false,
-          }),
-        {
-          wrapper: ({ children }) => (
-            <QueryClientProvider client={client}>{children}</QueryClientProvider>
-          ),
-        },
-      )
+    it('allows owner-free Goal and YOLO on a bound thread while container creation stays owner-scoped', async () => {
+      // 测试意图：本地界面命令（debug / shortcuts / goal / yolo）在无 owner 的既有 Thread
+      // 上仍然可用，因为它们是 owner-free 的执行控制；只有创建新容器（new）需要 owner。
+      const { result } = renderOwnerlessController()
+      await waitFor(() => expect(result.current.activeDraft).not.toBeNull())
+      act(() => result.current.dismissActionError())
 
-      // debug 切换正常可用
+      // debug 与 shortcuts 正常可用
       expect(result.current.boundViews.mode).toBe('conversation')
       act(() => {
         result.current.composer.onCommand(testCommand('debug'))
       })
       expect(result.current.boundViews.mode).toBe('debug')
-
-      // shortcuts 正常可用
       act(() => {
         result.current.composer.onCommand(testCommand('shortcuts'))
       })
       expect(result.current.interaction).toBe('shortcuts')
 
-      // new 命令被拦截，target 不变
+      // Goal 面板 owner-free 打开
+      act(() => {
+        result.current.closeInteraction()
+      })
+      act(() => {
+        result.current.composer.onCommand(testCommand('goal'))
+      })
+      expect(result.current.interaction).toBe('goal')
+      act(() => {
+        result.current.closeInteraction()
+      })
+
+      // YOLO 是 owner-free 的 per-thread 策略面，直接提交目标策略
+      act(() => {
+        result.current.composer.onCommand(testCommand('yolo'))
+      })
+      await waitFor(() => expect(harnessService.setThreadYolo).toHaveBeenCalledWith(
+        THREAD_ID,
+        { yoloEnabled: true },
+      ))
+
+      // new 仍被拦截：无 owner 面板没有可导航的容器
       act(() => {
         result.current.composer.onCommand(testCommand('new'))
       })
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
-
-      // yolo 命令被拦截，不改变状态且不调用服务端
-      act(() => {
-        result.current.composer.onCommand(testCommand('yolo'))
-      })
-      expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
     })
 
-    it('renders AgentPane safely without owner: rename button is disabled and header renders title', async () => {
-      // 测试意图：AgentPane 接收 undefined owner 时，标题重命名按钮自动禁用，避免无保护访问 owner.type 崩溃。
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    it('renders AgentPane without an owner and renames the bound thread from the heading', async () => {
+      // 测试意图：AgentPane 完全不传 owner 时不得崩溃，标题重命名按钮也不再按 owner 禁用，
+      // 且真实点击后能提交 PUT。
+      const user = userEvent.setup()
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
       render(
         <QueryClientProvider client={client}>
           <AgentPane
             paneId={THREAD_ID}
             agents={agents}
             environments={[]}
-            initialTarget={{ kind: 'BOUND_THREAD', threadId: THREAD_ID }}
-            capabilities={{ readOnly: true }}
             focused
           />
         </QueryClientProvider>,
@@ -2938,15 +2953,27 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
 
       await screen.findByRole('heading', { level: 2, name: 'thread-name' })
       const renameButton = screen.getByRole('button', { name: '重命名' })
-      expect(renameButton).toBeDisabled()
+      expect(renameButton).toBeEnabled()
+
+      await user.click(renameButton)
+      const input = await screen.findByRole('textbox', { name: '名称' })
+      expect(input).toHaveValue('thread-name')
+      await user.clear(input)
+      await user.type(input, 'renamed without owner')
+      await user.click(screen.getByRole('button', { name: '保存' }))
+
+      await waitFor(() => expect(harnessService.renameThread).toHaveBeenCalledWith(
+        THREAD_ID,
+        { name: 'renamed without owner' },
+      ))
     })
 
-    it('distinguishes CHAT, ISSUE_AGENT, and null owner barrier behaviors', async () => {
-      // 测试意图：矩阵级门禁验证——CHAT 的 Debug 标题按钮只被草稿就绪度限制，
-      // ISSUE_AGENT 与 NULL 完全不开放预览（不支持预览）且不暴露 settings。
+    it('applies the same owner-free bound interaction for CHAT, ISSUE_AGENT and absent owners', async () => {
+      // 测试意图：矩阵级验证——既有 Thread 的能力不再由 owner 类型裁剪：三种 owner 状态下
+      // 预览都只受草稿就绪度限制、settings 都暴露，owner 概念只保留给容器创建。
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-      // 1. CHAT owner (等待快照加载以就绪 draft)
+      // 1. CHAT owner
       const { result: chatResult } = renderHook(
         () =>
           useAgentPaneController({
@@ -2961,11 +2988,10 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
       await waitFor(() => expect(chatResult.current.activeDraft).not.toBeNull())
-      // 未挂载 composer 时就绪度为「草稿为空」，而不是被宿主屏障拒绝
       expect(chatResult.current.previewDisabledReason).toBe('草稿为空')
       expect(chatResult.current.composer.settings).toBeDefined()
 
-      // 2. ISSUE_AGENT owner
+      // 2. ISSUE_AGENT owner：与 CHAT 完全相同的既有 Thread 行为
       const { result: issueResult } = renderHook(
         () =>
           useAgentPaneController({
@@ -2979,11 +3005,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           }),
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
-      expect(issueResult.current.previewDisabled).toBe(true)
-      expect(issueResult.current.previewDisabledReason).toBe('当前不支持预览')
-      expect(issueResult.current.composer.settings).toBeUndefined()
+      await waitFor(() => expect(issueResult.current.activeDraft).not.toBeNull())
+      expect(issueResult.current.previewDisabledReason).toBe('草稿为空')
+      expect(issueResult.current.composer.settings).toBeDefined()
 
-      // 3. NULL owner
+      // 3. 无 owner：同样开放预览与 settings，只有容器导航仍被拒绝
       const { result: nullResult } = renderHook(
         () =>
           useAgentPaneController({
@@ -2996,10 +3022,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           }),
         { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
       )
-      expect(nullResult.current.composer.disabled).toBe(true)
-      expect(nullResult.current.previewDisabled).toBe(true)
-      expect(nullResult.current.previewDisabledReason).toBe('当前不支持预览')
-      expect(nullResult.current.composer.settings).toBeUndefined()
+      await waitFor(() => expect(nullResult.current.activeDraft).not.toBeNull())
+      expect(nullResult.current.previewDisabledReason).toBe('草稿为空')
+      expect(nullResult.current.composer.settings).toBeDefined()
+      act(() => nullResult.current.composer.onCommand(testCommand('new')))
+      expect(nullResult.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     })
   })
 
@@ -3010,9 +3037,9 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
         JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
       )
-      vi.mocked(harnessService.acceptCommandBatch)
+      vi.mocked(harnessService.acceptThreadCommandBatch)
         .mockRejectedValueOnce(new Error('Network disconnected'))
-        .mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+        .mockResolvedValueOnce(acceptedResponse())
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -3022,11 +3049,13 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const sendButton = screen.getByRole('button', { name: '发送消息' })
       await user.click(sendButton)
 
-      // 验证初次发送
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-      const firstBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+      // 验证初次发送：绑定 Thread 走 owner-free 的 per-thread 命令批次
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+      const [firstThreadId, firstBatch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+      expect(firstThreadId).toBe(THREAD_ID)
       expect(firstBatch).toBeDefined()
       const firstKey = firstBatch?.commands[0]?.idempotencyKey
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
 
       // 界面渲染出真实的 bound-pending-controls
       const controls = await screen.findByTestId('bound-pending-controls')
@@ -3040,13 +3069,15 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
       expect(localStorage.getItem(pendingKey)).not.toBeNull()
 
-      // 点击真实的“重试”按钮
+      // 点击真实的“重试”按钮（在途提交收尾前该控件保持禁用，等它解锁再点）
       const retryButton = screen.getByRole('button', { name: '重试' })
+      // 在途提交收尾前控件保持禁用；先等它解锁，再点击真实按钮。
+      await waitFor(() => expect(retryButton).toBeEnabled())
       await user.click(retryButton)
 
       // 验证重试发送了完全相同的 batch（逐字节复用相同 idempotencyKey）
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
-      const secondBatch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[1]?.[0]
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
+      const secondBatch = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]?.[1]
       expect(secondBatch?.commands[0]?.idempotencyKey).toBe(firstKey)
 
       // 成功后，controls 消失，localStorage 被清空，输入框解锁
@@ -3061,7 +3092,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
         JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
       )
-      vi.mocked(harnessService.acceptCommandBatch)
+      vi.mocked(harnessService.acceptThreadCommandBatch)
         .mockRejectedValueOnce(new Error('Gateway timeout'))
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -3071,21 +3102,22 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await user.type(composer, 'Abandon me')
       await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       await screen.findByTestId('bound-pending-controls')
       const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
       expect(localStorage.getItem(pendingKey)).not.toBeNull()
       expect(composer).toHaveAttribute('aria-disabled', 'true')
 
-      // 点击真实的“取消/放弃”按钮
+      // 点击真实的“取消/放弃”按钮（在途提交收尾前该控件保持禁用，等它解锁再点）
       const abandonButton = screen.getByRole('button', { name: '取消' })
+      await waitFor(() => expect(abandonButton).toBeEnabled())
       await user.click(abandonButton)
 
       // 验证控制栏消失，本地 pending 清理，输入框解锁，且未发起新的网络请求
       await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
       expect(localStorage.getItem(pendingKey)).toBeNull()
       expect(composer).toHaveAttribute('aria-disabled', 'false')
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
     })
 
     it('aborts sending before POST when localStorage persistence fails (fail-closed)', async () => {
@@ -3110,8 +3142,8 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         await user.type(composer, 'Fail closed attempt')
         await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-        // 验证 fail-closed：未调用 acceptCommandBatch
-        expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+        // 验证 fail-closed：未调用 acceptThreadCommandBatch
+        expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
         // 出现明确的存储失败可重试错误提示
         await waitFor(() => {
           expect(screen.getByText(/无法保存发送记录/)).toBeInTheDocument()
@@ -3140,15 +3172,13 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
             environmentName: null,
             yoloEnabled: false,
           },
+          kind: 'MESSAGE',
           localDraft: [{ type: 'text', partId: 'p-reload', text: 'reload test message' }],
+          goalText: null,
+          // 既有 Thread 的冻结请求：只有精确 CAS 游标与命令，没有 owner/target。
           request: {
-            owner: { type: 'CHAT', chatId: CHAT_ID },
-            target: {
-              type: 'THREAD',
-              threadId: THREAD_ID,
-              expectedHeadEntryId: 'h1',
-              expectedNextCommandSequence: '1',
-            },
+            expectedHeadEntryId: 'h1',
+            expectedNextCommandSequence: '1',
             commands: [
               {
                 type: 'USER_MESSAGE',
@@ -3159,7 +3189,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
           },
         }),
       )
-      vi.mocked(harnessService.acceptCommandBatch).mockResolvedValueOnce([] as HarnessThreadCommandDTO[])
+      vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValueOnce(acceptedResponse())
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
@@ -3174,10 +3204,14 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const retryButton = screen.getByRole('button', { name: '重试' })
       await user.click(retryButton)
 
-      // 验证使用原请求 command idempotencyKey 重发
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-      const batch = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0]
+      // 验证使用原请求 command idempotencyKey 重发，且按 threadId 走 per-thread 入口
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+      const [reloadedThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+      expect(reloadedThreadId).toBe(THREAD_ID)
+      expect(batch).not.toHaveProperty('owner')
+      expect(batch).not.toHaveProperty('target')
       expect(batch?.commands[0]?.idempotencyKey).toBe('cmd-reloaded-key-1')
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
 
       // 重试成功后状态清理
       await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
@@ -3198,7 +3232,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         resolveRetry = resolve
       })
 
-      vi.mocked(harnessService.acceptCommandBatch)
+      vi.mocked(harnessService.acceptThreadCommandBatch)
         .mockRejectedValueOnce(new Error('Network disconnected'))
         .mockReturnValueOnce(retryPromise)
 
@@ -3212,18 +3246,19 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await screen.findByTestId('bound-pending-controls')
       const retryBtn = screen.getByRole('button', { name: '重试' })
       const cancelBtn = screen.getByRole('button', { name: '取消' })
-      expect(retryBtn).not.toBeDisabled()
-      expect(cancelBtn).not.toBeDisabled()
+      // 在途提交收尾前两个控件都禁用；解锁后才允许重试，因此这里先等解锁再断言与点击。
+      await waitFor(() => expect(retryBtn).toBeEnabled())
+      expect(cancelBtn).toBeEnabled()
 
       await user.click(retryBtn)
       await waitFor(() => expect(screen.queryByTestId('bound-pending-controls')).toBeNull())
       expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
       expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
       await user.click(composer)
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
 
       resolveRetry([])
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
       expect(screen.queryByTestId('bound-pending-controls')).toBeNull()
     })
 
@@ -3234,7 +3269,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const firstCallPromise = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
         resolveFirst = resolve
       })
-      vi.mocked(harnessService.acceptCommandBatch).mockReturnValueOnce(firstCallPromise)
+      vi.mocked(harnessService.acceptThreadCommandBatch).mockReturnValueOnce(firstCallPromise)
 
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -3259,7 +3294,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       act(() => {
         submission = result.current.composer.onSubmit()
       })
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       expect(result.current.composer.disabled).toBe(true)
 
       act(() => result.current.composer.onPartsChange([createTextPart('typing next message while in flight')]))
@@ -3289,15 +3324,13 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const pane2Request = new Promise<HarnessThreadCommandDTO[]>((resolve) => {
         resolvePane2 = resolve
       })
-      vi.mocked(harnessService.acceptCommandBatch)
+      vi.mocked(harnessService.acceptThreadCommandBatch)
         .mockReturnValueOnce(pane2Request)
         .mockRejectedValueOnce(new Error('Network error on pane 1'))
       vi.mocked(harnessService.stopThread).mockResolvedValueOnce({
-        status: 'IDLE',
-        thread: thread(),
-        stoppedTurnEndEntryId: null,
-        cancelledCommandCount: 0,
-        cancelledUserMessages: [],
+        status: 'STOPPED',
+        thread: thread({ executionControl: 'STOPPED' }),
+        stoppedThreads: [],
       })
 
       const client2 = new QueryClient({
@@ -3323,7 +3356,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       act(() => {
         void controller2.current.composer.onSubmit()
       })
-      await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
       const pendingKey = `kk-studio.agent-thread-pending.${THREAD_ID}`
       const pane2Stored = localStorage.getItem(pendingKey)
       expect(pane2Stored).not.toBeNull()
@@ -3345,14 +3378,14 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       const pane1Stored = localStorage.getItem(pendingKey)
       expect(pane1Stored).not.toBeNull()
       expect(pane1Stored).not.toBe(pane2Stored)
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
 
       act(() => controller2.current.composer.onPartsChange([createTextPart('pane 2 retry')]))
       await act(async () => {
         await controller2.current.composer.onSubmit()
       })
       expect(controller2.current.error).toMatch(/无法保存发送记录/)
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(2)
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
       expect(localStorage.getItem(pendingKey)).toBe(pane1Stored)
       expect(controller2.current.pendingMessage).toBeNull()
 
@@ -3535,8 +3568,14 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         await hook.result.current.composer.onSubmit([createTextPart('bound message')])
       })
 
-      expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1)
-      const [batchRequest] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+      expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+      const [boundThreadId, batchRequest] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+      expect(boundThreadId).toBe(THREAD_ID)
+      // owner-free：请求体只有 CAS 游标与命令
+      expect(batchRequest).not.toHaveProperty('owner')
+      expect(batchRequest).not.toHaveProperty('target')
+      expect(batchRequest.expectedHeadEntryId).toBe('head-1')
+      expect(batchRequest.expectedNextCommandSequence).toBe('1')
       expect(batchRequest.commands.map((c) => c.type)).toEqual([
         'SET_AGENT',
         'SET_MODEL',
@@ -3546,6 +3585,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(batchRequest.commands[1]).toMatchObject({
         model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
       })
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     })
 
     it('includes SET_AGENT and SET_MODEL for the new agent model in the bound preview request batch', async () => {

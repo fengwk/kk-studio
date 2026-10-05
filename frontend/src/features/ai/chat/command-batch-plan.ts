@@ -1,22 +1,33 @@
 import type {
-  AgentCommandBatchRequestDTO,
-  AgentRuntimeOwnerDTO,
+  HarnessCommandCreateDTO,
   HarnessThreadDTO,
+  ThreadCommandBatchRequestDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
-  buildAcceptanceRequest,
-  buildGoalAcceptanceRequest,
+  buildBranchDiffCommands,
+  type BranchDraft,
+} from '@/features/ai/chat/branch-draft'
+import {
+  buildThreadCommandBatchRequest,
   copyBranchDraft,
-  type FrozenCommandBatchRequest,
+  normalizeGoalText,
 } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
-import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import type { ComposerPart } from '@/features/ai/composer/composer-parts'
+import {
+  hasMessageContent,
+  partsKey,
+  partsToMessageContents,
+  trimMessageParts,
+  type ComposerPart,
+} from '@/features/ai/composer/composer-parts'
 
+/**
+ * 既有 Thread 的一次命令批次计划：请求只携带精确 CAS 游标与有序命令，
+ * 不携带 owner/target；targetDraft 是失败后本地恢复用的 branch 草稿身份。
+ */
 export interface CommandBatchPlan {
-  request: AgentCommandBatchRequestDTO
+  request: ThreadCommandBatchRequestDTO
   identity: string
   targetDraft: BranchDraft
-  frozen: FrozenCommandBatchRequest
 }
 
 export function createCommandId(): string {
@@ -32,53 +43,69 @@ export function createDecisionId(): string {
 }
 
 export function buildMessageBatchPlan(options: {
-  owner: AgentRuntimeOwnerDTO
   thread: HarnessThreadDTO
   effectiveBase: BranchDraft
   draft: BranchDraft
   parts: ComposerPart[]
   createCommandId?: () => string
 }): CommandBatchPlan {
-  const frozen = buildAcceptanceRequest({
-    owner: options.owner,
-    target: { kind: 'BOUND_THREAD', threadId: options.thread.threadId },
-    thread: options.thread,
-    base: options.effectiveBase,
-    draft: options.draft,
-    parts: options.parts,
-    createId: options.createCommandId ?? createCommandId,
-  })
+  const createId = options.createCommandId ?? createCommandId
+  const payloadParts = trimMessageParts(options.parts)
+  if (!hasMessageContent(payloadParts)) {
+    throw new Error('A command batch requires message content')
+  }
+  const contents = partsToMessageContents(payloadParts)
+  const firstContent = contents[0]
+  if (firstContent == null) {
+    throw new Error('A command batch requires non-empty contents')
+  }
+  const message: HarnessCommandCreateDTO = {
+    type: 'USER_MESSAGE',
+    idempotencyKey: createId(),
+    contents: [firstContent, ...contents.slice(1)],
+  }
+  const commands = [
+    ...buildBranchDiffCommands(options.effectiveBase, options.draft, createId),
+    message,
+  ]
   return {
-    request: frozen.request,
-    identity: frozen.identity,
+    request: buildThreadCommandBatchRequest(options.thread, commands),
+    identity: JSON.stringify({
+      threadId: options.thread.threadId,
+      commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
+      branchDraft: options.draft,
+      parts: partsKey(payloadParts),
+    }),
     targetDraft: copyBranchDraft(options.draft),
-    frozen,
   }
 }
 
 export function buildGoalBatchPlan(options: {
-  owner: AgentRuntimeOwnerDTO
   thread: HarnessThreadDTO
   effectiveBase: BranchDraft
   draft: BranchDraft
   goalText: string | null
-  parts?: ComposerPart[]
   createCommandId?: () => string
 }): CommandBatchPlan {
-  const frozen = buildGoalAcceptanceRequest({
-    owner: options.owner,
-    target: { kind: 'BOUND_THREAD', threadId: options.thread.threadId },
-    thread: options.thread,
-    base: options.effectiveBase,
-    draft: options.draft,
-    goalText: options.goalText,
-    localParts: options.parts,
-    createId: options.createCommandId ?? createCommandId,
-  })
+  const createId = options.createCommandId ?? createCommandId
+  const text = normalizeGoalText(options.goalText)
+  const goalCommand: HarnessCommandCreateDTO = {
+    type: 'GOAL',
+    idempotencyKey: createId(),
+    text,
+  }
+  const commands = [
+    ...buildBranchDiffCommands(options.effectiveBase, options.draft, createId),
+    goalCommand,
+  ]
   return {
-    request: frozen.request,
-    identity: frozen.identity,
+    request: buildThreadCommandBatchRequest(options.thread, commands),
+    identity: JSON.stringify({
+      threadId: options.thread.threadId,
+      commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
+      branchDraft: options.draft,
+      goalText: text,
+    }),
     targetDraft: copyBranchDraft(options.draft),
-    frozen,
   }
 }

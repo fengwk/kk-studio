@@ -9,6 +9,7 @@ import type {
   HarnessGoalSettingDTO,
   HarnessModelSelectionDTO,
   ImageInputTier,
+  ThreadCommandBatchRequestDTO,
 } from '@/shared/api/contracts/ai-runtime'
 
 export type PaneTarget =
@@ -18,6 +19,11 @@ export type PaneTarget =
 
 export type PaneTargetKind = PaneTarget['kind']
 
+/**
+ * 容器创建（NEW_SESSION / NEW_THREAD）的未决接受：只有创建才需要产品 owner。
+ * 既有 Thread 的发送、Goal、设置、预览等一律走 per-thread 的
+ * {@link BoundPendingMessage}，不再伪造 owner。
+ */
 export interface PendingAcceptance {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
@@ -141,14 +147,6 @@ function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
       && nonBlank(value.threadId)
       && typeof value.yoloEnabled === 'boolean'
   }
-  if (value.type === 'THREAD') {
-    return keys.length === 4
-      && keys.every((key) => key === 'type' || key === 'threadId'
-        || key === 'expectedHeadEntryId' || key === 'expectedNextCommandSequence')
-      && nonBlank(value.threadId)
-      && nonBlank(value.expectedHeadEntryId)
-      && nonBlank(value.expectedNextCommandSequence)
-  }
   return false
 }
 
@@ -215,6 +213,16 @@ function isCommandBatchRequest(value: unknown): value is AgentCommandBatchReques
   return isRecord(value)
     && isOwner(value.owner)
     && isCommandTarget(value.target)
+    && Array.isArray(value.commands)
+    && value.commands.length > 0
+    && value.commands.every(isCommand)
+}
+
+function isThreadCommandBatchRequest(value: unknown): value is ThreadCommandBatchRequestDTO {
+  return isRecord(value)
+    && hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
+    && nonBlank(value.expectedHeadEntryId)
+    && nonBlank(value.expectedNextCommandSequence)
     && Array.isArray(value.commands)
     && value.commands.length > 0
     && value.commands.every(isCommand)
@@ -399,9 +407,6 @@ export function loadPendingAcceptance(
   storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
 ): PendingAcceptance | null {
   try {
-    if (owner.type === 'ISSUE_AGENT') {
-      return null
-    }
     const raw = storage.getItem(pendingStorageKey(owner, paneId))
     if (!raw) {
       return null
@@ -429,9 +434,6 @@ export function savePendingAcceptance(
   pending: PendingAcceptance,
   storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
 ): void {
-  if (owner.type === 'ISSUE_AGENT') {
-    return
-  }
   try {
     storage.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
   } catch {
@@ -451,11 +453,18 @@ export function clearPendingAcceptance(
   }
 }
 
+/**
+ * 既有 Thread 的一次未决写入（普通消息或 Goal）。它只依赖 Thread 的 CAS 游标，
+ * 不携带 owner；发送前持久化，未知结果后保留，刷新/重绑后按 thread 恢复精确重试，
+ * 并按 kind 把内容恢复到对应编辑区（消息 → composer，目标 → Goal 编辑区）。
+ */
 export interface BoundPendingMessage {
   threadId: string
-  request: AgentCommandBatchRequestDTO
+  request: ThreadCommandBatchRequestDTO
   targetDraft: BranchDraft
+  kind: 'MESSAGE' | 'GOAL'
   localDraft: ComposerPart[]
+  goalText: string | null
   unknownOutcome: boolean
 }
 
@@ -483,20 +492,28 @@ function resolveStorage(
 
 export function isBoundPendingMessageValue(value: unknown): value is BoundPendingMessage {
   return isRecord(value)
-    && hasExactKeys(value, ['threadId', 'request', 'targetDraft', 'localDraft', 'unknownOutcome'])
+    && hasExactKeys(value, [
+      'threadId',
+      'request',
+      'targetDraft',
+      'kind',
+      'localDraft',
+      'goalText',
+      'unknownOutcome',
+    ])
     && nonBlank(value.threadId)
+    && (value.kind === 'MESSAGE' || value.kind === 'GOAL')
     && typeof value.unknownOutcome === 'boolean'
-    && isCommandBatchRequest(value.request)
-    && value.request.target.type === 'THREAD'
-    && value.request.target.threadId === value.threadId
+    && isThreadCommandBatchRequest(value.request)
     && isBranchDraft(value.targetDraft)
     && Array.isArray(value.localDraft)
     && value.localDraft.every(isComposerPart)
+    && (value.goalText === null || typeof value.goalText === 'string')
 }
 
 export function sameBatchRequestIdentity(
-  left: AgentCommandBatchRequestDTO,
-  right: AgentCommandBatchRequestDTO,
+  left: ThreadCommandBatchRequestDTO,
+  right: ThreadCommandBatchRequestDTO,
 ): boolean {
   if (left === right) {
     return true
@@ -595,7 +612,7 @@ export function saveBoundPendingMessage(
 
 export function clearBoundPendingMessage(
   threadId: string,
-  matchingRequest?: AgentCommandBatchRequestDTO,
+  matchingRequest?: ThreadCommandBatchRequestDTO,
   storage?: Pick<Storage, 'getItem' | 'removeItem'>,
 ): boolean {
   const resolved = resolveStorage(storage)
@@ -611,7 +628,7 @@ export function clearBoundPendingMessage(
       }
       try {
         const parsed = JSON.parse(raw) as { request?: unknown }
-        if (parsed && isCommandBatchRequest(parsed.request)) {
+        if (parsed && isThreadCommandBatchRequest(parsed.request)) {
           if (!sameBatchRequestIdentity(parsed.request, matchingRequest)) {
             // multi-pane 同 thread pending：避免清理属于另一个请求身份的 pending
             return false

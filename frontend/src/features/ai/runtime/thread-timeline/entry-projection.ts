@@ -19,6 +19,7 @@ import {
   projectRootSettings,
   projectSettingsChanges,
   parseSettingsSnapshot,
+  projectNotificationEntry,
   projectUnknownEntry,
   projectUnsupportedMessageEntry,
 } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
@@ -139,6 +140,10 @@ export function projectDurableEntry(
         aborted: true,
       })
     }
+    return
+  }
+  if (entryType === 'NOTIFICATION') {
+    messages.push(projectNotificationEntry(entry, payload))
     return
   }
   if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {

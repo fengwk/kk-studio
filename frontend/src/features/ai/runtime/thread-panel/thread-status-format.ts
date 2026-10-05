@@ -126,7 +126,7 @@ function positiveFinite(value: number | undefined): number | null {
 }
 
 /**
- * 格式化 Thread 运行状态，为 WAITING_CHILDREN / QUEUED 等提供准确的本地化文案。
+ * 格式化 Thread 运行状态，为 STOPPED / QUEUED 等提供准确的本地化文案。
  */
 export function formatThreadStatusLabel(
   status?: string | null,
@@ -136,8 +136,8 @@ export function formatThreadStatusLabel(
     return ''
   }
   switch (status) {
-    case 'WAITING_CHILDREN':
-      return t('ai.runtime.thread.status.WAITING_CHILDREN')
+    case 'STOPPED':
+      return t('ai.runtime.thread.status.STOPPED')
     case 'QUEUED':
       return t('ai.runtime.thread.status.QUEUED')
     case 'IDLE':

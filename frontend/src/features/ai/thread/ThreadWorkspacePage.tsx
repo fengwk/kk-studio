@@ -84,7 +84,7 @@ export function ThreadWorkspacePage() {
           agents={agentsQuery.data?.results ?? []}
           environments={environmentsQuery.data ?? []}
           initialTarget={{ kind: 'BOUND_THREAD', threadId }}
-          capabilities={{ readOnly: true, allowNewSession: false }}
+          capabilities={{ allowNewSession: false }}
           focused
         />
       </div>

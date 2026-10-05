@@ -47,6 +47,7 @@ vi.mock('@/shared/api/environment-service', () => ({
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     acceptCommandBatch: vi.fn(),
+    acceptThreadCommandBatch: vi.fn(),
     listSessionThreads: vi.fn(),
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
@@ -104,6 +105,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     version: '0',
     status: 'IDLE',
     processing: false,
+    executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -125,6 +127,7 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
     toolInvocations: [],
     modelAttemptFailures: [],
     manualCompaction: { available: false, disabledReason: 'not available' },
+    stopReceipts: [],
   }
 }
 
@@ -176,6 +179,7 @@ beforeEach(() => {
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
+  vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
 })
 
 describe('ChatWorkspacePage', () => {
@@ -219,6 +223,7 @@ describe('ChatWorkspacePage', () => {
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
     await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
     const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
     expect(request.target.type).toBe('NEW_SESSION')
@@ -231,7 +236,7 @@ describe('ChatWorkspacePage', () => {
     )
   })
 
-  it('sends an existing BOUND_THREAD through the same single command-batches endpoint', async () => {
+  it('sends an existing BOUND_THREAD through the per-thread command-batches endpoint', async () => {
     const user = userEvent.setup()
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -243,14 +248,20 @@ describe('ChatWorkspacePage', () => {
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
-    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    expect(request.target).toMatchObject({
-      type: 'THREAD',
-      threadId: THREAD_ID,
+    // 既有 Thread 走 per-thread 写入口，不再经过创建批次端点。
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(threadId).toBe(THREAD_ID)
+    expect(request).toMatchObject({
       expectedHeadEntryId: 'head-1',
       expectedNextCommandSequence: '1',
     })
+    expect(Object.keys(request).sort()).toEqual([
+      'commands',
+      'expectedHeadEntryId',
+      'expectedNextCommandSequence',
+    ])
   })
 
   it('keeps independent target persistence for two visible Chat panes', async () => {
@@ -351,22 +362,7 @@ describe('ChatWorkspacePage', () => {
     const user = userEvent.setup()
     let resolveBatch!: () => void
     const pendingPromise = new Promise<{ thread: HarnessThreadDTO; entries: HarnessSessionEntryDTO[] }>((resolve) => {
-      resolveBatch = () => resolve({
-        thread: {
-          threadId: THREAD_ID,
-          sessionId: 'sess-1',
-          state: 'IDLE',
-          yolo: false,
-          activeAttemptId: null,
-          pinnedAgentName: null,
-          pinnedEnvironmentName: null,
-          lastActivityTime: '2026-01-01T00:00:00Z',
-          version: '1',
-          createTime: '2026-01-01T00:00:00Z',
-          updateTime: '2026-01-01T00:00:00Z',
-        },
-        entries: [],
-      })
+      resolveBatch = () => resolve({ thread: thread(), entries: [] })
     })
 
     vi.mocked(harnessService.acceptCommandBatch).mockImplementation(() => pendingPromise)

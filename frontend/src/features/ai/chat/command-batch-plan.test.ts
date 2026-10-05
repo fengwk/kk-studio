@@ -36,6 +36,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     version: '0',
     status: 'IDLE',
     processing: false,
+    executionControl: 'RUNNABLE',
     branchSettings: settings(),
     createTime: null,
     updateTime: null,
@@ -61,7 +62,6 @@ function plan(
   options: Partial<Parameters<typeof buildMessageBatchPlan>[0]> = {},
 ): CommandBatchPlan {
   return buildMessageBatchPlan({
-    owner: { type: 'CHAT', chatId: 'chat-1' },
     thread: thread(),
     effectiveBase: draftOf(),
     draft: draftOf(),
@@ -77,12 +77,16 @@ describe('command batch replay identity', () => {
     const second = plan()
     expect(second.identity).toBe(first.identity)
     expect(second.request.commands[0]?.type).toBe('USER_MESSAGE')
-    expect(second.request.target).toMatchObject({
-      type: 'THREAD',
-      threadId: 't1',
+    // 既有 Thread 的批次只提交精确 CAS 游标，绝不携带 owner/target。
+    expect(second.request).toMatchObject({
       expectedHeadEntryId: 'root',
       expectedNextCommandSequence: '1',
     })
+    expect(Object.keys(second.request).sort()).toEqual([
+      'commands',
+      'expectedHeadEntryId',
+      'expectedNextCommandSequence',
+    ])
   })
 
   it('changes identity when content, target draft, or Thread changes', () => {
@@ -110,11 +114,18 @@ describe('command batch replay identity', () => {
     ])
   })
 
-  it('keeps the exact frozen request available for a controller replay', () => {
+  it('exposes the complete owner-free request for a controller replay', () => {
     const batch = plan()
-    expect(batch.frozen.request).toBe(batch.request)
-    expect(batch.frozen.identity).toBe(batch.identity)
-    expect(batch.frozen.composerParts).toEqual(batch.frozen.composerParts)
+    expect(batch.request).toEqual({
+      expectedHeadEntryId: 'root',
+      expectedNextCommandSequence: '1',
+      commands: [{
+        type: 'USER_MESSAGE',
+        idempotencyKey: 'stable-command',
+        contents: [{ type: 'TEXT', text: 'hello' }],
+      }],
+    })
+    expect(batch.targetDraft).toEqual(draftOf())
   })
 })
 
