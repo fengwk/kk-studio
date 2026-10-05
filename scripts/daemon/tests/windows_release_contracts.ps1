@@ -6,6 +6,11 @@ production helpers. Only OS ACL/ScheduledTasks and JAR process outcomes are mock
 The parent suite separately exercises real processes/decoder, NTFS ACLs and the real fat JAR.
 No task is registered and no network request leaves the machine. ASCII-only for PS 5.1.
 #>
+function ConvertTo-FixtureText {
+    param([Parameter(Mandatory = $true)][int[]] $CodePoints)
+    return -join ($CodePoints | ForEach-Object { [char] $_ })
+}
+
 function Test-ReleaseInstallerContracts {
     $productionCopy = (Get-Command Copy-PrivateFile).ScriptBlock
     $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("kk-release-" + [Guid]::NewGuid().ToString("N"))
@@ -242,12 +247,12 @@ function Test-ReleaseInstallerContracts {
             -Message "overwrite preserves runtime data"
 
         foreach ($case in @(
-            @("owner", "unmanaged Scheduled Task"), @("refresh-owner", "unmanaged Scheduled Task"),
-            @("download", "fixture download failure"), @("checksum", "checksum mismatch"),
-            @("foreign-checksum", "exactly one matching asset"), @("multiple-checksum", "exactly one matching asset"),
+            @("owner", (ConvertTo-FixtureText 0x975E,0x53D7,0x7BA1,0x8BA1,0x5212,0x4EFB,0x52A1)), @("refresh-owner", (ConvertTo-FixtureText 0x975E,0x53D7,0x7BA1,0x8BA1,0x5212,0x4EFB,0x52A1)),
+            @("download", (ConvertTo-FixtureText 0x65E0,0x6CD5,0x4E0B,0x8F7D)), @("checksum", (ConvertTo-FixtureText 0x6821,0x9A8C,0x5931,0x8D25)),
+            @("foreign-checksum", (ConvertTo-FixtureText 0x6821,0x9A8C,0x5931,0x8D25)), @("multiple-checksum", (ConvertTo-FixtureText 0x6821,0x9A8C,0x5931,0x8D25)),
             @("version", "does not match"), @("version-exit", "exit code 23"),
             @("config", "Invalid daemon configuration"), @("config-leak", "Invalid daemon configuration"),
-            @("config-unknown", "unrecognized output"), @("config-output", "unrecognized output"),
+            @("config-unknown", (ConvertTo-FixtureText 0x914D,0x7F6E,0x6821,0x9A8C,0x5931,0x8D25)), @("config-output", (ConvertTo-FixtureText 0x914D,0x7F6E,0x6821,0x9A8C,0x5931,0x8D25)),
             @("definition", "fixture definition failure"), @("backup", "Partial backup")
         )) {
             Reset-Fixture
@@ -279,7 +284,7 @@ function Test-ReleaseInstallerContracts {
         foreach ($failure in @("stop", "publish-config", "publish-token", "register", "start")) {
             Reset-Fixture
             $state.Failure = $failure
-            Assert-Throws -Action { Invoke-Main } -ExpectedMessage "No automatic rollback" `
+            Assert-Throws -Action { Invoke-Main } -ExpectedMessage (ConvertTo-FixtureText 0x672A,0x81EA,0x52A8,0x56DE,0x6EDA) `
                 -Message "$failure reports manual recovery"
             Assert-True -Condition (Test-Path -LiteralPath $state.Backup) -Message "$failure retains backup"
             Assert-Equal -Expected "old token" -Actual ([IO.File]::ReadAllText((Join-Path $state.Backup "daemon.token"))) `
@@ -302,7 +307,7 @@ function Test-ReleaseInstallerContracts {
         }
         Reset-Fixture
         $state.Task = $null
-        Assert-Throws -Action { Invoke-Main } -ExpectedMessage "Unowned program conflict" -Message "orphan program not overwritten"
+        Assert-Throws -Action { Invoke-Main } -ExpectedMessage (ConvertTo-FixtureText 0x62D2,0x7EDD,0x8986,0x76D6,0x65E0,0x53D7,0x7BA1,0x4EFB,0x52A1,0x7684,0x7A0B,0x5E8F) -Message "orphan program not overwritten"
         Assert-Equal -Expected 0 -Actual $requests.Count -Message "orphan conflict precedes download"
         Assert-OldFiles -Context "orphan"
         Remove-Item -LiteralPath $script:InstalledJar
