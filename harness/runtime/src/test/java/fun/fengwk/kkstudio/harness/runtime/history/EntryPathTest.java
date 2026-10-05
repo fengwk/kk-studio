@@ -1226,6 +1226,90 @@ class EntryPathTest {
         new EntryPath(List.of(root, start, goalUser, reply, end, goalStart)).baseSettings().goal());
   }
 
+  /**
+   * N1：回合之间的系统通知是「待下一 INPUT 接纳」的输入来源，因此 notification-only 的 INPUT 无需再写 USER 消息即可规划；该 pending
+   * 输入只被紧随的 INPUT 消费一次。
+   */
+  @Test
+  void notificationOnlyInputTurnIsValidBetweenTurns() {
+    Entry root = root(settings("root"));
+    Entry notification = notification(id(2L), id(1L));
+    Entry start = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("turn"));
+    Entry reply = assistantMessage(id(4L), id(3L));
+    Entry end = turnEnd(id(5L), id(4L), id(3L), TurnEndOutcome.COMPLETED, null, null);
+
+    EntryPath path = new EntryPath(List.of(root, notification, start, reply, end));
+
+    assertEquals(end, path.head());
+  }
+
+  /** N1：pending 通知只被紧随的 INPUT 消费一次；下一个 INPUT 仍需自己的 USER/CUSTOM 输入。 */
+  @Test
+  void pendingNotificationIsConsumedByExactlyOneFollowingInput() {
+    Entry root = root(settings("root"));
+    Entry notification = notification(id(2L), id(1L));
+    Entry first = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("turn"));
+    Entry firstReply = assistantMessage(id(4L), id(3L));
+    Entry firstEnd = turnEnd(id(5L), id(4L), id(3L), TurnEndOutcome.COMPLETED, null, null);
+    Entry second = turnStart(id(6L), id(5L), TurnStartReason.INPUT, settings("turn"));
+    Entry secondReply = assistantMessage(id(7L), id(6L));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(root, notification, first, firstReply, firstEnd, second, secondReply)));
+  }
+
+  /** N1：COMPACTION turn 不消费 pending 通知，紧随其后的 INPUT 仍可用该通知满足输入前置。 */
+  @Test
+  void compactionPreservesPendingNotificationForFollowingInput() {
+    Entry root = root(settings("root"));
+    Entry notification = notification(id(2L), id(1L));
+    Entry compaction = compactionStart(id(3L), id(2L), settings("turn"));
+    Entry summary = compactionResult(id(4L), id(3L));
+    Entry compactionEnd = turnEnd(id(5L), id(4L), id(3L), TurnEndOutcome.COMPLETED, null, null);
+    Entry start = turnStart(id(6L), id(5L), TurnStartReason.INPUT, settings("turn"));
+    Entry reply = assistantMessage(id(7L), id(6L));
+    Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, null, null);
+
+    EntryPath path =
+        new EntryPath(
+            List.of(root, notification, compaction, summary, compactionEnd, start, reply, end));
+
+    assertEquals(end, path.head());
+  }
+
+  /** N1：INPUT 输入段内的通知合法（assistant 结果之前），但绝不晚于 assistant 结果。 */
+  @Test
+  void notificationInsideInputTurnMustPrecedeAssistantResult() {
+    Entry root = root(settings("root"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry notification = notification(id(3L), id(2L));
+    Entry reply = assistantMessage(id(4L), id(3L));
+    Entry end = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+    assertEquals(end, new EntryPath(List.of(root, start, notification, reply, end)).head());
+
+    Entry user = userMessage(id(3L), id(2L));
+    Entry afterAssistant = notification(id(5L), id(4L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, start, user, reply, afterAssistant)));
+  }
+
+  private static Entry notification(UUID id, UUID parentId) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new NotificationPayload(
+            id(900L),
+            NotificationKind.SUBAGENT_RESULT,
+            id(901L),
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("notified")))),
+        time(id));
+  }
+
   private static Entry root(BranchSettings settings) {
     return new Entry(id(1L), SESSION_ID, null, new RootPayload(settings), BASE);
   }
