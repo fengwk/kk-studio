@@ -60,9 +60,19 @@ function formFromConfig(config: EnvironmentInstallConfigDTO) {
     bashExecutable: config.daemon.bashExecutable ?? '',
     note: config.daemon.note ?? '',
     lspEnabled: config.daemon.lsp != null,
-    servers: JSON.stringify(config.daemon.lsp?.servers ?? {}, null, 2),
+    // 未配置 LSP 时保持空值，避免把示例当作配置提交。
+    servers: config.daemon.lsp == null ? '' : JSON.stringify(config.daemon.lsp.servers, null, 2),
   }
 }
+
+/** 暗纹示例，不是默认值，也不会随保存提交。 */
+const LSP_EXAMPLE_TEXT = `{
+  "jdtls": {
+    "command": ["~/.local/share/nvim/mason/bin/jdtls"],
+    "extensions": [".java"],
+    "rootMarkers": ["pom.xml"]
+  }
+}`
 
 export function EnvironmentInstallModal({ environment, uninstall = false, onClose }: Props) {
   const { t } = useI18n()
@@ -74,7 +84,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
   const [bashExecutable, setBashExecutable] = useState('')
   const [note, setNote] = useState('')
   const [lspEnabled, setLspEnabled] = useState(false)
-  const [servers, setServers] = useState('{}')
+  const [servers, setServers] = useState('')
   const [version, setVersion] = useState(environment.version)
   const [loadKey, setLoadKey] = useState(0)
   const [loading, setLoading] = useState(!uninstall)
@@ -157,7 +167,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
     setBashExecutable('')
     setNote('')
     setLspEnabled(false)
-    setServers('{}')
+    setServers('')
     setLoadError(null)
   }
 
@@ -245,11 +255,11 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         className="modal-card environment-install-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={t(uninstall ? 'ai.environment.uninstall' : 'ai.environment.install')}
+        aria-label={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
         onMouseDown={event => event.stopPropagation()}
       >
         <ModalHeader
-          title={`${t(uninstall ? 'ai.environment.uninstall' : 'ai.environment.install')} · ${environment.name}`}
+          title={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
           onClose={onClose}
         />
         <form onSubmit={event => void submit(event)}>
@@ -257,6 +267,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             <p className="confirm-modal-description">
               {t(uninstall ? 'ai.environment.install.uninstallNotice' : 'ai.environment.install.notice')}
             </p>
+            {!uninstall && (
+              <p className="field-help install-notice-detail">{t('ai.environment.install.noticeDetail')}</p>
+            )}
             {loading && !loadError && <p role="status">{t('ai.environment.loading')}</p>}
             {loadError && (
               <div className="field-error" role="alert">
@@ -305,6 +318,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                     <input
                       value={studioUrl}
                       onChange={event => setStudioUrl(event.target.value)}
+                      placeholder={t('ai.environment.install.originPlaceholder')}
                       aria-describedby="install-origin-help"
                       disabled={disabled}
                       required
@@ -355,6 +369,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                           rows={8}
                           value={servers}
                           onChange={event => setServers(event.target.value)}
+                          placeholder={LSP_EXAMPLE_TEXT}
                           aria-describedby="install-lsp-help"
                           disabled={disabled}
                           spellCheck={false}
@@ -372,6 +387,9 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
               <p className="field-error" role="alert">
                 {error}
               </p>
+            )}
+            {!uninstall && (
+              <p className="field-help install-credential-note">{t('ai.environment.install.credentialNote')}</p>
             )}
           </div>
           <div className="modal-footer">

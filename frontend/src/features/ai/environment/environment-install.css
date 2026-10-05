@@ -50,13 +50,18 @@
 }
 
 .environment-install-modal .confirm-modal-description {
-  margin-bottom: 16px;
+  margin-bottom: 8px;
+}
+
+.environment-install-modal textarea::placeholder {
+  color: var(--fg-dim, #9da89f);
+  opacity: 1;
 }
 
 .environment-install-modal .form-group textarea {
   width: 100%;
   min-width: 0;
-  height: 180px;
+  height: 220px;
   min-height: 160px;
   box-sizing: border-box;
   font-family: var(--mono);
@@ -74,6 +79,14 @@
   line-height: 1.5;
   color: var(--muted, #9ca3af);
   word-break: break-word;
+}
+
+.environment-install-modal .install-notice-detail {
+  margin-bottom: 16px;
+}
+
+.environment-install-modal .install-credential-note {
+  margin-top: 16px;
 }
 
 .environment-install-modal .install-load-actions {
