@@ -482,8 +482,8 @@ class HarnessWorkDispatcherHandoffTest {
   }
 
   /**
-   * 在途（旧 lease 过期的 RUNNING）与等待态 claim 由真实 Processor 收敛：恢复旧 lease、唤醒 THREAD 并 complete；等待态 Tool 直接
-   * complete 且保持 WAITING_INPUT；全程绝不重放 Provider / Tool。
+   * 在途与等待态 claim 由真实 Model/Tool Processor 收敛：终态唤醒各自 THREAD，等待态只完成 Work；此测试在 THREAD handoff
+   * 边界记录唤醒，历史物化与后续模型执行由恢复集成测试覆盖。
    */
   @Test
   void routesInFlightAndWaitingClaimsToTheRealProcessors() {
@@ -497,6 +497,7 @@ class HarnessWorkDispatcherHandoffTest {
     markToolRunning(store, toolSeed.toolInvocationId(), started);
     parkToolForInput(store, waitingSeed.toolInvocationId(), started);
     MutableClock clock = clock();
+    clock.set(started.plusSeconds(60));
     FakeModelGateway modelGateway = new FakeModelGateway();
     FakeToolGateway toolGateway = new FakeToolGateway();
     RealtimeEventSink sink = event -> {};
@@ -507,17 +508,6 @@ class HarnessWorkDispatcherHandoffTest {
             0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
     ScheduledExecutorService processorScheduler = Executors.newScheduledThreadPool(1);
     ownedExecutors.add(processorScheduler);
-    ThreadProcessor threadProcessor =
-        new ThreadProcessor(
-            store,
-            (threadId, path, preparation) -> {
-              throw new AssertionError("resolver must not be called for a quiescent thread");
-            },
-            new ThreadProcessorConfig(
-                leaseConfig, Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT),
-            clock,
-            processorScheduler,
-            Runnable::run);
     ModelProcessor modelProcessor =
         new ModelProcessor(
             store,
@@ -538,17 +528,27 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run);
+    CopyOnWriteArrayList<UUID> threadHandoffs = new CopyOnWriteArrayList<>();
+    Consumer<ClaimedWork> recordThreadHandoff =
+        claim -> {
+          threadHandoffs.add(claim.target().id());
+          store.transaction(
+              tx -> {
+                tx.completeWork(claim, clock.instant());
+                return null;
+              });
+        };
     HarnessWorkDispatcher dispatcher =
-        new HarnessWorkDispatcher(
+        newDispatcher(
             store,
-            config(4),
             clock,
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
-            threadProcessor,
-            modelProcessor,
-            toolProcessor);
+            4,
+            recordThreadHandoff,
+            modelProcessor::process,
+            toolProcessor::process);
 
     dispatcher.start();
     try {
@@ -563,13 +563,29 @@ class HarnessWorkDispatcherHandoffTest {
                           new WorkTarget(WorkTargetType.TOOL, waitingSeed.toolInvocationId()))
                       == null
                   && work(store, new WorkTarget(WorkTargetType.THREAD, threadSeed.threadId()))
+                      == null
+                  && threadHandoffs.containsAll(
+                      List.of(threadSeed.threadId(), modelSeed.threadId(), toolSeed.threadId()))
+                  && work(store, new WorkTarget(WorkTargetType.THREAD, modelSeed.threadId()))
+                      == null
+                  && work(store, new WorkTarget(WorkTargetType.THREAD, toolSeed.threadId()))
                       == null);
       // 恢复只收敛 durable 事实，聚合终态不由 Gateway 产生；等待态只完成 Work 而不触碰外部执行。
       assertTrue(modelGateway.started.isEmpty());
       assertTrue(toolGateway.started.isEmpty());
+      assertEquals(
+          ModelInvocationStatus.FAILED,
+          store
+              .transaction(
+                  tx -> tx.findModelInvocation(modelSeed.modelInvocationId()).orElseThrow())
+              .status());
+      assertEquals(ToolInvocationStatus.UNKNOWN, tool(store, toolSeed.toolInvocationId()));
       assertEquals(ToolInvocationStatus.WAITING_INPUT, tool(store, waitingSeed.toolInvocationId()));
+      assertEquals(3, threadHandoffs.size());
     } finally {
       dispatcher.stop();
+      modelProcessor.close();
+      toolProcessor.close();
     }
   }
 

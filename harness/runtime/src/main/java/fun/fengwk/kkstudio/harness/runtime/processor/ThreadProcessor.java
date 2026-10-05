@@ -259,7 +259,7 @@ public final class ThreadProcessor {
         if (preparation != null) {
           yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         }
-        // 压缩判断完成后，已关闭 turn 是安全边界：有序消费到第一条 user-like，
+        // 压缩判断完成后，已关闭 turn 是安全边界：有序消费完整输入快照，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
         if (hasInputDemand(tx, thread)) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
