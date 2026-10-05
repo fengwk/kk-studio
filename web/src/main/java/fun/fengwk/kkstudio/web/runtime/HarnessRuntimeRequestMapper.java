@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
@@ -222,12 +223,6 @@ public final class HarnessRuntimeRequestMapper {
     return switch (type) {
       case "NEW_SESSION" -> {
         requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
-        requireForbidden(
-            dto.hasExpectedHeadEntryIdField(), "target.expectedHeadEntryId", "target type " + type);
-        requireForbidden(
-            dto.hasExpectedNextCommandSequenceField(),
-            "target.expectedNextCommandSequence",
-            "target type " + type);
         yield new AcceptCommandsTarget.NewSession(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
@@ -237,31 +232,39 @@ public final class HarnessRuntimeRequestMapper {
       }
       case "NEW_THREAD" -> {
         requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
-        requireForbidden(
-            dto.hasExpectedHeadEntryIdField(), "target.expectedHeadEntryId", "target type " + type);
-        requireForbidden(
-            dto.hasExpectedNextCommandSequenceField(),
-            "target.expectedNextCommandSequence",
-            "target type " + type);
         yield new AcceptCommandsTarget.NewThread(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getStartEntryId(), "target.startEntryId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
-      case "THREAD" -> {
-        requireForbidden(dto.hasSessionIdField(), "target.sessionId", "target type " + type);
-        requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
-        requireForbidden(dto.hasRootSettingsField(), "target.rootSettings", "target type " + type);
-        requireForbidden(dto.hasYoloEnabledField(), "target.yoloEnabled", "target type " + type);
-        yield new AcceptCommandsTarget.Thread(
-            parseUuid(dto.getThreadId(), "target.threadId"),
-            parseUuid(dto.getExpectedHeadEntryId(), "target.expectedHeadEntryId"),
-            parsePositiveDecimal(
-                dto.getExpectedNextCommandSequence(), "target.expectedNextCommandSequence"));
-      }
       default -> throw new IllegalArgumentException("unknown target type: " + type);
     };
+  }
+
+  /**
+   * 映射既有 Thread 的通用命令批：target 由 path 的 {@code threadId} 与请求体的精确 cursor 组合，不带 owner；附件物化与 Session
+   * 归属校验由接受服务的 preflight 完成。
+   */
+  public static AcceptCommandsCommand toAcceptThreadCommandsCommand(
+      String threadId, HarnessThreadCommandBatchDTO dto) {
+    requireNonNull(dto, "threadCommandBatchDTO");
+    List<HarnessCommandCreateDTO> requestCommands = requireList(dto.getCommands(), "commands");
+    if (requestCommands.isEmpty()) {
+      throw new IllegalArgumentException("commands must not be empty");
+    }
+    List<NewThreadCommand> commands = new ArrayList<>(requestCommands.size());
+    for (HarnessCommandCreateDTO command : requestCommands) {
+      commands.add(toNewHttpCommand(command));
+    }
+    validateHttpCommandShape(commands);
+    AcceptCommandsTarget target =
+        new AcceptCommandsTarget.Thread(
+            parseUuid(threadId, "threadId"),
+            parseUuid(dto.getExpectedHeadEntryId(), "expectedHeadEntryId"),
+            parsePositiveDecimal(
+                dto.getExpectedNextCommandSequence(), "expectedNextCommandSequence"));
+    return new AcceptCommandsCommand(target, commands);
   }
 
   /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
@@ -348,6 +351,10 @@ public final class HarnessRuntimeRequestMapper {
       }
       case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
+      case "NOTIFICATION" -> throw new IllegalArgumentException(
+          "NOTIFICATION is internal-only and not allowed on the product HTTP surface");
+      case "SET_CONTRIBUTOR_STATE" -> throw new IllegalArgumentException(
+          "SET_CONTRIBUTOR_STATE is internal-only and not allowed on the product HTTP surface");
       default -> throw new IllegalArgumentException("unknown command type: " + type);
     };
   }

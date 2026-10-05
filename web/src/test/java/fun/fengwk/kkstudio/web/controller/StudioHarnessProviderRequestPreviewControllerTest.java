@@ -38,8 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -50,7 +48,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 请求预览 HTTP 契约：复用与发送完全相同的 batch 请求体，成功响应只暴露协议请求体本身，拒绝按 400/404/409 确定性翻译。
+ * 请求预览 HTTP 契约：复用与既有 Thread 发送完全相同的 owner-free 请求体（path Thread + 精确 cursor +
+ * 有序命令），成功响应只暴露协议请求体本身，拒绝按 400/404/409 确定性翻译。
  *
  * <p>意图：本测试锁住「预览入口不引入第二套请求形状」以及「响应不泄露 credential / endpoint / header」。真实的规划、物化与协议编码 由 {@code
  * ProviderRequestPreviewServiceIntegrationTest} 覆盖。
@@ -93,7 +92,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     dto.setBodyJson(body);
     dto.setSourceHeadEntryId(HEAD_ENTRY_ID);
     dto.setSnapshotNotice(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE);
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any())).thenReturn(dto);
+    when(previewService.preview(any(UUID.class), any())).thenReturn(dto);
 
     String response =
         mockMvc
@@ -122,12 +121,12 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   }
 
   /**
-   * 测试意图：预览与发送共用同一请求体与同一映射——owner、THREAD target 的 cursor、SET_* 前缀与 USER_MESSAGE 内容必须在控制器入口
-   * 被精确解析；ATTACHMENT 保持 wire 形态（预览绝不在此层物化或消费 upload）。
+   * 测试意图：预览与发送共用同一请求体与同一映射——path Thread、精确 cursor、SET_* 前缀与 USER_MESSAGE 内容必须在控制器入口被精确解析；ATTACHMENT
+   * 保持 wire 形态（预览绝不在此层物化或消费 upload）。
    */
   @Test
-  void previewMapsCanonicalOwnerThreadCursorAndUserMessageContents() throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+  void previewMapsCanonicalThreadCursorAndUserMessageContents() throws Exception {
+    when(previewService.preview(any(UUID.class), any()))
         .thenReturn(new HarnessProviderRequestPreviewDTO());
     mockMvc
         .perform(
@@ -136,16 +135,9 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                 .content(batch(draftCommands())))
         .andExpect(status().isOk());
 
-    ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(previewService)
-        .preview(eq(UUID.fromString(THREAD_ID)), ownerCaptor.capture(), commandCaptor.capture());
-
-    assertEquals(OwnerType.CHAT, ownerCaptor.getValue().type());
-    assertEquals(
-        UUID.fromString(OWNER_ID),
-        assertInstanceOf(OwnerRef.Chat.class, ownerCaptor.getValue()).chatId());
+    verify(previewService).preview(eq(UUID.fromString(THREAD_ID)), commandCaptor.capture());
 
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
@@ -193,7 +185,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   /** 当前事实不允许精确预览（快照漂移、非空闲、queued、压缩、附件未 READY、adapter 不支持）统一是 409。 */
   @Test
   void previewTranslatesUnavailableFactsToConflict() throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+    when(previewService.preview(any(UUID.class), any()))
         .thenThrow(
             new ProviderRequestPreviewUnavailableException(
                 Reason.PREVIEW_THREAD_BUSY,
@@ -215,7 +207,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   @ParameterizedTest
   @EnumSource(Reason.class)
   void previewPublishesTypedReasonWithoutCauseDetails(Reason reason) throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+    when(previewService.preview(any(UUID.class), any()))
         .thenThrow(
             new ProviderRequestPreviewUnavailableException(
                 reason,
@@ -240,7 +232,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   /** 缺失 Thread 与其它运行时查询一致是 404（不因为「预览」而变成 409 或 200）。 */
   @Test
   void previewTranslatesMissingThreadToNotFound() throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+    when(previewService.preview(any(UUID.class), any()))
         .thenThrow(new HarnessRuntimeNotFoundException("thread not found"));
 
     mockMvc
@@ -252,7 +244,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("thread not found"));
   }
 
-  /** 越权资源与非法请求形状是请求错误（400），并且绝不调用预览服务。 */
+  /** 非法请求形状是请求错误（400），并且绝不调用预览服务。 */
   @Test
   void previewRejectsMalformedRequestsBeforeTouchingTheService() throws Exception {
     // 非 canonical UUID path：与其它 thread 端点一致地 400。
@@ -273,69 +265,76 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                         """
                         [{
                           "type":"CUSTOM_MESSAGE",
-                          "idempotencyKey":"%s",
-                          "contents":[{"type":"TEXT","text":"system rules"}]
+                          "idempotencyKey":"%s"
                         }]
                         """
                             .formatted(USER_MESSAGE_KEY))))
         .andExpect(status().isBadRequest());
 
-    // target 形态错误（THREAD 不得携带 sessionId）同样在入口被拒绝。
+    // owner / target 已不在请求体中：多携带即未知字段，入口拒绝而不是静默忽略。
+    String legacyOwnerAndTargetShape =
+        """
+        {
+          "owner":{"type":"CHAT","chatId":"%s"},
+          "target":{
+            "type":"THREAD",
+            "threadId":"%s",
+            "expectedHeadEntryId":"%s",
+            "expectedNextCommandSequence":"7"
+          },
+          "expectedHeadEntryId":"%s",
+          "expectedNextCommandSequence":"7",
+          "commands":%s
+        }
+        """
+            .formatted(OWNER_ID, THREAD_ID, HEAD_ENTRY_ID, HEAD_ENTRY_ID, draftCommands());
     mockMvc
         .perform(
             post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    batch(draftCommands())
-                        .replace(
-                            "\"expectedHeadEntryId\":\"%s\"".formatted(HEAD_ENTRY_ID),
-                            "\"sessionId\":\"%s\",\"expectedHeadEntryId\":\"%s\""
-                                .formatted(HEAD_ENTRY_ID, HEAD_ENTRY_ID))))
-        .andExpect(status().isBadRequest());
-
-    // 历史 owner.id 不能被静默接受为 chatId，避免错误身份进入只读授权。
-    mockMvc
-        .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    batch(draftCommands())
-                        .replace(
-                            "\"chatId\":\"%s\"".formatted(OWNER_ID),
-                            "\"id\":\"%s\"".formatted(OWNER_ID))))
+                .content(legacyOwnerAndTargetShape))
         .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("unknown command owner field: id"));
+        .andExpect(jsonPath("$.errors.detail").value("unknown thread command batch field: owner"));
 
-    verify(previewService, never()).preview(any(UUID.class), any(OwnerRef.class), any());
+    verify(previewService, never()).preview(any(UUID.class), any());
   }
 
-  /** Issue Agent Session 的输入必须经 Issue 业务工作流，预览入口不提供第二条写入通道。 */
+  /** 预览服务自身的类型化拒绝（GOAL 草稿不属于预览形状）经统一翻译为 400，且不调用第二次。 */
   @Test
-  void previewRejectsIssueAgentSessionOwnerAtPublicHttpBoundary() throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+  void previewTranslatesServiceRejectionToBadRequest() throws Exception {
+    when(previewService.preview(any(UUID.class), any()))
         .thenThrow(
-            new IllegalArgumentException("provider request preview is limited to CHAT owners"));
+            new IllegalArgumentException(
+                "provider request preview only accepts SET_* settings before the user message"));
 
     mockMvc
         .perform(
             post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    batch(draftCommands())
-                        .replace(
-                            "\"type\":\"CHAT\",\"chatId\":\"%s\"".formatted(OWNER_ID),
-                            "\"type\":\"ISSUE_AGENT\",\"issueId\":\"%s\",\"agentName\":\"executor\""
-                                .formatted(OWNER_ID))))
+                    batch(
+                        """
+                        [{
+                          "type":"GOAL",
+                          "idempotencyKey":"%s",
+                          "text":null
+                        }]
+                        """
+                            .formatted(USER_MESSAGE_KEY))))
         .andExpect(status().isBadRequest())
         .andExpect(
             jsonPath("$.errors.detail")
-                .value("provider request preview is limited to CHAT owners"));
+                .value(
+                    "provider request preview only accepts SET_* settings before the user message"));
+
+    verify(previewService)
+        .preview(eq(UUID.fromString(THREAD_ID)), any(AcceptCommandsCommand.class));
   }
 
   /** 预览服务只在请求形状合法后被调用一次，因此它不可能被用作绕过形状校验的探测通道。 */
   @Test
   void previewCallsServiceExactlyOnceForAWellFormedBatch() throws Exception {
-    when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
+    when(previewService.preview(any(UUID.class), any()))
         .thenReturn(new HarnessProviderRequestPreviewDTO());
     mockMvc
         .perform(
@@ -343,7 +342,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isOk());
-    verify(previewService).preview(eq(UUID.fromString(THREAD_ID)), any(), any());
+    verify(previewService).preview(eq(UUID.fromString(THREAD_ID)), any());
   }
 
   private static String draftCommands() {
@@ -366,20 +365,16 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         .formatted(SET_MODEL_KEY, USER_MESSAGE_KEY, UPLOAD_ID, BLOB_ID);
   }
 
+  /** 预览请求体与既有 Thread 发送完全同源：只携带 path Thread 的 cursor 与命令，不再携带 owner/target。 */
   private static String batch(String commands) {
     return """
         {
-          "owner":{"type":"CHAT","chatId":"%s"},
-          "target":{
-            "type":"THREAD",
-            "threadId":"%s",
-            "expectedHeadEntryId":"%s",
-            "expectedNextCommandSequence":"7"
-          },
+          "expectedHeadEntryId":"%s",
+          "expectedNextCommandSequence":"7",
           "commands":%s
         }
         """
-        .formatted(OWNER_ID, THREAD_ID, HEAD_ENTRY_ID, commands);
+        .formatted(HEAD_ENTRY_ID, commands);
   }
 
   /** 断言辅助视图：只保留 payload 与 requestHash，避免测试重复展开 record。 */

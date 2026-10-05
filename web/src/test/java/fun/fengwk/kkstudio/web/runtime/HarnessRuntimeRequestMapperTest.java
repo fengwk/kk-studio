@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
@@ -89,8 +90,8 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void mapsOwnerAndAllThreeTargets() {
-    // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型。
+  void mapsOwnerAndCreationTargets() {
+    // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型；THREAD 不再由创建型 union 承载。
     HarnessCommandOwnerDTO chatOwner = new HarnessCommandOwnerDTO();
     chatOwner.setType("CHAT");
     chatOwner.setChatId(idText(10));
@@ -115,13 +116,20 @@ class HarnessRuntimeRequestMapperTest {
     AcceptCommandsCommand newThread =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newThreadTarget(), userCommand("entry")));
-    AcceptCommandsCommand thread =
-        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-            request(threadTarget(), userCommand("thread")));
 
     assertInstanceOf(AcceptCommandsTarget.NewSession.class, newSession.target());
     assertInstanceOf(AcceptCommandsTarget.NewThread.class, newThread.target());
-    assertInstanceOf(AcceptCommandsTarget.Thread.class, thread.target());
+
+    // 既有 Thread 不再经由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
+    HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
+    thread.setType("THREAD");
+    thread.setThreadId(idText(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(thread, userCommand("thread"))));
+
     assertThrows(
         IllegalArgumentException.class,
         () -> {
@@ -178,7 +186,7 @@ class HarnessRuntimeRequestMapperTest {
   @Test
   void mapsFixedSetPrefixAndRawRequestHash() {
     // 只允许稳定 SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
-    HarnessCommandBatchDTO request = request(threadTarget(), userCommand("user"));
+    HarnessThreadCommandBatchDTO request = threadBatch(userCommand("user"));
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
@@ -187,7 +195,8 @@ class HarnessRuntimeRequestMapperTest {
     environment.setEnvironmentName("local");
     request.setCommands(List.of(agent, model, environment, userCommand("user")));
 
-    AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, request);
 
     assertEquals(
         List.of(
@@ -207,17 +216,18 @@ class HarnessRuntimeRequestMapperTest {
   void environmentCommandRequiresExplicitNullableFieldAndRejectsCrossCommandFields() {
     HarnessCommandCreateDTO cleared = command("SET_ENVIRONMENT", "clear");
     cleared.setEnvironmentName(null);
-    HarnessCommandBatchDTO request = request(threadTarget(), cleared, userCommand("tail"));
-    AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
+    HarnessThreadCommandBatchDTO request = threadBatch(cleared, userCommand("tail"));
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, request);
     assertEquals(new SetEnvironmentCommandPayload(null), mapped.commands().getFirst().payload());
 
     // 字段缺失必须拒绝（无法区分「未选择」与「请求未携带」）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(
-                    threadTarget(), command("SET_ENVIRONMENT", "missing"), userCommand("tail"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID,
+                threadBatch(command("SET_ENVIRONMENT", "missing"), userCommand("tail"))));
 
     for (String otherType : List.of("USER_MESSAGE", "SET_AGENT", "SET_MODEL")) {
       HarnessCommandCreateDTO crossField;
@@ -234,8 +244,8 @@ class HarnessRuntimeRequestMapperTest {
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                  request(threadTarget(), crossField, userCommand("tail"))),
+              HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                  THREAD_ID, threadBatch(crossField, userCommand("tail"))),
           otherType + " must reject environmentName");
     }
 
@@ -247,8 +257,8 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), environment, model, userCommand("tail"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(environment, model, userCommand("tail"))));
   }
 
   @Test
@@ -360,7 +370,8 @@ class HarnessRuntimeRequestMapperTest {
     UserMessageCommandPayload payload =
         assertInstanceOf(
             UserMessageCommandPayload.class,
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command))
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                    THREAD_ID, threadBatch(command))
                 .commands()
                 .getFirst()
                 .payload());
@@ -427,7 +438,8 @@ class HarnessRuntimeRequestMapperTest {
     UserMessageCommandPayload payload =
         assertInstanceOf(
             UserMessageCommandPayload.class,
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command))
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                    THREAD_ID, threadBatch(command))
                 .commands()
                 .getFirst()
                 .payload());
@@ -439,7 +451,9 @@ class HarnessRuntimeRequestMapperTest {
     command.setContents(List.of(content));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)),
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)),
         why);
   }
 
@@ -456,20 +470,22 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)));
 
     command.setContents(List.of());
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)));
 
     HarnessCommandCreateDTO missingContents = command("USER_MESSAGE", "missing-contents");
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), missingContents)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(missingContents)));
 
     HarnessUserMessageContentDTO unknown = new HarnessUserMessageContentDTO();
     unknown.setType("UNKNOWN");
@@ -477,7 +493,8 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)));
 
     HarnessUserMessageContentDTO missingName = new HarnessUserMessageContentDTO();
     missingName.setType("RESOURCE");
@@ -486,28 +503,38 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)));
 
     command.setContents(Arrays.asList((HarnessUserMessageContentDTO) null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command)));
   }
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE，也不接受未知 discriminator。
-    HarnessCommandCreateDTO custom = command("CUSTOM_MESSAGE", "custom");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), custom)));
+    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE / NOTIFICATION / SET_CONTRIBUTOR_STATE，也不接受未知
+    // discriminator。
+    for (String internal : List.of("CUSTOM_MESSAGE", "NOTIFICATION", "SET_CONTRIBUTOR_STATE")) {
+      HarnessCommandCreateDTO rejected = command(internal, internal);
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                  THREAD_ID, threadBatch(rejected)),
+          internal + " must be rejected");
+    }
 
     HarnessCommandCreateDTO unknown = command("UNKNOWN", "unknown");
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), unknown)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(unknown)),
+        "unknown command discriminator must be rejected");
   }
 
   @Test
@@ -518,38 +545,59 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), userCommand("user"), agent)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), agent)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(userCommand("user"), agent)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), userCommand("one"), userCommand("two"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(agent)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(userCommand("one"), userCommand("two"))));
 
     HarnessCommandCreateDTO duplicateAgent = command("SET_AGENT", "duplicate-agent");
     duplicateAgent.setAgentName("other-assistant");
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), agent, duplicateAgent, userCommand("user"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(agent, duplicateAgent, userCommand("user"))));
 
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
     model.setModel(modelSelection());
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), model, agent, userCommand("user"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(model, agent, userCommand("user"))));
 
-    HarnessCommandBatchDTO empty = request(threadTarget(), userCommand("unused"));
+    HarnessThreadCommandBatchDTO empty = threadBatch(userCommand("unused"));
     empty.setCommands(List.of());
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(empty));
+        () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, empty));
+  }
+
+  /** 测试意图：既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
+  @Test
+  void mapsThreadBatchCursorAndRequiresCommands() {
+    AcceptCommandsTarget.Thread target =
+        (AcceptCommandsTarget.Thread)
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                    THREAD_ID, threadBatch(userCommand("user")))
+                .target();
+    assertEquals(idText(3), target.expectedHeadEntryId().toString());
+    assertEquals(4L, target.expectedNextCommandSequence());
+
+    HarnessThreadCommandBatchDTO empty = new HarnessThreadCommandBatchDTO();
+    empty.setExpectedHeadEntryId(idText(3));
+    empty.setExpectedNextCommandSequence("4");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, empty));
   }
 
   @Test
@@ -590,7 +638,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsTargetUnionViolationsAndUnknownType() {
-    // NEW_SESSION/NEW_THREAD/THREAD 的字段集合互斥，未知 target 必须拒绝。
+    // NEW_SESSION/NEW_THREAD 的字段集合互斥；THREAD 与未知 target 类型一律拒绝。
     HarnessCommandTargetDTO newSession = newSessionTarget();
     newSession.setStartEntryId(idText(8));
     assertTargetRejected(newSession);
@@ -599,8 +647,10 @@ class HarnessRuntimeRequestMapperTest {
     newThread.setRootSettings(branchSettings());
     assertTargetRejected(newThread);
 
-    HarnessCommandTargetDTO thread = threadTarget();
-    thread.setSessionId(idText(2));
+    // 既有 Thread 不再由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
+    HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
+    thread.setType("THREAD");
+    thread.setThreadId(idText(1));
     assertTargetRejected(thread);
 
     HarnessCommandTargetDTO unknown = new HarnessCommandTargetDTO();
@@ -621,24 +671,28 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, null));
 
-    HarnessCommandBatchDTO missingTarget = request(threadTarget(), userCommand("user"));
+    HarnessCommandBatchDTO missingTarget = request(newThreadTarget(), userCommand("user"));
     missingTarget.setTarget(null);
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(missingTarget));
 
-    HarnessCommandBatchDTO missingCommands = request(threadTarget(), userCommand("user"));
+    HarnessThreadCommandBatchDTO missingCommands = threadBatch(userCommand("user"));
     missingCommands.setCommands(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(missingCommands));
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, missingCommands));
 
-    HarnessCommandBatchDTO nullCommand = request(threadTarget(), userCommand("user"));
+    HarnessThreadCommandBatchDTO nullCommand = threadBatch(userCommand("user"));
     nullCommand.setCommands(Arrays.asList((HarnessCommandCreateDTO) null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(nullCommand));
+        () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, nullCommand));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -669,7 +723,7 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandCreateDTO set = command("GOAL", "goal-set");
     set.setText("ship the release");
     AcceptCommandsCommand mapped =
-        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), set));
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(set));
     assertEquals(ThreadCommandType.GOAL, mapped.commands().getFirst().payload().type());
     assertEquals(
         new GoalCommandPayload("ship the release"), mapped.commands().getFirst().payload());
@@ -681,7 +735,7 @@ class HarnessRuntimeRequestMapperTest {
     cleared.setText(null);
     assertEquals(
         new GoalCommandPayload(null),
-        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), cleared))
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, threadBatch(cleared))
             .commands()
             .getFirst()
             .payload());
@@ -690,27 +744,29 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), command("GOAL", "goal-missing"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command("GOAL", "goal-missing"))));
 
     // 空白文本不是清除，必须由 Core canonical 规则拒绝。
     HarnessCommandCreateDTO blank = command("GOAL", "goal-blank");
     blank.setText("   ");
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), blank)));
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(blank)));
 
     // GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须是最后一条。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), set, userCommand("tail"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(set, userCommand("tail"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), userCommand("head"), set)));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(userCommand("head"), set)));
 
     // 跨命令字段：GOAL 不携带 contents，其他命令不携带 text。
     HarnessCommandCreateDTO goalWithContents = command("GOAL", "goal-contents");
@@ -726,8 +782,8 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), command, userCommand("tail"))));
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, threadBatch(command, userCommand("tail"))));
   }
 
   private static void assertTargetRejected(HarnessCommandTargetDTO target) {
@@ -736,6 +792,14 @@ class HarnessRuntimeRequestMapperTest {
         () ->
             HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
                 request(target, userCommand("user"))));
+  }
+
+  private static HarnessThreadCommandBatchDTO threadBatch(HarnessCommandCreateDTO... commands) {
+    HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
+    batch.setExpectedHeadEntryId(idText(3));
+    batch.setExpectedNextCommandSequence("4");
+    batch.setCommands(List.of(commands));
+    return batch;
   }
 
   private static HarnessCommandBatchDTO request(
@@ -787,15 +851,6 @@ class HarnessRuntimeRequestMapperTest {
     target.setStartEntryId(idText(3));
     target.setThreadId(idText(1));
     target.setYoloEnabled(false);
-    return target;
-  }
-
-  private static HarnessCommandTargetDTO threadTarget() {
-    HarnessCommandTargetDTO target = new HarnessCommandTargetDTO();
-    target.setType("THREAD");
-    target.setThreadId(idText(1));
-    target.setExpectedHeadEntryId(idText(3));
-    target.setExpectedNextCommandSequence("4");
     return target;
   }
 

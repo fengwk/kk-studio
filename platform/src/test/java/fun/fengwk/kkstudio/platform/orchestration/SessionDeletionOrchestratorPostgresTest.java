@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -105,15 +105,16 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
     UUID owner = chatOwner();
     UUID otherOwner = chatOwner();
     UUID ownedSession = ownedSession("owned", owner);
-    UUID ownedRoot = seedRootThread(ownedSession, ThreadLifecycleStatus.ACTIVE);
-    UUID sameSessionChild = seedChildThread(ownedSession, ownedRoot, ThreadLifecycleStatus.IDLE);
+    UUID ownedRoot = seedRootThread(ownedSession, ThreadExecutionControl.RUNNABLE);
+    UUID sameSessionChild =
+        seedChildThread(ownedSession, ownedRoot, ThreadExecutionControl.RUNNABLE);
     UUID childSession = seedSession("task-child");
     UUID childSessionRoot = seedRootEntry(childSession);
     UUID crossSessionChild =
-        seedThreadIn(childSession, childSessionRoot, ownedRoot, ThreadLifecycleStatus.IDLE);
+        seedThreadIn(childSession, childSessionRoot, ownedRoot, ThreadExecutionControl.RUNNABLE);
     // 同一 Session 内由另一入口建立的无父 fork：只有「以 Session 为单位」推进闭包才会把它一并删除。
     UUID childSessionFork =
-        seedThreadIn(childSession, childSessionRoot, null, ThreadLifecycleStatus.IDLE);
+        seedThreadIn(childSession, childSessionRoot, null, ThreadExecutionControl.RUNNABLE);
     UUID emptySession = ownedSession("owned-empty", owner);
     // pending join（未匹配）：逐 child 删除会拒绝，闭包内两端同删必须允许。
     UUID pendingJoin = seedJoin(sameSessionChild, ownedRoot, 1L, null, null);
@@ -125,8 +126,9 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
 
     // 生存者：另一个 owner 的 Session + root + child + pending join。
     UUID survivorSession = ownedSession("survivor", otherOwner);
-    UUID survivorRoot = seedRootThread(survivorSession, ThreadLifecycleStatus.ACTIVE);
-    UUID survivorChild = seedChildThread(survivorSession, survivorRoot, ThreadLifecycleStatus.IDLE);
+    UUID survivorRoot = seedRootThread(survivorSession, ThreadExecutionControl.RUNNABLE);
+    UUID survivorChild =
+        seedChildThread(survivorSession, survivorRoot, ThreadExecutionControl.RUNNABLE);
     UUID survivorJoin = seedJoin(survivorChild, survivorRoot, 1L, null, null);
 
     deleteSessions(new OwnerRef.Chat(owner));
@@ -160,12 +162,15 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
     UUID owner = chatOwner();
     UUID otherOwner = chatOwner();
     UUID survivorSession = ownedSession("survivor", otherOwner);
-    UUID survivorRoot = seedRootThread(survivorSession, ThreadLifecycleStatus.ACTIVE);
+    UUID survivorRoot = seedRootThread(survivorSession, ThreadExecutionControl.RUNNABLE);
     UUID ownedSession = ownedSession("owned", owner);
     // 该 Session 内的线程指向生存者 Session 的父：闭包只能是它自己，父不在删除集合内。
     UUID strandedChild =
         seedThreadIn(
-            ownedSession, seedRootEntry(ownedSession), survivorRoot, ThreadLifecycleStatus.IDLE);
+            ownedSession,
+            seedRootEntry(ownedSession),
+            survivorRoot,
+            ThreadExecutionControl.RUNNABLE);
     UUID strandedJoin = seedJoin(strandedChild, survivorRoot, 1L, null, null);
 
     assertThrows(IllegalStateException.class, () -> deleteSessions(new OwnerRef.Chat(owner)));
@@ -198,8 +203,8 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
     UUID projectId = projectRow();
     UUID issueId = issueRow(projectId);
     UUID sessionId = seedSession("issue-agent-session");
-    UUID root = seedRootThread(sessionId, ThreadLifecycleStatus.IDLE);
-    UUID child = seedChildThread(sessionId, root, ThreadLifecycleStatus.ACTIVE);
+    UUID root = seedRootThread(sessionId, ThreadExecutionControl.RUNNABLE);
+    UUID child = seedChildThread(sessionId, root, ThreadExecutionControl.RUNNABLE);
     bindIssueAgentThread(issueId, agentName, child);
     UUID join = seedJoin(child, root, 1L, null, null);
 
@@ -239,7 +244,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
         });
   }
 
-  private UUID seedRootThread(UUID sessionId, ThreadLifecycleStatus status) {
+  private UUID seedRootThread(UUID sessionId, ThreadExecutionControl status) {
     UUID rootEntryId = seedRootEntry(sessionId);
     return seedThreadIn(sessionId, rootEntryId, null, status);
   }
@@ -254,12 +259,12 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
         });
   }
 
-  private UUID seedChildThread(UUID sessionId, UUID parentThreadId, ThreadLifecycleStatus status) {
+  private UUID seedChildThread(UUID sessionId, UUID parentThreadId, ThreadExecutionControl status) {
     return seedThreadIn(sessionId, headEntryOf(sessionId), parentThreadId, status);
   }
 
   private UUID seedThreadIn(
-      UUID sessionId, UUID headEntryId, UUID parentThreadId, ThreadLifecycleStatus status) {
+      UUID sessionId, UUID headEntryId, UUID parentThreadId, ThreadExecutionControl status) {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
@@ -273,6 +278,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
                   "thread-" + threadId,
                   false,
                   status,
+                  0L,
                   1L,
                   0L,
                   T0,

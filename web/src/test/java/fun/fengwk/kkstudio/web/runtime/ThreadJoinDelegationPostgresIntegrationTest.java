@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
+import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -45,7 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -94,7 +95,7 @@ import java.util.stream.Collectors;
  *   <li>重启无 NOTIFY：接受阶段没有任何调度器在跑，durable work 行是唯一恢复面，调度器启动后自行读取并推进；
  *   <li>首 idle 固定结果：receipt 一旦匹配就冻结在 {@code resultHeadEntryId}，子执行后续历史绝不改写它；
  *   <li>忙子 resume：向仍在执行（已有未消费命令）的子追加源 prompt 立即被接受，并在真正下一次 Idle 结算；
- *   <li>三层执行树：结果沿不可变 parent 链逐级传递，每级都把下一级的报告带回自己的报告里，父级同时停在 WAITING_CHILDREN。
+ *   <li>三层执行树：结果沿不可变 parent 链逐级传递，每级都把下一级的报告带回自己的报告里，父级状态只由自身 durable 执行控制与本地投影表达。
  * </ul>
  *
  * <p>调度隔离：每个用例自持一个真实 {@link HarnessWorkDispatcher} 实例与私有 executor，并在用例结束时停止，因此没有任何用例依赖
@@ -198,26 +199,57 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         headEntryId(parentThreadId),
         "child work");
 
-    // 父仍欠自己的 turn（本地有工作）：durable 生命周期是 ACTIVE，而不是"等孩子"。
-    assertEquals(ThreadLifecycleStatus.ACTIVE, threadState(parentThreadId).status());
+    // 父仍欠自己的 turn（本地有工作）：durable 执行控制是 RUNNABLE。
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadState(parentThreadId).executionControl());
 
     // 真实 idle Stop：父必须写下自己的 durable STOP 边界，而不是让子结果照常唤醒它。
+    UUID stopRequestId = UUID.randomUUID();
     StopResult stop =
         runtime.stop(
-            new StopCommand(
-                parentThreadId, UUID.randomUUID(), threadState(parentThreadId).version()));
+            new StopCommand(parentThreadId, stopRequestId, threadState(parentThreadId).version()));
     assertFalse(stop.replayed());
-    assertNotNull(stop.stoppedTurnEndEntryId());
-    assertStoppedHead(parentThreadId, stop.stoppedTurnEndEntryId());
+    UUID parentStopBoundary = stoppedTurnEndEntryId(stop, parentThreadId);
+    assertNotNull(parentStopBoundary);
+    assertStoppedHead(parentThreadId, parentStopBoundary);
 
     // 停止传播所有执行后代：子命令被取消、子写出 STOP 边界，join 因此完成首次匹配并冻结 receipt。
-    // 停止同时解除父自身的本地义务：父不再有排队工作，因此收敛为 IDLE（其停止边界就是它的 head）。
-    assertEquals(ThreadLifecycleStatus.IDLE, threadState(parentThreadId).status());
+    // 停止同时解除父自身的本地义务：父不再有排队工作（其停止边界就是它的 head），durable 执行控制为 STOPPED。
+    assertEquals(ThreadExecutionControl.STOPPED, threadState(parentThreadId).executionControl());
     ThreadJoin join = joinOf(invocationId);
     assertTrue(join.matched(), "stopped parent must still freeze the child receipt");
     assertNull(join.deliveryCommandSequence());
     assertStoppedHead(childThreadId, threadState(childThreadId).headEntryId());
-    assertEquals(ThreadLifecycleStatus.IDLE, threadState(childThreadId).status());
+    assertEquals(ThreadExecutionControl.STOPPED, threadState(childThreadId).executionControl());
+
+    // 精确的子树回执：Stop 覆盖整棵受影响执行子树（父 + 直接子），每个节点各一条回执，携带同一 stopRequestId、
+    // 各自自有停止边界与取消输入，绝不多收无关节点。
+    assertEquals(
+        Set.of(parentThreadId, childThreadId),
+        stop.stoppedThreads().stream()
+            .map(StoppedThreadReceipt::threadId)
+            .collect(Collectors.toSet()),
+        "stop must emit exactly one receipt per stopped node of the execution subtree");
+    assertTrue(
+        stop.stoppedThreads().stream()
+            .allMatch(receipt -> receipt.stopRequestId().equals(stopRequestId)),
+        "every subtree receipt must reference the cancelled stop request");
+    StoppedThreadReceipt parentReceipt = receipt(stop, parentThreadId);
+    assertEquals(parentStopBoundary, parentReceipt.stoppedTurnEndEntryId());
+    assertEquals(1, parentReceipt.cancelledCommandCount());
+    assertEquals(
+        "coordinate the work",
+        messageText(
+            ((UserMessageCommandPayload) parentReceipt.cancelledInputs().getFirst().payload())
+                .message()));
+    StoppedThreadReceipt childReceipt = receipt(stop, childThreadId);
+    assertEquals(threadState(childThreadId).headEntryId(), childReceipt.stoppedTurnEndEntryId());
+    assertEquals(1, childReceipt.cancelledCommandCount());
+    assertEquals(1, childReceipt.cancelledInputs().size());
+    assertEquals(
+        "child work",
+        messageText(
+            ((UserMessageCommandPayload) childReceipt.cancelledInputs().getFirst().payload())
+                .message()));
 
     ThreadJoinReceipt receipt = receiptOf(invocationId);
     assertEquals(ThreadJoinOutcome.CANCELLED, receipt.outcome());
@@ -231,7 +263,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     long resumeSequence = threadState(parentThreadId).nextCommandSequence();
     NewThreadCommand resumePrompt = promptCommand(UUID.randomUUID(), "resume the work");
     AcceptedCommands resumed =
-        acceptOnThread(parentThreadId, stop.stoppedTurnEndEntryId(), resumeSequence, resumePrompt);
+        acceptOnThread(parentThreadId, parentStopBoundary, resumeSequence, resumePrompt);
     assertFalse(resumed.replayed());
 
     List<ThreadCommand> delivered = resultCommands(parentThreadId);
@@ -244,7 +276,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
     // 重放同一批输入（同一幂等键、同一 cursor）不得产生第二次交付。
     AcceptedCommands replayed =
-        acceptOnThread(parentThreadId, stop.stoppedTurnEndEntryId(), resumeSequence, resumePrompt);
+        acceptOnThread(parentThreadId, parentStopBoundary, resumeSequence, resumePrompt);
     assertTrue(replayed.replayed());
     assertEquals(1, resultCommands(parentThreadId).size());
   }
@@ -410,9 +442,9 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         }
       }
       assertEquals(MAX_CONCURRENT_CHILDREN, acceptedChildren);
-      // 父自身保持唯一；父此时仍欠自己的 turn（本地有排队工作），因此 durable 生命周期是 ACTIVE。
+      // 父自身保持唯一；父此时仍欠自己的 turn（本地有排队工作），因此 durable 执行控制是 RUNNABLE。
       assertEquals(1, count("harness_thread", "id", parentThreadId));
-      assertEquals(ThreadLifecycleStatus.ACTIVE, threadState(parentThreadId).status());
+      assertEquals(ThreadExecutionControl.RUNNABLE, threadState(parentThreadId).executionControl());
     } finally {
       pool.shutdownNow();
     }
@@ -595,7 +627,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         headEntryId(parentThreadId),
         "child work");
     // 子已有接受但尚未消费的命令：resume 必须在"忙"状态下被接受。
-    assertEquals(ThreadLifecycleStatus.ACTIVE, threadState(childThreadId).status());
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadState(childThreadId).executionControl());
 
     UUID resumeInvocationId = UUID.randomUUID();
     UUID parentHead = headEntryId(parentThreadId);
@@ -624,7 +656,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertTrue(resumedJoin.matchedIdleVersion() >= firstJoin.matchedIdleVersion());
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(firstInvocationId).outcome());
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(resumeInvocationId).outcome());
-    assertEquals(ThreadLifecycleStatus.IDLE, threadState(childThreadId).status());
+    assertEquals(
+        ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(childThreadId).runtimeStatus());
 
     assertTrue(
         commandsOf(childThreadId).stream().allMatch(command -> command.state().isTerminal()),
@@ -638,8 +671,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 三层执行树：结果沿不可变 parent 链逐级传递——孙执行的报告先交付给子执行，子执行的下一次报告因此包含孙身份，最终父收到子的报告； 中间层级在子执行活跃期间停在
-   * WAITING_CHILDREN，执行关系由 parent 链表达，而不是混入 Session 对话历史。
+   * 三层执行树：结果沿不可变 parent 链逐级传递——孙执行的报告先交付给子执行，子执行的下一次报告因此包含孙身份，最终父收到子的报告； 执行关系由 parent 链表达，而不是混入
+   * Session 对话历史，父级状态只由自身 durable 执行控制表达。
    */
   @Test
   void threeLevelTreePropagatesResultsUpTheParentChain() {
@@ -668,9 +701,9 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         headEntryId(childThreadId),
         "grandchild work");
 
-    // 两级父此刻都仍欠各自的 turn：durable 生命周期是 ACTIVE（等孩子语义在专门用例中验证）。
-    assertEquals(ThreadLifecycleStatus.ACTIVE, threadState(rootThreadId).status());
-    assertEquals(ThreadLifecycleStatus.ACTIVE, threadState(childThreadId).status());
+    // 两级父此刻都仍欠各自的 turn：durable 执行控制是 RUNNABLE。
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadState(rootThreadId).executionControl());
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadState(childThreadId).executionControl());
 
     startTestDispatcher();
 
@@ -708,18 +741,17 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 父等孩子语义：父先把自身 turn 跑完（真实 dispatcher 收敛为 IDLE），此时接受子执行必须把父从 IDLE 收敛为 WAITING_CHILDREN——真实 durable
-   * 状态、真实 Runtime 投影与真实 HTTP 投影都必须如此，而不是继续伪装成 IDLE；子执行随后由重新启动的 dispatcher 仅凭 durable work
-   * 推进，整棵树最终回到 IDLE。
+   * 父先把自己的 turn 跑完（真实 dispatcher 收敛为本地 IDLE），此时接受子执行：父的 durable 执行控制保持 RUNNABLE，本地投影只按父自身的 事实表达为
+   * IDLE，不再递归祖先表达"等孩子"；子执行随后由重新启动的 dispatcher 仅凭 durable work 推进，整棵树最终收敛回 IDLE。
    */
   @Test
-  void parentWaitsChildrenOnlyWhileChildIsActiveAndReturnsToIdleAfterwards() {
+  void parentWithActiveChildStaysRunnableWithLocalIdleAndConvergesAfterChildSettles() {
     UUID parentThreadId = UUID.randomUUID();
     acceptRootSession(UUID.randomUUID(), parentThreadId, "parent work");
 
     HarnessWorkDispatcher first = startTestDispatcher();
     awaitTrue(
-        () -> threadState(parentThreadId).status() == ThreadLifecycleStatus.IDLE,
+        () -> runtime.getThreadSnapshot(parentThreadId).runtimeStatus() == ThreadRuntimeStatus.IDLE,
         "parent must finish its own turn first");
     // 停止调度构造"父空闲 + 子活跃"的确定窗口：不依赖 sleep，也不依赖别的用例的执行顺序。
     first.stop();
@@ -735,12 +767,12 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         headEntryId(parentThreadId),
         "child work");
 
-    // 父没有本地工作但有活跃直接孩子：durable 生命周期、Runtime 投影与 HTTP 投影都必须显式表达"等孩子"。
-    assertEquals(ThreadLifecycleStatus.WAITING_CHILDREN, threadState(parentThreadId).status());
+    // 父没有本地工作但有活跃直接孩子：durable 执行控制保持 RUNNABLE，本地投影只按父自身事实表达为 IDLE，不再有"等孩子"这类递归状态。
+    assertEquals(ThreadExecutionControl.RUNNABLE, threadState(parentThreadId).executionControl());
     HarnessThreadDTO parentDto =
         HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(parentThreadId));
-    assertEquals(ThreadRuntimeStatus.WAITING_CHILDREN.name(), parentDto.getStatus());
-    assertTrue(parentDto.getProcessing());
+    assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
+    assertFalse(parentDto.getProcessing());
     assertNull(parentDto.getParentThreadId());
     // 子执行尚未被消费：它对外是排队中（processing），并携带不可变执行父关系。
     HarnessThreadDTO childDto =
@@ -759,8 +791,9 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         "restarted dispatcher must settle the child without any notification");
     awaitTrue(
         () ->
-            threadState(childThreadId).status() == ThreadLifecycleStatus.IDLE
-                && threadState(parentThreadId).status() == ThreadLifecycleStatus.IDLE,
+            runtime.getThreadSnapshot(childThreadId).runtimeStatus() == ThreadRuntimeStatus.IDLE
+                && runtime.getThreadSnapshot(parentThreadId).runtimeStatus()
+                    == ThreadRuntimeStatus.IDLE,
         "the whole tree must converge back to IDLE once every descendant settled");
     assertEquals(ThreadJoinOutcome.COMPLETED, receiptOf(invocationId).outcome());
     assertEquals(1, resultCommands(parentThreadId).size());
@@ -960,6 +993,21 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
           assertFalse(head.continueModel());
           return null;
         });
+  }
+
+  /** 从一次 Stop 的完整受影响集合中取出目标 Thread 自己的停止边界。 */
+  private static UUID stoppedTurnEndEntryId(StopResult stop, UUID threadId) {
+    return receipt(stop, threadId).stoppedTurnEndEntryId();
+  }
+
+  /** 取出某个节点的停止回执；缺失即断言失败。 */
+  private static StoppedThreadReceipt receipt(StopResult stop, UUID threadId) {
+    for (StoppedThreadReceipt receipt : stop.stoppedThreads()) {
+      if (receipt.threadId().equals(threadId)) {
+        return receipt;
+      }
+    }
+    throw new AssertionError("stop result carries no receipt for thread " + threadId);
   }
 
   private static String resultMessageText(ThreadCommand command) {
