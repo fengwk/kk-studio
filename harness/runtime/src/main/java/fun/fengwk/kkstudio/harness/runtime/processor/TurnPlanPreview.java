@@ -71,7 +71,8 @@ public final class TurnPlanPreview {
             nextCommandSequence + planned.size() - 1,
             UUID::randomUUID,
             now,
-            null)
+            null,
+            false)
         .candidatePath();
   }
 }

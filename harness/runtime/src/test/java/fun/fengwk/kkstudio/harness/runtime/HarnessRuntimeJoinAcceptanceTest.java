@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
@@ -29,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -217,13 +215,6 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(3L, accepted.acceptedCommands().get(0).sequence());
 
     // client 仍以原始期望序号 2 重放：被跳过的 seq 2 恰是 Join 交付命令，按契约应接受重放。
-    //
-    // 阻塞项：当前主源无法满足该契约（详见迁移报告）。AcceptCommandsControl.replayThreadBatch 用
-    // command.idempotencyKey() 反查 Join（AcceptCommandsControl.java:706-713），Join 只按 invocationId 建索引
-    // （HarnessStore.findJoin / InMemoryHarnessStore.insertJoin）；而
-    // ThreadJoinCompletion.buildDelivery 把交付命令的
-    // idempotencyKey 设为 payload.notificationId()（由 invocationId 派生、与其不相等的通知 ID），
-    // 因此“前置全是交付命令”分支不可达，本用例的期望重放被判定为 COMMAND_REPLAY_ORDER_MISMATCH。
     AcceptCommandsCommand originalReplay =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), List.of(userCmd));
@@ -603,26 +594,18 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   @Test
-  void stoppedParentResumesOnlyOnGenuineUserInput() {
-    // 测试意图：STOPPED 父线程只有接纳“真实用户输入”（USER / typed GOAL / 非 SystemReminder 的 CUSTOM_MESSAGE）时才在同一
-    // 事务内恢复 RUNNABLE；仅接纳 reminder 或 SET_* 前缀 command 时保持 STOPPED；恢复只作用于目标线程，
-    // 随 Stop 一起暂停的后代保持 STOPPED。每个子用例使用全新 store/runtime，避免全局 subagent 额度跨用例累积，
-    // 使“保持 STOPPED”的断言只可能由恢复规则本身导致。
+  void stoppedParentResumesOnTrustedTaskInput() {
+    // 测试意图：STOPPED 父线程接纳可信任务输入（USER / GOAL / CUSTOM_MESSAGE）时在同一事务内恢复 RUNNABLE；恢复只作用于
+    // 目标线程，随 Stop 一起暂停的后代保持 STOPPED。每个子用例使用全新 store/runtime，避免全局 subagent 额度跨用例累积。
     assertStoppedParentResumeOutcome(3000, List.of(userMessagePayload("resume")), true);
     assertStoppedParentResumeOutcome(3010, List.of(new GoalCommandPayload("resume goal")), true);
     assertStoppedParentResumeOutcome(
         3020, List.of(new CustomMessageCommandPayload(AgentMessage.user("plain custom"))), true);
+    // 所有 CUSTOM 都是可信输入，不再按 <system-reminder> 文本标签区分特权来源；系统通知只经 NOTIFICATION Command。
     assertStoppedParentResumeOutcome(
         3030,
         List.of(new CustomMessageCommandPayload(SystemReminder.message("soft budget nudge"))),
-        false);
-    // SET_* 前缀只是运行时配置，跟在后面的 reminder 才构成 batch 末尾的 user-like 输入，因此整体不是真实用户输入。
-    assertStoppedParentResumeOutcome(
-        3040,
-        List.of(
-            new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")),
-            new CustomMessageCommandPayload(SystemReminder.message("soft budget nudge"))),
-        false);
+        true);
   }
 
   /**

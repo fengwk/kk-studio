@@ -35,7 +35,8 @@ import java.util.UUID;
  *       ThreadJoinOutcome#CANCELLED}，且不包含旧的助手文本；
  *   <li>源命令未被执行（无 {@code appliedEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出 {@link
  *       IllegalStateException}；
- *   <li>正常完成投影为 {@link ThreadJoinOutcome#COMPLETED} 与最后一段助手产出的 report；
+ *   <li>正常完成投影为 {@link ThreadJoinOutcome#COMPLETED} 与冻结的 {@code finalAnswerEntryId} 对应的 assistant
+ *       文本（最终答复为空即回退占位，绝不借用更早的助手文本）；
  *   <li>失败投影为 {@link ThreadJoinOutcome#ERROR}，分离 error 与 partialResult；
  *   <li>用户停止或取消投影为 {@link ThreadJoinOutcome#CANCELLED}，保留 partialResult 与取消说明。
  * </ul>
@@ -118,8 +119,9 @@ public final class ThreadJoinProjector {
 
     switch (end.outcome()) {
       case COMPLETED -> {
+        // 正常完成只取冻结的最终回答条目：绝不扫描之前 tool-call 附带的旧文本；最终答复为空即明确占位。
         outcome = ThreadJoinOutcome.COMPLETED;
-        reportField = lastAssistantText;
+        reportField = extractFinalAnswerText(path, join.finalAnswerEntryId());
       }
       case FAILED -> {
         outcome = ThreadJoinOutcome.ERROR;
@@ -150,6 +152,31 @@ public final class ThreadJoinProjector {
             reportField,
             partialResultField,
             errorField));
+  }
+
+  /**
+   * 正常完成只读取 join 冻结的 {@code finalAnswerEntryId}：该条目必须是切片内的 ASSISTANT MESSAGE；其文本为空时返回空串（由渲染层
+   * 回退为明确占位），绝不借用更早的助手文本。
+   */
+  private static String extractFinalAnswerText(EntryPath path, UUID finalAnswerEntryId) {
+    if (finalAnswerEntryId == null) {
+      throw new IllegalStateException("completed join requires a frozen final answer entry id");
+    }
+    for (Entry entry : path.entries()) {
+      if (entry.id().equals(finalAnswerEntryId)) {
+        if (!(entry.payload() instanceof MessagePayload message)
+            || message.message().role() != AgentMessageRole.ASSISTANT) {
+          throw new IllegalStateException(
+              "frozen final answer entry " + finalAnswerEntryId + " is not an ASSISTANT MESSAGE");
+        }
+        return extractMessageText(message.message());
+      }
+    }
+    throw new IllegalStateException(
+        "frozen final answer entry "
+            + finalAnswerEntryId
+            + " not found on terminal path "
+            + path.head().id());
   }
 
   private static int indexOf(EntryPath path, UUID entryId) {

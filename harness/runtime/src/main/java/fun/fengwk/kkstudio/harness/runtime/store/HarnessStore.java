@@ -260,10 +260,12 @@ public interface HarnessStore {
 
     /**
      * 持久保存一次 Stop 产生的完整回执集合（请求目标与全部后代各一条）。要求每条回执的 Thread 已在本事务锁定；回执身份 {@code (threadId,
-     * stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootStopRequestId} 是本次
-     * Stop 的根请求 ID，用于精确重放旧范围而不以当前树重算。
+     * stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootThreadId} 是本次 Stop
+     * 的请求目标 Thread，{@code rootStopRequestId} 是本次 Stop 的根请求 ID，二者共同标识一次 Stop 的完整范围，用于
+     * 精确重放旧范围而不以当前树重算，也避免不同树的派生身份互相串回执。
      */
-    void insertStopReceipts(UUID rootStopRequestId, List<StoppedThreadReceipt> receipts);
+    void insertStopReceipts(
+        UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts);
 
     /** 按 {@code (threadId, stopRequestId)} 读取单条 Stop 回执；不存在返回 {@link Optional#empty()}。 */
     Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId);
@@ -271,8 +273,12 @@ public interface HarnessStore {
     /** 读取该 Thread 自己的全部 Stop 回执，按创建顺序返回；不产生锁。返回不可变列表。 */
     List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId);
 
-    /** 读取一次 Stop（以根 stopRequestId 标识）产生的完整回执集合，按 Thread UUID 升序返回；不产生锁。返回不可变列表。 */
-    List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(UUID rootStopRequestId);
+    /**
+     * 读取以 {@code (rootThreadId, rootStopRequestId)} 根对标识的一次 Stop 产生的完整回执集合，按 Thread UUID 升序返回；
+     * 根对不匹配或不存在时返回空列表。不产生锁。返回不可变列表。
+     */
+    List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
+        UUID rootThreadId, UUID rootStopRequestId);
 
     /**
      * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；

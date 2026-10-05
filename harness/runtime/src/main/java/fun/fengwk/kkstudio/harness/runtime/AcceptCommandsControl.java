@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -754,23 +753,18 @@ final class AcceptCommandsControl {
     return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
   }
 
-  /** 仅显式新 USER/GOAL/CUSTOM（非系统性 reminder）输入把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */
+  /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */
   private static boolean resumeStoppedTarget(ThreadState thread, boolean genuineUserInput) {
     return genuineUserInput && thread.executionControl().isStopped();
   }
 
+  /** 可信任务输入：USER_MESSAGE、GOAL、CUSTOM_MESSAGE；系统通知只经 NOTIFICATION Command，不是输入来源。 */
   private static boolean isGenuineUserInput(List<NewThreadCommand> commands) {
     for (NewThreadCommand command : commands) {
-      if (command.payload() instanceof UserMessageCommandPayload) {
+      if (command.payload() instanceof UserMessageCommandPayload
+          || command.payload() instanceof GoalCommandPayload
+          || command.payload() instanceof CustomMessageCommandPayload) {
         return true;
-      }
-      if (command.payload() instanceof GoalCommandPayload) {
-        return true;
-      }
-      if (command.payload() instanceof CustomMessageCommandPayload custom) {
-        if (!SystemReminder.isReminder(custom.message())) {
-          return true;
-        }
       }
     }
     return false;
