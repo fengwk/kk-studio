@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -298,21 +300,19 @@ class StudioEnvironmentControllerTest {
   /** 意图：安装与卸载脚本以纯文本返回，带禁止缓存和禁止嗅探头，且不被 Result JSON 包装。 */
   @Test
   void installAndUninstallScriptsUsePlainTextHeaders() throws Exception {
-    when(environmentService.installCommand(eq(EnvironmentId.of(ENV_ID)), eq("valid-code")))
+    when(environmentService.installationScript(eq(EnvironmentId.of(ENV_ID)), eq("valid-code")))
         .thenReturn("echo 汉字 ' $ `");
-    when(environmentService.uninstallCommand("windows")).thenReturn("uninstall windows");
+    when(environmentService.uninstallationScript("windows")).thenReturn("uninstall windows");
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/install").param("code", "valid-code"))
+        .perform(
+            get("/api/harness/environments/" + ENV_ID + "/install").param("code", "valid-code"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(header().string("X-Content-Type-Options", "nosniff"))
         .andExpect(content().string("echo 汉字 ' $ `"))
-        .andExpect(
-            content()
-                .string(
-                    org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("\"data\""))));
+        .andExpect(content().string(not(containsString("\"data\""))));
     mockMvc
         .perform(get("/api/harness/environments/uninstall/windows"))
         .andExpect(status().isOk())
@@ -323,9 +323,9 @@ class StudioEnvironmentControllerTest {
   /** 意图：未知身份、非法身份与非法操作系统分别返回 404/400，且错误正文不回显凭据。 */
   @Test
   void installAndUninstallFailuresDoNotEchoCredentials() throws Exception {
-    when(environmentService.installCommand(eq(EnvironmentId.of(ENV_ID)), eq("bad-code")))
+    when(environmentService.installationScript(eq(EnvironmentId.of(ENV_ID)), eq("bad-code")))
         .thenThrow(new AiResourceNotFoundException("environment"));
-    when(environmentService.uninstallCommand("bad"))
+    when(environmentService.uninstallationScript("bad"))
         .thenThrow(
             new AiValidationException(
                 "operatingSystem", "operatingSystem must be linux, macos or windows"));
@@ -333,11 +333,7 @@ class StudioEnvironmentControllerTest {
     mockMvc
         .perform(get("/api/harness/environments/" + ENV_ID + "/install").param("code", "bad-code"))
         .andExpect(status().isNotFound())
-        .andExpect(
-            content()
-                .string(
-                    org.hamcrest.Matchers.not(
-                        org.hamcrest.Matchers.containsString(ENV_ID.toString()))));
+        .andExpect(content().string(not(containsString(ENV_ID.toString()))));
     mockMvc
         .perform(get("/api/harness/environments/" + ENV_ID + "/install"))
         .andExpect(status().isBadRequest());

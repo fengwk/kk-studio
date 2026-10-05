@@ -15,10 +15,10 @@ $stage = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString('N'))
 try {
   New-Item -ItemType Directory -Path $stage | Out-Null
   Set-KkPrivateAcl -Path $stage -Directory
-@@STAGING@@
+%s
   $installer = Join-Path $stage 'install.ps1'
-  Invoke-WebRequest -UseBasicParsing -Uri @@INSTALLER@@ -OutFile $installer
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $installer @@ACTION@@@@PARAMETERS@@
+  Invoke-WebRequest -UseBasicParsing -Uri %s -OutFile $installer
+  & powershell -NoProfile -ExecutionPolicy Bypass -File $installer %s%s
   if ($LASTEXITCODE -ne 0) { throw 'Installer failed' }
 }
 catch {
