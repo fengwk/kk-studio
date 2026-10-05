@@ -1088,17 +1088,21 @@ describe('buildBoundThreadTranscript', () => {
     } as ToolDialogueMessage
 
     transcript.onDecideApproval?.(message, 'DENY')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'DENY')
+    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'DENY', THREAD_ID)
     expect(onDenyApproval).toHaveBeenCalledTimes(1)
 
     transcript.onDecideApproval?.(message, 'ALLOW')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'ALLOW')
+    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'ALLOW', THREAD_ID)
     expect(onDenyApproval).toHaveBeenCalledTimes(1)
 
     // 无 invocationId 的消息不触发任何副作用。
     transcript.onDecideApproval?.({} as ToolDialogueMessage, 'DENY')
     expect(controller.decideApproval).toHaveBeenCalledTimes(2)
     expect(onDenyApproval).toHaveBeenCalledTimes(1)
+
+    // 带子 Thread 身份的审批必须直达子节点，不能落到当前父面板。
+    transcript.onDecideApproval?.({ invocationId: 'child-inv', threadId: 'child-thread' } as ToolDialogueMessage, 'ALLOW')
+    expect(controller.decideApproval).toHaveBeenCalledWith('child-inv', 'ALLOW', 'child-thread')
   })
 
   it('projects the scene-neutral transcript facts (scroll/resetKey/eventCount)', () => {

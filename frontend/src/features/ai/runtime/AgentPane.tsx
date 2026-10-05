@@ -12,7 +12,8 @@ import {
   type AgentPaneCapabilities,
   type AgentPaneDefaults,
 } from '@/features/ai/runtime/useAgentPaneController'
-import { Pencil as PencilIcon } from 'lucide-react'
+import { useState } from 'react'
+import { GitFork as AgentTreeIcon, Pencil as PencilIcon } from 'lucide-react'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
@@ -21,6 +22,7 @@ import { useI18n } from '@/shared/i18n'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
+import { ThreadAgentTreePanel } from '@/features/ai/runtime/ThreadAgentTreePanel'
 
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 
@@ -54,6 +56,7 @@ export function AgentPane({
   onStop?: () => Promise<void> | void
 }) {
   const { t } = useI18n()
+  const [agentTreeOpen, setAgentTreeOpen] = useState(false)
   const pane = useAgentPaneController({
     owner,
     paneId,
@@ -92,7 +95,7 @@ export function AgentPane({
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
       <ChatPanel
-        heading={renderBoundThreadHeading(boundThreadName)}
+        heading={renderBoundThreadHeading(boundThreadName, pane.target.threadId)}
         labels={pane.boundLabels}
         transcript={pane.buildBoundThreadTranscript({
           controller: pane.controller,
@@ -197,29 +200,46 @@ export function AgentPane({
     </section>
   )
 
-  function renderBoundThreadHeading(name: string | null) {
+  function renderBoundThreadHeading(name: string | null, threadId: string) {
+    const agentTreePanelId = `agent-tree-${paneId}`
     return (
-      <header className="agent-pane-thread-heading">
-        {name != null ? (
-          <h2 className="agent-pane-thread-title" title={name}>{name}</h2>
-        ) : (
-          <h2 className="agent-pane-thread-title">{t('ai.runtime.rename.loadingName')}</h2>
-        )}
-        <button
-          type="button"
-          className="agent-pane-thread-rename"
-          aria-label={t('ai.runtime.rename.titleAria')}
-          title={t('ai.runtime.rename.titleAria')}
-          disabled={!owner || owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
-          onClick={() => {
-            if (name != null && pane.target.kind === 'BOUND_THREAD') {
-              pane.renameThread(pane.target.threadId, name)
-            }
-          }}
-        >
-          <PencilIcon aria-hidden="true" />
-        </button>
-      </header>
+      <>
+        <header className="agent-pane-thread-heading">
+          {name != null ? (
+            <h2 className="agent-pane-thread-title" title={name}>{name}</h2>
+          ) : (
+            <h2 className="agent-pane-thread-title">{t('ai.runtime.rename.loadingName')}</h2>
+          )}
+          <button
+            type="button"
+            className="agent-pane-thread-tree"
+            aria-label={t('ai.runtime.agentTree.toggle')}
+            title={t('ai.runtime.agentTree.toggle')}
+            aria-expanded={agentTreeOpen}
+            aria-controls={agentTreePanelId}
+            onClick={() => setAgentTreeOpen((open) => !open)}
+          >
+            <AgentTreeIcon aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="agent-pane-thread-rename"
+            aria-label={t('ai.runtime.rename.titleAria')}
+            title={t('ai.runtime.rename.titleAria')}
+            disabled={!owner || owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
+            onClick={() => {
+              if (name != null && pane.target.kind === 'BOUND_THREAD') {
+                pane.renameThread(pane.target.threadId, name)
+              }
+            }}
+          >
+            <PencilIcon aria-hidden="true" />
+          </button>
+        </header>
+        {agentTreeOpen ? (
+          <ThreadAgentTreePanel key={threadId} threadId={threadId} panelId={agentTreePanelId} />
+        ) : null}
+      </>
     )
   }
 

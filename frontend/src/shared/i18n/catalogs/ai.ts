@@ -1415,6 +1415,70 @@ export const aiCatalog = {
     'en-US': 'Rename',
     'zh-CN': '重命名',
   },
+  'ai.runtime.agentTree.toggle': {
+    'en-US': 'Agent relationships',
+    'zh-CN': 'Agent 关系',
+  },
+  'ai.runtime.agentTree.panel': {
+    'en-US': 'Agent relationships',
+    'zh-CN': 'Agent 关系',
+  },
+  'ai.runtime.agentTree.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.runtime.agentTree.loading': {
+    'en-US': 'Loading agent relationships…',
+    'zh-CN': '正在加载 Agent 关系…',
+  },
+  'ai.runtime.agentTree.error': {
+    'en-US': 'Agent relationships failed to load',
+    'zh-CN': 'Agent 关系加载失败',
+  },
+  'ai.runtime.agentTree.refreshFailed': {
+    'en-US': 'Agent relationships failed to refresh',
+    'zh-CN': 'Agent 关系刷新失败',
+  },
+  'ai.runtime.agentTree.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
+  'ai.runtime.agentTree.empty': {
+    'en-US': 'No agent relationships',
+    'zh-CN': '没有 Agent 关系',
+  },
+  'ai.runtime.agentTree.root': {
+    'en-US': 'Main agent',
+    'zh-CN': '主 Agent',
+  },
+  'ai.runtime.agentTree.current': {
+    'en-US': 'Current',
+    'zh-CN': '当前',
+  },
+  'ai.runtime.agentTree.turns': {
+    'en-US': '{{count}} turns',
+    'zh-CN': '{{count}} 回合',
+  },
+  'ai.runtime.agentTree.toolCalls': {
+    'en-US': '{{count}} tool calls',
+    'zh-CN': '{{count}} 次工具调用',
+  },
+  'ai.runtime.agentTree.outcome.COMPLETED': {
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
+  },
+  'ai.runtime.agentTree.outcome.FAILED': {
+    'en-US': 'Failed',
+    'zh-CN': '失败',
+  },
+  'ai.runtime.agentTree.outcome.STOPPED': {
+    'en-US': 'Stopped',
+    'zh-CN': '已停止',
+  },
+  'ai.runtime.agentTree.outcome.CANCELLED': {
+    'en-US': 'Cancelled',
+    'zh-CN': '已取消',
+  },
   'ai.runtime.shortcuts.title': {
     'en-US': 'Keyboard shortcuts',
     'zh-CN': '键盘快捷键',

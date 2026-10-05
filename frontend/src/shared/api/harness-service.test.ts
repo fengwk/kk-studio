@@ -107,6 +107,17 @@ describe('harnessService', () => {
   })
 
   /**
+   * 测试意图：关系树从任意节点读取真实 root，路径与 snapshot 分离且参数被编码。
+   */
+  it('queries the agent relationship tree via GET /harness/threads/{id}/tree', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    await service.getThreadTree('thread /1')
+
+    expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/tree')
+  })
+
+  /**
    * 测试意图：验证 Session/Thread 名称修改使用 PUT /harness/sessions/{id}/name 与
    * PUT /harness/threads/{id}/name，且路径参数被安全转义。
    */
