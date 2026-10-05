@@ -806,14 +806,30 @@ function Test-PureValidation {
     Assert-Equal -Expected "'C:\owner''s profile\daemon.json'" `
         -Actual (ConvertTo-PowerShellLiteral -Value "C:\owner's profile\daemon.json") `
         -Message "manual recovery literals quote apostrophes safely"
-    $instructions = Get-ConflictBackupCommands
-    $commands = $instructions.Substring($instructions.IndexOf("`n") + 1)
-    $tokens = $null
-    $errors = $null
-    $null = [Management.Automation.Language.Parser]::ParseInput($commands, [ref] $tokens, [ref] $errors)
-    Assert-Equal -Expected 0 -Actual $errors.Count -Message "manual private-backup commands parse"
-    Assert-True -Condition ($commands.IndexOf("Set-Acl") -gt $commands.IndexOf("SetAccessRuleProtection")) `
-        -Message "manual backup instructions construct protected owner ACL"
+    $savedTaskName = $script:TaskName
+    $savedTaskDescription = $script:TaskDescription
+    try {
+        $script:TaskName = "fixture's task"
+        $script:TaskDescription = "managed fixture"
+        Assert-ManagedTask -Task ([pscustomobject] @{ Description = $script:TaskDescription })
+        $failure = Assert-Throws -Action {
+            Assert-ManagedTask -Task ([pscustomobject] @{ Description = "foreign task" })
+        } -ExpectedMessage "Get-ScheduledTask" -Message "foreign task is rejected with inspection guidance"
+        $commands = [regex]::Match($failure, "(?m)Get-ScheduledTask -TaskName [^\r\n]+").Value
+        Assert-Equal -Expected (
+            "Get-ScheduledTask -TaskName 'fixture''s task' -TaskPath '\' | Format-List TaskName, State, Description"
+        ) -Actual $commands -Message "inspection guidance quotes the task name safely"
+        $tokens = $null
+        $errors = $null
+        $null = [Management.Automation.Language.Parser]::ParseInput($commands, [ref] $tokens, [ref] $errors)
+        Assert-Equal -Expected 0 -Actual $errors.Count -Message "read-only inspection command parses"
+        Assert-True -Condition ($failure -notmatch "Stop-ScheduledTask|Unregister-ScheduledTask|Export-ScheduledTask|Set-Acl") `
+            -Message "foreign task guidance never suggests mutation or backup"
+    }
+    finally {
+        $script:TaskName = $savedTaskName
+        $script:TaskDescription = $savedTaskDescription
+    }
 }
 
 function Test-ConfigFailureDetail {
