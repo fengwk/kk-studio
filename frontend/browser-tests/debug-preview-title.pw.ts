@@ -4,7 +4,6 @@ import { expect, test, type Page } from './fixture'
 const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
 const THREAD_ID = 'f0000000-0000-0000-0000-00000000f001'
-const CHAT_ID = 'chat-preview-harness'
 const DRAFT = '复核下一次请求预览入口'
 /** 窄布局断点 < 1100px：单列 Tab 结构，与宽布局的三列结构互斥。 */
 const NARROW_VIEWPORT = { width: 954, height: 934 }
@@ -39,13 +38,8 @@ interface SnapshotRequest {
 interface PreviewRequest {
   kind: 'preview'
   body: {
-    owner: { type: string; chatId: string }
-    target: {
-      type: string
-      threadId: string
-      expectedHeadEntryId: string
-      expectedNextCommandSequence: string
-    }
+    expectedHeadEntryId: string
+    expectedNextCommandSequence: string
     commands: Array<{
       type: string
       contents?: Array<{ type: string; text?: string }>
@@ -56,7 +50,7 @@ interface PreviewRequest {
 
 type RecordedRequest = SnapshotRequest | PreviewRequest
 
-function threadSnapshot(cursor: Cursor) {
+function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
   return {
     status: 200,
     data: {
@@ -72,6 +66,7 @@ function threadSnapshot(cursor: Cursor) {
         version: cursor.nextCommandSequence,
         status: 'IDLE',
         processing: false,
+        executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
@@ -81,12 +76,13 @@ function threadSnapshot(cursor: Cursor) {
         createTime: '2026-10-01T00:00:00Z',
         updateTime: '2026-10-01T00:00:00Z',
       },
-      entries: [],
+      entries,
       queuedCommands: [],
       modelInvocation: null,
       toolInvocations: [],
       modelAttemptFailures: [],
       manualCompaction: { available: false, disabledReason: null },
+      stopReceipts: [],
     },
   }
 }
@@ -203,6 +199,7 @@ async function installPreviewApiMock(
     cursor: () => Cursor
     onPreview?: (body: PreviewRequest['body']) => Promise<PreviewFulfillment>
     agentSelection?: boolean
+    entries?: unknown[]
   },
 ): Promise<RecordedRequest[]> {
   const recorded: RecordedRequest[] = []
@@ -227,8 +224,8 @@ async function installPreviewApiMock(
         }
         await route.fulfill({
           json: draftRequestPreview({
-            headEntryId: body.target.expectedHeadEntryId,
-            nextCommandSequence: body.target.expectedNextCommandSequence,
+            headEntryId: body.expectedHeadEntryId,
+            nextCommandSequence: body.expectedNextCommandSequence,
           }, body.commands.find((command) => command.type === 'SET_MODEL')?.model?.modelName),
         })
         return
@@ -240,7 +237,7 @@ async function installPreviewApiMock(
       if (path === `/api/harness/threads/${THREAD_ID}`) {
         const cursor = options.cursor()
         recorded.push({ kind: 'snapshot', ...cursor })
-        await route.fulfill({ json: threadSnapshot(cursor) })
+        await route.fulfill({ json: threadSnapshot(cursor, options.entries ?? []) })
         return
       }
       if (path === '/api/ai/catalog/agents') {
@@ -299,13 +296,11 @@ function expectFreshPreviewWindow(
   expect(servingSnapshot.nextCommandSequence).toBe(expected.cursor.nextCommandSequence)
 
   const previewRequest = previews[0] as PreviewRequest
-  expect(previewRequest.body.owner).toEqual({ type: 'CHAT', chatId: CHAT_ID })
-  expect(previewRequest.body.target).toEqual({
-    type: 'THREAD',
-    threadId: THREAD_ID,
-    expectedHeadEntryId: expected.cursor.headEntryId,
-    expectedNextCommandSequence: expected.cursor.nextCommandSequence,
-  })
+  // 新 wire：per-thread 预览体只有 CAS 游标与命令，绝不携带产品 owner/target。
+  expect(previewRequest.body).not.toHaveProperty('owner')
+  expect(previewRequest.body).not.toHaveProperty('target')
+  expect(previewRequest.body.expectedHeadEntryId).toBe(expected.cursor.headEntryId)
+  expect(previewRequest.body.expectedNextCommandSequence).toBe(expected.cursor.nextCommandSequence)
   const userMessage = previewRequest.body.commands.find((command) => command.type === 'USER_MESSAGE')
   expect(userMessage?.contents?.[0]).toEqual({ type: 'TEXT', text: expected.draft })
 }
@@ -325,6 +320,42 @@ async function openDebugView(page: Page) {
   await editor.fill(DRAFT)
   return { composer, editor }
 }
+
+test('owner-free bound thread renders a NOTIFICATION entry as a system card', async ({ page }) => {
+  // 测试意图：系统结果通知在真实浏览器里使用独立系统样式，绝不渲染成 user/assistant
+  // 对话块，也不进入可编辑队列或草稿（草稿只承载人类输入）。
+  const notificationEntry = {
+    entryId: 'e0000000-0000-0000-0000-00000000e0a1',
+    threadId: THREAD_ID,
+    parentEntryId: null,
+    entryType: 'NOTIFICATION',
+    payloadJson: JSON.stringify({
+      notificationId: 'a0000000-0000-0000-0000-00000000a001',
+      kind: 'SUBAGENT_RESULT',
+      sourceThreadId: 'f0000000-0000-0000-0000-00000000f002',
+      message: { role: 'USER', contents: [{ type: 'text', text: '子 Thread 已完成数据迁移' }] },
+    }),
+    createTime: '2026-10-01T00:00:05Z',
+  }
+  await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/browser-tests/debug-preview-harness.html')
+
+  const card = page.locator('[data-entry-kind="notification"]')
+  await expect(card).toBeVisible()
+  await expect(card).toHaveClass(/kind-notification/)
+  await expect(card).toContainText('子 Thread 结果')
+  // 通知正文来自 message 的文本内容，而不是「没有附带文本」兜底或原始 JSON 转储。
+  await expect(card.locator('.thread-entry-text')).toHaveText('子 Thread 已完成数据迁移')
+  await expect(card).not.toContainText('没有附带文本内容')
+  // 系统通知不是对话块，也不进入可编辑草稿
+  await expect(card.locator('.thread-block-user')).toHaveCount(0)
+  await expect(card.locator('.thread-block-assistant')).toHaveCount(0)
+  const composer = page.locator('.thread-composer')
+  await expect(composer.locator('.composer-editor')).toHaveText('')
+  await expect(composer).not.toContainText('子 Thread 已完成数据迁移')
+  await page.screenshot({ path: resolve(reportsDir, 'notification-system-card.png') })
+})
 
 test.describe('Debug Preview Title Real React Browser Regression', () => {
   test('agent selection follows its model in preview and rejects invalid configuration without losing draft', async ({ page }) => {

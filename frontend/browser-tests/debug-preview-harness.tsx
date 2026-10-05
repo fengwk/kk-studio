@@ -14,9 +14,9 @@ setLocale('zh-CN')
  * 挂载真实 AgentPane（useAgentPaneController + 真实 ThreadComposer + 真实 Debug 视图），
  * 后端全部由 Playwright `page.route` mock 拦截；不启动真实模型或线上服务。
  * 视图初始即 BOUND_THREAD，使 Debug 视图的预览按钮与 Composer 底栏同时可见。
+ * 不传 owner：既有 Thread 的输入、Goal、设置、预览与 Stop 都不需要产品容器。
  */
 export const PREVIEW_HARNESS_THREAD_ID = 'f0000000-0000-0000-0000-00000000f001'
-export const PREVIEW_HARNESS_CHAT_ID = 'chat-preview-harness'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,8 +33,7 @@ function DebugPreviewHarnessApp() {
       <ApplicationEventProvider>
         <div className="preview-harness-frame" data-testid="preview-harness-frame">
           <AgentPane
-            owner={{ type: 'CHAT', chatId: PREVIEW_HARNESS_CHAT_ID }}
-            paneId="preview-pane"
+            paneId={PREVIEW_HARNESS_THREAD_ID}
             focused
             initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
             agents={[
