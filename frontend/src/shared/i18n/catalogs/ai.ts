@@ -2636,8 +2636,8 @@ export const aiCatalog = {
     'zh-CN': '在需要卸载的主机上执行命令。环境服务会被移除，本地配置和数据保留；Studio 中的环境记录不会删除。',
   },
   'ai.environment.install.savedCopied': {
-    'en-US': 'Installation command copied.',
-    'zh-CN': '安装命令已复制。',
+    'en-US': 'Installation command copied. Valid for 5 minutes.',
+    'zh-CN': '安装命令已复制，5分钟内有效。',
   },
   'ai.environment.install.savedCopyFailed': {
     'en-US': "Settings saved, but command generation or copying failed. Check clipboard permissions and retry. Nothing has been deployed.",

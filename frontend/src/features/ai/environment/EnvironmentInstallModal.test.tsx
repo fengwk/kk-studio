@@ -11,7 +11,7 @@ import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 
 vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: { getEnvironment: vi.fn(), saveInstallConfig: vi.fn() },
+  environmentService: { getEnvironment: vi.fn(), saveInstallConfig: vi.fn(), createInstallCode: vi.fn() },
 }))
 vi.mock('./clipboard', () => ({ copyTextToClipboard: vi.fn() }))
 
@@ -56,6 +56,9 @@ describe('EnvironmentInstallModal', () => {
     vi.resetAllMocks()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8' })
+    vi.mocked(environmentService.createInstallCode).mockResolvedValue({
+      code: "short-code'汉字", expiresAt: '2026-10-05T09:05:00.000Z',
+    })
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
   })
 
@@ -75,13 +78,16 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8',
       installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'https://canonical.example.com' } } })
     await user.click(copyButton())
-    expect(await screen.findByText('安装命令已复制。')).toBeInTheDocument()
+    expect(await screen.findByText('安装命令已复制，5分钟内有效。')).toBeInTheDocument()
     expect(screen.getByRole('status').closest('[role="dialog"]')).toBeNull()
     expect(within(screen.getByRole('dialog')).queryByRole('status')).toBeNull()
     expect(environmentService.saveInstallConfig).toHaveBeenCalledWith('env-1', '7', savedNormalized)
+    expect(environmentService.createInstallCode).toHaveBeenCalledWith('env-1', '8')
+    expect(vi.mocked(environmentService.saveInstallConfig).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
     const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
     expect(copied).toBe(
-      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/harness/environments/env-1/install' | bash)`,
+      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/harness/environments/env-1/install?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
     )
     expect(copied).not.toContain('canonical.example.com')
     expect(copied).not.toContain('registrationToken')
@@ -108,7 +114,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('save failed')
     expect(origin()).toHaveValue('https://draft.example.com')
-    expect(environmentService.getEnvironment).toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
     expect(copyTextToClipboard).not.toHaveBeenCalled()
   })
 
@@ -130,7 +136,7 @@ describe('EnvironmentInstallModal', () => {
     expect(vi.mocked(environmentService.saveInstallConfig).mock.calls[1]![1]).toBe('12')
   })
 
-  it('keeps the same install command for one environment id after the token rotates', async () => {
+  it('issues a new install code after token rotation without putting the long-lived token in the command', async () => {
     const user = userEvent.setup()
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
@@ -138,24 +144,30 @@ describe('EnvironmentInstallModal', () => {
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(1))
     const first = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({
-      ...card, version: '9', registrationToken: 'rotated-token',
+      ...card, version: '9', registrationToken: 'rotated-long-token',
+    })
+    vi.mocked(environmentService.createInstallCode).mockResolvedValue({
+      code: 'fresh-code', expiresAt: '2026-10-05T09:10:00.000Z',
     })
     await user.click(copyButton())
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(copyTextToClipboard).mock.calls[1]![0]).toBe(first)
-    expect(first).toContain('/api/harness/environments/env-1/install')
-    expect(first).not.toContain('rotated-token')
+    const second = vi.mocked(copyTextToClipboard).mock.calls[1]![0]
+    expect(second).not.toBe(first)
+    expect(second).toContain('code=fresh-code')
+    expect(second).not.toContain('rotated-long-token')
+    expect(environmentService.createInstallCode).toHaveBeenLastCalledWith('env-1', '9')
   })
 
-  it.each(['clipboard', 'missing-config'] as const)('explains settings saved but not copied on %s failure', async failure => {
+  it.each(['code', 'clipboard', 'missing-config'] as const)('explains settings saved but not copied on %s failure', async failure => {
     const user = userEvent.setup()
+    if (failure === 'code') vi.mocked(environmentService.createInstallCode).mockRejectedValue(new Error('code unavailable'))
     if (failure === 'clipboard') vi.mocked(copyTextToClipboard).mockResolvedValue(false)
     if (failure === 'missing-config') vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, installConfig: null, version: '8' })
     open()
     await waitFor(() => expect(copyButton()).toBeEnabled())
     await user.click(copyButton())
     expect(await screen.findByRole('alert')).toHaveTextContent('配置已保存，但命令生成或复制失败')
-    expect(screen.queryByText('安装命令已复制。')).toBeNull()
+    expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
   })
 
   it('reopens with current remote defaults rather than stale list card metadata', async () => {
@@ -184,7 +196,7 @@ describe('EnvironmentInstallModal', () => {
       if (phase === 'clipboard') {
         await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalled())
         // 剪贴板尚未确认时，不能抢先宣布复制成功。
-        expect(screen.queryByText('安装命令已复制。')).toBeNull()
+        expect(screen.queryByText('安装命令已复制，5分钟内有效。')).toBeNull()
       }
     }
     view.unmount()
@@ -430,6 +442,8 @@ describe('EnvironmentInstallModal', () => {
     )
     expect(environmentService.getEnvironment).not.toHaveBeenCalled()
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()
+    expect(environmentService.createInstallCode).not.toHaveBeenCalled()
+    expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).not.toContain('code=')
     vi.mocked(copyTextToClipboard).mockResolvedValue(false)
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('复制失败')

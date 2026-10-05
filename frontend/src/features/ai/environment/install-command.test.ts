@@ -8,6 +8,7 @@ import { detectInstallOS, generateInstallCommand, generateUninstallCommand, vali
 
 const origin = 'https://studio.example.com'
 const environmentId = "env/汉字'$(touch NEVER)"
+const installCode = "code'$(touch NEVER)"
 
 const config = (): EnvironmentInstallConfigDTO => ({
   operatingSystem: 'linux',
@@ -74,8 +75,8 @@ describe('install command', () => {
     'runs a one-line %s install that fetches the encoded environment URL and executes the remote script',
     os => {
       const input = { ...config(), operatingSystem: os }
-      const command = generateInstallCommand(origin, environmentId, os)
-      const expected = `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install`
+      const command = generateInstallCommand(origin, environmentId, os, installCode)
+      const expected = `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`
       expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
       expect(command).not.toContain('\n')
       expect(command).not.toContain(input.daemon.studioUrl)
@@ -91,7 +92,7 @@ describe('install command', () => {
   it.skipIf(process.platform === 'win32')(
     'returns the remote script status and does not treat a curl failure as success',
     () => {
-      const command = generateInstallCommand(origin, 'env-1', 'linux')
+      const command = generateInstallCommand(origin, 'env-1', 'linux', 'code-1')
       const failed = execute(command, 'echo ran; exit 17\n')
       expect(failed.run.status).toBe(17)
       expect(failed.run.stdout).toContain('ran')
@@ -129,13 +130,14 @@ describe('install command', () => {
     const input = config()
     input.operatingSystem = 'windows'
     input.javaHome = "C:\\Program Files\\Java\\it's"
-    const command = generateInstallCommand(origin, environmentId, 'windows')
+    const command = generateInstallCommand(origin, environmentId, 'windows', installCode)
     const encoded = encodeURIComponent(environmentId).replaceAll("'", "''")
+    const encodedCode = encodeURIComponent(installCode).replaceAll("'", "''")
     expect(command).not.toContain('\n')
     expect(command).toContain('Invoke-WebRequest -UseBasicParsing')
     expect(command).toContain('-ErrorAction Stop')
     expect(command).toContain('[scriptblock]::Create($script)')
-    expect(command).toContain(`'https://studio.example.com/api/harness/environments/${encoded}/install'`)
+    expect(command).toContain(`'https://studio.example.com/api/harness/environments/${encoded}/install?code=${encodedCode}'`)
     expect(command).not.toContain('registrationToken')
     expect(command).not.toContain('WriteAllText')
     expect(command).not.toContain('Set-Acl')
@@ -275,7 +277,7 @@ describe('install command', () => {
       expect(servers[id]).toEqual({
         command: ['server'], extensions: ['.ts'], rootMarkers: [], firstMatchMarkers: [],
       })
-      const command = generateInstallCommand(origin, id, 'linux')
+      const command = generateInstallCommand(origin, id, 'linux', 'code-1')
       expect(command).toContain(encodeURIComponent(id).replaceAll("'", "\\'"))
       expect(command).not.toContain(JSON.stringify(normalized.daemon))
     },
@@ -288,18 +290,21 @@ describe('install command', () => {
       input.daemon.lsp = lsp as EnvironmentInstallConfigDTO['daemon']['lsp']
       expect(() => validateInstallConfig(input)).toThrow(/^Invalid /)
     }
-    expect(() => generateInstallCommand(origin, "x\n$(touch NEVER)", 'linux'))
+    expect(() => generateInstallCommand(origin, "x\n$(touch NEVER)", 'linux', 'code-1'))
       .toThrow('environmentId')
-    expect(() => generateInstallCommand('https://evil.example/path', 'env-1', 'linux'))
+    expect(() => generateInstallCommand(origin, 'env-1', 'linux', "x\n$(touch NEVER)"))
+      .toThrow('installCode')
+    expect(() => generateInstallCommand('https://evil.example/path', 'env-1', 'linux', 'code-1'))
       .toThrow('downloadOrigin')
-    expect(() => generateInstallCommand('https://user:pass@studio.example.com', 'env-1', 'linux'))
+    expect(() => generateInstallCommand('https://user:pass@studio.example.com', 'env-1', 'linux', 'code-1'))
       .toThrow('downloadOrigin')
-    expect(() => generateInstallCommand(origin, 'env-1', 'wrong' as 'linux')).toThrow('operatingSystem')
+    expect(() => generateInstallCommand(origin, 'env-1', 'wrong' as 'linux', 'code-1')).toThrow('operatingSystem')
     expect(() => generateUninstallCommand('wrong' as 'linux', origin)).toThrow('operatingSystem')
-    const injected = generateInstallCommand(origin, "a'$(touch NEVER)b", 'linux')
+    const injected = generateInstallCommand(origin, "a'$(touch NEVER)b", 'linux', "c'$(touch NEVER)")
     expect(injected).toContain(encodeURIComponent("a'$(touch NEVER)b").replaceAll("'", "\\'"))
+    expect(injected).toContain(`code=${encodeURIComponent("c'$(touch NEVER)").replaceAll("'", "\\'")}`)
     expect(injected).not.toContain('$(touch NEVER)')
-    expect(generateInstallCommand(origin, 'env-1', 'linux'))
-      .toBe(generateInstallCommand(origin, 'env-1', 'linux'))
+    expect(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
+      .toBe(generateInstallCommand(origin, 'env-1', 'linux', 'code-1'))
   })
 })

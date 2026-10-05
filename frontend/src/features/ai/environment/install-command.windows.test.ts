@@ -19,7 +19,8 @@ it.skipIf(process.platform !== 'win32')(
     const recordPath = join(dir, 'record.json')
     const scriptPath = join(dir, 'command.ps1')
     const environmentId = "env/汉字'\"$`$(New-Item NEVER)"
-    const install = generateInstallCommand(origin, environmentId, 'windows')
+    const installCode = "code'汉字"
+    const install = generateInstallCommand(origin, environmentId, 'windows', installCode)
     const uninstall = generateUninstallCommand('windows', origin)
     function run(command: string, mode: 'ok' | 'download' | 'script') {
       const payload = mode === 'script'
@@ -48,7 +49,7 @@ ${command}
       const record = JSON.parse(readFileSync(recordPath, 'utf8'))
       expect(record.marker).toBe('执行-汉字')
       expect(record.url).toBe(
-        `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install`,
+        `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`,
       )
       expect(downloaded.stdout + downloaded.stderr).not.toContain('registrationToken')
       expect(existsSync(join(dir, 'NEVER'))).toBe(false)

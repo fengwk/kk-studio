@@ -32,6 +32,9 @@ async function api(page: Page) {
       card = { ...card, installConfig: body.installConfig, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: card })
     }
+    if (path.endsWith('/install-code')) {
+      return route.fulfill({ json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' } })
+    }
     if (path.endsWith('/token')) return route.fulfill({ json: { id: card.id, version: card.version, registrationToken: token } })
     if (path.endsWith('/registration-token')) {
       card = { ...card, version: String(Number(card.version) + 1) }
@@ -74,15 +77,16 @@ for (const width of [1280, 390, 320]) {
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await modal.getByRole('button', { name: '保存并复制安装命令' }).click()
-    await expect(page.getByRole('status')).toContainText('安装命令已复制')
+    await expect(page.getByRole('status')).toContainText('安装命令已复制，5分钟内有效')
     await expect(page.getByRole('status')).toHaveCSS('opacity', '1')
     await expect(modal.getByRole('status')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`install-toast-${width}.png`), fullPage: true })
     const command = await page.evaluate(() => navigator.clipboard.readText())
     const pageOrigin = new URL(page.url()).origin
-    const url = `${pageOrigin}/api/harness/environments/env-1/install`
+    const url = `${pageOrigin}/api/harness/environments/env-1/install?code=browser-install-code`
     expect(command).toBe(`(set -o pipefail; curl -fsSL $'${url}' | bash)`)
     expect(command).not.toContain(token)
+    expect(mock.calls.filter(c => c.endsWith('/install-code'))).toHaveLength(1)
     expect(mock.calls.filter(c => c.endsWith('/token'))).toHaveLength(0)
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
