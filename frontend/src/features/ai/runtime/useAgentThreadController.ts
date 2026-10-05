@@ -1088,9 +1088,13 @@ export function useAgentThreadController(
           (receipt.cancelledInputs ?? []).map((input) => input.idempotencyKey)))
         // Stop 已成功：即便回执合并失败也只报「草稿未恢复」，绝不把它当成 Stop 失败。
         await applyStopReceipts(receipts, operationThreadId, operationEpoch)
-        pendingStopRef.current = null
-        setStopReplayPending(false)
+        // await 期间宿主可能已强制重绑：A 的 late completion 只能清理 A 自己的 sidecar，
+        // 绝不改动当前绑定的待决标记（那可能已经是 B 刚发起、结果未知的 Stop）。
         clearPendingStop(operationThreadId)
+        if (isCurrentBound()) {
+          pendingStopRef.current = null
+          setStopReplayPending(false)
+        }
         if (isCurrentBound() && pendingMessageRef.current != null) {
           const cleared = pendingMessageRef.current
           clearBoundPendingMessage(operationThreadId, cleared.request)
