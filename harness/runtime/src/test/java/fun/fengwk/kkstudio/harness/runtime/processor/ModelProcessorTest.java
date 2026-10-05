@@ -424,12 +424,18 @@ class ModelProcessorTest {
   // ---------------------------------------------------------------------------------------------
 
   /**
-   * 新 claim 遇到旧 lease 过期的 RUNNING：UNKNOWN 保留 attempt + version+1 + THREAD wake + complete，绝不调用
-   * Gateway。
+   * 新 claim 遇到旧 lease 过期的 RUNNING：接入既有重试策略记录一次失败 attempt 后回到 READY 并按策略延迟重排 MODEL Work，attempt
+   * 保持已确认值、旧 partial 只留作尝试审计，绝不调用 Gateway，也不 request THREAD wake。
    */
   @Test
-  void staleRunningLeaseRecoveryTerminatesUnknownWithoutGateway() {
-    Fixture fixture = fixture();
+  void staleRunningLeaseRecoveryRetriesWithExistingPolicy() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)));
     transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     StreamCheckpoint checkpoint = new StreamCheckpoint(1, 7, "durable partial", "thinking");
@@ -437,17 +443,92 @@ class ModelProcessorTest {
         fixture.store,
         fixture.invocationId,
         model -> model.checkpoint(checkpoint, NOW.plusSeconds(1)));
-    ClaimedWork firstClaim = claim(fixture.store, fixture.invocationId, NOW);
+    claim(fixture.store, fixture.invocationId, NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, model.status());
+    assertEquals(1, model.attempt());
+    assertNull(model.streamCheckpoint());
+    assertNull(model.error());
+    assertEquals(1, model.failedAttempts().size());
+    assertEquals(1, model.failedAttempts().getFirst().attempt());
+    assertEquals(7L, model.failedAttempts().getFirst().sequence());
+    assertEquals("durable partial", model.failedAttempts().getFirst().text());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.failedAttempts().getFirst().error().kind());
+    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(
+        1,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
+    Work modelWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+    assertNotNull(modelWork);
+    assertEquals(fixture.clock.instant().plusSeconds(5), modelWork.availableAt());
+    assertNull(modelWork.leaseToken());
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /**
+   * 新 claim 遇到旧 lease 过期的 DISPATCHING：把可能已发出的启动计为一个已消耗 attempt（attempt+1）后按策略回到 READY， 绝不重放
+   * Provider。DISPATCHING 无 checkpoint，审计快照的 sequence/text 为空。
+   */
+  @Test
+  void staleDispatchingLeaseRecoveryChargesUnconfirmedAttemptAndRetries() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)));
+    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    claim(fixture.store, fixture.invocationId, NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, model.status());
+    assertEquals(1, model.attempt());
+    assertEquals(1, model.failedAttempts().size());
+    assertEquals(1, model.failedAttempts().getFirst().attempt());
+    assertEquals(0L, model.failedAttempts().getFirst().sequence());
+    assertEquals("", model.failedAttempts().getFirst().text());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.failedAttempts().getFirst().error().kind());
+    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    Work modelWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+    assertNotNull(modelWork);
+    assertEquals(fixture.clock.instant().plusSeconds(5), modelWork.availableAt());
+  }
+
+  /**
+   * 新 claim 遇到旧 lease 过期的 RUNNING 且重试预算耗尽：FAILED 保留已确认 attempt，唤醒 THREAD 并 complete MODEL
+   * Work，明确报告失败而不是无限重试。
+   */
+  @Test
+  void staleRunningLeaseRecoveryExhaustedTerminatesFailed() {
+    Fixture fixture = fixture();
+    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    claim(fixture.store, fixture.invocationId, NOW);
     fixture.clock.advance(Duration.ofSeconds(61));
     ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
 
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertEquals(checkpoint, model.streamCheckpoint());
+    assertTrue(model.failedAttempts().isEmpty());
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
@@ -455,12 +536,14 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 新 claim 遇到旧 lease 过期的 DISPATCHING：UNKNOWN 消费 proposed attempt（attempt+1）。 */
+  /**
+   * 新 claim 遇到旧 lease 过期的 DISPATCHING 且重试预算耗尽：未确认的启动仍计为 attempt+1 后 FAILED，唤醒 THREAD 并 complete
+   * MODEL Work。
+   */
   @Test
-  void staleDispatchingLeaseRecoveryConsumesProposedAttempt() {
+  void staleDispatchingLeaseRecoveryExhaustedTerminatesFailed() {
     Fixture fixture = fixture();
     transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     claim(fixture.store, fixture.invocationId, NOW);
@@ -470,10 +553,17 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+    assertTrue(model.failedAttempts().isEmpty());
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(
+        2,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
   }
 
   /** terminal 行且 resultEntryId 仍 null：确保 THREAD wake 后 complete，不重复 bump version。 */
@@ -921,7 +1011,7 @@ class ModelProcessorTest {
 
   /**
    * 真实故障回归：RUNNING 后本地 wall clock 回拨到 invocation 创建时间之前，terminal 仍必须落地并 complete MODEL Work，不能遗留给
-   * lease-expiry UNKNOWN recovery。
+   * lease-expiry recovery。
    */
   @Test
   void successTerminalSurvivesClockRollbackAndCompletesModelWork() {
@@ -1958,7 +2048,10 @@ class ModelProcessorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, failed.error().kind());
   }
 
-  /** 同一 JVM 内旧 lease 过期后新 claim（不同 token）：supersede 本地旧 execution，恢复为 UNKNOWN 且不重放 Provider。 */
+  /**
+   * 同一 JVM 内旧 lease 过期后新 claim（不同 token）：supersede 本地旧 execution，按既有重试策略恢复 durable RUNNING（保留已确认
+   * attempt / 取消旧 handle / 绝不重放 Provider）；无重试预算时如实终止 FAILED。
+   */
   @Test
   void sameJvmRecoverySupersedesStaleLocalExecution() {
     Fixture fixture = fixture();
@@ -1974,8 +2067,9 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(handle.isCancelled());
     assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
@@ -2653,8 +2747,8 @@ class ModelProcessorTest {
 
   /**
    * 并发不同 token：新 claim 已真实 owned（旧 lease 过期被 dispatcher 重新 claim）时通过 claimOwned 前置校验并抢占 guard
-   * （replace 循环），supersede 旧本地 execution 后按 durable DISPATCHING 恢复 UNKNOWN（消费 proposed attempt）； 旧
-   * process 的 Started handle 到达时被锁外 cancel。
+   * （replace 循环），supersede 旧本地 execution 后按 durable DISPATCHING 把未确认启动计为 attempt+1（无重试预算时 FAILED）；
+   * 旧 process 的 Started handle 到达时被锁外 cancel。
    */
   @Test
   void concurrentNewTokenPreemptsGuardAndRecoversUnknown() throws Exception {
@@ -2694,8 +2788,8 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
     assertEquals(1, fixture.gateway.startCalls);
     assertTrue(handle.isCancelled());
-    assertEquals(
-        ModelInvocationStatus.UNKNOWN, model(fixture.store, fixture.invocationId).status());
+    // 新 token 接管 durable DISPATCHING：把可能已发出的启动计为 attempt+1，无重试预算时如实终止 FAILED。
+    assertEquals(ModelInvocationStatus.FAILED, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
@@ -2708,8 +2802,8 @@ class ModelProcessorTest {
 
   /**
    * stale-start fence：A（token-1）在 heartbeat 启动后暂停；lease 过期后由**另一实例**（模拟另一 JVM 的 processor， 本地
-   * registry / guard 独立，A 的本地 abandoned 检查不可见）以 token-2 recover UNKNOWN；A 恢复时 fence 校验 durable 已非
-   * DISPATCHING → 立即 abandon 并 LOST，绝不调用 Gateway。
+   * registry / guard 独立，A 的本地 abandoned 检查不可见）以 token-2 接管 durable DISPATCHING；A 恢复时 fence 校验
+   * durable 已非 DISPATCHING → 立即 abandon 并 LOST，绝不调用 Gateway。
    */
   @Test
   void staleStartAfterCrossInstanceRecoveryNeverCallsGateway() throws Exception {
@@ -2739,7 +2833,7 @@ class ModelProcessorTest {
     assertTrue(
         inHeartbeat.await(5, TimeUnit.SECONDS)); // A 已 putIfAbsent + prepare，暂停在 startHeartbeat
 
-    // lease 过期，dispatcher 以 token-2 重新 claim；另一实例 recover UNKNOWN（跨实例，A 的 abandoned 检查不可见）。
+    // lease 过期，dispatcher 以 token-2 重新 claim；另一实例接管 durable DISPATCHING（跨实例，A 的 abandoned 检查不可见）。
     fixtureA.clock.advance(Duration.ofSeconds(61));
     replaceModelWork(fixtureA);
     ClaimedWork claimedB =
@@ -2764,7 +2858,7 @@ class ModelProcessorTest {
     assertFalse(fixtureA.processor.hasActiveExecution());
     assertFalse(processorB.hasActiveExecution());
     ModelInvocation model = model(fixtureA.store, fixtureA.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
+    assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(2, thread(fixtureA.store, fixtureA.baseline.threadId()).version());
     assertEquals(

@@ -244,7 +244,50 @@ class ModelInvocationTransitionTest {
     assertThrows(IllegalArgumentException.class, () -> failed(1).retryReady(failure(1), T1));
   }
 
-  /** failedAttempts 只能由 RUNNING -> READY 追加一条，历史前缀不可改写或跨状态注入。 */
+  /**
+   * DISPATCHING -&gt; READY 的失联恢复把可能已发出的启动计为一个已消耗 attempt：attempt+1 且追加一条 attempt 等于新值的失败记录，
+   * DISPATCHING 无 checkpoint。
+   */
+  @Test
+  void retryDispatchedReturnsToReadyChargingUnconfirmedAttempt() {
+    ModelInvocation first = dispatching(0).retryDispatched(failure(1), T1);
+    assertEquals(ModelInvocationStatus.READY, first.status());
+    assertEquals(1, first.attempt());
+    assertNull(first.streamCheckpoint());
+    assertNull(first.error());
+    assertEquals(List.of(failure(1)), first.failedAttempts());
+
+    ModelInvocation second = dispatching(1).retryDispatched(failure(2), T2);
+    assertEquals(2, second.attempt());
+    assertEquals(List.of(failure(1), failure(2)), second.failedAttempts());
+
+    assertThrows(IllegalArgumentException.class, () -> ready(0).retryDispatched(failure(1), T1));
+    assertThrows(
+        IllegalArgumentException.class, () -> running(1, null).retryDispatched(failure(1), T1));
+    // 失败 attempt 必须恰好是本次未确认的启动计数，不能复用当前 attempt。
+    assertThrows(
+        IllegalArgumentException.class, () -> dispatching(1).retryDispatched(failure(1), T1));
+  }
+
+  /** DISPATCHING -&gt; FAILED 的失联耗尽同样把未确认启动计为 attempt+1，并以明确错误终止。 */
+  @Test
+  void failDispatchedTerminatesFailedChargingUnconfirmedAttempt() {
+    ModelInvocation next = dispatching(0).failDispatched(error(), T1);
+    assertEquals(ModelInvocationStatus.FAILED, next.status());
+    assertEquals(1, next.attempt());
+    assertEquals(error(), next.error());
+    assertEquals(List.of(), next.failedAttempts());
+
+    ModelInvocation retried = dispatching(1).failDispatched(error(), T2);
+    assertEquals(2, retried.attempt());
+    assertEquals(List.of(failure(1)), retried.failedAttempts());
+
+    assertThrows(IllegalArgumentException.class, () -> ready(0).failDispatched(error(), T1));
+    assertThrows(
+        IllegalArgumentException.class, () -> running(1, null).failDispatched(error(), T1));
+  }
+
+  /** failedAttempts 只能由 RUNNING -> READY 与 DISPATCHING -> READY（失联计费）追加一条，历史前缀不可改写或跨状态注入。 */
   @Test
   void failedAttemptsAreAppendOnlyAcrossTransitions() {
     ModelInvocation running = running(1, checkpoint(1));
