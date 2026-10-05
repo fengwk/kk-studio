@@ -946,43 +946,17 @@ public abstract class HarnessStoreCommandContract {
     // 测试意图：NOTIFICATION 命令必须精确匹配同四字段的 NOTIFICATION Entry；其它命令不得引用 NOTIFICATION Entry。
     UUID notificationId = TestIds.id(41);
     UUID sourceThreadId = TestIds.id(42);
-    inTransaction(
-        store,
-        tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.insertCommands(
-              List.of(
-                  notificationCommand(
-                      baseline.threadId(),
-                      1,
-                      TestIds.id(1),
-                      notificationId,
-                      NotificationKind.SUBAGENT_RESULT,
-                      sourceThreadId,
-                      "delegated result")));
-        });
+    insertNotificationCommand(
+        notificationId, NotificationKind.SUBAGENT_RESULT, sourceThreadId, "delegated result", 1);
     UUID matchingEntryId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  notificationEntry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      notificationId,
-                      NotificationKind.SUBAGENT_RESULT,
-                      sourceThreadId,
-                      "delegated result",
-                      T1));
-              return id;
-            });
+        insertNotificationEntry(
+            notificationId, NotificationKind.SUBAGENT_RESULT, sourceThreadId, "delegated result");
     // 正向：四字段一致的 NOTIFICATION Entry 可被应用。
     inTransaction(
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+          ThreadCommand queued = queuedCommand(tx, baseline.threadId(), TestIds.id(1));
           tx.updateCommands(List.of(queued.markApplied(matchingEntryId)));
         });
     assertEquals(
@@ -995,64 +969,25 @@ public abstract class HarnessStoreCommandContract {
             .state());
 
     // 负向：kind 不一致的 NOTIFICATION Entry 被拒绝。
-    inTransaction(
-        store,
-        tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.insertCommands(
-              List.of(
-                  notificationCommand(
-                      baseline.threadId(),
-                      2,
-                      TestIds.id(2),
-                      notificationId,
-                      NotificationKind.SUBAGENT_RESULT,
-                      sourceThreadId,
-                      "delegated result")));
-        });
+    insertNotificationCommand(
+        notificationId, NotificationKind.SUBAGENT_RESULT, sourceThreadId, "delegated result", 2);
     UUID mismatchedEntryId =
-        store.transaction(
-            tx -> {
-              UUID id = tx.nextId();
-              tx.insertEntry(
-                  notificationEntry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      notificationId,
-                      NotificationKind.TASK_BUDGET,
-                      sourceThreadId,
-                      "delegated result",
-                      T1));
-              return id;
-            });
-    assertThrows(
-        IllegalArgumentException.class,
+        insertNotificationEntry(
+            notificationId, NotificationKind.TASK_BUDGET, sourceThreadId, "delegated result");
+    assertCommandRejected(
+        "NOTIFICATION applied entry must match the command payload",
         () ->
             inTransaction(
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  ThreadCommand queued = queuedCommand(tx, baseline.threadId(), TestIds.id(2));
                   tx.updateCommands(List.of(queued.markApplied(mismatchedEntryId)));
                 }));
 
     // 负向：NOTIFICATION 命令不得引用非 NOTIFICATION Entry（TURN_START）。
-    inTransaction(
-        store,
-        tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.insertCommands(
-              List.of(
-                  notificationCommand(
-                      baseline.threadId(),
-                      3,
-                      TestIds.id(3),
-                      notificationId,
-                      NotificationKind.SUBAGENT_RESULT,
-                      sourceThreadId,
-                      "delegated result")));
-        });
+    insertNotificationCommand(
+        notificationId, NotificationKind.SUBAGENT_RESULT, sourceThreadId, "delegated result", 3);
     UUID turnStartEntryId =
         store.transaction(
             tx -> {
@@ -1062,14 +997,14 @@ public abstract class HarnessStoreCommandContract {
                       id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
               return id;
             });
-    assertThrows(
-        IllegalArgumentException.class,
+    assertCommandRejected(
+        "NOTIFICATION command must apply its own NOTIFICATION entry",
         () ->
             inTransaction(
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  ThreadCommand queued = queuedCommand(tx, baseline.threadId(), TestIds.id(3));
                   tx.updateCommands(List.of(queued.markApplied(turnStartEntryId)));
                 }));
 
@@ -1080,15 +1015,70 @@ public abstract class HarnessStoreCommandContract {
           tx.lockThread(baseline.threadId());
           tx.insertCommands(List.of(command(baseline.threadId(), 4, TestIds.id(4))));
         });
-    assertThrows(
-        IllegalArgumentException.class,
+    assertCommandRejected(
+        "TURN_START",
         () ->
             inTransaction(
                 store,
                 tx -> {
                   tx.lockThread(baseline.threadId());
-                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  ThreadCommand queued = queuedCommand(tx, baseline.threadId(), TestIds.id(4));
                   tx.updateCommands(List.of(queued.markApplied(matchingEntryId)));
                 }));
+  }
+
+  /** 断言命令更新被拒绝且异常信息包含给定片段。 */
+  private static void assertCommandRejected(String fragment, Runnable action) {
+    IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, action::run);
+    assertTrue(ex.getMessage().contains(fragment), () -> "unexpected message: " + ex.getMessage());
+  }
+
+  /** 按 idempotencyKey 取队列命令，避免其它仍处于 QUEUED 的命令影响选择。 */
+  private static ThreadCommand queuedCommand(
+      HarnessStore.Transaction tx, UUID threadId, UUID idempotencyKey) {
+    return tx.loadQueuedCommands(threadId).stream()
+        .filter(command -> command.idempotencyKey().equals(idempotencyKey))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /** 写入 NOTIFICATION 命令；sequence 与 idempotencyKey 相同以便定位。 */
+  private void insertNotificationCommand(
+      UUID notificationId, NotificationKind kind, UUID sourceThreadId, String text, long sequence) {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  notificationCommand(
+                      baseline.threadId(),
+                      sequence,
+                      TestIds.id(sequence),
+                      notificationId,
+                      kind,
+                      sourceThreadId,
+                      text)));
+        });
+  }
+
+  /** 在根 Entry 下写入 NOTIFICATION Entry 并返回其 id。 */
+  private UUID insertNotificationEntry(
+      UUID notificationId, NotificationKind kind, UUID sourceThreadId, String text) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          tx.insertEntry(
+              notificationEntry(
+                  id,
+                  baseline.sessionId(),
+                  baseline.rootEntryId(),
+                  notificationId,
+                  kind,
+                  sourceThreadId,
+                  text,
+                  T1));
+          return id;
+        });
   }
 }
