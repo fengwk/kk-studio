@@ -1472,7 +1472,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后 THREAD batch SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、version+1、stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、thread.executionControl STOPPED、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
 
@@ -1565,9 +1565,13 @@ registerCase({
         expectedVersion,
       })
       assert(stop.status === 'STOPPED', safeDiagnosticJson(stop))
+      assert(stop.thread.executionControl === 'STOPPED', safeDiagnosticJson(stop.thread))
+      const stopReceipt = stop.stoppedThreads.find((receipt) => receipt.threadId === tid)
+      assert(stopReceipt, `target stop receipt missing: ${safeDiagnosticJson(stop)}`)
+      assert(stopReceipt.stopRequestId === stopRequestId, safeDiagnosticJson(stopReceipt))
       assert(
-        stop.stoppedTurnEndEntryId != null,
-        safeDiagnosticJson(stop),
+        stopReceipt.stoppedTurnEndEntryId != null,
+        safeDiagnosticJson(stopReceipt),
       )
       assert(
         Number(stop.thread.version) === Number(beforeStop.version) + 1,
@@ -1606,11 +1610,13 @@ registerCase({
         expectedVersion,
       })
       assert(replay.status === 'REPLAYED', safeDiagnosticJson(replay))
+      const replayReceipt = replay.stoppedThreads.find((receipt) => receipt.threadId === tid)
+      assert(replayReceipt, `replay target receipt missing: ${safeDiagnosticJson(replay)}`)
       assert(
-        String(replay.stoppedTurnEndEntryId) === String(stop.stoppedTurnEndEntryId),
+        String(replayReceipt.stoppedTurnEndEntryId) === String(stopReceipt.stoppedTurnEndEntryId),
         `replay must identify the same stopped TURN_END: ${safeDiagnosticJson({ stop, replay })}`,
       )
-      assert(replay.cancelledCommandCount === 0, safeDiagnosticJson(replay))
+      assert(replayReceipt.cancelledCommandCount === 0, safeDiagnosticJson(replayReceipt))
       assert(
         String(replay.thread.headEntryId) === String(stop.thread.headEntryId)
           && String(replay.thread.version) === String(stop.thread.version),

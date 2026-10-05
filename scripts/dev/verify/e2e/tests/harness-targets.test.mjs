@@ -106,6 +106,9 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
     name: 'main',
     nextCommandSequence: '1',
     version: '0',
+    status: 'IDLE',
+    processing: false,
+    executionControl: 'RUNNABLE',
   }
 
   assert.equal(threadParentIdOf({ ...base, parentThreadId: null }), null)
