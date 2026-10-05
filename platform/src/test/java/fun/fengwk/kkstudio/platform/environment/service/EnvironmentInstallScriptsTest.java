@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -21,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -140,26 +143,58 @@ class EnvironmentInstallScriptsTest {
             .contains("-JavaHome"));
   }
 
-  @Test
-  void executesWindowsInstallAndUninstallWithPwsh() throws Exception {
-    assumeTrue(
-        Files.isExecutable(Path.of("/usr/bin/pwsh")),
-        "pwsh is required to execute the Windows command");
+  /** 只在 Windows 执行生成脚本。下载由同进程函数覆盖，不改生成文本、不访问网络； Linux 上的 PowerShell 不能代替 Windows SID ACL。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"powershell", "pwsh"})
+  @EnabledOnOs(OS.WINDOWS)
+  void executesWindowsInstallAndUninstall(String shell) throws Exception {
+    Path executable = Path.of(shell + ".exe");
+    assumeTrue(windowsCommandExists(executable), shell + " is not installed");
     Path dir = Files.createTempDirectory("kk-windows-command-");
+    Path recordPath = dir.resolve("record.json");
+    Path fixture = dir.resolve("recorder.ps1");
+    String token = "private-汉字'\"$`$(New-Item NEVER)";
+    EnvironmentInstallConfigDTO config = config("windows", "C:\\Program Files\\Java\\it's");
+    Files.writeString(fixture, WINDOWS_RECORDER);
     try {
-      String install =
-          EnvironmentInstallScripts.install(config("windows", "C:\\Java\\jdk"), "private");
-      ProcessResult installed = runPwsh(rewriteWindowsDownload(install), dir, true);
-      assertEquals(1, installed.status(), installed.stdout() + installed.stderr());
-      assertFalse((installed.stdout() + installed.stderr()).contains("private"));
-      assertEquals("install", Files.readString(dir.resolve("ran.txt")).strip());
-      assertTrue(names(dir).stream().noneMatch(name -> name.length() == 32));
+      ProcessResult failed =
+          runWindows(
+              executable,
+              EnvironmentInstallScripts.install(config, token),
+              dir,
+              fixture,
+              recordPath);
+      assertEquals(1, failed.status(), failed.stdout() + failed.stderr());
+      assertFalse((failed.stdout() + failed.stderr()).contains(token));
+      JsonNode record = JSON.readTree(Files.readString(recordPath));
+      assertEquals("install", record.get("action").asText());
+      assertEquals(token, record.get("token").asText());
+      assertEquals(
+          Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8)),
+          record.get("bytes").asText());
+      assertEquals(expectedDaemon(config), JSON.readTree(record.get("configRaw").asText()));
+      assertEquals(config.getJavaHome(), record.get("javaHome").asText());
+      assertTrue(record.get("sibling").asBoolean());
+      for (String facts : List.of("dir", "configFile", "tokenFile")) {
+        JsonNode acl = record.get(facts);
+        assertTrue(acl.get("protected").asBoolean());
+        assertEquals(record.get("sid").asText(), acl.get("owner").asText());
+        assertEquals(0, acl.get("foreign").asInt());
+        assertTrue(acl.get("readable").asInt() >= 1);
+      }
+      assertFalse(record.get("environment").toString().contains(token));
+      assertFalse(Files.exists(Path.of(record.get("stage").asText())));
+      assertFalse(Files.exists(dir.resolve("NEVER")));
 
       ProcessResult removed =
-          runPwsh(
-              rewriteWindowsDownload(EnvironmentInstallScripts.uninstall("windows")), dir, false);
-      assertEquals(0, removed.status(), removed.stdout() + removed.stderr());
-      assertEquals("uninstall", Files.readString(dir.resolve("ran.txt")).strip());
+          runWindows(
+              executable, EnvironmentInstallScripts.uninstall("windows"), dir, fixture, recordPath);
+      assertEquals(1, removed.status(), removed.stdout() + removed.stderr());
+      JsonNode uninstall = JSON.readTree(Files.readString(recordPath));
+      assertEquals("uninstall", uninstall.get("action").asText());
+      assertFalse(uninstall.has("configRaw"));
+      assertFalse(uninstall.has("token"));
+      assertEquals("", uninstall.get("javaHome").asText());
     } finally {
       delete(dir);
     }
@@ -234,36 +269,93 @@ class EnvironmentInstallScriptsTest {
     return new ProcessResult(process.waitFor(), stdout, stderr);
   }
 
-  private static String rewriteWindowsDownload(String command) {
-    return command.replace(
-        "Invoke-WebRequest -UseBasicParsing -Uri",
-        "Copy-Item -LiteralPath $env:FIXTURE -Destination");
-  }
+  private static final String WINDOWS_RECORDER =
+      """
+      param(
+        [Parameter(Position = 0)][string]$Action,
+        [string]$ConfigFile,
+        [string]$TokenFile,
+        [string]$JavaHome
+      )
+      $ErrorActionPreference = 'Stop'
+      $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+      function Get-Facts([string]$Path) {
+        $acl = Get-Acl -LiteralPath $Path
+        $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        [pscustomobject]@{
+          protected = $acl.AreAccessRulesProtected
+          owner = (New-Object Security.Principal.NTAccount($acl.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value
+          foreign = @($rules | Where-Object { $_.IdentityReference.Value -ne $sid }).Count
+          readable = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 }).Count
+        }
+      }
+      $data = @{ action = $Action; javaHome = $JavaHome; environment = @{} }
+      Get-ChildItem Env: | ForEach-Object { $data.environment[$_.Name] = $_.Value }
+      if ($Action -eq 'install') {
+        $data.sid = $sid
+        $data.stage = Split-Path $ConfigFile
+        $data.sibling = (Split-Path $TokenFile) -eq $data.stage
+        $data.configRaw = [IO.File]::ReadAllText($ConfigFile)
+        $data.token = [IO.File]::ReadAllText($TokenFile)
+        $data.bytes = [Convert]::ToBase64String([IO.File]::ReadAllBytes($TokenFile))
+        $data.dir = Get-Facts $data.stage
+        $data.configFile = Get-Facts $ConfigFile
+        $data.tokenFile = Get-Facts $TokenFile
+      }
+      [IO.File]::WriteAllText($env:RECORD, ($data | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+      exit 17
+      """;
 
-  private static ProcessResult runPwsh(String command, Path dir, boolean failInstaller)
-      throws Exception {
+  /** 父脚本带 BOM，使 Windows PowerShell 5.1 按 Unicode 解析；生成脚本文本本身不被改写。 */
+  private static ProcessResult runWindows(
+      Path shell, String command, Path dir, Path fixture, Path record) throws Exception {
     Path script = dir.resolve("command.ps1");
-    Files.writeString(script, command);
-    Path fixture = dir.resolve("install.ps1");
-    Files.writeString(
-        fixture,
+    String parent =
         """
-        param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)
-        Set-Content -LiteralPath (Join-Path $env:TMPDIR 'ran.txt') -Value $Arguments[0] -Encoding ascii
-        if ($env:FAIL_INSTALLER -eq '1') { exit 9 }
-        exit 0
-        """);
-    ProcessBuilder builder = new ProcessBuilder("pwsh", "-NoProfile", "-File", script.toString());
+        function Invoke-WebRequest {
+          param([switch]$UseBasicParsing, $Uri, $OutFile)
+          if (-not $UseBasicParsing -or [string]::IsNullOrEmpty($Uri) -or [string]::IsNullOrEmpty($OutFile)) {
+            throw 'download override did not receive the generated parameters'
+          }
+          Copy-Item -LiteralPath $env:FIXTURE -Destination $OutFile
+        }
+        """
+            + command;
+    byte[] body = parent.getBytes(StandardCharsets.UTF_8);
+    byte[] bom = new byte[] {(byte) 0xef, (byte) 0xbb, (byte) 0xbf};
+    byte[] encoded = new byte[bom.length + body.length];
+    System.arraycopy(bom, 0, encoded, 0, bom.length);
+    System.arraycopy(body, 0, encoded, bom.length, body.length);
+    Files.write(script, encoded);
+    ProcessBuilder builder =
+        new ProcessBuilder(
+            shell.toString(),
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script.toString());
     builder.directory(dir.toFile());
-    builder.environment().put("TMPDIR", dir.toString());
+    builder.environment().put("RECORD", record.toString());
     builder.environment().put("FIXTURE", fixture.toString());
-    if (failInstaller) {
-      builder.environment().put("FAIL_INSTALLER", "1");
-    }
     Process process = builder.start();
     String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
     return new ProcessResult(process.waitFor(), stdout, stderr);
+  }
+
+  private static boolean windowsCommandExists(Path executable) {
+    String path = System.getenv("PATH");
+    if (path == null) {
+      return false;
+    }
+    for (String entry : path.split(";")) {
+      if (Files.isExecutable(Path.of(entry).resolve(executable))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static EnvironmentInstallConfigDTO config(String operatingSystem, String javaHome) {
