@@ -51,17 +51,24 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       if (method === 'POST' && url === '/api/ai/chats') {
         return response({ id: chatId, agentName: body.agentName, version: '0' }, 201)
       }
-      if (method === 'POST' && url === '/api/harness/command-batches') {
+      if (
+        method === 'POST'
+        && (url === '/api/harness/command-batches'
+          || url === `/api/harness/threads/${thread?.threadId}/command-batches`)
+      ) {
         requestCount++
         snapshotReads = 0
-        if (!thread) {
+        if (url === '/api/harness/command-batches') {
           assert.equal(body.target.type, 'NEW_SESSION')
           thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
-            name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false }
+            name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false,
+            executionControl: 'RUNNABLE' }
         } else {
-          assert.equal(body.target.type, 'THREAD')
-          assert.equal(body.target.expectedHeadEntryId, thread.headEntryId)
-          assert.equal(body.target.expectedNextCommandSequence, thread.nextCommandSequence)
+          // 既有 Thread 续写面 owner-free：body 只带 cursor 与 commands。
+          assert.equal(body.expectedHeadEntryId, thread.headEntryId)
+          assert.equal(body.expectedNextCommandSequence, thread.nextCommandSequence)
+          assert.equal(Object.hasOwn(body, 'owner'), false)
+          assert.equal(Object.hasOwn(body, 'target'), false)
         }
         const text = body.commands[0].contents[0].text
         const marker = text.match(/MARKER-[\w-]+/)[0]
