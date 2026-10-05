@@ -49,7 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
@@ -303,7 +303,8 @@ class ModelRequestDebugServiceTest {
 
   private static ThreadSnapshot idleSnapshot() {
     EntryPath path = basePath();
-    return new ThreadSnapshot(thread(USER_ENTRY_ID), path, List.of(), null, List.of(), List.of());
+    return new ThreadSnapshot(
+        thread(USER_ENTRY_ID), path, List.of(), null, List.of(), List.of(), List.of());
   }
 
   /** Tool context：head 是 Assistant 结果，而活动 Invocation 的 request head 是更早的 USER Entry。 */
@@ -326,7 +327,7 @@ class ModelRequestDebugServiceTest {
             NOW,
             NOW);
     return new ThreadSnapshot(
-        thread(ASSISTANT_ENTRY_ID), path, List.of(), model, List.of(), List.of());
+        thread(ASSISTANT_ENTRY_ID), path, List.of(), model, List.of(), List.of(), List.of());
   }
 
   private static EntryPath basePath() {
@@ -390,9 +391,10 @@ class ModelRequestDebugServiceTest {
         CREATION_REQUEST_HASH,
         "thread",
         false,
-        ThreadLifecycleStatus.IDLE,
-        1,
-        0,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
+        1L,
+        0L,
         NOW,
         NOW);
   }

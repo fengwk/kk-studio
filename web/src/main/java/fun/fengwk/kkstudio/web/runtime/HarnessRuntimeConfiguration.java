@@ -50,7 +50,6 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.StoragePluginResourceGateway;
@@ -352,7 +351,6 @@ public class HarnessRuntimeConfiguration {
   @Bean
   public ProviderRequestPreviewService providerRequestPreviewService(
       HarnessRuntime runtime,
-      HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
       DatabaseTurnResolver turnResolver,
       DatabaseProviderResolutionService providerResolution,
       ThreadProcessorConfig threadProcessorConfig,
@@ -362,7 +360,6 @@ public class HarnessRuntimeConfiguration {
       Clock clock) {
     return new ProviderRequestPreviewService(
         runtime,
-        acceptanceOrchestrator,
         turnResolver,
         providerResolution,
         threadProcessorConfig.compactionProvider(),

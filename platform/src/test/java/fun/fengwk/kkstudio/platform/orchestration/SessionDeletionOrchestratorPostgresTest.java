@@ -120,7 +120,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
     UUID pendingJoin = seedJoin(sameSessionChild, ownedRoot, 1L, null, null);
     // 已匹配未交付：父仍在删除集合内，同样一并回收。
     UUID matchedPendingDelivery =
-        seedJoin(sameSessionChild, ownedRoot, 2L, 1L, headEntryOf(ownedSession));
+        seedJoin(sameSessionChild, ownedRoot, 2L, headEntryOf(ownedSession), null);
     // 跨 Session 子线程持有的 pending join：其 Session 由后代闭包覆盖。
     UUID crossSessionJoin = seedJoin(crossSessionChild, ownedRoot, 1L, null, null);
 
@@ -300,8 +300,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
   /**
    * 写入一条 join 及其源 command（同一事务，满足 join 对源 command 的外键）。
    *
-   * <p>{@code matchedIdleVersion} 为空表示未匹配的 pending join；非空表示已匹配未交付（交付序列为空，且需要父命令，故本 fixture
-   * 只构造未交付形态）。
+   * <p>{@code terminalEntryId} 为空表示未匹配的 pending join；非空表示已匹配未交付（交付序列为空，且需要父命令，故本 fixture 只构造未交付形态）。
    *
    * @return 该 join 的 invocationId，便于按行断言删除结果
    */
@@ -309,8 +308,8 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
       UUID childThreadId,
       UUID parentThreadId,
       long sequence,
-      Long matchedIdleVersion,
-      UUID resultHeadEntryId) {
+      UUID terminalEntryId,
+      UUID finalAnswerEntryId) {
     UUID invocationId = UUID.randomUUID();
     store.transaction(
         tx -> {
@@ -323,7 +322,6 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
                   parentThreadId,
                   childThreadId,
                   sequence,
-                  0L,
                   "agent",
                   10,
                   0L,
@@ -333,9 +331,9 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
                   T0,
                   T0);
           tx.insertJoin(join);
-          if (matchedIdleVersion != null) {
-            // insertJoin 只接受未匹配记录；匹配是首次冻结结果 head 的单调推进。
-            tx.updateJoin(join.match(matchedIdleVersion, resultHeadEntryId, T1));
+          if (terminalEntryId != null) {
+            // insertJoin 只接受未匹配记录；匹配是首次冻结终态 Entry 的单调推进。
+            tx.updateJoin(join.match(terminalEntryId, finalAnswerEntryId, T1));
           }
           return null;
         });

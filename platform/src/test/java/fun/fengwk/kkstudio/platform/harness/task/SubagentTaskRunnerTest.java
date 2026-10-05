@@ -596,7 +596,6 @@ class SubagentTaskRunnerTest {
         parentThreadId,
         childThreadId,
         1L,
-        1L,
         agent,
         maxTurns,
         0L,
