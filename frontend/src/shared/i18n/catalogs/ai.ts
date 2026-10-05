@@ -2591,10 +2591,6 @@ export const aiCatalog = {
     'en-US': 'https://studio.example.com',
     'zh-CN': 'https://studio.example.com',
   },
-  'ai.environment.install.optional': {
-    'en-US': "Optional: Java, Bash, note and LSP servers",
-    'zh-CN': "可选：Java、Bash、备注和 LSP servers",
-  },
   'ai.environment.install.bash': {
     'en-US': "Bash executable",
     'zh-CN': "Bash 可执行文件",
@@ -2602,6 +2598,10 @@ export const aiCatalog = {
   'ai.environment.install.note': {
     'en-US': "Note",
     'zh-CN': "备注",
+  },
+  'ai.environment.install.notePlaceholder': {
+    'en-US': 'e.g. Development workstation',
+    'zh-CN': '例如：开发工作站',
   },
   'ai.environment.install.lsp': {
     'en-US': "Enable LSP servers",

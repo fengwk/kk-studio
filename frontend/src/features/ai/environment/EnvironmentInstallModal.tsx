@@ -74,6 +74,13 @@ const LSP_EXAMPLE_TEXT = `{
   }
 }`
 
+/** 路径示例只随所选操作系统变化，不检测本机、不写入表单值。 */
+const PATH_EXAMPLES: Record<InstallOperatingSystem, { javaHome: string; bash: string }> = {
+  linux: { javaHome: '/usr/lib/jvm/java-21-openjdk', bash: '/bin/bash' },
+  macos: { javaHome: '/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home', bash: '/bin/bash' },
+  windows: { javaHome: 'C:\\Program Files\\Java\\jdk-21', bash: 'C:\\Program Files\\Git\\bin\\bash.exe' },
+}
+
 export function EnvironmentInstallModal({ environment, uninstall = false, onClose }: Props) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -328,59 +335,59 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                     {t('ai.environment.install.originHelp')}
                   </p>
                 </div>
-                <details>
-                  <summary>{t('ai.environment.install.optional')}</summary>
-                  <label className="form-group">
-                    <span>Java home (JDK 21)</span>
-                    <input
-                      value={javaHome}
-                      onChange={event => setJavaHome(event.target.value)}
-                      disabled={disabled}
-                    />
-                  </label>
-                  <label className="form-group">
-                    <span>{t('ai.environment.install.bash')}</span>
-                    <input
-                      value={bashExecutable}
-                      onChange={event => setBashExecutable(event.target.value)}
-                      disabled={disabled}
-                    />
-                  </label>
-                  <label className="form-group">
-                    <span>{t('ai.environment.install.note')}</span>
-                    <input
-                      value={note}
-                      onChange={event => setNote(event.target.value)}
-                      maxLength={512}
-                      disabled={disabled}
-                    />
-                  </label>
-                  <Checkbox
-                    checked={lspEnabled}
-                    onChange={setLspEnabled}
+                <label className="form-group">
+                  <span>Java home (JDK 21)</span>
+                  <input
+                    value={javaHome}
+                    onChange={event => setJavaHome(event.target.value)}
+                    placeholder={PATH_EXAMPLES[os].javaHome}
                     disabled={disabled}
-                    label={t('ai.environment.install.lsp')}
                   />
-                  {lspEnabled && (
-                    <div className="install-field">
-                      <label className="form-group">
-                        <span>LSP servers (JSON)</span>
-                        <textarea
-                          rows={8}
-                          value={servers}
-                          onChange={event => setServers(event.target.value)}
-                          placeholder={LSP_EXAMPLE_TEXT}
-                          aria-describedby="install-lsp-help"
-                          disabled={disabled}
-                          spellCheck={false}
-                        />
-                      </label>
-                      <p id="install-lsp-help" className="field-help">
-                        {t('ai.environment.install.lspHelp')}
-                      </p>
-                    </div>
-                  )}
-                </details>
+                </label>
+                <label className="form-group">
+                  <span>{t('ai.environment.install.bash')}</span>
+                  <input
+                    value={bashExecutable}
+                    onChange={event => setBashExecutable(event.target.value)}
+                    placeholder={PATH_EXAMPLES[os].bash}
+                    disabled={disabled}
+                  />
+                </label>
+                <label className="form-group">
+                  <span>{t('ai.environment.install.note')}</span>
+                  <input
+                    value={note}
+                    onChange={event => setNote(event.target.value)}
+                    placeholder={t('ai.environment.install.notePlaceholder')}
+                    maxLength={512}
+                    disabled={disabled}
+                  />
+                </label>
+                <Checkbox
+                  checked={lspEnabled}
+                  onChange={setLspEnabled}
+                  disabled={disabled}
+                  label={t('ai.environment.install.lsp')}
+                />
+                {lspEnabled && (
+                  <div className="install-field">
+                    <label className="form-group">
+                      <span>LSP servers (JSON)</span>
+                      <textarea
+                        rows={8}
+                        value={servers}
+                        onChange={event => setServers(event.target.value)}
+                        placeholder={LSP_EXAMPLE_TEXT}
+                        aria-describedby="install-lsp-help"
+                        disabled={disabled}
+                        spellCheck={false}
+                      />
+                    </label>
+                    <p id="install-lsp-help" className="field-help">
+                      {t('ai.environment.install.lspHelp')}
+                    </p>
+                  </div>
+                )}
               </>
             )}
             {error && (

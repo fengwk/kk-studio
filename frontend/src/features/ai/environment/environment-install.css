@@ -34,25 +34,18 @@
   min-width: 0;
 }
 
-.environment-install-modal details > .form-group,
-.environment-install-modal details > .ui-checkbox,
-.environment-install-modal details > .install-field {
+.environment-install-modal .install-field + .form-group,
+.environment-install-modal .form-group + .form-group,
+.environment-install-modal .form-group + .ui-checkbox,
+.environment-install-modal .ui-checkbox + .install-field {
   margin-top: 16px;
-}
-
-.environment-install-modal details {
-  margin-top: 16px;
-}
-
-.environment-install-modal summary {
-  cursor: pointer;
-  margin-bottom: 12px;
 }
 
 .environment-install-modal .confirm-modal-description {
   margin-bottom: 8px;
 }
 
+.environment-install-modal input::placeholder,
 .environment-install-modal textarea::placeholder {
   color: var(--fg-dim, #9da89f);
   opacity: 1;
