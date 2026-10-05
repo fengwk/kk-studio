@@ -213,10 +213,13 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         if (!active.current) return
         setVersion(savedCard.version)
         if (savedCard.installConfig == null) throw new InstallConfigError('installConfig')
+        const issued = await environmentService.createInstallCode(savedCard.id, savedCard.version)
+        if (!active.current) return
         command = generateInstallCommand(
           downloadOrigin,
           savedCard.id,
           savedCard.installConfig.operatingSystem,
+          issued.code,
         )
       }
       if (!active.current) return

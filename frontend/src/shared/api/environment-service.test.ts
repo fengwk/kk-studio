@@ -74,6 +74,27 @@ describe('environmentService', () => {
   })
 
   /**
+   * 测试意图：签发 5 分钟安装 code 使用 POST /harness/environments/{id}/install-code，
+   * body 只有 expectedVersion，返回解包后的 code 与 expiresAt，不轮换长期 token。
+   */
+  it('issues a short install code via POST /harness/environments/{id}/install-code', async () => {
+    const issued = { code: "code'汉字", expiresAt: '2026-10-05T09:05:00.000Z' }
+    const client = {
+      get: vi.fn(async () => ({})),
+      post: vi.fn(async () => issued),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.createInstallCode('env/a', '8')
+    expect(client.post).toHaveBeenCalledWith('/harness/environments/env%2Fa/install-code', {
+      expectedVersion: '8',
+    })
+    expect(result).toEqual(issued)
+    expect(client.get).not.toHaveBeenCalled()
+  })
+
+  /**
    * 测试意图：验证轮换 registration token 端点使用 POST /harness/environments/{id}/registration-token，
    * 且 expectedVersion 放在 POST body { expectedVersion } 中。
    */

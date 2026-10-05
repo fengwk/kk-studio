@@ -247,17 +247,19 @@ function windowsCommand(url: string): string {
   return `$ErrorActionPreference='Stop'; $script = (Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri ${quoted}).Content; if ([string]::IsNullOrEmpty($script)) { throw 'Empty installer' }; & ([scriptblock]::Create($script))`
 }
 
-/** 安装脚本由服务端按已保存配置生成；URL 只定位环境，不携带 token。 */
+/** 安装脚本由服务端按已保存配置生成；URL 只带 5 分钟 code，不带长期 token。 */
 export function generateInstallCommand(
   origin: string,
   environmentId: string,
   os: InstallOperatingSystem,
+  code: string,
 ): string {
   nonblankText(environmentId, 'environmentId')
+  nonblankText(code, 'installCode')
   if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
   const url = scriptUrl(
     origin,
-    `/api/harness/environments/${encodeURIComponent(environmentId)}/install`,
+    `/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
   )
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }
