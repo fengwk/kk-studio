@@ -7,7 +7,6 @@ import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
 import { invalidateProjectQueries } from './projects-invalidation'
-import { queryKeys } from '@/shared/lib/query-keys'
 import {
   clearPendingAction,
   loadPendingAction,
@@ -24,40 +23,18 @@ vi.mock('@/shared/app-events', () => ({
   ApplicationEventProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
-let capturedOnStop: (() => Promise<void> | void) | undefined
+let capturedPaneProps: Record<string, unknown> | undefined
 
 vi.mock('@/features/ai/runtime/AgentPane', () => ({
-  AgentPane: ({
-    owner,
-    capabilities,
-    onSubmitInstruction,
-    onStop,
-  }: {
-    owner: unknown
-    capabilities?: {
-      allowSwitchAgent?: boolean
-      allowBranching?: boolean
-      allowGenericChat?: boolean
-    }
-    onSubmitInstruction?: (text: string) => Promise<void> | void
-    onStop?: () => Promise<void> | void
-  }) => {
-    capturedOnStop = onStop
+  AgentPane: (props: Record<string, unknown>) => {
+    capturedPaneProps = props
     return (
-      <div data-testid="controlled-agent-pane" data-owner={JSON.stringify(owner)}>
-        <span data-testid="capabilities-switch-agent">{String(capabilities?.allowSwitchAgent)}</span>
-        <span data-testid="capabilities-branching">{String(capabilities?.allowBranching)}</span>
-        <span data-testid="capabilities-chat">{String(capabilities?.allowGenericChat)}</span>
-        <button data-testid="pane-submit-instruction" onClick={() => void Promise.resolve(onSubmitInstruction?.('Please investigate test')).catch(() => {})}>
-          Send Instruction
-        </button>
-        <button data-testid="pane-submit-instruction-alt" onClick={() => void Promise.resolve(onSubmitInstruction?.('Different instruction content')).catch(() => {})}>
-          Send Alt Instruction
-        </button>
-        <button data-testid="pane-stop-action" onClick={() => void Promise.resolve(onStop?.()).catch(() => {})}>
-          Stop Run
-        </button>
-      </div>
+      <div
+        data-testid="agent-pane"
+        data-owner={props.owner ? JSON.stringify(props.owner) : 'none'}
+        data-has-instruction={String(props.onSubmitInstruction != null)}
+        data-has-stop={String(props.onStop != null)}
+      />
     )
   },
 }))
@@ -80,6 +57,7 @@ function NavigationProbe() {
 
 function renderPage(ui: React.ReactElement, client?: QueryClient, initialEntries: string[] = ['/']) {
   latestNav = undefined
+  capturedPaneProps = undefined
   const queryClient = client ?? new QueryClient({
     defaultOptions: {
       queries: {
@@ -297,20 +275,10 @@ describe('ProjectDetailPage', () => {
     })
   })
 
-  it('mounts controlled AgentPane dock when issue and thread query parameters are valid and forwards instruction and stop actions', async () => {
-    // 测试意图：验证携带合法 issue 与 thread 参数时成功挂载受控 AgentPane，输入转化为 INSTRUCTION 类型的 Issue 活动，停止操作触发 stopIssue
-    const api = createMockApi({
-      appendIssueActivity: vi.fn().mockResolvedValue({
-        id: 'act-1',
-        issueId: mockSnapshot.issues[0].issue.id,
-        actorType: 'HUMAN',
-        actorId: 'user-1',
-        kind: 'INSTRUCTION',
-        body: 'Please investigate test',
-        createdAt: '2026-09-27T00:00:00Z',
-      }),
-      stopIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
-    })
+  it('mounts an owner-free bound-Thread AgentPane dock with container-only capabilities', async () => {
+    // 测试意图：Issue 只是组织容器；合法 issue+thread 参数下挂载的 AgentPane 不伪造 owner、
+    // 不接管发送与停止，只保留禁用创建 Session/分叉的容器能力，已有 Thread 的输入、Goal、预览与 Stop 全走通用交互。
+    const api = createMockApi()
 
     renderPage(
       <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
@@ -318,39 +286,23 @@ describe('ProjectDetailPage', () => {
       [`/projects/${projectId}?issue=${mockSnapshot.issues[0].issue.id}&thread=th-valid-101`],
     )
 
-    // 等待受控 AgentPane 成功挂载
-    const pane = await screen.findByTestId('controlled-agent-pane')
-    expect(pane).toBeInTheDocument()
+    const pane = await screen.findByTestId('agent-pane')
+    expect(pane).toHaveAttribute('data-owner', 'none')
+    expect(pane).toHaveAttribute('data-has-instruction', 'false')
+    expect(pane).toHaveAttribute('data-has-stop', 'false')
 
-    // 验证受控门禁配置（不可切换 Agent、不可分叉、不可通用 Chat）
-    expect(screen.getByTestId('capabilities-switch-agent')).toHaveTextContent('false')
-    expect(screen.getByTestId('capabilities-branching')).toHaveTextContent('false')
-    expect(screen.getByTestId('capabilities-chat')).toHaveTextContent('false')
+    await waitFor(() => expect(capturedPaneProps).toBeDefined())
+    expect(capturedPaneProps?.paneId).toBe('project-issue-th-valid-101')
+    expect(capturedPaneProps?.initialTarget).toEqual({ kind: 'BOUND_THREAD', threadId: 'th-valid-101' })
+    expect(capturedPaneProps?.owner).toBeUndefined()
+    expect(capturedPaneProps?.onSubmitInstruction).toBeUndefined()
+    expect(capturedPaneProps?.onStop).toBeUndefined()
+    // 容器能力只保留「不创建 Session / 不分叉」，不再有 Agent 切换与通用 Chat 门禁
+    expect(capturedPaneProps?.capabilities).toEqual({ allowNewSession: false, allowBranching: false })
 
-    // 触发发送指令活动
-    fireEvent.click(screen.getByTestId('pane-submit-instruction'))
-    await waitFor(() => {
-      expect(api.appendIssueActivity).toHaveBeenCalledWith(
-        mockSnapshot.issues[0].issue.id,
-        expect.objectContaining({
-          kind: 'INSTRUCTION',
-          body: 'Please investigate test',
-          expectedVersion: mockSnapshot.issues[0].issue.version,
-        }),
-      )
-    })
-
-    // 触发受控停止
-    fireEvent.click(screen.getByTestId('pane-stop-action'))
-    await waitFor(() => {
-      expect(api.stopIssue).toHaveBeenCalledWith(
-        mockSnapshot.issues[0].issue.id,
-        expect.objectContaining({
-          expectedVersion: mockSnapshot.issues[0].issue.version,
-          detail: '用户在 Agent 视图中终止执行',
-        }),
-      )
-    })
+    // 宿主不再把输入劫持成 Issue 活动，也不再把 Stop 劫持成 stopIssue
+    expect(api.appendIssueActivity).not.toHaveBeenCalled()
+    expect(api.stopIssue).not.toHaveBeenCalled()
   })
 
   it('strictly blocks and displays rejection banner when query thread does not belong to issue', async () => {
@@ -366,11 +318,11 @@ describe('ProjectDetailPage', () => {
     expect(
       await screen.findByText('目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入'),
     ).toBeInTheDocument()
-    expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
   })
 
-  it('closes controlled AgentPane dock when clicking close button', async () => {
-    // 测试意图：验证点击受控 Dock 头部关闭按钮后，清除 thread 路由参数并卸载 Agent 面板
+  it('closes the AgentPane dock when clicking close button', async () => {
+    // 测试意图：验证点击 Dock 头部关闭按钮后，清除 thread 路由参数并卸载 Agent 面板
     const api = createMockApi()
 
     renderPage(
@@ -379,73 +331,14 @@ describe('ProjectDetailPage', () => {
       [`/projects/${projectId}?issue=${mockSnapshot.issues[0].issue.id}&thread=th-valid-101`],
     )
 
-    expect(await screen.findByTestId('controlled-agent-pane')).toBeInTheDocument()
+    expect(await screen.findByTestId('agent-pane')).toBeInTheDocument()
 
     const closeBtn = screen.getByLabelText('关闭 Agent 视图')
     fireEvent.click(closeBtn)
 
     await waitFor(() => {
-      expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
     })
-  })
-
-  it('freezes attempt payload and reuses requestKey on network retry, but generates new requestKey for edited body', async () => {
-    // 测试意图：验证指令活动在网络失败重试相同 payload 时沿用相同 requestKey，一旦编辑修改内容则视为新 attempt 生成不同 requestKey
-    let callCount = 0
-    const appendMock = vi.fn().mockImplementation(() => {
-      callCount++
-      if (callCount === 1) {
-        return Promise.reject(new Error('Network offline'))
-      }
-      return Promise.resolve({
-        id: `act-${callCount}`,
-        issueId: mockSnapshot.issues[0].issue.id,
-        actorType: 'HUMAN',
-        actorId: 'user-1',
-        kind: 'INSTRUCTION',
-        body: 'Please investigate test',
-        createdAt: '2026-09-27T00:00:00Z',
-      })
-    })
-
-    const api = createMockApi({
-      appendIssueActivity: appendMock,
-    })
-
-    const { queryClient } = renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${mockSnapshot.issues[0].issue.id}&thread=th-valid-101`],
-    )
-
-    await screen.findByTestId('controlled-agent-pane')
-
-    // 第一次提交：失败
-    fireEvent.click(screen.getByTestId('pane-submit-instruction'))
-    await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(1))
-    const firstRequestKey = appendMock.mock.calls[0][1].requestKey
-
-    // 服务端已提交但响应丢失；失效事件先带来新版本，重试仍必须携带原始完整请求。
-    const detailKey = queryKeys.projects.issue(projectId, mockSnapshot.issues[0].issue.id)
-    await act(async () => {
-      queryClient.setQueryData<IssueDetailDTO>(detailKey, (detail) => detail && ({
-        ...detail,
-        issue: { ...detail.issue, version: '2' },
-      }))
-    })
-
-    // 第二次提交（相同内容重试）：必须沿用 firstRequestKey
-    fireEvent.click(screen.getByTestId('pane-submit-instruction'))
-    await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(2))
-    const retryRequestKey = appendMock.mock.calls[1][1].requestKey
-    expect(retryRequestKey).toBe(firstRequestKey)
-    expect(appendMock.mock.calls[1]).toEqual(appendMock.mock.calls[0])
-
-    // 第三次提交（编辑为不同内容）：必须生成不同的全新 requestKey
-    fireEvent.click(screen.getByTestId('pane-submit-instruction-alt'))
-    await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(3))
-    const editedRequestKey = appendMock.mock.calls[2][1].requestKey
-    expect(editedRequestKey).not.toBe(firstRequestKey)
   })
 
   it('prevents rapid duplicate clicks from dispatching concurrent requests for same issue (inflight protection)', async () => {
@@ -508,192 +401,89 @@ describe('ProjectDetailPage', () => {
     setItemSpy.mockRestore()
   })
 
-  it('I07: AgentPane.onStop 首次网络失败后持久化保留，刷新/重挂载后重试沿用相同 body/requestKey/version', async () => {
-    // 测试意图：验证受控 AgentPane 停止动作首次遭遇网络未知异常时，将 STOP 动作保留在侧车中；重新挂载页面后再次触发停止，严格复用原 requestKey、expectedVersion 与 detail 重试
+  it('keeps a board transition in the sidecar after an unknown network failure and replays the frozen request on remount', async () => {
+    // 测试意图：看板动作与旧受控入口共用同一侧车执行器；网络未知失败必须保留完全相同的 requestKey/expectedVersion 供刷新后重试
     const targetIssue = mockSnapshot.issues[0].issue
     clearPendingAction(targetIssue.id)
 
     let callCount = 0
-    const stopMock = vi.fn().mockImplementation(() => {
+    const transitionMock = vi.fn().mockImplementation(() => {
       callCount++
       if (callCount === 1) {
         return Promise.reject(new Error('Network connection timeout'))
       }
       return Promise.resolve(targetIssue)
     })
+    const api = createMockApi({ transitionIssue: transitionMock })
 
-    const api = createMockApi({
-      stopIssue: stopMock,
-    })
+    const clickFirstTransition = async () => {
+      const buttons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+      fireEvent.click(buttons[0])
+    }
 
-    // 第一次挂载页面并触发停止
-    const { unmount } = renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`],
-    )
+    const { unmount } = renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+    await clickFirstTransition()
 
-    await screen.findByTestId('controlled-agent-pane')
-    fireEvent.click(screen.getByTestId('pane-stop-action'))
+    await waitFor(() => expect(transitionMock).toHaveBeenCalledTimes(1))
+    const firstArgs = transitionMock.mock.calls[0]
+    expect(firstArgs[0]).toBe(targetIssue.id)
+    const firstPayload = firstArgs[1] as { requestKey: string; expectedVersion: string }
 
-    await waitFor(() => expect(stopMock).toHaveBeenCalledTimes(1))
-    const firstCallArgs = stopMock.mock.calls[0]
-    expect(firstCallArgs[0]).toBe(targetIssue.id)
-    const firstPayload = firstCallArgs[1]
-    expect(firstPayload.detail).toBe('用户在 Agent 视图中终止执行')
-
-    // 侧车中应当持久化保留了该 VALID STOP 动作
+    // 侧车中应当持久化保留了该 VALID 动作
     const loaded = loadPendingAction(targetIssue.id)
     expect(loaded.type).toBe('VALID')
     if (loaded.type === 'VALID') {
-      expect(loaded.action.kind).toBe('STOP')
+      expect(loaded.action.kind).toBe('TRANSITION')
       expect(loaded.action.requestKey).toBe(firstPayload.requestKey)
       expect(loaded.action.expectedVersion).toBe(firstPayload.expectedVersion)
-      expect(loaded.action.payload).toEqual({ detail: '用户在 Agent 视图中终止执行' })
     }
 
     unmount()
 
-    // 页面刷新 / 重新挂载，再次触发停止重试
-    renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`],
-    )
+    // 刷新 / 重新挂载后重试：必须复用冻结的 requestKey 与 expectedVersion
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+    await clickFirstTransition()
 
-    await screen.findByTestId('controlled-agent-pane')
-    fireEvent.click(screen.getByTestId('pane-stop-action'))
-
-    await waitFor(() => expect(stopMock).toHaveBeenCalledTimes(2))
-    const retryCallArgs = stopMock.mock.calls[1]
-    expect(retryCallArgs[0]).toBe(targetIssue.id)
-    // 必须与首次调用的 body、requestKey、expectedVersion 完全一致
-    expect(retryCallArgs[1]).toEqual(firstPayload)
-
-    // 第二次调用成功后，侧车中挂起动作被清除
-    await waitFor(() => {
-      expect(loadPendingAction(targetIssue.id)).toEqual({ type: 'NONE' })
-    })
+    await waitFor(() => expect(transitionMock).toHaveBeenCalledTimes(2))
+    expect(transitionMock.mock.calls[1]).toEqual(transitionMock.mock.calls[0])
+    await waitFor(() => expect(loadPendingAction(targetIssue.id)).toEqual({ type: 'NONE' }))
 
     clearPendingAction(targetIssue.id)
   })
 
-  it('I07: AgentPane.onStop 本地存储失败时 0 API 调用并展示安全拦截错误', async () => {
-    // 测试意图：验证当持久化侧车失败（如配额超限）时，fail-closed 拦截停止操作，禁止发送 API 请求（0 次调用），并向用户呈现受控错误
-    const targetIssue = mockSnapshot.issues[0].issue
-    clearPendingAction(targetIssue.id)
-
-    const stopMock = vi.fn()
-    const api = createMockApi({
-      stopIssue: stopMock,
-    })
-
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('QuotaExceededError')
-    })
-
-    renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`],
-    )
-
-    await screen.findByTestId('controlled-agent-pane')
-    fireEvent.click(screen.getByTestId('pane-stop-action'))
-
-    // API 0 次调用
-    expect(stopMock).not.toHaveBeenCalled()
-
-    // 界面展示拦截横幅
-    expect(await screen.findByText(/无法保存操作记录，未发送请求/i)).toBeInTheDocument()
-
-    setItemSpy.mockRestore()
-    clearPendingAction(targetIssue.id)
-  })
-
-  it('I07: AgentPane.onStop 若该 Issue 存在其他未决动作拒绝执行且不覆盖现有侧车记录', async () => {
-    // 测试意图：验证当 Issue 侧车已存在其他类型未确认操作（如 TRANSITION）时，STOP 操作被安全拒绝，不覆盖已有记录且不发起 stop API 请求
+  it('rejects a board action while another pending action exists and keeps the existing sidecar record', async () => {
+    // 测试意图：同一 Issue 只允许一个未确认写操作；存在其他未决动作时拒绝新动作、0 API 调用且绝不覆盖侧车记录
     const targetIssue = mockSnapshot.issues[0].issue
     clearPendingAction(targetIssue.id)
 
     const existingAction: PendingIssueAction = {
       issueId: targetIssue.id,
-      kind: 'TRANSITION',
+      kind: 'RECOVER',
       requestKey: '11111111-2222-3333-4444-555555555555',
       expectedVersion: targetIssue.version,
-      payload: { toState: 'IN_PROGRESS' },
+      payload: {},
       createdAt: new Date().toISOString(),
       isUnknown: true,
     }
     storePendingAction(targetIssue.id, existingAction)
 
-    const stopMock = vi.fn()
-    const api = createMockApi({
-      stopIssue: stopMock,
-    })
+    const transitionMock = vi.fn()
+    const api = createMockApi({ transitionIssue: transitionMock })
 
-    renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`],
-    )
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
-    await screen.findByTestId('controlled-agent-pane')
-    fireEvent.click(screen.getByTestId('pane-stop-action'))
+    const buttons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    fireEvent.click(buttons[0])
 
-    // stopIssue 0 次调用
-    expect(stopMock).not.toHaveBeenCalled()
-
-    // 页面呈现阻止错误提示
+    expect(transitionMock).not.toHaveBeenCalled()
     expect(await screen.findByText(/该 Issue 存在未确认结果的写操作，暂不能继续/i)).toBeInTheDocument()
 
-    // 验证侧车中的 TRANSITION 记录完好无损，未被 STOP 覆盖
     const loaded = loadPendingAction(targetIssue.id)
     expect(loaded.type).toBe('VALID')
     if (loaded.type === 'VALID') {
-      expect(loaded.action.kind).toBe('TRANSITION')
+      expect(loaded.action.kind).toBe('RECOVER')
       expect(loaded.action.requestKey).toBe(existingAction.requestKey)
     }
-
-    clearPendingAction(targetIssue.id)
-  })
-
-  it('I07: AgentPane.onStop 快速双击连点进行 single-flight 保护，仅触发一次 API 且第二个 promise reject', async () => {
-    // 测试意图：验证用户在 Agent 视图中触发停止时，inflight 锁生效阻断并发重复调用；第二个并发调用 promise reject 抛出受控错误，确保同一执行在途时仅发起单次 API 调用
-    const targetIssue = mockSnapshot.issues[0].issue
-    clearPendingAction(targetIssue.id)
-
-    let resolveStop: () => void = () => {}
-    const stopMock = vi.fn().mockImplementation(() => {
-      return new Promise<void>((resolve) => {
-        resolveStop = resolve
-      })
-    })
-
-    const api = createMockApi({
-      stopIssue: stopMock,
-    })
-
-    renderPage(
-      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
-      undefined,
-      [`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`],
-    )
-
-    await screen.findByTestId('controlled-agent-pane')
-    expect(capturedOnStop).toBeDefined()
-
-    // 1. 测试直接并发调用 onStop：第一个处于执行在途，第二个被 inflight 锁拦截并 reject
-    const p1 = capturedOnStop?.()
-    const p2 = capturedOnStop?.()
-
-    await expect(p2).rejects.toThrow('终止 Issue 失败')
-    expect(stopMock).toHaveBeenCalledTimes(1)
-
-    // 完成首个在途调用
-    resolveStop()
-    await p1
-    expect(stopMock).toHaveBeenCalledTimes(1)
 
     clearPendingAction(targetIssue.id)
   })
@@ -743,7 +533,7 @@ describe('ProjectDetailPage', () => {
     )
 
     // 初始进入包含合法 thread，dock 挂载，弹窗默认未打开
-    await screen.findByTestId('controlled-agent-pane')
+    await screen.findByTestId('agent-pane')
     expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
 
     // 点击 Dock 头部按钮手动打开 Issue 详情
@@ -755,7 +545,7 @@ describe('ProjectDetailPage', () => {
       getNav().navigate(-1)
     })
     await waitFor(() => {
-      expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
       expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
     })
 
@@ -763,7 +553,7 @@ describe('ProjectDetailPage', () => {
     act(() => {
       getNav().navigate(1)
     })
-    await screen.findByTestId('controlled-agent-pane')
+    await screen.findByTestId('agent-pane')
     expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
   })
 
@@ -777,7 +567,7 @@ describe('ProjectDetailPage', () => {
       [`/projects/${projectId}?filter=active&issue=${targetIssueId}&thread=th-valid-101`],
     )
 
-    await screen.findByTestId('controlled-agent-pane')
+    await screen.findByTestId('agent-pane')
     expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
 
     // 点击 Dock 头部关闭按钮
@@ -785,7 +575,7 @@ describe('ProjectDetailPage', () => {
 
     await waitFor(() => {
       // Dock 卸载
-      expect(screen.queryByTestId('controlled-agent-pane')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-pane')).not.toBeInTheDocument()
       // 绝对不隐式弹出 IssueDetailModal
       expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
       // URL 中 issue 和 thread 被清除，但 filter=active 得到完整保留
@@ -818,7 +608,7 @@ describe('ProjectDetailPage', () => {
     await waitFor(() => {
       expect(getNav().location.search).toContain(`issue=${targetIssue.id}`)
       expect(getNav().location.search).toContain('thread=th-valid-101')
-      expect(screen.getByTestId('controlled-agent-pane')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-pane')).toBeInTheDocument()
     })
   })
 
@@ -846,7 +636,7 @@ describe('ProjectDetailPage', () => {
     act(() => {
       getNav().navigate(`/projects/${projectId}?issue=${targetIssue.id}&thread=th-valid-101`)
     })
-    await screen.findByTestId('controlled-agent-pane')
+    await screen.findByTestId('agent-pane')
     fireEvent.click(screen.getByRole('button', { name: '查看完整 Issue 详情' }))
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
 
@@ -856,7 +646,7 @@ describe('ProjectDetailPage', () => {
 
     await waitFor(() => {
       expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
-      expect(screen.getByTestId('controlled-agent-pane')).toBeInTheDocument()
+      expect(screen.getByTestId('agent-pane')).toBeInTheDocument()
       expect(getNav().location.search).toContain('thread=th-valid-101')
     })
   })

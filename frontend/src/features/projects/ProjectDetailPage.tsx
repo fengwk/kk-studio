@@ -42,13 +42,6 @@ export interface ProjectDetailPageProps {
   api?: ProjectsApi
 }
 
-interface PendingInstructionAttempt {
-  issueId: string
-  expectedVersion: string
-  body: string
-  requestKey: string
-}
-
 export function ProjectDetailPage({
   projectId,
   onBack,
@@ -154,46 +147,6 @@ export function ProjectDetailPage({
     }
   }
 
-  const pendingInstructionRef = useRef<PendingInstructionAttempt | null>(null)
-
-  const handleSubmitInstruction = async (text: string) => {
-    if (!issueDetail) return
-    const trimmed = text.trim()
-    if (!trimmed) return
-
-    const issueId = issueDetail.issue.id
-    const expectedVersion = issueDetail.issue.version
-
-    let attempt = pendingInstructionRef.current
-    if (
-      !attempt ||
-      attempt.issueId !== issueId ||
-      attempt.body !== trimmed
-    ) {
-      // 远端版本推进可能来自已提交但丢响应的请求，不能改变待重试的 payload。
-      attempt = {
-        issueId,
-        expectedVersion,
-        body: trimmed,
-        requestKey: createUuid(),
-      }
-      pendingInstructionRef.current = attempt
-    }
-
-    await api.appendIssueActivity(attempt.issueId, {
-      expectedVersion: attempt.expectedVersion,
-      requestKey: attempt.requestKey,
-      kind: 'INSTRUCTION',
-      body: attempt.body,
-    })
-    // 成功后清空挂起的 attempt；若失败抛出异常中断执行，attempt 保留在 ref 中供重试
-    pendingInstructionRef.current = null
-    await invalidateSnapshot()
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.projects.issue(projectId, issueId),
-    })
-  }
-
   const invalidateSnapshot = async () => {
     await queryClient.invalidateQueries({
       queryKey: queryKeys.projects.snapshot(projectId),
@@ -287,37 +240,6 @@ export function ProjectDetailPage({
       return false
     } finally {
       inflightIssuesRef.current.delete(issueId)
-    }
-  }
-
-  const handleStopIssue = async () => {
-    if (!issueDetail) return
-    const targetIssueId = issueDetail.issue.id
-    const targetVersion = issueDetail.issue.version
-    const requestKey = createUuid()
-    const action: PendingIssueAction = {
-      issueId: targetIssueId,
-      kind: 'STOP',
-      requestKey,
-      expectedVersion: targetVersion,
-      payload: { detail: '用户在 Agent 视图中终止执行' },
-      createdAt: new Date().toISOString(),
-      isUnknown: true,
-    }
-    const ok = await executeBoardIssueAction(
-      targetIssueId,
-      targetVersion,
-      action,
-      (reqKey, expVer) =>
-        api.stopIssue(targetIssueId, {
-          expectedVersion: expVer,
-          requestKey: reqKey,
-          detail: '用户在 Agent 视图中终止执行',
-        }),
-      '终止 Issue',
-    )
-    if (!ok) {
-      throw new Error('终止 Issue 失败')
     }
   }
 
@@ -619,19 +541,14 @@ export function ProjectDetailPage({
               ) : (
                 <AgentPane
                   key={queryThreadId}
-                  owner={{ type: 'ISSUE_AGENT', issueId: issueDetail!.issue.id, agentName: matchedAgentName! }}
                   paneId={`project-issue-${queryThreadId}`}
                   agents={agentsQuery.data?.results ?? []}
                   environments={environmentsQuery.data ?? []}
                   initialTarget={{ kind: 'BOUND_THREAD', threadId: queryThreadId }}
                   capabilities={{
                     allowNewSession: false,
-                    allowSwitchAgent: false,
                     allowBranching: false,
-                    allowGenericChat: false,
                   }}
-                  onSubmitInstruction={handleSubmitInstruction}
-                  onStop={handleStopIssue}
                   focused
                 />
               )}
