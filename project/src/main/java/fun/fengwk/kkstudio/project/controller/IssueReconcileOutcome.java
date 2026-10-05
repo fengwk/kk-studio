@@ -38,13 +38,6 @@ public enum IssueReconcileOutcome {
   /** 活动时长额度耗尽：Run 失败收尾并与 ERROR 暂停门禁原子写入。 */
   RUN_BUDGET_EXHAUSTED,
 
-  /**
-   * 工具副作用结果未定：按既有 UNKNOWN 入口收尾并写入人工核查门禁，绝不自动完成或交接。
-   *
-   * <p>核查解除后 mailbox 仍保留，显式恢复才会继续推进。
-   */
-  RUN_UNKNOWN,
-
   /** 迟到的旧 Run（阶段或归属已不匹配）：只做安全收尾，绝不推进阶段。 */
   STALE_RUN_CLOSED,
 

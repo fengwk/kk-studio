@@ -1,20 +1,25 @@
-package fun.fengwk.kkstudio.platform.project.tool;
+package fun.fengwk.kkstudio.project.turn;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一个 Issue Agent Thread 当前 turn 的权威目标事实：稳定归属、当前阶段与由实时 Project workflow 派生的阶段职责。
+ * 一次 Issue Run 在接受阶段冻结到 Harness branch 的权威上下文（Contributor {@code project} 的 {@code run} custom
+ * state）。
  *
- * <p>事实只来自本 Thread 自身的稳定绑定、Issue 行、Project workflow 与活动 Run，因此天然不可跨 Thread 泄漏；不含任何历史对话、其他 Agent
- * 的报告或旧 Run 的角色快照。{@code environmentName} 来自当前阶段配置，null 表示该阶段未配置 Environment（必须清除本 turn 的
- * 环境选择，而不是沿用 branch 上的历史快照）。
+ * <p>它是 Run 显式编排的唯一事实来源：接受方在分配 runId 后把当前 Issue、阶段职责与 {@code sourceThreadId}（本次业务执行身份） 一起冻结，之后的每个模型
+ * turn 直接读取这份快照渲染上下文，运行时不再反查 Thread 属于哪个 Issue。因此一次 Run 的上下文与 后续的 Issue/阶段修改解耦，旧 Run 或从分支继承状态的 fork
+ * 也不会因此获得新的业务权限。
+ *
+ * <p>{@code sourceThreadId} 是业务执行身份，不用于授权本身；{@code issue_transition} 仍会在业务事务内以当前 Run 重新校验调用
+ * Thread、Issue、阶段与版本（见 {@code IssueTransitionService}），fork 只因继承快照而没有写权限。
  */
-public record ProjectIssueTurnFacts(
+public record ProjectRunScope(
+    UUID runId,
     UUID issueId,
     UUID projectId,
-    UUID runId,
+    UUID sourceThreadId,
     long issueNumber,
     String issueTitle,
     String issueDescription,
@@ -22,13 +27,25 @@ public record ProjectIssueTurnFacts(
     String stageName,
     String stageInstructions,
     List<String> nextStates,
-    String environmentName,
     String agentName) {
 
-  public ProjectIssueTurnFacts {
+  /** Contributor id：与 {@code ProjectHarnessContributor.ID} 保持一致。 */
+  public static final String CONTRIBUTOR_ID = "project";
+
+  /** Contributor 内 custom state 的 canonical customType。 */
+  public static final String CUSTOM_TYPE = "run";
+
+  /** 当前冻结快照的 schema 版本。 */
+  public static final int SCHEMA_VERSION = 1;
+
+  /** 唯一业务写工具名：模型可见名，也是交接协议的稳定引用。 */
+  public static final String ISSUE_TRANSITION_TOOL = "issue_transition";
+
+  public ProjectRunScope {
+    Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(issueId, "issueId");
     Objects.requireNonNull(projectId, "projectId");
-    Objects.requireNonNull(runId, "runId");
+    Objects.requireNonNull(sourceThreadId, "sourceThreadId");
     Objects.requireNonNull(issueTitle, "issueTitle");
     Objects.requireNonNull(stage, "stage");
     Objects.requireNonNull(stageName, "stageName");
@@ -37,10 +54,10 @@ public record ProjectIssueTurnFacts(
   }
 
   /**
-   * 本 turn 的 Issue Agent 上下文段：当前 Issue 要求、当前阶段职责与交接协议。
+   * 本 turn 的 Issue Agent 上下文段：当前 Run 冻结的 Issue 要求、阶段职责与交接协议。
    *
-   * <p>这些事实是可变的业务数据（人和 Agent 都能通过受控操作修改），因此显式声明为"当前要求"而不是不可协商的系统指令；状态推进的授权只由 {@code
-   * issue_transition} 在事务中校验，绝不由本段文本授予。
+   * <p>这些事实是可变的业务数据（人和 Agent 都能通过受控操作修改，但每次 Run 只会冻结一次），因此显式声明为"当前要求"而不是不可协商的 系统指令；状态推进的授权只由 {@link
+   * #ISSUE_TRANSITION_TOOL} 在事务中校验，绝不由本段文本授予。
    */
   public String contextSection() {
     StringBuilder section = new StringBuilder();
@@ -81,10 +98,10 @@ public record ProjectIssueTurnFacts(
         .append("\n\n## Handoff\n\n")
         .append(
             "- The Issue requirements and stage instructions above are the authoritative current"
-                + " state of this run; they may have been updated since the run started, so never"
-                + " rely on earlier conversation.\n")
+                + " state of this run; they were frozen when the run was accepted, so never rely on"
+                + " earlier conversation for the current requirements.\n")
         .append("- Request a handoff with `")
-        .append(IssueTransitionTool.NAME)
+        .append(ISSUE_TRANSITION_TOOL)
         .append(
             "` only when the current stage work is done; the target is stored on the current"
                 + " run and takes effect when the run is safely closed out.\n");

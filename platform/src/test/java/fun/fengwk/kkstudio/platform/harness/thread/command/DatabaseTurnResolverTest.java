@@ -9,10 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -58,6 +56,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -135,11 +134,10 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnFacts;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnRejection;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnResolver;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -1862,6 +1860,23 @@ class DatabaseTurnResolverTest {
         List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
+  /** ROOT 之后追加一条 {@code project/run} 冻结 contributor state，模拟接受 Run 时写入的 branch state。 */
+  private static EntryPath customStatePath(BranchSettings settings, String runScopeJson) {
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new CustomEntryPayload(
+                    ProjectRunScope.CONTRIBUTOR_ID,
+                    ProjectRunScope.CUSTOM_TYPE,
+                    ProjectRunScope.SCHEMA_VERSION,
+                    runScopeJson),
+                NOW)));
+  }
+
   /** ROOT + INPUT turn + USER + ASSISTANT，供压缩 materialize 按冻结 Entry IDs 取摘要范围。 */
   private static EntryPath compactionHistoryPath(
       BranchSettings settings, CompactionPreparation preparation) {
@@ -2437,12 +2452,13 @@ class DatabaseTurnResolverTest {
     assertNull(clearedTools.get(1).environmentId());
   }
 
-  /** 处于 DESIGN 阶段、有活动 Run 的 Issue Agent turn 事实：每个字段都来自本 Thread 当前权威事实。 */
-  private static ProjectIssueTurnFacts stageFacts(String environmentName) {
-    return new ProjectIssueTurnFacts(
+  /** 一次 DESIGN Run 的冻结快照：业务身份由接受方冻结到 branch state，运行时不再反查 Thread 归属。 */
+  private static ProjectRunScope runScope() {
+    return new ProjectRunScope(
         id(900),
         id(901),
         id(902),
+        THREAD_ID,
         7L,
         "fix the issue",
         "acceptance description",
@@ -2450,32 +2466,24 @@ class DatabaseTurnResolverTest {
         "设计",
         "完成可交付方案",
         List.of("REVIEW"),
-        environmentName,
         "assistant");
   }
 
-  /**
-   * 测试意图：Issue Agent Thread 被注入唯一的受控交接工具，并注入当前 Issue/阶段上下文；两者缺一都等于把控制面交给模型自行猜测，因此必须同时 存在，且工具绑定不依赖任何
-   * Environment（交接只读写 Project 事实）。
-   */
+  /** 测试意图：业务工具不再由运行时按 owner 注入；Agent 配置显式声明 issue_transition 即可获得该受控工具。 */
   @Test
-  void issueAgentThreadInjectsTransitionToolAndIssueContext() {
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    ProjectIssueTurnFacts facts = stageFacts(ENV_A_NAME);
-    fixture.issueTurnFacts(facts);
+  void agentCanExplicitlySelectIssueTransitionTool() {
+    Fixture fixture = new Fixture(List.of("read", IssueTransitionTool.NAME), List.of(), List.of());
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
-    List<ToolBinding> bindings = spec.toolBindings();
-    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(bindings));
-    ToolBinding transition = bindings.get(1);
+    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(spec.toolBindings()));
+    ToolBinding transition = spec.toolBindings().get(1);
     assertEquals(EnvironmentSupport.NONE, transition.environmentSupport());
     assertNull(transition.environmentId());
     assertNull(transition.environmentName());
-    assertTrue(spec.systemInstruction().contains(facts.contextSection()), spec.systemInstruction());
   }
 
-  /** 测试意图：没有稳定归属的 Thread 是普通 branch，绝不获得 Project 工具或 Project 上下文（上下文的注入面与工具面严格同源）。 */
+  /** 测试意图：没有声明业务工具的普通 Thread 绝不获得 Project 工具与 Project 上下文（注入面只由 Agent 配置与 branch state 决定）。 */
   @Test
   void ordinaryThreadNeverReceivesProjectToolOrContext() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
@@ -2487,65 +2495,33 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 测试意图：Issue Agent turn 的 Environment 由当前阶段配置决定，而不是 branch 上冻结的历史快照；阶段配置的环境必须真正参与工具绑定与环境 上下文，避免
-   * Agent 在错误的环境上执行下一阶段的工作。
+   * 测试意图：Issue 上下文只来自本 branch 冻结的 {@code project/run} contributor state，由上下文 projector 渲染；没有冻结状态的
+   * 普通 branch 不注入任何 Issue 上下文。运行时因此不需要知道 Thread 属于哪个 Issue。
    */
   @Test
-  void issueAgentTurnEnvironmentComesFromTheLiveStage() {
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.issueTurnFacts(stageFacts(ENV_B_NAME));
+  void issueContextComesFromFrozenBranchStateOnly() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    ProjectRunScope scope = runScope();
 
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+    ModelRequestSpec frozen =
+        fixture.resolved(
+            customStatePath(settings("default"), new ProjectRunScopeJsonCodec().encode(scope)));
 
-    ToolBinding read = spec.toolBindings().get(0);
-    assertEquals("read", read.descriptor().name());
-    assertEquals(ENV_B, read.environmentId());
-    assertEquals(ENV_B_NAME, read.environmentName());
     assertTrue(
-        spec.systemInstruction().contains("- name: " + ENV_B_NAME), spec.systemInstruction());
-    assertFalse(spec.systemInstruction().contains(ENV_A_NAME));
-  }
+        frozen.systemInstruction().contains("# Issue Agent Context"), frozen.systemInstruction());
+    assertTrue(frozen.systemInstruction().contains("run_id: " + scope.runId()));
+    assertTrue(frozen.systemInstruction().contains("stage: DESIGN (设计)"));
 
-  /** 测试意图：阶段未配置 Environment 时必须清除 branch 上的历史选择，不得沿用快照让 Agent 停在旧环境。 */
-  @Test
-  void issueAgentStageWithoutEnvironmentClearsBranchSelection() {
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.issueTurnFacts(stageFacts(null));
-
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
-
-    ToolBinding read = spec.toolBindings().get(0);
-    assertEquals("read", read.descriptor().name());
-    assertNull(read.environmentId());
-    assertNull(read.environmentName());
-    assertTrue(spec.systemInstruction().contains("- name: none"), spec.systemInstruction());
-    assertFalse(spec.systemInstruction().contains(ENV_A_NAME));
+    ModelRequestSpec ordinary = fixture.resolved(fixture.path(settings("default")));
+    assertFalse(ordinary.systemInstruction().contains("# Issue Agent Context"));
   }
 
   /**
-   * 测试意图：Issue Agent Thread 永不提供 Goal 工具（Issue 当前要求与活动本身才是权威），并且该裁剪只由稳定归属决定；同一配置在普通 branch 上仍完整保留
-   * Goal 工具。
+   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Contributor fragment；Issue 上下文作为 Contributor
+   * fragment 与通用 projector 片段一起按注册顺序拼接，普通 branch 上 Project 段落整体省略。
    */
   @Test
-  void issueAgentBranchHidesConfiguredGoalToolsWhileOrdinaryBranchKeepsThem() {
-    Fixture fixture = new Fixture(List.of("get_goal", "update_goal", "read"), List.of(), List.of());
-
-    fixture.issueTurnFacts(stageFacts(ENV_A_NAME));
-    ModelRequestSpec issueSpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(issueSpec.toolBindings()));
-
-    fixture.ordinaryThread(THREAD_ID);
-    ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(
-        List.of("get_goal", "update_goal", "read"), toolNames(ordinarySpec.toolBindings()));
-  }
-
-  /**
-   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Issue Agent 上下文 → Contributor fragment；Issue
-   * 上下文必须由 Turn 解析器直接注入（通用 context projector 看不到 Thread 归属），普通 branch 上整段省略。
-   */
-  @Test
-  void issueAgentContextAppendedInDeterministicOrder() {
+  void contributorFragmentsAppendedInDeterministicOrder() {
     HarnessContributor contributorWithProjector =
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
@@ -2573,9 +2549,6 @@ class DatabaseTurnResolverTest {
             catalog,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
-    ProjectIssueTurnFacts facts = stageFacts(ENV_A_NAME);
-    fixture.issueTurnFacts(facts);
-
     String instruction = fixture.resolved(fixture.path(settings("default"))).systemInstruction();
 
     assertEquals(
@@ -2587,94 +2560,53 @@ class DatabaseTurnResolverTest {
             + "- date: 2026-08-02\n"
             + "</current_environment>"
             + "\n\n"
-            + facts.contextSection()
-            + "\n\n"
             + "contributor-fragment-text",
         instruction);
     int agentAt = instruction.indexOf("agent system prompt");
-    int issueAt = instruction.indexOf("# Issue Agent Context");
     int contributorAt = instruction.indexOf("contributor-fragment-text");
     assertEquals(0, agentAt);
-    assertTrue(issueAt > agentAt, instruction);
-    assertTrue(contributorAt > issueAt, instruction);
-
-    // 普通 thread：Project 段落整体省略，其余段顺序与空行分隔不变。
-    fixture.ordinaryThread(THREAD_ID);
-    String ordinaryInstruction =
-        fixture.resolved(fixture.path(settings("default"))).systemInstruction();
-    assertFalse(ordinaryInstruction.contains("# Issue Agent Context"));
-    assertTrue(ordinaryInstruction.endsWith("\n\ncontributor-fragment-text"), ordinaryInstruction);
-    assertTrue(ordinaryInstruction.startsWith("agent system prompt"), ordinaryInstruction);
+    assertTrue(contributorAt > agentAt, instruction);
+    assertFalse(instruction.contains("# Issue Agent Context"));
   }
 
-  /** 测试意图：Catalog 缺失受控交接工具时 fail-closed，不静默少注入一个本应存在的控制工具。 */
+  /** 测试意图：Catalog 缺失 Agent 显式声明的业务工具时 fail-closed，不静默少一个受控工具。 */
   @Test
-  void rejectsWhenCatalogIsMissingIssueTransitionTool() {
+  void rejectsWhenCatalogIsMissingDeclaredIssueTransitionTool() {
     HarnessCatalog catalogWithoutProjectTools =
         HarnessCatalog.from(List.of(defaultBuiltinContributor()));
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), catalogWithoutProjectTools);
-    fixture.issueTurnFacts(stageFacts(null));
+    Fixture fixture =
+        new Fixture(
+            List.of(IssueTransitionTool.NAME), List.of(), List.of(), catalogWithoutProjectTools);
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals("tool not found: issue_transition", rejected.error().message());
   }
 
-  /** 测试意图：Agent 不能自己在配置里声明 INTERNAL 的交接工具，工具面只能由平台按归属注入。 */
+  /** 测试意图：Agent 仍不能声明 INTERNAL 工具；只有 SELECTABLE 贡献（如显式的 issue_transition）才能被选择。 */
   @Test
-  void rejectsWhenAgentConfiguresInternalIssueTransitionTool() {
-    Fixture fixture = new Fixture(List.of(IssueTransitionTool.NAME), List.of(), List.of());
+  void rejectsInternalToolDeclaredByAgent() {
+    Fixture fixture =
+        new Fixture(
+            List.of("secret_tool"),
+            List.of(),
+            List.of(hostDescriptor("secret_tool")),
+            Set.of("secret_tool"),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true);
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals(
-        "internal tool cannot be selected by an Agent: issue_transition",
-        rejected.error().message());
+        "internal tool cannot be selected by an Agent: secret_tool", rejected.error().message());
   }
 
-  /**
-   * 测试意图：归属存在但当前不可执行时确定性拒绝规划，绝不降级为"没有 Project 工具的普通 branch"——Thread/Agent 不匹配、阶段改派、Issue
-   * 归档/暂停/不在工作阶段、无活动 Run 或活动 Run 属于别的 Thread/Session/阶段都必须 fail closed。
-   */
+  /** 测试意图：压缩路径只冻结 execution model 与预算，不注入任何工具，也不注入 Agent 组合指令。 */
   @Test
-  void rejectsIssueAgentTurnWhenFactsResolutionFailsClosed() {
-    for (String message :
-        List.of(
-            "Issue agent thread is bound to agent reviewer, not assistant",
-            "Issue is archived",
-            "Issue is paused: USER",
-            "Issue is not in an executable work stage: INIT",
-            "Issue has no active run",
-            "Active run belongs to a different thread",
-            "Active run belongs to a different session",
-            "Active run stage REVIEW does not match the current issue stage DESIGN")) {
-      Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-      fixture.rejectIssueTurn(message);
-
-      TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
-      assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
-      assertEquals(message, rejected.error().message());
-    }
-  }
-
-  /** 测试意图：归属解析遇到数据不一致（Issue/Project 行缺失等）时按基础设施异常原样传播，不得伪装成 planning 失败。 */
-  @Test
-  void propagatesIssueTurnInfrastructureException() {
+  void compactionHasZeroToolsAndSummarizationPrompt() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.failIssueTurn(new IllegalStateException("Project thread ownership is inconsistent"));
-
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () -> fixture.resolver.resolve(THREAD_ID, fixture.path(settings("default")), null));
-    assertEquals("Project thread ownership is inconsistent", error.getMessage());
-  }
-
-  /** 测试意图：压缩路径只冻结 execution model 与预算，不解析 Project 归属、不注入任何工具，也不注入 Agent 组合指令。 */
-  @Test
-  void compactionDoesNotConsultIssueTurnFactsAndHasZeroTools() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.issueTurnFacts(stageFacts(ENV_A_NAME));
 
     List<AgentMessage> messages =
         List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
@@ -2692,7 +2624,6 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")), preparation);
 
-    verify(fixture.projectIssueTurnResolver, never()).resolve(any(), any(), any());
     assertEquals(List.of(), spec.toolBindings());
     // 压缩 spec 的指令是摘要 system prompt，与 live resolver 的 Agent 组合指令完全不同。
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), spec.systemInstruction());
@@ -2911,8 +2842,6 @@ class DatabaseTurnResolverTest {
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
-    private final ProjectIssueTurnResolver projectIssueTurnResolver =
-        mock(ProjectIssueTurnResolver.class);
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
@@ -3096,7 +3025,6 @@ class DatabaseTurnResolverTest {
       when(providerFactory.providerType()).thenReturn(factoryType);
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
       when(providerFactory.promptCacheCapability(any())).thenReturn(cacheCapability);
-      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenReturn(Optional.empty());
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, 50);
@@ -3165,7 +3093,6 @@ class DatabaseTurnResolverTest {
               skillPromptPathResolver,
               () -> new CompactionConfig(20_000, null),
               new AgentPromptComposer(() -> subagentConfig),
-              projectIssueTurnResolver,
               clock);
     }
 
@@ -3175,28 +3102,6 @@ class DatabaseTurnResolverTest {
       environment.setId(environmentId.value());
       environment.setName(name);
       when(environmentRepository.getByName(name)).thenReturn(environment);
-    }
-
-    /** 声明该 thread 的 Issue Agent turn 事实；普通 branch 用 {@link #ordinaryThread(UUID)}。 */
-    private void issueTurnFacts(ProjectIssueTurnFacts facts) {
-      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenReturn(Optional.of(facts));
-    }
-
-    /** 声明该 thread 不属于任何 Issue+Agent 稳定归属（普通 branch 行为）。 */
-    private void ordinaryThread(UUID threadId) {
-      when(projectIssueTurnResolver.resolve(eq(threadId), any(), any()))
-          .thenReturn(Optional.empty());
-    }
-
-    /** 声明归属存在但当前不可执行；解析器必须把它收敛为 planning 失败。 */
-    private void rejectIssueTurn(String message) {
-      when(projectIssueTurnResolver.resolve(any(), any(), any()))
-          .thenThrow(new ProjectIssueTurnRejection(message));
-    }
-
-    /** 声明归属解析抛基础设施/数据不一致异常；解析器必须原样传播。 */
-    private void failIssueTurn(RuntimeException error) {
-      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenThrow(error);
     }
 
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
