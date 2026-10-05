@@ -580,44 +580,47 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         StopResult stopResult = stopFuture.get(10, TimeUnit.SECONDS);
         assertNotNull(stopResult);
       } catch (ExecutionException e) {
-        // 若 Stop 在子线程处于 terminal apply pending 窗口时执行，按规范拒绝为 TERMINAL_APPLY_PENDING 并回滚
-        assertInstanceOf(HarnessRuntimeConflictException.class, e.getCause());
+        // 子终态先交付时父 version 已前进；只有明确的 CAS 冲突允许重读后发起停止。
+        HarnessRuntimeConflictException conflict =
+            assertInstanceOf(HarnessRuntimeConflictException.class, e.getCause());
+        assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, conflict.reason());
+        ThreadState current =
+            store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
+        assertNotNull(
+            runtime.stop(
+                new StopCommand(fixture.parentThreadId(), stopRequestId, current.version())));
       }
 
       ThreadProcessResult childResult = childFuture.get(10, TimeUnit.SECONDS);
       assertNotNull(childResult);
 
-      // 验证无论哪个事务先提交，交付命令数量至多为 1，绝对不发生重复交付
+      // 两个串行顺序最终都停止父节点，通知已物化，不留下 queued 工作。
       List<ThreadCommand> allParentCommands =
           store.transaction(
               tx -> {
                 tx.lockThread(fixture.parentThreadId());
                 return tx.loadQueuedCommands(fixture.parentThreadId());
               });
-      assertTrue(allParentCommands.size() <= 1, "Parent must not receive duplicate join commands");
+      assertTrue(allParentCommands.isEmpty(), "Stopped parent must not retain queued commands");
 
       // 校验同一 invocationId 的交付命令至多 1 条，且从未重复物化为多条通知历史
-      var customCmd =
+      ThreadCommand notification =
           store.transaction(
               tx ->
                   tx.findCommandByIdempotencyKey(
-                      fixture.parentThreadId(), fixture.joinInvocationId()));
-      if (customCmd.isPresent()) {
-        assertTrue(
-            customCmd.get().state() == ThreadCommandState.APPLIED
-                || customCmd.get().state() == ThreadCommandState.QUEUED
-                || customCmd.get().state() == ThreadCommandState.CANCELLED);
-      }
+                          fixture.parentThreadId(), fixture.joinInvocationId())
+                      .orElseThrow());
+      assertEquals(ThreadCommandState.APPLIED, notification.state());
       ThreadState finalParent =
           store.transaction(tx -> tx.findThread(fixture.parentThreadId()).orElseThrow());
       EntryPath finalParentPath =
           store.transaction(tx -> tx.loadEntryPath(finalParent.headEntryId()));
-      assertTrue(
+      assertEquals(
+          1L,
           finalParentPath.entries().stream()
-                  .filter(entry -> entry.payload() instanceof NotificationPayload)
-                  .count()
-              <= 1,
-          "Parent history must not contain duplicate delivery notifications");
+              .filter(entry -> entry.payload() instanceof NotificationPayload)
+              .count(),
+          "Parent history must contain exactly one delivery notification");
     } finally {
       scheduler.shutdownNow();
     }

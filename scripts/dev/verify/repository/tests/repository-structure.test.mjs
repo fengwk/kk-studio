@@ -530,8 +530,8 @@ const CORE_STATE_ENUMS = [
     enumName: 'ThreadRuntimeStatus',
     constants: [
       'IDLE',
-      'STOPPED',
       'QUEUED',
+      'STOPPED',
       'CONTINUATION_DUE',
       'MODEL_READY',
       'MODEL_DISPATCHING',
