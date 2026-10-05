@@ -116,9 +116,11 @@ YOLO 是 Thread 的即时策略 `yoloEnabled`，通过
 preflight，关闭时按工具权限审批；`ask_user` 始终等待人工回答。子 Thread 首次创建时
 继承父 Thread 的 YOLO，后续恢复保留已有值。
 
-Project Agent 的职责、阶段 Environment 与交接工具来自当前 workflow。每个 live turn
-复核 Issue 归属、阶段、门禁和活动 Run 坐标，再注入当前职责及 `issue_transition`。
-产品行为见 [Canvas、Project 与交互](canvas-project.md)，规划适配见
+Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
+Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_MODEL` / `SET_ENVIRONMENT` /
+`SET_CONTRIBUTOR_STATE`），并冻结本次 Run 的 `ProjectRunScope`。每个 live turn 只按该分支设置规划；
+`issue_transition` 等业务工具从冻结 scope 取得 runId，在业务锁内复核 Run/Issue/阶段/版本与调用
+Thread 身份。产品行为见 [Canvas、Project 与交互](canvas-project.md)，规划适配见
 [Platform](modules/platform.md)。
 
 ### Tools、Skills 与委派
@@ -157,9 +159,10 @@ Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [P
 与 [Harness Daemon](modules/harness-daemon.md)。
 
 Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
-返回 `{"thread_id":"...","status":"accepted"}`；父 Thread 可以继续工作，Runtime
-在子执行首次 Idle 匹配 join 后以独立消息交付结果。继续委派使用 `thread_id` 并复验
-父子归属；深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
+返回 `{"thread_id":"...","status":"accepted"}`；父 Thread 可以继续工作，root Join 在子执行
+首次到达终态（`COMPLETED` / `ERROR` / `CANCELLED`）时冻结 `terminalEntryId` / `finalAnswerEntryId`，
+再以 `NOTIFICATION` 交付结果，不等待其永久子树 idle。继续委派使用 `thread_id` 并复验父子归属；
+深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
 `inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见
 [异步委派](modules/builtin-tools-design.md)与 [Harness Runtime](modules/harness-runtime.md)。
 
@@ -199,10 +202,11 @@ MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消�
 ### Agent Loop
 
 ```text
-POST /api/harness/command-batches
-  -> Web 校验 owner、target、UUID 与 cursor
-  -> Platform 授权、附件物化和产品归属编排
-  -> HarnessRuntime.acceptCommands
+创建型 POST /api/harness/command-batches
+  或 owner-free POST /api/harness/threads/{threadId}/command-batches
+  -> Web 校验 owner/target 或 path threadId、UUID 与 cursor
+  -> Platform 授权、附件物化与归属校验
+  -> HarnessRuntime.acceptCommands / acceptOnThread
        Session / Thread / Command CAS
        command mailbox + THREAD Work
   -> HarnessWorkDispatcher claim
@@ -231,10 +235,12 @@ Canvas 编辑接受 typed commands、语义组前置条件与 idempotency key，
 完整输出。Canvas revision 用于同步排序，编辑冲突按名称、资源、Function 或布局各自判断。
 
 Project 的 `(Issue, Agent)` 绑定稳定 Thread，`(Issue, state)` 持有阶段预算。Run 接受
-原子完成额度检查、Thread 选择或创建、历史起点冻结、Run/Activity 写入、Harness 命令与
-Work 登记。Issue Controller 每次认领后重读当前事实，在安全点等待、恢复或收尾；
-交接提交时复验 Run 身份、版本、合法边与门禁。Canvas 与 Project 的使用、数据关系和
-UNKNOWN 核实路径见 [Canvas、Project 与交互](canvas-project.md)。
+原子完成额度检查、Thread 选择或创建、历史起点冻结、`ProjectRunScope`（含显式
+Agent/Model/Environment 与业务工具）提交、Run/Activity 写入、Harness 命令与 Work 登记。
+Issue Controller 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
+`finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
+交接提交时复验 Run 身份、版本、合法边与门禁，并在同一业务锁内写入 `active=false` 快照。
+Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas、Project 与交互](canvas-project.md)。
 
 ### 附件与媒体
 
