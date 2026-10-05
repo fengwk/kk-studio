@@ -55,6 +55,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -183,11 +184,12 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 父暂停 + 恢复：父本地 turn 已结束时显式 stop 必须写下 durable 停止边界；有界停止传播到子执行后 join 完成首次匹配并冻结
-   * receipt，但父已停止因此只保存、不投递、不唤醒；父真实接受新输入时原子交付旧结果，且重放不产生第二次交付。
+   * 父停止语义：父本地 turn 未消费即显式 stop 必须写下 durable 停止边界并保持 {@code STOPPED}；有界停止传播到子执行后 join 完成首次匹配并 冻结
+   * receipt，父已停止因此不排队、不唤醒、不遗留 Work。停止边界是当前 head 路径上的祖先（历史可继续 append NOTIFICATION），不要求恰为当前
+   * head；重放不产生第二次交付。
    */
   @Test
-  void stoppedParentHoldsMatchedReceiptUntilGenuineResumeDeliversExactlyOnce() {
+  void stoppedParentKeepsStoppedAndDeliversHeldReceiptOnlyOnNextInput() {
     UUID parentThreadId = UUID.randomUUID();
     acceptRootSession(UUID.randomUUID(), parentThreadId, "coordinate the work");
 
@@ -220,7 +222,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(ThreadExecutionControl.STOPPED, threadState(parentThreadId).executionControl());
     ThreadJoin join = joinOf(invocationId);
     assertTrue(join.matched(), "stopped parent must still freeze the child receipt");
-    assertNull(join.deliveryCommandSequence());
+    // 父也在停止集合内：匹配结果不排队、不唤醒，直接物化为 APPLIED NOTIFICATION 并 append 到父历史。
+    assertNotNull(join.deliveryCommandSequence());
     assertStoppedHead(childThreadId, threadState(childThreadId).headEntryId());
     assertEquals(ThreadExecutionControl.STOPPED, threadState(childThreadId).executionControl());
 
@@ -264,29 +267,38 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(ThreadJoinOutcome.CANCELLED, receipt.outcome());
     assertEquals(childThreadId, receipt.childThreadId());
     assertEquals("child work", receipt.prompt());
-    assertTrue(
-        resultCommands(parentThreadId).isEmpty(),
-        "a stopped parent must not be woken by its child receipt");
 
-    // 父真实接受新输入：先原子交付挂起的旧结果，再插入本次用户命令。
-    long resumeSequence = threadState(parentThreadId).nextCommandSequence();
-    NewThreadCommand resumePrompt = promptCommand(UUID.randomUUID(), "resume the work");
-    AcceptedCommands resumed =
-        acceptOnThread(parentThreadId, parentStopBoundary, resumeSequence, resumePrompt);
-    assertFalse(resumed.replayed());
-
+    // 交付是历史物化而非 QUEUED/唤醒：恰一条 APPLIED NOTIFICATION 命令，父无 queued 命令、无残留 Work。
     List<ThreadCommand> delivered = resultCommands(parentThreadId);
-    assertEquals(1, delivered.size(), "exactly one result message must be delivered on resume");
-    assertEquals(invocationId, delivered.getFirst().idempotencyKey());
-    String deliveredText = resultMessageText(delivered.getFirst());
+    assertEquals(1, delivered.size(), "stopped parent receives exactly one materialized result");
+    ThreadCommand delivery = delivered.getFirst();
+    assertEquals(invocationId, delivery.idempotencyKey());
+    assertEquals(ThreadCommandState.APPLIED, delivery.state());
+    assertNotNull(delivery.appliedEntryId());
+    String deliveredText = resultMessageText(delivery);
     assertTrue(deliveredText.contains("<subagent_result"), deliveredText);
     assertTrue(deliveredText.contains("state=\"cancelled\""), deliveredText);
-    assertNotNull(joinOf(invocationId).deliveryCommandSequence());
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockThread(parentThreadId);
+              return tx.loadQueuedCommands(parentThreadId).isEmpty();
+            }),
+        "stopped parent must not keep queued commands");
+    assertFalse(hasWork(WorkTargetType.THREAD, parentThreadId));
+    assertFalse(hasWork(WorkTargetType.THREAD, childThreadId));
+    assertEquals(ThreadExecutionControl.STOPPED, threadState(parentThreadId).executionControl());
 
-    // 重放同一批输入（同一幂等键、同一 cursor）不得产生第二次交付。
-    AcceptedCommands replayed =
-        acceptOnThread(parentThreadId, parentStopBoundary, resumeSequence, resumePrompt);
-    assertTrue(replayed.replayed());
+    // 重放同一 stop：返回持久回执集合，不产生第二次通知，也不遗留 Work。
+    StopResult replayedStop =
+        runtime.stop(
+            new StopCommand(parentThreadId, stopRequestId, threadState(parentThreadId).version()));
+    assertTrue(replayedStop.replayed());
+    assertEquals(
+        Set.of(parentThreadId, childThreadId),
+        replayedStop.stoppedThreads().stream()
+            .map(StoppedThreadReceipt::threadId)
+            .collect(Collectors.toSet()));
     assertEquals(1, resultCommands(parentThreadId).size());
   }
 
@@ -727,13 +739,14 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
     awaitTrue(
         () -> runtime.projectJoinReceipt(childInvocationId).isPresent(),
-        "child must settle after consuming the grandchild receipt");
+        "child must freeze its own first final");
     ThreadJoinReceipt childReceipt = receiptOf(childInvocationId);
     assertEquals(ThreadJoinOutcome.COMPLETED, childReceipt.outcome());
-    // 子执行的下一次 turn 输入正是孙执行的 receipt，因此报告里必须出现孙 Thread 身份与孙报告。
-    assertTrue(
+    // 首个 final 冻结 child 自己的报告；后续孙报告不得改写该旧 final。
+    assertEquals("ACK:child work", childReceipt.report());
+    assertFalse(
         childReceipt.report().contains(grandChildThreadId.toString()), childReceipt.report());
-    assertTrue(childReceipt.report().contains("ACK:grandchild work"), childReceipt.report());
+    assertFalse(childReceipt.report().contains("ACK:grandchild work"), childReceipt.report());
 
     // 执行树事实来自不可变 parent 链（head-to-root，包含自身）。
     assertEquals(
@@ -743,12 +756,22 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(grandChildThreadId, threadState(grandChildThreadId).id());
     assertEquals(childThreadId, threadState(grandChildThreadId).parentThreadId());
 
+    // 每直接父恰收一次结果通知：child 收孙结果，root 收 child 的 first-final，祖先不下传孙身份。
+    awaitTrue(
+        () -> resultCommands(childThreadId).size() == 1,
+        "child must receive the grandchild result exactly once");
+    String childDelivery = resultMessageText(resultCommands(childThreadId).getFirst());
+    assertTrue(childDelivery.contains(grandChildThreadId.toString()), childDelivery);
+    assertTrue(childDelivery.contains("state=\"completed\""), childDelivery);
+
     awaitTrue(
         () -> resultCommands(rootThreadId).size() == 1,
         "root must receive the child result exactly once");
     String rootDelivery = resultMessageText(resultCommands(rootThreadId).getFirst());
     assertTrue(rootDelivery.contains(childThreadId.toString()), rootDelivery);
     assertTrue(rootDelivery.contains("state=\"completed\""), rootDelivery);
+    // 祖先只收直接 child 的 first-final，绝不下传孙身份。
+    assertFalse(rootDelivery.contains(grandChildThreadId.toString()), rootDelivery);
   }
 
   /**
@@ -994,17 +1017,24 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     return store.transaction(tx -> tx.findWork(new WorkTarget(type, targetId)).isPresent());
   }
 
-  /** 断言 head 恰为停止门禁承认的 STOPPED 边界（非 continuation 的 STOPPED TURN_END）。 */
+  /**
+   * 断言停止边界是当前 head 路径上的 {@code STOPPED} 非 continuation TURN_END。停止后历史可继续 append（例如
+   * NOTIFICATION），因此边界只保证是 head 的祖先（含自身），不要求恰为当前 head。
+   */
   private void assertStoppedHead(UUID threadId, UUID expectedTurnEndEntryId) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.findThread(threadId).orElseThrow();
-          assertEquals(expectedTurnEndEntryId, thread.headEntryId());
-          TurnEndPayload head =
+          assertTrue(
+              tx.loadEntryPath(thread.headEntryId()).entries().stream()
+                  .anyMatch(entry -> entry.id().equals(expectedTurnEndEntryId)),
+              "stop boundary must be on the current head path");
+          TurnEndPayload boundary =
               assertInstanceOf(
-                  TurnEndPayload.class, tx.findEntry(thread.headEntryId()).orElseThrow().payload());
-          assertEquals(TurnEndOutcome.STOPPED, head.outcome());
-          assertFalse(head.continueModel());
+                  TurnEndPayload.class,
+                  tx.findEntry(expectedTurnEndEntryId).orElseThrow().payload());
+          assertEquals(TurnEndOutcome.STOPPED, boundary.outcome());
+          assertFalse(boundary.continueModel());
           return null;
         });
   }
