@@ -34,6 +34,16 @@ export interface ThreadDraftRecord {
 /** 一次 Stop 回执合并的结果；重复回执返回同一份记录，不重复追加。 */
 export type StopReceiptMergeResult = ThreadDraftRecord
 
+/**
+ * 整份草稿写入的结果。
+ *
+ * STALE 表示调用方携带的 generation 早于记录里已合并的 Stop 回执：写入被拒绝（记录未被修改），
+ * 并返回既有记录，供调用方保留自己的编辑并通过恢复通道重新同步。
+ */
+export type DraftSaveOutcome =
+  | { status: 'SAVED' }
+  | { status: 'STALE'; record: ThreadDraftRecord }
+
 const DB_NAME = 'kkstudio.thread-drafts'
 const DB_VERSION = 1
 const STORE_NAME = 'threadDrafts'
@@ -114,17 +124,54 @@ export async function loadThreadDraft(threadId: string): Promise<ThreadDraftReco
   })
 }
 
-/** 写入 composer 草稿；Goal 文本与已合并回执身份在同一事务内保留。 */
-export function saveThreadDraftParts(threadId: string, parts: ComposerPart[]): Promise<void> {
-  return enqueueWrite(threadId, async (database) => {
-    await updateRecord(database, threadId, (current) => ({ ...current, parts }))
-  })
+/**
+ * 写入 composer 草稿；Goal 文本与已合并回执身份在同一事务内保留。
+ *
+ * `observedStopRequestIds` 是调用方 UI 已观察到的恢复 generation（来自 loadThreadDraft 或
+ * applyStopReceipt 返回的 record）。记录里出现调用方尚未观察的回执时，本次整份写入会被拒绝。
+ */
+export function saveThreadDraftParts(
+  threadId: string,
+  parts: ComposerPart[],
+  observedStopRequestIds: readonly string[],
+): Promise<DraftSaveOutcome> {
+  return saveObserved(threadId, observedStopRequestIds, (current) => ({ ...current, parts }))
 }
 
-/** 写入 Goal 编辑区文本；composer 草稿与已合并回执身份在同一事务内保留。 */
-export function saveThreadGoalText(threadId: string, goalText: string | null): Promise<void> {
+/** 写入 Goal 编辑区文本；composer 草稿与已合并回执身份在同一事务内保留，判定语义同 {@link saveThreadDraftParts}。 */
+export function saveThreadGoalText(
+  threadId: string,
+  goalText: string | null,
+  observedStopRequestIds: readonly string[],
+): Promise<DraftSaveOutcome> {
+  return saveObserved(threadId, observedStopRequestIds, (current) => ({ ...current, goalText }))
+}
+
+/**
+ * 带 generation 判定的整份写入。
+ *
+ * `appliedStopRequestIds` 既是回执身份也是恢复 generation：已合并的恢复内容只存在于记录里，
+ * 记录中出现了调用方尚未观察的回执，说明这份 UI 快照早于那次恢复，整份覆盖写会把恢复文本与
+ * 回执身份拆开（身份还在、文本永久丢失、此后也不会再回填）。读取、判定与写入在同一 readwrite
+ * 事务内完成；判定为陈旧时不修改记录，直接返回既有记录。
+ */
+function saveObserved(
+  threadId: string,
+  observedStopRequestIds: readonly string[],
+  update: (current: ThreadDraftRecord) => ThreadDraftRecord,
+): Promise<DraftSaveOutcome> {
   return enqueueWrite(threadId, async (database) => {
-    await updateRecord(database, threadId, (current) => ({ ...current, goalText }))
+    const observed = new Set(observedStopRequestIds)
+    let stale = false
+    const record = await updateRecord(database, threadId, (current) => {
+      if (current.appliedStopRequestIds.some((id) => !observed.has(id))) {
+        stale = true
+        // 返回 null：不写记录，保留既有内容与回执身份。
+        return null
+      }
+      return update(current)
+    })
+    return stale ? { status: 'STALE', record } : { status: 'SAVED' }
   })
 }
 
@@ -193,10 +240,11 @@ export function applyStopReceipt(
     }))
 }
 
+/** mutate 返回 null 表示「只读判定、不写记录」，此时 resolve 既有记录。 */
 function updateRecord(
   db: IDBDatabase,
   threadId: string,
-  mutate: (current: ThreadDraftRecord) => ThreadDraftRecord,
+  mutate: (current: ThreadDraftRecord) => ThreadDraftRecord | null,
 ): Promise<ThreadDraftRecord> {
   return new Promise<ThreadDraftRecord>((resolve, reject) => {
     let result: ThreadDraftRecord | null = null
@@ -204,9 +252,12 @@ function updateRecord(
     const store = tx.objectStore(STORE_NAME)
     const request = store.get(threadId)
     request.onsuccess = () => {
-      const next = mutate(normalizeRecord(request.result, threadId))
-      result = next
-      store.put(storedRecord(next))
+      const current = normalizeRecord(request.result, threadId)
+      const next = mutate(current)
+      result = next ?? current
+      if (next != null) {
+        store.put(storedRecord(next))
+      }
     }
     request.onerror = () => reject(request.error ?? new Error('Failed to read thread draft'))
     tx.oncomplete = () => {
