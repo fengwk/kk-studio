@@ -414,6 +414,69 @@ class ThreadJoinProjectorTest {
         });
   }
 
+  /**
+   * 测试意图：COMPLETED 但 join 未冻结 finalAnswerEntryId 时 report 必须为 null，绝不借用切片内更早的助手文本（旧答案不 得冒充最终答复）。
+   */
+  @Test
+  void completedWithoutFrozenFinalAnswerDoesNotBorrowEarlierAssistantText() {
+    UUID turnStart = id(320);
+    UUID user = id(321);
+    UUID draftAssistant = id(322);
+    UUID turnEnd = id(323);
+
+    store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStart,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                  T0));
+          tx.insertEntry(userEntry(user, sessionId, turnStart, "do work", T0));
+          tx.insertEntry(
+              new Entry(draftAssistant, sessionId, user, assistantPayload("old draft answer"), T0));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd,
+                  sessionId,
+                  draftAssistant,
+                  new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, false, null, null),
+                  T0));
+          seedAppliedCommand(tx, childThreadId, 1L, "do work", turnStart);
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(42),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            "coder",
+            10,
+            0L,
+            turnEnd,
+            null,
+            null,
+            T0,
+            T0);
+
+    store.transaction(
+        tx -> {
+          ThreadJoinReceipt receipt = ThreadJoinProjector.INSTANCE.project(tx, join).orElseThrow();
+          assertEquals(ThreadJoinOutcome.COMPLETED, receipt.outcome());
+          assertEquals("do work", receipt.prompt());
+          assertNull(receipt.report());
+          assertNull(receipt.partialResult());
+          assertNull(receipt.error());
+          // 渲染回退为明确占位，且绝不泄露切片内更早的助手文本。
+          assertFalse(receipt.renderCompletionXml().contains("old draft answer"));
+          return null;
+        });
+  }
+
   @Test
   void failedTurnWithAssistantTextAndErrorPayloadSeparatesPartialResultAndError() {
     // 测试意图：验证 FAILED 终态保留 partial assistant 文本作为 partialResult，且 error 携带 AssistantErrorPayload

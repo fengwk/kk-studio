@@ -962,6 +962,91 @@ class HistoryEntryPayloadJsonCodecTest {
                     + suffix));
   }
 
+  /**
+   * 测试意图：NOTIFICATION Entry 四字段严格往返，canonical 字段序固定为 {@code
+   * {notificationId,kind,sourceThreadId,message}}，message 只允许 USER 角色。
+   */
+  @Test
+  void roundTripsNotificationPayloadWithStrictFieldOrder() {
+    NotificationPayload payload =
+        new NotificationPayload(
+            new UUID(0L, 21L),
+            NotificationKind.SUBAGENT_RESULT,
+            new UUID(0L, 7L),
+            user("child finished"));
+    String json = CODEC.encode(payload);
+    assertEquals(
+        "{\"notificationId\":\"00000000-0000-0000-0000-000000000015\","
+            + "\"kind\":\"SUBAGENT_RESULT\","
+            + "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\","
+            + "\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\","
+            + "\"text\":\"child finished\"}]}}",
+        json);
+    assertEquals(payload, CODEC.decode(EntryType.NOTIFICATION, json));
+    assertEquals(payload, CODEC.decodeNode(EntryType.NOTIFICATION, CODEC.encodeNode(payload)));
+    // 通知类型是受限枚举：TASK_BUDGET 同样精确编码/解码，不落回自由文本。
+    NotificationPayload budget =
+        new NotificationPayload(
+            new UUID(0L, 22L), NotificationKind.TASK_BUDGET, new UUID(0L, 7L), user("budget"));
+    assertEquals(budget, CODEC.decode(EntryType.NOTIFICATION, CODEC.encode(budget)));
+  }
+
+  /** 测试意图：非 USER 角色的 NOTIFICATION 必须被拒绝，禁止把 assistant/tool 消息伪装成系统通知。 */
+  @Test
+  void rejectsNotificationWithNonUserMessageRole() {
+    String assistantMessage =
+        "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.NOTIFICATION, notificationJson(assistantMessage)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new NotificationPayload(
+                new UUID(0L, 21L),
+                NotificationKind.SUBAGENT_RESULT,
+                new UUID(0L, 7L),
+                assistant("x")));
+  }
+
+  /** 测试意图：NOTIFICATION 四字段全必填；缺失、未知、kind 越界与类型错误都必须严格拒绝且不丢字段。 */
+  @Test
+  void rejectsNotificationMissingUnknownOrWrongTypedFields() {
+    String message = "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"n\"}]}";
+    String id21 = "\"notificationId\":\"00000000-0000-0000-0000-000000000015\"";
+    String kind = "\"kind\":\"SUBAGENT_RESULT\"";
+    String id7 = "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\"";
+    String msg = "\"message\":" + message;
+
+    for (String json :
+        List.of(
+            "{" + kind + "," + id7 + "," + msg + "}", // 缺 notificationId
+            "{" + id21 + "," + id7 + "," + msg + "}", // 缺 kind
+            "{" + id21 + "," + kind + "," + msg + "}", // 缺 sourceThreadId
+            "{" + id21 + "," + kind + "," + id7 + "}", // 缺 message
+            "{" + id21 + "," + kind + "," + id7 + "," + msg + ",\"extra\":1}", // 未知字段
+            "{" + id21 + ",\"kind\":\"BOGUS\"," + id7 + "," + msg + "}", // kind 越界
+            "{" + id21 + ",\"kind\":\"subagent_result\"," + id7 + "," + msg + "}", // kind 大小写不放松
+            "{\"notificationId\":\"not-a-uuid\"," + kind + "," + id7 + "," + msg + "}",
+            "{" + id21 + "," + kind + ",\"sourceThreadId\":\"not-a-uuid\"," + msg + "}",
+            "{" + id21 + "," + kind + "," + id7 + ",\"message\":5}",
+            "{" + id21 + "," + kind + "," + id7 + ",\"message\":\"text\"}")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> CODEC.decode(EntryType.NOTIFICATION, json),
+          "NOTIFICATION must reject: " + json);
+    }
+  }
+
+  private static String notificationJson(String messageJson) {
+    return "{\"notificationId\":\"00000000-0000-0000-0000-000000000015\","
+        + "\"kind\":\"SUBAGENT_RESULT\","
+        + "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\","
+        + "\"message\":"
+        + messageJson
+        + "}";
+  }
+
   private static String rootSettingsWith(String reasonField) {
     return reasonField
         + "\"settings\":{\"agentName\":\"a\","
