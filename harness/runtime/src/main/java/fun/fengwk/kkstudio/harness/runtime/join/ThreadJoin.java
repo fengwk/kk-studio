@@ -6,12 +6,10 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
- * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head
- * 重新推导旧结果。
+ * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head 重新推导旧结果。
  *
  * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
- * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId}
- * 判定。
+ * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId} 判定。
  */
 public record ThreadJoin(
     UUID invocationId,
@@ -51,8 +49,7 @@ public record ThreadJoin(
       throw new IllegalArgumentException("maxTurns must be positive");
     }
     if (finalAnswerEntryId != null && terminalEntryId == null) {
-      throw new IllegalArgumentException(
-          "a final answer entry requires a frozen terminal entry");
+      throw new IllegalArgumentException("a final answer entry requires a frozen terminal entry");
     }
     if (deliveryCommandSequence != null
         && (parentThreadId == null || terminalEntryId == null || deliveryCommandSequence <= 0)) {
@@ -67,9 +64,7 @@ public record ThreadJoin(
     return terminalEntryId != null;
   }
 
-  /**
-   * 冻结一次结果：{@code terminalEntryId} 必填，{@code finalAnswerEntryId} 可空。已匹配的 join 不可再次冻结。
-   */
+  /** 冻结一次结果：{@code terminalEntryId} 必填，{@code finalAnswerEntryId} 可空。已匹配的 join 不可再次冻结。 */
   public ThreadJoin match(UUID terminalEntryId, UUID finalAnswerEntryId, Instant now) {
     if (matched()) {
       throw new IllegalArgumentException("join already matched");

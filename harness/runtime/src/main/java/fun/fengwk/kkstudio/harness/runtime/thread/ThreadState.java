@@ -11,13 +11,13 @@ import java.util.regex.Pattern;
  * 持久化 Thread 当前状态。
  *
  * <p>持久化 Thread 自身拥有的字段：所属 Session、不可变父 Thread、creation request hash 身份键、head Entry cursor、Thread
- * 显示名称、Thread YOLO runtime policy、执行控制（{@link ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位
- * {@code inputThroughSequence}（初值 0）、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId}、
- * {@code parentThreadId}、{@code creationRequestHash} 与 {@code createdAt} 创建后不可变；environment、open turn、execution
- * epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
+ * 显示名称、Thread YOLO runtime policy、执行控制（{@link ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code
+ * inputThroughSequence}（初值 0）、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId}、
+ * {@code parentThreadId}、{@code creationRequestHash} 与 {@code createdAt} 创建后不可变；environment、open
+ * turn、execution epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
- * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。执行控制只区分
- * {@code RUNNABLE / STOPPED}，不再维护递归的 IDLE/ACTIVE/WAITING_CHILDREN。
+ * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。执行控制只区分 {@code
+ * RUNNABLE / STOPPED}，不再维护递归的 IDLE/ACTIVE/WAITING_CHILDREN。
  *
  * <p>{@code inputThroughSequence} 是「已被普通 INPUT 接纳或确定性拒绝」的序号水位：它随历史、Command 应用坐标与 Invocation 在同
  * 一事务推进，不因 Stop、压缩或模型重试而倒退。{@code nextCommandSequence} 保留为下一条待分配 Command sequence。
@@ -80,9 +80,9 @@ public record ThreadState(
 
   /**
    * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / parentThreadId /
-   * creationRequestHash / createdAt）不可变， {@code headEntryId} / {@code inputThroughSequence} / {@code
-   * nextCommandSequence} / {@code version} / {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格
-   * +1。exact replay 一律被接受。
+   * creationRequestHash / createdAt）不可变， {@code headEntryId} / {@code inputThroughSequence} /
+   * {@code nextCommandSequence} / {@code version} / {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code
+   * version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -137,6 +137,23 @@ public record ThreadState(
   }
 
   /**
+   * 在一次原子步骤中预留 {@code count} 条 Command sequence 并设置执行控制：仅显式新 USER/GOAL/CUSTOM 输入可把 STOPPED 的目标
+   * Thread 恢复为 RUNNABLE，且必须在与命令写入同一 version 中完成；{@code count} 必须为正。
+   */
+  public ThreadState reserveCommandSequencesAndSetControl(
+      int count, ThreadExecutionControl executionControl, Instant now) {
+    if (count <= 0) {
+      throw new IllegalArgumentException("count must be positive");
+    }
+    return copy(
+        headEntryId,
+        Objects.requireNonNull(executionControl, "executionControl"),
+        inputThroughSequence,
+        Math.addExact(nextCommandSequence, (long) count),
+        now);
+  }
+
+  /**
    * 在一个原子步骤中推进 head Entry cursor，恒保留当前冻结的 YOLO runtime policy 与输入水位（不再接受外部传入值，杜绝 terminal /
    * resolver 提交路径写入过期策略）；{@code version} 严格 +1。
    */
@@ -150,8 +167,8 @@ public record ThreadState(
   }
 
   /**
-   * 在一个原子步骤中同时推进 head Entry cursor 与输入水位：普通 INPUT 把已物化通知与 queued 输入的 cutoff、应用坐标、历史与
-   * Invocation 一起提交；{@code version} 严格 +1。
+   * 在一个原子步骤中同时推进 head Entry cursor 与输入水位：普通 INPUT 把已物化通知与 queued 输入的 cutoff、应用坐标、历史与 Invocation
+   * 一起提交；{@code version} 严格 +1。
    */
   public ThreadState advanceHeadAndInputThroughSequence(
       UUID headEntryId, long inputThroughSequence, Instant now) {
@@ -171,13 +188,12 @@ public record ThreadState(
     if (inputThroughSequence < this.inputThroughSequence) {
       throw new IllegalArgumentException("inputThroughSequence must not regress");
     }
-    return copy(
-        headEntryId, executionControl, inputThroughSequence, nextCommandSequence, now);
+    return copy(headEntryId, executionControl, inputThroughSequence, nextCommandSequence, now);
   }
 
   /**
-   * 在同一 version 内预留 {@code count} 条 Command sequence 并推进 head：用于父 Thread 已停止时把系统通知直接固化到历史（命令与
-   * head 必须一致）。{@code count} 必须为正。
+   * 在同一 version 内预留 {@code count} 条 Command sequence 并推进 head：用于父 Thread 已停止时把系统通知直接固化到历史（命令与 head
+   * 必须一致）。{@code count} 必须为正。
    */
   public ThreadState reserveCommandSequencesAndAdvanceHead(
       int count, UUID headEntryId, Instant now) {

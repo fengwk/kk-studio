@@ -38,8 +38,8 @@ import java.util.function.Supplier;
 /**
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
  *
- * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：Join 在源输入应用后的首次执行终止（最终回答 / 不可继续失败 /
- * Stop）冻结一次，并与终态 Entry、父通知在同一事务提交。父 Thread 为 STOPPED 时通知直接固化到历史而不唤醒模型。
+ * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：Join 在源输入应用后的首次执行终止（最终回答 / 不可继续失败 / Stop）冻结一次，并与终态
+ * Entry、父通知在同一事务提交。父 Thread 为 STOPPED 时通知直接固化到历史而不唤醒模型。
  */
 public final class ThreadLifecycleCoordinator {
 
@@ -236,7 +236,8 @@ public final class ThreadLifecycleCoordinator {
     List<ThreadCommand> applied = new ArrayList<>(deliveries.size());
     UUID head = parent.headEntryId();
     for (ThreadJoinCompletion.Delivery delivery : deliveries) {
-      NotificationCommandPayload payload = (NotificationCommandPayload) delivery.command().payload();
+      NotificationCommandPayload payload =
+          (NotificationCommandPayload) delivery.command().payload();
       UUID entryId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -244,7 +245,9 @@ public final class ThreadLifecycleCoordinator {
               parent.sessionId(),
               head,
               new NotificationPayload(
-                  payload.notificationId(), payload.kind(), payload.sourceThreadId(),
+                  payload.notificationId(),
+                  payload.kind(),
+                  payload.sourceThreadId(),
                   payload.message()),
               now));
       applied.add(delivery.command().markApplied(entryId));
@@ -274,7 +277,8 @@ public final class ThreadLifecycleCoordinator {
             compactionConfig != null
                 && automaticCompactionPlanner.plan(thread, path, compactionConfig, hasQueuedDemand)
                     != null;
-        yield hasQueuedDemand || compactionDue;
+        // 已物化在输入水位之后的尾部系统通知同样构成尚未处理的本地工作；不能只看 QUEUED 行。
+        yield hasQueuedDemand || path.hasTrailingNotifications() || compactionDue;
       }
     };
   }

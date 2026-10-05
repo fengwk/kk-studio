@@ -235,7 +235,7 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
-  /** workspacePath 形状已整体删除，对任何 command type 都必须保持拒绝；SET_ENVIRONMENT 是当前唯一的第五类命令。 */
+  /** workspacePath 形状已整体删除，对任何 command type 都必须保持拒绝。 */
   @Test
   void rejectsLegacyWorkspacePathPayloadAcrossAllTypes() {
     for (ThreadCommandType type : ThreadCommandType.values()) {
@@ -248,7 +248,7 @@ class ThreadCommandPayloadJsonCodecTest {
           () -> codec.decode(type, "{\"workspacePath\":null}"),
           "workspacePath 形状必须对 " + type + " 保持拒绝");
     }
-    assertEquals(6, ThreadCommandType.values().length);
+    assertEquals(8, ThreadCommandType.values().length);
   }
 
   private static AgentMessage user(String text) {

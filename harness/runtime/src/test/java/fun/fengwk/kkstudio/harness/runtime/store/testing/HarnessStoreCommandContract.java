@@ -84,7 +84,7 @@ public abstract class HarnessStoreCommandContract {
             canonical.payload(),
             canonical.idempotencyKey(),
             canonical.requestHash(),
-            canonical.appliedTurnStartEntryId(),
+            canonical.appliedEntryId(),
             canonical.stopRequestId(),
             canonical.cancelledAt(),
             canonical.createdAt().plusNanos(1));

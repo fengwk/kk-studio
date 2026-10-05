@@ -13,10 +13,7 @@ import java.util.UUID;
  * {notificationId,kind,sourceThreadId,message}}，与 command JSON 同形。
  */
 public record NotificationPayload(
-    UUID notificationId,
-    NotificationKind kind,
-    UUID sourceThreadId,
-    AgentMessage message)
+    UUID notificationId, NotificationKind kind, UUID sourceThreadId, AgentMessage message)
     implements EntryPayload {
 
   public NotificationPayload {

@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -49,6 +50,7 @@ class TurnPlanTest {
             1L,
             List.of(),
             List.of(),
+            Map.of(),
             entries,
             candidatePath,
             TestIds.id(99),
@@ -84,6 +86,7 @@ class TurnPlanTest {
             1L,
             List.of(message),
             List.of(),
+            Map.of(),
             candidatePath.entries(),
             candidatePath,
             TestIds.id(99),
@@ -100,6 +103,7 @@ class TurnPlanTest {
             1L,
             List.of(message),
             List.of(message),
+            Map.of(),
             candidatePath.entries(),
             candidatePath,
             TestIds.id(99),
@@ -160,6 +164,7 @@ class TurnPlanTest {
                         sourcePath,
                         TurnStartReason.STOP,
                         List.of(),
+                        0L,
                         ids(7_000L),
                         NOW,
                         null));
@@ -187,6 +192,7 @@ class TurnPlanTest {
                 sourcePath,
                 TurnStartReason.INPUT,
                 List.of(custom),
+                1L,
                 ids(7_100L),
                 NOW,
                 null);
@@ -245,6 +251,7 @@ class TurnPlanTest {
                 0L,
                 List.of(),
                 List.of(),
+                Map.of(),
                 List.of(),
                 null,
                 TestIds.id(99),
@@ -261,6 +268,7 @@ class TurnPlanTest {
                 0L,
                 List.of(),
                 List.of(),
+                Map.of(),
                 List.of(),
                 candidatePath,
                 TestIds.id(99),
@@ -284,6 +292,7 @@ class TurnPlanTest {
         cutoffSequence,
         List.of(),
         List.of(),
+        Map.of(),
         candidatePath.entries(),
         candidatePath,
         turnStartEntryId,

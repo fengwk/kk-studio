@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -61,7 +60,7 @@ import java.util.function.Function;
  * Session 一个 ROOT 且 ROOT 先于其他 Entry、parent 连续且同 Session、createdAt 顺序与 turn / tool-prefix 结构）；Thread
  * head Entry 存在（insert 与 update）；Command 只能以 QUEUED 插入，所属 thread 存在且 保持 {@code (thread, sequence)}
  * 与 {@code (thread, idempotencyKey)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
- * exact-idempotent，appliedTurnStartEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
+ * exact-idempotent，appliedEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
  * ModelInvocation 只能以 READY / attempt=0 插入并保持 {@code (thread, turnStartEntryId)}
  * 唯一，requestHeadEntryId 必须等于 thread 当前 head（创建时 requestHead CAS），turnStartEntryId 必须位于 requestHead
  * 的 EntryPath 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path
@@ -868,8 +867,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
       return state.joins.values().stream()
-          .filter(
-              join -> join.childThreadId().equals(childThreadId) && !join.matched())
+          .filter(join -> join.childThreadId().equals(childThreadId) && !join.matched())
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
                   .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
@@ -898,9 +896,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       Objects.requireNonNull(parentThreadId, "parentThreadId");
       return (int)
           state.joins.values().stream()
-              .filter(
-                  join ->
-                      parentThreadId.equals(join.parentThreadId()) && !join.matched())
+              .filter(join -> parentThreadId.equals(join.parentThreadId()) && !join.matched())
               .count();
     }
 
@@ -950,7 +946,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       for (int i = 0; i < receipts.size(); i++) {
         state.stopReceipts.put(keys.get(i), receipts.get(i));
       }
-      state.stopReceiptsByRoot
+      state
+          .stopReceiptsByRoot
           .computeIfAbsent(rootStopRequestId, ignored -> new ArrayList<>())
           .addAll(keys);
     }
@@ -960,7 +957,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(stopRequestId, "stopRequestId");
-      return Optional.ofNullable(state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)));
+      return Optional.ofNullable(
+          state.stopReceipts.get(new StopReceiptKey(threadId, stopRequestId)));
     }
 
     @Override
@@ -982,8 +980,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       return keys.stream()
           .map(state.stopReceipts::get)
-          .sorted(
-              Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR))
+          .sorted(Comparator.comparing(StoppedThreadReceipt::threadId, UuidOrder.COMPARATOR))
           .toList();
     }
 
@@ -1245,28 +1242,31 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * appliedTurnStartEntryId（若有）必须指向 TURN_START Entry，该 Entry 的 path session 与 Command Thread 的
-     * Session 一致，且被引用 TURN_START 的 ownerThreadId 等于 command 的 threadId。
+     * appliedEntryId（若有）必须指向用户/配置的 TURN_START Entry 或系统通知自身的 NOTIFICATION Entry；该 Entry 的 path
+     * session 与 Command Thread 的 Session 一致，被引用 TURN_START 的 ownerThreadId 等于 command 的 threadId。
      */
     private void requireValidConsumedTurnStart(ThreadCommand command) {
-      UUID appliedTurnStartEntryId = command.appliedTurnStartEntryId();
-      if (appliedTurnStartEntryId == null) {
+      UUID appliedEntryId = command.appliedEntryId();
+      if (appliedEntryId == null) {
         return;
       }
-      Entry turnStart = requireExistingEntry(appliedTurnStartEntryId);
-      if (turnStart.payload().type() != EntryType.TURN_START) {
-        throw new IllegalArgumentException(
-            "appliedTurnStartEntryId must reference a TURN_START entry");
-      }
+      Entry applied = requireExistingEntry(appliedEntryId);
       ThreadState thread = state.threads.get(command.threadId());
       if (thread == null) {
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
       }
-      if (!turnStart.sessionId().equals(thread.sessionId())) {
+      if (!applied.sessionId().equals(thread.sessionId())) {
         throw new IllegalArgumentException(
-            "consumed turn start must be in the command thread's session");
+            "consumed entry must be in the command thread's session");
       }
-      TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
+      if (applied.payload().type() == EntryType.NOTIFICATION) {
+        // 系统通知物化为自身 NOTIFICATION Entry，不引用 TURN_START。
+        return;
+      }
+      if (applied.payload().type() != EntryType.TURN_START) {
+        throw new IllegalArgumentException("appliedEntryId must reference a TURN_START entry");
+      }
+      TurnStartPayload turnStartPayload = (TurnStartPayload) applied.payload();
       if (!command.threadId().equals(turnStartPayload.ownerThreadId())) {
         throw new IllegalArgumentException(
             "consumed turn start ownerThreadId must equal the command threadId");
@@ -1278,15 +1278,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
      * terminal-&gt;QUEUED、APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变。
      */
     private static void requireValidCommandLifecycle(ThreadCommand stored, ThreadCommand command) {
-      if (stored.appliedTurnStartEntryId() != null || stored.cancelledAt() != null) {
-        if (!Objects.equals(stored.appliedTurnStartEntryId(), command.appliedTurnStartEntryId())
+      if (stored.appliedEntryId() != null || stored.cancelledAt() != null) {
+        if (!Objects.equals(stored.appliedEntryId(), command.appliedEntryId())
             || !Objects.equals(stored.cancelledAt(), command.cancelledAt())) {
           throw new IllegalArgumentException(
               "terminal commands must be updated exactly idempotently");
         }
         return;
       }
-      boolean consumed = command.appliedTurnStartEntryId() != null;
+      boolean consumed = command.appliedEntryId() != null;
       boolean cancelled = command.cancelledAt() != null;
       if (consumed == cancelled) {
         // 两者都缺失：QUEUED -> QUEUED；两者都存在时已被 record contract 直接拒绝。

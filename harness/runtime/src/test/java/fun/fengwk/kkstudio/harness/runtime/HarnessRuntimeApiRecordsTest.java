@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.sett
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,14 +16,13 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reaso
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 
@@ -219,10 +219,10 @@ class HarnessRuntimeApiRecordsTest {
     assertEquals(TestIds.id(7), input.idempotencyKey());
     assertEquals(payload, input.payload());
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new CancelledThreadInput(0L, TestIds.id(7), payload));
+        IllegalArgumentException.class, () -> new CancelledThreadInput(0L, TestIds.id(7), payload));
     assertThrows(NullPointerException.class, () -> new CancelledThreadInput(1L, null, payload));
-    assertThrows(NullPointerException.class, () -> new CancelledThreadInput(1L, TestIds.id(7), null));
+    assertThrows(
+        NullPointerException.class, () -> new CancelledThreadInput(1L, TestIds.id(7), null));
   }
 
   /** StopResult / StoppedThreadReceipt 最终形状：replayed + 权威 Thread + 每节点持久回执。 */

@@ -20,7 +20,10 @@ public enum ThreadRuntimeStatus {
   /** 本地处于空闲上下文，但存在已排队命令等待启动新 turn（控制增强状态，local-only 的 {@code from} 绝不返回）。 */
   QUEUED,
 
-  /** Thread 已被显式停止（{@code ThreadExecutionControl.STOPPED}），不再启动模型执行（控制增强状态，local-only 的 {@code from} 绝不返回）。 */
+  /**
+   * Thread 已被显式停止（{@code ThreadExecutionControl.STOPPED}），不再启动模型执行（控制增强状态，local-only 的 {@code from}
+   * 绝不返回）。
+   */
   STOPPED,
 
   /** 线程存在待推进的继续义务，等待调度触发新的执行。 */

@@ -21,8 +21,8 @@ import java.util.UUID;
  * Join 结果交付的共享实现：把已冻结的 Join 投影为固定回执，构造一条 {@link NotificationKind#SUBAGENT_RESULT} 系统通知命令交付给父
  * Thread，并给出待写入的 Join 交付事实。
  *
- * <p>执行终止边界、Join 结果冻结与父通知接受在同一事务提交；父为 STOPPED 时由调用方把通知直接固化到历史而不唤醒模型。通知内容与来源在冻结时
- * 确定，重复交付不从子 Thread 最新 head 重建旧结果。
+ * <p>执行终止边界、Join 结果冻结与父通知接受在同一事务提交；父为 STOPPED 时由调用方把通知直接固化到历史而不唤醒模型。通知内容与来源在冻结时 确定，重复交付不从子 Thread
+ * 最新 head 重建旧结果。
  */
 public final class ThreadJoinCompletion {
 
@@ -69,7 +69,7 @@ public final class ThreadJoinCompletion {
             parent.id(),
             sequence,
             payload,
-            payload.notificationId(),
+            matched.invocationId(),
             ThreadCommandPayloadJsonCodec.requestHash(payload),
             null,
             null,

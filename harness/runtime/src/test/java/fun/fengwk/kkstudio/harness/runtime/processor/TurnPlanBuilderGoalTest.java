@@ -61,6 +61,7 @@ class TurnPlanBuilderGoalTest {
             path(store, baseline.threadId()),
             TurnStartReason.INPUT,
             List.of(goal),
+            1L,
             ids(),
             NOW,
             null);
@@ -95,7 +96,7 @@ class TurnPlanBuilderGoalTest {
 
     TurnPlan first =
         builder.build(
-            baseline.threadId(), base, TurnStartReason.INPUT, List.of(goal), ids, NOW, null);
+            baseline.threadId(), base, TurnStartReason.INPUT, List.of(goal), 1L, ids, NOW, null);
     GoalSetting firstSetting = first.candidatePath().baseSettings().goal();
     ThreadCommand repeated =
         new ThreadCommand(
@@ -114,6 +115,7 @@ class TurnPlanBuilderGoalTest {
             first.candidatePath(),
             TurnStartReason.INPUT,
             List.of(repeated),
+            1L,
             ids,
             NOW,
             null);
@@ -138,6 +140,7 @@ class TurnPlanBuilderGoalTest {
             second.candidatePath(),
             TurnStartReason.INPUT,
             List.of(clear),
+            1L,
             ids,
             NOW,
             null);
@@ -160,6 +163,7 @@ class TurnPlanBuilderGoalTest {
             path(store, baseline.threadId()),
             TurnStartReason.CONTINUATION,
             List.of(goal),
+            1L,
             ids(),
             NOW,
             null);

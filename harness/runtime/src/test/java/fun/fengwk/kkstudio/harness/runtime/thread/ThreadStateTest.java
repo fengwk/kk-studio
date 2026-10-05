@@ -419,7 +419,14 @@ class ThreadStateTest {
             ThreadState.validateTransition(
                 stored,
                 state(
-                    id(8), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 6L, CREATED)));
+                    id(8),
+                    id(100),
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    6L,
+                    CREATED)));
     // 拒绝 sessionId 改变
     assertThrows(
         IllegalArgumentException.class,

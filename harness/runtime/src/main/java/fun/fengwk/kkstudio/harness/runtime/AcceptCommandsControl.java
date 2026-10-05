@@ -48,7 +48,8 @@ import java.util.UUID;
 final class AcceptCommandsControl {
 
   /**
-   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt; SET_CONTRIBUTOR_STATE，每类至多一次、全部在消息之前。
+   * SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT -&gt;
+   * SET_CONTRIBUTOR_STATE，每类至多一次、全部在消息之前。
    */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
       List.of(
@@ -364,7 +365,10 @@ final class AcceptCommandsControl {
           }
 
           ThreadState advanced =
-              thread.reserveCommandSequences(allInserted.size(), parentMutationNow);
+              resumeStoppedTarget(thread, genuineUserInput)
+                  ? thread.reserveCommandSequencesAndSetControl(
+                      allInserted.size(), ThreadExecutionControl.RUNNABLE, parentMutationNow)
+                  : thread.reserveCommandSequences(allInserted.size(), parentMutationNow);
           tx.updateThread(advanced);
 
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
@@ -480,6 +484,10 @@ final class AcceptCommandsControl {
       ThreadState parent =
           tx.findThread(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
+      // 停止父 Thread 不再接受新的执行子任务：不能只依赖 head 变化，STOPPED 是持久的拒绝条件。
+      if (parent.executionControl().isStopped()) {
+        throw new IllegalArgumentException("join parent is stopped");
+      }
       if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())) {
         throw new IllegalArgumentException("join parent no longer accepts this invocation");
       }
@@ -744,6 +752,11 @@ final class AcceptCommandsControl {
   private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
     Instant candidate = Objects.requireNonNull(now, "now");
     return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
+  }
+
+  /** 仅显式新 USER/GOAL/CUSTOM（非系统性 reminder）输入把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */
+  private static boolean resumeStoppedTarget(ThreadState thread, boolean genuineUserInput) {
+    return genuineUserInput && thread.executionControl().isStopped();
   }
 
   private static boolean isGenuineUserInput(List<NewThreadCommand> commands) {

@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -103,7 +103,7 @@ class HarnessRuntimeStopContinuationTest {
         store.transaction(
             tx -> tx.findCommandByIdempotencyKey(threadId, TestIds.id(1)).orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
-    assertNull(command.appliedTurnStartEntryId());
+    assertNull(command.appliedEntryId());
     assertFalse(
         store
             .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)))
@@ -212,6 +212,8 @@ class HarnessRuntimeStopContinuationTest {
 
     StopResult replay = runtime.stop(new StopCommand(ids[0], stopRequestId, 0));
     assertTrue(replay.replayed());
-    assertEquals(targetReceipt(first).stoppedTurnEndEntryId(), targetReceipt(replay).stoppedTurnEndEntryId());
+    assertEquals(
+        targetReceipt(first).stoppedTurnEndEntryId(),
+        targetReceipt(replay).stoppedTurnEndEntryId());
   }
 }

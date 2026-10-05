@@ -231,7 +231,10 @@ abstract class HarnessStoreDeletionContract {
 
   /** 在已有 Session 中创建一个永久子 Thread（父 Thread 可以位于另一个 Session）。 */
   private UUID createChildThread(
-      UUID parentThreadId, UUID sessionId, UUID headEntryId, ThreadExecutionControl executionControl) {
+      UUID parentThreadId,
+      UUID sessionId,
+      UUID headEntryId,
+      ThreadExecutionControl executionControl) {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
@@ -278,7 +281,6 @@ abstract class HarnessStoreDeletionContract {
                   parentThreadId,
                   childThreadId,
                   1L,
-                  0L,
                   "test-agent",
                   10,
                   0L,
@@ -288,7 +290,7 @@ abstract class HarnessStoreDeletionContract {
                   T1,
                   T1);
           tx.insertJoin(join);
-          tx.updateJoin(join.match(1L, resultHeadEntryId, T2));
+          tx.updateJoin(join.match(resultHeadEntryId, null, T2));
         });
   }
 }

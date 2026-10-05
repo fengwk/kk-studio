@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -40,8 +39,8 @@ import java.util.function.Supplier;
  * <p>INPUT 收获快照内<b>全部</b> queued Command（不再在首条 user-like 后截断），消费到冻结 cutoff 为止；SET_* 与
  * SET_CONTRIBUTOR_STATE 按 sequence 归约成该轮配置（SET_CONTRIBUTOR_STATE 同时追加 CUSTOM state Entry），
  * USER_MESSAGE / CUSTOM_MESSAGE / GOAL 追加对应消息，NOTIFICATION 追加为系统通知 Entry。cutoff 之后到达的输入留到下一轮。
- * 只要快照含至少一条消息或通知就允许规划；纯设置不单独触发。CONTINUATION 只消费设置，保留消息与通知留待下一轮 INPUT；COMPACTION
- * 消费零 Command。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
+ * 只要快照含至少一条消息或通知就允许规划；纯设置不单独触发。CONTINUATION 只消费设置，保留消息与通知留待下一轮 INPUT；COMPACTION 消费零
+ * Command。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
 final class TurnPlanBuilder {
 
@@ -81,7 +80,9 @@ final class TurnPlanBuilder {
         consumedCommands.add(command);
       }
     }
-    if (reason == TurnStartReason.INPUT && !hasInputDemand(consumedCommands)) {
+    if (reason == TurnStartReason.INPUT
+        && !hasInputDemand(consumedCommands)
+        && !sourcePath.hasTrailingNotifications()) {
       throw new IllegalArgumentException(
           "INPUT plan requires at least one queued message or notification");
     }
@@ -170,7 +171,9 @@ final class TurnPlanBuilder {
                     sessionId,
                     parentId,
                     new NotificationPayload(
-                        value.notificationId(), value.kind(), value.sourceThreadId(),
+                        value.notificationId(),
+                        value.kind(),
+                        value.sourceThreadId(),
                         value.message()),
                     now));
             appliedEntryIds.put(command.sequence(), entryId);

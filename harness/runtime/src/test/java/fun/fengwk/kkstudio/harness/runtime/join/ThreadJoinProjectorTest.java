@@ -56,7 +56,7 @@ import java.util.UUID;
  * <ol>
  *   <li>未匹配的 ThreadJoin 返回 empty；
  *   <li>已匹配的 ThreadJoin 严格以其冻结的 terminalEntryId 为 head 加载路径；
- *   <li>执行切片从源命令的 appliedTurnStartEntryId 起算，绝不取切片之前的旧助手输出；
+ *   <li>执行切片从源命令的 appliedEntryId 起算，绝不取切片之前的旧助手输出；
  *   <li>执行前被取消（未产生 turnStart 或已被取消）结算为 CANCELLED 且 partial/report 为空；
  *   <li>COMPLETED、FAILED、STOPPED、CANCELLED 四种终态的 report/partial/error 映射与契约完全一致；
  *   <li>多轮次/多命令时，后续轮次的推进不影响旧 Join 的固定凭据（fixed head snapshot）。
@@ -266,7 +266,7 @@ class ThreadJoinProjectorTest {
 
   @Test
   void appliedTurnStartMissingFromHeadPathThrowsIllegalStateException() {
-    // 测试意图：验证当 appliedTurnStartEntryId 不在 terminalEntryId 路径上时判定为不变量破损，抛出
+    // 测试意图：验证当 appliedEntryId 不在 terminalEntryId 路径上时判定为不变量破损，抛出
     // IllegalStateException（不伪造 CANCELLED）。
     UUID turnStartOrphan = id(200);
     UUID userOrphan = id(201);

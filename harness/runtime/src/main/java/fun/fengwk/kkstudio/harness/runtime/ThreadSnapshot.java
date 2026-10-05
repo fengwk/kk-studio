@@ -49,8 +49,8 @@ public record ThreadSnapshot(
   }
 
   /**
-   * 持久执行控制为 {@link ThreadExecutionControl#STOPPED} 时投影 STOPPED；否则按本地适用上下文投影细分阶段，本地空闲但存在排队命令时
-   * 投影 QUEUED。不递归查询后代。
+   * 持久执行控制为 {@link ThreadExecutionControl#STOPPED} 时投影 STOPPED；否则按本地适用上下文投影细分阶段，本地空闲但存在排队命令时 投影
+   * QUEUED。不递归查询后代。
    */
   public ThreadRuntimeStatus runtimeStatus() {
     if (thread.executionControl().isStopped()) {

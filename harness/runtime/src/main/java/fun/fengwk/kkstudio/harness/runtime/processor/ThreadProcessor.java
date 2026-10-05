@@ -218,6 +218,12 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    // STOPPED 是持久的执行控制：停止后只固化通知，绝不自动启动模型；只有显式新人工/可信输入在 accept 阶段恢复
+    // RUNNABLE 后才会再次进入这里。残留 claim 在这里完成 fencing，不产生任何 durable mutation。
+    if (thread.executionControl().isStopped()) {
+      completeClaim(tx, claim, now);
+      return null;
+    }
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     return switch (context) {
@@ -278,7 +284,8 @@ public final class ThreadProcessor {
       }
       case ThreadContext.IdleOrHistorical ignored -> {
         List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-        boolean userDemand = hasQueuedDemand(queued);
+        // 已物化但位于输入水位之后的系统通知仍需普通输入处理：不能只从 QUEUED 行判断 demand。
+        boolean userDemand = hasQueuedDemand(queued) || path.hasTrailingNotifications();
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
             automaticCompactionPlanner.plan(
@@ -295,7 +302,10 @@ public final class ThreadProcessor {
     };
   }
 
-  /** queued 快照中是否存在需要驱动 turn 的输入（USER_MESSAGE、USER CUSTOM_MESSAGE 或系统 NOTIFICATION）；SET_* 不构成 turn 需求。 */
+  /**
+   * queued 快照中是否存在需要驱动 turn 的输入（USER_MESSAGE、USER CUSTOM_MESSAGE 或系统 NOTIFICATION）；SET_* 不构成 turn
+   * 需求。
+   */
   private static boolean hasQueuedDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
       if (command.type().isMessage() || command.type().isNotification()) {
@@ -746,9 +756,11 @@ public final class ThreadProcessor {
       CompactionPreparation preparation,
       Instant now) {
     // 分类与构造同事务：classifier 已确认的 precondition 在此不可达，泄露即为不变量失败，fail closed 绝不循环重试。
+    // 回合之间可追加已物化系统通知；续写义务锚点必须看到通知之前的 TURN_END。
     if (reason == TurnStartReason.CONTINUATION
         && (path.openTurnStart().isPresent()
-            || !(path.head().payload() instanceof TurnEndPayload end && end.continueModel()))) {
+            || !(path.headIgnoringTrailingNotifications().payload() instanceof TurnEndPayload end
+                && end.continueModel()))) {
       throw new IllegalStateException(
           "continuation preconditions changed under the same transaction for thread "
               + thread.id());
@@ -919,7 +931,8 @@ public final class ThreadProcessor {
               != null;
       boolean requestThread = deferredUserDemand || compactionDue;
       ThreadState advanced =
-          thread.advanceHeadAndInputThroughSequence(turnEndId, nextWatermark(plan, thread), mutationNow);
+          thread.advanceHeadAndInputThroughSequence(
+              turnEndId, nextWatermark(plan, thread), mutationNow);
       tx.updateThread(advanced);
       // Rejected 是源输入的不可继续失败：执行终止边界结算本次 Join。
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
@@ -952,9 +965,7 @@ public final class ThreadProcessor {
     return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
   }
 
-  /**
-   * INPUT / CONTINUATION 把输入水位推进到冻结 cutoff；COMPACTION 不推进水位，保留尚待处理通知的原始尾部。
-   */
+  /** INPUT / CONTINUATION 把输入水位推进到冻结 cutoff；COMPACTION 不推进水位，保留尚待处理通知的原始尾部。 */
   private static long nextWatermark(TurnPlan plan, ThreadState thread) {
     if (plan.reason() == TurnStartReason.COMPACTION) {
       return thread.inputThroughSequence();

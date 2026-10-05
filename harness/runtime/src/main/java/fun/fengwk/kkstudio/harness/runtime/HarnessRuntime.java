@@ -527,11 +527,7 @@ public final class HarnessRuntime {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread);
     return snapshot(
-        thread,
-        locked.path(),
-        queued,
-        locked.context(),
-        tx.loadStopReceiptsByThread(thread.id()));
+        thread, locked.path(), queued, locked.context(), tx.loadStopReceiptsByThread(thread.id()));
   }
 
   private static ThreadSnapshot snapshot(

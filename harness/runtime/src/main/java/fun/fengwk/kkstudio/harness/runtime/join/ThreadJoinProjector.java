@@ -27,14 +27,14 @@ import java.util.UUID;
 /**
  * 无状态的只读 ThreadJoin 结果凭据投影器。
  *
- * <p>未匹配的 join 返回 {@link Optional#empty()}； 已匹配的 join 以其冻结的 {@code terminalEntryId} 为界，通过 store
- * 加载 root-to-head 历史路径， 定位源命令的 {@code appliedEntryId}，并仅对该切片范围内的条目推导终态与报告：
+ * <p>未匹配的 join 返回 {@link Optional#empty()}； 已匹配的 join 以其冻结的 {@code terminalEntryId} 为界，通过 store 加载
+ * root-to-head 历史路径， 定位源命令的 {@code appliedEntryId}，并仅对该切片范围内的条目推导终态与报告：
  *
  * <ul>
  *   <li>源命令在执行前被取消（{@code cancelledAt != null} 且 {@code appliedEntryId == null}）投影为 {@link
  *       ThreadJoinOutcome#CANCELLED}，且不包含旧的助手文本；
- *   <li>源命令未被执行（无 {@code appliedEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出
- *       {@link IllegalStateException}；
+ *   <li>源命令未被执行（无 {@code appliedEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出 {@link
+ *       IllegalStateException}；
  *   <li>正常完成投影为 {@link ThreadJoinOutcome#COMPLETED} 与最后一段助手产出的 report；
  *   <li>失败投影为 {@link ThreadJoinOutcome#ERROR}，分离 error 与 partialResult；
  *   <li>用户停止或取消投影为 {@link ThreadJoinOutcome#CANCELLED}，保留 partialResult 与取消说明。
