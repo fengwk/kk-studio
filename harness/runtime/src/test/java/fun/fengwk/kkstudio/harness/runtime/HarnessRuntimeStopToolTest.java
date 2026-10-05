@@ -15,13 +15,11 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.succ
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -33,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
@@ -177,35 +174,46 @@ class HarnessRuntimeStopToolTest {
   }
 
   @Test
-  void terminalPendingToolStopConflictsWithoutAnyMutation() {
+  void terminalPendingToolStopMaterializesToolResultsThenStops() {
+    // 模型已 SUCCEEDED（assistant 已挂载），唯一 Tool sibling 已 terminal 但结果尚未物化。
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     cancelTool(store, baseline);
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
     seedToolWork(store, baseline.toolId());
-    HarnessRuntimeConflictException error =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
-    assertEquals(Reason.TERMINAL_APPLY_PENDING, error.reason());
-    ToolInvocation tool =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
-    assertEquals(ToolInvocationStatus.CANCELLED, tool.status());
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(1L, thread.version());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
-    assertEquals(4, path.entries().size());
+
+    // 提交先于 Stop：Stop 不 409，而是把已 terminal 的 tool sibling 结果物化进历史后正常停止。
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
+    assertStopped(result);
+    ThreadState stored = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));
+    // ToolResult 已物化（TOOL 角色），并保留 batch 关闭的 COMPLETED TURN_END；head 为 STOP 边界。
     assertTrue(
+        path.entries().stream()
+            .anyMatch(
+                e ->
+                    e.payload() instanceof MessagePayload msg && msg.toolResultMetadata() != null));
+    assertTrue(
+        path.entries().stream()
+            .anyMatch(
+                e ->
+                    e.payload() instanceof TurnEndPayload end
+                        && end.outcome() == TurnEndOutcome.COMPLETED));
+    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
+    // 全部 Invocation 行与 Work 删除。
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
+    assertFalse(
         store
             .transaction(
                 tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
-    assertTrue(
+    assertFalse(
         store
             .transaction(
                 tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
             .isPresent());
-    assertTrue(
+    assertFalse(
         store
             .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
             .isPresent());

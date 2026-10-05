@@ -5,22 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -29,10 +21,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
@@ -126,12 +116,10 @@ public final class ThreadProcessor {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
-  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
-  private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
+  private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
-  private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
   private final AutomaticCompactionPlanner automaticCompactionPlanner =
       new AutomaticCompactionPlanner();
   private final ThreadLifecycleCoordinator coordinator;
@@ -161,7 +149,7 @@ public final class ThreadProcessor {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
-    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
+    this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
     this.coordinator = new ThreadLifecycleCoordinator();
   }
 
@@ -343,20 +331,6 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
-  private static ModelAttemptSnapshot modelAttemptSnapshot(ModelInvocation model) {
-    if (model.failedAttempts().size() == model.attempt()) {
-      return null;
-    }
-    if (model.streamCheckpoint() == null) {
-      return new ModelAttemptSnapshot(model.attempt(), 0, "", "");
-    }
-    return new ModelAttemptSnapshot(
-        model.streamCheckpoint().attempt(),
-        model.streamCheckpoint().sequence(),
-        model.streamCheckpoint().text(),
-        model.streamCheckpoint().thinking());
-  }
-
   /**
    * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序），单 action 恰好执行一次并完成 claim。
    *
@@ -411,131 +385,20 @@ public final class ThreadProcessor {
           hasQueuedMessage);
       return;
     }
-    UUID sessionId = path.root().sessionId();
-    UUID parentId =
-        ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model, false);
-    boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
-    ProviderResponse response = model.result();
-    UUID resultEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            resultEntryId,
-            sessionId,
-            parentId,
-            succeeded
-                ? payloadMapper.assistantPayload(response, model.requestSpec().toolBindings())
-                : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
-            mutationNow,
-            succeeded ? model.providerReplayState() : null));
-    UUID head = resultEntryId;
-    boolean toolPhase = false;
-    boolean continueModel = false;
-    boolean terminal = false;
-    UUID finalAnswerEntryId = null;
-    List<ToolInvocation> invocations = List.of();
-    if (succeeded) {
-      // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
-      ModelResponsePlan plan = responsePlanner.plan(response, model.requestSpec().toolBindings());
-      switch (plan) {
-        case ModelResponsePlan.Completed ignored -> {
-          terminal = true;
-          finalAnswerEntryId = resultEntryId;
-          head =
-              appendCompletedTurnEnd(
-                  tx, sessionId, resultEntryId, model.turnStartEntryId(), false, mutationNow);
-        }
-        case ModelResponsePlan.Continue ignored -> {
-          // 上游协议要求立即续写：本 turn 以 COMPLETED + continueModel=true 关闭，下一 claim 由既有 durable
-          // continuation 机制启动下一轮模型调用（不在此处复制 continuation 逻辑）。
-          continueModel = true;
-          head =
-              appendCompletedTurnEnd(
-                  tx, sessionId, resultEntryId, model.turnStartEntryId(), true, mutationNow);
-        }
-        case ModelResponsePlan.Failed failed -> {
-          terminal = true;
-          UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  resultEntryId,
-                  new TurnEndPayload(
-                      model.turnStartEntryId(),
-                      TurnEndOutcome.FAILED,
-                      false,
-                      failed.reason(),
-                      null),
-                  mutationNow));
-          head = turnEndId;
-        }
-        case ModelResponsePlan.ToolBatch batch -> {
-          toolPhase = true;
-          // active Tool phase：attach resultEntryId 并保留 parent，插入全部 sibling。
-          tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-          List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
-          Map<ContributorStateKey, ContributorStateAccessMode> seenStateAccesses = new HashMap<>();
-          for (int callIndex = 0; callIndex < batch.tools().size(); callIndex++) {
-            ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
-            ToolInvocationStatus status = slot.status();
-            ToolInvocationError error = slot.error();
-            if (status == ToolInvocationStatus.READY) {
-              // READY 槽位的 binding 由 planner 保证非空；contributor sibling 状态冲突仍在 Thread 边界确定性拒绝。
-              ToolInvocationError conflict =
-                  siblingStateConflict(slot.binding().contributor(), seenStateAccesses);
-              if (conflict != null) {
-                status = ToolInvocationStatus.FAILED;
-                error = conflict;
-              }
-            }
-            UUID toolId = tx.nextId();
-            materialized.add(
-                new ToolInvocation(
-                    toolId,
-                    model.id(),
-                    resultEntryId,
-                    callIndex,
-                    slot.call(),
-                    slot.binding(),
-                    status,
-                    0,
-                    null,
-                    null,
-                    ToolEffectBatch.EMPTY,
-                    error,
-                    mutationNow,
-                    mutationNow));
-          }
-          tx.insertToolInvocations(materialized);
-          invocations = materialized;
-        }
-      }
-    } else {
-      terminal = true;
-      UUID turnEndId = tx.nextId();
-      tx.insertEntry(
-          new Entry(
-              turnEndId,
-              sessionId,
-              resultEntryId,
-              new TurnEndPayload(
-                  model.turnStartEntryId(),
-                  TurnEndOutcome.FAILED,
-                  false,
-                  TurnEndReason.TURN_FAILED,
-                  null),
-              mutationNow));
-      head = turnEndId;
-    }
+    ModelOutcomeAppender.Applied applied =
+        modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
+    UUID head = applied.headEntryId();
+    UUID finalAnswerEntryId = applied.finalAnswerEntryId();
+    boolean terminal = applied.terminal();
+    boolean continueModel = applied.continueModel();
+    boolean toolPhase = applied.toolPhase();
+    List<ToolInvocation> invocations = applied.toolInvocations();
     ThreadState advancedThread;
     boolean requestThread = false;
     if (toolPhase) {
       advancedThread = thread.advanceHead(head, mutationNow);
       tx.updateThread(advancedThread);
     } else {
-      // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
-      tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-      tx.deleteModelInvocation(model.id());
       // 完全结束的 closed turn 只重建 queued demand / fallback / hard-overflow obligation；soft threshold
       // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
       // obligation 并启动续写。
@@ -586,26 +449,6 @@ public final class ThreadProcessor {
     tx.completeWork(claim, now);
   }
 
-  /** COMPLETED TURN_END（COMPLETE 无 calls 与 CONTINUE 共用）；返回新 head。 */
-  private static UUID appendCompletedTurnEnd(
-      HarnessStore.Transaction tx,
-      UUID sessionId,
-      UUID parentId,
-      UUID turnStartEntryId,
-      boolean continueModel,
-      Instant mutationNow) {
-    UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            sessionId,
-            parentId,
-            new TurnEndPayload(
-                turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-            mutationNow));
-    return turnEndId;
-  }
-
   /** 应用一个 terminal Compaction Model；摘要语义失败也关闭本 turn，让 reducer决定一次 fallback或停止。 */
   private void applyCompactionModel(
       HarnessStore.Transaction tx,
@@ -617,46 +460,11 @@ public final class ThreadProcessor {
       Instant mutationNow,
       Instant workNow,
       boolean hasQueuedDemand) {
-    UUID sessionId = path.root().sessionId();
-    EntryPayload resultPayload;
-    TurnEndOutcome outcome;
-    boolean continueModel = false;
-    if (model.status() != ModelInvocationStatus.SUCCEEDED) {
-      resultPayload =
-          payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model));
-      outcome = TurnEndOutcome.FAILED;
-    } else {
-      resultPayload = CompactionResultEvaluator.evaluate(path, start, model.result());
-      if (resultPayload instanceof CompactionPayload) {
-        outcome = TurnEndOutcome.COMPLETED;
-        continueModel =
-            start.phase() == CompactionPhase.HISTORY
-                || start.trigger() == CompactionTrigger.OVERFLOW
-                || (start.trigger() == CompactionTrigger.THRESHOLD
-                    && CompactionHistory.hasPendingOwnedContinuation(
-                        thread, path, model.turnStartEntryId()));
-      } else {
-        outcome = TurnEndOutcome.FAILED;
-      }
-    }
-    UUID resultEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(resultEntryId, sessionId, path.head().id(), resultPayload, mutationNow));
-    UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            sessionId,
-            resultEntryId,
-            new TurnEndPayload(
-                model.turnStartEntryId(),
-                outcome,
-                continueModel,
-                outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
-                null),
-            mutationNow));
-    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-    tx.deleteModelInvocation(model.id());
+    ModelOutcomeAppender.Applied applied =
+        modelOutcomeAppender.appendCompaction(tx, thread, path, model, start, mutationNow);
+    UUID turnEndId = applied.headEntryId();
+    TurnEndOutcome outcome = applied.outcome();
+    boolean continueModel = applied.continueModel();
     boolean compactionDue =
         automaticCompactionPlanner.plan(
                 thread.advanceHead(turnEndId, mutationNow),
@@ -720,36 +528,17 @@ public final class ThreadProcessor {
             "tool siblings changed under lock for assistant entry " + assistant.id());
       }
     }
-    // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
-    ModelAttemptMaterialization.validateAttached(model, path);
     Instant mutationNow =
         HarnessStoreTime.notBefore(
             now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
     for (ToolInvocation sibling : siblings) {
       mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
     }
-    UUID sessionId = path.root().sessionId();
-    UUID parentId = path.head().id();
-    for (ToolInvocation sibling : siblings) {
-      ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(
-              tx, sessionId, parentId, sibling, mutationNow, toolResultHistoryMaterializer);
-      parentId = applied.headEntryId();
-    }
-    UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            sessionId,
-            parentId,
-            new TurnEndPayload(
-                model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
-            mutationNow));
+    ModelOutcomeAppender.Applied applied =
+        modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, mutationNow);
+    UUID turnEndId = applied.headEntryId();
     ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
     tx.updateThread(advanced);
-    // children 先于 parent 删除（FK 顺序）。
-    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
-    tx.deleteModelInvocation(model.id());
     EntryPath updatedPath = tx.loadEntryPath(turnEndId);
     coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
