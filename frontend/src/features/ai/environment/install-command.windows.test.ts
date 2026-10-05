@@ -12,9 +12,9 @@ const origin = 'https://studio.example.com'
  * 分别验证下载失败、远端脚本失败，以及 UTF-8 脚本在内存中可执行。
  * 仅在 Windows 运行；非 Windows 主机明确跳过，不用 Git Bash 代替。
  */
-it.skipIf(process.platform !== 'win32')(
-  'executes the one-line download: failure, script failure, and a UTF-8 script',
-  () => {
+it.skipIf(process.platform !== 'win32').each(['powershell.exe', 'pwsh.exe'])(
+  'executes the one-line download with %s: failure, script failure, and a UTF-8 script',
+  shell => {
     const dir = mkdtempSync(join(tmpdir(), 'kk-command-'))
     const recordPath = join(dir, 'record.json')
     const scriptPath = join(dir, 'command.ps1')
@@ -23,25 +23,28 @@ it.skipIf(process.platform !== 'win32')(
     const install = generateInstallCommand(origin, environmentId, 'windows', installCode)
     const uninstall = generateUninstallCommand('windows', origin)
     function run(command: string, mode: 'ok' | 'download' | 'script') {
+      rmSync(recordPath, { force: true })
       const payload = mode === 'script'
         ? "throw 'remote failed'"
-        : "$data = @{ url = $url; marker = '执行-汉字' }; [IO.File]::WriteAllText($env:RECORD, ($data | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))"
+        : "$data = @{ url = $script:downloadUrl; marker = '执行-汉字'; token = 'private-synthetic-token' }; [IO.File]::WriteAllText($env:RECORD, ($data | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))"
       const download = mode === 'download'
         ? "throw 'download failed'"
-        : `$url = $Uri; $script:downloaded = @'
+        : `$script:downloadUrl = $Uri; $content = @'
 ${payload}
-'@`
+'@
+[pscustomobject]@{ Content = $content }`
       writeFileSync(
         scriptPath,
         `\ufefffunction Invoke-WebRequest { param([switch]$UseBasicParsing, $Uri) ${download} }
 $ErrorActionPreference = 'Continue'
 $script = 'outer'
+Set-PSDebug -Trace 2
 ${command}
 if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'caller scope changed' }
 `,
       )
       return spawnSync(
-        'powershell.exe',
+        shell,
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
         { cwd: dir, encoding: 'utf8', env: { ...process.env, RECORD: recordPath } },
       )
@@ -51,10 +54,11 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       expect(downloaded.status).toBe(0)
       const record = JSON.parse(readFileSync(recordPath, 'utf8'))
       expect(record.marker).toBe('执行-汉字')
+      expect(record.token).toBe('private-synthetic-token')
       expect(record.url).toBe(
         `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`,
       )
-      expect(downloaded.stdout + downloaded.stderr).not.toContain('registrationToken')
+      expect(downloaded.stdout + downloaded.stderr).not.toContain('private-synthetic-token')
       expect(existsSync(join(dir, 'NEVER'))).toBe(false)
 
       const scriptFailed = run(install, 'script')

@@ -35,8 +35,8 @@ import java.util.Map;
 /**
  * 稳定 Environment Card REST API。
  *
- * <p>{@code registrationToken} 仅出现在 create、显式只读 token 以及 rotate-token 响应中；三者均返回 {@code
- * Cache-Control: no-store}， 避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。最近一次 READY 的宿主 metadata 直接随 Card
+ * <p>{@code registrationToken} 仅在 create、显式只读 token、rotate-token 和经安装 code 授权的脚本响应中返回；这些响应均带 {@code
+ * Cache-Control: no-store}，避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。最近一次 READY 的宿主 metadata 直接随 Card
  * 返回，因此没有独立端点；最近 200 条以内的运维事件走只读 events 端点，Card 只投影最近一条 WARN/ERROR。
  */
 @AllArgsConstructor

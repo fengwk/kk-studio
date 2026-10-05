@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
 Installs (default), inspects, or removes the kk-studio Environment Daemon
@@ -86,9 +86,9 @@ function Throw-Failure {
         [Parameter(Mandatory = $true)][string] $Message,
         [ValidateSet("安装", "卸载")][string] $Action = "安装"
     )
-    $next = if ($Action -eq "卸载") { "处理后再重试卸载" } else { "修正后重试安装" }
+    $next = if ($Action -eq "卸载") { "处理后，重新复制并执行卸载命令" } else { "修正后，重新复制并执行安装命令" }
     throw [System.InvalidOperationException]::new(
-        "${Action}失败：${Message}`n下一步：按上面的原因${next}。需要诊断时运行 .\install.ps1 status。"
+        "${Action}失败：${Message}`n下一步：按上面的原因${next}。"
     )
 }
 

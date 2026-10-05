@@ -71,6 +71,9 @@ jobs:
       - name: Build real daemon fat JAR for Windows config compatibility
         shell: bash
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am package -DskipTests "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
+      - name: Test generated Windows scripts with native ACLs
+        shell: bash
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
       - name: Test installer with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
@@ -89,7 +92,7 @@ jobs:
         shell: bash
         run: npm --prefix frontend ci
       - name: Test generated Windows install command natively
-        # The generator stages owner-private files; only a real Windows host proves ACLs.
+        # Fetch and execute the one-line command in both supported PowerShell hosts.
         shell: bash
         run: npm --prefix frontend run test:install:windows
 

@@ -150,8 +150,9 @@ Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--c
 应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
 验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
 
-Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证生成的 Windows 安装命令
-在真实 PowerShell 子进程中暂存 owner-only 文件、UTF-8 字节与清理，仅在 Windows 主机执行。
+Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
+失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
+验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
 
 只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
@@ -365,6 +366,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `environment.install_config_cas_roundtrip`：`PUT .../install-config` 以 `expectedVersion` CAS 保存
   嵌套 `installConfig`，仅内容变化时推进版本，相同配置 no-op 不推进；硬非法值 400 且零写入、不回显提交值。
+- `environment.install_script_code_roundtrip`：五分钟 code 签发不改变配置或版本，安装脚本响应为
+  不缓存的 UTF-8 纯文本；缺失、篡改或轮换后失效的 code 被拒绝，卸载脚本不含环境凭据。只下载检查，不执行主机安装。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
   幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。

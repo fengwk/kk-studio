@@ -38,23 +38,41 @@ stdout/stderr。
      不要带路径、查询或片段。
    - 可选的 **Java home (JDK 21)**、**Bash 可执行文件**、**备注**。
    - 可选的 **启用 LSP servers** 与 JSON `servers`。不需要选择本地文件路径，也没有 LSP 上传。
-4. 点击**“保存并复制安装命令”**。Studio 先校验并 `PUT` 保存配置，再读取当前 registration
-   token，用**服务端返回的已保存配置**生成命令并写入剪贴板。
+4. 点击**“保存并复制安装命令”**。Studio 先校验并保存配置，再签发 **5 分钟有效**的安装 code，
+   将一行下载执行命令写入剪贴板。请在有效期内到目标主机执行。
 
-按钮只在保存成功后读取 token；保存失败时不会读取 token，也不会复制命令。保存成功但读取
-token 或复制失败时，提示会明确说明**配置已保存但命令未生成/复制，尚未部署**。CAS 版本冲突时
-只重基版本，保留你正在编辑的草稿。
+命令从当前 Studio 地址下载脚本，不在终端粘贴配置或长期注册令牌。Linux/macOS 命令形如：
 
-> 安装命令包含凭据，请勿分享；它可能进入剪贴板历史。**保存不代表已应用**；覆盖只影响当前
+```bash
+(set -o pipefail; curl -fsSL 'https://studio.example.com/api/harness/environments/<id>/install?code=<code>' | bash)
+```
+
+Windows 命令先完整下载脚本，再在 PowerShell 的局部作用域执行；下载或安装失败都会返回失败。
+下载执行前会关闭调试回显，避免脚本中的长期凭据进入终端输出。
+code 在有效期内可重复使用；过期后重新复制命令，已经下载的脚本不会因 code 到期而中断。
+安装成功会提示服务已启动，再回 Studio 确认 `READY`。
+
+保存失败时不会签发 code 或复制命令。保存成功但签发或复制失败时，提示会明确说明
+**配置已保存但命令未复制，尚未部署**。CAS 版本冲突时只重基版本，保留你正在编辑的草稿。
+
+> 安装命令中的 code 可下载含凭据的脚本，请勿分享。**保存不代表已应用**；覆盖只影响当前
 > OS 用户唯一的受管 Daemon，重启后它连接这次选择的 Environment，并中断原绑定 Environment
 > 的在途调用（结果不确定、已发生的命令副作用不回滚），但保留运行数据。
 
-命令本体是一个自包含脚本：它在私有临时目录里以 0600 写入 `daemon.json` 与 `daemon.token`
+Studio 返回的脚本在私有临时目录里以 0600 写入 `daemon.json` 与 `daemon.token`
 （两个文件必须是同目录的兄弟文件，且分别命名为 `daemon.json` 与 `daemon.token`），下载
 `install.sh` / `install.ps1` 到同一目录，再执行下面的稳定安装契约。token 只作为文件内容传递给
 安装器，不进入子进程 argv、环境变量或日志。
 
-Environment 卡片上的“卸载”按钮生成同样的自包含脚本，但不读取或保存任何配置，也不需要 token。
+Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 下载对应 OS 的脚本；
+不读取或保存环境配置，也不需要 code 或 token。
+
+如果外部入口要求浏览器登录，需允许目标主机访问这两个 GET 脚本下载路径：
+
+- `/api/harness/environments/{environmentId}/install`
+- `/api/harness/environments/uninstall/{operatingSystem}`
+
+安装下载由 code 校验授权；签发 code 的 POST 与其它管理 API 仍须受入口访问控制保护。
 
 ## 安装器契约
 
@@ -102,8 +120,8 @@ Java home 发现顺序为 `--java-home` / `-JavaHome` → `JAVA_HOME_21` → `JA
    唯一个人备份目录，再发布新文件并重启服务。
 
 预检失败时现有受管安装保持不变。**install 会整体替换程序、配置与 token，并重启服务**，保留数据
-目录与日志。发布之后的失败返回非零，**不自动回滚**：安装器会输出备份路径、状态检查与恢复步骤，
-你可以按提示用备份手动恢复，或修正暂存输入后重试。重启会中断在途工具调用，进程内 invocation
+目录与日志。发布之后的失败返回非零，**不自动回滚**：安装器会输出备份路径和当前平台的诊断命令，
+你可以检查后用备份手动恢复，或修正安装设置后重新复制命令重试。重启会中断在途工具调用，进程内 invocation
 journal 不跨重启保留，已经发生的命令副作用不回滚。
 
 ## 固定布局与文件
@@ -175,7 +193,16 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 
 `PUT /api/harness/environments/{id}/install-config` 以 `{expectedVersion, installConfig}` 保存，
 `installConfig` 不可为 null；版本不匹配返回冲突，配置未变则幂等不写行。响应 Card 不包含 token。
-token 仍由现有 token 接口按需读取，UI 只在生成命令时读取，不放入 query 缓存或 localStorage。
+安装 UI 不读取长期 token，只请求安装 code：
+
+| 入口 | 契约 |
+| --- | --- |
+| `POST /api/harness/environments/{id}/install-code` | `{expectedVersion}` 校验已保存版本，返回 `{code, expiresAt}`；不改变环境版本或配置 |
+| `GET /api/harness/environments/{id}/install?code=...` | 校验 code 后，按当前保存的 OS、配置和 token 返回 UTF-8 纯文本脚本 |
+| `GET /api/harness/environments/uninstall/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
+
+签发与脚本响应均禁止缓存。code 以当前 registration token 对安装用途、环境 ID 和到期时间做
+HMAC-SHA256 签名，无独立存储；到期、篡改、错环境或 token 轮换后，下载被拒绝。
 
 ### 配置同步
 
@@ -324,9 +351,9 @@ Platform Skill URI。
 | Windows | 任务 Description 必须精确等于 `Managed by scripts/daemon/install.ps1; schema=1; ownerSid=<当前 SID>` |
 
 检查顺序在下载与写入之前。同名服务存在但标记不匹配、定义是符号链接/非普通文件、属主不是当前
-用户时，安装或卸载会拒绝并报告：拒绝原因、实际服务定义的绝对路径或任务名、检查命令，以及安全的
-手工导出、停止、禁用、移动到唯一个人备份（仅限确认属于当前用户、在 HOME 内的定义）与重新加载
-步骤，最后提示保留未知 JAR/config/token/数据后重试。安装器**不会删除未知 JAR 或数据，也不会
+用户时，安装或卸载会拒绝并报告原因、服务定义路径或任务名，以及一条检查命令。
+确认归属后再由对应所有者处理冲突，先私密备份，保留未知程序与数据；不要直接删除系统文件。
+安装器**不会删除未知 JAR 或数据，也不会
 伪造所有权标记**；标记只用于识别管理归属，不能通过手工补标记授权接管。
 
 同一 OS 用户只允许一个受管 Daemon；它继承启动用户的文件与命令权限，没有文件系统沙箱。
@@ -339,8 +366,9 @@ HOME 也不是默认工作目录。
 程序、配置与 token 后重启**，保留数据目录与日志。因此：
 
 - 改配置：在 Web 弹窗修改后重新“保存并复制安装命令”，在目标主机执行同一条 `install`。
-- 更新程序：重新执行一次生成的 `install`（或带相同稳定契约的本地安装），即得到最新缓存。
-- 轮换 token：在 Web 轮换后，重新生成并执行 `install`；或安全更新 `daemon.token` 文件后重启
+- 更新程序：重新复制并执行安装命令（或带相同稳定契约的本地安装），即得到最新正式版本。
+- 轮换 token：环境 ID 不变，但旧安装 code 立即失效；在 Web 重新复制并执行安装命令，
+  或安全更新 `daemon.token` 文件后重启
   受管服务。Daemon 每次 HELLO 前读取 token 文件；已被拒绝而退出的进程需要重启。
 
 重启会中断在途工具调用，进程内 invocation journal 不跨重启保留，已经发生的命令副作用不回滚。
@@ -376,6 +404,7 @@ HOME 也不是默认工作目录。
 
 | 现象 | 处理 |
 | --- | --- |
+| 下载脚本返回 HTTP 400 | 安装 code 已过期、被修改或因 token 轮换失效；回 Studio 重新复制安装命令 |
 | Java 版本或 home 预检失败 | 指定真正的 JDK 21 home；Unix 检查可执行的 `bin/java`，Windows 还要有 `bin/javac`；PATH 中的 java shim 未必指向正确 home |
 | GitHub 下载或 SHA 校验失败 | 检查网络、代理与 release 是否含成对资产；不要跳过校验，旧受管安装保持不动 |
 | `unmanaged unit` / `unmanaged plist` / `unmanaged Scheduled Task` | 按[管理身份与冲突处理](#管理身份与冲突处理)确认归属，检查、导出、停止并移开非受管定义；不要伪造所有权标记 |
