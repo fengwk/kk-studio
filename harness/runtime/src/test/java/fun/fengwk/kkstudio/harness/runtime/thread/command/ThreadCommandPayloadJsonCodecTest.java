@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ImageMessageContent;
@@ -14,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 
 import java.util.List;
+import java.util.UUID;
 
 /** Thread command payload codec：严格 canonical 形态、无类型 JSON 与未知字段拒绝。 */
 class ThreadCommandPayloadJsonCodecTest {
@@ -249,6 +252,156 @@ class ThreadCommandPayloadJsonCodecTest {
           "workspacePath 形状必须对 " + type + " 保持拒绝");
     }
     assertEquals(8, ThreadCommandType.values().length);
+  }
+
+  /** 测试意图：NOTIFICATION command 四字段严格往返，canonical 字段序与历史 payload 同形，仅允许 USER 角色。 */
+  @Test
+  void roundTripsNotificationCommandWithStrictFieldOrder() {
+    NotificationCommandPayload payload =
+        new NotificationCommandPayload(
+            new UUID(0L, 21L),
+            NotificationKind.SUBAGENT_RESULT,
+            new UUID(0L, 7L),
+            user("child finished"));
+    String json = codec.encode(payload);
+    assertEquals(
+        "{\"notificationId\":\"00000000-0000-0000-0000-000000000015\","
+            + "\"kind\":\"SUBAGENT_RESULT\","
+            + "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\","
+            + "\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\","
+            + "\"text\":\"child finished\"}]}}",
+        json);
+    assertFalse(json.contains("\"type\":\"NOTIFICATION\""));
+    assertEquals(ThreadCommandType.NOTIFICATION, payload.type());
+    assertEquals(payload, codec.decode(ThreadCommandType.NOTIFICATION, json));
+    // request 形态与 durable 形态一致：可信内部入口不经 HTTP 请求编码。
+    assertEquals(
+        payload, codec.decode(ThreadCommandType.NOTIFICATION, codec.encodeRequest(payload)));
+    assertEquals(
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        ThreadCommandPayloadJsonCodec.requestHash(payload));
+    assertFalse(
+        ThreadCommandPayloadJsonCodec.requestHash(payload)
+            .equals(
+                ThreadCommandPayloadJsonCodec.requestHash(
+                    new NotificationCommandPayload(
+                        new UUID(0L, 21L),
+                        NotificationKind.TASK_BUDGET,
+                        new UUID(0L, 7L),
+                        user("child finished")))));
+  }
+
+  /** 测试意图：NOTIFICATION 的 message 只允许 USER 角色；非 USER 必须被拒绝。 */
+  @Test
+  void rejectsNotificationCommandWithNonUserMessageRole() {
+    String assistantMessage =
+        "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.NOTIFICATION, notificationCommandJson(assistantMessage)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new NotificationCommandPayload(
+                new UUID(0L, 21L),
+                NotificationKind.SUBAGENT_RESULT,
+                new UUID(0L, 7L),
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("x")))));
+  }
+
+  /** 测试意图：NOTIFICATION 四字段全必填；缺失、未知、kind 越界与类型错误都必须严格拒绝。 */
+  @Test
+  void rejectsNotificationCommandMissingUnknownOrWrongTypedFields() {
+    String message = "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"n\"}]}";
+    String id21 = "\"notificationId\":\"00000000-0000-0000-0000-000000000015\"";
+    String kind = "\"kind\":\"SUBAGENT_RESULT\"";
+    String id7 = "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\"";
+    String msg = "\"message\":" + message;
+
+    for (String json :
+        List.of(
+            "{" + kind + "," + id7 + "," + msg + "}",
+            "{" + id21 + "," + id7 + "," + msg + "}",
+            "{" + id21 + "," + kind + "," + msg + "}",
+            "{" + id21 + "," + kind + "," + id7 + "}",
+            "{" + id21 + "," + kind + "," + id7 + "," + msg + ",\"extra\":1}",
+            "{" + id21 + ",\"kind\":\"BOGUS\"," + id7 + "," + msg + "}",
+            "{\"notificationId\":\"not-a-uuid\"," + kind + "," + id7 + "," + msg + "}",
+            "{" + id21 + "," + kind + ",\"sourceThreadId\":\"not-a-uuid\"," + msg + "}",
+            "{" + id21 + "," + kind + "," + id7 + ",\"message\":5}",
+            "{\"notificationId\":5," + kind + "," + id7 + "," + msg + "}",
+            "{" + id21 + ",\"kind\":5," + id7 + "," + msg + "}")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(ThreadCommandType.NOTIFICATION, json),
+          "NOTIFICATION must reject: " + json);
+    }
+  }
+
+  /** 测试意图：SET_CONTRIBUTOR_STATE 的 state 四字段严格往返，嵌套 data 不丢字段。 */
+  @Test
+  void roundTripsSetContributorStateCommandWithoutDroppingDataFields() {
+    SetContributorStateCommandPayload payload =
+        new SetContributorStateCommandPayload(
+            new CustomEntryPayload(
+                "com.example.issue",
+                "issue-scope",
+                2,
+                "{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],\"nested\":{\"k\":1}}"));
+    String json = codec.encode(payload);
+    assertEquals(
+        "{\"state\":{\"contributorId\":\"com.example.issue\",\"customType\":\"issue-scope\","
+            + "\"schemaVersion\":2,\"data\":{\"issueId\":\"i-1\",\"labels\":[\"a\",\"b\"],"
+            + "\"nested\":{\"k\":1}}}}",
+        json);
+    assertEquals(ThreadCommandType.SET_CONTRIBUTOR_STATE, payload.type());
+    SetContributorStateCommandPayload decoded =
+        (SetContributorStateCommandPayload)
+            codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json);
+    assertEquals(payload, decoded);
+    // data 逐字保留（含数组与嵌套对象），重编码与原始 JSON 一致。
+    assertEquals(json, codec.encode(decoded));
+  }
+
+  /**
+   * 测试意图：SET_CONTRIBUTOR_STATE 只接受 {@code
+   * {state:{contributorId,customType,schemaVersion,data}}}；缺失、未知、 类型错误、非法标识符与非正 schemaVersion 一律拒绝。
+   */
+  @Test
+  void rejectsSetContributorStateMissingUnknownOrWrongTypedFields() {
+    for (String json :
+        List.of(
+            "{}",
+            "{\"state\":5}",
+            "{\"state\":[]}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,",
+            "{\"state\":{\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"schemaVersion\":1,\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":0,\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":-1,\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"C\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":[]}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{},\"extra\":1}}",
+            "{\"state\":{\"contributorId\":\"c\",\"customType\":\"t\",\"schemaVersion\":1,\"data\":{}},\"extra\":1}")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, json),
+          "SET_CONTRIBUTOR_STATE must reject: " + json);
+    }
+  }
+
+  private static String notificationCommandJson(String messageJson) {
+    return "{\"notificationId\":\"00000000-0000-0000-0000-000000000015\","
+        + "\"kind\":\"SUBAGENT_RESULT\","
+        + "\"sourceThreadId\":\"00000000-0000-0000-0000-000000000007\","
+        + "\"message\":"
+        + messageJson
+        + "}";
   }
 
   private static AgentMessage user(String text) {
