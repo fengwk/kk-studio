@@ -98,7 +98,7 @@
                                         <include>fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoin</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinRequest</include>
-                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadLifecycleStatus</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadState</include>
                                     </includes>
                                     <limits>
