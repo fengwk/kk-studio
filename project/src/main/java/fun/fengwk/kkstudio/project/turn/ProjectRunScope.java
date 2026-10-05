@@ -14,6 +14,10 @@ import java.util.UUID;
  *
  * <p>{@code sourceThreadId} 是业务执行身份，不用于授权本身；{@code issue_transition} 仍会在业务事务内以当前 Run 重新校验调用
  * Thread、Issue、阶段与版本（见 {@code IssueTransitionService}），fork 只因继承快照而没有写权限。
+ *
+ * <p>{@code active} 显式标记该 Run 是否仍处于执行期：接受时为 {@code true}；Run 进入任何终态时在同一业务锁内接受一条纯
+ * SET_CONTRIBUTOR_STATE 批次保存同一 {@code runId} 的 {@code active=false} 副本。这样 branch 上后写的 scope 一定来自更新的
+ * Run 生命周期位置，projector 对已关闭 scope 输出空、业务写工具拒绝，从旧 Run 或 fork 继承快照都不会再获得业务权限。
  */
 public record ProjectRunScope(
     UUID runId,
@@ -27,7 +31,8 @@ public record ProjectRunScope(
     String stageName,
     String stageInstructions,
     List<String> nextStates,
-    String agentName) {
+    String agentName,
+    boolean active) {
 
   /** Contributor id：与 {@code ProjectHarnessContributor.ID} 保持一致。 */
   public static final String CONTRIBUTOR_ID = "project";
@@ -51,6 +56,54 @@ public record ProjectRunScope(
     Objects.requireNonNull(stageName, "stageName");
     Objects.requireNonNull(agentName, "agentName");
     nextStates = List.copyOf(Objects.requireNonNull(nextStates, "nextStates"));
+  }
+
+  /** 活跃 Run 的便捷构造：接受 Run 时 {@code active} 恒为 true。 */
+  public ProjectRunScope(
+      UUID runId,
+      UUID issueId,
+      UUID projectId,
+      UUID sourceThreadId,
+      long issueNumber,
+      String issueTitle,
+      String issueDescription,
+      String stage,
+      String stageName,
+      String stageInstructions,
+      List<String> nextStates,
+      String agentName) {
+    this(
+        runId,
+        issueId,
+        projectId,
+        sourceThreadId,
+        issueNumber,
+        issueTitle,
+        issueDescription,
+        stage,
+        stageName,
+        stageInstructions,
+        nextStates,
+        agentName,
+        true);
+  }
+
+  /** 返回同一 Run 事实的关闭副本：{@code runId} 等身份不变，仅把 {@code active} 置为 false。 */
+  public ProjectRunScope closed() {
+    return new ProjectRunScope(
+        runId,
+        issueId,
+        projectId,
+        sourceThreadId,
+        issueNumber,
+        issueTitle,
+        issueDescription,
+        stage,
+        stageName,
+        stageInstructions,
+        nextStates,
+        agentName,
+        false);
   }
 
   /**

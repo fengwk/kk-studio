@@ -68,6 +68,10 @@ public class IssueTransitionService {
           "issue_run", "unsupported run context schema version: " + scopeSchemaVersion);
     }
     ProjectRunScope scope = decodeScope(runScopeJson);
+    if (!scope.active()) {
+      throw new AiValidationException(
+          "issue_run", "this run has already been closed; a handoff cannot be accepted");
+    }
     if (!scope.sourceThreadId().equals(callingThreadId)) {
       throw new AiValidationException(
           "issue_run", "issue_transition is only available on the run's own thread");
@@ -79,11 +83,11 @@ public class IssueTransitionService {
       throw inconsistent();
     }
     Issue peek = issueRepository.getById(scope.issueId());
-    if (peek == null) {
+    if (peek == null || !peek.getProjectId().equals(scope.projectId())) {
       throw inconsistent();
     }
     Project project = projectRepository.lockForKeyShare(peek.getProjectId());
-    if (project == null) {
+    if (project == null || !project.getId().equals(scope.projectId())) {
       throw inconsistent();
     }
     Issue issue = issueRepository.lockById(scope.issueId());

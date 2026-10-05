@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -82,6 +85,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   @BeforeEach
   void setUpHarnessSnapshot() {
     customPayloads.clear();
+    // Harness 假件是共享 Spring 上下文的单例 mock：清空调用记录，避免跨用例的 verify 计数相互污染。
+    clearInvocations(harnessRuntime);
     when(harnessRuntime.getThreadSnapshot(any(UUID.class)))
         .thenAnswer(invocation -> createSnapshot(invocation.getArgument(0)));
   }
@@ -446,9 +451,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
-  /** 测试意图：活动执行时长耗尽且处于静止状态的 Run 会在单事务内失败收尾，并将 Issue 置为 ERROR 暂停门禁，保留 mailbox 等待恢复。 */
+  /** 测试意图：活动执行时长耗尽时用显式 Stop（当前 Thread 版本 CAS、稳定 requestId）结束执行，并在同一事务失败收尾，不再等待业务派发门禁把执行收敛成 idle。 */
   @Test
-  void activeRunBudgetExhaustedFailsRunAndPausesIssueWithErrorGate() {
+  void activeRunBudgetExhaustedStopsThreadAndFailsRun() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("执行时长耗尽", agent, agent, 3);
     Issue issue = createIssue(projectId);
@@ -463,6 +468,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, outcome);
+    // 业务预算要求停止：必须对当前 Thread 发起显式 Stop，而不是写通用 Pause 后等 idle。
+    verify(harnessRuntime).stop(any(StopCommand.class));
     assertEquals(
         1L,
         count(
@@ -483,6 +490,34 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
     assertEquals(
         1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+  }
+
+  /** 测试意图：即使在途模型仍 RUNNING，预算耗尽也必须先 Stop 再失败收尾，绝不能像旧实现那样 pause 后无限期停在 DEFERRED。 */
+  @Test
+  void inFlightRunBudgetExhaustedStopsAndFailsInsteadOfWaitingForIdle() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("在途预算耗尽", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    jdbc.update(
+        "update project_issue_run set remaining_execution_ms = 1, active_since ="
+            + " current_timestamp - interval '10 seconds' where id = ?",
+        run.getId());
+    ModelInvocation activeModel = mock(ModelInvocation.class);
+    when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId()))
+        .thenReturn(overlay(run.getThreadId(), List.of(), activeModel, List.of()));
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, outcome);
+    verify(harnessRuntime).stop(any(StopCommand.class));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'FAILED'",
+            run.getId()));
   }
 
   /** 测试意图：在完全静止点且存在交接意图（next_state）的活动 Run，reconcile 会正常收尾该 Run 并推进 Issue 状态到目标阶段。 */
