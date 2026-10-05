@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.runtime;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -59,6 +60,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -221,19 +223,26 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertStoppedHead(childThreadId, threadState(childThreadId).headEntryId());
     assertEquals(ThreadExecutionControl.STOPPED, threadState(childThreadId).executionControl());
 
-    // 精确的子树回执：Stop 覆盖整棵受影响执行子树（父 + 直接子），每个节点各一条回执，携带同一 stopRequestId、
-    // 各自自有停止边界与取消输入，绝不多收无关节点。
+    // 精确的子树回执：Stop 覆盖整棵受影响执行子树（父 + 直接子），每个节点各一条回执，携带各自身份的停止请求
+    // （root 用请求自身 id，子节点用 root+子身份派生的确定 id）、各自自有停止边界与取消输入，绝不多收无关节点。
     assertEquals(
         Set.of(parentThreadId, childThreadId),
         stop.stoppedThreads().stream()
             .map(StoppedThreadReceipt::threadId)
             .collect(Collectors.toSet()),
         "stop must emit exactly one receipt per stopped node of the execution subtree");
-    assertTrue(
-        stop.stoppedThreads().stream()
-            .allMatch(receipt -> receipt.stopRequestId().equals(stopRequestId)),
-        "every subtree receipt must reference the cancelled stop request");
     StoppedThreadReceipt parentReceipt = receipt(stop, parentThreadId);
+    StoppedThreadReceipt childReceipt = receipt(stop, childThreadId);
+    assertEquals(
+        stopRequestId, parentReceipt.stopRequestId(), "root receipt keeps the requested stop id");
+    assertNotEquals(
+        stopRequestId,
+        childReceipt.stopRequestId(),
+        "child receipt must not reuse the root stop id");
+    assertEquals(
+        derivedChildStopRequestId(stopRequestId, childThreadId),
+        childReceipt.stopRequestId(),
+        "child receipt carries the deterministic root+child derived stop id");
     assertEquals(parentStopBoundary, parentReceipt.stoppedTurnEndEntryId());
     assertEquals(1, parentReceipt.cancelledCommandCount());
     assertEquals(
@@ -241,7 +250,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         messageText(
             ((UserMessageCommandPayload) parentReceipt.cancelledInputs().getFirst().payload())
                 .message()));
-    StoppedThreadReceipt childReceipt = receipt(stop, childThreadId);
     assertEquals(threadState(childThreadId).headEntryId(), childReceipt.stoppedTurnEndEntryId());
     assertEquals(1, childReceipt.cancelledCommandCount());
     assertEquals(1, childReceipt.cancelledInputs().size());
@@ -1008,6 +1016,15 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
       }
     }
     throw new AssertionError("stop result carries no receipt for thread " + threadId);
+  }
+
+  /**
+   * 与 Runtime 相同的确定派生：子节点的停止请求 id = {@code nameUUID(rootStopRequestId + ":" + childThreadId)}。 每个
+   * Thread 持有独立回执身份，子节点不重用 root 的 id。
+   */
+  private static UUID derivedChildStopRequestId(UUID rootStopRequestId, UUID childThreadId) {
+    return UUID.nameUUIDFromBytes(
+        (rootStopRequestId + ":" + childThreadId).getBytes(StandardCharsets.UTF_8));
   }
 
   private static String resultMessageText(ThreadCommand command) {

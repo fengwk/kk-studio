@@ -42,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.harness.dispatch.IssueAgentWorkDispatchAdmission;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
@@ -54,7 +53,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
-import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -127,7 +125,6 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ModelRequestDebugService modelRequestDebugService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
-  @Autowired private WorkDispatchAdmission workDispatchAdmission;
   @Autowired private ApplicationContext applicationContext;
   @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
   @Autowired private EnvironmentSessionListener environmentSessionListener;
@@ -190,15 +187,14 @@ class HarnessRuntimeConfigurationTest {
   }
 
   /**
-   * 产品派发门禁必须真正装到 Dispatcher 上：应用上下文里唯一的 {@link WorkDispatchAdmission} 就是平台门禁实现，因此 Dispatcher 通过
-   * {@code ObjectProvider} 取到的正是它——paused/BLOCKED/归档 Issue 的 MODEL/TOOL 派发在真实组合根里也不会发生。
+   * 产品面不再装配 owner/Issue 派发门禁：上下文里没有任何 {@link WorkDispatchAdmission} bean，Dispatcher 的 {@code
+   * ObjectProvider} 回落即既有 {@link WorkDispatchAdmission#ALLOW_ALL}——纯 Harness 组合根无需宿主策略也能放行派发。
    */
   @Test
-  void wiresTheProductDispatchGateIntoTheDispatcher() {
-    assertInstanceOf(IssueAgentWorkDispatchAdmission.class, workDispatchAdmission);
-    assertEquals(
-        Set.of(workDispatchAdmission),
-        Set.copyOf(applicationContext.getBeansOfType(WorkDispatchAdmission.class).values()));
+  void dispatcherFallsBackToAllowAllWithoutAProductGate() {
+    assertTrue(
+        applicationContext.getBeansOfType(WorkDispatchAdmission.class).isEmpty(),
+        "web composition root must not register a product dispatch gate");
   }
 
   @Test
