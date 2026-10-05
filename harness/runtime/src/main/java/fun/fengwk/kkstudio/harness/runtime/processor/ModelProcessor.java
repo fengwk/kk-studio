@@ -5,10 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -17,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchRequest;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -54,8 +57,8 @@ import java.util.function.BiFunction;
  * <p>重复准入所有权围栏（duplicate admission fencing）：任何 guard 替换 / active supersede 之前先用 Work-only 短事务校验传入
  * claim 当前真实 owned（伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，不 cancel 合法 active execution）；通过后再进
  * per-invocation guard 覆盖 prepare 到 registry 插入。同一 claim（同 lease token）重复 / 并发投递一律 LOST_OWNERSHIP
- * no-op（不 cancel、不持久化变更）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并按 持久化
- * DISPATCHING / RUNNING 状态恢复 UNKNOWN。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无状态写入
+ * no-op（不 cancel、不持久化变更）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并让 持久化
+ * DISPATCHING / RUNNING 状态按既有重试策略恢复。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无状态写入
  * 的陈旧启动围栏（stale-start fence：持久化仍 DISPATCHING + attempt 匹配 + claim 仍 owned），失败立即 abandon 并 LOST，绝不启动
  * Provider（覆盖另一 JVM 实例 recovery 后本实例本地 abandoned 检查不可见的场景）。
  *
@@ -133,9 +136,9 @@ public final class ModelProcessor implements AutoCloseable {
    * LOST_OWNERSHIP（不 cancel、不 mutation）；不同新 token（已通过 Work-only 校验，旧 lease 必然过期）先 supersede 旧本地
    * execution 再 prepare。prepare 短事务按 Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread -&gt;
    * ModelInvocation -&gt; Work 锁序二次校验：READY 转 DISPATCHING + Thread version+1（事务外启动 heartbeat /
-   * Gateway）；DISPATCHING / RUNNING（旧 lease 过期恢复）收敛为 UNKNOWN + version+1 + 请求 THREAD Work + complete
-   * MODEL Work，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL
-   * Work，不重复 bump version。
+   * Gateway）；DISPATCHING / RUNNING（旧 lease 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL
+   * Work，预算耗尽则以 FAILED 明确终止并唤醒 THREAD，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍
+   * null 时）后 complete MODEL Work，不重复 bump version。
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -170,6 +173,7 @@ public final class ModelProcessor implements AutoCloseable {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Rejected ignored -> deferRejected(claim);
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
+          case Prepare.Retry ignored -> ProcessResult.RESCHEDULED;
           case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
         };
       } catch (ClaimLostSignal ignored) {
@@ -510,25 +514,96 @@ public final class ModelProcessor implements AutoCloseable {
             }));
   }
 
-  /** 旧 lease 过期恢复：DISPATCHING 消费 proposed attempt，RUNNING 保留 attempt；绝不重放 Provider。 */
+  /**
+   * 旧 lease 过期恢复：执行持有者已失效，但不把可能已经发出的调用当成确定未执行。接入既有 {@link
+   * fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy} 与持久 attempt/retryAt。
+   *
+   * <p>DISPATCHING 表示启动可能已发出但结果未被确认，计为一个已消耗 attempt（{@code attempt + 1}）；RUNNING 计当前已确认
+   * attempt。允许重试时记录一条 retryable failed attempt 后回到 READY，并按策略延迟重排 MODEL Work（不 request THREAD
+   * wake，旧 partial 只作为尝试审计，绝不与新 attempt 的文本或 tool-call 拼接）；预算耗尽时以 FAILED 明确终止并唤醒 THREAD。绝不重放
+   * Provider，也不新建恢复专用预算或重置计数。
+   */
   private Prepare recoverUnknown(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
+    boolean unconfirmedDispatch = model.status() == ModelInvocationStatus.DISPATCHING;
+    int chargeableAttempt =
+        unconfirmedDispatch ? Math.addExact(model.attempt(), 1) : model.attempt();
+    ModelInvocationError error =
+        new ModelInvocationError(
+            ProviderErrorKind.TRANSIENT,
+            unconfirmedDispatch
+                ? "model dispatch lease expired before the start was confirmed; provider outcome"
+                    + " cannot be confirmed"
+                : "model work lease expired; provider outcome cannot be confirmed");
+    InvocationRetryDecision decision =
+        InvocationRetryDecision.decide(
+            config.retryPolicyProvider().retryPolicy(), true, chargeableAttempt);
+    if (decision.retry()) {
+      Instant failedAt = durableFailedAt(now, thread, model);
+      Instant retryAt = failedAt.plus(decision.delay());
+      ModelAttemptFailure failure =
+          attemptFailure(model, chargeableAttempt, error, failedAt, retryAt);
+      tx.updateModelInvocation(
+          unconfirmedDispatch
+              ? model.retryDispatched(failure, failedAt)
+              : model.retryReady(failure, failedAt));
+      tx.updateThread(thread.touchVersion(failedAt));
+      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+        throw new ClaimLostSignal();
+      }
+      tx.rescheduleWork(claim, now, Duration.between(now, retryAt));
+      return new Prepare.Retry();
+    }
+    // 预算耗尽：如实终止并唤醒 THREAD，不通过无限重试伪装持续推进。
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    ModelInvocationError error =
-        new ModelInvocationError(
-            ProviderErrorKind.TRANSIENT,
-            "model work lease expired; provider outcome cannot be confirmed");
-    tx.updateModelInvocation(model.unknown(error, now));
+    tx.updateModelInvocation(
+        unconfirmedDispatch ? model.failDispatched(error, now) : model.fail(error, now));
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
+  }
+
+  /** 恢复失败尝试的审计快照：旧 partial（RUNNING 的安全 checkpoint）只留作尝试记录，不参与新 attempt。 */
+  private static ModelAttemptFailure attemptFailure(
+      ModelInvocation model,
+      int attempt,
+      ModelInvocationError error,
+      Instant failedAt,
+      Instant retryAt) {
+    StreamCheckpoint checkpoint = model.streamCheckpoint();
+    return new ModelAttemptFailure(
+        attempt,
+        checkpoint == null ? 0L : checkpoint.sequence(),
+        checkpoint == null ? "" : checkpoint.text(),
+        checkpoint == null ? "" : checkpoint.thinking(),
+        error,
+        failedAt,
+        retryAt);
+  }
+
+  /** 失败审计时间下界：max(now, thread.updatedAt, model.updatedAt, 上一 retryAt)，与运行时重试记账一致。 */
+  private static Instant durableFailedAt(Instant now, ThreadState thread, ModelInvocation model) {
+    Instant effective = now;
+    if (effective.isBefore(thread.updatedAt())) {
+      effective = thread.updatedAt();
+    }
+    if (effective.isBefore(model.updatedAt())) {
+      effective = model.updatedAt();
+    }
+    if (!model.failedAttempts().isEmpty()) {
+      Instant previousRetryAt = model.failedAttempts().getLast().retryAt();
+      if (effective.isBefore(previousRetryAt)) {
+        effective = previousRetryAt;
+      }
+    }
+    return effective;
   }
 
   /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete MODEL Work；不重复 bump version。 */
@@ -639,12 +714,19 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   private sealed interface Prepare
-      permits Prepare.Lost, Prepare.Rejected, Prepare.Dispatched, Prepare.Terminated {
+      permits Prepare.Lost,
+          Prepare.Rejected,
+          Prepare.Dispatched,
+          Prepare.Terminated,
+          Prepare.Retry {
 
     record Lost() implements Prepare {}
 
     /** 宿主拒绝本次新的对外执行：未做任何 Harness 变更，调用方只允许 durable reschedule。 */
     record Rejected() implements Prepare {}
+
+    /** 失联恢复已按策略回到 READY 并重排 MODEL Work：不启动 Provider，不 request THREAD wake。 */
+    record Retry() implements Prepare {}
 
     record Dispatched(
         UUID threadId,

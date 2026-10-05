@@ -88,6 +88,8 @@ class ToolProcessorRecoveryTest {
     assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
     assertEquals(1, tool.attempt());
     assertEquals("LEASE_EXPIRED", tool.error().kind());
+    assertTrue(tool.error().message().contains("Last known status: RUNNING"));
+    assertTrue(tool.error().message().contains("cannot be confirmed"));
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(
         1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
@@ -99,7 +101,7 @@ class ToolProcessorRecoveryTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 新 claim 遇到旧 lease 过期的 DISPATCHING：UNKNOWN 消费 proposed attempt（attempt+1）。 */
+  /** 新 claim 遇到旧 lease 过期的 DISPATCHING：UNKNOWN 消费 proposed attempt（attempt+1），并如实报告最后已知状态。 */
   @Test
   void staleDispatchingLeaseRecoveryConsumesProposedAttempt() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -114,11 +116,12 @@ class ToolProcessorRecoveryTest {
 
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
-    assertEquals(
-        ToolInvocationStatus.UNKNOWN,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+    assertEquals(1, tool.attempt());
+    assertEquals("LEASE_EXPIRED", tool.error().kind());
+    assertTrue(tool.error().message().contains("Last known status: DISPATCHING"));
+    assertTrue(tool.error().message().contains("cannot be confirmed"));
     assertEquals(0, fixture.gateway.startCalls);
     assertEquals(
         1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());

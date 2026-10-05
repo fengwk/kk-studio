@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -460,10 +461,13 @@ final class ToolExecution implements ToolGateway.Listener {
   private Applied finishFailureLocked(ToolGateway.Failure failure, List<Publish> publishes) {
     ToolInvocationError error = failure.error();
     ToolSideEffect sideEffect = request.binding().descriptor().sideEffect();
-    if (failure.retryable()
-        && sideEffect != ToolSideEffect.NON_IDEMPOTENT
-        && config.retryPolicyProvider().retryPolicy().allowsRetry(attempt)) {
-      Duration delay = config.retryPolicyProvider().retryPolicy().delayBeforeRetry(attempt);
+    InvocationRetryDecision decision =
+        InvocationRetryDecision.decide(
+            config.retryPolicyProvider().retryPolicy(),
+            failure.retryable() && sideEffect != ToolSideEffect.NON_IDEMPOTENT,
+            attempt);
+    if (decision.retry()) {
+      Duration delay = decision.delay();
       boolean committed = safeTerminal(() -> commitRetry(delay));
       if (committed) {
         log.info(

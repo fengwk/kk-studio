@@ -120,10 +120,11 @@ public record ModelInvocation(
   /**
    * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt 仅在
    * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN（已确认启动）以及 DISPATCHING-&gt;CANCELLED（Stop
-   * 窗口内调用可能已开始）这几种情形下恰好 +1；terminal 事实不可变 （仅 {@code resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在
-   * RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal 时被引入或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的
-   * stored checkpoint 或清除它； terminal 结果 Entry 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay
-   * 始终被接受。
+   * 窗口内调用可能已开始）这几种情形下恰好 +1；DISPATCHING-&gt;READY 的 BUSY bounce 与 DISPATCHING-&gt;FAILED 的启动前拒绝保持
+   * attempt，而执行持有者失联的恢复会把可能已发出的启动计为 attempt + 1（READY 重试或 FAILED 终止）；terminal 事实不可变 （仅 {@code
+   * resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在 RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal
+   * 时被引入或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它； terminal 结果 Entry
+   * 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay 始终被接受。
    */
   public static void validateTransition(ModelInvocation stored, ModelInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -190,18 +191,32 @@ public record ModelInvocation(
 
   private static void requireAttemptDelta(
       ModelInvocation stored, ModelInvocation next, int attemptDelta) {
-    boolean advancesAttempt =
-        stored.status() == ModelInvocationStatus.DISPATCHING
-            && (next.status() == ModelInvocationStatus.RUNNING
-                || next.status() == ModelInvocationStatus.UNKNOWN
-                || next.status() == ModelInvocationStatus.CANCELLED);
-    if (advancesAttempt) {
-      if (attemptDelta != 1) {
-        throw new IllegalArgumentException(
-            "a confirmed start or the DISPATCHING stop window must advance attempt by exactly"
-                + " one");
+    if (stored.status() == ModelInvocationStatus.DISPATCHING) {
+      boolean mustCharge =
+          next.status() == ModelInvocationStatus.RUNNING
+              || next.status() == ModelInvocationStatus.UNKNOWN
+              || next.status() == ModelInvocationStatus.CANCELLED;
+      if (mustCharge) {
+        if (attemptDelta != 1) {
+          throw new IllegalArgumentException(
+              "a confirmed start or the DISPATCHING stop window must advance attempt by exactly"
+                  + " one");
+        }
+        return;
       }
-    } else if (attemptDelta != 0) {
+      boolean maybeCharged =
+          next.status() == ModelInvocationStatus.READY
+              || next.status() == ModelInvocationStatus.FAILED;
+      if (maybeCharged) {
+        // 未发出（BUSY bounce / 启动前拒绝）保持 attempt；失联恢复把可能已发出的启动计为 attempt + 1。
+        if (attemptDelta != 0 && attemptDelta != 1) {
+          throw new IllegalArgumentException(
+              "a DISPATCHING -> " + next.status() + " move must keep or advance attempt by one");
+        }
+        return;
+      }
+    }
+    if (attemptDelta != 0) {
       throw new IllegalArgumentException("attempt must not change on this transition");
     }
   }
@@ -308,13 +323,16 @@ public record ModelInvocation(
       }
       return;
     }
-    boolean retryTransition =
+    boolean confirmedRetry =
         stored.status() == ModelInvocationStatus.RUNNING
             && next.status() == ModelInvocationStatus.READY;
-    if (!retryTransition) {
+    boolean dispatchRetry =
+        stored.status() == ModelInvocationStatus.DISPATCHING
+            && next.status() == ModelInvocationStatus.READY
+            && next.attempt() == Math.addExact(stored.attempt(), 1);
+    if (!confirmedRetry && !dispatchRetry) {
       if (!storedFailures.equals(nextFailures)) {
-        throw new IllegalArgumentException(
-            "failedAttempts may only change on a RUNNING -> READY retry transition");
+        throw new IllegalArgumentException("failedAttempts may only change on a retry transition");
       }
       return;
     }
@@ -327,10 +345,11 @@ public record ModelInvocation(
         throw new IllegalArgumentException("failedAttempts is append-only");
       }
     }
+    int consumedAttempt = dispatchRetry ? Math.addExact(stored.attempt(), 1) : stored.attempt();
     ModelAttemptFailure appended = nextFailures.get(nextFailures.size() - 1);
-    if (appended.attempt() != stored.attempt()) {
+    if (appended.attempt() != consumedAttempt) {
       throw new IllegalArgumentException(
-          "failed attempt must equal the current invocation attempt");
+          "failed attempt must equal the attempt consumed by this retry");
     }
     if (!isRetryable(appended.error())) {
       throw new IllegalArgumentException("failed attempt requires a retryable error");
@@ -409,6 +428,56 @@ public record ModelInvocation(
     nextFailures.add(failure);
     return withState(
         ModelInvocationStatus.READY, attempt, null, null, null, null, nextFailures, now);
+  }
+
+  /**
+   * DISPATCHING -&gt; READY：执行持有者失联，本次启动可能已经发出但结果未被确认。把这次未确认的启动计为一个已消耗 attempt（{@code attempt +
+   * 1}），记录一个 retryable failed attempt 后从头重新调度；DISPATCHING 不携带 checkpoint，旧 partial 不参与新 attempt。
+   */
+  public ModelInvocation retryDispatched(ModelAttemptFailure failure, Instant now) {
+    Objects.requireNonNull(failure, "failure");
+    if (status != ModelInvocationStatus.DISPATCHING) {
+      throw new IllegalArgumentException("retryDispatched requires DISPATCHING status");
+    }
+    if (failure.attempt() != Math.addExact(attempt, 1)) {
+      throw new IllegalArgumentException(
+          "failed attempt must equal the unconfirmed dispatch attempt");
+    }
+    if (failure.error().kind() != ProviderErrorKind.TRANSIENT
+        && failure.error().kind() != ProviderErrorKind.INVALID_RESPONSE) {
+      throw new IllegalArgumentException("retryDispatched requires a retryable error");
+    }
+    List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
+    nextFailures.add(failure);
+    return withState(
+        ModelInvocationStatus.READY,
+        Math.addExact(attempt, 1),
+        null,
+        null,
+        null,
+        null,
+        nextFailures,
+        now);
+  }
+
+  /**
+   * DISPATCHING -&gt; FAILED：执行持有者失联且重试预算不允许再发起一次调用。未确认的启动仍计为一个已消耗 attempt（{@code attempt +
+   * 1}）后明确终止失败；failedAttempts 保持 pending prefix 不变。
+   */
+  public ModelInvocation failDispatched(ModelInvocationError error, Instant now) {
+    Objects.requireNonNull(error, "error");
+    if (status != ModelInvocationStatus.DISPATCHING) {
+      throw new IllegalArgumentException("failDispatched requires DISPATCHING status");
+    }
+    return withState(
+        ModelInvocationStatus.FAILED,
+        Math.addExact(attempt, 1),
+        null,
+        null,
+        error,
+        null,
+        failedAttempts,
+        now);
   }
 
   /** RUNNING -&gt; RUNNING，附带当前 attempt 的一个单调安全 text/thinking checkpoint。 */
