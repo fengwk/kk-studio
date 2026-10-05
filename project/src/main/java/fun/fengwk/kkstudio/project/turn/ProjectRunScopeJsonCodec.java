@@ -40,7 +40,8 @@ public final class ProjectRunScopeJsonCodec {
           "stageName",
           "stageInstructions",
           "nextStates",
-          "agentName");
+          "agentName",
+          "active");
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -76,6 +77,7 @@ public final class ProjectRunScopeJsonCodec {
       nextStates.add(next);
     }
     node.put("agentName", scope.agentName());
+    node.put("active", scope.active());
     return write(node);
   }
 
@@ -98,6 +100,7 @@ public final class ProjectRunScopeJsonCodec {
     String stageInstructions = optionalText(node, "stageInstructions");
     List<String> nextStates = requireStringArray(node, "nextStates");
     String agentName = requireText(node, "agentName");
+    boolean active = requireBoolean(node, "active");
     return new ProjectRunScope(
         runId,
         issueId,
@@ -110,7 +113,8 @@ public final class ProjectRunScopeJsonCodec {
         stageName,
         stageInstructions,
         nextStates,
-        agentName);
+        agentName,
+        active);
   }
 
   private static JsonNode parse(String dataJson) {
@@ -158,6 +162,14 @@ public final class ProjectRunScopeJsonCodec {
       throw new IllegalArgumentException(CONTEXT + " field " + field + " must be an integer");
     }
     return value.longValue();
+  }
+
+  private static boolean requireBoolean(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isBoolean()) {
+      throw new IllegalArgumentException(CONTEXT + " field " + field + " must be a boolean");
+    }
+    return value.booleanValue();
   }
 
   private static String requireText(ObjectNode node, String field) {

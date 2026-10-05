@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.project.turn;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -70,6 +72,11 @@ class ProjectRunScopeJsonCodecTest {
         IllegalArgumentException.class,
         () -> codec.decode(json.replace(",\"agentName\":\"worker\"", "")));
     assertThrows(
+        IllegalArgumentException.class, () -> codec.decode(json.replace(",\"active\":true", "")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(json.replace("\"active\":true", "\"active\":\"true\"")));
+    assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(json.replace("\"issueNumber\":7", "\"issueNumber\":\"7\"")));
     assertThrows(
@@ -96,6 +103,19 @@ class ProjectRunScopeJsonCodecTest {
   void rejectsNonObjectAndMalformedJson() {
     assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{oops}"));
+  }
+
+  /** 关闭副本与活跃快照共用同一严格格式，只通过 active 区分，且必须无损往返。 */
+  @Test
+  void encodesAndDecodesClosedScopeFaithfully() {
+    ProjectRunScope active = scope("做事", "设计", List.of("REVIEW"));
+    ProjectRunScope closed = active.closed();
+
+    assertEquals(active.runId(), closed.runId());
+    assertFalse(closed.active());
+    String json = codec.encode(closed);
+    assertTrue(json.contains("\"active\":false"));
+    assertEquals(closed, codec.decode(json));
   }
 
   private static ProjectRunScope scope(

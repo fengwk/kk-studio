@@ -35,6 +35,12 @@ public enum IssueReconcileOutcome {
   /** 正常收尾但没有交接：Node 保持当前阶段，后续按额度新建 Run。 */
   RUN_COMPLETED,
 
+  /** 目标执行以失败终态结束（Join outcome=ERROR）：Run 失败收尾，绝不借此推进阶段。 */
+  RUN_FAILED,
+
+  /** 目标执行被取消终态结束（Join outcome=CANCELLED，含显式 Stop）：Run 取消收尾，绝不借此推进阶段。 */
+  RUN_CANCELLED,
+
   /** 活动时长额度耗尽：Run 失败收尾并与 ERROR 暂停门禁原子写入。 */
   RUN_BUDGET_EXHAUSTED,
 
