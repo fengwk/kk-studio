@@ -1088,11 +1088,11 @@ describe('buildBoundThreadTranscript', () => {
     } as ToolDialogueMessage
 
     transcript.onDecideApproval?.(message, 'DENY')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'DENY')
+    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'DENY', THREAD_ID)
     expect(onDenyApproval).toHaveBeenCalledTimes(1)
 
     transcript.onDecideApproval?.(message, 'ALLOW')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'ALLOW')
+    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'ALLOW', THREAD_ID)
     expect(onDenyApproval).toHaveBeenCalledTimes(1)
 
     // 无 invocationId 的消息不触发任何副作用。
