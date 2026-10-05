@@ -22,7 +22,7 @@ executor 优先采用 `mybatis.executor-type`，未配置时采用 factory 的 `
 | [harness/model](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
 | [catalog/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
 | [harness/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
-| [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` 按当前 Agent、Model、Environment 和产品归属规划 live turn |
+| [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` 按当前 branch 的 Agent、Model、Environment 规划 live turn，不反查 Thread 归属 |
 | [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本与本地路径路由 |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat、Issue+Agent owner 的命令接受、Session 查询与深删除 |
@@ -85,25 +85,18 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
-在同一物理事务内完成 owner 授权、Session 归属、READY 附件引用转移与 Runtime 命令接受。
-精确重放仍执行 owner 授权，但复用已接受事实。接受使用 owner KEY SHARE，
-深删除使用排他锁并按 Owner → Session → Thread 清理 Harness 与 Blob 引用。
+在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。接受使用 owner KEY SHARE，深删除使用排他锁并按 Owner → Session → Thread 清理 Harness 与 Blob 引用。
 
-Issue+Agent 的稳定归属由 Project 绑定提供；角色、阶段和活动 Run 从持久事实解析。
-`issue_transition` 写入 Run 的 `next_state`，工作流流转由 Project 调谐器完成。
-问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
+Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
-[`IssueAgentWorkDispatchAdmission`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/dispatch/IssueAgentWorkDispatchAdmission.java)
-在 `READY -> DISPATCHING` 意图事务内、Harness 行锁之前取得
-Project FOR SHARE → Issue FOR UPDATE → 活动 Run FOR UPDATE，
-复验归属、阶段、归档、暂停与收尾约束。拒绝只重排 Work，保留 Invocation；
-已在途、等待和终态执行沿原路径收敛。外部调用在提交后启动。
+宿主派发准入保留为 Runtime 的通用端口 [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java)（未注入宿主策略时默认 `ALLOW_ALL`）：它只在 `READY -> DISPATCHING` 意图事务内、Harness 行锁之前运行，宿主可结合自身行锁复验产品事实，拒绝只重排 Work 并保留 Invocation，外部调用在提交后启动。Issue 不再注入按归属/阶段拦截的准入实现：需要终止在途 Run 时由业务显式调用 Stop，已删除的 Runtime 业务派发门禁不参与收尾。
 
 ## Model 与 Tool 执行
 
-`DatabaseTurnResolver` 每个 live turn 现读 Catalog，解析当前 Agent、Model、Variant、
-Environment、工具、Skill 和 subagents。普通分支按 branch settings 选择环境，Issue Agent
-按当前阶段选择环境。缺失引用或不可执行 owner 返回规划失败。
+`DatabaseTurnResolver` 每个 live turn 现读 Catalog，只按该分支冻结/提交的 Agent、Model、Variant、
+Environment、工具、Skill 和 subagents 规划；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
+Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
+显式提交或冻结到 branch state。缺失引用返回规划失败。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。
 
@@ -126,7 +119,7 @@ requirements 复验目录；有效超时仅经 `Tool.resolveTimeout` 解析一�
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。发送前协议预览则使用与正式发送相同的规划、物化和编码器，返回点击时
-完整请求体（可能含内联媒体），适用于已有空闲 Chat Thread。它以只读方式检查附件，
+完整请求体（可能含内联媒体），适用于已有空闲 Thread。它以只读方式检查附件，
 结果与随后发送之间仍可能发生历史或配置变化；入口和冲突契约见 [Web](web.md)。
 
 ## Storage、Blob 与 Resource
