@@ -31,12 +31,8 @@ export interface ThreadDraftRecord {
   appliedStopRequestIds: string[]
 }
 
-/** 一次 Stop 回执合并的结果；applied=false 表示该回执此前已合并，调用方不得再改 UI。 */
-export interface StopReceiptMergeResult {
-  applied: boolean
-  parts: ComposerPart[]
-  goalText: string | null
-}
+/** 一次 Stop 回执合并的结果；重复回执返回同一份记录，不重复追加。 */
+export type StopReceiptMergeResult = ThreadDraftRecord
 
 const DB_NAME = 'kkstudio.thread-drafts'
 const DB_VERSION = 1
@@ -97,10 +93,14 @@ function enqueueWrite<T>(
   return next
 }
 
+/**
+ * 读取记录。IndexedDB 不可用时显式抛错，由调用方向用户暴露「草稿不可用」，
+ * 绝不以 null 静默充当「没有草稿」。
+ */
 export async function loadThreadDraft(threadId: string): Promise<ThreadDraftRecord | null> {
   const factory = resolveFactory()
   if (factory == null) {
-    return null
+    throw new Error('IndexedDB is not available')
   }
   const db = await openDatabase(factory)
   return new Promise<ThreadDraftRecord | null>((resolve, reject) => {
@@ -170,34 +170,27 @@ export function restoreThreadGoalText(threadId: string, goalText: string): Promi
 /**
  * 原子幂等合并一条 Stop 回执。
  *
- * liveParts 只在回执属于当前绑定 Thread 时传入：它可能是尚未持久化的附件草稿，
- * 回填必须以用户此刻看到的草稿为基准；其它 Thread 的草稿只从自身记录读取。
+ * 持久记录是唯一事实源：回填以记录中的可编辑草稿为基准（正常编辑走同一条串行链，
+ * 因此记录里已包含先于本次合并落盘的编辑），绝不接受调用方传入的整份 draft 快照，
+ * 否则另一个标签页已经恢复/新增的输入会被过期快照覆盖。
+ * 已合并过的回执不重复追加，但仍返回记录，供尚未读到它的标签页同步。
  */
 export function applyStopReceipt(
   receipt: HarnessStoppedThreadReceiptDTO,
-  liveParts?: ComposerPart[],
 ): Promise<StopReceiptMergeResult> {
-  return enqueueWrite(receipt.threadId, async (database) => {
-    let applied = false
-    const record = await updateRecord(database, receipt.threadId, (current) => {
+  return enqueueWrite(receipt.threadId, async (database) =>
+    updateRecord(database, receipt.threadId, (current) => {
       if (current.appliedStopRequestIds.includes(receipt.stopRequestId)) {
         return current
       }
-      applied = true
       const cancelledInputs = receipt.cancelledInputs ?? []
       return {
         threadId: receipt.threadId,
-        parts: prependCancelledMessages(cancelledInputs, liveParts ?? current.parts),
+        parts: prependCancelledMessages(cancelledInputs, current.parts),
         goalText: mergeCancelledGoalTexts(cancelledInputs, current.goalText),
         appliedStopRequestIds: [...current.appliedStopRequestIds, receipt.stopRequestId],
       }
-    })
-    return {
-      applied,
-      parts: applied ? record.parts : [],
-      goalText: applied ? record.goalText : null,
-    }
-  })
+    }))
 }
 
 function updateRecord(

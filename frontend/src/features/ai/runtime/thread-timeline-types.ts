@@ -205,9 +205,9 @@ export interface QueuedThreadMessage {
 
 export interface ThreadTimeline {
   messages: DialogueMessage[]
-  /** 在持久 transcript 之外展示的 QUEUED USER_MESSAGE / CUSTOM_MESSAGE 命令。 */
+  /** 在持久 transcript 之外展示的可编辑 QUEUED USER_MESSAGE 命令。 */
   queuedMessages: QueuedThreadMessage[]
-  /** 当 mailbox 中仍有用户可见的排队命令时为 true。 */
+  /** 当 mailbox 中仍有排队的人类输入（USER_MESSAGE / GOAL）时为 true。 */
   hasPendingInputs: boolean
 }
 
