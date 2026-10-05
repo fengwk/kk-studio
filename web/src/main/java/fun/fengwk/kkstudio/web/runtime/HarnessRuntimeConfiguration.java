@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
@@ -207,14 +206,12 @@ public class HarnessRuntimeConfiguration {
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
       SystemSettingsSnapshot systemSettingsSnapshot,
-      ToolHistoryActionResolver toolHistoryActionResolver,
-      HarnessDispatcherProperties dispatcherProperties) {
+      ToolHistoryActionResolver toolHistoryActionResolver) {
     return new ModelProcessorConfig(
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(
             systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
-        dispatcherProperties.getAdmissionDeferral(),
         StreamFlushConfig.DEFAULT,
         toolHistoryActionResolver);
   }
@@ -223,15 +220,13 @@ public class HarnessRuntimeConfiguration {
   public ToolProcessorConfig toolProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
-      SystemSettingsSnapshot systemSettingsSnapshot,
-      HarnessDispatcherProperties dispatcherProperties) {
+      SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ToolProcessorConfig(
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(advanced.toolPreflightFailureDelayMillis()),
-        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()),
-        dispatcherProperties.getAdmissionDeferral());
+        Duration.ofMillis(advanced.toolDispatchBusyFallbackDelayMillis()));
   }
 
   /**
@@ -283,8 +278,7 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor,
-      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
+      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -293,8 +287,7 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        flushExecutor,
-        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
+        flushExecutor);
   }
 
   @Bean(destroyMethod = "close")
@@ -305,17 +298,9 @@ public class HarnessRuntimeConfiguration {
       ToolProcessorConfig config,
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
-      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker) {
     return new ToolProcessor(
-        store,
-        toolGateway,
-        realtimeEventSink,
-        config,
-        clock,
-        scheduler,
-        heartbeatWorker,
-        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
+        store, toolGateway, realtimeEventSink, config, clock, scheduler, heartbeatWorker);
   }
 
   @Bean
