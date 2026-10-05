@@ -394,7 +394,7 @@ describe('ThreadWorkspacePage', () => {
     // 子 Thread 工作区与普通 Thread 能力一致（可输入、可设置、可 Goal/Stop）；
     // 切换 child 后旧消息、排队、审批与该 Thread 自己的草稿都不得残留到另一个 child。
     const user = userEvent.setup()
-    await saveThreadDraftParts(CHILD_THREAD_ID, [createTextPart('stale child draft')])
+    await saveThreadDraftParts(CHILD_THREAD_ID, [createTextPart('stale child draft')], [])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => {
       if (threadId === OTHER_CHILD_THREAD_ID) {
         return snapshotFor(OTHER_CHILD_THREAD_ID)

@@ -2567,6 +2567,10 @@ export const aiCatalog = {
     'en-US': 'Unsent input could not be restored to the editor; retry',
     'zh-CN': '未消费的输入未能恢复到编辑区，请重试',
   },
+  'ai.runtime.action.draftWriteConflict': {
+    'en-US': 'Draft out of sync: unsent input was restored elsewhere, your current edit is kept',
+    'zh-CN': '草稿未同步：另一处已恢复未发送内容，当前输入已保留',
+  },
   'ai.runtime.action.retryDraftRestore': {
     'en-US': 'Retry restoring draft',
     'zh-CN': '重试恢复草稿',

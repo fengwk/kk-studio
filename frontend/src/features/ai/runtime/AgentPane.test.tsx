@@ -1545,7 +1545,7 @@ describe('AgentPane orchestration', () => {
 
   it('keeps the stored draft unchanged while navigating recalled history', async () => {
     // 历史导航只更新当前受控内容；Thread 草稿记录仍是用户原始编辑（刷新按该记录恢复）。
-    await saveThreadDraftParts(THREAD_ID, [createTextPart('original draft')])
+    await saveThreadDraftParts(THREAD_ID, [createTextPart('original draft')], [])
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
