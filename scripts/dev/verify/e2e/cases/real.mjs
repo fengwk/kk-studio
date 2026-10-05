@@ -1291,7 +1291,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 Runtime 在子执行首次 Idle 匹配 join 后异步交付为独立 CUSTOM_MESSAGE（SystemReminder 形态：USER 角色的 <system-reminder> 包裹文本，内层唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该消息 durable 且父重新 quiescent；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后异步交付为 NOTIFICATION Entry（kind=SUBAGENT_RESULT，sourceThreadId=被委派子 Thread，notificationId 由 join 身份确定性派生，message 为 USER 角色、正文唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该通知 durable 且父重新 quiescent；完成身份由 kind=SUBAGENT_RESULT + sourceThreadId + notificationId 与受理回执的子 Thread 匹配，不靠正文 XML，普通 CUSTOM_MESSAGE 与 TASK_BUDGET 通知被排除；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
@@ -1408,9 +1408,9 @@ registerCase({
       assert(taskId, `accepted receipt thread_id missing: ${taskText}`)
       canonicalUuid(taskId, 'task receipt thread id')
 
-      // 完成消息由 Runtime 在子执行首次 Idle 匹配 join 后异步交付（真实 wire：CUSTOM_MESSAGE +
-      // SystemReminder 包裹文本 + <subagent_result>），因此必须轮询而非只取一次 quiescent 快照；
-      // provider/规划错误立即失败并带完整诊断。
+      // 完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后异步交付为 NOTIFICATION
+      // (kind=SUBAGENT_RESULT, sourceThreadId=被委派子 Thread)，因此必须轮询而非只取一次
+      // quiescent 快照；provider/规划错误立即失败并带完整诊断。
       const completion = await waitForSubagentResult(ctx, parentThreadId, taskId, {
         timeoutMs: 240_000,
         intervalMs: 1_000,
@@ -1424,7 +1424,13 @@ registerCase({
         threadParentIdOf(parentSnapshot.thread) === null,
         `root parent thread must be null: ${safeDiagnosticJson(parentSnapshot.thread)}`,
       )
-      const subagentResultText = completion.text
+      const subagentResult = completion.result
+      assert(
+        subagentResult.sourceThreadId === taskId,
+        `subagent result source ${subagentResult.sourceThreadId} != accepted child ${taskId}`,
+      )
+      canonicalUuid(subagentResult.notificationId, 'subagent result notification id')
+      const subagentResultText = subagentResult.text
       assert(
         subagentResultText.includes(marker),
         `subagent result for thread ${taskId} missing marker: ${subagentResultText}`,
@@ -1443,9 +1449,14 @@ registerCase({
         childSnapshot.thread.processing === false,
         `child thread must be settled: ${safeDiagnosticJson(childSnapshot.thread)}`,
       )
-      const completionEntry = (parentSnapshot.entries || []).findIndex(
-        (entry) => entryType(entry) === 'CUSTOM_MESSAGE' && messageText(entry) === subagentResultText,
-      )
+      const completionEntry = (parentSnapshot.entries || []).findIndex((entry) => {
+        const [result] = subagentResults([entry])
+        return (
+          result !== undefined
+          && result.sourceThreadId === taskId
+          && result.notificationId === subagentResult.notificationId
+        )
+      })
       const parentAnswer = normalAssistantEntries(parentSnapshot.entries.slice(completionEntry + 1)).at(-1)
       assert(
         completionEntry >= 0 && parentAnswer && messageText(parentAnswer).includes(marker),
@@ -2293,45 +2304,34 @@ export function collectTaskToolResults(entries) {
 }
 
 /**
- * 判断一段文本是否是运行时注入的 `<system-reminder>` 提醒正文（与
- * `SystemReminder.wrap` 的精确定界符一致）。
+ * 提取父 Thread 收到的 task 完成通知（`EntryType.NOTIFICATION`）。
  *
- * <p>完成交付是运行时 steering，不是真实用户输入；只有带该包裹形态的 CUSTOM_MESSAGE 才算完成消息，
- * 普通用户 custom message 里出现同样的 XML 不得被认成委派结果。
+ * <p>真实 wire 由 `ThreadJoinCompletion.buildDelivery` 构造：payload 为
+ * `{notificationId,kind,sourceThreadId,message}`，`kind=SUBAGENT_RESULT`，`sourceThreadId` 是被委派
+ * 的子 Thread，`message` 固定为 USER 角色、正文外层唯一形状
+ * `<subagent_result thread_id="…" agent="…" state="…">`。完成身份取自持久字段
+ * `kind` / `sourceThreadId` / `notificationId`，不解析正文 XML；普通 `CUSTOM_MESSAGE`（含用户伪装的
+ * `<system-reminder>` / `<subagent_result>`）与同属 NOTIFICATION 的 `TASK_BUDGET` 提醒都被排除。
  */
-export function isSystemReminderText(text) {
-  return (
-    typeof text === 'string'
-    && text.startsWith('<system-reminder>\n')
-    && text.endsWith('\n</system-reminder>')
-  )
-}
-
-/**
- * 提取父 Thread 收到的 task 完成消息正文。
- *
- * <p>真实 wire 是 `CUSTOM_MESSAGE`（payload 为 `SystemReminder.message`，即 USER 角色的
- * `<system-reminder>` 包裹文本，见 `ThreadJoinCompletion.buildDelivery`），正文外层唯一形状是
- * `<subagent_result thread_id="…" agent="…" state="…">`；因此这里只认 CUSTOM_MESSAGE + 提醒包裹，
- * 不做任何旧别名兼容，也不接受普通用户消息。
- */
-export function subagentResultTexts(entries) {
-  const texts = []
+export function subagentResults(entries) {
+  const results = []
   for (const entry of entries || []) {
-    if (entryType(entry) !== 'CUSTOM_MESSAGE') continue
-    const message = parseEntryPayload(entry).message
+    if (entryType(entry) !== 'NOTIFICATION') continue
+    const payload = parseEntryPayload(entry)
+    if (payload.kind !== 'SUBAGENT_RESULT') continue
+    const message = payload.message
     if (message?.role !== 'USER') continue
-    for (const content of message.contents || []) {
-      if (
-        content?.type === 'text'
-        && isSystemReminderText(content.text)
-        && content.text.includes('<subagent_result')
-      ) {
-        texts.push(content.text)
-      }
-    }
+    const text = (message.contents || [])
+      .filter((content) => content?.type === 'text')
+      .map((content) => String(content.text || ''))
+      .join('\n')
+    results.push({
+      notificationId: String(payload.notificationId || ''),
+      sourceThreadId: String(payload.sourceThreadId || ''),
+      text,
+    })
   }
-  return texts
+  return results
 }
 
 /**
@@ -2423,23 +2423,24 @@ async function captureThreadFailureDiagnostics(ctx, threadId, label, extra = {})
 }
 
 /**
- * 等待父 Thread 收到指定 task 的完成消息并重新 quiescent。
+ * 等待父 Thread 收到指定 task 的完成通知并重新 quiescent。
  *
- * <p>完成消息异步交付，因此轮询真实 snapshot；一旦出现 ASSISTANT_ERROR 且父不再推进（provider/规划错误），
- * 立即失败并带完整诊断，绝不为一条不可能出现的消息挂满超时。
+ * <p>完成通知异步交付，因此轮询真实 snapshot，并按 `kind=SUBAGENT_RESULT` 通知的
+ * `sourceThreadId` 匹配受理回执里的子 Thread；一旦出现 ASSISTANT_ERROR 且父不再推进
+ * （provider/规划错误），立即失败并带完整诊断，绝不为一条不可能出现的通知挂满超时。
  */
 async function waitForSubagentResult(ctx, threadId, taskId, { timeoutMs = 240_000, intervalMs = 1_000 } = {}) {
-  const needle = `<subagent_result thread_id="${taskId}"`
   const deadline = Date.now() + timeoutMs
   let last = null
   while (Date.now() <= deadline) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
     last = snapshot
     const idle = !snapshot.thread.processing && (snapshot.queuedCommands || []).length === 0
-    const texts = subagentResultTexts(snapshot.entries || [])
-    const matched = texts.filter((text) => text.includes(needle))
+    const matched = subagentResults(snapshot.entries || []).filter(
+      (result) => result.sourceThreadId === taskId,
+    )
     if (matched.length > 0) {
-      if (idle) return { snapshot, text: matched.at(-1) }
+      if (idle) return { snapshot, result: matched.at(-1) }
     } else if (idle) {
       const errors = (snapshot.entries || []).filter(
         (entry) => entryType(entry) === 'ASSISTANT_ERROR',
