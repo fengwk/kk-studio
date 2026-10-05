@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultReason;
@@ -50,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -431,6 +434,48 @@ final class StoreTestSupport {
         null,
         null,
         T0);
+  }
+
+  /** NOTIFICATION 命令；其四字段必须与物化 NOTIFICATION Entry 完全一致。 */
+  static ThreadCommand notificationCommand(
+      UUID threadId,
+      long sequence,
+      UUID idempotencyKey,
+      UUID notificationId,
+      NotificationKind kind,
+      UUID sourceThreadId,
+      String text) {
+    NotificationCommandPayload payload =
+        new NotificationCommandPayload(
+            notificationId, kind, sourceThreadId, AgentMessage.user(text));
+    return new ThreadCommand(
+        threadId,
+        sequence,
+        payload,
+        idempotencyKey,
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        null,
+        null,
+        null,
+        T0);
+  }
+
+  /** 物化到历史的 NOTIFICATION Entry。 */
+  static Entry notificationEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      UUID notificationId,
+      NotificationKind kind,
+      UUID sourceThreadId,
+      String text,
+      Instant createdAt) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new NotificationPayload(notificationId, kind, sourceThreadId, AgentMessage.user(text)),
+        createdAt);
   }
 
   /** 返回仅设置了 consumed marker 的 command；其余身份信息保持不变。 */

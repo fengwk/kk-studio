@@ -5,6 +5,8 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.notificationCommand;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.notificationEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -936,5 +939,156 @@ public abstract class HarnessStoreCommandContract {
     assertTrue(
         store.transaction(tx -> tx.listThreadsBySession(other.sessionId())).stream()
             .noneMatch(thread -> thread.sessionId().equals(baseline.sessionId())));
+  }
+
+  @Test
+  void notificationCommandMustMatchItsOwnNotificationEntry() {
+    // 测试意图：NOTIFICATION 命令必须精确匹配同四字段的 NOTIFICATION Entry；其它命令不得引用 NOTIFICATION Entry。
+    UUID notificationId = TestIds.id(41);
+    UUID sourceThreadId = TestIds.id(42);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  notificationCommand(
+                      baseline.threadId(),
+                      1,
+                      TestIds.id(1),
+                      notificationId,
+                      NotificationKind.SUBAGENT_RESULT,
+                      sourceThreadId,
+                      "delegated result")));
+        });
+    UUID matchingEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  notificationEntry(
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      notificationId,
+                      NotificationKind.SUBAGENT_RESULT,
+                      sourceThreadId,
+                      "delegated result",
+                      T1));
+              return id;
+            });
+    // 正向：四字段一致的 NOTIFICATION Entry 可被应用。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+          tx.updateCommands(List.of(queued.markApplied(matchingEntryId)));
+        });
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        store
+            .transaction(
+                tx ->
+                    tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                        .orElseThrow())
+            .state());
+
+    // 负向：kind 不一致的 NOTIFICATION Entry 被拒绝。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  notificationCommand(
+                      baseline.threadId(),
+                      2,
+                      TestIds.id(2),
+                      notificationId,
+                      NotificationKind.SUBAGENT_RESULT,
+                      sourceThreadId,
+                      "delegated result")));
+        });
+    UUID mismatchedEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  notificationEntry(
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      notificationId,
+                      NotificationKind.TASK_BUDGET,
+                      sourceThreadId,
+                      "delegated result",
+                      T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  tx.updateCommands(List.of(queued.markApplied(mismatchedEntryId)));
+                }));
+
+    // 负向：NOTIFICATION 命令不得引用非 NOTIFICATION Entry（TURN_START）。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(
+              List.of(
+                  notificationCommand(
+                      baseline.threadId(),
+                      3,
+                      TestIds.id(3),
+                      notificationId,
+                      NotificationKind.SUBAGENT_RESULT,
+                      sourceThreadId,
+                      "delegated result")));
+        });
+    UUID turnStartEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  tx.updateCommands(List.of(queued.markApplied(turnStartEntryId)));
+                }));
+
+    // 负向：其它命令不得引用 NOTIFICATION Entry。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(baseline.threadId(), 4, TestIds.id(4))));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  ThreadCommand queued = tx.loadQueuedCommands(baseline.threadId()).get(0);
+                  tx.updateCommands(List.of(queued.markApplied(matchingEntryId)));
+                }));
   }
 }

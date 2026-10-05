@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -11,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -943,21 +945,66 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       StopRootKey root = new StopRootKey(rootThreadId, rootStopRequestId);
       List<StopReceiptKey> keys = new ArrayList<>(receipts.size());
+      boolean rootReceiptPresent = false;
       for (StoppedThreadReceipt receipt : receipts) {
         requireLocked(LockKey.thread(receipt.threadId()));
         StopReceiptKey key = new StopReceiptKey(receipt.threadId(), receipt.stopRequestId());
         if (state.stopReceipts.containsKey(key)) {
           throw new IllegalArgumentException("stop receipt already exists: " + key);
         }
+        requireThreadInStopSubtree(receipt.threadId(), rootThreadId);
+        if (receipt.threadId().equals(rootThreadId)) {
+          rootReceiptPresent = true;
+          if (!receipt.stopRequestId().equals(rootStopRequestId)) {
+            throw new IllegalArgumentException(
+                "root stop receipt must carry the root stop request id " + rootStopRequestId);
+          }
+        }
         if (receipt.stoppedTurnEndEntryId() != null) {
-          requireExistingEntry(receipt.stoppedTurnEndEntryId());
+          requireStoppedTurnEnd(receipt.threadId(), receipt.stoppedTurnEndEntryId());
         }
         keys.add(key);
+      }
+      if (!rootReceiptPresent) {
+        throw new IllegalArgumentException(
+            "stop receipt set must contain the root thread receipt " + rootThreadId);
       }
       for (int i = 0; i < receipts.size(); i++) {
         state.stopReceipts.put(keys.get(i), new StoredStopReceipt(receipts.get(i), root));
       }
       state.stopReceiptsByRoot.computeIfAbsent(root, ignored -> new ArrayList<>()).addAll(keys);
+    }
+
+    /** 回执所属 Thread 必须位于 rootThreadId 的停止子树内（rootThreadId 是其祖先或自身）。 */
+    private void requireThreadInStopSubtree(UUID threadId, UUID rootThreadId) {
+      if (!findAncestorChain(threadId).contains(rootThreadId)) {
+        throw new IllegalArgumentException(
+            "thread " + threadId + " is not in the stop subtree rooted at " + rootThreadId);
+      }
+    }
+
+    /** 停止边界必须是该 Thread 自己 Session 内、由其自有 Turn 关闭的 STOPPED TurnEnd。 */
+    private void requireStoppedTurnEnd(UUID threadId, UUID stoppedTurnEndEntryId) {
+      ThreadState thread = state.threads.get(threadId);
+      if (thread == null) {
+        throw new IllegalArgumentException("thread " + threadId + " does not exist");
+      }
+      Entry turnEnd = requireExistingEntry(stoppedTurnEndEntryId);
+      if (!turnEnd.sessionId().equals(thread.sessionId())) {
+        throw new IllegalArgumentException(
+            "stopped turn end must be in the receipt thread's session");
+      }
+      if (!(turnEnd.payload() instanceof TurnEndPayload end)
+          || end.outcome() != TurnEndOutcome.STOPPED) {
+        throw new IllegalArgumentException(
+            "stopped turn end must be a STOPPED TurnEnd entry: " + stoppedTurnEndEntryId);
+      }
+      Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload start)
+          || !threadId.equals(start.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "stopped turn end must close a turn owned by thread " + threadId);
+      }
     }
 
     @Override
@@ -1010,6 +1057,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
               .orElseThrow(
                   () -> new IllegalArgumentException("join not found: " + join.invocationId()));
       ThreadJoin.validateTransition(old, join);
+      requireValidJoinReceipt(join);
       if (join.terminalEntryId() != null) {
         requireExistingEntry(join.terminalEntryId());
       }
@@ -1032,6 +1080,79 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
       }
       state.joins.put(join.invocationId(), join);
+    }
+
+    /**
+     * 已冻结的 Join 回执必须与子 Thread 历史一致：terminal 与子 Thread 当前 head 必须在同一 branch（互为祖先）；terminal 是 TurnEnd
+     * 时其 Turn 必须由子 Thread 拥有；final answer 是 ASSISTANT MESSAGE 时必须位于源命令应用 Entry 之后、 terminal 路径上。共享
+     * store 契约允许 opaque 占位 Entry，因此非 TurnEnd/非 ASSISTANT 的占位仅做同 Session 校验。
+     */
+    private void requireValidJoinReceipt(ThreadJoin join) {
+      if (join.terminalEntryId() == null) {
+        return;
+      }
+      UUID childThreadId = join.childThreadId();
+      ThreadState child = state.threads.get(childThreadId);
+      if (child == null) {
+        throw new IllegalArgumentException("thread " + childThreadId + " does not exist");
+      }
+      EntryPath terminalPath = loadEntryPath(join.terminalEntryId());
+      EntryPath childPath = loadEntryPath(child.headEntryId());
+      if (indexOfEntry(childPath, join.terminalEntryId()) < 0
+          && indexOfEntry(terminalPath, child.headEntryId()) < 0) {
+        throw new IllegalArgumentException(
+            "join terminal entry must be on the child thread branch: " + join.terminalEntryId());
+      }
+      if (terminalPath.head().payload() instanceof TurnEndPayload end) {
+        requireTurnEndOwnedBy(end, childThreadId);
+      }
+      if (join.finalAnswerEntryId() == null) {
+        return;
+      }
+      Entry finalAnswer = requireExistingEntry(join.finalAnswerEntryId());
+      if (!finalAnswer.sessionId().equals(child.sessionId())) {
+        throw new IllegalArgumentException(
+            "join final answer must be in the child thread's session");
+      }
+      if (!(finalAnswer.payload() instanceof MessagePayload message)
+          || message.message().role() != AgentMessageRole.ASSISTANT) {
+        return;
+      }
+      ThreadCommand source = findCommand(childThreadId, join.sourceCommandSequence()).orElse(null);
+      UUID appliedStart = source == null ? null : source.appliedEntryId();
+      if (appliedStart == null) {
+        throw new IllegalArgumentException("join final answer requires an applied source command");
+      }
+      int startIndex = indexOfEntry(terminalPath, appliedStart);
+      if (startIndex < 0) {
+        throw new IllegalArgumentException(
+            "join source applied entry must be on the terminal path: " + appliedStart);
+      }
+      int finalIndex = indexOfEntry(terminalPath, join.finalAnswerEntryId());
+      if (finalIndex <= startIndex) {
+        throw new IllegalArgumentException(
+            "join final answer entry must follow the applied source entry");
+      }
+    }
+
+    /** TurnEnd 引用的 TurnStart 必须由指定 Thread 拥有。 */
+    private void requireTurnEndOwnedBy(TurnEndPayload end, UUID ownerThreadId) {
+      Entry turnStart = requireExistingEntry(end.turnStartEntryId());
+      if (!(turnStart.payload() instanceof TurnStartPayload start)
+          || !ownerThreadId.equals(start.ownerThreadId())) {
+        throw new IllegalArgumentException(
+            "join terminal turn must be owned by the child thread " + ownerThreadId);
+      }
+    }
+
+    private static int indexOfEntry(EntryPath path, UUID entryId) {
+      List<Entry> entries = path.entries();
+      for (int i = 0; i < entries.size(); i++) {
+        if (entries.get(i).id().equals(entryId)) {
+          return i;
+        }
+      }
+      return -1;
     }
 
     @Override
@@ -1248,7 +1369,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         // 伪造身份的 update 仍以 IllegalArgumentException 拒绝。
         requireLocked(LockKey.thread(command.threadId()));
         requireValidCommandLifecycle(stored, command);
-        requireValidConsumedTurnStart(command);
+        requireValidAppliedEntry(command);
       }
       for (ThreadCommand command : copied) {
         state.commands.put(new CommandKey(command.threadId(), command.sequence()), command);
@@ -1256,10 +1377,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     /**
-     * appliedEntryId（若有）必须指向用户/配置的 TURN_START Entry 或系统通知自身的 NOTIFICATION Entry；该 Entry 的 path
-     * session 与 Command Thread 的 Session 一致，被引用 TURN_START 的 ownerThreadId 等于 command 的 threadId。
+     * appliedEntryId（若有）必须与命令类型精确匹配：NOTIFICATION 必须引用自身四字段完全一致的 NOTIFICATION Entry；其它命令必须 引用本
+     * Thread 拥有的 TURN_START Entry（不得借用同 Session 的任意 Entry）。
      */
-    private void requireValidConsumedTurnStart(ThreadCommand command) {
+    private void requireValidAppliedEntry(ThreadCommand command) {
       UUID appliedEntryId = command.appliedEntryId();
       if (appliedEntryId == null) {
         return;
@@ -1273,29 +1394,25 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "consumed entry must be in the command thread's session");
       }
-      if (applied.payload().type() == EntryType.NOTIFICATION) {
-        // 系统通知物化为自身 NOTIFICATION Entry，不引用 TURN_START；command 与 Entry 的四个身份/内容字段必须逐一匹配。
-        if (!(command.payload() instanceof NotificationCommandPayload notification)) {
+      if (command.type().isNotification()) {
+        if (!(applied.payload() instanceof NotificationPayload notification)
+            || !(command.payload() instanceof NotificationCommandPayload submitted)) {
           throw new IllegalArgumentException(
-              "NOTIFICATION entry may only be referenced by a NOTIFICATION command");
+              "NOTIFICATION command must apply its own NOTIFICATION entry");
         }
-        NotificationPayload notificationPayload = (NotificationPayload) applied.payload();
-        if (!notificationPayload.notificationId().equals(notification.notificationId())
-            || notificationPayload.kind() != notification.kind()
-            || !notificationPayload.sourceThreadId().equals(notification.sourceThreadId())
-            || !notificationPayload.message().equals(notification.message())) {
+        if (!notification.notificationId().equals(submitted.notificationId())
+            || notification.kind() != submitted.kind()
+            || !notification.sourceThreadId().equals(submitted.sourceThreadId())
+            || !notification.message().equals(submitted.message())) {
           throw new IllegalArgumentException(
-              "applied NOTIFICATION entry must match the command notification payload");
+              "NOTIFICATION applied entry must match the command payload");
         }
         return;
       }
-      if (applied.payload().type() != EntryType.TURN_START) {
-        throw new IllegalArgumentException("appliedEntryId must reference a TURN_START entry");
-      }
-      TurnStartPayload turnStartPayload = (TurnStartPayload) applied.payload();
-      if (!command.threadId().equals(turnStartPayload.ownerThreadId())) {
+      if (!(applied.payload() instanceof TurnStartPayload turnStartPayload)
+          || !command.threadId().equals(turnStartPayload.ownerThreadId())) {
         throw new IllegalArgumentException(
-            "consumed turn start ownerThreadId must equal the command threadId");
+            "appliedEntryId must reference a TURN_START owned by the command thread");
       }
     }
 

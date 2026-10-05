@@ -70,8 +70,8 @@ import java.util.concurrent.TimeoutException;
  *       Session / Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
  *   <li><b>配额超限与标识重用回滚</b>：子线程 Join 配额超限或 InvocationId 重用被拒绝时，同样在 PostgreSQL 中不产生任何孤儿记录；
  *   <li><b>并发接受 Tree Lock 串行化</b>：同一父级下的并发子线程接受请求通过 PG Advisory Lock 严格串行化，避免配额竞态；
- *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> Join 冻结 -> 父级交付 NOTIFICATION ->
- *       父级消费， PostgreSQL 全表状态一致性与最终一致性检验。
+ *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> Join 冻结 -> 父级交付 NOTIFICATION -> 父级消费，
+ *       PostgreSQL 全表状态一致性与最终一致性检验。
  * </ul>
  */
 class PostgresqlJoinAcceptanceRollbackTest {
