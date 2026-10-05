@@ -378,6 +378,11 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
   `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
   物化门禁；该 case 需要 `host-mock`，不是 `requires=-`。
+- `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
+  `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
+  查询不改变 head 或版本；非法 UUID 为 400，缺失 Thread 为 404。
+  根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
+  跨 Session 的多层父子树与锁序由内存及 PostgreSQL 契约测试覆盖。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此

@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
@@ -70,6 +71,40 @@ public final class HarnessRuntimeResponseMapper {
       new ToolInvocationErrorJsonCodec();
 
   private HarnessRuntimeResponseMapper() {}
+
+  /**
+   * 映射一次事务内读出的执行树。节点顺序保持 Runtime 的 {@code createdAt} 再 UUID 序，不在此重排。
+   *
+   * <p>只取名称、当前模型、运行状态和当前路径计数；不序列化 Entry、Command 或 Tool 载荷。
+   */
+  public static List<HarnessThreadTreeNodeDTO> toThreadTreeDtos(List<ThreadSnapshot> snapshots) {
+    Objects.requireNonNull(snapshots, "snapshots");
+    List<HarnessThreadTreeNodeDTO> nodes = new ArrayList<>(snapshots.size());
+    for (ThreadSnapshot snapshot : snapshots) {
+      nodes.add(toThreadTreeNodeDto(snapshot));
+    }
+    return List.copyOf(nodes);
+  }
+
+  private static HarnessThreadTreeNodeDTO toThreadTreeNodeDto(ThreadSnapshot snapshot) {
+    Objects.requireNonNull(snapshot, "snapshot");
+    HarnessThreadTreeNodeDTO dto = new HarnessThreadTreeNodeDTO();
+    dto.setThreadId(snapshot.thread().id().toString());
+    dto.setParentThreadId(
+        snapshot.thread().parentThreadId() == null
+            ? null
+            : snapshot.thread().parentThreadId().toString());
+    dto.setName(snapshot.thread().name());
+    dto.setAgentName(snapshot.entryPath().baseSettings().agentName());
+    dto.setModel(toModelSelectionDto(snapshot.entryPath().baseSettings().model()));
+    ThreadRuntimeStatus status = snapshot.runtimeStatus();
+    dto.setStatus(status.name());
+    dto.setProcessing(status.isProcessing());
+    dto.setTurnCount(snapshot.turnCount());
+    dto.setToolCallCount(snapshot.toolCallCount());
+    dto.setOutcome(snapshot.outcome() == null ? null : snapshot.outcome().name());
+    return dto;
+  }
 
   /**
    * 映射一个一致的 Thread 快照；DTO 列表为不可变副本。
