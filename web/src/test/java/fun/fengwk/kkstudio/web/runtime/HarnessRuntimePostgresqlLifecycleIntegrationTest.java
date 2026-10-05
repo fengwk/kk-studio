@@ -158,9 +158,9 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         ROOT_PAYLOAD_JSON);
     jdbc.update(
         "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-            + " creation_request_hash, name, yolo_enabled, status, next_command_sequence, version,"
-            + " created_at, updated_at)"
-            + " values (?, ?, null, ?, ?, ?, false, 'IDLE', 1, 0, now(), now())",
+            + " creation_request_hash, name, yolo_enabled, execution_control,"
+            + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, ?, false, 'RUNNABLE', 0, 1, 0, now(), now())",
         THREAD_ID,
         SESSION_ID,
         ROOT_ENTRY_ID,
@@ -201,7 +201,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
       statement.execute("drop schema if exists public cascade");
       statement.execute("create schema public");
     }
-    // V1 baseline（唯一事实源）提供 Harness 7 表 + system_setting 默认行。
+    // V1 baseline 提供 Harness Schema 与 system_setting 默认行。
     Flyway.configure()
         .dataSource(new SingleConnectionDataSource(connection, true))
         .locations("classpath:db/migration")
