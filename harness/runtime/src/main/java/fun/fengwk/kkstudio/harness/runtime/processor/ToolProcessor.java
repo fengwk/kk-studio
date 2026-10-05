@@ -369,7 +369,10 @@ public final class ToolProcessor implements AutoCloseable {
     return new Prepare.Terminated();
   }
 
-  /** 旧 lease 过期恢复：DISPATCHING 消费 proposed attempt，RUNNING 保留 attempt；绝不重放 Tool。 */
+  /**
+   * 旧 lease 过期恢复：执行持有者已失效，绝不重放 Tool。DISPATCHING 表示可能已派发、RUNNING 表示正在运行；两者都如实给出
+   * 中断原因与最后已知状态，并明确外部效果未知，交给下一轮模型自行决定查询或重试。
+   */
   private Prepare recoverUnknown(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
@@ -380,13 +383,22 @@ public final class ToolProcessor implements AutoCloseable {
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    ToolInvocationError error =
-        new ToolInvocationError(
-            "LEASE_EXPIRED", "tool work lease expired; tool outcome cannot be confirmed");
+    ToolInvocationError error = leaseLostError(tool.status());
     tx.updateToolInvocations(List.of(tool.unknown(error, now)));
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
+  }
+
+  /** 失联恢复的如实反馈：只报告可证实的原因与最后已知状态，并明确外部效果未知；不把未知效果写成“确定未执行”。 */
+  private static ToolInvocationError leaseLostError(ToolInvocationStatus lastKnownStatus) {
+    return new ToolInvocationError(
+        "LEASE_EXPIRED",
+        "tool invocation was interrupted because its execution holder was lost; no persisted final"
+            + " result was obtained. Last known status: "
+            + lastKnownStatus
+            + ". Whether the external operation took effect, or is still running, cannot be"
+            + " confirmed by this result.");
   }
 
   /**
