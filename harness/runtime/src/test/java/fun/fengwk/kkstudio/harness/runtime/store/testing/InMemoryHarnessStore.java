@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -1272,7 +1274,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
             "consumed entry must be in the command thread's session");
       }
       if (applied.payload().type() == EntryType.NOTIFICATION) {
-        // 系统通知物化为自身 NOTIFICATION Entry，不引用 TURN_START。
+        // 系统通知物化为自身 NOTIFICATION Entry，不引用 TURN_START；command 与 Entry 的四个身份/内容字段必须逐一匹配。
+        if (!(command.payload() instanceof NotificationCommandPayload notification)) {
+          throw new IllegalArgumentException(
+              "NOTIFICATION entry may only be referenced by a NOTIFICATION command");
+        }
+        NotificationPayload notificationPayload = (NotificationPayload) applied.payload();
+        if (!notificationPayload.notificationId().equals(notification.notificationId())
+            || notificationPayload.kind() != notification.kind()
+            || !notificationPayload.sourceThreadId().equals(notification.sourceThreadId())
+            || !notificationPayload.message().equals(notification.message())) {
+          throw new IllegalArgumentException(
+              "applied NOTIFICATION entry must match the command notification payload");
+        }
         return;
       }
       if (applied.payload().type() != EntryType.TURN_START) {

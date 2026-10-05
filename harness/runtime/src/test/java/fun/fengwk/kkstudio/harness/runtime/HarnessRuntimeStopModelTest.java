@@ -3,24 +3,22 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.modelError;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedRunningContinuationModel;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedTerminalModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targetReceipt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -217,35 +215,36 @@ class HarnessRuntimeStopModelTest {
   }
 
   @Test
-  void terminalPendingModelStopConflictsWithoutAnyMutation() {
-    HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
-    seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
+  void terminalPendingModelStopMaterializesCommittedResultThenStops() {
+    // 真实形态：ROOT -> TURN_START(INPUT) -> USER；Model 已 terminal（CANCELLED）但结果尚未 apply。
+    HarnessRuntimeTestSupport.ModelBaseline baseline =
+        seedModel(store, ModelInvocationStatus.RUNNING);
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation model = tx.lockModelInvocation(baseline.modelId()).orElseThrow();
+          tx.updateModelInvocation(model.cancel(modelError(), T5));
+        });
     seedThreadWork(store, baseline.threadId());
     seedModelWork(store, baseline.modelId());
-    HarnessRuntimeConflictException error =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
-    assertEquals(Reason.TERMINAL_APPLY_PENDING, error.reason());
-    ModelInvocation model = storedModel(baseline.modelId());
-    assertTrue(model.status().isTerminal());
-    assertNull(model.resultEntryId());
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-    assertEquals(0L, thread.version());
-    ThreadCommand command =
-        store.transaction(
-            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
-    assertEquals(ThreadCommandState.QUEUED, command.state());
+
+    // 提交先于 Stop：Stop 不 409，而是把已提交的 terminal 结果物化进历史后正常停止。
+    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
+    assertStopped(result);
+    // Model 行在物化/停止后物理删除。
+    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
+    EntryPath path = pathOf(baseline.threadId());
+    // 已提交结果被保留：ASSISTANT_ERROR(CANCELLED) 与 FAILED TURN_END 在 STOP 边界之前。
+    assertTrue(path.entries().stream().anyMatch(e -> e.payload() instanceof AssistantErrorPayload));
     assertTrue(
-        store
-            .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
-            .isPresent());
-    assertTrue(
-        store
-            .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
-            .isPresent());
+        path.entries().stream()
+            .anyMatch(
+                e ->
+                    e.payload() instanceof TurnEndPayload end
+                        && end.outcome() == TurnEndOutcome.FAILED));
+    TurnEndPayload stopEnd = (TurnEndPayload) path.head().payload();
+    assertEquals(TurnEndOutcome.STOPPED, stopEnd.outcome());
+    assertNull(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).orElse(null));
   }
 
   private ModelInvocation storedModel(UUID modelId) {
