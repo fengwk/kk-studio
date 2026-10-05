@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class PostgresqlModelLeaseRecoveryTest {
 
   private static final Duration LEASE = Duration.ofSeconds(30);
-  private static final Duration RETRY_DELAY = Duration.ofMillis(400);
+  private static final Duration RETRY_DELAY = Duration.ofMinutes(5);
 
   private HarnessStore store;
   private JdbcTemplate jdbc;
