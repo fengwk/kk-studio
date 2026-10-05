@@ -4,9 +4,10 @@ import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/Me
 import { ModelAttemptFailureMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
-import type {
-  DialogueMessage,
-  ToolDialogueMessage,
+import {
+  sameToolCall,
+  type DialogueMessage,
+  type ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
 import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { ReactNode } from 'react'
@@ -143,8 +144,5 @@ function findPairedResult(
 }
 
 function sameToolIdentity(left: ToolDialogueMessage, right: ToolDialogueMessage): boolean {
-  if (left.toolCallId && right.toolCallId) {
-    return left.toolCallId === right.toolCallId
-  }
-  return left.rendererKey === right.rendererKey && left.toolName === right.toolName
+  return sameToolCall(left, right)
 }

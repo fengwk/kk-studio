@@ -7,6 +7,7 @@ import type {
   ToolDialogueMessage,
   TurnUsage,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { toolCallIdentity as strictToolCallIdentity } from '@/features/ai/runtime/thread-timeline-types'
 import {
   contentText,
   toResourceAttachment,
@@ -220,6 +221,7 @@ export function projectDurableEntry(
   }
   if (role === 'TOOL') {
     const toolResults = contents.filter((candidate) => getString(candidate.type) === 'tool_result')
+    const metadata = asRecord(payload.toolResultMetadata)
     toolResults.forEach((content, index) => {
       const key = toolCallKey(getString(content.toolCallId))
       const argumentsQueue = durableToolArguments.get(key) ?? []
@@ -227,7 +229,7 @@ export function projectDurableEntry(
       if (argumentsQueue.length === 0) {
         durableToolArguments.delete(key)
       }
-      messages.push(projectToolResult(entry, content, argumentsJson, index))
+      messages.push(projectToolResult(entry, content, argumentsJson, index, metadata))
     })
     if (toolResults.length === 0) {
       messages.push(projectEmptyMessageEntry(entry, role))
@@ -319,6 +321,7 @@ function projectToolCall(
     attachments: [],
     createdAt: entry.createTime,
     status: 'done',
+    callIdentity: strictToolCallIdentity(entry.entryId, callIndex),
   }
 }
 
@@ -327,8 +330,11 @@ function projectToolResult(
   content: Record<string, unknown>,
   argumentsJson: string,
   callIndex: number,
+  metadata: Record<string, unknown>,
 ): ToolDialogueMessage {
   const projected = projectToolResultContent(content, argumentsJson)
+  const assistantEntryId = getString(metadata.assistantEntryId)
+  const metadataCallIndex = integerValue(metadata.callIndex)
   return {
     id: `${entry.entryId}:tool-result:${toolCallIdentity(content, callIndex)}`,
     role: 'tool',
@@ -343,6 +349,9 @@ function projectToolResult(
     errorMessage: projected.errorMessage,
     createdAt: entry.createTime,
     status: projected.status,
+    callIdentity: assistantEntryId && metadataCallIndex != null
+      ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
+      : undefined,
   }
 }
 

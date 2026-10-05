@@ -10,13 +10,16 @@ import type {
   RealtimeModelStream,
   RealtimeToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
-import type {
-  DialogueMessage,
-  QueuedThreadMessage,
-  ThreadTimeline,
-  ToolApprovalState,
-  ToolDialogueMessage,
+import {
+  sameToolCall,
+  toolCallIdentity,
+  type DialogueMessage,
+  type QueuedThreadMessage,
+  type ThreadTimeline,
+  type ToolApprovalState,
+  type ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { parseToolErrorText } from '@/features/ai/runtime/thread-realtime-state'
 import {
   projectDurableEntry,
   projectToolResultContent,
@@ -338,22 +341,27 @@ function projectInvocationOverlays(
         || invocation.errorJson != null
         || isFailedInvocationStatus(invocation.status)
       )
+    const failureText = invocation.errorJson != null
+      ? parseToolErrorText(invocation.errorJson)
+      : null
     const projected: ToolDialogueMessage = {
       ...message,
+      callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
       // 终态以 invocation 自己的 resultJson/errorJson 为准。call.status=done 只表示
       // arguments 已完成，不能在 durable result 或 invocation 结果到达前当成成功。
       status: terminalResult == null ? 'streaming' : (failed ? 'error' : 'done'),
       invocationId: invocation.id,
       // environmentId 是环境路由身份，绝不能当作审批目标 Thread。
       threadId: threadId || undefined,
-      partial: overlay && overlay.text ? overlay.text : undefined,
+      // 终态结果已经可见时，旧 partial 不能再盖过正文、附件或错误。
+      partial: terminalResult == null && overlay?.text ? overlay.text : undefined,
       partialAttachments:
-        overlay && overlay.attachments && overlay.attachments.length > 0
+        terminalResult == null && overlay?.attachments && overlay.attachments.length > 0
           ? overlay.attachments
           : undefined,
-      partialErrorText: overlay?.errorText,
+      partialErrorText: terminalResult == null ? overlay?.errorText : undefined,
       approval: approval?.required ? approval : undefined,
-      errorMessage: failed ? undefined : message.errorMessage,
+      errorMessage: failed ? failureText ?? undefined : message.errorMessage,
     }
     messages[index] = projected
     if (terminalResult != null && !hasDurableToolResult(messages, projected)) {
@@ -363,6 +371,7 @@ function projectInvocationOverlays(
         role: 'tool',
         phase: 'result',
         subjectEntryId: projected.subjectEntryId,
+        callIdentity: projected.callIdentity,
         toolCallId: projected.toolCallId,
         toolName: projected.toolName,
         rendererKey: projected.rendererKey,
@@ -371,7 +380,7 @@ function projectInvocationOverlays(
         threadId: projected.threadId,
         status: failed ? 'error' : terminalResult.status,
         errorMessage: failed
-          ? terminalResult.errorMessage ?? translate('ai.runtime.entry.toolFailed')
+          ? terminalResult.errorMessage ?? failureText ?? translate('ai.runtime.entry.toolFailed')
           : undefined,
       })
       index += 1
@@ -416,22 +425,8 @@ function hasDurableToolResult(
     candidate.role === 'tool'
     && candidate.phase === 'result'
     && !candidate.id.startsWith('transient:tool-result:')
-    && sameToolResultIdentity(call, candidate),
+    && sameToolCall(call, candidate),
   )
-}
-
-function sameToolResultIdentity(
-  call: ToolDialogueMessage,
-  result: ToolDialogueMessage,
-): boolean {
-  if (call.toolCallId && result.toolCallId) {
-    return call.toolCallId === result.toolCallId
-      && call.rendererKey === result.rendererKey
-  }
-  return call.subjectEntryId != null
-    && call.subjectEntryId === result.subjectEntryId
-    && call.rendererKey === result.rendererKey
-    && call.toolName === result.toolName
 }
 
 /** 将规范的 ToolApproval JSON 解析为可安全展示的投影。 */

@@ -1011,9 +1011,10 @@ describe('thread timeline', () => {
       status: 'done',
       invocationId: 'inv-done',
     })
-    // 终态 resultJson 只覆盖 status/errorMessage：同 attempt 的实时 overlay 文本
-    // 仍保留为 partial（builder 不会因 terminal 而清空 partial）。
-    expect(call?.partial).toBe('streaming partial')
+    // 终态 result 到达后，同 attempt 的旧 partial 不再覆盖最终正文。
+    expect(call?.partial).toBeUndefined()
+    expect(timeline.messages.find((message) => message.role === 'tool' && message.phase === 'result'))
+      .toMatchObject({ text: 'ok', status: 'done' })
   })
 
   it('deduplicates tool invocations by assistantEntryId:callIndex identity', () => {
@@ -1203,19 +1204,120 @@ describe('thread timeline', () => {
     ])
   })
 
+  it('keeps a reused toolCallId on the current assistant independent of an older result', () => {
+    // 历史 assistant A 的 result 不能按 toolCallId 屏蔽当前 assistant B 的 transient result。
+    const timeline = buildThreadTimeline(
+      [
+        entry('A', 'MESSAGE', messagePayload('ASSISTANT', [toolCallContent('x', 0)])),
+        entry('A-result', 'MESSAGE', {
+          ...messagePayload('TOOL', [{
+            type: 'tool_result',
+            toolCallId: 'x',
+            toolName: 'bash',
+            rendererKey: 'bash',
+            error: false,
+            contents: [{ type: 'text', text: 'old output' }],
+          }]),
+          toolResultMetadata: {
+            assistantEntryId: 'A',
+            toolCallId: 'x',
+            callIndex: 0,
+            status: 'SUCCEEDED',
+            synthetic: false,
+            reason: null,
+          },
+        }),
+        entry('B', 'MESSAGE', messagePayload('ASSISTANT', [toolCallContent('x', 0)])),
+      ],
+      [],
+      [invocation('inv-b', 'B', 'x', {
+        status: 'SUCCEEDED',
+        resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'current output' }], error: false }),
+      })],
+    )
+    const current = timeline.messages.filter((message) =>
+      message.role === 'tool' && (message.subjectEntryId === 'B' || message.callIdentity === 'B:0'),
+    )
+    expect(current).toMatchObject([
+      { phase: 'call', callIdentity: 'B:0', status: 'done' },
+      { phase: 'result', callIdentity: 'B:0', text: 'current output', status: 'done' },
+    ])
+    expect(timeline.messages.filter((message) => message.role === 'tool' && message.phase === 'result')
+      .map((message) => message.text)).toEqual(['old output', 'current output'])
+  })
+
+  it('does not exchange results between reused ids or different call indexes', () => {
+    // 两条历史复用和同批两个 callIndex 都必须各自配对，不能拿相邻结果。
+    const timeline = buildThreadTimeline(
+      [
+        entry('A', 'MESSAGE', messagePayload('ASSISTANT', [
+          toolCallContent('x', 0),
+          toolCallContent('x', 1),
+        ])),
+        entry('A-result-0', 'MESSAGE', {
+          ...messagePayload('TOOL', [toolResult('x', 'first output')]),
+          toolResultMetadata: toolResultMetadata('A', 'x', 0),
+        }),
+        entry('A-result-1', 'MESSAGE', {
+          ...messagePayload('TOOL', [toolResult('x', 'second output')]),
+          toolResultMetadata: toolResultMetadata('A', 'x', 1),
+        }),
+        entry('B', 'MESSAGE', messagePayload('ASSISTANT', [
+          toolCallContent('x', 0),
+          toolCallContent('x', 1),
+        ])),
+        entry('B-result', 'MESSAGE', {
+          ...messagePayload('TOOL', [toolResult('x', 'current first')]),
+          toolResultMetadata: toolResultMetadata('B', 'x', 0),
+        }),
+      ],
+      [],
+      [
+        invocation('inv-b0', 'B', 'x', {
+          callIndex: 0,
+          status: 'SUCCEEDED',
+          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'stale transient' }], error: false }),
+        }),
+        invocation('inv-b1', 'B', 'x', {
+          callIndex: 1,
+          status: 'SUCCEEDED',
+          resultJson: JSON.stringify({ contents: [{ type: 'text', text: 'current second' }], error: false }),
+          errorJson: JSON.stringify({ code: 'TOOL_FAILED', message: 'disk full' }),
+        }),
+      ],
+    )
+    expect(timeline.messages.filter((message) => message.role === 'tool')).toMatchObject([
+      { phase: 'call', callIdentity: 'A:0' },
+      { phase: 'call', callIdentity: 'A:1' },
+      { phase: 'result', callIdentity: 'A:0', text: 'first output' },
+      { phase: 'result', callIdentity: 'A:1', text: 'second output' },
+      { phase: 'call', callIdentity: 'B:0' },
+      { phase: 'call', callIdentity: 'B:1', status: 'error', errorMessage: 'disk full' },
+      { phase: 'result', callIdentity: 'B:1', text: 'current second', status: 'error', errorMessage: 'disk full' },
+      { phase: 'result', callIdentity: 'B:0', text: 'current first' },
+    ])
+    expect(timeline.messages.some((message) =>
+      message.role === 'tool' && message.id.startsWith('transient:tool-result:inv-b0'))).toBe(false)
+    expect(timeline.messages.filter((message) =>
+      message.role === 'tool' && message.text === 'first output')).toHaveLength(1)
+  })
+
   it('replaces a transient invocation result with the durable result and keeps a later success', () => {
     // durable tool result 到达后是唯一输出；同 attempt 的旧 partial 错误不能盖过最终成功。
     const timeline = buildThreadTimeline(
       [
         assistantCalls(['call-1']),
-        entry('41', 'MESSAGE', messagePayload('TOOL', [{
-          type: 'tool_result',
-          toolCallId: 'call-1',
-          toolName: 'bash',
-          rendererKey: 'bash',
-          error: false,
-          contents: [{ type: 'text', text: 'durable ok' }],
-        }])),
+        entry('41', 'MESSAGE', {
+          ...messagePayload('TOOL', [{
+            type: 'tool_result',
+            toolCallId: 'call-1',
+            toolName: 'bash',
+            rendererKey: 'bash',
+            error: false,
+            contents: [{ type: 'text', text: 'durable final' }],
+          }]),
+          toolResultMetadata: toolResultMetadata('40', 'call-1', 0),
+        }),
       ],
       [],
       [invocation('inv-1', '40', 'call-1', {
@@ -1228,17 +1330,21 @@ describe('thread timeline', () => {
         invocationId: 'inv-1',
         attempt: 1,
         toolCallId: 'call-1',
-        text: 'partial failure',
+        text: 'stale partial',
         error: true,
         errorText: 'temporary',
+        attachments: [{ type: 'file', name: 'stale.txt', mime: 'text/plain', data: 'file:///tmp/stale.txt' }],
         createdAt: '2026-07-28T10:00:01Z',
       }]]),
     )
     const tools = timeline.messages.filter((message) => message.role === 'tool')
     expect(tools).toMatchObject([
-      { phase: 'call', status: 'done', partial: 'partial failure', partialErrorText: 'temporary' },
-      { phase: 'result', text: 'durable ok', status: 'done' },
+      { phase: 'call', status: 'done', callIdentity: '40:0' },
+      { phase: 'result', text: 'durable final', status: 'done', callIdentity: '40:0' },
     ])
+    expect(tools[0]?.role === 'tool' ? tools[0].partial : 'present').toBeUndefined()
+    expect(tools[0]?.role === 'tool' ? tools[0].partialErrorText : 'present').toBeUndefined()
+    expect(tools[0]?.role === 'tool' ? tools[0].partialAttachments : ['present']).toBeUndefined()
     expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
     expect(tools.some((message) => message.id.startsWith('transient:tool-result:'))).toBe(false)
   })
@@ -1397,6 +1503,32 @@ function command(
 function messagePayload(role: string, contents: Array<Record<string, unknown>>) {
   return {
     message: { role, contents },
+  }
+}
+
+function toolResultMetadata(
+  assistantEntryId: string,
+  toolCallId: string,
+  callIndex: number,
+): Record<string, unknown> {
+  return {
+    assistantEntryId,
+    toolCallId,
+    callIndex,
+    status: 'SUCCEEDED',
+    synthetic: false,
+    reason: null,
+  }
+}
+
+function toolResult(toolCallId: string, text: string): Record<string, unknown> {
+  return {
+    type: 'tool_result',
+    toolCallId,
+    toolName: 'bash',
+    rendererKey: 'bash',
+    error: false,
+    contents: [{ type: 'text', text }],
   }
 }
 
