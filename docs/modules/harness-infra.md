@@ -97,7 +97,7 @@ threadLeaseDuration / modelLeaseDuration / toolLeaseDuration
 periodicPollInterval / executorRejectionDelay / maxDispatchTasks
 ```
 
-前五个 Duration 必须是正的整毫秒，与 Store 的毫秒精度时间边界一致；`maxDispatchTasks` 只约束本机排队与运行中的 processor handoff 总数（到达上限即停止 claim），绝不约束异步 Model / Tool 的执行并发——那由各 Processor 及其注入的 Gateway / executor 决定。生产组合由 [`HarnessDispatcherProperties`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessDispatcherProperties.java)（前缀 `kk-studio.harness.dispatcher`）提供，它另外承载派发准入重排延迟 `admission-deferral` 与 worker 池容量 `worker.concurrency` / `worker.queue-capacity`，生产装配当前用同一个 `lease-duration` 填充 THREAD / MODEL / TOOL 三个 lease 字段。
+前五个 Duration 必须是正的整毫秒，与 Store 的毫秒精度时间边界一致；`maxDispatchTasks` 只约束本机排队与运行中的 processor handoff 总数（到达上限即停止 claim），绝不约束异步 Model / Tool 的执行并发——那由各 Processor 及其注入的 Gateway / executor 决定。生产组合由 [`HarnessDispatcherProperties`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessDispatcherProperties.java)（前缀 `kk-studio.harness.dispatcher`）提供，它另外承载 worker 池容量 `worker.concurrency` / `worker.queue-capacity`，生产装配当前用同一个 `lease-duration` 填充 THREAD / MODEL / TOOL 三个 lease 字段。
 
 ## Realtime source / sink
 

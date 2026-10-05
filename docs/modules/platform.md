@@ -89,7 +89,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 
 Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
-宿主派发准入保留为 Runtime 的通用端口 [`WorkDispatchAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/WorkDispatchAdmission.java)（未注入宿主策略时默认 `ALLOW_ALL`）：它只在 `READY -> DISPATCHING` 意图事务内、Harness 行锁之前运行，宿主可结合自身行锁复验产品事实，拒绝只重排 Work 并保留 Invocation，外部调用在提交后启动。Issue 不注入按归属/阶段拦截的准入实现：需要终止在途 Run 时由业务显式调用 Stop，Runtime 不为产品 Gate 新增派发过滤。
+Runtime 在自己的 lease 所有权短事务内直接持久 `READY -> DISPATCHING`，提交之后才调用 Provider / Tool Gateway，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
 ## Model 与 Tool 执行
 
@@ -270,7 +270,7 @@ Host/SNI 与证书校验保留原域名。Daemon 与浏览器的网络策略独�
 
 | 前缀 | 用途 |
 | --- | --- |
-| `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll、拒绝与准入延迟 |
+| `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll 与拒绝 |
 | `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
 | `kk-studio.harness.runtime` | worker 开关与 Resource 根 |
 | `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
