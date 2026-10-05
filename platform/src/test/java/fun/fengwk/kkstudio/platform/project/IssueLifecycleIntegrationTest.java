@@ -145,6 +145,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     ThreadState threadState = mock(ThreadState.class);
     when(threadState.headEntryId()).thenReturn(headEntry(activeRun.getThreadId()));
     when(threadState.sessionId()).thenReturn(activeRun.getSessionId());
+    // 收尾闭合 scope 会用同一 Thread 的 next_command_sequence 接受纯 SET_CONTRIBUTOR_STATE 批次，必须为正。
+    when(threadState.nextCommandSequence()).thenReturn(1L);
     EntryPath entryPath = mock(EntryPath.class);
     Entry rootEntry = mock(Entry.class);
     when(rootEntry.id()).thenReturn(activeRun.getStartEntryId());

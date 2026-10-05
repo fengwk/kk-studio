@@ -38,6 +38,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -242,6 +244,16 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         commandType);
   }
 
+  /** 本 Thread 上 Run 接受的 SET_ENVIRONMENT 取值；null 表示显式清空，用于断言环境只来自阶段配置。 */
+  protected String runEnvironmentName(UUID threadId) {
+    ThreadCommandPayload payload =
+        new ThreadCommandPayloadJsonCodec()
+            .decode(
+                ThreadCommandType.SET_ENVIRONMENT,
+                commandPayload(threadId, ThreadCommandType.SET_ENVIRONMENT.name()));
+    return ((SetEnvironmentCommandPayload) payload).environmentName();
+  }
+
   /** 本 Thread 上最新一次 scope 冻结命令的序号：用于断言关闭旧 scope 后新 Run 的 active=true 严格在其之后。 */
   protected long latestRunScopeSequence(UUID threadId) {
     Long value =
@@ -396,6 +408,18 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
               });
+      when(transaction.deleteJoinsForThreads(any()))
+          .thenAnswer(
+              invocation -> {
+                List<UUID> threadIds = invocation.getArgument(0);
+                int deleted = 0;
+                for (UUID threadId : threadIds) {
+                  deleted +=
+                      jdbc.update(
+                          "delete from harness_thread_join where child_thread_id = ?", threadId);
+                }
+                return deleted;
+              });
       when(transaction.deleteThreads(any()))
           .thenAnswer(
               invocation -> {
@@ -444,6 +468,10 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   acceptAndJoin(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
       when(runtime.findJoin(any(UUID.class)))
           .thenAnswer(invocation -> findJoin(jdbc, invocation.getArgument(0)));
+      when(runtime.findThreadCommand(any(UUID.class), any(UUID.class)))
+          .thenAnswer(
+              invocation ->
+                  findThreadCommand(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
       when(runtime.projectJoinReceipt(any(UUID.class)))
           .thenAnswer(invocation -> projectJoinReceipt(jdbc, invocation.getArgument(0)));
       when(runtime.getThreadSnapshot(any(UUID.class)))
@@ -549,6 +577,39 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
               null));
     }
 
+    /** 按 Thread + idempotencyKey 读取 durable command，用真实 payload codec 还原 typed aggregate。 */
+    private static Optional<ThreadCommand> findThreadCommand(
+        JdbcTemplate jdbc, UUID threadId, UUID idempotencyKey) {
+      List<Map<String, Object>> rows =
+          jdbc.queryForList(
+              "select sequence, command_type, payload::text as payload, request_hash,"
+                  + " applied_entry_id, stop_request_id, cancelled_at, created_at"
+                  + " from harness_thread_command where thread_id = ? and idempotency_key = ?",
+              threadId,
+              idempotencyKey);
+      if (rows.isEmpty()) {
+        return Optional.empty();
+      }
+      Map<String, Object> row = rows.get(0);
+      ThreadCommandPayload payload =
+          COMMAND_CODEC.decode(
+              ThreadCommandType.valueOf((String) row.get("command_type")),
+              (String) row.get("payload"));
+      return Optional.of(
+          new ThreadCommand(
+              threadId,
+              ((Number) row.get("sequence")).longValue(),
+              payload,
+              idempotencyKey,
+              (String) row.get("request_hash"),
+              (UUID) row.get("applied_entry_id"),
+              (UUID) row.get("stop_request_id"),
+              row.get("cancelled_at") == null
+                  ? null
+                  : ((Timestamp) row.get("cancelled_at")).toInstant(),
+              ((Timestamp) row.get("created_at")).toInstant()));
+    }
+
     private static AcceptedCommands accept(JdbcTemplate jdbc, AcceptCommandsCommand command) {
       AcceptCommandsTarget target = command.target();
       if (target instanceof AcceptCommandsTarget.NewSession newSession) {
@@ -582,7 +643,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now,
             now);
         insertCommands(jdbc, threadId, 1, command.commands(), now);
-        return accepted(rootEntryId);
+        return accepted(threadId, rootEntryId);
       }
       AcceptCommandsTarget.Thread thread = (AcceptCommandsTarget.Thread) target;
       insertCommands(
@@ -595,7 +656,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           "update harness_thread set next_command_sequence = next_command_sequence + ? where id = ?",
           command.commands().size(),
           thread.threadId());
-      return accepted(thread.expectedHeadEntryId());
+      return accepted(thread.threadId(), thread.expectedHeadEntryId());
     }
 
     /** 记录本次接受的真实命令行，供并发幂等测试断言「只派发一次」。 */
@@ -628,11 +689,14 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       }
     }
 
-    private static AcceptedCommands accepted(UUID rootEntryId) {
+    private static AcceptedCommands accepted(UUID threadId, UUID rootEntryId) {
       Entry rootEntry = mock(Entry.class);
       when(rootEntry.id()).thenReturn(rootEntryId);
+      ThreadState thread = mock(ThreadState.class);
+      when(thread.id()).thenReturn(threadId);
       AcceptedCommands accepted = mock(AcceptedCommands.class);
       when(accepted.rootEntry()).thenReturn(rootEntry);
+      when(accepted.thread()).thenReturn(thread);
       return accepted;
     }
 

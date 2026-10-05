@@ -58,36 +58,6 @@ public record ProjectRunScope(
     nextStates = List.copyOf(Objects.requireNonNull(nextStates, "nextStates"));
   }
 
-  /** 活跃 Run 的便捷构造：接受 Run 时 {@code active} 恒为 true。 */
-  public ProjectRunScope(
-      UUID runId,
-      UUID issueId,
-      UUID projectId,
-      UUID sourceThreadId,
-      long issueNumber,
-      String issueTitle,
-      String issueDescription,
-      String stage,
-      String stageName,
-      String stageInstructions,
-      List<String> nextStates,
-      String agentName) {
-    this(
-        runId,
-        issueId,
-        projectId,
-        sourceThreadId,
-        issueNumber,
-        issueTitle,
-        issueDescription,
-        stage,
-        stageName,
-        stageInstructions,
-        nextStates,
-        agentName,
-        true);
-  }
-
   /** 返回同一 Run 事实的关闭副本：{@code runId} 等身份不变，仅把 {@code active} 置为 false。 */
   public ProjectRunScope closed() {
     return new ProjectRunScope(
