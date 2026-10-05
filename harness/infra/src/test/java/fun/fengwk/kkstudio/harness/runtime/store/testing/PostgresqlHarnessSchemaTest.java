@@ -17,10 +17,10 @@ import java.util.UUID;
 class PostgresqlHarnessSchemaTest {
 
   /**
-   * Harness runtime 协议恰好八张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该八表。
+   * Harness runtime 协议恰好九张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该九表。
    *
-   * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， 属于
-   * runtime 协议空间。
+   * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余），
+   * {@code harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
    */
   private static final List<String> RUNTIME_TABLES =
       List.of(
@@ -30,6 +30,7 @@ class PostgresqlHarnessSchemaTest {
           "harness_thread",
           "harness_thread_command",
           "harness_thread_join",
+          "harness_thread_stop_receipt",
           "harness_tool_invocation",
           "harness_work");
 
@@ -42,7 +43,7 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void schemaContainsExactlyTheEightHarnessTables() {
+  void schemaContainsExactlyTheNineHarnessTables() {
     // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间。
     List<String> tables =
         jdbc.queryForList(
@@ -78,7 +79,8 @@ class PostgresqlHarnessSchemaTest {
             "creation_request_hash",
             "name",
             "yolo_enabled",
-            "status",
+            "execution_control",
+            "input_through_sequence",
             "next_command_sequence",
             "version",
             "created_at",
@@ -105,16 +107,57 @@ class PostgresqlHarnessSchemaTest {
             "parent_thread_id",
             "child_thread_id",
             "source_command_sequence",
-            "after_version",
             "agent",
             "max_turns",
             "reminder_turn",
-            "matched_idle_version",
-            "result_head_entry_id",
+            "terminal_entry_id",
+            "final_answer_entry_id",
             "delivery_command_sequence",
             "created_at",
             "updated_at"),
         columns);
+  }
+
+  @Test
+  void threadStopReceiptTableStoresRootedReceiptSetOnly() {
+    // 测试意图：验证 harness_thread_stop_receipt 列、集合身份 (root_thread_id, root_stop_request_id) 与 FK 严格与契约对齐。
+    List<String> columns =
+        jdbc.queryForList(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = 'public' and table_name = 'harness_thread_stop_receipt'
+            order by ordinal_position
+            """,
+            String.class);
+    assertEquals(
+        List.of(
+            "root_thread_id",
+            "thread_id",
+            "stop_request_id",
+            "root_stop_request_id",
+            "stopped_turn_end_entry_id",
+            "cancelled_command_count",
+            "cancelled_inputs",
+            "created_at"),
+        columns);
+    // 根 Thread 与所属 Thread 都必须受 harness_thread 外键约束，terminal Entry 受 harness_entry 外键约束。
+    List<String> foreignKeys =
+        jdbc.queryForList(
+            """
+            select constraint_name
+            from information_schema.table_constraints
+            where table_schema = 'public' and table_name = 'harness_thread_stop_receipt'
+              and constraint_type = 'FOREIGN KEY'
+            order by constraint_name
+            """,
+            String.class);
+    assertEquals(
+        List.of(
+            "fk_harness_thread_stop_receipt_root_thread",
+            "fk_harness_thread_stop_receipt_thread",
+            "fk_harness_thread_stop_receipt_turn_end"),
+        foreignKeys);
   }
 
   @Test
@@ -142,6 +185,7 @@ class PostgresqlHarnessSchemaTest {
             "harness_model_invocation.result",
             "harness_model_invocation.stream_checkpoint",
             "harness_thread_command.payload",
+            "harness_thread_stop_receipt.cancelled_inputs",
             "harness_tool_invocation.approval",
             "harness_tool_invocation.binding",
             "harness_tool_invocation.call",
@@ -174,6 +218,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_join_parent_pending",
             "idx_harness_thread_parent",
             "idx_harness_thread_session",
+            "idx_harness_thread_stop_receipt_root",
             "idx_harness_tool_invocation_model_nonterminal",
             "idx_harness_tool_invocation_pending",
             "idx_harness_work_available",
@@ -205,11 +250,16 @@ class PostgresqlHarnessSchemaTest {
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));
-    // Join 等待匹配与等待投递索引
+    // Join 等待匹配与等待投递索引（新模型按 terminal_entry_id 判定 matched）
     assertTrue(childPending.contains("(child_thread_id)"));
-    assertTrue(childPending.contains("WHERE (matched_idle_version IS NULL)"));
+    assertTrue(childPending.contains("WHERE (terminal_entry_id IS NULL)"));
     assertTrue(parentPending.contains("(parent_thread_id)"));
-    assertTrue(parentPending.contains("WHERE (delivery_command_sequence IS NULL)"));
+    assertTrue(
+        parentPending.contains(
+            "WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL))"));
+    // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
+    String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
+    assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
     // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖全部非终态（含人工输入等待），且按 model_invocation_id 建键。
     assertTrue(toolNonterminal.contains("(model_invocation_id)"));
     for (String nonterminal :
@@ -258,8 +308,8 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'IDLE', 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         turnStartEntryId);
@@ -593,8 +643,8 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         turnStartEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         turnStartEntryId);
@@ -759,8 +809,8 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
         rootEntryId);
@@ -770,8 +820,8 @@ class PostgresqlHarnessSchemaTest {
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
                 rootEntryId),
@@ -781,8 +831,8 @@ class PostgresqlHarnessSchemaTest {
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
                 rootEntryId),
@@ -791,8 +841,8 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
                 rootEntryId),
@@ -800,9 +850,10 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessThreadStatusAndParentConstraintsEnforceLifecycleAndNoSelfParent() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 harness_thread 的生命周期状态（IDLE/ACTIVE/WAITING_CHILDREN）、
-    // 不可自引用父关系（ck_harness_thread_parent_not_self）以及父 Thread 外键约束（fk_harness_thread_parent）。
+  void harnessThreadExecutionControlAndParentConstraintsEnforceLifecycleAndNoSelfParent() {
+    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 harness_thread 的持久执行控制（RUNNABLE/STOPPED）、
+    // 输入水位必须小于下一条命令序号（ck_harness_thread_input_through）、不可自引用父关系
+    // （ck_harness_thread_parent_not_self）以及父 Thread 外键约束（fk_harness_thread_parent）。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000030");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000031");
     UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000032");
@@ -817,38 +868,52 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
 
-    // 1. 拒绝非法 status 枚举（如 'RUNNING'）
-    DataIntegrityViolationException exStatus =
+    // 1. 拒绝非法 execution_control 枚举（如 'RUNNING'）
+    DataIntegrityViolationException exControl =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNING', 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNING', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     parentThreadId,
                     sessionId,
                     rootEntryId),
-            "ck_harness_thread_status must reject invalid status");
-    assertTrue(exStatus.getMessage().contains("ck_harness_thread_status"));
+            "ck_harness_thread_execution_control must reject invalid execution control");
+    assertTrue(exControl.getMessage().contains("ck_harness_thread_execution_control"));
 
-    // 2. 正常插入合法 parent thread（status='ACTIVE'，parent_thread_id=null）
+    // 2. 拒绝 input_through_sequence 不小于 next_command_sequence（如 2 >= 2）
+    DataIntegrityViolationException exWatermark =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 'RUNNABLE', 2, 2, 0, statement_timestamp(), statement_timestamp())",
+                    parentThreadId,
+                    sessionId,
+                    rootEntryId),
+            "ck_harness_thread_input_through must reject watermark >= next_command_sequence");
+    assertTrue(exWatermark.getMessage().contains("ck_harness_thread_input_through"));
+
+    // 3. 正常插入合法 parent thread（execution_control='RUNNABLE'，parent_thread_id=null）
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent-thread', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent-thread', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 parentThreadId,
                 sessionId,
                 rootEntryId));
 
-    // 3. 拒绝 parent_thread_id 指向自身
+    // 4. 拒绝 parent_thread_id 指向自身
     DataIntegrityViolationException exSelfParent =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', false, 'IDLE', 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     childThreadId,
@@ -856,15 +921,15 @@ class PostgresqlHarnessSchemaTest {
             "ck_harness_thread_parent_not_self must reject self-parent");
     assertTrue(exSelfParent.getMessage().contains("ck_harness_thread_parent_not_self"));
 
-    // 4. 拒绝不存在的 parent_thread_id（FK 门禁）
+    // 5. 拒绝不存在的 parent_thread_id（FK 门禁）
     UUID nonExistentParentId = UUID.fromString("00000000-0000-0000-0000-000000000099");
     DataIntegrityViolationException exFk =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'IDLE', 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     nonExistentParentId,
@@ -872,12 +937,12 @@ class PostgresqlHarnessSchemaTest {
             "fk_harness_thread_parent must reject non-existent parent");
     assertTrue(exFk.getMessage().contains("fk_harness_thread_parent"));
 
-    // 5. 正向验证：合法 child thread 指向 parentThreadId
+    // 6. 正向验证：合法 child thread 指向 parentThreadId，且 STOPPED 控制可持久化
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'WAITING_CHILDREN', 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'STOPPED', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 childThreadId,
                 sessionId,
                 parentThreadId,
@@ -885,16 +950,16 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void harnessThreadJoinReceiptPairConstraintEnforcesBothNullOrBothNonNull() {
-    // 测试意图：真实 PostgreSQL CHECK 约束 ck_harness_thread_join_receipt_pair 物理门禁验证。
-    // 规定 matched_idle_version 与 result_head_entry_id 必须同时为 NULL 或同时为非 NULL。
+  void harnessThreadJoinFinalAnswerRequiresTerminalAndForeignKeys() {
+    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_final_answer（final answer 必须已有 terminal）
+    // 以及 terminal_entry_id / final_answer_entry_id 的外键门禁。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000040");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000041");
     UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000042");
-    UUID resultEntryId = UUID.fromString("00000000-0000-0000-0000-000000000043");
-    UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000044");
-    UUID childThreadId = UUID.fromString("00000000-0000-0000-0000-000000000045");
-    UUID invocationId = UUID.fromString("00000000-0000-0000-0000-000000000046");
+    UUID terminalEntryId = UUID.fromString("00000000-0000-0000-0000-000000000043");
+    UUID finalAnswerEntryId = UUID.fromString("00000000-0000-0000-0000-000000000044");
+    UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000045");
+    UUID childThreadId = UUID.fromString("00000000-0000-0000-0000-000000000046");
 
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
@@ -913,92 +978,106 @@ class PostgresqlHarnessSchemaTest {
     jdbc.update(
         "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
             + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"done\"}]}}'::jsonb, statement_timestamp())",
-        resultEntryId,
+        terminalEntryId,
+        sessionId,
+        turnStartEntryId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"summary\"}]}}'::jsonb, statement_timestamp())",
+        finalAnswerEntryId,
         sessionId,
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'IDLE', 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key, request_hash, applied_turn_start_entry_id, created_at)"
-            + " values (?, 1, 'USER_MESSAGE', '{\"text\":\"hello\"}'::jsonb, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, statement_timestamp())",
+        "insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key, request_hash, created_at)"
+            + " values (?, 1, 'USER_MESSAGE', '{\"text\":\"hello\"}'::jsonb, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', statement_timestamp())",
         childThreadId,
-        UUID.randomUUID(),
-        turnStartEntryId);
+        UUID.randomUUID());
 
-    // 1. 拒绝 matched_idle_version 非 null 但 result_head_entry_id 为 null
-    DataIntegrityViolationException ex1 =
+    // 1. final_answer 非空但 terminal 为空 → 违反 ck_harness_thread_join_final_answer
+    DataIntegrityViolationException exFinalAnswer =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, 2, null, null, statement_timestamp(), statement_timestamp())",
-                    invocationId,
-                    parentThreadId,
-                    childThreadId),
-            "ck_harness_thread_join_receipt_pair must reject matched_idle_version without result_head_entry_id");
-    assertTrue(ex1.getMessage().contains("ck_harness_thread_join_receipt_pair"));
-
-    // 2. 拒绝 matched_idle_version 为 null 但 result_head_entry_id 非 null
-    DataIntegrityViolationException ex2 =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, null, ?, null, statement_timestamp(), statement_timestamp())",
-                    invocationId,
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, ?, null, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
-                    resultEntryId),
-            "ck_harness_thread_join_receipt_pair must reject result_head_entry_id without matched_idle_version");
-    assertTrue(ex2.getMessage().contains("ck_harness_thread_join_receipt_pair"));
+                    finalAnswerEntryId),
+            "ck_harness_thread_join_final_answer must reject final answer without terminal");
+    assertTrue(exFinalAnswer.getMessage().contains("ck_harness_thread_join_final_answer"));
 
-    // 3. 正向验证：同为 null（待匹配 join）
+    // 2. terminal Entry 不存在 → 违反 fk_harness_thread_join_terminal_entry
+    DataIntegrityViolationException exTerminalFk =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, null, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
+                    parentThreadId,
+                    childThreadId,
+                    UUID.fromString("00000000-0000-0000-0000-000000000099")),
+            "fk_harness_thread_join_terminal_entry must reject non-existent entry");
+    assertTrue(exTerminalFk.getMessage().contains("fk_harness_thread_join_terminal_entry"));
+
+    // 3. final_answer Entry 不存在 → 违反 fk_harness_thread_join_final_answer_entry
+    DataIntegrityViolationException exFinalAnswerFk =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp())",
+                    UUID.randomUUID(),
+                    parentThreadId,
+                    childThreadId,
+                    terminalEntryId,
+                    UUID.fromString("00000000-0000-0000-0000-000000000098")),
+            "fk_harness_thread_join_final_answer_entry must reject non-existent entry");
+    assertTrue(
+        exFinalAnswerFk.getMessage().contains("fk_harness_thread_join_final_answer_entry"));
+
+    // 4. 正向验证：terminal 与 final answer 同时存在（未交付）合法
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp())",
-                invocationId,
-                parentThreadId,
-                childThreadId));
-
-    // 4. 正向验证：同为非 null（已匹配 receipt）
-    UUID matchedInvocationId = UUID.fromString("00000000-0000-0000-0000-000000000047");
-    assertDoesNotThrow(
-        () ->
-            jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, 2, ?, null, statement_timestamp(), statement_timestamp())",
-                matchedInvocationId,
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp())",
+                UUID.randomUUID(),
                 parentThreadId,
                 childThreadId,
-                resultEntryId));
+                terminalEntryId,
+                finalAnswerEntryId));
   }
 
   @Test
-  void harnessThreadJoinMatchedOrderAndDeliveryConstraints() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 harness_thread_join 的 matched > after
-    // 规则（ck_harness_thread_join_matched_order）
-    // 以及 delivery 必须已 matched 且 parent 非空规则（ck_harness_thread_join_delivery）与级联复合 FK。
+  void harnessThreadJoinDeliveryRequiresTerminalAndParent() {
+    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 ck_harness_thread_join_delivery（交付必须已 matched 且父非空）
+    // 以及交付命令的外键 fk_harness_thread_join_delivery_command。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000050");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000051");
-    UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000052");
-    UUID childThreadId = UUID.fromString("00000000-0000-0000-0000-000000000053");
+    UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000052");
+    UUID terminalEntryId = UUID.fromString("00000000-0000-0000-0000-000000000053");
+    UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000054");
+    UUID childThreadId = UUID.fromString("00000000-0000-0000-0000-000000000055");
 
     jdbc.update(
         "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
@@ -1009,18 +1088,31 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'ACTIVE', 2, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb, statement_timestamp())",
+        turnStartEntryId,
+        sessionId,
+        rootEntryId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"done\"}]}}'::jsonb, statement_timestamp())",
+        terminalEntryId,
+        sessionId,
+        turnStartEntryId);
+
+    jdbc.update(
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'RUNNABLE', 0, 2, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'IDLE', 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
-        rootEntryId);
+        turnStartEntryId);
 
     jdbc.update(
         "insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key, request_hash, created_at)"
@@ -1033,81 +1125,65 @@ class PostgresqlHarnessSchemaTest {
         parentThreadId,
         UUID.randomUUID());
 
-    // 1. 拒绝 matched_idle_version <= after_version（如 matched=2, after=2）
-    DataIntegrityViolationException exMatchedOrder =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 2, 'subagent', 10, 0, 2, ?, null, statement_timestamp(), statement_timestamp())",
-                    UUID.randomUUID(),
-                    parentThreadId,
-                    childThreadId,
-                    rootEntryId),
-            "ck_harness_thread_join_matched_order must reject matched <= after");
-    assertTrue(exMatchedOrder.getMessage().contains("ck_harness_thread_join_matched_order"));
-
-    // 2. 拒绝未 matched 时设置 delivery_command_sequence
+    // 1. terminal 为空时设置 delivery_command_sequence → 拒绝
     DataIntegrityViolationException exDeliveryUnmatched =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, null, null, 1, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, 1, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId),
-            "ck_harness_thread_join_delivery must reject delivery when unmatched");
+            "ck_harness_thread_join_delivery must reject delivery when terminal is null");
     assertTrue(exDeliveryUnmatched.getMessage().contains("ck_harness_thread_join_delivery"));
 
-    // 3. 拒绝 parent_thread_id 为空（root one-shot）时设置 delivery_command_sequence
+    // 2. parent_thread_id 为空（root one-shot）时设置 delivery_command_sequence → 拒绝
     DataIntegrityViolationException exDeliveryRoot =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, 1, 1, 'subagent', 10, 0, 3, ?, 1, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     childThreadId,
-                    rootEntryId),
+                    terminalEntryId),
             "ck_harness_thread_join_delivery must reject delivery when parent_thread_id is null");
     assertTrue(exDeliveryRoot.getMessage().contains("ck_harness_thread_join_delivery"));
 
-    // 4. 拒绝不存在的 delivery_command_sequence（复合外键 fk_harness_thread_join_delivery_command 门禁）
+    // 3. 不存在的 delivery_command_sequence → 违反 fk_harness_thread_join_delivery_command
     DataIntegrityViolationException exDeliveryFk =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, 3, ?, 99, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 99, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
-                    rootEntryId),
+                    terminalEntryId),
             "fk_harness_thread_join_delivery_command must reject non-existent command");
     assertTrue(exDeliveryFk.getMessage().contains("fk_harness_thread_join_delivery_command"));
 
-    // 5. 正向验证：合法的 matched > after 且包含已投递 delivery command
+    // 4. 正向验证：已 matched 且父非空、交付命令存在的 join 合法
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, 3, ?, 1, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp())",
                 UUID.randomUUID(),
                 parentThreadId,
                 childThreadId,
-                rootEntryId));
+                terminalEntryId));
   }
 
   @Test
-  void harnessThreadJoinSourceCommandAndResultHeadForeignKeys() {
-    // 测试意图：真实 PostgreSQL FK 门禁验证 harness_thread_join
-    // 的复合源命令外键（fk_harness_thread_join_source_command）
-    // 以及结果 head Entry 外键（fk_harness_thread_join_result_head）。
+  void harnessThreadJoinSourceCommandForeignKey() {
+    // 测试意图：真实 PostgreSQL 复合外键验证 fk_harness_thread_join_source_command
+    // 只接受 child Thread 上真实存在的源命令，且合法的 pending join（terminal 为空）可写入。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000060");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000061");
     UUID parentThreadId = UUID.fromString("00000000-0000-0000-0000-000000000062");
@@ -1122,54 +1198,48 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'ACTIVE', 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'IDLE', 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
         rootEntryId);
 
-    // 1. 拒绝源命令不存在（fk_harness_thread_join_source_command 门禁）
+    // 1. 源命令不存在 → 违反 fk_harness_thread_join_source_command
     DataIntegrityViolationException exSourceCmd =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId),
             "fk_harness_thread_join_source_command must reject non-existent source command");
     assertTrue(exSourceCmd.getMessage().contains("fk_harness_thread_join_source_command"));
 
-    // 插入合法的 child command
+    // 插入合法的 child 源命令
     jdbc.update(
         "insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key, request_hash, created_at)"
             + " values (?, 1, 'USER_MESSAGE', '{\"text\":\"hello\"}'::jsonb, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', statement_timestamp())",
         childThreadId,
         UUID.randomUUID());
 
-    // 2. 拒绝结果 head Entry 不存在（fk_harness_thread_join_result_head 门禁）
-    UUID nonExistentEntryId = UUID.fromString("00000000-0000-0000-0000-000000000099");
-    DataIntegrityViolationException exResultHead =
-        assertThrows(
-            DataIntegrityViolationException.class,
-            () ->
-                jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, after_version, agent, max_turns, reminder_turn, matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 1, 'subagent', 10, 0, 2, ?, null, statement_timestamp(), statement_timestamp())",
-                    UUID.randomUUID(),
-                    parentThreadId,
-                    childThreadId,
-                    nonExistentEntryId),
-            "fk_harness_thread_join_result_head must reject non-existent entry");
-    assertTrue(exResultHead.getMessage().contains("fk_harness_thread_join_result_head"));
+    // 2. 正向验证：源命令存在时 pending join（terminal 为空）合法
+    assertDoesNotThrow(
+        () ->
+            jdbc.update(
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at)"
+                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp())",
+                UUID.randomUUID(),
+                parentThreadId,
+                childThreadId));
   }
 }

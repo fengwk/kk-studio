@@ -121,6 +121,7 @@ column	harness_thread_stop_receipt	cancelled_command_count	type=integer notnull=
 column	harness_thread_stop_receipt	cancelled_inputs	type=jsonb notnull=t default=<null> generated= collation=-
 column	harness_thread_stop_receipt	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread_stop_receipt	root_stop_request_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread_stop_receipt	root_thread_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread_stop_receipt	stop_request_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread_stop_receipt	stopped_turn_end_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_stop_receipt	thread_id	type=uuid notnull=t default=<null> generated= collation=-
@@ -317,6 +318,7 @@ constraint	harness_thread_join	fk_harness_thread_join_source_command	FOREIGN KEY
 constraint	harness_thread_join	fk_harness_thread_join_terminal_entry	FOREIGN KEY (terminal_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_join	harness_thread_join_pkey	PRIMARY KEY (invocation_id)
 constraint	harness_thread_join	harness_thread_join_source_command_sequence_check	CHECK ((source_command_sequence > 0))
+constraint	harness_thread_stop_receipt	fk_harness_thread_stop_receipt_root_thread	FOREIGN KEY (root_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_stop_receipt	fk_harness_thread_stop_receipt_thread	FOREIGN KEY (thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread_stop_receipt	fk_harness_thread_stop_receipt_turn_end	FOREIGN KEY (stopped_turn_end_entry_id) REFERENCES harness_entry(id)
 constraint	harness_thread_stop_receipt	harness_thread_stop_receipt_cancelled_command_count_check	CHECK ((cancelled_command_count >= 0))
@@ -441,7 +443,7 @@ index	harness_thread_command	uk_harness_thread_command_idempotency	CREATE UNIQUE
 index	harness_thread_join	harness_thread_join_pkey	CREATE UNIQUE INDEX harness_thread_join_pkey ON public.harness_thread_join USING btree (invocation_id)
 index	harness_thread_join	idx_harness_thread_join_child_pending	CREATE INDEX idx_harness_thread_join_child_pending ON public.harness_thread_join USING btree (child_thread_id) WHERE (terminal_entry_id IS NULL)
 index	harness_thread_join	idx_harness_thread_join_parent_pending	CREATE INDEX idx_harness_thread_join_parent_pending ON public.harness_thread_join USING btree (parent_thread_id) WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL))
-index	harness_thread_stop_receipt	idx_harness_thread_stop_receipt_root	CREATE INDEX idx_harness_thread_stop_receipt_root ON public.harness_thread_stop_receipt USING btree (root_stop_request_id)
+index	harness_thread_stop_receipt	idx_harness_thread_stop_receipt_root	CREATE INDEX idx_harness_thread_stop_receipt_root ON public.harness_thread_stop_receipt USING btree (root_thread_id, root_stop_request_id)
 index	harness_thread_stop_receipt	pk_harness_thread_stop_receipt	CREATE UNIQUE INDEX pk_harness_thread_stop_receipt ON public.harness_thread_stop_receipt USING btree (thread_id, stop_request_id)
 index	harness_tool_invocation	harness_tool_invocation_pkey	CREATE UNIQUE INDEX harness_tool_invocation_pkey ON public.harness_tool_invocation USING btree (id)
 index	harness_tool_invocation	idx_harness_tool_invocation_model_nonterminal	CREATE INDEX idx_harness_tool_invocation_model_nonterminal ON public.harness_tool_invocation USING btree (model_invocation_id) WHERE ((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying, 'READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying])::text[]))

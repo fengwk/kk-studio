@@ -1318,6 +1318,7 @@ create index idx_harness_thread_join_parent_pending
 comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
 
 create table harness_thread_stop_receipt (
+    root_thread_id uuid not null,
     thread_id uuid not null,
     stop_request_id uuid not null,
     root_stop_request_id uuid not null,
@@ -1326,13 +1327,16 @@ create table harness_thread_stop_receipt (
     cancelled_inputs jsonb not null check (jsonb_typeof(cancelled_inputs) = 'array'),
     created_at timestamptz(3) not null,
     constraint pk_harness_thread_stop_receipt primary key (thread_id, stop_request_id),
+    constraint fk_harness_thread_stop_receipt_root_thread foreign key (root_thread_id)
+        references harness_thread (id),
     constraint fk_harness_thread_stop_receipt_thread foreign key (thread_id)
         references harness_thread (id),
     constraint fk_harness_thread_stop_receipt_turn_end foreign key (stopped_turn_end_entry_id)
         references harness_entry (id)
 );
 
-comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 操作在单个 Thread 上留下的持久回执；(thread_id, stop_request_id) 唯一';
+comment on table harness_thread_stop_receipt is 'Stop 回执：一次 Stop 操作在单个 Thread 上留下的持久回执；(thread_id, stop_request_id) 唯一；集合身份为 (root_thread_id, root_stop_request_id)';
+comment on column harness_thread_stop_receipt.root_thread_id is '本次 Stop 请求的目标根 Thread（集合身份的一部分，隔离不同树复用同一请求 UUID）';
 comment on column harness_thread_stop_receipt.thread_id is '所属 Thread';
 comment on column harness_thread_stop_receipt.stop_request_id is '本次 Stop 在该 Thread 上的请求 ID';
 comment on column harness_thread_stop_receipt.root_stop_request_id is '本次 Stop 的根请求 ID';
@@ -1342,9 +1346,9 @@ comment on column harness_thread_stop_receipt.cancelled_inputs is '退回给用�
 comment on column harness_thread_stop_receipt.created_at is '回执创建时间（毫秒精度）';
 
 create index idx_harness_thread_stop_receipt_root
-    on harness_thread_stop_receipt (root_stop_request_id);
+    on harness_thread_stop_receipt (root_thread_id, root_stop_request_id);
 
-comment on index idx_harness_thread_stop_receipt_root is '按 root_stop_request_id 检索一次 Stop 产生的全部回执';
+comment on index idx_harness_thread_stop_receipt_root is '按 (root_thread_id, root_stop_request_id) 检索一次 Stop 产生的全部回执';
 
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts
