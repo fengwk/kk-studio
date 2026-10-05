@@ -52,8 +52,9 @@ function treeNodes(turnCount = 3) {
       name: 'Preview Thread',
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
-      status: 'WAITING_CHILDREN',
-      processing: true,
+      // 本地状态：根自己空闲，不递归投影子树忙碌。
+      status: 'IDLE',
+      processing: false,
       turnCount: 6,
       toolCallCount: 3,
       outcome: null,
@@ -75,8 +76,9 @@ function snapshot() {
         yoloEnabled: false,
         nextCommandSequence: '1',
         version: '1',
-        status: 'WAITING_CHILDREN',
-        processing: true,
+        status: 'IDLE',
+        processing: false,
+        executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'assistant',
           model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
@@ -92,6 +94,7 @@ function snapshot() {
       toolInvocations: [],
       modelAttemptFailures: [],
       manualCompaction: { available: false, disabledReason: null },
+      stopReceipts: [],
     },
   }
 }
@@ -138,6 +141,126 @@ async function expectNoHorizontalOverflow(panel: ReturnType<Page['getByRole']>) 
   expect(metrics).toEqual({ panel: true, list: true })
 }
 
+/**
+ * 本地 IDLE 的根仍有活跃后代：一个 Stop 必须停止整棵子树，并把未消费的人类输入
+ * 退回各自的持久草稿（根的输入回到可见 composer），且请求体不带任何产品 owner/target。
+ */
+test('an idle root can still stop its running subtree in one owner-free request', async ({ page }) => {
+  const stopRequests: Array<{ stopRequestId?: string; expectedVersion?: string }> = []
+  const commandBatches: Array<Record<string, unknown>> = []
+  const cancelledText = '先澄清一下接口契约'
+  let stopped = false
+
+  await page.routeWebSocket(/\/api\/events\/v1$/, () => {})
+  await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
+    const path = new URL(route.request().url()).pathname
+    const method = route.request().method()
+    if (path === `/api/harness/threads/${THREAD_ID}/stop` && method === 'POST') {
+      stopRequests.push(route.request().postDataJSON())
+      stopped = true
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            status: 'STOPPED',
+            // 请求目标自己的权威投影：本地阶段变 STOPPED，执行控制已被停止。
+            thread: { ...snapshot().data.thread, status: 'STOPPED', executionControl: 'STOPPED', version: '2' },
+            stoppedThreads: [
+              {
+                threadId: THREAD_ID,
+                stopRequestId: route.request().postDataJSON().stopRequestId,
+                stoppedTurnEndEntryId: null,
+                cancelledCommandCount: 1,
+                cancelledInputs: [
+                  {
+                    sequence: '1',
+                    idempotencyKey: 'cmd-root-1',
+                    type: 'USER_MESSAGE',
+                    payloadJson: JSON.stringify({
+                      message: { role: 'USER', contents: [{ type: 'TEXT', text: cancelledText }] },
+                    }),
+                  },
+                ],
+              },
+              {
+                threadId: CHILD_ID,
+                stopRequestId: route.request().postDataJSON().stopRequestId,
+                stoppedTurnEndEntryId: null,
+                cancelledCommandCount: 1,
+                cancelledInputs: [
+                  {
+                    sequence: '2',
+                    idempotencyKey: 'cmd-child-1',
+                    type: 'USER_MESSAGE',
+                    payloadJson: JSON.stringify({
+                      message: { role: 'USER', contents: [{ type: 'TEXT', text: '子 Thread 自己的草稿' }] },
+                    }),
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      })
+      return
+    }
+    if (path === `/api/harness/threads/${THREAD_ID}/command-batches` && method === 'POST') {
+      commandBatches.push(route.request().postDataJSON())
+      await route.fulfill({ json: { status: 200, data: { accepted: true, thread: snapshot().data.thread } } })
+      return
+    }
+    if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
+      await route.fulfill({ json: { status: 200, data: treeNodes() } })
+      return
+    }
+    if (path === `/api/harness/threads/${THREAD_ID}`) {
+      await route.fulfill({ json: snapshot() })
+      return
+    }
+    if (path === '/api/ai/catalog/agents' || path === '/api/ai/catalog/models') {
+      await route.fulfill({ json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } } })
+      return
+    }
+    await route.fulfill({ json: { status: 200, data: {} } })
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/browser-tests/debug-preview-harness.html')
+  await expect(page.getByRole('heading', { name: 'Preview Thread' })).toBeVisible()
+
+  // 1. 根是本地的空闲（子树在跑），关系树里子 Thread 仍是运行中。
+  const toggle = page.getByRole('button', { name: 'Agent 关系' })
+  await toggle.click()
+  const panel = page.getByRole('region', { name: 'Agent 关系' })
+  const rows = panel.locator('.thread-agent-tree-row')
+  await expect(rows.nth(0)).toContainText('空闲')
+  await expect(rows.nth(1)).toContainText('Child Planner')
+  await expect(rows.nth(1)).toContainText('等待审批')
+
+  // 2. 本地 IDLE 不隐藏 Stop：composer 的 /stop 命令可用并提交 owner-free 请求。
+  const composer = page.locator('.thread-composer')
+  const editor = composer.locator('.composer-editor')
+  await editor.click()
+  await editor.fill('/stop')
+  const palette = composer.locator('.thread-command-palette')
+  await expect(palette).toBeVisible()
+  const stopItem = palette.locator('button', { hasText: 'stop' })
+  await expect(stopItem).not.toHaveAttribute('disabled', '')
+  await stopItem.click()
+
+  // 3. 请求体只有精确重放所需的 Stop 身份，没有 owner/target。
+  await expect.poll(() => stopRequests.length).toBe(1)
+  expect(Object.keys(stopRequests[0] ?? {}).sort()).toEqual(['expectedVersion', 'stopRequestId'])
+  expect(stopRequests[0]?.stopRequestId).toBeTruthy()
+  expect(stopRequests[0]?.expectedVersion).toBe('1')
+  await expect.poll(() => stopped).toBe(true)
+
+  // 4. 根自己的未消费输入被回退到可见草稿；子 Thread 的输入只写它自己的记录。
+  await expect(editor).toContainText(cancelledText)
+  expect(commandBatches).toEqual([])
+  await page.screenshot({ path: resolve(reportsDir, 'idle-root-stop-subtree.png') })
+})
+
 test('agent relationship tree stays inside the bound pane and opens exact threads', async ({ page }) => {
   // 真实 AgentPane 默认不读关系树；打开后展示主、子、孙和终态，跳转不改变当前绑定。
   const mock = await installAgentTreeMock(page)
@@ -155,7 +278,8 @@ test('agent relationship tree stays inside the bound pane and opens exact thread
   const rows = panel.locator('.thread-agent-tree-row')
   await expect(rows).toHaveCount(4)
   await expect(rows.nth(0)).toContainText('Preview Thread')
-  await expect(rows.nth(0)).toContainText('等待子 Thread')
+  // 父 Thread 只展示自己的本地阶段：子树忙碌不再把根写成「等待子 Thread」。
+  await expect(rows.nth(0)).toContainText('空闲')
   await expect(rows.nth(0)).toContainText('6 回合')
   await expect(rows.nth(1)).toContainText('Child Planner')
   await expect(rows.nth(1)).toContainText('等待审批')

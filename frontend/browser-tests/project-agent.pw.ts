@@ -1,4 +1,7 @@
+import { resolve } from 'node:path'
 import { expect, test } from './fixture'
+
+const reportsDir = resolve(new URL('.', import.meta.url).pathname, '../../reports/layout')
 
 const PROJECT_ID = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE_ID = 'b0000000-0000-0000-0000-000000000001'
@@ -92,17 +95,20 @@ function createThreadSnapshot() {
       thread: {
         name: 'Architecture Thread',
         threadId: VALID_THREAD_ID,
-        sessionId: 's1',
+        sessionId: '50000000-0000-0000-0000-000000000001',
         headEntryId: 'e1',
+        parentThreadId: null,
         yoloEnabled: false,
         nextCommandSequence: '1',
         version: '1',
         status: 'IDLE',
         processing: false,
+        executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'architect',
           model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
           environmentName: null,
+          goal: null,
         },
         createTime: '2026-09-20T00:00:00Z',
         updateTime: '2026-09-20T00:00:00Z',
@@ -112,9 +118,9 @@ function createThreadSnapshot() {
           entryId: 'e1',
           threadId: VALID_THREAD_ID,
           parentEntryId: null,
-          type: 'SYSTEM',
-          payload: { text: 'You are an architect agent.' },
-          createdAt: '2026-09-20T00:00:00Z',
+          entryType: 'SYSTEM',
+          payloadJson: JSON.stringify({ text: 'You are an architect agent.' }),
+          createTime: '2026-09-20T00:00:00Z',
         },
       ],
       queuedCommands: [],
@@ -122,102 +128,158 @@ function createThreadSnapshot() {
       toolInvocations: [],
       modelAttemptFailures: [],
       manualCompaction: { available: false, disabledReason: 'idle' },
+      stopReceipts: [],
     },
   }
 }
 
 test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
-  test('end-to-end browser flow: navigate from issue to controlled agent dock, submit instruction, stop, and close', async ({
+  test('end-to-end browser flow: the Issue dock hosts an owner-free bound Thread with message, Goal and Stop', async ({
     page,
   }) => {
-    // 测试意图：真实浏览器中从看板打开 Issue 详情，点击 Agent 线程进入受控 Dock，
-    // 验证输入消息作为 INSTRUCTION 发送并被网络拦截断言，验证受控停止触发 stopIssue
-    const interceptedActivities: Array<{ kind?: string; body?: string; requestKey?: string }> = []
-    const interceptedStops: Array<{ expectedVersion?: string; detail?: string }> = []
-    const previewRequests: string[] = []
+    // 测试意图：真实浏览器中 Issue 只是组织容器。打开 Agent 线程后，消息走 per-thread
+    // 命令批次（不再被劫持成 Issue INSTRUCTION）、Stop 走 per-thread Stop（不再 stopIssue）、
+    // Goal 面板可用；三者请求体都不带产品 owner/target，且绝不触发 Issue 动作接口。
+    const commandBatches: Array<Record<string, unknown>> = []
+    const stopRequests: Array<Record<string, unknown>> = []
+    const issueActivities: unknown[] = []
+    const issueStops: unknown[] = []
+    const cancelledText = '把未消费的输入还给我'
+    let stopCount = 0
 
     await page.route(
       (url) => new URL(url).pathname.startsWith('/api/'),
       async (route) => {
         const url = route.request().url()
         const method = route.request().method()
-      if (url.includes('provider-request-preview')) {
-        previewRequests.push(url)
-      }
+        const path = new URL(url).pathname
 
-      if (url.includes(`/projects/${PROJECT_ID}/snapshot`)) {
-        await route.fulfill({ json: createProjectSnapshot() })
-        return
-      }
-      if (url.includes(`/issues/${ISSUE_ID}/evidence`)) {
-        await route.fulfill({ json: { status: 200, data: [] } })
-        return
-      }
-      if (url.includes(`/issues/${ISSUE_ID}/activities`) && method === 'POST') {
-        const body = route.request().postDataJSON()
-        interceptedActivities.push(body)
-        await route.fulfill({
-          status: 201,
-          json: {
-            status: 201,
-            data: {
-              id: 'act-101',
-              issueId: ISSUE_ID,
-              actorType: 'HUMAN',
-              actorId: 'user-test',
-              kind: body.kind,
-              body: body.body,
-              createdAt: '2026-09-27T00:00:00Z',
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
+          commandBatches.push(route.request().postDataJSON())
+          await route.fulfill({ json: { status: 200, data: { accepted: true, thread: createThreadSnapshot().data.thread } } })
+          return
+        }
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
+          const body = route.request().postDataJSON()
+          stopRequests.push(body)
+          stopCount += 1
+          await route.fulfill({
+            json: {
+              status: 200,
+              data: {
+                status: 'STOPPED',
+                thread: {
+                  ...createThreadSnapshot().data.thread,
+                  status: 'STOPPED',
+                  executionControl: 'STOPPED',
+                  version: String(stopCount + 1),
+                },
+                stoppedThreads: [
+                  {
+                    threadId: VALID_THREAD_ID,
+                    stopRequestId: body.stopRequestId,
+                    stoppedTurnEndEntryId: null,
+                    cancelledCommandCount: 1,
+                    cancelledInputs: [
+                      {
+                        sequence: '1',
+                        idempotencyKey: 'cmd-restored-1',
+                        type: 'USER_MESSAGE',
+                        payloadJson: JSON.stringify({
+                          message: { role: 'USER', contents: [{ type: 'TEXT', text: cancelledText }] },
+                        }),
+                      },
+                    ],
+                  },
+                ],
+              },
             },
-          },
-        })
-        return
-      }
-      if (url.includes(`/issues/${ISSUE_ID}/stop`) && method === 'POST') {
-        const body = route.request().postDataJSON()
-        interceptedStops.push(body)
-        await route.fulfill({
-          status: 200,
-          json: {
-            status: 200,
-            data: createIssueDetail().data.issue,
-          },
-        })
-        return
-      }
-      if (url.includes(`/issues/${ISSUE_ID}`)) {
-        await route.fulfill({ json: createIssueDetail() })
-        return
-      }
-      if (url.includes('/api/ai/runtime/agents')) {
-        await route.fulfill({
-          json: {
-            status: 200,
-            data: {
-              results: [
-                { id: 'architect', name: 'architect', displayName: '系统架构师' },
-              ],
+          })
+          return
+        }
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}`) {
+          await route.fulfill({ json: createThreadSnapshot() })
+          return
+        }
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/tree`) {
+          await route.fulfill({ json: { status: 200, data: [] } })
+          return
+        }
+        if (path === `/api/harness/threads/${VALID_THREAD_ID}/model-request-debug`) {
+          await route.fulfill({ json: { status: 200, data: null } })
+          return
+        }
+        if (path === `/api/harness/environments`) {
+          await route.fulfill({ json: { status: 200, data: [] } })
+          return
+        }
+        if (path === `/api/issues/${ISSUE_ID}`) {
+          await route.fulfill({ json: createIssueDetail() })
+          return
+        }
+        if (path === `/api/issues/${ISSUE_ID}/activities`) {
+          if (method === 'POST') {
+            issueActivities.push(route.request().postDataJSON())
+          }
+          await route.fulfill({ json: { status: 200, data: [] } })
+          return
+        }
+        if (path === `/api/issues/${ISSUE_ID}/evidence`) {
+          await route.fulfill({ json: { status: 200, data: [] } })
+          return
+        }
+        if (path.startsWith(`/api/issues/${ISSUE_ID}`)) {
+          if (path.endsWith('/stop') && method === 'POST') {
+            issueStops.push(route.request().postDataJSON())
+          }
+          await route.fulfill({ json: { status: 200, data: createIssueDetail().data.issue } })
+          return
+        }
+        if (path === `/api/projects/${PROJECT_ID}/snapshot`) {
+          await route.fulfill({ json: createProjectSnapshot() })
+          return
+        }
+        if (path.startsWith(`/api/projects/${PROJECT_ID}/issues/${ISSUE_ID}`)) {
+          await route.fulfill({ json: createIssueDetail() })
+          return
+        }
+        if (path === '/api/ai/catalog/agents') {
+          await route.fulfill({
+            json: {
+              status: 200,
+              data: {
+                pageNumber: 1,
+                pageSize: 50,
+                totalCount: 1,
+                results: [
+                  { name: 'architect', description: '系统架构师', model: 'MiniMax-M2.7', variant: 'default',
+                    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] }, version: '1' },
+                ],
+              },
             },
-          },
-        })
-        return
-      }
-      if (url.includes('/api/ai/runtime/environments')) {
-        await route.fulfill({ json: { status: 200, data: [] } })
-        return
-      }
-      if (url.includes(`/api/ai/runtime/threads/${VALID_THREAD_ID}/snapshot`)) {
-        await route.fulfill({ json: createThreadSnapshot() })
-        return
-      }
-      if (url.includes(`/api/ai/runtime/threads/${VALID_THREAD_ID}/tree`)) {
-        await route.fulfill({ json: { status: 200, data: { entries: [] } } })
-        return
-      }
+          })
+          return
+        }
+        if (path === '/api/ai/catalog/models') {
+          await route.fulfill({
+            json: {
+              status: 200,
+              data: {
+                pageNumber: 1,
+                pageSize: 50,
+                totalCount: 0,
+                results: [],
+              },
+            },
+          })
+          return
+        }
 
-      await route.fulfill({ json: { status: 200, data: {} } })
-    })
+        await route.fulfill({ json: { status: 200, data: {} } })
+      },
+    )
 
+    await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/browser-tests/project-agent-harness.html')
 
     // 1. 看板上找到 Issue 卡片并点击
@@ -228,7 +290,6 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     // 2. 详情弹窗打开，切换到 Agent 线程 Tab
     const dialog = page.getByRole('dialog', { name: 'Issue #1 详情' })
     await expect(dialog).toBeVisible()
-
     const agentTab = dialog.getByRole('button', { name: /Agent 线程/ })
     await agentTab.click()
 
@@ -237,33 +298,72 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(openThreadBtn).toBeVisible()
     await openThreadBtn.click()
 
-    // 4. 验证 URL query 更新为 ?issue=...&thread=...
+    // 4. URL query 更新为 ?issue=...&thread=...
     await expect(page).toHaveURL(new RegExp(`issue=${ISSUE_ID}`))
     await expect(page).toHaveURL(new RegExp(`thread=${VALID_THREAD_ID}`))
 
-    // 5. 验证受控 Agent Dock 成功展开并展示 Agent 徽标
+    // 5. Dock 展开并展示 Agent 徽标与已绑定的 Thread
     const dock = page.locator('[data-testid="project-agent-dock"]')
     await expect(dock).toBeVisible()
     await expect(dock.locator('.badge-agent')).toHaveText('architect')
+    await expect(dock.getByRole('heading', { name: 'Architecture Thread' })).toBeVisible()
 
-    // 6. 在受控输入框中输入指令并提交
+    // 6. 通用输入：消息走 per-thread 命令批次，不再变成 Issue INSTRUCTION
     const composer = dock.getByLabel('给 AI 发送消息')
     await expect(composer).toBeVisible()
-    await expect(dock.getByRole('button', { name: '预览请求' })).toHaveCount(0)
     await composer.click()
     await composer.fill('Refactor auth module schema')
+    await dock.getByRole('button', { name: '发送消息' }).click()
 
-    const sendBtn = dock.getByRole('button', { name: '发送消息' })
-    await sendBtn.click()
+    await expect.poll(() => commandBatches.length).toBe(1)
+    const messageBatch = commandBatches[0]!
+    expect(Object.keys(messageBatch).sort()).toEqual([
+      'commands', 'expectedHeadEntryId', 'expectedNextCommandSequence',
+    ])
+    expect(messageBatch.expectedHeadEntryId).toBe('e1')
+    expect(messageBatch.expectedNextCommandSequence).toBe('1')
+    expect(messageBatch.commands).toEqual([
+      expect.objectContaining({
+        type: 'USER_MESSAGE',
+        contents: [{ type: 'TEXT', text: 'Refactor auth module schema' }],
+      }),
+    ])
+    expect(issueActivities).toEqual([])
+    expect(dock.getByRole('button', { name: '预览请求' })).toHaveCount(0)
+    await page.screenshot({ path: resolve(reportsDir, 'project-agent-owner-free.png') })
 
-    // 7. 断言后端接收到了 INSTRUCTION 类型的 Issue 活动请求，且带有幂等 requestKey
-    await expect.poll(() => interceptedActivities.length).toBe(1)
-    expect(interceptedActivities[0]?.kind).toBe('INSTRUCTION')
-    expect(interceptedActivities[0]?.body).toBe('Refactor auth module schema')
-    expect(interceptedActivities[0]?.requestKey).toBeTruthy()
-    expect(previewRequests).toEqual([])
+    // 7. Goal：容器不再封锁 Goal 面板，设置目标同样走 owner-free 命令批次
+    await composer.click()
+    await composer.fill('/goal')
+    const palette = dock.locator('.thread-command-palette')
+    await expect(palette).toBeVisible()
+    await palette.locator('button', { hasText: 'goal' }).click()
+    const goalPanel = dock.getByRole('region', { name: '目标' })
+    await expect(goalPanel).toBeVisible()
+    await goalPanel.locator('#goal-input').fill('交付可回滚的迁移方案')
+    await goalPanel.getByRole('button', { name: '设置目标' }).click()
 
-    // 8. 测试关闭 Agent 视图
+    await expect.poll(() => commandBatches.length).toBe(2)
+    const goalBatch = commandBatches[1]!
+    expect(goalBatch).not.toHaveProperty('owner')
+    expect(goalBatch).not.toHaveProperty('target')
+    expect(goalBatch.commands).toEqual([
+      expect.objectContaining({ type: 'GOAL', text: '交付可回滚的迁移方案' }),
+    ])
+
+    // 8. Stop：走 per-thread Stop（不再 stopIssue），并把未消费输入退回可见草稿
+    await composer.click()
+    await composer.fill('/stop')
+    await palette.locator('button', { hasText: 'stop' }).click()
+
+    await expect.poll(() => stopRequests.length).toBe(1)
+    expect(Object.keys(stopRequests[0] ?? {}).sort()).toEqual(['expectedVersion', 'stopRequestId'])
+    expect(stopRequests[0]?.expectedVersion).toBe('1')
+    expect(issueStops).toEqual([])
+    await expect(composer).toContainText(cancelledText)
+    await page.screenshot({ path: resolve(reportsDir, 'project-agent-stop-restores-draft.png') })
+
+    // 9. 关闭 Agent 视图
     const closeBtn = dock.getByLabel('关闭 Agent 视图')
     await closeBtn.click()
     await expect(dock).toHaveCount(0)
