@@ -119,7 +119,15 @@ function createThreadSnapshot() {
           threadId: VALID_THREAD_ID,
           parentEntryId: null,
           entryType: 'ROOT',
-          payloadJson: '{}',
+          // 真实 message codec：ROOT 只带一份完整 branch settings 快照（含 goal: null）。
+          payloadJson: JSON.stringify({
+            settings: {
+              agentName: 'architect',
+              model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+              environmentName: null,
+              goal: null,
+            },
+          }),
           createTime: '2026-09-20T00:00:00Z',
         },
         {
@@ -318,6 +326,11 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     await expect(dock.locator('.badge-agent')).toHaveText('architect')
     await expect(dock.getByRole('heading', { name: 'Architecture Thread' })).toBeVisible()
     await expect(dock.getByText('梳理鉴权模块的现有边界')).toBeVisible()
+    // ROOT 必须解析成会话开始的配置事实，而不是「配置快照不可解析」兜底。
+    await expect(dock.getByText(
+      '会话开始 · Agent: architect · 模型: minimax/MiniMax-M2.7 (default) · 环境: 无',
+    )).toBeVisible()
+    await expect(dock.getByText('配置快照不可解析')).toHaveCount(0)
 
     // 6. 通用输入：消息走 per-thread 命令批次，不再变成 Issue INSTRUCTION
     const composer = dock.getByLabel('给 AI 发送消息')

@@ -20,9 +20,11 @@ import {
   saveThreadDraftParts,
   saveThreadGoalText,
   type DraftSaveOutcome,
+  type StopReceiptMergeResult,
   type ThreadDraftRecord,
 } from '@/features/ai/runtime/thread-draft-store'
 import { boundPendingStorageKey } from '@/features/ai/runtime/agent-pane/pane-target'
+import { loadPendingStop } from '@/features/ai/runtime/pending-stop-sidecar'
 import { translate as t } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -328,6 +330,58 @@ describe('useAgentThreadController draft restore', () => {
     expect(partsToText(result.current.draft)).toBe('draft on B')
     expect(await readDraftText(THREAD_ID_2)).toBe('draft on B')
     expect(await readDraftText(THREAD_ID)).toBe('draft on A')
+  })
+
+  it('keeps the newly bound thread stop marker when the previous thread stop completes late', async () => {
+    // 测试意图：A 的 Stop 已成功但回执合并仍挂起时宿主强制切到 B，B 立刻发起自己的 Stop
+    // 且结果未知（保留 pending 与 sidecar）。A 的 late completion 只能清理 A 自己的 sidecar，
+    // 绝不能让 B 看起来「没有未决 Stop」，否则 B 的下一次 Stop 会铸新 id 而不是精确重放。
+    const gate = deferred<StopReceiptMergeResult>()
+    applyStopReceiptMock.mockReturnValue(gate.promise)
+    vi.mocked(harnessService.stopThread)
+      // A：真实响应已返回，回执合并被 gate 扣住
+      .mockResolvedValueOnce({
+        status: 'STOPPED',
+        thread: threadFixture(),
+        stoppedThreads: [stopReceipt(THREAD_ID, 'stop-a', [cancelledUserMessage(1, 'cancelled on A')])],
+      } as HarnessThreadStopResultDTO)
+      // B：网络未知失败，pending 与 sidecar 必须保留
+      .mockRejectedValueOnce(new Error('network connection lost'))
+
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useAgentThreadController(threadId),
+      { initialProps: { threadId: THREAD_ID }, wrapper },
+    )
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    let stopOnA: Promise<void> | undefined
+    act(() => {
+      stopOnA = result.current.stopThread()
+    })
+    await waitFor(() => expect(applyStopReceiptMock).toHaveBeenCalledTimes(1))
+
+    // 宿主强制重绑到 B：B 的 snapshot 与 A 的 basis 不同，A 的待决操作在这里退役。
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.disabled).toBe(false))
+
+    // B 发起自己的 Stop，结果未知：pending 与 sidecar 保留下来供精确重放。
+    await act(async () => {
+      await result.current.stopThread()
+    })
+    await waitFor(() => expect(result.current.stopReplayPending).toBe(true))
+    const pendingOnB = loadPendingStop(THREAD_ID_2)
+    expect(pendingOnB).not.toBeNull()
+
+    // 放行 A 的迟到回执合并：只能清理 A 自己的 sidecar 与状态，不得触碰 B 的待决标记。
+    await act(async () => {
+      gate.resolve(recordOf(THREAD_ID, [createTextPart('cancelled on A')], ['stop-a']))
+      await stopOnA
+    })
+
+    expect(result.current.stopReplayPending).toBe(true)
+    expect(loadPendingStop(THREAD_ID_2)).toEqual(pendingOnB)
+    // A 自己的未知操作本来就不存在（它已成功），其 sidecar 保持为空。
+    expect(loadPendingStop(THREAD_ID)).toBeNull()
   })
 
   it('keeps a newer user edit when the receipt merge resolves late and still persists both', async () => {
