@@ -48,7 +48,7 @@ export function InteractionsPage() {
           type="button"
           className="interaction-source-link"
           onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.threadId)}`)}
-          title={`Chat: ${owner.chatId}`}
+          title={t('ai.interaction.openChatSource')}
         >
           <MessageSquare size={14} aria-hidden="true" />
           <span>{t('ai.interaction.sourceChat')}</span>
@@ -63,7 +63,7 @@ export function InteractionsPage() {
           type="button"
           className="interaction-source-link"
           onClick={() => void handleOpenIssueSource(owner.issueId!, item.threadId)}
-          title={`Issue: ${owner.issueId || ''} (${owner.agentName || ''})`}
+          title={t('ai.interaction.openIssueSource')}
         >
           <Workflow size={14} aria-hidden="true" />
           <span>{t('ai.interaction.sourceIssue')}</span>

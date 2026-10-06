@@ -333,6 +333,7 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
  * Turn usage 摘要文本（Conversation TurnSummary 与 Event TURN_END 共用）：
  * `↑input · ↓output · RcacheRead · WcacheWrite · $cost · cache N% · X tok/s`。
  * 缺失/为零的 cacheRead/cacheWrite 缩写省略，分母为 0 显示 cache —，无测速样本显示 — tok/s。
+ * `separator` 供不同呈现宽度复用同一事实与运算，避免各自拼装导致口径漂移。
  */
 export function formatTurnUsageText(usage: {
   input: number
@@ -342,7 +343,7 @@ export function formatTurnUsageText(usage: {
   cost: number
   decodeTokens?: number | null
   decodeDurationMillis?: number | null
-}): string {
+}, separator = ' · '): string {
   const parts = [
     `↑${formatCompactTokens(usage.input)}`,
     `↓${formatCompactTokens(usage.output)}`,
@@ -358,5 +359,5 @@ export function formatTurnUsageText(usage: {
   parts.push(cacheHitRate != null ? `cache ${cacheHitRate}%` : 'cache —')
   const speed = calculateDecodeTokensPerSecond(usage)
   parts.push(speed != null ? `${speed} tok/s` : '— tok/s')
-  return parts.join(' · ')
+  return parts.join(separator)
 }
