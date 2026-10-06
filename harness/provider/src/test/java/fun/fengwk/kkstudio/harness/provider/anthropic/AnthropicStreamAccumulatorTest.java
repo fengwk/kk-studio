@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,8 +59,6 @@ class AnthropicStreamAccumulatorTest {
 
   private ProviderStreamBridge bridge;
   private ProviderDescriptor descriptor;
-  private static final String VALID_PREFIX_HASH =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private ProviderRequest request;
 
   @BeforeEach
@@ -83,19 +79,7 @@ class AnthropicStreamAccumulatorTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            new ModelPricing(
-                "USD",
-                "tier-1",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.valueOf(3.0),
-                BigDecimal.valueOf(15.0),
-                BigDecimal.valueOf(0.3),
-                BigDecimal.valueOf(3.75),
-                BigDecimal.valueOf(6.0),
-                BigDecimal.ZERO));
+            false);
     ModelVariant variant = new ModelVariant("default");
     request =
         new ProviderRequest(
@@ -113,7 +97,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesCompleteTurnWithThinkingTextToolAndUsage() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // message_start
     accumulator.handleEvent(
@@ -184,10 +168,23 @@ class AnthropicStreamAccumulatorTest {
     assertEquals("{\"x\": 42}", response.toolCalls().get(0).argumentsJson());
     assertTrue(response.toolCallDiagnostics().isEmpty());
 
-    // replay state
+    // replay state：只与 format 和 affinity（Provider/连接世代/wire 模型）绑定，与历史前缀无关
     assertNotNull(completion.replayState());
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, completion.replayState().format());
-    assertEquals(VALID_PREFIX_HASH, completion.replayState().sourcePrefixHash());
+    assertEquals(descriptor.affinity("claude-3-5-sonnet"), completion.replayState().affinity());
+    JsonNode replayPayload = completion.replayState().payload();
+    assertEquals("assistant", replayPayload.path("role").asText());
+    JsonNode replayContent = replayPayload.path("content");
+    assertEquals(3, replayContent.size());
+    assertEquals("thinking", replayContent.get(0).path("type").asText());
+    assertEquals("Let me think.", replayContent.get(0).path("thinking").asText());
+    assertEquals("sig_xyz", replayContent.get(0).path("signature").asText());
+    assertEquals("text", replayContent.get(1).path("type").asText());
+    assertEquals("Answer content", replayContent.get(1).path("text").asText());
+    assertEquals("tool_use", replayContent.get(2).path("type").asText());
+    assertEquals("call_abc", replayContent.get(2).path("id").asText());
+    assertEquals("calc", replayContent.get(2).path("name").asText());
+    assertEquals(42, replayContent.get(2).path("input").path("x").asInt());
 
     // 校验 emitted events 顺序与内容
     assertEquals(7, emittedEvents.size());
@@ -217,7 +214,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesLengthTruncationWithToolCallDiagnostic() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -253,7 +250,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void throwsInvalidResponseOnIncompleteToolArgumentsUnderCompleteStopReason() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -276,7 +273,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void throwsInvalidResponseOnCacheBreakdownMismatch() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 总数 20，但 5m + 1h = 10 + 5 = 15 != 20
     accumulator.handleEvent(
@@ -298,7 +295,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void preservesUnknownUsageFieldsAndParsesServiceTier() throws Exception {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -332,7 +329,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsNonTextualServiceTier() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     ProviderException ex =
         assertThrows(
@@ -348,7 +345,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void ignoresPingAndDoneAndFutureUnknownEvents() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent("ping", "{}");
     accumulator.handleEvent("future_unknown_event", "{\"data\":123}");
@@ -368,7 +365,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesSseErrorEventByMappingAndThrowing() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     ProviderException ex =
         assertThrows(
@@ -386,7 +383,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void throwsInvalidResponseOnUnexpectedEofBeforeMessageStop() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -398,7 +395,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesRedactedThinkingAndSignatureDeltaInReplayState() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -438,7 +435,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void refusalYieldsFilteredStopReasonAndNullReplayState() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -458,7 +455,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void acceptsMonotonicNonConsecutiveIndicesAndRejectsDuplicatesOrOutOfOrder() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -499,7 +496,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesToolInitialInputPlaceholderAndTerminalGapCompletion() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -524,7 +521,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesLengthTruncationWithoutAnyToolArgumentsDoesNotFabricateEmptyObject() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -549,7 +546,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsDeltaWhenToolArgumentsAlreadyFinalized() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -571,7 +568,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsActiveBlocksAndAppliesMultipleCumulativeMessageDeltas() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -605,7 +602,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void filteredStopReasonClearsToolsAndDiagnosticsWithoutThrowing() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -627,7 +624,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsPayloadWithDuplicateKeysUnderStrictJsonFeatures() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 重复 key
     assertThrows(
@@ -676,7 +673,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsDeltaWithoutMessageStart() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     assertThrows(
         ProviderException.class,
@@ -689,7 +686,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesThinkingWithoutSignatureOrRedactedWithoutDataDisablesReplay() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -717,7 +714,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsDeltaWithMissingDeltaObjectOrMismatchedType() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -769,7 +766,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsMismatchedDeltaTypesForThinkingAndToolUse() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -803,7 +800,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsMessageStopWithActiveBlock() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -820,7 +817,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesFlatCacheCreationBreakdownFields() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -946,7 +943,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void handlesToolInitialInputPlaceholderFollowedByJsonDeltas() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
@@ -993,8 +990,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void rejectsConflictingCacheBreakdownAliases() {
     // 1. nested 内部别名冲突 (10 vs 12)
-    AnthropicStreamAccumulator acc1 =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+    AnthropicStreamAccumulator acc1 = new AnthropicStreamAccumulator(request, descriptor, bridge);
     assertThrows(
         ProviderException.class,
         () ->
@@ -1016,8 +1012,7 @@ class AnthropicStreamAccumulatorTest {
                 """));
 
     // 2. nested 与 flat 别名冲突 (10 vs 15)
-    AnthropicStreamAccumulator acc2 =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+    AnthropicStreamAccumulator acc2 = new AnthropicStreamAccumulator(request, descriptor, bridge);
     assertThrows(
         ProviderException.class,
         () ->
@@ -1042,7 +1037,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void acceptsConsistentSameValueCacheBreakdownAliases() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // 多个别名同时出现但值完全一致（均为 10）
     accumulator.handleEvent(
@@ -1075,7 +1070,7 @@ class AnthropicStreamAccumulatorTest {
   @Test
   void mergesCacheBreakdownAcrossDifferentDimensionsAndEvents() {
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     // message_start 提供 nested 5m
     accumulator.handleEvent(
@@ -1120,7 +1115,7 @@ class AnthropicStreamAccumulatorTest {
   }
 
   private AnthropicStreamAccumulator newAccumulator() {
-    return new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+    return new AnthropicStreamAccumulator(request, descriptor, bridge);
   }
 
   private AnthropicStreamAccumulator startedAccumulator() {

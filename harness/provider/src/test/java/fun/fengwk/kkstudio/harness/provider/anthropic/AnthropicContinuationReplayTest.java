@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -37,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -45,14 +43,12 @@ import java.util.UUID;
 
 /**
  * 验证 Anthropic 续写终止态（{@code pause_turn} / {@code compaction}）到运行时 CONTINUE 的映射，以及 compaction replay
- * 对历史的重写：compaction block 必须唯一且位于消息首部，被摘要的历史整体省略，前缀哈希仍按原 durable 前缀校验。
+ * 对历史的重写：compaction block 必须唯一且位于消息首部，被摘要的历史整体省略；replay 只与 affinity 绑定，与 system 指令 和更早的历史无关。
  */
 class AnthropicContinuationReplayTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-  private static final String FORGED_PREFIX_HASH =
-      "0000000000000000000000000000000000000000000000000000000000000000";
 
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
   private final ProviderDescriptor descriptor =
@@ -70,9 +66,8 @@ class AnthropicContinuationReplayTest {
   @Test
   void mapsPauseTurnToContinueWithNativeReplayState() throws IOException {
     ProviderRequest firstRequest = request(List.of(userMsg("search the web")));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start",
         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_pause\",\"usage\":{\"input_tokens\":1}}}");
@@ -100,7 +95,6 @@ class AnthropicContinuationReplayTest {
     ProviderReplayState replayState = completion.replayState();
     assertNotNull(replayState, "CONTINUE must freeze native replay state");
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
-    assertEquals(frozenHash, replayState.sourcePrefixHash());
     JsonNode content = replayState.payload().path("content");
     assertEquals(2, content.size());
     assertEquals("server_tool_use", content.get(0).path("type").asText());
@@ -124,9 +118,8 @@ class AnthropicContinuationReplayTest {
   @Test
   void mapsCompactionToContinueAndFreezesReplayState() {
     ProviderRequest firstRequest = request(List.of(userMsg("summarize")));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -152,9 +145,6 @@ class AnthropicContinuationReplayTest {
   @Test
   void compactionReplayOmitsSummarizedHistoryAndStartsMessages() throws IOException {
     // 原 durable 前缀：仅含首条 user 消息（compaction 之前的真实历史）
-    String durablePrefixHash =
-        encoder.encode(request(List.of(userMsg("old question"))), descriptor).sourcePrefixHash();
-
     ObjectNode compactionBlock = NODES.objectNode();
     compactionBlock.put("type", "compaction");
     compactionBlock.put("summary", "earlier turns were summarized");
@@ -163,7 +153,6 @@ class AnthropicContinuationReplayTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            durablePrefixHash,
             payload(compactionBlock));
 
     ProviderRequest continuationRequest =
@@ -183,39 +172,40 @@ class AnthropicContinuationReplayTest {
     assertEquals("new question", messages.get(1).path("content").get(0).path("text").asText());
   }
 
-  /** 测试意图：compaction replay 的前缀校验仍针对原 durable 前缀；失配时 fail closed 而不是丢掉 compaction block。 */
+  /**
+   * 测试意图：compaction replay 只与 affinity 绑定，与 system 指令和更早的历史无关（不再有前缀哈希绑定）：即使 system 指令与
+   * 前缀历史都发生变化，replay 仍生效并省略被摘要的历史。
+   */
   @Test
-  void compactionReplayFailsClosedOnPrefixHashMismatch() {
+  void compactionReplayAppliesAcrossChangedSystemAndHistory() throws IOException {
     ObjectNode compactionBlock = NODES.objectNode();
     compactionBlock.put("type", "compaction");
     compactionBlock.put("summary", "summarized");
-    ProviderReplayState forgedReplay =
+    ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            FORGED_PREFIX_HASH,
             payload(compactionBlock));
 
+    // 与录制时不同的 system 指令，且首条 user 消息也被替换；replay 不受影响
     ProviderRequest continuationRequest =
         request(
+            "A completely different system instruction.",
             List.of(
-                userMsg("old question"),
-                assistantMsg(List.of(new ProviderTextBlock("")), forgedReplay)));
-    ProviderException error =
-        assertThrows(
-            ProviderException.class, () -> encoder.encode(continuationRequest, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        error.getMessage());
+                userMsg("unrelated earlier question"),
+                assistantMsg(List.of(new ProviderTextBlock("")), replayState),
+                userMsg("new question")));
+    JsonNode messages = wire(encoder.encode(continuationRequest, descriptor)).path("messages");
+
+    assertEquals(2, messages.size());
+    assertEquals("assistant", messages.get(0).path("role").asText());
+    assertEquals(compactionBlock, messages.get(0).path("content").get(0));
+    assertEquals("new question", messages.get(1).path("content").get(0).path("text").asText());
   }
 
   /** 测试意图：compaction block 必须唯一且位于消息首部，否则显式失败而不是编码出语义错误的请求。 */
   @Test
   void rejectsDuplicateOrMisplacedCompactionBlock() {
-    String durablePrefixHash =
-        encoder.encode(request(List.of(userMsg("hi"))), descriptor).sourcePrefixHash();
-
     // 1. 两个 compaction block
     ObjectNode duplicated = NODES.objectNode();
     duplicated.put("role", "assistant");
@@ -227,7 +217,6 @@ class AnthropicContinuationReplayTest {
             new ProviderReplayState(
                 ProviderReplayFormat.ANTHROPIC_MESSAGES,
                 descriptor.affinity("claude-3-5-sonnet"),
-                durablePrefixHash,
                 duplicated));
     assertEquals("duplicate compaction block in replay payload", duplicateError.getMessage());
 
@@ -242,7 +231,6 @@ class AnthropicContinuationReplayTest {
             new ProviderReplayState(
                 ProviderReplayFormat.ANTHROPIC_MESSAGES,
                 descriptor.affinity("claude-3-5-sonnet"),
-                durablePrefixHash,
                 misplaced));
     assertEquals(
         "compaction block must be the first content block of the replay message",
@@ -256,9 +244,8 @@ class AnthropicContinuationReplayTest {
   @Test
   void rejectsToolUseUnderContinueStopReason() {
     ProviderRequest firstRequest = request(List.of(userMsg("hi")));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
 
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -296,10 +283,9 @@ class AnthropicContinuationReplayTest {
     return payload;
   }
 
-  private AnthropicStreamAccumulator accumulator(
-      ProviderRequest request, String frozenSourcePrefixHash) {
+  private AnthropicStreamAccumulator accumulator(ProviderRequest request) {
     return new AnthropicStreamAccumulator(
-        request, descriptor, frozenSourcePrefixHash, new ProviderStreamBridge(new NoopHandler()));
+        request, descriptor, new ProviderStreamBridge(new NoopHandler()));
   }
 
   private static JsonNode wire(AnthropicEncodedRequest encoded) throws IOException {
@@ -307,11 +293,15 @@ class AnthropicContinuationReplayTest {
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {
+    return request("Test system instruction.", messages);
+  }
+
+  private ProviderRequest request(String systemInstruction, List<ProviderMessage> messages) {
     return new ProviderRequest(
         model(),
         new ModelVariant("default"),
         1024,
-        "Test system instruction.",
+        systemInstruction,
         messages,
         List.of(),
         ProviderCacheControl.none());
@@ -333,19 +323,7 @@ class AnthropicContinuationReplayTest {
         "claude-3-5-sonnet",
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        false);
   }
 
   private static final class NoopHandler implements ProviderStreamHandler {

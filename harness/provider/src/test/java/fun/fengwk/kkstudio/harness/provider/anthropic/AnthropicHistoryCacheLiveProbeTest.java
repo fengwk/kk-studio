@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,9 +18,7 @@ import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -37,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.ByteArrayOutputStream;
-import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.ByteBuffer;
@@ -56,7 +54,6 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.regex.Pattern;
 
 /**
  * 显式付费门禁的历史端点 A/B 测量；仅访问 TEST_ANTHROPIC 凭据指向的线路，不重试。
@@ -93,8 +90,9 @@ class AnthropicHistoryCacheLiveProbeTest {
     JsonNode expected = JSON.readTree(current);
     ((ObjectNode) expected.path("messages").get(0).path("content").get(0)).remove("cache_control");
     assertEquals(expected, JSON.readTree(old));
+    // 字节级 OLD 对照：OLD 体与 NEW 体只差被移除的 pre-assistant 历史端点 marker。
     assertEquals(
-        new String(current, StandardCharsets.UTF_8).replaceFirst(Pattern.quote(MARKER), ""),
+        withoutHistoryMarker(new String(current, StandardCharsets.UTF_8)),
         new String(old, StandardCharsets.UTF_8));
   }
 
@@ -227,34 +225,15 @@ class AnthropicHistoryCacheLiveProbeTest {
   }
 
   private static ProviderRequest request(List<ProviderMessage> messages) {
-    BigDecimal zero = BigDecimal.ZERO;
     return new ProviderRequest(
         new ModelDescriptor(
-            "minimax-anthropic",
-            "MiniMax-M3",
-            MODEL,
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true,
-            new ModelPricing(
-                "USD",
-                "probe",
-                "default",
-                BigDecimal.ONE,
-                "probe",
-                zero,
-                zero,
-                zero,
-                zero,
-                zero,
-                zero)),
+            "minimax-anthropic", "MiniMax-M3", MODEL, Set.of(ModelInputModality.TEXT), true, true),
         new ModelVariant("off", "off"),
         128,
         "answer OK only",
         messages,
         List.of(),
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT, "probe", Set.of(PromptCacheBreakpoint.CONVERSATION)));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "probe"));
   }
 
   private static ProviderMessage prefix() {
@@ -298,21 +277,37 @@ class AnthropicHistoryCacheLiveProbeTest {
     assertEquals(MODEL, root.path("model").asText());
     assertEquals(128, root.path("max_tokens").asInt());
     assertEquals("disabled", root.path("thinking").path("type").asText());
-    assertEquals("answer OK only", root.path("system").get(0).path("text").asText());
-    assertTrue(!root.path("system").get(0).has("cache_control") && !root.has("tools"));
+    JsonNode system = root.path("system").get(0);
+    assertEquals("answer OK only", system.path("text").asText());
+    // 新契约：SHORT 留存固定给 system 文本块打 ephemeral marker；请求没有 tools 也就不存在 tools marker。
+    assertEquals("ephemeral", system.path("cache_control").path("type").asText());
+    assertFalse(system.path("cache_control").has("ttl"));
+    assertFalse(root.has("tools"));
     List<Integer> positions = markers(root);
-    assertTrue(positions.size() <= 4);
+    // 历史端点 marker 加 system 固定 marker 不得超过原生 4 个上限。
+    assertTrue(positions.size() + 1 <= 4, () -> "markers=" + positions);
     assertEquals(warm ? List.of(0) : old ? List.of(25) : List.of(0, 25), positions);
   }
 
   private static byte[] oldBody(byte[] current) {
-    String body = new String(current, StandardCharsets.UTF_8);
-    int first = body.indexOf(MARKER);
+    return withoutHistoryMarker(new String(current, StandardCharsets.UTF_8))
+        .getBytes(StandardCharsets.UTF_8);
+  }
+
+  private static String withoutHistoryMarker(String body) {
+    int first = historyMarkerIndex(body);
+    return body.substring(0, first) + body.substring(first + MARKER.length());
+  }
+
+  /** 历史端点 marker 位于 messages 段内；system 段上的固定 marker 不参与 OLD 对照。 */
+  private static int historyMarkerIndex(String body) {
+    int messages = body.indexOf("\"messages\"");
+    assertTrue(messages >= 0, "classification=MISSING_MESSAGES");
+    int first = body.indexOf(MARKER, messages);
     assertTrue(
         first >= 0 && body.indexOf(MARKER, first + MARKER.length()) >= 0,
         "classification=MISSING_HISTORY_MARKER");
-    return (body.substring(0, first) + body.substring(first + MARKER.length()))
-        .getBytes(StandardCharsets.UTF_8);
+    return first;
   }
 
   /** 在真实 provider stream 边界只移除 OLD 历史 marker，然后仍委托生产 SSE transport。 */

@@ -21,7 +21,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -49,7 +48,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -70,7 +68,7 @@ import java.util.stream.Stream;
  *   <li>验证真实自适应参数 thinking.type=adaptive 与 output_config.effort，拒绝构造 SDK 私有虚假字段（如
  *       thinkingType=enabled、budget_tokens、sendThinking、returnThinking 等字段在 kk-studio 中故意不存在）。
  *   <li>验证流式 ThinkingDelta、SignatureDelta、TextDelta 与 ToolCallDelta 真实事件序列。
- *   <li>验证 terminal ProviderCompletion、durable 内容装配以及基于 canonical prefix hash 的原生 wire 重放。
+ *   <li>验证 terminal ProviderCompletion、durable 内容装配以及按 affinity 绑定的原生 wire 重放。
  * </ul>
  */
 class AnthropicThinkingTest {
@@ -154,14 +152,11 @@ class AnthropicThinkingTest {
     assertFalse(turn1WireRoot.has("sendThinking"));
     assertFalse(turn1WireRoot.has("returnThinking"));
 
-    String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
-    assertNotNull(frozenPrefixHash);
-
     // 2. 流式累积与事件顺序断言
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
+        new AnthropicStreamAccumulator(turn1Request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -216,7 +211,6 @@ class AnthropicThinkingTest {
     assertNotNull(replayState, "replayState must be formed for successful turn with signature");
     assertEquals(ProviderReplayFormat.ANTHROPIC_MESSAGES, replayState.format());
     assertEquals(descriptor.affinity(modelName), replayState.affinity());
-    assertEquals(frozenPrefixHash, replayState.sourcePrefixHash());
 
     // 3. 次轮后续请求重放 wire 断言
     ProviderMessage asstMsg1 =
@@ -296,12 +290,11 @@ class AnthropicThinkingTest {
             ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = encoder.encode(turn1Request, descriptor);
-    String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
+        new AnthropicStreamAccumulator(turn1Request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -452,12 +445,11 @@ class AnthropicThinkingTest {
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
-    String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
+        new AnthropicStreamAccumulator(req, descriptor, bridge);
 
     String encryptedThinkingData = "bWlzdGVyaW91cy1lbmNyeXB0ZWQtdGhpbmtpbmctYmxvYg==";
 
@@ -535,12 +527,11 @@ class AnthropicThinkingTest {
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
-    String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
+        new AnthropicStreamAccumulator(req, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -593,27 +584,17 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证当 ReplayState 的模型亲和性（affinity）与当前请求模型不匹配时：携带 thinking signature 的 native payload 无法用 durable
-   * 语义等价重建，必须 fail closed；而只含可等价重建内容的 payload 仍回退语义编码。
+   * 验证当 ReplayState 的模型亲和性（affinity）与当前请求模型不匹配时：不再 fail closed，而是按 durable 语义回退投影。
    *
-   * <p>测试意图：防止跨模型复用思考块或签名导致的协议不兼容或数据污染，同时保证纯语义 payload 的既有降级行为不变。
+   * <p>测试意图：跨模型复用思考块时不得把 native 事实（signature 等）发给上游；回退阶段把 thinking 降级为普通 text、text 原样保留，且不因存在
+   * replay 而拒绝请求。
    */
   @Test
-  void failsClosedOnNativeOnlyReplay_when_affinity_mismatches() throws IOException {
+  void fallsBackOnAffinityMismatch_when_native_only_replay() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-opus-4-8");
     ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    ProviderRequest req =
-        new ProviderRequest(
-            modelDesc,
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-    String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     // 构造模型不一致的 affinity (例如来自 claude-haiku-4-5-20251001)
     ProviderReplayAffinity mismatchedAffinity =
@@ -633,15 +614,12 @@ class AnthropicThinkingTest {
         .put("signature", "sig_valid");
     content.addObject().put("type", "text").put("text", "Text");
 
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, currentHash, payload);
-
     ProviderMessage asstMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
             List.of(new ProviderThinkingBlock("Thought"), new ProviderTextBlock("Text")),
-            replayState);
+            new ProviderReplayState(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, payload));
 
     ProviderRequest followUp =
         new ProviderRequest(
@@ -653,63 +631,31 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    // thinking 的 signature 无法用 durable thinking 文本重建：亲和性失配时必须 fail closed，绝不静默丢弃 signature
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        error.getMessage());
-
-    // 只含可等价重建 text 的 payload 在同一亲和性失配下仍回退语义编码
-    ObjectNode reconstructiblePayload = NODES.objectNode();
-    reconstructiblePayload.put("role", "assistant");
-    reconstructiblePayload.putArray("content").addObject().put("type", "text").put("text", "Text");
-    ProviderMessage reconstructibleAsstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Text")),
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                mismatchedAffinity,
-                currentHash,
-                reconstructiblePayload));
-    ProviderRequest reconstructibleFollowUp =
-        new ProviderRequest(
-            modelDesc,
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg, reconstructibleAsstMsg, userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-
+    // 亲和性失配：signature 不回放，thinking 降级为普通 text，wire 上不含 thinking/signature
     ArrayNode fallbackContents =
         (ArrayNode)
             MAPPER
-                .readTree(encoder.encode(reconstructibleFollowUp, descriptor).bodyUtf8Bytes())
+                .readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes())
                 .path("messages")
                 .get(1)
                 .path("content");
+    assertEquals(2, fallbackContents.size());
     assertEquals("text", fallbackContents.get(0).path("type").asText());
-    assertEquals("Text", fallbackContents.get(0).path("text").asText());
+    assertEquals("Thought", fallbackContents.get(0).path("text").asText());
+    assertEquals("text", fallbackContents.get(1).path("type").asText());
+    assertEquals("Text", fallbackContents.get(1).path("text").asText());
   }
 
   /**
-   * 验证当前缀哈希（sourcePrefixHash）不匹配时（例如历史对话或提示词改动）：携带 thinking signature 的 native payload 必须 fail
-   * closed；只含可等价重建内容的 payload 仍回退语义编码。
+   * 验证 replay 只与 affinity 绑定：即使 system 指令与更早的历史都发生变化（跨系统/跨时间复用），携带 thinking signature 的 native
+   * payload 仍必须原样回放，signature 绝不丢失。
    *
-   * <p>测试意图：验证对话历史前缀校验契约，同时杜绝静默丢弃 signature 造成的原生事实丢失。
+   * <p>测试意图：证明 replay 不再依赖任何前缀哈希，system 改动与历史增长都不影响原生事实回放。
    */
   @Test
-  void failsClosedOnNativeOnlyReplay_when_source_prefix_hash_mismatches() throws IOException {
+  void replaysNativeThinkingAcrossChangedSystemAndHistory() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
     ModelVariant variant = new ModelVariant("default", "high");
-    ProviderMessage userMsg =
-        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-
-    // 构造伪造或过期的 prefix hash
-    String forgedHash = "0000000000000000000000000000000000000000000000000000000000000000";
 
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
@@ -725,7 +671,6 @@ class AnthropicThinkingTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-sonnet-4-6"),
-            forgedHash,
             payload);
 
     ProviderMessage asstMsg =
@@ -734,56 +679,35 @@ class AnthropicThinkingTest {
             List.of(new ProviderThinkingBlock("Thought"), new ProviderTextBlock("Text")),
             replayState);
 
+    // 与录制时不同的 system 指令，并额外插入一条更早的 user 消息：replay 仍按 affinity 生效
     ProviderRequest followUp =
         new ProviderRequest(
             modelDesc,
             variant,
             1024,
-            "Test system instruction.",
-            List.of(userMsg, asstMsg, userMsg),
+            "A completely different system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("earlier"))),
+                asstMsg,
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
             List.of(),
             ProviderCacheControl.none());
 
-    // 前缀哈希不一致且 payload 含 signature：fail closed，绝不静默降级为没有 signature 的 text
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        error.getMessage());
-
-    // 只含可等价重建 text 的 payload 在同一前缀失配下仍回退语义编码
-    ObjectNode reconstructiblePayload = NODES.objectNode();
-    reconstructiblePayload.put("role", "assistant");
-    reconstructiblePayload.putArray("content").addObject().put("type", "text").put("text", "Text");
-    ProviderMessage reconstructibleAsstMsg =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("Text")),
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                descriptor.affinity("claude-sonnet-4-6"),
-                forgedHash,
-                reconstructiblePayload));
-    ProviderRequest reconstructibleFollowUp =
-        new ProviderRequest(
-            modelDesc,
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg, reconstructibleAsstMsg, userMsg),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ArrayNode fallbackContents =
+    ArrayNode replayedContent =
         (ArrayNode)
             MAPPER
-                .readTree(encoder.encode(reconstructibleFollowUp, descriptor).bodyUtf8Bytes())
+                .readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes())
                 .path("messages")
                 .get(1)
                 .path("content");
-    assertEquals("text", fallbackContents.get(0).path("type").asText());
-    assertEquals("Text", fallbackContents.get(0).path("text").asText());
+    assertEquals(2, replayedContent.size());
+    assertEquals("thinking", replayedContent.get(0).path("type").asText());
+    assertEquals("Thought", replayedContent.get(0).path("thinking").asText());
+    assertEquals("sig_valid", replayedContent.get(0).path("signature").asText());
+    assertEquals("text", replayedContent.get(1).path("type").asText());
+    assertEquals("Text", replayedContent.get(1).path("text").asText());
   }
 
   /**
@@ -806,7 +730,6 @@ class AnthropicThinkingTest {
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
-    String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
@@ -822,7 +745,6 @@ class AnthropicThinkingTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-sonnet-4-6"),
-            currentHash,
             payload);
 
     // Durable 内容中的 thinking 与 payload 不匹配
@@ -865,8 +787,7 @@ class AnthropicThinkingTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            false, // disabled
-            pricing());
+            false); // disabled
     ModelVariant variantWithEffort = new ModelVariant("default", "high");
 
     ProviderRequest req1 =
@@ -937,12 +858,10 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    String hash = encoder.encode(req, descriptor).sourcePrefixHash();
-
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(req, descriptor, hash, bridge);
+        new AnthropicStreamAccumulator(req, descriptor, bridge);
 
     for (JsonNode item : fixtureArray) {
       String event = item.path("event").asText();
@@ -994,13 +913,10 @@ class AnthropicThinkingTest {
     assertFalse(turn1WireRoot.has("output_config"), "BUDGET mode must omit output_config");
     assertEquals(List.of("interleaved-thinking-2025-05-14"), encodedTurn1.betaFeatures());
 
-    String frozenPrefixHash = encodedTurn1.sourcePrefixHash();
-    assertNotNull(frozenPrefixHash);
-
     RecordingStreamHandler handler = new RecordingStreamHandler();
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(turn1Request, descriptor, frozenPrefixHash, bridge);
+        new AnthropicStreamAccumulator(turn1Request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message_start",
@@ -1077,23 +993,7 @@ class AnthropicThinkingTest {
         modelName,
         Set.of(ModelInputModality.TEXT),
         true,
-        true, // reasoning enabled
-        pricing());
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
+        true); // reasoning enabled
   }
 
   private static class RecordingStreamHandler implements ProviderStreamHandler {
