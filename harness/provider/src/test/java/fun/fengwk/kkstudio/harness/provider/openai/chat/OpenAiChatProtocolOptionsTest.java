@@ -17,9 +17,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -59,19 +58,6 @@ class OpenAiChatProtocolOptionsTest {
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     reasoningModel =
         new ModelDescriptor(
             "openai",
@@ -79,11 +65,10 @@ class OpenAiChatProtocolOptionsTest {
             "gpt-4o-reasoning",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     plainModel =
         new ModelDescriptor(
-            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
   }
 
   @Test
@@ -201,7 +186,7 @@ class OpenAiChatProtocolOptionsTest {
 
     // runtime 配置仍然决定 include_usage 的最终值
     OpenAiChatConfiguration withoutUsage =
-        new OpenAiChatConfiguration(false, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(false, true, PromptCacheRetention.NONE);
     JsonNode configured =
         MAPPER.readTree(
             encoder
@@ -254,26 +239,25 @@ class OpenAiChatProtocolOptionsTest {
     assertEquals(1, tools.size());
     assertEquals("runtime_calc", tools.get(0).path("function").path("name").asText());
 
-    // prefix hash 覆盖最终 wire 数组（runtime 工具）
-    assertEquals(
-        OpenAiChatPrefixHasher.calculateHash(tools, (ArrayNode) root.path("messages")),
-        encoded.sourcePrefixHash());
-
     // 仅空 native tools 时保留空声明
     OpenAiChatEncodedRequest nativeOnlyEncoded =
         encoder.encode(
             request(reasoningModel, variant, List.of()),
             descriptor,
             OpenAiChatConfiguration.defaults());
-    assertEquals(0, MAPPER.readTree(nativeOnlyEncoded.bodyUtf8Bytes()).path("tools").size());
-    String plainHash =
-        encoder
-            .encode(
-                request(reasoningModel, new ModelVariant("native"), List.of(runtimeTool)),
-                descriptor,
-                OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
-    assertNotEquals(plainHash, nativeOnlyEncoded.sourcePrefixHash());
+    JsonNode nativeOnlyRoot = MAPPER.readTree(nativeOnlyEncoded.bodyUtf8Bytes());
+    assertEquals(0, nativeOnlyRoot.path("tools").size());
+
+    // 不同 tools 声明在最终 wire 上产生不同 tools 数组
+    JsonNode plainRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(reasoningModel, new ModelVariant("native"), List.of(runtimeTool)),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertNotEquals(nativeOnlyRoot.path("tools"), plainRoot.path("tools"));
 
     // 非 array 形态拒绝
     ProviderException illegalShape =
@@ -366,7 +350,7 @@ class OpenAiChatProtocolOptionsTest {
                     new OpenAiChatConfiguration(
                         true,
                         true,
-                        OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC,
+                        PromptCacheRetention.NONE,
                         OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK))
                 .bodyUtf8Bytes());
     assertEquals("disabled", deepseek.path("thinking").path("type").asText());

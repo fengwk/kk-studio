@@ -6,20 +6,17 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
-import java.util.EnumSet;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * OpenAI Chat Completions 适配器配置解析与校验对象。
  *
- * <p>已知字段严格类型与取值校验，未知字段安全忽略，禁止向外泄露原始配置内容。
+ * <p>已知字段严格类型与取值校验，未知字段安全忽略，禁止向外泄露原始配置内容。提示缓存只由一个与运行时一致的留存档位字段 {@code promptCacheRetention}（{@link
+ * PromptCacheRetention}）表达，不再有协议私有的 capability/policy/mode；缓存 key 由运行时按 Session 提供。
  */
 public final class OpenAiChatConfiguration {
 
@@ -32,14 +29,8 @@ public final class OpenAiChatConfiguration {
 
   public static final String FIELD_INCLUDE_USAGE = "openAiChatIncludeUsage";
   public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
-  public static final String FIELD_PROMPT_CACHE_MODE = "openAiPromptCacheMode";
+  public static final String FIELD_PROMPT_CACHE_RETENTION = "promptCacheRetention";
   public static final String FIELD_THINKING_FORMAT = "openAiChatThinkingFormat";
-
-  public enum PromptCacheMode {
-    AUTOMATIC,
-    LEGACY,
-    GPT_5_6_EXPLICIT
-  }
 
   public enum ThinkingFormat {
     STANDARD,
@@ -48,28 +39,28 @@ public final class OpenAiChatConfiguration {
 
   private final boolean includeUsage;
   private final boolean requireDone;
-  private final PromptCacheMode promptCacheMode;
+  private final PromptCacheRetention promptCacheRetention;
   private final ThinkingFormat thinkingFormat;
 
   public OpenAiChatConfiguration(
-      boolean includeUsage, boolean requireDone, PromptCacheMode promptCacheMode) {
-    this(includeUsage, requireDone, promptCacheMode, ThinkingFormat.STANDARD);
+      boolean includeUsage, boolean requireDone, PromptCacheRetention promptCacheRetention) {
+    this(includeUsage, requireDone, promptCacheRetention, ThinkingFormat.STANDARD);
   }
 
   public OpenAiChatConfiguration(
       boolean includeUsage,
       boolean requireDone,
-      PromptCacheMode promptCacheMode,
+      PromptCacheRetention promptCacheRetention,
       ThinkingFormat thinkingFormat) {
     this.includeUsage = includeUsage;
     this.requireDone = requireDone;
-    this.promptCacheMode = promptCacheMode == null ? PromptCacheMode.AUTOMATIC : promptCacheMode;
+    this.promptCacheRetention =
+        promptCacheRetention == null ? PromptCacheRetention.NONE : promptCacheRetention;
     this.thinkingFormat = thinkingFormat == null ? ThinkingFormat.STANDARD : thinkingFormat;
   }
 
   public static OpenAiChatConfiguration defaults() {
-    return new OpenAiChatConfiguration(
-        true, true, PromptCacheMode.AUTOMATIC, ThinkingFormat.STANDARD);
+    return new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
   }
 
   public static OpenAiChatConfiguration parse(String configJson) {
@@ -110,21 +101,21 @@ public final class OpenAiChatConfiguration {
       requireDone = node.booleanValue();
     }
 
-    PromptCacheMode cacheMode = PromptCacheMode.AUTOMATIC;
-    if (root.has(FIELD_PROMPT_CACHE_MODE)) {
-      JsonNode node = root.get(FIELD_PROMPT_CACHE_MODE);
+    PromptCacheRetention promptCacheRetention = PromptCacheRetention.NONE;
+    if (root.has(FIELD_PROMPT_CACHE_RETENTION)) {
+      JsonNode node = root.get(FIELD_PROMPT_CACHE_RETENTION);
       if (!node.isTextual()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
-            "field " + FIELD_PROMPT_CACHE_MODE + " must be a string");
+            "field " + FIELD_PROMPT_CACHE_RETENTION + " must be a string");
       }
       String text = node.textValue().trim();
       try {
-        cacheMode = PromptCacheMode.valueOf(text);
+        promptCacheRetention = PromptCacheRetention.valueOf(text);
       } catch (IllegalArgumentException ex) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
-            "unsupported prompt cache mode in " + FIELD_PROMPT_CACHE_MODE);
+            "unsupported value in " + FIELD_PROMPT_CACHE_RETENTION);
       }
     }
 
@@ -146,7 +137,8 @@ public final class OpenAiChatConfiguration {
       }
     }
 
-    return new OpenAiChatConfiguration(includeUsage, requireDone, cacheMode, thinkingFormat);
+    return new OpenAiChatConfiguration(
+        includeUsage, requireDone, promptCacheRetention, thinkingFormat);
   }
 
   public boolean includeUsage() {
@@ -157,23 +149,12 @@ public final class OpenAiChatConfiguration {
     return requireDone;
   }
 
-  public PromptCacheMode promptCacheMode() {
-    return promptCacheMode;
+  public PromptCacheRetention promptCacheRetention() {
+    return promptCacheRetention;
   }
 
   public ThinkingFormat thinkingFormat() {
     return thinkingFormat;
-  }
-
-  public PromptCacheCapability promptCacheCapability() {
-    return switch (promptCacheMode) {
-      case AUTOMATIC -> PromptCacheCapability.automatic();
-      case LEGACY -> PromptCacheCapability.affinity(
-          Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
-      case GPT_5_6_EXPLICIT -> PromptCacheCapability.breakpoints(
-          Set.of(PromptCacheRetention.SHORT),
-          EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
-    };
   }
 
   @Override
@@ -186,13 +167,13 @@ public final class OpenAiChatConfiguration {
     }
     return includeUsage == that.includeUsage
         && requireDone == that.requireDone
-        && promptCacheMode == that.promptCacheMode
+        && promptCacheRetention == that.promptCacheRetention
         && thinkingFormat == that.thinkingFormat;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(includeUsage, requireDone, promptCacheMode, thinkingFormat);
+    return Objects.hash(includeUsage, requireDone, promptCacheRetention, thinkingFormat);
   }
 
   @Override
@@ -201,8 +182,8 @@ public final class OpenAiChatConfiguration {
         + includeUsage
         + ", requireDone="
         + requireDone
-        + ", promptCacheMode="
-        + promptCacheMode
+        + ", promptCacheRetention="
+        + promptCacheRetention
         + ", thinkingFormat="
         + thinkingFormat
         + "]";

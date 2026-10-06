@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -33,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -86,22 +84,9 @@ class OpenAiChatStreamingDecoderTest {
             ProviderType.OPENAI,
             "http://127.0.0.1:" + port,
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
     defaultVariant = new ModelVariant("default");
   }
 

@@ -10,26 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
-import java.util.Set;
-
-/** 测试意图：验证 OpenAI Chat 配置对象的解析、默认值、严格类型校验与 PromptCacheCapability 派发。 */
+/** 测试意图：验证 OpenAI Chat 配置对象的解析、默认值、严格类型校验与统一留存档位字段。 */
 class OpenAiChatConfigurationTest {
 
   @Test
-  @DisplayName("null 或空白配置返回默认配置")
+  @DisplayName("null 或空白配置返回默认配置（NONE）")
   void parseDefaults() {
     OpenAiChatConfiguration config1 = OpenAiChatConfiguration.parse(null);
     assertTrue(config1.includeUsage());
     assertTrue(config1.requireDone());
-    assertEquals(OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC, config1.promptCacheMode());
-    assertEquals(PromptCacheMode.AUTOMATIC, config1.promptCacheCapability().mode());
+    assertEquals(PromptCacheRetention.NONE, config1.promptCacheRetention());
 
     OpenAiChatConfiguration config2 = OpenAiChatConfiguration.parse("   ");
     assertEquals(config1, config2);
@@ -43,7 +37,7 @@ class OpenAiChatConfigurationTest {
         {
           "openAiChatIncludeUsage": false,
           "openAiChatRequireDone": false,
-          "openAiPromptCacheMode": "GPT_5_6_EXPLICIT",
+          "promptCacheRetention": "LONG",
           "unknownField": "should_be_ignored",
           "extraObject": {"k": 1}
         }
@@ -51,28 +45,25 @@ class OpenAiChatConfigurationTest {
     OpenAiChatConfiguration config = OpenAiChatConfiguration.parse(json);
     assertFalse(config.includeUsage());
     assertFalse(config.requireDone());
-    assertEquals(
-        OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT, config.promptCacheMode());
-
-    PromptCacheCapability cap = config.promptCacheCapability();
-    assertEquals(PromptCacheMode.BREAKPOINTS, cap.mode());
-    assertEquals(Set.of(PromptCacheRetention.SHORT), cap.supportedRetentions());
-    assertEquals(
-        Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION),
-        cap.supportedBreakpoints());
+    assertEquals(PromptCacheRetention.LONG, config.promptCacheRetention());
+    assertEquals("promptCacheRetention", OpenAiChatConfiguration.FIELD_PROMPT_CACHE_RETENTION);
   }
 
   @Test
-  @DisplayName("LEGACY 模式 capability 包含 AFFINITY 与 SHORT+LONG")
-  void parseLegacyPromptCacheMode() {
-    String json = "{\"openAiPromptCacheMode\": \"LEGACY\"}";
-    OpenAiChatConfiguration config = OpenAiChatConfiguration.parse(json);
-    assertEquals(OpenAiChatConfiguration.PromptCacheMode.LEGACY, config.promptCacheMode());
-    PromptCacheCapability cap = config.promptCacheCapability();
-    assertEquals(PromptCacheMode.AFFINITY, cap.mode());
+  @DisplayName("promptCacheRetention 支持 NONE/SHORT/LONG 三档")
+  void parseAllRetentions() {
     assertEquals(
-        Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG), cap.supportedRetentions());
-    assertTrue(cap.supportedBreakpoints().isEmpty());
+        PromptCacheRetention.NONE,
+        OpenAiChatConfiguration.parse("{\"promptCacheRetention\": \"NONE\"}")
+            .promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        OpenAiChatConfiguration.parse("{\"promptCacheRetention\": \"SHORT\"}")
+            .promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.LONG,
+        OpenAiChatConfiguration.parse("{\"promptCacheRetention\": \"LONG\"}")
+            .promptCacheRetention());
   }
 
   @Test
@@ -93,7 +84,7 @@ class OpenAiChatConfigurationTest {
         () -> OpenAiChatConfiguration.parse("{\"openAiChatRequireDone\": 1}"));
     assertThrows(
         ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiPromptCacheMode\": true}"));
+        () -> OpenAiChatConfiguration.parse("{\"promptCacheRetention\": true}"));
   }
 
   @Test
@@ -104,7 +95,7 @@ class OpenAiChatConfigurationTest {
             ProviderException.class,
             () ->
                 OpenAiChatConfiguration.parse(
-                    "{\"openAiPromptCacheMode\": \"SUPER_SECRET_CACHE\"]}"));
+                    "{\"promptCacheRetention\": \"SUPER_SECRET_CACHE\"]}"));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exCache.kind());
     assertNull(exCache.getCause());
 
@@ -113,7 +104,7 @@ class OpenAiChatConfigurationTest {
             ProviderException.class,
             () ->
                 OpenAiChatConfiguration.parse(
-                    "{\"openAiPromptCacheMode\": \"SUPER_SECRET_CACHE\"}"));
+                    "{\"promptCacheRetention\": \"SUPER_SECRET_CACHE\"}"));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exCacheVal.kind());
     assertFalse(exCacheVal.getMessage().contains("SUPER_SECRET_CACHE"));
     assertNull(exCacheVal.getCause());

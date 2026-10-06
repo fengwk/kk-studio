@@ -16,9 +16,9 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,22 +65,9 @@ class OpenAiChatStreamAccumulatorTest {
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ModelVariant defaultVariant = new ModelVariant("default");
@@ -212,11 +198,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testContentDeltaAndTrailingUsage() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}");
@@ -268,11 +250,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testRefusalDeltaIsVisibleCompletedText() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I cannot\"}}]}");
@@ -298,11 +276,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testReasoningContentAndDetails() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         """
@@ -371,11 +345,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testToolCallsAggregation() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         """
@@ -431,7 +401,7 @@ class OpenAiChatStreamAccumulatorTest {
   void seedsFunctionAfterUntypedIdentityOnlyFrameFollowingCustomCall() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -478,7 +448,7 @@ class OpenAiChatStreamAccumulatorTest {
   void retainsTypedFunctionIdentityBeforeFunctionFragments() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -508,7 +478,7 @@ class OpenAiChatStreamAccumulatorTest {
   void identityOnlyFragmentAfterFunctionBuilderDoesNotFail() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -537,7 +507,7 @@ class OpenAiChatStreamAccumulatorTest {
   void nullOrScalarFunctionFragmentIsInvalidResponse() {
     OpenAiChatStreamAccumulator nullFunction =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     nullFunction.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -558,7 +528,7 @@ class OpenAiChatStreamAccumulatorTest {
 
     OpenAiChatStreamAccumulator scalarFunction =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     scalarFunction.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -583,7 +553,7 @@ class OpenAiChatStreamAccumulatorTest {
   void usesNormalizedOrdinalForLengthDiagnosticAfterCustomCall() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -614,7 +584,7 @@ class OpenAiChatStreamAccumulatorTest {
   void keepsContiguousOrdinalsForInterleavedFunctionCalls() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -664,11 +634,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testLengthTruncationDiagnostics() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         """
@@ -702,11 +668,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testContentFilterFinalState() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         "{\"id\":\"c5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},\"finish_reason\":\"content_filter\"}]}");
@@ -723,11 +685,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testUnsupportedFinishReason() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     assertThrows(
         ProviderException.class,
@@ -739,11 +697,7 @@ class OpenAiChatStreamAccumulatorTest {
   void testMissingDoneWhenRequired() {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
@@ -754,14 +708,9 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("openAiChatRequireDone 为 false 时已看到有效 finish_reason 且 EOF 可完成")
   void testOptionalDoneWithValidFinishReason() {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(true, false, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, false, PromptCacheRetention.NONE);
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            config,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
 
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
@@ -775,14 +724,9 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("openAiChatRequireDone 为 false 时未见有效 finish_reason 单纯 EOF 报错")
   void testOptionalDoneWithoutFinishReasonFailsOnEof() {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(true, false, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, false, PromptCacheRetention.NONE);
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request,
-            descriptor,
-            config,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
 
     accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}]}");
     assertThrows(ProviderException.class, accumulator::finish);
@@ -1155,11 +1099,7 @@ class OpenAiChatStreamAccumulatorTest {
 
   private OpenAiChatStreamAccumulator createAccumulator() {
     return new OpenAiChatStreamAccumulator(
-        request,
-        descriptor,
-        OpenAiChatConfiguration.defaults(),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        bridge);
+        request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
   }
 
   private void assertInvalidUsage(String usageJson, String field) {
