@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
@@ -43,8 +42,9 @@ import java.util.UUID;
  * HarnessRuntime 内部的同步 acceptCommands 控制面。
  *
  * <p>承担命令接受（NEW_SESSION / NEW_THREAD / THREAD 三条路径）、initial creation replay 与 ordered replay、 batch
- * shape 校验、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands / Work。名称不是
- * 创建请求的一部分：初始名称在创建事务内由首条 user-like 文本派生（缺省回退到 id 前缀），后期改名走独立的 rename 控制面。
+ * shape 校验、fork 边界 admission、cursor admission 校验以及向 Store 写入 Session / ROOT / Thread / Commands /
+ * Work。 Session 与 ROOT Thread 的初始名称在创建事务内由首条 user-like 文本派生（缺省回退到 id 前缀）；NEW_THREAD 的分支名称由调用方给出并进入
+ * creation request hash；后期改名走独立的 rename 控制面。
  */
 final class AcceptCommandsControl {
 
@@ -248,6 +248,14 @@ final class AcceptCommandsControl {
     return executionRootId;
   }
 
+  /**
+   * NEW_THREAD：在既有 Session 的合法 fork 边界独立 fork 新执行根。合法边界只有 ROOT 或已闭合 {@code TURN_END}（最新的闭合 {@code
+   * TURN_END} 同样合法）；任何 active / 半轮 / 未闭合前缀（USER、tool result、ASSISTANT message、仍在进行的 TURN_START 或
+   * STOP barrier）一律确定性拒绝且零写入。
+   *
+   * <p>不移动源 Thread、不补写任何 synthetic closure / HISTORY_CUT，也不复制 Entry：新 Thread 的 head 直接指向该边界。分支显示名取自
+   * target，与 target 的预分配 id 一起进入 creation request hash，并在创建事务内与 Thread 行原子写入。
+   */
   private AcceptedCommands acceptNewThread(
       AcceptCommandsTarget.NewThread target,
       List<NewThreadCommand> commands,
@@ -266,6 +274,7 @@ final class AcceptCommandsControl {
                     target.sessionId(),
                     target.startEntryId(),
                     target.threadId(),
+                    target.threadName(),
                     yoloPolicy,
                     commands);
             return attachJoin(
@@ -299,16 +308,13 @@ final class AcceptCommandsControl {
                     + " is not in session "
                     + target.sessionId());
           }
-          // STOP Turn 是原子控制屏障：NEW_THREAD 的 head 绝不能落在未闭合的 STOP Turn 内（已关闭的 STOPPED 边界可以正常 fork）。
-          if (endsInsideUnclosedStopTurn(tx, target.startEntryId())) {
-            throw new IllegalArgumentException(
-                "start entry " + target.startEntryId() + " is inside an unclosed STOP turn");
-          }
+          requireLegalForkBoundary(startEntry);
           String creationRequestHash =
               ThreadCreationRequestHash.forNewThread(
                   target.sessionId(),
                   target.startEntryId(),
                   target.threadId(),
+                  target.threadName(),
                   yoloPolicy,
                   commands);
           Instant now = clock.instant();
@@ -319,7 +325,7 @@ final class AcceptCommandsControl {
                   null,
                   target.startEntryId(),
                   creationRequestHash,
-                  Names.defaultThreadName(target.threadId()),
+                  target.threadName(),
                   yoloPolicy,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
@@ -333,16 +339,18 @@ final class AcceptCommandsControl {
         });
   }
 
-  /** start Entry 的 EntryPath 是否停在未闭合的 STOP Turn 内。 */
-  private static boolean endsInsideUnclosedStopTurn(
-      HarnessStore.Transaction tx, UUID startEntryId) {
-    return tx.loadEntryPath(startEntryId)
-        .openTurnStart()
-        .map(
-            turn ->
-                turn.payload() instanceof TurnStartPayload start
-                    && start.reason() == TurnStartReason.STOP)
-        .orElse(false);
+  /**
+   * NEW_THREAD 的合法 fork 边界：只有 ROOT 或已闭合 {@code TURN_END}。其它位置都是 active / 半轮 / 未闭合前缀，必须原子拒绝；这里只按
+   * start Entry 自身判定，不写源 Thread、不补写 synthetic closure，也不做任何 source Thread 推断。
+   */
+  private static void requireLegalForkBoundary(Entry startEntry) {
+    if (startEntry.payload().type().isRoot() || startEntry.payload() instanceof TurnEndPayload) {
+      return;
+    }
+    throw new IllegalArgumentException(
+        "start entry "
+            + startEntry.id()
+            + " is not a legal NEW_THREAD fork boundary (ROOT or a closed TURN_END)");
   }
 
   private AcceptedCommands acceptOnThread(

@@ -23,6 +23,10 @@ public class HarnessCommandTargetDTO {
   private String sessionId;
   private String startEntryId;
   private String threadId;
+
+  /** NEW_THREAD 的分支显示名；必须显式给出且非 blank（NEW_SESSION 禁用）。 */
+  private String threadName;
+
   private HarnessBranchSettingsDTO rootSettings;
   private Boolean yoloEnabled;
 
@@ -37,6 +41,10 @@ public class HarnessCommandTargetDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean threadIdFieldPresent;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean threadNameFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -69,6 +77,12 @@ public class HarnessCommandTargetDTO {
     this.threadIdFieldPresent = true;
   }
 
+  @JsonSetter("threadName")
+  public void setThreadName(Object value) {
+    this.threadName = HarnessRuntimeDtoSupport.requireJsonString(value, "target.threadName");
+    this.threadNameFieldPresent = true;
+  }
+
   @JsonSetter("rootSettings")
   public void setRootSettings(HarnessBranchSettingsDTO value) {
     this.rootSettings = value;
@@ -94,6 +108,11 @@ public class HarnessCommandTargetDTO {
   @JsonIgnore
   public boolean hasThreadIdField() {
     return threadIdFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasThreadNameField() {
+    return threadNameFieldPresent;
   }
 
   @JsonIgnore

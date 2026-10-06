@@ -622,6 +622,7 @@ class StudioHarnessCommandBatchControllerTest {
           "sessionId":"%s",
           "startEntryId":"%s",
           "threadId":"%s",
+          "threadName":"branch",
           "yoloEnabled":false
         }
         """

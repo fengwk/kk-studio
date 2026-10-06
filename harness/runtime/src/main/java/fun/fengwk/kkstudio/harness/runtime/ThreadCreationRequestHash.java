@@ -58,17 +58,22 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
-  /** 计算 NEW_THREAD target 的 creation request hash。 */
+  /**
+   * 计算 NEW_THREAD target 的 creation request hash。{@code threadName} 必须已经 {@link
+   * Names#normalize}，因为分支显示名是创建请求 身份的一部分：同 threadId + 同规范化名称精确 replay，改名则 hash 变化并映射为 ID reuse 冲突。
+   */
   public static String forNewThread(
       UUID sessionId,
       UUID startEntryId,
       UUID threadId,
+      String threadName,
       ThreadYoloPolicy yoloPolicy,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_THREAD");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
     envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
     envelope.put("threadId", requireId(threadId, "threadId").toString());
+    envelope.put("threadName", requireNonNull(threadName, "threadName"));
     envelope.set("yolo", yoloNode(yoloPolicy));
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
