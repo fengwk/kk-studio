@@ -1,5 +1,6 @@
 import { fireEvent, render } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 
 /** jsdom 不布局，用固定尺寸模拟有界视口，才能验证跟随/暂停的状态机。 */
@@ -63,5 +64,39 @@ describe('ToolOutputViewport', () => {
 
     // 与内容签名无关的重渲染不改变用户当前回看位置。
     expect(output?.scrollTop).toBe(120)
+  })
+
+  it('bubbles a reading intent when the user scrolls back into history', () => {
+    // 内层回看必须通知 transcript 外层暂停贴底（只暂停，恢复由外层决定），
+    // 否则并发的流式增长会把用户正在看的卡片拉走。
+    const onReadingIntent = vi.fn()
+    const { container } = render(
+      <div>
+        <ToolOutputViewport followKey="a">streaming a</ToolOutputViewport>
+      </div>,
+    )
+    const host = container.firstElementChild as HTMLElement
+    host.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
+    const output = container.querySelector<HTMLPreElement>('.thread-tool-output')
+    stubScrollMetrics(output!, 400, 100)
+
+    // 跟随底部时向下（贴底）的滚动不是回看意图。
+    output!.scrollTop = 400
+    fireEvent.scroll(output!)
+    expect(onReadingIntent).not.toHaveBeenCalled()
+
+    // 向历史方向滚动：冒泡一次阅读意图。
+    output!.scrollTop = 120
+    fireEvent.scroll(output!)
+    expect(onReadingIntent).toHaveBeenCalledTimes(1)
+    expect(onReadingIntent.mock.calls[0]?.[0]).toMatchObject({
+      bubbles: true,
+      detail: { source: 'tool-output' },
+    })
+
+    // 内层自己滚回底部只恢复内层跟随，不再向外层声明任何意图。
+    output!.scrollTop = 400
+    fireEvent.scroll(output!)
+    expect(onReadingIntent).toHaveBeenCalledTimes(1)
   })
 })

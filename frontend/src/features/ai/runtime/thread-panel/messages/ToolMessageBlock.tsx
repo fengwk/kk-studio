@@ -12,6 +12,7 @@ import {
   toolMessageContents,
 } from '@/features/ai/runtime/thread-panel/messages/tool-message-view'
 import { useReadImageDefault } from '@/features/ai/runtime/thread-panel/messages/useReadImageDefault'
+import { announceTranscriptReading } from '@/features/ai/runtime/transcript-reading'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
@@ -94,7 +95,11 @@ export function ToolMessageBlock({
             <span className="thread-tool-summary">
               <span className="thread-tool-name">{view.summary.name}</span>
               {view.summary.detail ? (
-                <span className="thread-tool-summary-detail">{view.summary.detail}</span>
+                // 单行 compact：完整原文留在 DOM 中可选中复制，超宽部分横向滚动
+                // （tabIndex 让键盘也能滚动这段参数区）。
+                <span className="thread-tool-summary-detail" tabIndex={0}>
+                  {view.summary.detail}
+                </span>
               ) : null}
             </span>
             {view.hasBody ? (
@@ -112,7 +117,12 @@ export function ToolMessageBlock({
                     ? t('ai.runtime.message.collapseTool')
                     : t('ai.runtime.message.expandTool')
                 }
-                onClick={() => setUserExpanded(!expanded)}
+                onClick={(event) => {
+                  // 展开/收起是用户对只读卡片的交互意图：暂停外层自动贴底，
+                  // 之后到达的流式文本不会把用户正在看的卡片拉走。
+                  announceTranscriptReading(event.currentTarget, 'tool-toggle')
+                  setUserExpanded(!expanded)
+                }}
               >
                 {expanded
                   ? <ChevronDown aria-hidden="true" />

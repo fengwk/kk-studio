@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 import { ThreadTranscript } from '@/features/ai/runtime/thread-panel/ThreadTranscript'
+import { transcriptStreamRevision } from '@/features/ai/runtime/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
@@ -11,8 +12,8 @@ import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-type
  * - `initialScrollTop` 非空时挂载即恢复该位置（重新进入 conversation），stick
  *   状态由恢复后的位置按 210px 阈值决定；
  * - `resetKey`（threadId）变化时重置 stick 并重新贴底（Thread 重绑后首次进入）；
- * - 流式结束（全部消息进入 done/error）后不再跟随高度变化，避免手动展开或媒体
- *   加载把外层滚动位置拉走。
+ * - 只有流式正文更新与消息增长会贴底；内层只读区域回看/交互会冒泡阅读意图暂停
+ *   跟随，直到用户把外层自己滚回底部。
  */
 export function ThreadConversationView({
   messages,
@@ -34,16 +35,16 @@ export function ThreadConversationView({
   /** 非消息内容的变化计数（控制 Entry/queued 等），用于贴底再评估。 */
   eventCount?: number
 }) {
-  // 仍在流式增长的唯一权威信号来自消息状态：只有它才允许用高度变化补贴底，
-  // 空闲时的高度变化（展开卡片、图片加载）必须保持外层滚动位置不动。
-  const streaming = messages.some((message) => message.status === 'streaming')
+  // 自动贴底只认显式信号：流式正文更新（stream revision）与消息数量增长。
+  // 布局尺寸变化（展开卡片、图片加载、思考样式切换）绝不触发贴底。
+  const streamRevision = transcriptStreamRevision(messages)
   useChatTranscriptAutoScroll(
     bodyRef,
     messages.length,
     eventCount,
     initialScrollTop,
     resetKey,
-    streaming,
+    streamRevision,
   )
   return (
     <ThreadTranscript
