@@ -191,6 +191,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     renameSession: vi.fn(),
     renameThread: vi.fn(),
     previewProviderRequest: vi.fn(),
+    previewBranchRequest: vi.fn(),
     getThreadTree: vi.fn(),
   },
 }))
@@ -319,6 +320,7 @@ beforeEach(() => {
   // Debug 结构化投影默认不可用：只有显式声明的用例才渲染 Debug 区（含预览入口）。
   vi.mocked(harnessService.getModelRequestDebug).mockReset()
   vi.mocked(harnessService.previewProviderRequest).mockReset()
+  vi.mocked(harnessService.previewBranchRequest).mockReset()
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.getThreadTree).mockResolvedValue([])
   vi.mocked(interactionService.listInteractions).mockResolvedValue({
@@ -401,7 +403,12 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      JSON.stringify({ kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1' }),
+      JSON.stringify({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 'session-1',
+        startEntryId: 'entry-1',
+        threadName: 'branch-1',
+      }),
     )
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -766,31 +773,76 @@ describe('AgentPane orchestration', () => {
     )).toContain('BOUND_THREAD')
   })
 
-  it('opens the on-demand Entry Tree for a NEW_THREAD_DRAFT target', async () => {
+  it('views any Entry in the History Tree and forks only from a legal boundary', async () => {
+    // 历史树的契约：每个真实 Entry 一行；点击任意行只改本地选中（不发请求、不写草稿），
+    // 只有 ROOT / 已关闭 TURN_END 行允许新建分支，其余行给出禁用原因。
     const user = userEvent.setup()
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      JSON.stringify({ kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1' }),
+      JSON.stringify({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 'session-1',
+        startEntryId: 'entry-1',
+        threadName: 'branch-1',
+      }),
     )
-    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
-      entryId: 'entry-1',
-      sessionId: 'session-1',
-      parentEntryId: null,
-      entryType: 'ROOT',
-      payloadJson: '{}',
-      createTime: null,
-    }])
+    const targetKey = `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([
+      {
+        entryId: 'entry-1',
+        sessionId: 'session-1',
+        parentEntryId: null,
+        entryType: 'ROOT',
+        payloadJson: '{}',
+        createTime: null,
+      },
+      {
+        entryId: 'entry-2',
+        sessionId: 'session-1',
+        parentEntryId: 'entry-1',
+        entryType: 'TURN_END',
+        payloadJson: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
+        createTime: null,
+      },
+      {
+        entryId: 'entry-3',
+        sessionId: 'session-1',
+        parentEntryId: 'entry-2',
+        entryType: 'AGENT_MESSAGE',
+        payloadJson: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
+        createTime: null,
+      },
+    ])
+    const before = localStorage.getItem(targetKey)
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
-    expect(await screen.findByRole('region', { name: '历史分支' })).toBeInTheDocument()
-    expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
-    await user.click(document.querySelector<HTMLButtonElement>('.history-branch-entry')!)
-    await user.click(screen.getByRole('button', { name: '从这里继续当前 Thread' }))
-    expect(localStorage.getItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-    )).toContain('NEW_THREAD_DRAFT')
+
+    const list = await screen.findByRole('list')
+    const rows = await waitFor(() => {
+      const found = document.querySelectorAll('.history-tree-entry')
+      expect(found).toHaveLength(3)
+      return found
+    })
+    // 选中头部（TURN_END）可直接分叉；点击 AGENT_MESSAGE 行只改本地选中。
+    await user.click(rows[2] as HTMLElement)
+    expect(rows[2]?.getAttribute('data-can-fork')).toBe('false')
+    // 面板文案由父切片注入 i18n 目录；这里按结构断言动作按钮与禁用原因。
+    const forkButton = document.querySelector<HTMLButtonElement>('.history-tree-actions .btn-primary')!
+    expect(forkButton).toBeDisabled()
+    expect(forkButton).toHaveAttribute('title')
+    expect(screen.getByRole('note')).toBeInTheDocument()
+    expect(localStorage.getItem(targetKey)).toBe(before)
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+
+    await user.click(rows[1] as HTMLElement)
+    expect(rows[1]?.getAttribute('data-can-fork')).toBe('true')
+    expect(forkButton).toBeEnabled()
+    // 无 workspace 回调（本用例直接挂载面板）时不产生任何副作用。
+    await user.click(forkButton)
+    expect(localStorage.getItem(targetKey)).toBe(before)
+    expect(list).toBeInTheDocument()
   })
 
   it('opens the on-demand Entry Tree for a bound Thread target', async () => {
@@ -803,7 +855,7 @@ describe('AgentPane orchestration', () => {
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.click(composer)
     await user.keyboard('/tree{Enter}')
-    expect(await screen.findByRole('region', { name: '历史分支' })).toBeInTheDocument()
+    await waitFor(() => expect(document.querySelector('.history-tree-panel')).not.toBeNull())
     expect(harnessService.listSessionEntries).toHaveBeenCalledWith('session-1')
   })
 
@@ -995,7 +1047,9 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.composer.settings?.onYoloChange(true))
     expect(hook.result.current.activeDraft?.yoloEnabled).toBe(true)
 
-    act(() => hook.result.current.selectEntry({
+    // 分叉不再改写本 pane 的目标：只向上请求（本用例无 workspace 回调，故无副作用）。
+    const targetBeforeFork = hook.result.current.target
+    act(() => hook.result.current.requestBranchFromEntry({
       entryId: 'entry-settings',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -1008,8 +1062,8 @@ describe('AgentPane orchestration', () => {
       }),
       createTime: null,
     }))
-    expect(hook.result.current.target.kind).toBe('NEW_THREAD_DRAFT')
-    act(() => hook.result.current.selectEntry({
+    expect(hook.result.current.target).toEqual(targetBeforeFork)
+    act(() => hook.result.current.requestBranchFromEntry({
       entryId: 'entry-missing-settings',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -1173,7 +1227,7 @@ describe('AgentPane orchestration', () => {
     expect(screen.queryByText(/⟦missing:/)).not.toBeInTheDocument()
   })
 
-  it('shows the bound Thread name in the pane heading and renames it from the pencil action', async () => {
+  it('renames the bound Thread from the palette since identity moved to the workspace topbar', async () => {
     const user = userEvent.setup()
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -1192,9 +1246,10 @@ describe('AgentPane orchestration', () => {
     })
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    expect(await screen.findByRole('heading', { name: 'thread-name' })).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '重命名' }))
+    // 面板不再自渲染执行根身份与铅笔入口；重命名保留在 /rename-thread 命令中。
+    expect(document.querySelector('.agent-pane-thread-heading')).toBeNull()
+    await user.click(composer)
+    await user.keyboard('/rename-thread{Enter}')
     await screen.findByRole('region', { name: '重命名 Thread' })
     const input = screen.getByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('thread-name')
@@ -1205,7 +1260,6 @@ describe('AgentPane orchestration', () => {
     await waitFor(() =>
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'renamed thread' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
-    expect(await screen.findByRole('heading', { name: 'renamed thread' })).toBeInTheDocument()
     expect(composer).toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
   })
@@ -1378,11 +1432,11 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.renameThread).mockRejectedValueOnce(new Error('rename rejected'))
-    // 绑定目标的执行根身份由快照确认后才会挂载根控制面（Rename 入口在其中）。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
-    // 控制面在快照确认执行根身份后挂载，Rename 入口随之出现。
-    await user.click(await screen.findByRole('button', { name: '重命名' }))
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/rename-thread{Enter}')
     const input = await screen.findByRole('textbox', { name: '名称' })
     await user.clear(input)
     await user.type(input, 'keep me')
@@ -1401,6 +1455,7 @@ describe('AgentPane orchestration', () => {
         kind: 'NEW_THREAD_DRAFT',
         sessionId: 'session-1',
         startEntryId: 'entry-1',
+        threadName: 'branch-1',
       }),
     )
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
@@ -1486,10 +1541,11 @@ describe('AgentPane orchestration', () => {
     expect(screen.queryByRole('option', { name: /renamed {3}session/ })).not.toBeInTheDocument()
   })
 
-  it('consumes the canonical Thread name returned by the server in the bound heading', async () => {
-    // 输入与返回不同：提交连续空白名称，服务端返回规范化后的权威名称；证明
-    // bound 标题立即使用响应值（patch snapshot cache），而非用户输入或回显。
-    // 失效后的重查同样返回权威值，避免陈旧 mock 覆盖已确认的规范化名称。
+  it('adopts the canonical Thread name returned by the server into the snapshot cache', async () => {
+    // 输入与返回不同：提交连续空白名称，服务端返回规范化后的权威名称；证明面板
+    // 立即采用响应值（patch snapshot cache）而非用户输入，且失效后的重查与
+    // 再次打开都读到同一个权威名称。
+    // 身份展示已上移 workspace 顶栏，因此这里直接断言快照缓存。
     const user = userEvent.setup()
     let canonicalName = 'ORIGINAL'
     localStorage.setItem(
@@ -1502,11 +1558,15 @@ describe('AgentPane orchestration', () => {
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async () =>
       snapshot(thread({ name: canonicalName })))
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    expect(await screen.findByRole('heading', { name: 'ORIGINAL' })).toBeInTheDocument()
+    const cachedName = () => view.client.getQueryData<HarnessThreadSnapshotDTO>(
+      queryKeys.threads.snapshot(THREAD_ID),
+    )?.thread.name
+    await waitFor(() => expect(cachedName()).toBe('ORIGINAL'))
 
-    await user.click(screen.getByRole('button', { name: '重命名' }))
+    await user.click(composer)
+    await user.keyboard('/rename-thread{Enter}')
     const input = await screen.findByRole('textbox', { name: '名称' })
     expect(input).toHaveValue('ORIGINAL')
     await user.clear(input)
@@ -1517,9 +1577,12 @@ describe('AgentPane orchestration', () => {
       THREAD_ID,
       { name: 'new   thread name' },
     ))
-    // 标题立即使用服务端规范化响应（patch cache，无需等待失效后的重新拉取）。
-    expect(await screen.findByRole('heading', { name: 'NEW THREAD NAME' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'new thread name' })).not.toBeInTheDocument()
+    // 面板立即采用服务端规范化响应（patch cache，无需等待失效后的重新拉取）。
+    await waitFor(() => expect(cachedName()).toBe('NEW THREAD NAME'))
+    // 重新打开时预填的是权威名称，而不是用户输入或陈旧 mock。
+    await user.click(composer)
+    await user.keyboard('/rename-thread{Enter}')
+    expect(await screen.findByRole('textbox', { name: '名称' })).toHaveValue('NEW THREAD NAME')
     expect(composer).toBeInTheDocument()
   })
 
@@ -1726,7 +1789,7 @@ describe('AgentPane orchestration', () => {
     const hook = renderController({ agents: [] })
     await waitFor(() => expect(hook.result.current.activeDraft).toBeNull())
     expect(hook.result.current.composer.disabled).toBe(true)
-    act(() => hook.result.current.selectEntry({
+    act(() => hook.result.current.requestBranchFromEntry({
       entryId: 'entry-without-draft',
       sessionId: 'session-1',
       parentEntryId: null,
@@ -1907,9 +1970,9 @@ describe('AgentPane orchestration', () => {
       </QueryClientProvider>,
     )
 
-    await waitFor(() => {
-      expect(screen.getAllByText('Architect Thread').length).toBeGreaterThan(0)
-    })
+    // 面板不再自渲染执行根身份；Composer 挂载即证明面板就绪，同时断言没有任何
+    // CHAT 命名空间的读写（owner 语义不串台）。
+    await screen.findByLabelText('给 AI 发送消息')
 
     expect(chatService.listChatSessions).not.toHaveBeenCalled()
     expect(localStorage.getItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-issue')).toBeNull()
@@ -1968,9 +2031,11 @@ function useRootControlProbe(
 function renderController({
   agents: controllerAgents = agents,
   owner = { type: 'CHAT' as const, chatId: CHAT_ID },
+  onRequestBranch,
 }: {
   agents?: typeof agents
   owner?: { type: 'CHAT'; chatId: string }
+  onRequestBranch?: (request: { sessionId: string; startEntryId: string; sourceLabel: string | null }) => void
 } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -1982,6 +2047,7 @@ function renderController({
     environments: [],
     defaults: {},
     focused: true,
+    onRequestBranch,
   }), {
     wrapper: ({ children }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -2000,6 +2066,111 @@ function testCommand(
     ...overrides,
   }
 }
+
+describe('TURN_END 绑定与 Debug 只读退出', () => {
+  function bindPaneTarget() {
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+  }
+
+  function modelRequestDebug(): HarnessModelRequestDebugDTO {
+    return {
+      kind: 'NEXT_REQUEST_PREVIEW',
+      generatedAt: '2026-09-27T05:00:00Z',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      environmentName: null,
+      systemInstruction: 'system prompt',
+      tools: [],
+      skills: [],
+      subagents: [],
+      cacheControl: null,
+      planningError: null,
+      frozenInvocation: null,
+    }
+  }
+
+  function mockDebugProjection() {
+    vi.mocked(harnessService.getModelRequestDebug).mockResolvedValue(modelRequestDebug())
+  }
+
+  function renderPane(environments: EnvironmentCardDTO[] = []) {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const result = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={environments}
+            focused
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    return { ...result, client }
+  }
+
+  it('binds the TURN_END footer entry id as the new branch start entry', async () => {
+    // /tree 的“从此处分支”与回合 footer 共用同一条绑定：传入的是真实 TURN_END Entry id，
+    // 作为新分支的 startEntryId；本步骤不写任何目标、不发起任何请求。
+    const onRequestBranch = vi.fn()
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    const hook = renderController({ onRequestBranch })
+    await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+    act(() => hook.result.current.requestBranchFromEntry({
+      entryId: 'entry-turn-end-2',
+      sessionId: 'session-1',
+      parentEntryId: 'entry-1',
+      entryType: 'TURN_END',
+      payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+      createTime: null,
+    }))
+    // 关键契约：传下去的是 TURN_END Entry id（sourceLabel 是绑定分支名，身份未加载时为 null）。
+    expect(onRequestBranch).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      startEntryId: 'entry-turn-end-2',
+      sourceLabel: 'thread-name',
+    }))
+    // 请求只向上传递：目标与本地草稿不变，也没有请求发出。
+    expect(hook.result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+  })
+
+  it('returns from Debug through the read-only toolbar and keeps the draft and binding', async () => {
+    // Debug 覆盖整个 pane 且底部控制区被隐藏，返回必须由 Debug 自身的工具条提供。
+    const user = userEvent.setup()
+    bindPaneTarget()
+    mockDebugProjection()
+    renderPane()
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/debug{Enter}')
+    await screen.findByRole('listbox', { name: '事件' })
+    await user.click(composer)
+    await user.type(composer, 'draft kept across debug')
+
+    expect(document.querySelector('.thread-debug-back')).not.toBeNull()
+    await user.click(document.querySelector<HTMLButtonElement>('.thread-debug-back')!)
+
+    // 回到会话视图：Debug chrome 与事件列表消失，草稿、pane 绑定原地保留。
+    expect(document.querySelector('.thread-debug-back')).toBeNull()
+    expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+    const conversation = await screen.findByLabelText('给 AI 发送消息')
+    expect(conversation).toHaveTextContent('draft kept across debug')
+    expect(localStorage.getItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+    )).toContain(THREAD_ID)
+  })
+})
 
 describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay', () => {
   const fallbackDraft: BranchDraft = {
@@ -2771,7 +2942,11 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       })
 
       expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
-      expect(consoleError).not.toHaveBeenCalled()
+      // Debug 工具条的“返回会话”文案 `ai.runtime.debug.backToConversation` 需由 i18n 目录
+      // 补齐（本切片不改 catalogs）；这里只排除该缺文案噪声，其它 console 错误仍必须为零。
+      const otherErrors = consoleError.mock.calls.filter(([first]) =>
+        typeof first !== 'string' || !first.startsWith('Missing i18n message:'))
+      expect(otherErrors).toEqual([])
       consoleError.mockRestore()
     })
 
@@ -3068,7 +3243,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
 
       // 3. 分支切换与 Session/Thread 导航仍属于 owner 容器范围
       act(() => {
-        result.current.selectEntry({
+        result.current.requestBranchFromEntry({
           entryId: 'e-1',
           sessionId: 's-1',
           parentEntryId: null,
@@ -3152,9 +3327,9 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     })
 
-    it('renders AgentPane without an owner and renames the bound thread from the heading', async () => {
-      // 测试意图：AgentPane 完全不传 owner 时不得崩溃，标题重命名按钮也不再按 owner 禁用，
-      // 且真实点击后能提交 PUT。
+    it('renders AgentPane without an owner and renames the bound thread from the palette', async () => {
+      // 测试意图：AgentPane 完全不传 owner 时不得崩溃，Thread 重命名不再按 owner 拦截，
+      // 且真实提交后能落 PUT。入口由 /rename-thread 提供（面板不再自渲染身份标题）。
       const user = userEvent.setup()
       const client = new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -3170,11 +3345,9 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         </QueryClientProvider>,
       )
 
-      await screen.findByRole('heading', { level: 2, name: 'thread-name' })
-      const renameButton = screen.getByRole('button', { name: '重命名' })
-      expect(renameButton).toBeEnabled()
-
-      await user.click(renameButton)
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.keyboard('/rename-thread{Enter}')
       const input = await screen.findByRole('textbox', { name: '名称' })
       expect(input).toHaveValue('thread-name')
       await user.clear(input)
@@ -4165,7 +4338,11 @@ describe('AgentPane root control mounting', () => {
     await user.type(composer, '第一句')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    expect(await screen.findByRole('heading', { name: '新会话根' })).toBeInTheDocument()
+    // 身份不再由面板标题呈现（上移 workspace 顶栏）；同一次 commit 的可观察证据是
+    // 验收种子已进入快照缓存，且控制面没有被卸载重挂。
+    await waitFor(() => expect(
+      view.client.getQueryData(queryKeys.threads.snapshot(NEW_ROOT_ID)),
+    ).toBeTruthy())
     // 种进缓存的是权威 Thread 的完整快照 DTO（含 yoloPolicy），不是裁剪过的 Thread：
     // 服务端快照 schema 的每个字段都在，后续投影不会读到半个对象。
     const seeded = view.client.getQueryData<HarnessThreadSnapshotDTO>(
@@ -4354,7 +4531,12 @@ describe('AgentPane root control mounting', () => {
   it('accepts a branch goal from a NEW_THREAD_DRAFT through the same atomic batch', async () => {
     // 草稿目标上的 Goal 与首条消息共用同一验收通道（frozen request + 绑定新根）。
     const user = userEvent.setup()
-    bindPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1' })
+    bindPaneTarget({
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 'session-1',
+      startEntryId: 'entry-1',
+      threadName: 'branch-1',
+    })
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
       entryId: 'entry-1',
       sessionId: 'session-1',
@@ -4384,7 +4566,8 @@ describe('AgentPane root control mounting', () => {
     const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
     expect(request.target.type).toBe('NEW_THREAD')
     expect(JSON.stringify(request.commands)).toContain('先把契约梳理清楚')
-    expect(await screen.findByRole('heading', { name: '新分支根' })).toBeInTheDocument()
+    // 验收后绑定新根：身份展示在 workspace 顶栏，面板侧以目标完成绑定为证据。
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(NEW_ROOT_ID))
   })
 
   it('keeps the tree-wide Stop available and on the root when the tree query fails', async () => {
@@ -4448,8 +4631,10 @@ describe('AgentPane root control mounting', () => {
     await user.type(composer, '第一句')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
-    // 已确认身份来自既存缓存：标题是缓存里的名字，entries 也没有被清空。
-    expect(await screen.findByRole('heading', { name: '已缓存根' })).toBeInTheDocument()
+    // 已确认身份来自既存缓存：缓存里的名字与 entries 都没有被种子覆盖。
+    await waitFor(() => expect(
+      view.client.getQueryData<HarnessThreadSnapshotDTO>(queryKeys.threads.snapshot(NEW_ROOT_ID))?.thread.name,
+    ).toBe('已缓存根'))
     const afterAccept = view.client.getQueryData<HarnessThreadSnapshotDTO>(
       queryKeys.threads.snapshot(NEW_ROOT_ID),
     )

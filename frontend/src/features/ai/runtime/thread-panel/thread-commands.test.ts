@@ -54,7 +54,12 @@ describe('AgentPane command registry', () => {
   })
 
   it('exposes the target command matrix without mutating the shared registry', () => {
-    const target = { kind: 'NEW_THREAD_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' }
+    const target = {
+      kind: 'NEW_THREAD_DRAFT' as const,
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    }
     expect(commandIdsForTarget(target)).toEqual([
       'thread',
       'agent',
@@ -77,7 +82,12 @@ describe('AgentPane command registry', () => {
     expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
       .not.toContain('rename-thread')
     // NEW_THREAD_DRAFT：可重命名父 Session，但没有持久化 Thread 可重命名。
-    const newThread = { kind: 'NEW_THREAD_DRAFT' as const, sessionId: 's1', startEntryId: 'e1' }
+    const newThread = {
+      kind: 'NEW_THREAD_DRAFT' as const,
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    }
     expect(commandIdsForTarget(newThread)).toContain('rename-session')
     expect(commandIdsForTarget(newThread)).not.toContain('rename-thread')
     // BOUND_THREAD：Session 与 Thread 都已持久化，两者可用。

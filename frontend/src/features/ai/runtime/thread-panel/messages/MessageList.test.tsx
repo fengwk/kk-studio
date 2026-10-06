@@ -429,3 +429,4 @@ describe('MessageList tool renderer dispatch', () => {
     expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)
   })
 })
+

@@ -551,7 +551,7 @@ describe('thread timeline', () => {
     ])
   })
 
-  it('produces no messages for unchanged TURN_START and TURN_END control boundaries', () => {
+  it('projects control boundaries as no entry rows plus the TURN_END footer meta', () => {
     const settings = {
       agentName: 'JIJI', model: { providerName: 'provider', modelName: 'model', variant: 'default' },
       environmentName: null,
@@ -573,10 +573,16 @@ describe('thread timeline', () => {
       [],
     )
 
+    // TURN_START 不投影；TURN_END 恒定投影一条携带真实 Entry id 的页脚 meta
+    // （回合 footer 的“从此处分支”只认这个 id，与 usage 是否存在无关）。
     expect(timeline.messages.map((m) => m.id)).toEqual([
       'entry:0',
+      'meta-turn-end-2',
       '3',
     ])
+    expect(timeline.messages[1]?.role).toBe('meta')
+    // endEntryId 由 usage-owner 加在共享类型上；合并后可直接读字段。
+    expect((timeline.messages[1] as { endEntryId?: string } | undefined)?.endEntryId).toBe('2')
     expect(timeline.messages.find((m) => m.role === 'entry' && m.kind === 'unknown_entry')).toBeUndefined()
   })
 

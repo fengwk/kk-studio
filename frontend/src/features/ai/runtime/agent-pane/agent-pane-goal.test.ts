@@ -77,6 +77,7 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
         kind: 'NEW_THREAD_DRAFT',
         sessionId: 's1',
         startEntryId: 'e1',
+        threadName: 'branch-1',
       })
       const bound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
       expect(sessionDraft.find((command) => command.id === 'goal')?.disabled).toBe(true)
@@ -196,7 +197,12 @@ describe('AgentPane Goal pipeline and owner-free command availability', () => {
       // 只有容器创建才冻结带 owner 的请求；既有 Thread 的 Goal 走 thread command batch。
       const frozen = buildGoalAcceptanceRequest({
         owner,
-        target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's-123', startEntryId: 'e-1' },
+        target: {
+          kind: 'NEW_THREAD_DRAFT',
+          sessionId: 's-123',
+          startEntryId: 'e-1',
+          threadName: 'branch-1',
+        },
         draft: baseDraft,
         base: baseDraft,
         goalText: 'New goal',

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyChatLayout,
+  chatLayoutForPaneCount,
+  chatPanePosition,
   focusPane,
   loadChatPaneState,
+  revealChatPane,
   saveChatPaneState,
   visibleChatPanes,
 } from '@/features/ai/chat/chat-pane-state'
@@ -149,5 +152,46 @@ describe('Chat pane layout state', () => {
     expect(defaultState.layout).toBe('single')
     expect(defaultState.focusedPaneId).toBe('pane-1')
     expect(() => saveChatPaneState('chat-1', defaultState, throwingStore)).not.toThrow()
+  })
+})
+
+describe('Chat pane destination routing helpers', () => {
+  it('maps pane ids to positions 1..9 and rejects unknown ids', () => {
+    expect(chatPanePosition('pane-1')).toBe(1)
+    expect(chatPanePosition('pane-9')).toBe(9)
+    expect(chatPanePosition('pane-0')).toBeNull()
+    expect(chatPanePosition('pane-x')).toBeNull()
+    expect(chatPanePosition('thread-1')).toBeNull()
+  })
+
+  it('picks the smallest layout that can hold the requested pane count', () => {
+    expect(chatLayoutForPaneCount(1)).toBe('single')
+    expect(chatLayoutForPaneCount(2)).toBe('split-2')
+    expect(chatLayoutForPaneCount(3)).toBe('split-3')
+    expect(chatLayoutForPaneCount(4)).toBe('grid-4')
+    expect(chatLayoutForPaneCount(9)).toBe('grid-9')
+    expect(chatLayoutForPaneCount(0)).toBe('single')
+    expect(chatLayoutForPaneCount(12)).toBe('grid-9')
+  })
+
+  it('reveals a hidden destination pane by expanding the layout', () => {
+    const single = loadChatPaneState('chat-1', storage())
+    expect(visibleChatPanes(single).map((pane) => pane.id)).toEqual(['pane-1'])
+
+    const revealed = revealChatPane(single, 'pane-5')
+    expect(revealed.layout).toBe('grid-5')
+    expect(visibleChatPanes(revealed).map((pane) => pane.id)).toEqual([
+      'pane-1',
+      'pane-2',
+      'pane-3',
+      'pane-4',
+      'pane-5',
+    ])
+
+    // 已在容量内的目标位置与未知位置都不改变布局。
+    expect(revealChatPane(revealed, 'pane-2')).toBe(revealed)
+    expect(revealChatPane(revealed, 'pane-9').layout).toBe('grid-9')
+    const nine = revealChatPane(revealed, 'pane-9')
+    expect(revealChatPane(nine, 'unknown')).toBe(nine)
   })
 })

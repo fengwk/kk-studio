@@ -1,4 +1,4 @@
-import { Pencil as PencilIcon } from 'lucide-react'
+import { useCallback } from 'react'
 import { useI18n } from '@/shared/i18n'
 import {
   ThreadPanel,
@@ -10,7 +10,11 @@ import { RootThreadControlArea } from '@/features/ai/runtime/RootThreadControlAr
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
 import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
-import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
+import { HistoryTree } from '@/features/ai/chat/HistoryTree'
+import {
+  EntryBranchContext,
+  branchRequestFromEndEntry,
+} from '@/features/ai/runtime/thread-panel/entry-branch-context'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
@@ -19,6 +23,8 @@ import {
   useRootThreadControl,
   type AgentPaneCapabilities,
   type AgentPaneDefaults,
+  type BranchRequestInput,
+  type PaneReport,
 } from '@/features/ai/runtime/useRootThreadControl'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
@@ -46,6 +52,8 @@ export function RootAgentPane({
   initialTarget,
   onTargetConsumed,
   capabilities,
+  onRequestBranch,
+  onReport,
   target,
   setTarget,
   projection,
@@ -61,6 +69,8 @@ export function RootAgentPane({
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
+  onRequestBranch?: (request: BranchRequestInput) => void
+  onReport?: (report: PaneReport) => void
   target: PaneTarget
   setTarget: (next: PaneTarget) => void
   projection: ThreadProjection
@@ -78,6 +88,8 @@ export function RootAgentPane({
     initialTarget,
     onTargetConsumed,
     capabilities,
+    onRequestBranch,
+    onReport,
     target,
     setTarget,
     projection,
@@ -89,11 +101,11 @@ export function RootAgentPane({
     pane.controller.dismissActionError()
   }
 
-  // Bound Thread 主列顶部的名称标题；名称是主展示文本（绝不回退为 id）。
-  const boundThreadName = pane.target.kind === 'BOUND_THREAD'
-    && pane.controller.thread?.threadId === pane.target.threadId
-    ? pane.controller.thread.name
-    : null
+  // 分支名不再在 pane 内重复展示（顶栏面包屑承载身份）；这里只保留状态标签判定。
+  const boundThreadName = pane.boundBranchName
+
+  // Debug 主视图接管主滚动区时，输入/审批/分支控制面整体隐藏（保持挂载以保留草稿与绑定）。
+  const debugActive = pane.target.kind === 'BOUND_THREAD' && pane.boundViews.mode === 'debug'
 
   const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
   const boundWorkingLabel = boundStatus === 'QUEUED'
@@ -113,13 +125,12 @@ export function RootAgentPane({
       <ThreadPane
         projection={pane.controller}
         environments={environments}
-        heading={renderBoundThreadHeading(boundThreadName)}
         activity={{
           working: pane.controller.working || pane.composer.pending,
           workingLabel: boundWorkingLabel,
           actionError: pane.error,
           onDismissActionError,
-          widgets: boundIsRoot && boundThreadId != null
+          widgets: boundIsRoot && boundThreadId != null && !debugActive
             ? (
               <ActiveThreadTree
                 tree={tree}
@@ -137,6 +148,7 @@ export function RootAgentPane({
               messages={pane.controller.timeline.messages}
               queuedMessages={pane.controller.timeline.queuedMessages}
               tree={tree}
+              hidden={debugActive}
             />
           )}
         views={{
@@ -186,8 +198,29 @@ export function RootAgentPane({
       />
     )
 
+  const requestBranchRef = pane.requestBranch
+  const branchSessionId = pane.target.kind === 'BOUND_THREAD' ? pane.currentSessionId : null
+  const entryBranchRequest = useCallback(
+    (endEntryId: string) => {
+      const request = branchRequestFromEndEntry({
+        endEntryId,
+        sessionId: branchSessionId,
+        sourceLabel: boundThreadName,
+      })
+      if (request != null) {
+        requestBranchRef(request)
+      }
+    },
+    [boundThreadName, branchSessionId, requestBranchRef],
+  )
+  const canBranchFromConversation = branchSessionId != null
+    && pane.target.kind === 'BOUND_THREAD'
+    && capabilities?.allowBranching !== false
+    && !debugActive
+    && pane.target.threadId === pane.controller.thread?.threadId
+
   return (
-    <>
+    <EntryBranchContext.Provider value={canBranchFromConversation ? entryBranchRequest : null}>
       {content}
       {pane.pendingAcceptance ? (
         <div className="thread-acceptance-retry">
@@ -246,34 +279,8 @@ export function RootAgentPane({
         }
         onClose={pane.dismissConflict}
       />
-    </>
+    </EntryBranchContext.Provider>
   )
-
-  function renderBoundThreadHeading(name: string | null) {
-    return (
-      <header className="agent-pane-thread-heading">
-        {name != null ? (
-          <h2 className="agent-pane-thread-title" title={name}>{name}</h2>
-        ) : (
-          <h2 className="agent-pane-thread-title">{t('ai.runtime.rename.loadingName')}</h2>
-        )}
-        <button
-          type="button"
-          className="agent-pane-thread-rename"
-          aria-label={t('ai.runtime.rename.titleAria')}
-          title={t('ai.runtime.rename.titleAria')}
-          disabled={name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
-          onClick={() => {
-            if (name != null && pane.target.kind === 'BOUND_THREAD') {
-              pane.renameThread(pane.target.threadId, name)
-            }
-          }}
-        >
-          <PencilIcon aria-hidden="true" />
-        </button>
-      </header>
-    )
-  }
 
   function renderInteractionPanel() {
     if (pane.interaction === 'rename-session' || pane.interaction === 'rename-thread') {
@@ -332,9 +339,9 @@ export function RootAgentPane({
         return null
       }
       return (
-        <HistoryBranchPanel
+        <HistoryTree
           entries={pane.treeEntries}
-          currentHeadEntryId={
+          headEntryId={
             pane.target.kind === 'BOUND_THREAD'
               ? pane.controller.thread?.headEntryId ?? null
               : pane.target.kind === 'NEW_THREAD_DRAFT'
@@ -344,7 +351,7 @@ export function RootAgentPane({
           loading={pane.treeEntriesLoading}
           queryError={pane.treeEntriesError}
           onClose={pane.closeInteraction}
-          onSelectEntry={pane.selectEntry}
+          onFork={pane.requestBranchFromEntry}
         />
       )
     }

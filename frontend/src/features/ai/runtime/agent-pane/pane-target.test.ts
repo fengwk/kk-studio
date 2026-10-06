@@ -16,8 +16,10 @@ import {
   normalizePaneTarget,
   sameBatchRequestIdentity,
   saveBoundPendingMessage,
+  samePaneTarget,
   savePaneTarget,
   savePendingAcceptance,
+  targetIdentity,
   type BoundPendingMessage,
   type PendingAcceptance,
   type PaneTarget,
@@ -44,7 +46,12 @@ function memoryStorage(): Storage {
 describe('PaneTarget durable-local FSM', () => {
   it('accepts only the three target states and normalizes malformed storage to NEW_SESSION_DRAFT', () => {
     expect(isPaneTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
-    expect(isPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
+    expect(isPaneTarget({
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    })).toBe(true)
     expect(isPaneTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
     expect(isPaneTarget({ kind: 'unknown' })).toBe(false)
     expect(normalizePaneTarget(null)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
@@ -52,26 +59,37 @@ describe('PaneTarget durable-local FSM', () => {
       kind: 'NEW_THREAD_DRAFT',
       sessionId: ' s1 ',
       startEntryId: ' e1 ',
+      threadName: 'branch-1',
     })).toEqual({
       kind: 'NEW_THREAD_DRAFT',
       sessionId: 's1',
       startEntryId: 'e1',
+      threadName: 'branch-1',
     })
     expect(normalizePaneTarget({ kind: 'BOUND_THREAD', threadId: '' }))
       .toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(isNewSessionTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
-    expect(isNewThreadTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
+    expect(isNewThreadTarget({
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    })).toBe(true)
     expect(isBoundTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
   })
 
-  it('rejects hidden creation names and the legacy ENTRY_DRAFT shape via exact own keys', () => {
-    // 本地持久化绝不允许创建前草稿/创建 target 携带名称或任何未知字段。
+  it('requires a canonical branch name on the local draft and rejects unknown keys', () => {
+    // 新建分支的名称是创建 target 的必需事实（进入 creationRequestHash），必须恰好
+    // 规范化；不携带名称、名称非规范化或出现未知字段的本地 target 一律拒绝。
     for (const target of [
       { kind: 'NEW_SESSION_DRAFT', name: 'draft name' },
       { kind: 'NEW_SESSION_DRAFT', threadName: 'draft name' },
       { kind: 'NEW_SESSION_DRAFT', extra: true },
-      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'hidden' },
-      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', name: 'hidden' },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: '' },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: '  spaced  ' },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'x'.repeat(257) },
+      { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1', threadName: 'ok', name: 'hidden' },
       { kind: 'BOUND_THREAD', threadId: 't1', name: 'hidden' },
       { kind: 'BOUND_THREAD', threadId: 't1', sessionName: 'hidden' },
       { kind: 'ENTRY_DRAFT', sessionId: 's1', startEntryId: 'e1' },
@@ -79,14 +97,30 @@ describe('PaneTarget durable-local FSM', () => {
       expect(isPaneTarget(target)).toBe(false)
     }
     expect(isPaneTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
-    expect(isPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' })).toBe(true)
     expect(isPaneTarget({ kind: 'BOUND_THREAD', threadId: 't1' })).toBe(true)
+    // 合法的 NEW_THREAD_DRAFT：命名与目标位置共同构成持久化形状。
+    const draft: PaneTarget = {
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    }
+    expect(isPaneTarget(draft)).toBe(true)
+    expect(normalizePaneTarget(draft)).toEqual(draft)
+    // 同一个 start entry 但不同名称是不同的本地草稿目标。
+    expect(samePaneTarget(draft, { ...draft, threadName: 'branch-2' })).toBe(false)
+    expect(targetIdentity(draft)).toBe('thread-draft:s1:e1:branch-1')
   })
 
   it('persists only target, while PendingAcceptance remains a separate sidecar', () => {
     const storage = memoryStorage()
     const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
-    const target: PaneTarget = { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' }
+    const target: PaneTarget = {
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 's1',
+      startEntryId: 'e1',
+      threadName: 'branch-1',
+    }
     savePaneTarget(owner, 'pane-1', target, storage)
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual(target)
     expect(storage.length).toBe(1)
@@ -280,6 +314,7 @@ describe('PaneTarget durable-local FSM', () => {
         sessionId: 's1',
         startEntryId: 'e1',
         threadId: 't1',
+        threadName: 'branch-1',
         yoloEnabled: false,
       },
     })
