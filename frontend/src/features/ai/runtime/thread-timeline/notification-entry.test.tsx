@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
-import { ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
+import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/ai/runtime/thread-panel/messages/EntryMessageBlock'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'

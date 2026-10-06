@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
 import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
-import { ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
+import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
 import { setLocale } from '@/shared/i18n'
 

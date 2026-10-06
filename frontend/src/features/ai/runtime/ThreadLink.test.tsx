@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ThreadLink, ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
+import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
+import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 
 const CHILD = '00000000-0000-4000-8000-000000000002'
 
