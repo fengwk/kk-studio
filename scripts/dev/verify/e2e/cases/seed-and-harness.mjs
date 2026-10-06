@@ -13,6 +13,7 @@ import {
 } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
+  assertRootYoloPolicy,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -325,7 +326,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'agentName/model/environmentName 与 yoloEnabled 原样持久化并投影，goal 始终显式投影（未设置时 null）；Chat 默认值独立',
+  docs: 'agentName/model/environmentName 与 Thread YOLO policy（mode/rootThreadId）原样持久化并投影，goal 始终显式投影（未设置时 null）；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -350,7 +351,7 @@ registerCase({
       yoloEnabled: true,
       commands: [userMessageCommand(`settings ${cid().slice(0, 8)}`, cid())],
     })
-    assert(accepted.thread.yoloEnabled === true, JSON.stringify(accepted.thread))
+    assertRootYoloPolicy(accepted.thread, true)
     assert(
       isDeepStrictEqual(accepted.thread.branchSettings, expectedSettings),
       JSON.stringify({ expected: expectedSettings, actual: accepted.thread.branchSettings }),
@@ -897,7 +898,8 @@ registerCase({
       sessionId,
       startEntryId,
       threadId: branchThreadId,
-      yoloEnabled: thread.yoloEnabled,
+      // NEW_THREAD 独立 fork 新执行根：根开关从原根 mode 派生，不读取已删除的 boolean 字段。
+      yoloEnabled: thread.yoloPolicy.mode === 'ENABLE',
       commands: [userMessageCommand(branchUserText, cid())],
     })
     // NEW_THREAD accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
@@ -1586,7 +1588,7 @@ registerCase({
     )
     // yolo 是直接控制面：batch 不含 SET_YOLO，Thread 保持创建时的值（直接更新见 thread.yolo_direct_update）。
     assert(
-      finalSnapshot.thread.yoloEnabled === thread.yoloEnabled,
+      isDeepStrictEqual(finalSnapshot.thread.yoloPolicy, thread.yoloPolicy),
       JSON.stringify(finalSnapshot.thread),
     )
     assert(
@@ -1794,11 +1796,11 @@ registerCase({
       commands: [userMessageCommand(`yolo materialize ${cid().slice(0, 8)}`, cid())],
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
-    assert(thread.yoloEnabled === false, JSON.stringify(thread))
+    assertRootYoloPolicy(thread, false)
 
     // 变化 + 精确 version：version +1，返回权威 Thread。
     const enabled = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
-    assert(enabled.yoloEnabled === true, JSON.stringify(enabled))
+    assertRootYoloPolicy(enabled, true)
     assert(
       String(Number(enabled.version)) === String(Number(thread.version) + 1),
       JSON.stringify({ before: thread.version, after: enabled.version }),
@@ -1807,18 +1809,18 @@ registerCase({
 
     // 同值 no-op：不读取请求 version，version/head 零触碰。
     const sameValue = await setThreadYolo(ctx, threadId, { yoloEnabled: true })
-    assert(sameValue.yoloEnabled === true, JSON.stringify(sameValue))
+    assertRootYoloPolicy(sameValue, true)
     assert(String(sameValue.version) === String(enabled.version), JSON.stringify(sameValue))
 
     // 关闭并精确 +1；快照反映同一权威值，且全程不产生 queued Command / Entry / Work。
     const disabled = await setThreadYolo(ctx, threadId, { yoloEnabled: false })
-    assert(disabled.yoloEnabled === false, JSON.stringify(disabled))
+    assertRootYoloPolicy(disabled, false)
     assert(
       String(Number(disabled.version)) === String(Number(enabled.version) + 1),
       JSON.stringify({ before: enabled.version, after: disabled.version }),
     )
     const fresh = await getThreadSnapshot(ctx, threadId)
-    assert(fresh.thread.yoloEnabled === false, JSON.stringify(fresh.thread))
+    assertRootYoloPolicy(fresh.thread, false)
     assert(String(fresh.thread.version) === String(disabled.version), JSON.stringify(fresh.thread))
     assert(fresh.queuedCommands.length === 0, JSON.stringify(fresh.queuedCommands))
     // setThreadYolo 绝不追加/修改 Entry：快照 entries 与 YOLO 开关前后一致。

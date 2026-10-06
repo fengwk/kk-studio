@@ -2,7 +2,8 @@ export async function assertReadOnlyZeroFooter(scope, label) {
   const footer = scope.getByLabel('会话状态')
   await footer.waitFor({ state: 'visible', timeout: 10_000 })
   const text = (await footer.innerText()).replace(/\s+/g, ' ').trim()
-  for (const expected of ['未选择环境', '↑0', '↓0', '$0.000']) {
+  // 单行 Footer 分组只使用 U+2223；组内统计项由 U+00B7 分隔。
+  for (const expected of ['未选择环境', ' ∣ ', '↑0', '↓0', '$0.000']) {
     if (!text.includes(expected)) {
       throw new Error(`${label} missing "${expected}": ${text}`)
     }
