@@ -8,9 +8,15 @@ interface MainViewScrollPositions {
   debug: number | null
 }
 
-/** 每个 Pane 独立维护 Conversation/Debug 的模式、选中行和两套滚动位置。 */
+/**
+ * 每个 Pane 独立维护 Conversation/Debug 的模式、选中行和两套滚动位置。
+ *
+ * 状态归属的键是本地「视图身份」而不是 API threadId：本地分支/新建草稿都没有 threadId
+ * （都是 ""），只有按目标稳定字段区分身份，才能在换绑目标时整体重置，而不是复用上一份
+ * 草稿的 Debug 模式与选中行。身份变化即重置模式、选中行与两套滚动位置。
+ */
 export function useThreadPanelViewState(
-  threadId: string,
+  viewKey: string,
   transcriptBodyRef: RefObject<HTMLDivElement | null>,
   events: ThreadEventRecord[],
 ) {
@@ -47,19 +53,19 @@ export function useThreadPanelViewState(
     setModeState(next)
   }, [transcriptBodyRef])
 
-  const lastThreadIdRef = useRef(threadId)
+  const lastViewKeyRef = useRef(viewKey)
   useEffect(() => {
-    if (lastThreadIdRef.current === threadId) {
+    if (lastViewKeyRef.current === viewKey) {
       return
     }
-    lastThreadIdRef.current = threadId
+    lastViewKeyRef.current = viewKey
     positionsRef.current = { conversation: null, debug: null }
     setInitialConversationScrollTop(null)
     setInitialDebugScrollTop(null)
     setSelectedEventId(null)
     modeRef.current = 'conversation'
     setModeState('conversation')
-  }, [threadId])
+  }, [viewKey])
 
   useEffect(() => {
     setSelectedEventId((current) =>
