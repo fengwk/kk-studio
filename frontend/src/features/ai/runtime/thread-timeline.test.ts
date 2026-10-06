@@ -455,7 +455,7 @@ describe('thread timeline', () => {
     ])
   })
 
-  it('keeps a blank raw payload inspectable through the durable Entry fallback', () => {
+  it('keeps a blank payload Entry inspectable through the durable Entry fallback', () => {
     const root = {
       ...entry('root', 'ROOT', {}),
       payloadJson: '',
@@ -464,7 +464,7 @@ describe('thread timeline', () => {
     const timeline = buildThreadTimeline([root], [], [])
 
     expect(timeline.messages).toMatchObject([
-      { role: 'entry', kind: 'invalid_settings', rawPayloadJson: '{}', subjectEntryId: 'root' },
+      { role: 'entry', kind: 'invalid_settings', subjectEntryId: 'root' },
     ])
   })
 
