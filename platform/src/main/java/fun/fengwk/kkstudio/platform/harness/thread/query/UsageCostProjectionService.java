@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.thread.query;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -24,9 +25,9 @@ import java.util.UUID;
 /**
  * Session Entry 的读取时费用投影：只用 durable 记录的真实用量与「当前」catalog 价格现算，绝不写回任何历史。
  *
- * <p>费用边界：Assistant entry 只保存用量，本服务沿 parent 链取最近一次调用的 {@link ModelSelection}（TURN_START 的 {@code
- * compaction.executionModel}、否则该 Turn 的 branch settings，未进入 Turn 时回落 ROOT）乘以当前价格。同一次投影内每个出现过的
- * 模型至多查一次 catalog；无法定价（模型已删除）或定义非法（数据损坏）分别缺席与抛出，绝不伪装成 0 费用。
+ * <p>费用边界：Assistant entry 与 COMPACTION 结果只保存用量，本服务沿 parent 链取最近一次调用的 {@link
+ * ModelSelection}（TURN_START 的 {@code compaction.executionModel}、否则该 Turn 的 branch settings，未进入
+ * Turn 时回落 ROOT）乘以当前价格。同一次投影内每个出现过的模型至多查一次 catalog；无法定价（模型已删除）或定义非法（数据损坏）分别缺席与抛出，绝不伪装成 0 费用。
  */
 @Component
 public class UsageCostProjectionService {
@@ -67,10 +68,17 @@ public class UsageCostProjectionService {
     return Map.copyOf(costs);
   }
 
-  /** 只有 ASSISTANT MESSAGE 携带 assistantMetadata；USER / TOOL / 控制 Entry 一律没有可计价的用量。 */
+  /**
+   * ASSISTANT MESSAGE 与 COMPACTION 结果都可能携带 assistantMetadata；只有真正发生过的模型输出才有用量，USER / TOOL / 无
+   * metadata 的控制 Entry 一律没有可计价的用量。
+   */
   private static ModelUsage recordedUsage(Entry entry) {
     if (entry.payload() instanceof MessagePayload message && message.assistantMetadata() != null) {
       return message.assistantMetadata().usage();
+    }
+    if (entry.payload() instanceof CompactionPayload compaction
+        && compaction.assistantMetadata() != null) {
+      return compaction.assistantMetadata().usage();
     }
     return null;
   }
@@ -116,7 +124,7 @@ public class UsageCostProjectionService {
   private static HarnessUsageCostDTO usageCost(ModelCost cost) {
     HarnessUsageCostDTO dto = new HarnessUsageCostDTO();
     dto.setCurrency(cost.currency());
-    // 精确十进制文本：直接取 BigDecimal 的规范表示，不在读取侧做任何展示舍入。
+    // 精确十进制文本：直接取 BigDecimal 的规范表示，每 Entry 微成本精确保留，展示层的最终定标由调用方负责。
     dto.setAmount(cost.total().toPlainString());
     return dto;
   }

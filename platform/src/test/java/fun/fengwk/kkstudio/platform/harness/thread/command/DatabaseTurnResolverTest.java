@@ -1859,6 +1859,37 @@ class DatabaseTurnResolverTest {
                 NOW.plusSeconds(5))));
   }
 
+  /**
+   * ROOT + 关闭 INPUT turn + COMPACTION TURN_START(head)，head 携带冻结的 executionModel 与 maxOutputTokens。
+   */
+  private static EntryPath compactionRequestPath(
+      ModelSelection executionModel, Integer maxOutputTokens) {
+    BranchSettings settings = settings("default");
+    CompactionStart start =
+        new CompactionStart(
+            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, executionModel, id(3), null, null);
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            turnEntry(id(2), id(1), settings),
+            userEntry(id(3), id(2), "hello"),
+            assistantEntry(id(4), id(3), "reply"),
+            turnEnd(id(5), id(4), id(2)),
+            new Entry(
+                id(6),
+                SESSION_ID,
+                id(5),
+                new TurnStartPayload(
+                    TurnStartReason.COMPACTION,
+                    settings,
+                    THREAD_ID,
+                    // contextWindow 与 maxOutputTokens 必须同时冻结或同时缺失。
+                    maxOutputTokens == null ? null : 4096,
+                    maxOutputTokens,
+                    start),
+                NOW)));
+  }
+
   /** 两个关闭 Turn：USER + ABORTED + STOPPED；CUSTOM + ASSISTANT_ERROR + FAILED。两个 Turn 使用同一 settings。 */
   private static EntryPath multiTurnPath(BranchSettings settings) {
     return multiTurnPath(settings, settings);
@@ -2205,6 +2236,97 @@ class DatabaseTurnResolverTest {
     // fallback model 的 limit.output = 4096 经 FULL 预算公式 floor(0.8 * 4096) = 3276 裁剪。
     assertEquals(3276, resolved.maxOutputTokens());
     assertEquals(3276, resolved.spec().outputTokens());
+  }
+
+  /**
+   * 逆证：历史压缩预览只按 durable {@code CompactionStart.executionModel} 解析 catalog，并直接冻结该 TURN_START 的实际
+   * maxOutputTokens，绝不回退到 branch settings.model，也绝不按当前 config 重算预算。
+   */
+  @Test
+  void historicalCompactionPlanFreezesDurableExecutionModelAndBudget() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.modelGlobalOutputLimit(600);
+    ModelSelection fallback = new ModelSelection("fallback-provider", "fallback-model", "fallback");
+    fixture.addModel(
+        fallback,
+        new ParsedAgentModelConfig(
+            8192,
+            4096,
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            List.of(new ModelVariant("fallback")),
+            "fallback",
+            pricing()));
+    when(fixture.providers.getByName("provider"))
+        .thenThrow(
+            new AssertionError("historical compaction must not resolve branch settings.model"));
+    when(fixture.models.getByProviderNameAndName("provider", "model"))
+        .thenThrow(
+            new AssertionError("historical compaction must not resolve branch settings.model"));
+
+    EntryPath path = compactionRequestPath(fallback, 1234);
+
+    LiveTurnPlan.Planned planned =
+        assertInstanceOf(
+            LiveTurnPlan.Planned.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
+
+    assertEquals("fallback-provider", planned.spec().model().providerName());
+    assertEquals("fallback-model", planned.spec().model().modelName());
+    assertEquals(8192, planned.contextWindow());
+    // 冻结的 durable 预算 1234，而不是当前 config 对 fallback（reserve 4096）会算出的 3276。
+    assertEquals(1234, planned.spec().outputTokens());
+    assertEquals(List.of(), planned.spec().toolBindings());
+    assertEquals(CompactionPrompts.summarizationSystemPrompt(), planned.spec().systemInstruction());
+    assertEquals(ProviderCacheControl.none(), planned.spec().cacheControl());
+
+    // 反向对照：同一 executionModel 走正式执行路径时预算仍按当前 config 现算，与冻结值不同。
+    List<AgentMessage> messages =
+        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
+    CompactionPreparation preparation =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            fallback,
+            id(3),
+            null,
+            null,
+            null,
+            messages,
+            50_000L);
+    int recomputed =
+        fixture.resolvedResult(fixture.path(settings("default")), preparation).maxOutputTokens();
+    assertEquals(3276, recomputed);
+    assertNotEquals(recomputed, planned.spec().outputTokens());
+  }
+
+  /** 非压缩历史输出与 live planner 完全同源（同一 spec / contextWindow），只有压缩输出走专用重建。 */
+  @Test
+  void historicalLivePlanIsIdenticalToLivePlanner() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    EntryPath path = fixture.path(settings("default"));
+
+    LiveTurnPlan.Planned live = fixture.planned(path);
+    LiveTurnPlan.Planned historical =
+        assertInstanceOf(
+            LiveTurnPlan.Planned.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
+
+    assertEquals(live.spec(), historical.spec());
+    assertEquals(live.contextWindow(), historical.contextWindow());
+  }
+
+  /** 缺少 durable 冻结预算时不猜值：历史压缩预览返回稳定 typed 拒绝，绝不拿默认或当前 config 冒充历史事实。 */
+  @Test
+  void historicalCompactionPlanRejectsMissingFrozenBudget() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    EntryPath path = compactionRequestPath(settings("default").model(), null);
+
+    LiveTurnPlan.Rejected rejected =
+        assertInstanceOf(
+            LiveTurnPlan.Rejected.class, fixture.resolver.planHistorical(THREAD_ID, path, NOW));
+
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
+    assertTrue(rejected.detail().contains("maxOutputTokens"), rejected.detail());
   }
 
   /** CompactionPreparation 保持最小，派生 token/window 与 compaction metadata 不进入 ModelRequestSpec。 */
@@ -2575,7 +2697,7 @@ class DatabaseTurnResolverTest {
                 SESSION_ID,
                 id(6),
                 // CompactionStart carries the cut; the result payload carries only the summary.
-                new CompactionPayload(summary),
+                new CompactionPayload(summary, null),
                 NOW),
             turnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
@@ -2626,14 +2748,15 @@ class DatabaseTurnResolverTest {
             assistantEntry(id(4), id(3), "first reply"),
             turnEnd(id(5), id(4), id(2)),
             compactionStartEntry(id(6), id(5), settings, id(4)),
-            new Entry(id(7), SESSION_ID, id(6), new CompactionPayload("old summary"), NOW),
+            new Entry(id(7), SESSION_ID, id(6), new CompactionPayload("old summary", null), NOW),
             turnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
             userEntry(id(10), id(9), "second user"),
             assistantEntry(id(11), id(10), "second reply"),
             turnEnd(id(12), id(11), id(9)),
             compactionStartEntry(id(13), id(12), settings, id(10)),
-            new Entry(id(14), SESSION_ID, id(13), new CompactionPayload("latest summary"), NOW),
+            new Entry(
+                id(14), SESSION_ID, id(13), new CompactionPayload("latest summary", null), NOW),
             turnEnd(id(15), id(14), id(13)),
             turnEntry(id(16), id(15), settings),
             userEntry(id(17), id(16), "third user"),

@@ -149,7 +149,7 @@ class ModelRequestMaterializerTest {
             null,
             null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
-    entries.add(entry(7, 6, new CompactionPayload("kept summary")));
+    entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
         entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
@@ -286,7 +286,7 @@ class ModelRequestMaterializerTest {
             null,
             null);
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
-    entries.add(entry(7, 6, new CompactionPayload("summary")));
+    entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
         entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
 
@@ -538,7 +538,7 @@ class ModelRequestMaterializerTest {
         entry(
             id(compactionTurnStart + 1),
             id(compactionTurnStart),
-            new CompactionPayload("kept summary")));
+            new CompactionPayload("kept summary", null)));
     entries.add(
         entry(
             id(compactionTurnStart + 2),

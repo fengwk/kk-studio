@@ -49,7 +49,7 @@ class HistoryNormalizationTest {
     PathBuilder path = new PathBuilder();
     Entry root = path.root();
     Entry turn = path.compactionStart(root.id());
-    path.append(turn.id(), new CompactionPayload("summary"));
+    path.append(turn.id(), new CompactionPayload("summary", null));
     EntryPath entryPath = path.build();
 
     assertEquals(

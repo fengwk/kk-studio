@@ -432,12 +432,7 @@ class ModelRequestDebugServiceTest {
         ProviderType.OPENAI,
         new UUID(0L, 42L),
         new ModelDescriptor(
-            "provider",
-            "model",
-            "wire-model",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            false),
+            "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         // 冻结请求只携带 Agent 正文唯一的 systemInstruction 与零 tool binding。
         new ModelVariant("default"),
         512,

@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -52,10 +53,11 @@ import java.util.UUID;
  * 输出的记录时间显式交给规划，绝不用当前时间冒充。
  *
  * <p>预览与正式发送同源：candidate 历史由同一 {@link TurnPlanPreview} 构造，冻结请求来自同一 {@link
- * DatabaseTurnResolver#planLive(UUID, EntryPath, Instant)}，有效请求来自同一 {@link
+ * DatabaseTurnResolver#planLive(UUID, EntryPath, Instant)}（历史模型输出走 {@link
+ * DatabaseTurnResolver#planHistorical(UUID, EntryPath, Instant)}），有效请求来自同一 {@link
  * DatabaseProviderResolutionService#resolve}，最终字节来自同一 {@link
  * ProviderAdapter#encodeRequestBody}。附件只做 READY 的只读 peek，RESOURCE 仍必须由目标 Session 持有。压缩 Turn
- * 的模型调用属于压缩专用 planning/encoder，本入口显式 typed 拒绝而不是重建一个错误的 live 请求。
+ * 也是真实模型输出：按其 durable COMPACTION TURN_START 冻结的 executionModel 与预算走同一条物化/编码路径。
  */
 public final class ProviderRequestPreviewService {
 
@@ -124,7 +126,7 @@ public final class ProviderRequestPreviewService {
         TurnPlanPreview.inputCandidatePath(
             threadId, snapshot.entryPath(), snapshot.thread().nextCommandSequence(), prepared, now);
     return planAndEncode(
-        threadId,
+        turnResolver.planLive(threadId, candidatePath, now),
         candidatePath,
         now,
         snapshot.entryPath().head().id(),
@@ -161,7 +163,7 @@ public final class ProviderRequestPreviewService {
         TurnPlanPreview.inputCandidatePath(
             candidateThreadId, sourcePath, FIRST_COMMAND_SEQUENCE, prepared, now);
     return planAndEncode(
-        candidateThreadId,
+        turnResolver.planLive(candidateThreadId, candidatePath, now),
         candidatePath,
         now,
         source.id(),
@@ -173,7 +175,8 @@ public final class ProviderRequestPreviewService {
    * 现算一次历史模型输出的 Provider 协议请求体预览：请求前缀严格是 ROOT 到该输出的 parent，规划时间显式取该输出的记录时间。
    *
    * <p>catalog 与 Provider 配置都已不是当时的那一份，因此这里按当前定义重建；响应以 {@link
-   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。
+   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。压缩输出按其 durable COMPACTION
+   * TURN_START 冻结的 executionModel 与预算重建，与普通输出一样是只读 GET。
    *
    * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
    * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata
@@ -184,14 +187,13 @@ public final class ProviderRequestPreviewService {
 
     Map<UUID, Entry> entries = sessionEntries(sessionId);
     Entry output = requireSessionEntry(entries, entryId, "entry");
-    requireLiveReconstructible(entries, output);
     UUID requestHeadEntryId = requireRequestHead(output);
     EntryPath requestPath = entryPath(entries, requestHeadEntryId);
     Instant recordedAt = output.createdAt();
     // 历史路径可能不属于任何一个现存 Thread；规划本身不回查 Thread 归属，因此这里同样只给 candidate id。
     UUID candidateThreadId = UUID.randomUUID();
     return planAndEncode(
-        candidateThreadId,
+        turnResolver.planHistorical(candidateThreadId, requestPath, recordedAt),
         requestPath,
         recordedAt,
         requestHeadEntryId,
@@ -201,13 +203,12 @@ public final class ProviderRequestPreviewService {
 
   /** 三种预览共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
   private HarnessProviderRequestPreviewDTO planAndEncode(
-      UUID candidateThreadId,
+      LiveTurnPlan plan,
       EntryPath candidatePath,
       Instant plannedAt,
       UUID sourceHeadEntryId,
       String kind,
       String notice) {
-    LiveTurnPlan plan = turnResolver.planLive(candidateThreadId, candidatePath, plannedAt);
     if (plan instanceof LiveTurnPlan.Rejected) {
       // 规划的错误码与自由文本详情都不属于公开预览协议。
       throw new ProviderRequestPreviewUnavailableException(
@@ -262,27 +263,12 @@ public final class ProviderRequestPreviewService {
     }
   }
 
-  /** 压缩 Turn 的模型调用走压缩专用 planning/encoder，live 入口无法重建；这里显式 typed 拒绝，绝不拿普通 live 规划冒充历史。 */
-  private static void requireLiveReconstructible(Map<UUID, Entry> entries, Entry output) {
-    Entry cursor = output;
-    while (cursor != null) {
-      if (cursor.payload() instanceof TurnStartPayload start) {
-        if (start.compaction() != null) {
-          throw new ProviderRequestPreviewUnavailableException(
-              Reason.PREVIEW_UNSUPPORTED,
-              "compaction model calls are not reconstructible through the live request path");
-        }
-        return;
-      }
-      UUID parentEntryId = cursor.parentEntryId();
-      cursor = parentEntryId == null ? null : entries.get(parentEntryId);
-    }
-  }
-
-  /** 历史预览只接受模型输出本身：请求前缀就是它的 parent，因此本次输出与未来历史绝不进入请求体。 */
+  /**
+   * 历史预览只接受模型输出本身：携带 assistantMetadata 的 ASSISTANT MESSAGE，或携带真实模型输出 metadata 的 COMPACTION
+   * 结果。请求前缀就是它的 parent，因此本次输出与未来历史绝不进入请求体。
+   */
   private static UUID requireRequestHead(Entry output) {
-    if (!(output.payload() instanceof MessagePayload message)
-        || message.assistantMetadata() == null) {
+    if (!carriesModelOutputMetadata(output)) {
       throw new IllegalArgumentException(
           "provider request preview requires an assistant model output entry");
     }
@@ -291,6 +277,17 @@ public final class ProviderRequestPreviewService {
           "assistant model output must have a request head entry: " + output.id());
     }
     return output.parentEntryId();
+  }
+
+  /** 只有真正发生过 provider 调用的输出才带 assistantMetadata，才存在可重建的请求前缀。 */
+  private static boolean carriesModelOutputMetadata(Entry output) {
+    if (output.payload() instanceof MessagePayload message) {
+      return message.assistantMetadata() != null;
+    }
+    if (output.payload() instanceof CompactionPayload compaction) {
+      return compaction.assistantMetadata() != null;
+    }
+    return false;
   }
 
   /**

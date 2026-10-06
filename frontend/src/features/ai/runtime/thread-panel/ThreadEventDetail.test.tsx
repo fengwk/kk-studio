@@ -153,6 +153,48 @@ describe('ThreadEventDetail', () => {
     expect(onRequestHistoricalPreview).toHaveBeenCalledWith('assistant-entry-1')
   })
 
+  // 意图：携带真实模型输出 metadata 的 COMPACTION 结果同样提供该入口（其请求前缀按其 durable TURN_START 重建）。
+  it('offers the historical request preview for a compaction result with real model metadata', () => {
+    const onRequestHistoricalPreview = vi.fn()
+    const record = createRecord({
+      source: 'entry',
+      entryId: 'compaction-entry-1',
+      kind: 'COMPACTION',
+      title: 'COMPACTION',
+      historicalPreviewEligible: true,
+    })
+
+    render(
+      <ThreadEventDetail
+        record={record}
+        onClose={vi.fn()}
+        onRequestHistoricalPreview={onRequestHistoricalPreview}
+      />,
+    )
+
+    const button = screen.getByTestId('historical-request-preview')
+    fireEvent.click(button)
+    expect(onRequestHistoricalPreview).toHaveBeenCalledWith('compaction-entry-1')
+  })
+
+  // 意图：纯摘要（无真实模型输出 metadata）没有可重建的请求，不提供入口。
+  it('does not offer the historical request preview for a pure compaction summary', () => {
+    render(
+      <ThreadEventDetail
+        record={createRecord({
+          source: 'entry',
+          entryId: 'compaction-entry-2',
+          kind: 'COMPACTION',
+          title: 'COMPACTION',
+          historicalPreviewEligible: false,
+        })}
+        onClose={vi.fn()}
+        onRequestHistoricalPreview={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+  })
+
   // 意图：非模型调用 Entry（无 entryId 或非 ASSISTANT）不应提供该入口。
   it('does not offer the historical request preview when it is not an assistant entry', () => {
     render(

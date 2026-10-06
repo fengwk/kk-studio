@@ -38,6 +38,26 @@ function otherEntry(entryId: string, entryType: HarnessSessionEntryDTO['entryTyp
   }
 }
 
+/** COMPACTION 结果 Entry：canonical shape 的 summaryText + 可空 assistantMetadata。 */
+function compactionEntry(
+  entryId: string,
+  usage: Record<string, number> | null,
+  usageCost?: { currency: string; amount: string } | null,
+): HarnessSessionEntryDTO {
+  return {
+    entryId,
+    sessionId: 's1',
+    parentEntryId: null,
+    entryType: 'COMPACTION',
+    payloadJson: JSON.stringify({
+      summaryText: 'summarized',
+      assistantMetadata: usage == null ? null : { stopReason: 'COMPLETE', usage },
+    }),
+    createTime: '2026-07-28T10:00:00Z',
+    usageCost: usageCost ?? null,
+  }
+}
+
 describe('aggregateEntryUsage', () => {
   it('returns null when no Entry carries usage facts', () => {
     expect(aggregateEntryUsage([])).toBeNull()
@@ -76,13 +96,15 @@ describe('aggregateEntryUsage', () => {
     expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '0.5' })
   })
 
-  // compaction 回合的 usage 是真实事实：不能被隐藏内容/卡片不可见而从累计漏计
-  it('includes model usage that happened inside a compaction turn', () => {
+  // compaction 回合的真实 usage 由结果 Entry 的 canonical assistantMetadata 承载：同样不能因隐藏内容漏计
+  it('includes model usage recorded on a compaction result entry', () => {
     const aggregated = aggregateEntryUsage([
       otherEntry('compact-turn', 'TURN_START'),
-      assistantEntry('assistant-compact', {
-        inputTokens: 1000, outputTokens: 100, providerTotalTokens: 1100,
-      }, { currency: 'USD', amount: '1.5' }),
+      compactionEntry(
+        'compaction-1',
+        { inputTokens: 1000, outputTokens: 100, providerTotalTokens: 1100 },
+        { currency: 'USD', amount: '1.5' },
+      ),
       otherEntry('compact-end', 'TURN_END'),
       assistantEntry('assistant-real', {
         inputTokens: 10, outputTokens: 1, providerTotalTokens: 11,
@@ -90,6 +112,15 @@ describe('aggregateEntryUsage', () => {
     ])
     expect(aggregated).toMatchObject({ input: 1010, output: 101, providerTotal: 1111 })
     expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '1.75' })
+  })
+
+  // 纯摘要（无 metadata）没有真实模型用量：既不计价也不伪造 0
+  it('ignores a compaction result without canonical metadata', () => {
+    expect(aggregateEntryUsage([
+      otherEntry('compact-turn', 'TURN_START'),
+      compactionEntry('compaction-1', null),
+      otherEntry('compact-end', 'TURN_END'),
+    ])).toBeNull()
   })
 
   // 亚微级费用必须精确保留：先 sum 后 round，绝不在中间截断

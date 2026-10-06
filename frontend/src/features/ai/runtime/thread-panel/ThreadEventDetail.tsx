@@ -7,8 +7,8 @@ import { useI18n } from '@/shared/i18n'
  * 只读 Event 详情视图：位于 Debug 视图详情列。
  * 展示选中事件的结构化详情字段与原始 payload JSON，由详情列单列整体纵向滚动。
  *
- * 选中的是历史 ASSISTANT 模型调用 Entry 时，额外提供按需读取「该次调用之前的请求前缀」
- * 的入口：它只是一次只读 GET 预览，不会发生任何写入或重放。
+ * 选中的是历史 ASSISTANT 模型调用 Entry，或携带真实模型输出 metadata 的 COMPACTION 结果时，
+ * 额外提供按需读取「该次调用之前的请求前缀」的入口：它只是一次只读 GET 预览，不会发生任何写入或重放。
  */
 export function ThreadEventDetail({
   record,
@@ -54,7 +54,9 @@ export function ThreadEventDetail({
 
   const entryId = record.entryId
   const canPreviewHistoricalRequest =
-    record.kind === 'ASSISTANT_MESSAGE' && entryId != null && onRequestHistoricalPreview != null
+    (record.kind === 'ASSISTANT_MESSAGE' || record.historicalPreviewEligible === true) &&
+    entryId != null &&
+    onRequestHistoricalPreview != null
 
   return (
     <section
