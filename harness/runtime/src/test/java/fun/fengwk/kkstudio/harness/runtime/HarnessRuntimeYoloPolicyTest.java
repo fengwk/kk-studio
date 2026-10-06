@@ -6,6 +6,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.user
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
@@ -115,6 +117,44 @@ class HarnessRuntimeYoloPolicyTest {
     assertEquals(ThreadYoloPolicy.follow(root.threadId()), replayed.yoloPolicy());
     assertEquals(creationHash, replayed.creationRequestHash());
     assertEquals(childVersion, replayed.version());
+  }
+
+  /** 创建边界一致性校验：祖先链存在错根 policy（FOLLOW 指向无关树）时立即 fail closed，不在损坏树上创建新子代理。 */
+  @Test
+  void childCreationUnderMisrootedAncestorFailsClosed() {
+    HarnessRuntimeTestSupport.Baseline rootA = HarnessRuntimeTestSupport.seedBaseline(store);
+    HarnessRuntimeTestSupport.Baseline rootB = HarnessRuntimeTestSupport.seedBaseline(store);
+    UUID parentThreadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertThread(
+                  new ThreadState(
+                      id,
+                      rootA.sessionId(),
+                      rootA.threadId(),
+                      rootA.rootEntryId(),
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "misrooted",
+                      ThreadYoloPolicy.follow(rootB.threadId()),
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
+              return id;
+            });
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                childSession(parentThreadId, TestIds.id(401), TestIds.id(402)),
+                join(TestIds.id(4001), parentThreadId, rootA.rootEntryId()),
+                AcceptancePreflight.IDENTITY));
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(402)).isEmpty()));
+    assertTrue(runtime.findJoin(TestIds.id(4001)).isEmpty());
   }
 
   private static AcceptCommandsCommand childSession(

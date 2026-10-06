@@ -171,11 +171,13 @@ final class AcceptCommandsControl {
               parentThreadId != null
                   ? lockTreeAndAncestors(tx, parentThreadId, true, Set.of(threadId))
                   : lockTreeAndAncestors(tx, threadId, false, null);
-          ThreadYoloPolicy yoloPolicy =
-              parentThreadId == null
-                  ? ThreadYoloPolicy.root(rootYoloEnabled)
-                  : ThreadYoloPolicy.follow(
-                      lockedAncestors.chain.get(lockedAncestors.chain.size() - 1));
+          ThreadYoloPolicy yoloPolicy;
+          if (parentThreadId == null) {
+            yoloPolicy = ThreadYoloPolicy.root(rootYoloEnabled);
+          } else {
+            UUID executionRootId = validateLockedAncestorsYolo(lockedAncestors);
+            yoloPolicy = ThreadYoloPolicy.follow(executionRootId);
+          }
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   sessionId, threadId, rootSettings, parentThreadId, yoloPolicy, commands);
@@ -213,6 +215,37 @@ final class AcceptCommandsControl {
           return attachJoin(
               tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
+  }
+
+  /**
+   * 子 Session 创建边界的一致性校验：已锁定的祖先链必须与链末位真实执行根一致——根自身不得 FOLLOW，任何祖先的不可变 Follow 目标必须等于该根。 祖先链存在历史错根
+   * policy 时立即 fail closed，避免在损坏树上静默创建子代理并扩散错误。只使用当前事务已锁定的祖先结果，不额外加锁。
+   */
+  private static UUID validateLockedAncestorsYolo(LockedAncestors lockedAncestors) {
+    List<UUID> chain = lockedAncestors.chain;
+    UUID executionRootId = chain.get(chain.size() - 1);
+    ThreadState executionRoot =
+        Objects.requireNonNull(
+            lockedAncestors.threads.get(executionRootId), "locked execution root");
+    if (executionRoot.yoloPolicy().isFollow()) {
+      throw new IllegalStateException(
+          "execution root " + executionRootId + " must not follow another thread");
+    }
+    for (UUID ancestorId : chain) {
+      ThreadState ancestor =
+          Objects.requireNonNull(lockedAncestors.threads.get(ancestorId), "locked ancestor thread");
+      if (ancestor.yoloPolicy().isFollow()
+          && !executionRootId.equals(ancestor.yoloPolicy().rootThreadId())) {
+        throw new IllegalStateException(
+            "thread "
+                + ancestorId
+                + " follows "
+                + ancestor.yoloPolicy().rootThreadId()
+                + " which is not its execution root "
+                + executionRootId);
+      }
+    }
+    return executionRootId;
   }
 
   private AcceptedCommands acceptNewThread(
