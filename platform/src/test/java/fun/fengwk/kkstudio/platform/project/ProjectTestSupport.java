@@ -616,7 +616,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
     private static AcceptedCommands accept(JdbcTemplate jdbc, AcceptCommandsCommand command) {
       AcceptCommandsTarget target = command.target();
-      if (target instanceof AcceptCommandsTarget.NewSession newSession) {
+      if (target instanceof AcceptCommandsTarget.NewRootSession newSession) {
         UUID sessionId = newSession.sessionId();
         UUID threadId = newSession.threadId();
         UUID rootEntryId = UUID.randomUUID();
@@ -634,15 +634,51 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, yolo_enabled, execution_control, input_through_sequence,"
+                + " name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence,"
                 + " next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, null, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
             "0".repeat(64),
             "thread-" + threadId,
-            newSession.yoloEnabled(),
+            newSession.yoloEnabled() ? "ENABLE" : "DISABLE",
+            command.commands().size() + 1L,
+            now,
+            now);
+        insertCommands(jdbc, threadId, 1, command.commands(), now);
+        return accepted(threadId, rootEntryId);
+      }
+      if (target instanceof AcceptCommandsTarget.NewChildSession newSession) {
+        UUID sessionId = newSession.sessionId();
+        UUID threadId = newSession.threadId();
+        UUID parentThreadId = newSession.parentThreadId();
+        UUID rootThreadId = resolveExecutionRoot(jdbc, parentThreadId);
+        UUID rootEntryId = UUID.randomUUID();
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbc.update(
+            "insert into harness_session (id, name, created_at) values (?, ?, ?)",
+            sessionId,
+            "session-" + sessionId,
+            now);
+        jdbc.update(
+            "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+                + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
+            rootEntryId,
+            sessionId,
+            now);
+        jdbc.update(
+            "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+                + " creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control,"
+                + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                + " values (?, ?, ?, ?, ?, ?, 'FOLLOW', ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
+            threadId,
+            sessionId,
+            parentThreadId,
+            rootEntryId,
+            "0".repeat(64),
+            "thread-" + threadId,
+            rootThreadId,
             command.commands().size() + 1L,
             now,
             now);
@@ -661,6 +697,17 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           command.commands().size(),
           thread.threadId());
       return accepted(thread.threadId(), thread.expectedHeadEntryId());
+    }
+
+    /** 由不可变 parent 链派生真实执行根（parentThreadId 为 null 的最顶层 Thread）。 */
+    private static UUID resolveExecutionRoot(JdbcTemplate jdbc, UUID threadId) {
+      return jdbc.queryForObject(
+          "with recursive chain as (select id, parent_thread_id from harness_thread where id = ?"
+              + " union all select t.id, t.parent_thread_id from harness_thread t"
+              + " join chain c on t.id = c.parent_thread_id)"
+              + " select id from chain where parent_thread_id is null",
+          UUID.class,
+          threadId);
     }
 
     /** 记录本次接受的真实命令行，供并发幂等测试断言「只派发一次」。 */

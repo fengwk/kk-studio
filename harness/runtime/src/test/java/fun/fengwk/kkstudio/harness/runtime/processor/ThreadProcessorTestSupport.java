@@ -64,6 +64,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -142,7 +143,7 @@ final class ThreadProcessorTestSupport {
         headEntryId,
         CREATION_REQUEST_HASH,
         "main",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

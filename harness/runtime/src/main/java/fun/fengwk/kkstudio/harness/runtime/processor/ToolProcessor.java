@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -41,14 +42,14 @@ import java.util.function.BiFunction;
  * stale 一律完整 no-op。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
- * （preflight 期间由本地 heartbeat 维持 lease）；锁内 YOLO 快照为 true 时跳过 preflight 直接 Allow（不调用 evaluator /
- * gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt; beginDispatch（Thread version 只 +1）后进入
- * Gateway 派发；Ask 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1
- * + THREAD wake + complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code
- * preflightFailureDelay} reschedule。READY + completed approval 同事务 beginDispatch + version+1 后直接 进入
- * Gateway 派发。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING / RUNNING 旧 lease 恢复为
- * UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD wake + complete，绝不重放
- * Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
+ * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理 Follow 真实执行根）为 true 时跳过 preflight
+ * 直接 Allow（不调用 evaluator / gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt;
+ * beginDispatch（Thread version 只 +1）后进入 Gateway 派发；Ask 转 WAITING_APPROVAL（version+1 + complete，不
+ * request THREAD）；Deny 转 FAILED（version+1 + THREAD wake + complete）；preflight 抛异常保持 READY /
+ * approval null / version 不变，按 {@code preflightFailureDelay} reschedule。READY + completed approval
+ * 同事务 beginDispatch + version+1 后直接 进入 Gateway 派发。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING
+ * / RUNNING 旧 lease 恢复为 UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD
+ * wake + complete，绝不重放 Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
  *
  * <p>派发与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation guard
  * -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
@@ -221,9 +222,9 @@ public final class ToolProcessor implements AutoCloseable {
    * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接进入 Gateway
    * 派发。
    *
-   * <p>YOLO 决策在锁内完成：锁 Thread 后读取的 {@code yoloEnabled} 为 true 时直接返回 {@link Prepare.Allowed}（一次
-   * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的派发）；false 才走普通 gateway preflight。 人输入判定先于
-   * YOLO 与 preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
+   * <p>YOLO 决策在锁内完成：锁 Thread（含执行树锁与祖先链）后解析的实际开关为 true 时直接返回 {@link Prepare.Allowed}（一次 preflight
+   * 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的派发）；false 才走普通 gateway preflight。 人输入判定先于 YOLO 与
+   * preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
   private Prepare prepareReady(
       HarnessStore.Transaction tx,
@@ -244,7 +245,7 @@ public final class ToolProcessor implements AutoCloseable {
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     if (tool.approval() == null) {
-      if (thread.yoloEnabled()) {
+      if (effectiveYoloEnabled(tx, thread)) {
         // YOLO=true：锁内快照直接 Allow，绝不调用 permission evaluator / ToolGateway.preflight。
         return new Prepare.Allowed(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
       }
@@ -835,6 +836,48 @@ public final class ToolProcessor implements AutoCloseable {
 
   private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
     return ThreadProcessor.lockThreadWithSession(tx, threadId);
+  }
+
+  /**
+   * 在已按 {@link #lockThreadWithSession} 持有执行树锁并锁定完整祖先链的事务内解析实际 YOLO 开关：执行根读自身 mode，子代理跟随其不可变 {@code
+   * FOLLOW(rootThreadId)} 读取真实执行根的 mode。
+   *
+   * <p>Follow 目标必须等于当前事务已锁定的真实执行根（祖先链末位）；指向无关树或中间节点都是权限一致性破坏，显式抛出而不静默兜底，也绝不 为无关根额外加锁。根缺失或根策略异常同样
+   * fail closed。
+   */
+  private static boolean effectiveYoloEnabled(HarnessStore.Transaction tx, ThreadState thread) {
+    ThreadYoloPolicy policy = thread.yoloPolicy();
+    if (!policy.isFollow()) {
+      return policy.isEnabled();
+    }
+    List<UUID> chain = tx.findAncestorChain(thread.id());
+    UUID executionRootId = chain.isEmpty() ? thread.id() : chain.get(chain.size() - 1);
+    if (!executionRootId.equals(policy.rootThreadId())) {
+      throw new IllegalStateException(
+          "thread "
+              + thread.id()
+              + " follows "
+              + policy.rootThreadId()
+              + " which is not its execution root "
+              + executionRootId);
+    }
+    ThreadState root =
+        tx.findThread(executionRootId)
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "yolo execution root "
+                            + executionRootId
+                            + " does not exist for thread "
+                            + thread.id()));
+    if (root.yoloPolicy().isFollow()) {
+      throw new IllegalStateException(
+          "thread "
+              + root.id()
+              + " follows another thread and cannot be the execution root of "
+              + thread.id());
+    }
+    return root.yoloPolicy().isEnabled();
   }
 
   private void release(ToolExecution execution) {

@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloPolicyDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
@@ -121,7 +122,13 @@ public final class HarnessRuntimeResponseMapper {
     dto.setName(snapshot.thread().name());
     dto.setSessionId(snapshot.entryPath().root().sessionId().toString());
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
-    dto.setYoloEnabled(snapshot.thread().yoloEnabled());
+    HarnessThreadYoloPolicyDTO yoloPolicy = new HarnessThreadYoloPolicyDTO();
+    yoloPolicy.setMode(snapshot.thread().yoloPolicy().mode().name());
+    yoloPolicy.setRootThreadId(
+        snapshot.thread().yoloPolicy().rootThreadId() == null
+            ? null
+            : snapshot.thread().yoloPolicy().rootThreadId().toString());
+    dto.setYoloPolicy(yoloPolicy);
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
     dto.setVersion(Long.toString(snapshot.thread().version()));
     ThreadRuntimeStatus status = snapshot.runtimeStatus();

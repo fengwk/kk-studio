@@ -826,7 +826,7 @@ final class StopControl {
             headEntryId,
             thread.creationRequestHash(),
             thread.name(),
-            thread.yoloEnabled(),
+            thread.yoloPolicy(),
             ThreadExecutionControl.STOPPED,
             thread.inputThroughSequence(),
             thread.nextCommandSequence(),

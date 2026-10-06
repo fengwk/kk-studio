@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
@@ -81,17 +82,35 @@ class PostgresqlStopReceiptTest {
           UUID grandChildThreadId = tx.nextId();
           tx.insertSession(StoreTestSupport.session(sessionId));
           tx.insertEntry(StoreTestSupport.rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(rootThreadId, sessionId, null, rootEntryId, label + "-root"));
           tx.insertThread(
-              thread(childThreadId, sessionId, rootThreadId, rootEntryId, label + "-child"));
+              thread(rootThreadId, sessionId, null, null, rootEntryId, label + "-root"));
           tx.insertThread(
-              thread(grandChildThreadId, sessionId, childThreadId, rootEntryId, label + "-grand"));
+              thread(
+                  childThreadId,
+                  sessionId,
+                  rootThreadId,
+                  rootThreadId,
+                  rootEntryId,
+                  label + "-child"));
+          tx.insertThread(
+              thread(
+                  grandChildThreadId,
+                  sessionId,
+                  childThreadId,
+                  rootThreadId,
+                  rootEntryId,
+                  label + "-grand"));
           return new Tree(sessionId, rootEntryId, rootThreadId, childThreadId, grandChildThreadId);
         });
   }
 
   private static ThreadState thread(
-      UUID id, UUID sessionId, UUID parentThreadId, UUID headEntryId, String name) {
+      UUID id,
+      UUID sessionId,
+      UUID parentThreadId,
+      UUID rootThreadId,
+      UUID headEntryId,
+      String name) {
     return new ThreadState(
         id,
         sessionId,
@@ -99,7 +118,9 @@ class PostgresqlStopReceiptTest {
         headEntryId,
         HASH,
         name,
-        false,
+        parentThreadId == null
+            ? ThreadYoloPolicy.root(false)
+            : ThreadYoloPolicy.follow(rootThreadId),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,
@@ -411,6 +432,7 @@ class PostgresqlStopReceiptTest {
                   thread(
                       id,
                       tree.sessionId(),
+                      tree.rootThreadId(),
                       tree.rootThreadId(),
                       tree.rootEntryId(),
                       "middle-sibling"));

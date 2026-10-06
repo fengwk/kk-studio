@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -406,7 +407,7 @@ final class StoreTestSupport {
         headEntryId,
         CREATION_REQUEST_HASH,
         name,
-        yoloEnabled,
+        ThreadYoloPolicy.root(yoloEnabled),
         ThreadExecutionControl.RUNNABLE,
         0L,
         nextCommandSequence,

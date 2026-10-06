@@ -627,7 +627,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(
                 new NewThreadCommand(
                     userMessage(

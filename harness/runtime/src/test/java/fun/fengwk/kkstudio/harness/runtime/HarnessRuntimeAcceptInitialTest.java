@@ -62,8 +62,7 @@ class HarnessRuntimeAcceptInitialTest {
 
   private static AcceptCommandsCommand newSession(List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            TestIds.id(101), TestIds.id(102), settings(), null, true),
+        new AcceptCommandsTarget.NewRootSession(TestIds.id(101), TestIds.id(102), settings(), true),
         commands);
   }
 
@@ -71,8 +70,7 @@ class HarnessRuntimeAcceptInitialTest {
   private static AcceptCommandsCommand newSession(
       UUID sessionId, UUID threadId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
-        commands);
+        new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false), commands);
   }
 
   private static AcceptCommandsCommand entry(
@@ -109,7 +107,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(TestIds.id(101), thread.sessionId());
     assertEquals(root.id(), thread.headEntryId());
     assertEquals(CREATION_REQUEST_HASH.length(), thread.creationRequestHash().length());
-    assertTrue(thread.yoloEnabled());
+    assertTrue(thread.yoloPolicy().isEnabled());
     // creation request hash 是服务端 deterministic 64 位小写 SHA-256。
     assertTrue(thread.creationRequestHash().matches("[0-9a-f]{64}"));
     // 初始 thread version 0，accept 后恰好 +1；next sequence 从 1 起推进 1。
@@ -199,8 +197,8 @@ class HarnessRuntimeAcceptInitialTest {
   void newSessionReplayAfterSecondBatchReturnsOnlyTheInitialCommands() {
     AcceptCommandsCommand initial =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(
-                TestIds.id(101), TestIds.id(102), settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(
+                TestIds.id(101), TestIds.id(102), settings(), false),
             List.of(setAgent(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a")));
     AcceptedCommands first = runtime.acceptCommands(initial, AcceptancePreflight.IDENTITY);
     // 同一 Thread 上再接受第二批（THREAD target，cursor: head=root, next=3）。
@@ -252,8 +250,8 @@ class HarnessRuntimeAcceptInitialTest {
         AcceptancePreflight.IDENTITY);
     AcceptCommandsCommand otherSession =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(
-                TestIds.id(105), TestIds.id(102), settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(
+                TestIds.id(105), TestIds.id(102), settings(), false),
             List.of(userMessageCommand(TestIds.id(1), "hello")));
     HarnessRuntimeConflictException error =
         assertThrows(

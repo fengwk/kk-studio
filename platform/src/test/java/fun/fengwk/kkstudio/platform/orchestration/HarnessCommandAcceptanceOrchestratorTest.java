@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -263,6 +264,30 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatRepository, never()).lockForKeyShare(any());
+    verify(issueAgentThreadRepository, never()).findByIssueIdAndAgentName(any(), any());
+  }
+
+  /**
+   * 子代理 NEW_CHILD_SESSION 不属于 owner-aware 产品入口：产品 owner 无法持有子 Session，且该路径缺少 Chat ownership
+   * preflight 与 Issue 不可变绑定 guard。任何 owner 都必须在加锁与 Runtime 调用之前确定性拒绝，零 repo/runtime 写入；真实子代理由
+   * internal task 经 {@code HarnessRuntime.acceptCommandsAndJoin} 原子创建。
+   */
+  @Test
+  void rejectsChildSessionTargetOnOwnerAwareAcceptance() {
+    AcceptCommandsCommand childCommand =
+        newChildSession(
+            SESSION_ID, THREAD_ID, OTHER_THREAD_ID, user(new TextMessageContent("child")));
+
+    assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, childCommand));
+    assertThrows(
+        IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, childCommand));
+
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(store, never()).transaction(any());
+    verify(chatRepository, never()).lockForKeyShare(any());
+    verify(chatSessionRepository, never()).insert(any(), any());
+    verify(issueRepository, never()).getById(any());
+    verify(projectRepository, never()).lockForKeyShare(any());
     verify(issueAgentThreadRepository, never()).findByIssueIdAndAgentName(any(), any());
   }
 
@@ -715,7 +740,14 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   private static AcceptCommandsCommand newSession(UUID threadId, NewThreadCommand... commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(SESSION_ID, threadId, SETTINGS, null, false),
+        new AcceptCommandsTarget.NewRootSession(SESSION_ID, threadId, SETTINGS, false),
+        List.of(commands));
+  }
+
+  private static AcceptCommandsCommand newChildSession(
+      UUID sessionId, UUID threadId, UUID parentThreadId, NewThreadCommand... commands) {
+    return new AcceptCommandsCommand(
+        new AcceptCommandsTarget.NewChildSession(sessionId, threadId, SETTINGS, parentThreadId),
         List.of(commands));
   }
 
@@ -755,7 +787,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         ENTRY_ID,
         "0".repeat(64),
         "thread",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,
