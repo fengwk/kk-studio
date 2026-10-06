@@ -284,7 +284,7 @@ describe('AgentPane acceptance pipeline', () => {
   it('projects one command matrix for Chat and Canvas across all three targets', () => {
     const expected = {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
-      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'tree', 'new', 'upload', 'shortcuts', 'rename-session', 'goal'],
+      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'tree', 'new', 'upload', 'debug', 'shortcuts', 'rename-session', 'goal'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {

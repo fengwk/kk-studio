@@ -247,8 +247,9 @@ export function useRootThreadControl({
 
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
 
-  // 预览作用域：绑定的 Thread 或本地新建分支草稿（sessionId:startEntryId）。作用域
-  // 变化即作废在途预览，避免旧响应污染新的绑定/草稿。
+  // 视图身份与预览作用域同源：绑定 Thread 用 threadId，本地分支草稿用
+  // sessionId:startEntryId:name（新建 Session 草稿没有身份可言，固定为空串）。
+  // 身份变化即作废在途预览，并重置该 Pane 的本地视图状态（Debug 模式/滚动/检查器选中）。
   const previewScope = isBoundTarget(target)
     ? `thread:${target.threadId}`
     : isNewThreadTarget(target)
@@ -1548,6 +1549,8 @@ export function useRootThreadControl({
   ])
 
   const boundViews = useBoundThreadPanelViews(boundThreadId, controller, {
+    // 本地草稿没有 threadId：视图状态按目标身份隔离，API 预览仍按真实 threadId/会话。
+    viewKey: previewScope,
     onPreview: canExposePreview ? () => void handlePreview() : undefined,
     previewLoading,
     previewDisabled,
