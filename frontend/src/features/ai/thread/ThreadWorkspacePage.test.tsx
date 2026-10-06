@@ -439,7 +439,14 @@ describe('ThreadWorkspacePage', () => {
       expect(screen.getAllByText('Waiting Parent').length).toBeGreaterThan(0)
     })
     expect(screen.getByText('只读查看')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回执行根' })).toHaveAttribute('href', `/threads/${rootId}`)
+    const backToRoot = screen.getByRole('link', { name: '返回执行根' })
+    expect(backToRoot).toHaveAttribute('href', `/threads/${rootId}`)
+    // 独立子线程地址同样把返回入口放在顶部标题区，排在 transcript 之前。
+    expect(backToRoot.closest('.agent-pane-thread-heading')).not.toBeNull()
+    const transcript = document.querySelector('[role="log"]') as HTMLElement
+    expect(
+      backToRoot.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: '给 AI 发送消息' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '发送消息' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
@@ -447,7 +454,7 @@ describe('ThreadWorkspacePage', () => {
 
     // 返回执行根：路由切到 root 地址，重新加载 root 快照；子 Thread 草稿不会跟随。
     vi.mocked(harnessService.getThreadSnapshot).mockClear()
-    await user.click(screen.getByRole('link', { name: '返回执行根' }))
+    await user.click(backToRoot)
 
     await waitFor(() => {
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(rootId)

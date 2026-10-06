@@ -225,6 +225,37 @@ async function installPaneApi(page: Page): Promise<Recorded> {
   return recorded
 }
 
+/**
+ * 查看层/独立地址的返回入口必须在顶部标题区、且在 transcript 之上且不在滚动容器内：
+ * 这里用真实布局（boundingBox + computed overflow）证明，而不是只断言元素存在。
+ */
+async function expectBackEntryOnTop(page: Page, name: string, role: 'button' | 'link' = 'button') {
+  const back = page.getByRole(role, { name })
+  const box = await back.boundingBox()
+  expect(box).not.toBeNull()
+  const transcriptBox = await page.locator('[role="log"]:visible').first().boundingBox()
+  expect(transcriptBox).not.toBeNull()
+  expect(box!.y + box!.height).toBeLessThanOrEqual(transcriptBox!.y)
+  expect(await back.evaluate((node) => (
+    node.closest('header.agent-pane-thread-heading') != null
+      && (node.closest('.chat-main') as HTMLElement).firstElementChild
+        === node.closest('header.agent-pane-thread-heading')
+  ))).toBe(true)
+  // 标题区不随 transcript 滚动：返回入口与滚动容器之间没有滚动祖先。
+  expect(await back.evaluate((node) => {
+    let current = node.parentElement
+    while (current != null && !current.classList.contains('chat-main')) {
+      const { overflowY, overflow } = getComputedStyle(current)
+      if (['auto', 'scroll'].includes(overflowY) || ['auto', 'scroll'].includes(overflow)) {
+        return current.className
+      }
+      current = current.parentElement
+    }
+    return null
+  })).toBeNull()
+  return back
+}
+
 async function openRootPane(page: Page, recorded: Recorded) {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(HARNESS_URL)
@@ -266,8 +297,9 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await expect(treeRow).toBeVisible()
   await treeRow.click()
 
-  await expect(page.getByRole('button', { name: '返回上一层' })).toBeVisible()
   await expect(page.getByText('只读查看')).toBeVisible()
+  const backToRootLayer = await expectBackEntryOnTop(page, '返回上一层')
+  await expect(backToRootLayer).toBeVisible()
   expect(new URL(page.url()).pathname).toBe(HARNESS_URL)
   // 上传注册表没有被卸载释放：没有 DELETE，也没有第二次 reserve。
   expect(recorded.deletedUploads).toEqual([])
@@ -279,7 +311,7 @@ test('root draft and uploaded attachment survive observing a child and coming ba
   await expectAttachmentAlive(page)
 
   // 4. 逐层返回后根层重新可见，草稿与附件都还在。
-  await page.getByRole('button', { name: '返回上一层' }).click()
+  await backToRootLayer.click()
   await expect(composer).toBeVisible()
   await expect(editor).toContainText('根草稿要保留')
   await expectAttachmentAlive(page)
@@ -339,7 +371,9 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
 
   await expect(page.getByRole('heading', { name: 'worker child', level: 1 })).toBeVisible()
   await expect(page.getByText('只读查看')).toBeVisible()
-  await expect(page.getByRole('link', { name: '返回执行根' })).toBeVisible()
+  const backToRoot = await expectBackEntryOnTop(page, '返回执行根', 'link')
+  await expect(backToRoot).toBeVisible()
+  await expect(backToRoot).toHaveAttribute('href', '/threads/' + ROOT_ID)
   await expect(page.locator('.thread-composer')).toHaveCount(0)
   await expect(page.getByRole('textbox')).toHaveCount(0)
   expect(recorded.uploadCalls).toEqual([])

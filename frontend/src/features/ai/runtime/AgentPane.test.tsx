@@ -3927,8 +3927,19 @@ describe('AgentPane root control and child observation', () => {
 
     await user.click(source)
 
-    expect(await screen.findByRole('button', { name: '返回上一层' })).toBeInTheDocument()
+    const back = await screen.findByRole('button', { name: '返回上一层' })
     expect(screen.getByText('只读查看')).toBeInTheDocument()
+    // 返回入口在查看层顶部标题区（名称/只读标识旁），不是 transcript 与 widget 之后的底部控制区。
+    expect(back.closest('.agent-pane-thread-heading')).not.toBeNull()
+    const childLayer = back.closest('.chat-pane-layer') as HTMLElement
+    const childTranscript = childLayer.querySelector('[role="log"]') as HTMLElement
+    expect(childLayer.querySelector('.thread-child-return-bar')).toContainElement(back)
+    // 标题区是主列的首个元素（顶部非滚动区），transcript 在其之后。
+    expect((back.closest('.chat-main') as HTMLElement).firstElementChild)
+      .toBe(back.closest('.agent-pane-thread-heading'))
+    expect(
+      back.compareDocumentPosition(childTranscript) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
     expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
 
@@ -3945,7 +3956,7 @@ describe('AgentPane root control and child observation', () => {
     // 隐藏的根层不持有焦点（也不被其他层抢走）：停止加载后焦点不在隐藏子树内。
     expect(document.activeElement).toBe(document.body)
 
-    await user.click(screen.getByRole('button', { name: '返回上一层' }))
+    await user.click(back)
 
     expect(layers[0]).not.toHaveAttribute('hidden')
     expect(composer).toHaveTextContent('root draft kept')

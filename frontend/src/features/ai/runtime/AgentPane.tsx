@@ -124,7 +124,7 @@ export function AgentPane({
               threadId={boundThreadId}
               projection={projection}
               environments={environments}
-              controls={childRootThreadId == null
+              navigation={childRootThreadId == null
                 ? undefined
                 : <ChildThreadRootLink rootThreadId={childRootThreadId} />}
               readOnly
@@ -141,7 +141,7 @@ export function AgentPane({
             <BoundThreadView
               threadId={layer.threadId}
               environments={environments}
-              controls={<ChildThreadBackBar onBack={navigation.goBack} />}
+              navigation={<ChildThreadBackBar onBack={navigation.goBack} />}
               readOnly
             />
           </div>

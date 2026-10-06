@@ -24,6 +24,7 @@ describe('useInteractionsController', () => {
     interactionId: 'int-1',
     status: 'WAITING_INPUT',
     threadId: 'th-1',
+    rootThreadId: 'th-1',
     sessionId: 'sess-1',
     owner: { type: 'CHAT', chatId: 'chat-1', issueId: null, agentName: null },
     toolCallId: 'call-1',
@@ -37,6 +38,7 @@ describe('useInteractionsController', () => {
     interactionId: 'int-2',
     status: 'WAITING_APPROVAL',
     threadId: 'th-2',
+    rootThreadId: 'th-2',
     sessionId: 'sess-2',
     owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'iss-1', agentName: 'developer' },
     toolCallId: 'call-2',
@@ -400,6 +402,104 @@ describe('useInteractionsController', () => {
     expect(result.current.items).toHaveLength(2)
     expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-1', 'int-2'])
     expect(result.current.isFetchingMore).toBe(false)
+  })
+
+  it('never exposes the previous root items or cursor after the root changes', async () => {
+    // 测试意图：过滤范围（root）变化时，旧根的 items/cursor 绝不允许出现在新根里，
+    // 新根首帧只能是它自己的第一页（缓存命中时）或空列表，而不是旧根列表。
+    const rootA = 'root-a'
+    const rootB = 'root-b'
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-root-a' })
+      .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
+
+    const { result, rerender } = renderHook(
+      ({ rootThreadId }: { rootThreadId: string }) => useInteractionsController(rootThreadId, 10),
+      { wrapper, initialProps: { rootThreadId: rootA } },
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-1'])
+    expect(result.current.nextCursor).toBe('cursor-root-a')
+
+    rerender({ rootThreadId: rootB })
+
+    // 切换后的首帧：没有旧根 item、没有旧根游标，也没有“还有更多”。
+    expect(result.current.items).toEqual([])
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.hasMore).toBe(false)
+
+    await waitFor(() => {
+      expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-2'])
+    })
+    expect(result.current.nextCursor).toBeNull()
+    expect(interactionService.listInteractions).toHaveBeenLastCalledWith(rootB, null, 10)
+  })
+
+  it('fences a late loadMore response from the previous root', async () => {
+    // 测试意图：旧根在途的分页响应迟到时，既不能追加进新根的列表，也不能改写新根的
+    // 游标或翻页状态——即使新根的第一页还没到。
+    const rootA = 'root-a'
+    const rootB = 'root-b'
+    let resolveStaleLoadMore!: (page: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const staleLoadMore = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>(
+      (resolve) => {
+        resolveStaleLoadMore = resolve
+      },
+    )
+    let resolveNewRootPage!: (page: { items: InteractionDTO[]; nextCursor: string | null }) => void
+    const newRootPage = new Promise<{ items: InteractionDTO[]; nextCursor: string | null }>(
+      (resolve) => {
+        resolveNewRootPage = resolve
+      },
+    )
+    vi.spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-root-a-2' })
+      .mockImplementationOnce(() => staleLoadMore)
+      .mockImplementationOnce(() => newRootPage)
+
+    const { result, rerender } = renderHook(
+      ({ rootThreadId }: { rootThreadId: string }) => useInteractionsController(rootThreadId, 10),
+      { wrapper, initialProps: { rootThreadId: rootA } },
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    act(() => {
+      void result.current.loadMore()
+    })
+    await waitFor(() => expect(result.current.isFetchingMore).toBe(true))
+
+    rerender({ rootThreadId: rootB })
+
+    // 新根第一页仍在路上：旧根列表、游标与翻页状态都不外泄。
+    expect(result.current.items).toEqual([])
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.hasMore).toBe(false)
+    expect(result.current.isFetchingMore).toBe(false)
+
+    await act(async () => {
+      resolveStaleLoadMore({
+        items: [{ ...mockItem1, interactionId: 'stale-root-a-page-2' }],
+        nextCursor: 'cursor-stale-root-a',
+      })
+      await staleLoadMore
+    })
+
+    // 迟到的旧根响应被栅栏拦住：列表仍为空，游标没有被旧根改写。
+    expect(result.current.items).toEqual([])
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.isFetchingMore).toBe(false)
+    expect(result.current.isError).toBe(false)
+
+    await act(async () => {
+      resolveNewRootPage({ items: [mockItem2], nextCursor: null })
+      await newRootPage
+    })
+
+    await waitFor(() => {
+      expect(result.current.items.map((it) => it.interactionId)).toEqual(['int-2'])
+    })
+    expect(result.current.nextCursor).toBeNull()
+    expect(result.current.hasMore).toBe(false)
   })
 
   it('loadMore catch sets controlled error on active generation without unhandled rejection', async () => {
