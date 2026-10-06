@@ -1591,6 +1591,14 @@ export const aiCatalog = {
     'en-US': 'Assistant response failed',
     'zh-CN': '助手回复失败',
   },
+  'ai.runtime.thinking.expand': {
+    'en-US': 'Expand thinking',
+    'zh-CN': '展开思考',
+  },
+  'ai.runtime.thinking.collapse': {
+    'en-US': 'Collapse thinking',
+    'zh-CN': '收起思考',
+  },
   'ai.runtime.message.modelRequestFailed': {
     'en-US': 'Model request failed',
     'zh-CN': '模型请求失败',
@@ -1672,12 +1680,12 @@ export const aiCatalog = {
     'zh-CN': '打开原件 {{name}}',
   },
   'ai.runtime.status.environmentUnavailableText': {
-    'en-US': 'env:{{name}} (unavailable)',
-    'zh-CN': 'env:{{name}}（不可用）',
+    'en-US': '{{name}} (unavailable)',
+    'zh-CN': '{{name}}（不可用）',
   },
   'ai.runtime.status.environmentText': {
-    'en-US': 'env:{{name}}',
-    'zh-CN': 'env:{{name}}',
+    'en-US': '{{name}}',
+    'zh-CN': '{{name}}',
   },
   'ai.runtime.status.environmentTitle': {
     'en-US': 'Environment: {{name}}',

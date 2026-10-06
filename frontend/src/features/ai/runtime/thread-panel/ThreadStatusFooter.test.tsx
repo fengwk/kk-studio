@@ -29,7 +29,7 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
-    expect(lines[0].textContent).toBe('未选择环境 | ↑0 | ↓0 | $0.000 | cache — | — tok/s')
+    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · $0.000 · cache — · — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -51,9 +51,9 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const spans = [...footer.querySelectorAll('.thread-status-line span')]
     expect(spans.map((span) => span.textContent)).toEqual([
-      'env:local',
+      'local',
       'ctx 61/128k',
-      '↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s',
+      '↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s',
     ])
   })
 
@@ -66,7 +66,7 @@ describe('ThreadStatusFooter', () => {
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:local')
+    expect(footer).toHaveTextContent('local')
     expect(footer.querySelector('button')).toBeNull()
     expect(lineOf(footer).getAttribute('title')).toContain('环境：local')
   })
@@ -81,7 +81,7 @@ describe('ThreadStatusFooter', () => {
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:env-uuid-42')
+    expect(footer).toHaveTextContent('env-uuid-42')
   })
 
   it('marks an unavailable binding without replacing it', () => {
@@ -93,7 +93,7 @@ describe('ThreadStatusFooter', () => {
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:dev（不可用）')
+    expect(footer).toHaveTextContent('dev（不可用）')
     expect(lineOf(footer).getAttribute('title')).toContain('环境：dev（不可用）')
   })
 
@@ -123,7 +123,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      'env:local | ctx 61/128k | ↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s',
+      'local ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s',
     )
     expect(lines[0]).toHaveAttribute(
       'title',
@@ -166,7 +166,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      '未选择环境 | ctx 0/128k | ↑0 | ↓0 | $0.000 | cache — | — tok/s',
+      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · $0.000 · cache — · — tok/s',
     )
     expect(lines[0]).toHaveAttribute(
       'title',
@@ -194,7 +194,7 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'env:dev (unavailable) | ctx —/128k | ↑0 | ↓0 | $0.000 | cache — | — tok/s',
+      'dev (unavailable) ∣ ctx —/128k ∣ ↑0 · ↓0 · $0.000 · cache — · — tok/s',
     )
     expect(line).toHaveAttribute('title', [
       'Environment: dev (unavailable)',
