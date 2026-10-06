@@ -332,7 +332,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByRole('heading', { level: 3, name: '缓存策略' })).toBeInTheDocument()
       expect(screen.getByText('留存档位')).toBeInTheDocument()
       expect(screen.getByText('SHORT')).toBeInTheDocument()
-      expect(screen.getByText('前缀标识 (Affinity Key)')).toBeInTheDocument()
+      expect(screen.getByText('缓存键 (Cache Key)')).toBeInTheDocument()
       expect(screen.getByText('aff-key-42')).toBeInTheDocument()
       // 断点字段已从契约移除：不再出现任何断点行
       expect(screen.queryByText('Cache 断点')).not.toBeInTheDocument()
@@ -402,7 +402,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('Retention')).toBeInTheDocument()
       expect(screen.getByText('NONE')).toBeInTheDocument()
       expect(screen.getByText('(Provider automatic caching is not guaranteed)')).toBeInTheDocument()
-      expect(screen.getByText('Affinity Key')).toBeInTheDocument()
+      expect(screen.getByText('Cache Key')).toBeInTheDocument()
       // 断点字段已从 DTO 移除
       expect(screen.queryByText('Breakpoints')).not.toBeInTheDocument()
     })

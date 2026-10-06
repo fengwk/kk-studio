@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProv
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -49,7 +48,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -275,28 +273,9 @@ class ProviderToolResultMediaMatrixWireTest {
 
   /** 请求形态：USER 指令 → ASSISTANT tool call → TOOL 结果（文本 + 媒体），用于验证媒体与该次调用的绑定。 */
   private static ProviderRequest request(Protocol protocol, ModelInputModality modality) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     ModelDescriptor model =
         new ModelDescriptor(
-            protocol.label,
-            protocol.modelId,
-            protocol.modelId,
-            ALL_MODALITIES,
-            true,
-            false,
-            pricing);
+            protocol.label, protocol.modelId, protocol.modelId, ALL_MODALITIES, true, false);
     return new ProviderRequest(
         model,
         new ModelVariant("default"),

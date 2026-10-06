@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -19,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -409,23 +407,10 @@ class ProviderStreamBridgeTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-            zeroCost(),
             "req1",
             "tier1",
             "{}");
     return new ProviderCompletion(response);
-  }
-
-  private static ModelCost zeroCost() {
-    return new ModelCost(
-        "USD",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 
   /** 记录 cancel 次数的底层流替身；可在 cancel 内注入阻塞点以构造并发场景。 */
