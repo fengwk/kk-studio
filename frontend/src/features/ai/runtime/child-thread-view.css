@@ -20,8 +20,8 @@
 }
 
 .thread-child-return-bar {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 0 0 auto;
 }

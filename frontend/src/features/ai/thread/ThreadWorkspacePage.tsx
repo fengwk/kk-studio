@@ -89,7 +89,7 @@ export function ThreadWorkspacePage() {
             <ChildThreadView
               threadId={threadId}
               environments={environmentsQuery.data ?? []}
-              controls={rootThreadId == null
+              navigation={rootThreadId == null
                 ? null
                 : <ChildThreadRootLink rootThreadId={rootThreadId} />}
             />
