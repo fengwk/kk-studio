@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -11,7 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -64,7 +62,6 @@ public final class EchoModelGateway implements ModelGateway {
         List.of(),
         GenerationStopReason.COMPLETE,
         usage(),
-        cost(),
         null,
         null,
         null);
@@ -92,17 +89,5 @@ public final class EchoModelGateway implements ModelGateway {
 
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
-  }
-
-  private static ModelCost cost() {
-    return new ModelCost(
-        "USD",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 }

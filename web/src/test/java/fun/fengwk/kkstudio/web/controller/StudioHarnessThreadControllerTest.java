@@ -41,16 +41,19 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -70,6 +73,7 @@ class StudioHarnessThreadControllerTest {
   private HarnessRuntime runtime;
   private ModelRequestDebugService modelRequestDebugService;
   private InteractionService interactionService;
+  private UsageCostProjectionService usageCostProjectionService;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -77,8 +81,12 @@ class StudioHarnessThreadControllerTest {
     runtime = mock(HarnessRuntime.class);
     modelRequestDebugService = mock(ModelRequestDebugService.class);
     interactionService = mock(InteractionService.class);
+    usageCostProjectionService = mock(UsageCostProjectionService.class);
+    // 费用是快照的读取时投影：默认没有可计价事实，单个用例再按 entry id 指定。
+    when(usageCostProjectionService.project(any())).thenReturn(Map.of());
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, modelRequestDebugService, interactionService);
+        new StudioHarnessThreadController(
+            runtime, modelRequestDebugService, interactionService, usageCostProjectionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -104,6 +112,31 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
         .andExpect(jsonPath("$.data.thread.processing").value(false))
         .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
+  }
+
+  /** 意图：快照的每个 Entry 都带读取时费用投影，未计价 Entry 显式为 null；投影只发生一次（不逐消息请求）。 */
+  @Test
+  void snapshotCarriesReadTimeUsageCostPerEntry() throws Exception {
+    // ROOT -> TURN_START -> USER -> ASSISTANT -> TURN_END：费用只落在记录了用量的 ASSISTANT Entry 上。
+    when(runtime.getThreadSnapshot(id(1)))
+        .thenReturn(HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
+    when(runtime.manualCompactionAvailability(id(1)))
+        .thenReturn(ManualCompactionAvailability.enabled());
+    HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
+    cost.setCurrency("USD");
+    cost.setAmount("0.500000000000");
+    when(usageCostProjectionService.project(any())).thenReturn(Map.of(id(4), cost));
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.entries[0].usageCost").value(nullValue()))
+        .andExpect(jsonPath("$.data.entries[3].entryId").value(idText(4)))
+        .andExpect(jsonPath("$.data.entries[3].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.data.entries[3].usageCost.amount").value("0.500000000000"));
+
+    // 一次快照只投影一次，绝不逐消息请求。
+    verify(usageCostProjectionService, times(1)).project(any());
   }
 
   /** 子节点入口返回真实根和父关系；根与未结束 outcome 必须显式序列化为 null。 */
@@ -200,7 +233,8 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.skills[0].observedHeadCommit").value(nullValue()))
         .andExpect(jsonPath("$.data.subagents[0].name").value("coder"))
         .andExpect(jsonPath("$.data.cacheControl.retention").value("NONE"))
-        .andExpect(jsonPath("$.data.cacheControl.affinityKey").value(nullValue()))
+        .andExpect(jsonPath("$.data.cacheControl.key").value(nullValue()))
+        .andExpect(jsonPath("$.data.cacheControl.affinityKey").doesNotExist())
         .andExpect(jsonPath("$.data.planningError").value(nullValue()))
         .andExpect(jsonPath("$.data.frozenInvocation").value(nullValue()));
 
@@ -290,8 +324,8 @@ class StudioHarnessThreadControllerTest {
     HarnessModelRequestDebugDTO.CacheControlDTO cacheControl =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
     cacheControl.setRetention("NONE");
-    cacheControl.setAffinityKey(null);
-    cacheControl.setBreakpoints(List.of());
+    // NONE 时 key 显式 null：wire 上「未启用」与「有 key」必须可区分。
+    cacheControl.setKey(null);
 
     HarnessModelRequestDebugDTO debug = new HarnessModelRequestDebugDTO();
     debug.setKind("NEXT_REQUEST_PREVIEW");

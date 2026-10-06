@@ -26,22 +26,26 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -57,6 +61,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
@@ -76,7 +82,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -107,19 +112,6 @@ class ProviderRequestPreviewServiceTest {
 
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
       new ModelUsage(1_000L, 2L, 0L, 0L, 0L, 0L, 1_002L);
-  private static final ModelPricing PRICING =
-      new ModelPricing(
-          "USD",
-          "standard",
-          "standard",
-          BigDecimal.ONE,
-          "v1",
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO,
-          BigDecimal.ZERO);
   private static final BranchSettings SETTINGS =
       new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
 
@@ -138,7 +130,21 @@ class ProviderRequestPreviewServiceTest {
   private static final UUID ATTACHMENT_BLOB_ID = id(13L);
   private static final UUID OWNED_BLOB_ID = id(14L);
   private static final UUID GENERATION_ID = id(15L);
+  private static final UUID TOOL_RESULT_ID = id(16L);
+  private static final UUID INVOCATION_ID = id(17L);
+  private static final UUID LATER_USER_ID = id(18L);
+  private static final UUID TURN_THREE_START_ID = id(19L);
+  private static final UUID TURN_THREE_ASSISTANT_ID = id(20L);
+  private static final UUID COMPACTION_ENTRY_ID = id(21L);
+  private static final UUID COMPACTION_TURN_START_ID = id(22L);
   private static final byte[] BODY = "{\"model\":\"wire-model\"}".getBytes(StandardCharsets.UTF_8);
+
+  /** 历史输出的记录时间：与固定 clock 明显不同，用来证明历史预览用的是记录时间而不是「现在」。 */
+  private static final Instant TOOL_CALL_TIME = NOW.plusSeconds(60);
+  private static final Instant TOOL_RESULT_TIME = NOW.plusSeconds(120);
+  private static final Instant TURN_TWO_ASSISTANT_TIME = NOW.plusSeconds(300);
+  private static final Instant LATER_USER_TIME = NOW.plusSeconds(420);
+  private static final Instant LATER_ASSISTANT_TIME = NOW.plusSeconds(480);
 
   private HarnessRuntime runtime;
   private DatabaseTurnResolver turnResolver;
@@ -171,12 +177,18 @@ class ProviderRequestPreviewServiceTest {
 
   @AfterEach
   void verifyReadOnlyBoundaries() {
-    // 测试意图：成功及九类拒绝都只允许读取，不得接受命令、消费附件或改变资源引用。
+    // 测试意图：成功及各类拒绝都只允许读取——既不接受命令、消费附件或改变资源引用，也不触达 Session 之外的写入口。
     verify(runtime, atLeast(0)).getThreadSnapshot(any());
+    verify(runtime, atLeast(0)).getSessionEntries(any());
     verify(uploadService, atLeast(0)).peekReady(any());
     verify(refManager, atLeast(0)).contains(any(), any());
     verify(blobManager, atLeast(0)).getBlob(any());
     verifyNoMoreInteractions(runtime, uploadService, refManager, blobManager);
+    // 预览只调用冻结规划与 Provider 解析，绝不经过接受/游标/压缩等任何其它 resolver 能力。
+    verify(turnResolver, atLeast(0)).planLive(any(), any(), any());
+    verifyNoMoreInteractions(turnResolver);
+    verify(providerResolution, atLeast(0)).resolve(any(), any(), any());
+    verifyNoMoreInteractions(providerResolution);
   }
 
   @Test
@@ -308,7 +320,7 @@ class ProviderRequestPreviewServiceTest {
                         userMessage("hi"))));
     assertTrue(queued.getMessage().contains("queued commands"));
     assertEquals(Reason.PREVIEW_QUEUED_COMMANDS, queued.reason());
-    verify(turnResolver, never()).planLive(any(), any());
+    verify(turnResolver, never()).planLive(any(), any(), any());
     verify(providerResolution, never()).resolve(any(), any(), any());
     // 预览只读取快照，不触达接受路径的其它任何能力。
   }
@@ -333,7 +345,7 @@ class ProviderRequestPreviewServiceTest {
                         userMessage("hi"))));
     assertTrue(error.getMessage().contains("not idle"));
     assertEquals(Reason.PREVIEW_THREAD_BUSY, error.reason());
-    verify(turnResolver, never()).planLive(any(), any());
+    verify(turnResolver, never()).planLive(any(), any(), any());
   }
 
   /** 测试意图：下一步必定是自动压缩时明确拒绝（不运行压缩模型）；阈值以下的历史则继续走到真实规划边界。 */
@@ -354,12 +366,12 @@ class ProviderRequestPreviewServiceTest {
                         userMessage("hi"))));
     assertTrue(compaction.getMessage().contains("compaction"));
     assertEquals(Reason.PREVIEW_COMPACTION_REQUIRED, compaction.reason());
-    verify(turnResolver, never()).planLive(any(), any());
+    verify(turnResolver, never()).planLive(any(), any(), any());
 
     // 阴性对照：同一形状但 usage 远低于阈值时压缩门放行，拒绝只来自真实的规划结果（证明这是一个真实判定而非恒真拒绝）。
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread, closedTurnPath(BELOW_THRESHOLD_USAGE), List.of()));
-    when(turnResolver.planLive(eq(THREAD_ID), any()))
+    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Rejected("PLANNING_FAILED", "provider detail leaked"));
     ProviderRequestPreviewUnavailableException planning =
         assertThrows(
@@ -388,7 +400,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(new StorageUploadService.ReadyUpload(ATTACHMENT_BLOB_ID, "authoritative.png"));
     when(refManager.contains(SESSION_ID, OWNED_BLOB_ID)).thenReturn(true);
     ModelRequestSpec spec = spec();
-    when(turnResolver.planLive(eq(THREAD_ID), any()))
+    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Planned(spec, CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -417,18 +429,18 @@ class ProviderRequestPreviewServiceTest {
                                     OWNED_BLOB_ID, "owned.pdf", null, null)))),
                     id(61L))));
 
-    assertEquals(HarnessProviderRequestPreviewDTO.KIND, dto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW, dto.getKind());
     assertEquals(NOW, dto.getGeneratedAt());
     assertEquals("OPENAI", dto.getProviderType());
     assertEquals("model", dto.getModelName());
     assertEquals(BODY.length, dto.getBodyByteSize());
     assertEquals(new String(BODY, StandardCharsets.UTF_8), dto.getBodyJson());
     assertEquals(TURN_TWO_END_ID.toString(), dto.getSourceHeadEntryId());
-    assertEquals(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE, dto.getSnapshotNotice());
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE, dto.getNotice());
 
     // 候选历史由同一 transform 构造：新 USER 消息同时携带文本、权威附件事实与已持有 RESOURCE，且顺序不变。
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(eq(THREAD_ID), pathCaptor.capture());
+    verify(turnResolver).planLive(eq(THREAD_ID), pathCaptor.capture(), eq(NOW));
     MessagePayload frozen = lastUserMessage(pathCaptor.getValue());
     List<AgentMessageContent> contents = frozen.message().contents();
     assertEquals(3, contents.size());
@@ -498,7 +510,7 @@ class ProviderRequestPreviewServiceTest {
                                             OWNED_BLOB_ID, "foreign.pdf", null, null)))),
                             id(72L)))));
     assertTrue(foreign.getMessage().contains("not owned"));
-    verify(turnResolver, never()).planLive(any(), any());
+    verify(turnResolver, never()).planLive(any(), any(), any());
   }
 
   /** 测试意图：adapter 未实现预览能力时明确拒绝（绝不伪装成空体），Provider 编码失败只回显稳定类别而不外泄原因文本。 */
@@ -522,7 +534,7 @@ class ProviderRequestPreviewServiceTest {
                     }))
         .when(providerResolution)
         .resolve(any(), any(), any());
-    when(turnResolver.planLive(eq(THREAD_ID), any()))
+    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     ProviderRequestPreviewUnavailableException unsupported =
         assertThrows(
@@ -560,7 +572,7 @@ class ProviderRequestPreviewServiceTest {
         .thenReturn(
             snapshot(
                 thread(TURN_TWO_END_ID, 1L), closedTurnPath(BELOW_THRESHOLD_USAGE), List.of()));
-    when(turnResolver.planLive(eq(THREAD_ID), any()))
+    when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(any(), any(), any()))
         .thenThrow(new IllegalArgumentException("provider connection generation drift"));
@@ -576,6 +588,249 @@ class ProviderRequestPreviewServiceTest {
                         userMessage("hi"))));
     assertTrue(drift.getMessage().contains("cannot resolve the current provider"));
     assertEquals(Reason.PREVIEW_PROVIDER_UNAVAILABLE, drift.reason());
+  }
+
+  /**
+   * 测试意图：本地分支草稿在 Session 事实边界上预览——不创建 Thread、不做任何 Thread cursor/queued/压缩判定，候选历史延续该 Session 到草稿起点
+   * 为止的全部历史；附件仍只是 READY 的只读 peek。
+   */
+  @Test
+  void previewsLocalBranchDraftWithoutCreatingAnyThread() {
+    EntryPath sessionTree = closedTurnPath(BELOW_THRESHOLD_USAGE);
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+    when(uploadService.peekReady(UPLOAD_ID))
+        .thenReturn(new StorageUploadService.ReadyUpload(ATTACHMENT_BLOB_ID, "draft.png"));
+    when(turnResolver.planLive(any(), any(), eq(NOW)))
+        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+
+    HarnessProviderRequestPreviewDTO dto =
+        service.previewDraft(
+            SESSION_ID,
+            TURN_TWO_END_ID,
+            List.of(
+                setting(ThreadCommandKind.SET_MODEL),
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER,
+                            List.of(
+                                new TextMessageContent("draft input"),
+                                new AttachmentMessageContent(UPLOAD_ID, null)))),
+                    id(203L))));
+
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW, dto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE, dto.getNotice());
+    assertEquals(NOW, dto.getGeneratedAt());
+    assertEquals("OPENAI", dto.getProviderType());
+    assertEquals("model", dto.getModelName());
+    assertEquals(BODY.length, dto.getBodyByteSize());
+    // 草稿的 source head 就是分支起点，且它自己已经存在于 durable 历史里。
+    assertEquals(TURN_TWO_END_ID.toString(), dto.getSourceHeadEntryId());
+
+    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planLive(any(), pathCaptor.capture(), eq(NOW));
+    EntryPath candidate = pathCaptor.getValue();
+    assertEquals(sessionTree.entries(), candidate.entries().subList(0, sessionTree.entries().size()));
+    Entry appended = lastUserEntry(candidate);
+    assertEquals(TURN_TWO_END_ID, appended.parentEntryId());
+    // SET_MODEL 作为设置前缀冻结进 candidate 的 TURN_START，不产生模型可见消息。
+    assertEquals("model", candidate.baseSettings().model().modelName());
+    List<AgentMessageContent> contents = lastUserMessage(candidate).message().contents();
+    assertEquals(2, contents.size());
+    assertEquals("draft input", ((TextMessageContent) contents.getFirst()).text());
+    ResourceMessageContent attachment =
+        assertInstanceOf(ResourceMessageContent.class, contents.get(1));
+    assertEquals(ATTACHMENT_BLOB_ID, attachment.blobId());
+    assertEquals("draft.png", attachment.name());
+
+    // 草稿没有 Thread：既不读 Thread 快照，也不接受命令、消费附件或建立资源归属。
+    verify(runtime, never()).getThreadSnapshot(any());
+    verify(uploadService).peekReady(UPLOAD_ID);
+    verify(uploadService, never()).lockReady(any());
+    verify(uploadService, never()).delete(any());
+    verify(refManager, never()).retainRef(any(), any());
+    verify(refManager, never()).releaseRef(any(), any());
+  }
+
+  /** 测试意图：ROOT 上的全新 Session 也能预览首个输入；候选历史只有 ROOT，绝不因为「还没有任何 Turn」而拒绝。 */
+  @Test
+  void previewsLocalBranchDraftFromTheRootOfAFreshSession() {
+    EntryPath emptySession = new EntryPath(List.of(
+        new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW)));
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(emptySession.entries());
+    when(turnResolver.planLive(any(), any(), eq(NOW)))
+        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+
+    HarnessProviderRequestPreviewDTO dto =
+        service.previewDraft(SESSION_ID, ROOT_ID, List.of(userMessage("first input")));
+
+    assertEquals(ROOT_ID.toString(), dto.getSourceHeadEntryId());
+    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planLive(any(), pathCaptor.capture(), eq(NOW));
+    EntryPath candidate = pathCaptor.getValue();
+    assertEquals(ROOT_ID, candidate.root().id());
+    assertEquals(ROOT_ID, candidate.entries().get(1).parentEntryId());
+    assertEquals("first input", ((TextMessageContent) lastUserMessage(candidate).message().contents().getFirst()).text());
+  }
+
+  /** 测试意图：草稿起点必须与 NEW_THREAD 的合法落点一致，且必须属于目标 Session；两者都在任何规划之前拒绝。 */
+  @Test
+  void rejectsDraftStartEntriesThatCannotCarryANewTurn() {
+    EntryPath sessionTree = closedTurnPath(BELOW_THRESHOLD_USAGE);
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+
+    IllegalArgumentException midTurn =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.previewDraft(SESSION_ID, TURN_TWO_USER_ID, List.of(userMessage("hi"))));
+    assertTrue(midTurn.getMessage().contains("ROOT or TURN_END"), midTurn.getMessage());
+
+    IllegalArgumentException foreign =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.previewDraft(SESSION_ID, id(99L), List.of(userMessage("hi"))));
+    assertTrue(foreign.getMessage().contains("does not belong to the session"));
+    verify(turnResolver, never()).planLive(any(), any(), any());
+  }
+
+  /**
+   * 测试意图：历史预览的请求前缀严格是「该输出的 parent」，因此同一用户可见回合里更早的模型调用与合法工具结果必须保留，而本次输出与其后的
+   * （含未来回合的）历史绝不进入请求体，也绝不用整个 Turn 甚至整个 Session 冒充前缀。
+   */
+  @Test
+  void previewsHistoricalOutputsAgainstTheirOwnRequestPrefix() {
+    EntryPath sessionTree = toolRoundPath();
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+    when(turnResolver.planLive(any(), any(), any()))
+        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+
+    // 第一次模型调用（带工具调用）：前缀是它自己的输入段，工具结果与后续回合都不在其中。
+    HarnessProviderRequestPreviewDTO toolCallDto =
+        service.previewHistorical(SESSION_ID, TURN_ONE_ASSISTANT_ID);
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, toolCallDto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, toolCallDto.getNotice());
+    assertEquals(TURN_ONE_USER_ID.toString(), toolCallDto.getSourceHeadEntryId());
+    // 历史规划时间显式取该输出的记录时间，绝不用「现在」冒充。
+    assertEquals(TOOL_CALL_TIME, toolCallDto.getGeneratedAt());
+
+    // 同一回合的最终输出：前缀保留更早的模型调用与工具结果，只排除输出自身及其后的历史。
+    HarnessProviderRequestPreviewDTO finalDto =
+        service.previewHistorical(SESSION_ID, TURN_TWO_ASSISTANT_ID);
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, finalDto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, finalDto.getNotice());
+    assertEquals(TURN_TWO_START_ID.toString(), finalDto.getSourceHeadEntryId());
+    assertEquals(TURN_TWO_ASSISTANT_TIME, finalDto.getGeneratedAt());
+
+    ArgumentCaptor<EntryPath> toolCallPath = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planLive(any(), toolCallPath.capture(), eq(TOOL_CALL_TIME));
+    assertEquals(
+        List.of(ROOT_ID, TURN_ONE_START_ID, TURN_ONE_USER_ID), ids(toolCallPath.getValue()));
+
+    ArgumentCaptor<EntryPath> finalPath = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planLive(any(), finalPath.capture(), eq(TURN_TWO_ASSISTANT_TIME));
+    assertEquals(
+        List.of(
+            ROOT_ID,
+            TURN_ONE_START_ID,
+            TURN_ONE_USER_ID,
+            TURN_ONE_ASSISTANT_ID,
+            TOOL_RESULT_ID,
+            TURN_ONE_END_ID,
+            TURN_TWO_START_ID),
+        ids(finalPath.getValue()));
+    // 反向断言：被预览的输出及其后的历史（含未来回合）绝不进入它自己的请求前缀。
+    assertFalse(
+        ids(finalPath.getValue()).contains(TURN_TWO_ASSISTANT_ID),
+        "the previewed output must not enter its own request prefix");
+
+    // 历史预览只读 Session 全树，也不需要任何 Thread。
+    verify(runtime, never()).getThreadSnapshot(any());
+  }
+
+  /**
+   * 测试意图：压缩 Turn 的模型调用属于压缩专用 planning/encoder，live 入口无法重建，必须显式 typed 拒绝，绝不重建一个错误的 live 请求并
+   * 当作历史输出返回。
+   */
+  @Test
+  void rejectsHistoricalPreviewOfCompactionTurnsAsTypedUnsupported() {
+    when(runtime.getSessionEntries(SESSION_ID))
+        .thenReturn(List.of(
+            new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW),
+            new Entry(
+                COMPACTION_TURN_START_ID,
+                SESSION_ID,
+                ROOT_ID,
+                new TurnStartPayload(
+                    TurnStartReason.COMPACTION,
+                    SETTINGS,
+                    THREAD_ID,
+                    null,
+                    null,
+                    new CompactionStart(
+                        CompactionPhase.FULL,
+                        CompactionTrigger.THRESHOLD,
+                        SETTINGS.model(),
+                        ROOT_ID,
+                        null,
+                        null)),
+                NOW),
+            new Entry(
+                COMPACTION_ENTRY_ID,
+                SESSION_ID,
+                COMPACTION_TURN_START_ID,
+                new CompactionPayload("compaction summary"),
+                NOW)));
+
+    ProviderRequestPreviewUnavailableException error =
+        assertThrows(
+            ProviderRequestPreviewUnavailableException.class,
+            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
+    assertEquals(Reason.PREVIEW_UNSUPPORTED, error.reason());
+    assertTrue(error.getMessage().contains("not reconstructible"), error.getMessage());
+    verify(turnResolver, never()).planLive(any(), any(), any());
+  }
+
+  /** 测试意图：历史预览只接受模型输出本身；非模型输出与不属于该 Session 的 id 都在任何规划之前拒绝。 */
+  @Test
+  void rejectsHistoricalPreviewForEntriesThatAreNotModelOutputs() {
+    EntryPath sessionTree = toolRoundPath();
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+
+    IllegalArgumentException notAnOutput =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.previewHistorical(SESSION_ID, TURN_ONE_USER_ID));
+    assertTrue(notAnOutput.getMessage().contains("assistant model output"));
+
+    IllegalArgumentException foreign =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.previewHistorical(SESSION_ID, id(99L)));
+    assertTrue(foreign.getMessage().contains("does not belong to the session"));
+    verify(turnResolver, never()).planLive(any(), any(), any());
   }
 
   /** 便捷：以固定 scope 构造命令批（idempotencyKey 显式给定，避免随机 UUID 影响断言）。 */
@@ -609,13 +864,7 @@ class ProviderRequestPreviewServiceTest {
         ProviderType.OPENAI,
         GENERATION_ID,
         new ModelDescriptor(
-            "provider",
-            "model",
-            "wire-model",
-            Set.of(ModelInputModality.TEXT),
-            false,
-            false,
-            PRICING),
+            "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), false, false),
         new ModelVariant("v1"),
         1024,
         "system instruction",
@@ -719,33 +968,157 @@ class ProviderRequestPreviewServiceTest {
         TurnStartReason.INPUT, SETTINGS, THREAD_ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, null);
   }
 
-  private static MessagePayload assistantMessage(String text, ModelUsage usage) {
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
-        new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE,
-            usage,
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+  private static TurnStartPayload continuationTurnStart() {
+    return new TurnStartPayload(
+        TurnStartReason.CONTINUATION,
+        SETTINGS,
+        THREAD_ID,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
         null);
   }
 
-  /** 取候选历史中最后一条 USER 消息：预览追加的输入边界。 */
-  private static MessagePayload lastUserMessage(EntryPath path) {
+  /**
+   * 一个「工具调用 → 工具结果 → 续写模型调用」的完整历史，外加此后第三个回合：用来固定「请求前缀只到该输出的 parent」这一事实。
+   *
+   * <p>ASSISTANT 在同一个 open Turn 内只能出现一次，因此同一次用户输入下的多次模型调用表现为 INPUT turn 后的 CONTINUATION turn；前缀
+   * 必须跨越这两个 turn，而不是从续写 turn 的 TURN_START 开始。
+   */
+  private static EntryPath toolRoundPath() {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW));
+    entries.add(new Entry(TURN_ONE_START_ID, SESSION_ID, ROOT_ID, inputTurnStart(), NOW));
+    entries.add(
+        new Entry(
+            TURN_ONE_USER_ID,
+            SESSION_ID,
+            TURN_ONE_START_ID,
+            new MessagePayload(AgentMessage.user("first user"), null, null),
+            NOW));
+    entries.add(
+        new Entry(
+            TURN_ONE_ASSISTANT_ID,
+            SESSION_ID,
+            TURN_ONE_USER_ID,
+            toolCallMessage(),
+            TOOL_CALL_TIME));
+    entries.add(
+        new Entry(
+            TOOL_RESULT_ID,
+            SESSION_ID,
+            TURN_ONE_ASSISTANT_ID,
+            toolResultMessage(),
+            TOOL_RESULT_TIME));
+    entries.add(
+        new Entry(
+            TURN_ONE_END_ID,
+            SESSION_ID,
+            TOOL_RESULT_ID,
+            new TurnEndPayload(TURN_ONE_START_ID, TurnEndOutcome.COMPLETED, true, null, null),
+            TOOL_RESULT_TIME));
+    entries.add(
+        new Entry(
+            TURN_TWO_START_ID,
+            SESSION_ID,
+            TURN_ONE_END_ID,
+            continuationTurnStart(),
+            TURN_TWO_ASSISTANT_TIME));
+    entries.add(
+        new Entry(
+            TURN_TWO_ASSISTANT_ID,
+            SESSION_ID,
+            TURN_TWO_START_ID,
+            assistantMessage("final answer", BELOW_THRESHOLD_USAGE),
+            TURN_TWO_ASSISTANT_TIME));
+    entries.add(
+        new Entry(
+            TURN_TWO_END_ID,
+            SESSION_ID,
+            TURN_TWO_ASSISTANT_ID,
+            new TurnEndPayload(TURN_TWO_START_ID, TurnEndOutcome.COMPLETED, false, null, null),
+            LATER_USER_TIME));
+    entries.add(
+        new Entry(
+            TURN_THREE_START_ID,
+            SESSION_ID,
+            TURN_TWO_END_ID,
+            inputTurnStart(),
+            LATER_USER_TIME));
+    entries.add(
+        new Entry(
+            LATER_USER_ID,
+            SESSION_ID,
+            TURN_THREE_START_ID,
+            new MessagePayload(AgentMessage.user("later user"), null, null),
+            LATER_USER_TIME));
+    entries.add(
+        new Entry(
+            TURN_THREE_ASSISTANT_ID,
+            SESSION_ID,
+            LATER_USER_ID,
+            assistantMessage("later answer", BELOW_THRESHOLD_USAGE),
+            LATER_ASSISTANT_TIME));
+    return new EntryPath(entries);
+  }
+
+  /** ASSISTANT 工具调用：结构上必须由配对的 ToolResult 紧跟。 */
+  private static MessagePayload toolCallMessage() {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ToolCallMessageContent("call-1", "read", "builtin:read", "{}"))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, null),
+        null);
+  }
+
+  /** 合法的真实工具结果：callIndex/toolCallId/assistantEntryId 与上一 Assistant 的调用严格配对。 */
+  private static MessagePayload toolResultMessage() {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.TOOL,
+            List.of(
+                new ToolResultMessageContent(
+                    "call-1", "read", "builtin:read", List.of(new TextMessageContent("body")),
+                    false, "{}"))),
+        null,
+        new ToolResultMetadata(
+            INVOCATION_ID,
+            TURN_ONE_ASSISTANT_ID,
+            "call-1",
+            0,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null));
+  }
+
+  private static MessagePayload assistantMessage(String text, ModelUsage usage) {
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null),
+        null);
+  }
+
+  /** 取路径上最后一条 USER 消息的 Entry：预览在草稿起点之后追加的输入边界。 */
+  private static Entry lastUserEntry(EntryPath path) {
     for (int i = path.entries().size() - 1; i >= 0; i--) {
-      if (path.entries().get(i).payload() instanceof MessagePayload message
+      Entry entry = path.entries().get(i);
+      if (entry.payload() instanceof MessagePayload message
           && message.message().role() == AgentMessageRole.USER) {
-        return message;
+        return entry;
       }
     }
     throw new AssertionError("candidate path has no user message");
+  }
+
+  /** 取路径上最后一条 USER 消息：预览追加的输入边界。 */
+  private static MessagePayload lastUserMessage(EntryPath path) {
+    return (MessagePayload) lastUserEntry(path).payload();
+  }
+
+  private static List<UUID> ids(EntryPath path) {
+    return path.entries().stream().map(Entry::id).toList();
   }
 
   private static UUID id(long value) {

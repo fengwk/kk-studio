@@ -597,7 +597,36 @@ class HarnessRuntimeDtoContractTest {
     for (String fieldName : List.of("observedHeadCommit", "installedCommit")) {
       assertRequiredNullable(HarnessModelRequestDebugDTO.SkillDTO.class, fieldName);
     }
-    assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "affinityKey");
+    assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "key");
+  }
+
+  /**
+   * 测试意图：cache 事实收敛为 {@code {retention, key}}——只保留 provider cache control 真正需要的两件事，key 是 session
+   * UUID 文本且 NONE 时显式 null；旧的 affinityKey/breakpoints 语义不得残留。
+   */
+  @Test
+  void debugCacheControlExposesRetentionAndNullableKeyOnly() throws Exception {
+    Map<String, Class<?>> expected = Map.of("retention", String.class, "key", String.class);
+    for (Map.Entry<String, Class<?>> entry : expected.entrySet()) {
+      assertEquals(
+          entry.getValue(),
+          HarnessModelRequestDebugDTO.CacheControlDTO.class
+              .getDeclaredField(entry.getKey())
+              .getType(),
+          entry.getKey());
+    }
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessModelRequestDebugDTO.CacheControlDTO.class.getDeclaredField("affinityKey"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessModelRequestDebugDTO.CacheControlDTO.class.getDeclaredField("breakpoints"));
+
+    HarnessModelRequestDebugDTO.CacheControlDTO none =
+        new HarnessModelRequestDebugDTO.CacheControlDTO();
+    none.setRetention("NONE");
+    none.setKey(null);
+    assertTrue(MAPPER.writeValueAsString(none).contains("\"key\":null"));
   }
 
   private static void assertRequiredNullable(Class<?> dtoClass, String fieldName) throws Exception {
@@ -682,5 +711,125 @@ class HarnessRuntimeDtoContractTest {
         }
       }
     }
+  }
+
+  /**
+   * 测试意图：读取时费用只是 Session Entry 的 wire 投影——它作为独立字段附加，绝不混入 payloadJson/history metadata，且「未计价」必须 显式输出
+   * null 而不是缺席（缺席会被误读为旧版本客户端）。
+   */
+  @Test
+  void sessionEntryDtoCarriesReadTimeUsageCostOutsidePayload() throws Exception {
+    HarnessSessionEntryDTO entry = new HarnessSessionEntryDTO();
+    entry.setEntryId("00000000-0000-0000-0000-000000000001");
+    entry.setSessionId("00000000-0000-0000-0000-000000000002");
+    entry.setEntryType("MESSAGE");
+    entry.setPayloadJson("{}");
+
+    assertEquals(
+        HarnessUsageCostDTO.class,
+        HarnessSessionEntryDTO.class.getDeclaredField("usageCost").getType());
+    assertRequiredNullable(HarnessSessionEntryDTO.class, "usageCost");
+    assertTrue(MAPPER.writeValueAsString(entry).contains("\"usageCost\":null"));
+
+    HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
+    cost.setCurrency("USD");
+    cost.setAmount("0.001234567890");
+    entry.setUsageCost(cost);
+    String json = MAPPER.writeValueAsString(entry);
+    assertTrue(json.contains("\"currency\":\"USD\""), json);
+    // 金额是精确十进制文本：不做展示舍入，求和绝不用浮点。
+    assertTrue(json.contains("\"amount\":\"0.001234567890\""), json);
+    // 费用是 payloadJson 之外的独立字段：历史载荷本身保持逐字节不变。
+    assertTrue(json.contains("\"payloadJson\":\"{}\""), json);
+  }
+
+  /**
+   * 测试意图：预览响应只用 {@code notice} 声明能力边界（无 snapshotNotice 别名），两种视图各自携带稳定且语义正确的判别符与提示——
+   * 历史视图绝不声称自己就是原始发送字节。
+   */
+  @Test
+  void providerRequestPreviewExposesKindsAndSingleNoticeFieldOnly() throws Exception {
+    assertEquals("DRAFT_REQUEST_PREVIEW", HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW);
+    assertEquals(
+        "HISTORICAL_REQUEST_PREVIEW", HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW);
+    assertEquals(
+        String.class, HarnessProviderRequestPreviewDTO.class.getDeclaredField("notice").getType());
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessProviderRequestPreviewDTO.class.getDeclaredField("snapshotNotice"));
+    assertFalse(
+        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE
+            .toLowerCase()
+            .contains("click-time snapshot"),
+        "历史预览的提示不得声称点击时快照");
+    assertTrue(
+        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE.contains("not the original"),
+        "历史预览必须声明它不是原始发送字节");
+
+    HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
+    dto.setKind(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW);
+    dto.setNotice(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+    String json = MAPPER.writeValueAsString(dto);
+    assertTrue(json.contains("\"kind\":\"HISTORICAL_REQUEST_PREVIEW\""), json);
+    assertTrue(json.contains("\"notice\":"), json);
+  }
+
+  /**
+   * 测试意图：本地分支草稿预览请求只携带分支起点与命令批，必须与既有 Thread 写请求一样 fail-closed——未知字段、非字符串 startEntryId、非数组 commands
+   * 都在 DTO 边界拒绝，绝不需要（也不接受）threadName 等创建期字段。
+   */
+  @Test
+  void draftPreviewRequestIsStrictAboutBoundaryFields() throws Exception {
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"startEntryId":"00000000-0000-0000-0000-000000000001","commands":[],
+                 "threadName":"hidden"}
+                """,
+                HarnessDraftPreviewRequestDTO.class));
+    Exception unknownField =
+        assertThrows(
+            Exception.class,
+            () ->
+                LENIENT_MAPPER.readValue(
+                    """
+                    {"startEntryId":"00000000-0000-0000-0000-000000000001","commands":[],
+                     "threadName":"hidden"}
+                    """,
+                    HarnessDraftPreviewRequestDTO.class));
+    assertTrue(
+        hasCause(unknownField, HarnessRequestFormatException.class),
+        "unknown field rejection must originate from the DTO any-setter");
+    assertThrows(
+        Exception.class,
+        () ->
+            LENIENT_MAPPER.readValue(
+                """
+                {"startEntryId":1,"commands":[]}
+                """,
+                HarnessDraftPreviewRequestDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            LENIENT_MAPPER.readValue(
+                """
+                {"startEntryId":"00000000-0000-0000-0000-000000000001","commands":{}}
+                """,
+                HarnessDraftPreviewRequestDTO.class));
+
+    HarnessDraftPreviewRequestDTO parsed =
+        LENIENT_MAPPER.readValue(
+            """
+            {"startEntryId":"00000000-0000-0000-0000-000000000001",
+             "commands":[{"type":"USER_MESSAGE",
+                          "idempotencyKey":"00000000-0000-0000-0000-000000000003",
+                          "contents":[{"type":"TEXT","text":"hi"}]}]}
+            """,
+            HarnessDraftPreviewRequestDTO.class);
+    assertEquals("00000000-0000-0000-0000-000000000001", parsed.getStartEntryId());
+    assertEquals(1, parsed.getCommands().size());
+    assertEquals("USER_MESSAGE", parsed.getCommands().getFirst().getType());
   }
 }

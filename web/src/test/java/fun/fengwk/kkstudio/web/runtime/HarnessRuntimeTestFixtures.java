@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -43,7 +42,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -97,7 +95,7 @@ public final class HarnessRuntimeTestFixtures {
     MessagePayload payload =
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("ok"))),
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), null),
             null);
     return new Entry(id(4), id(1), id(3), payload, NOW);
   }
@@ -249,11 +247,6 @@ public final class HarnessRuntimeTestFixtures {
     return new ModelUsage(11, 7, 5, 3, 2, 13, 47);
   }
 
-  public static ModelCost cost() {
-    BigDecimal zero = BigDecimal.ZERO;
-    return new ModelCost("USD", zero, zero, zero, zero, zero, zero, zero);
-  }
-
   public static ProviderResponse toolCallResponse() {
     return new ProviderResponse(
         "",
@@ -261,7 +254,6 @@ public final class HarnessRuntimeTestFixtures {
         List.of(new ProviderToolCall("call-1", "web_search", "{}")),
         GenerationStopReason.COMPLETE,
         usage(),
-        cost(),
         null,
         null,
         null);
@@ -276,7 +268,7 @@ public final class HarnessRuntimeTestFixtures {
     MessagePayload payload =
         new MessagePayload(
             message,
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), null),
             null);
     return new Entry(id(4), id(1), id(3), payload, NOW);
   }
