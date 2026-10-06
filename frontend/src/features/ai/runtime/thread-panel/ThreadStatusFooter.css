@@ -1,4 +1,4 @@
-/* ThreadStatusFooter 组件样式：随本组件加载，父级集成后删除 styles.css 中旧的全局 footer 规则。 */
+/* ThreadStatusFooter 的单行只读事实。 */
 
 .thread-status-footer {
   flex-shrink: 0;

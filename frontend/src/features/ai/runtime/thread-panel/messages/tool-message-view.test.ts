@@ -197,6 +197,38 @@ describe('buildToolMessageView', () => {
     expect(toolMessageContents(call, emptyResult)).toEqual([])
   })
 
+  it('keeps execution output streaming after the call entry is durable', () => {
+    // 调用已持久化不代表日志结束；最终结果出现后才关闭尾部跟随。
+    const call = message({
+      toolName: 'bash',
+      rendererKey: 'bash',
+      subjectEntryId: 'assistant-1',
+      status: 'streaming',
+      partialContents: [{ type: 'text', text: 'running' }],
+    })
+    const streaming = buildToolMessageView({
+      message: call,
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+    expect(streaming.argumentsStreaming).toBe(false)
+    expect(streaming.contentsStreaming).toBe(true)
+
+    const completed = buildToolMessageView({
+      message: call,
+      result: message({
+        phase: 'result',
+        subjectEntryId: 'tool-result-1',
+        status: 'done',
+        ...withContents('completed'),
+      }),
+      expanded: true,
+      hasCallRecordRenderer: false,
+    })
+    expect(completed.contentsStreaming).toBe(false)
+    expect(completed.contents).toEqual([{ type: 'text', text: 'completed' }])
+  })
+
   it('drops the stale partial error once a durable result exists', () => {
     const call = message({ status: 'streaming' })
     const view = buildToolMessageView({

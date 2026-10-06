@@ -85,6 +85,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -935,9 +936,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private static final String QUESTIONNAIRE = loadQuestionnaire();
 
   private static String loadQuestionnaire() {
-    try {
-      ClassPathResource resource = new ClassPathResource("interaction/ask-user-questionnaire.json");
-      return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+    ClassPathResource resource = new ClassPathResource("interaction/ask-user-questionnaire.json");
+    try (InputStream input = resource.getInputStream()) {
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8).strip();
     } catch (IOException error) {
       throw new ExceptionInInitializerError(error);
     }

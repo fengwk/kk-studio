@@ -21,13 +21,15 @@ Thread 持久化 `ThreadYoloPolicy`：
 也不能 Follow 中间父节点或其他执行树。Follow 目标创建后不可变。
 根开关只修改根行，不递归修改子行或子行版本。Chat/Project 开关仅初始化新根。
 
-创建、权限预检和开关更新遵循既有树锁及业务行锁顺序。创建幂等指纹包含稳定的 Follow
-目标，不包含当时解析出的开关值。YOLO 影响尚未完成权限决定的调用，不自动批准
+创建、权限预检和开关更新遵循既有树锁及业务行锁顺序。权限判定在树锁内核对不可变
+祖先链与 Follow 目标；目标不是真实根时立即拒绝，不能读取另一棵树的开关。创建幂等
+指纹包含稳定的 Follow 目标，不包含当时解析出的开关值。YOLO 影响尚未完成权限决定的调用，不自动批准
 `WAITING_APPROVAL`，不回答问卷，也不回滚已经派发的工具。
 
 Thread 查询 DTO 的 `yoloPolicy` 为 `{mode, rootThreadId}`，根的 `rootThreadId` 为 null。
 该字段取代 Thread 查询投影的 `yoloEnabled`。新根创建请求、产品默认值和根开关命令仍可
-使用 boolean，因为这些输入不表达 Follow。观察面板显示跟随身份；实际开关读取根事实。
+使用 boolean，因为这些输入不表达 Follow。只读子面板根据 Follow 目标提供返回执行根入口，
+不提供独立开关；根开关显示根的权威策略。
 
 ## 人工交互与产品边界
 
@@ -52,19 +54,20 @@ ThreadJoin 的订阅方持有，结果通知与执行唤醒仍交给直接派发
 ## 面板与输入区
 
 ```text
-AgentPane：目标绑定、创建导航、pane 内查看路径
-  -> ThreadPane：已绑定 Thread 的数据与视图组装
-     -> 只读投影：Snapshot、实时流、timeline、Debug、usage
-     -> ThreadPanel：标题、主视图、Widget、可选根控制区、Footer
-        -> RootThreadControlArea：根草稿、提交、设置、Stop、审批、问卷
+AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投影
+  -> RootAgentPane（仅草稿或已确认的根）：useRootThreadControl
+     -> ThreadPane -> ThreadPanel：标题、对话/Debug、Widget、Footer
+        -> RootThreadControlArea：Composer、Stop、审批、问卷
+  -> BoundThreadView（只读子代理）：ThreadPane -> ThreadPanel，无控制区
 ```
 
 只读子代理不初始化编辑草稿、上传注册表和人工执行 Hook。Thread 身份未加载完成前不能
 暴露控制区。Debug 切换是查看入口，不依赖 Composer。资源解析和 Footer 由 ThreadPane
 组装，不增加重复参数转发层。
 
-Composer 保留 `contenteditable + ComposerPart[]`。DOM、光标、IME 和 Pill 编辑集中在
-编辑器边界，附件上传、焦点、输入历史和提交后释放复用既有能力。草稿只有一个权威所有者。
+`ThreadComposer` 保留 `contenteditable + ComposerPart[]` 的输入协议，负责附件注册、
+上传、输入历史和提交生命周期；`ComposerEditor` 只负责 DOM、光标、IME、换行和 Pill 编辑。
+文件、parts 与键盘事件通过明确回调跨越编辑器边界，草稿只有一个权威所有者。
 选择面板接管输入区域不丢草稿和上传，也不隐藏审批与活跃树。
 
 ## 活跃树与 pane 内导航
@@ -80,7 +83,8 @@ Composer 保留 `contenteditable + ComposerPart[]`。DOM、光标、IME 和 Pill
 保留原始执行绑定；Ctrl/Cmd、中键和复制地址保持浏览器行为。逐层进入可逐层返回，独立
 子线程地址提供返回执行根入口。导航状态不复制 Snapshot、执行状态或编辑草稿。
 
-根面板查看期间保留草稿与上传，但隐藏区域不能响应输入快捷键或抢焦点。返回恢复阅读位置、
+返回导航位于子面板顶部标题区，底部不留下输入区或操作栏。根面板查看期间保留草稿与上传，
+隐藏层同时使用 `hidden/inert` 与 Composer 的失活状态，不能响应输入快捷键或抢焦点。返回恢复阅读位置、
 展开状态和合理焦点。子代理完成不自动退出查看；加载失败也必须能返回。
 
 ## 工具卡片
@@ -124,10 +128,14 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 - 展开：同一份完整原文由现有 MarkdownRenderer 渲染，沿用展开样式。
 - 原始换行、缩进和 Markdown 保持不变；完成后保留最后预览，空思考不留空框。
 
-工具静态正文从顶部阅读，持续日志默认跟随底部；用户上滚后暂停，回到底部恢复。
+工具静态正文从顶部阅读，只有仍在执行的 bash 流式输出默认跟随底部；
+用户上滚后暂停，回到底部恢复。调用 Entry 已持久化不代表 partial 输出已经结束。
 不按工具截取 N 行，也不添加“还有 N 行”的前端截断提示。后端分页、外部化、捕获不完整
 说明是结果事实，必须保留。
 
+工具、思考与压缩卡片通过冒泡的阅读意图通知外层暂停跟随；恢复必须来自外层真实滚动
+手势回到底部阈值内，程序定位或布局收缩钳制 scrollTop 都不能恢复。外层只对新增记录
+与显式流式正文更新调度一次布局后贴底，不从尺寸变化推断消息增长。
 手动展开、思考样式切换和图片加载不能触发外层强制贴底。用户回看内部日志时外层也不能
 移走整张卡片。实时调用转持久调用保持身份、展开、滚动和选择；并行调用状态互不串扰。
 展开、复制、链接和下载各自独立，支持键盘、窄 pane 与触屏。
@@ -157,7 +165,8 @@ Thread 链接和结果/错误/partial，不重复铺开 task prompt。信封只�
 正文复用安全 Markdown 能力。不支持的 XML 标签保留为普通文本，标签、内容及其换行
 不能丢失；`<read-files>` 和 `<modified-files>` 不做专用解析、计数或折叠。正常标题、
 列表和代码块仍按 Markdown 展示，不把整份摘要变成 `<pre>`，不执行任意 HTML。
-只有确实出现共用结构时提取薄的系统卡片外壳与正文能力，不增加注册或配置体系。
+通知和压缩摘要共用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全正文；
+不增加注册或配置体系。
 
 展开、内部回看和媒体布局变化不触发外层强制贴底，普通刷新不重置展开状态。
 压缩后端、持久化及后续模型的上下文选择保持不变。
@@ -181,3 +190,6 @@ archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · $0.055 · cache 9
 
 Schema 切换只在已确认范围的备份后执行，不操作现有共享数据库。静态资源断连异常独立于
 Thread Runtime 验证，已提交响应不二次写 JSON，正常 API 错误翻译和必要日志保持不变。
+
+上级：[系统设计](../system-design.md)。模块实现见 [Harness Runtime](harness-runtime.md)、
+[Frontend](frontend.md)与 [Web](web.md)；检查入口见 [开发与测试](../operations/development-and-testing.md)。

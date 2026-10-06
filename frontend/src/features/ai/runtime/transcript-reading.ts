@@ -12,7 +12,7 @@ import type {
  * - 恢复只有一条路径：外层自己滚回到贴底阈值内，才重新跟随；
  * - 该事件只表达「暂停」，从不表达「恢复」，因此内层滚回自己的底部不会抢走外层控制权。
  *
- * 用法（E 的 ThinkingBlock 后续接同一接口，无需修改本文件）：
+ * 工具、思考和压缩卡片共用此接口：
  * `announceTranscriptReading(element, 'thinking')`，其中 `element` 必须是
  * transcript 滚动容器（`.thread-dialogue`）的后代节点。
  */

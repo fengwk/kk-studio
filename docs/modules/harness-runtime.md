@@ -55,10 +55,16 @@ NOTIFICATION
 
 ```text
 id / sessionId / parentThreadId / headEntryId / creationRequestHash / name
-yoloEnabled / executionControl / inputThroughSequence / nextCommandSequence / version / createdAt / updatedAt
+yoloPolicy / executionControl / inputThroughSequence / nextCommandSequence / version / createdAt / updatedAt
 ```
 
-`sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进。`name` 与 `yoloEnabled` 都由控制面直接更新：同值 no-op 不推进 version，值变化只替换该字段并精确 +1，不产生 Command / Entry / Work。YOLO 不与完整 Thread version 做 CAS，最后一次序列化写入生效。
+`sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进。`name` 与根的 YOLO 开关由控制面直接更新：同值 no-op 不推进 version，值变化只替换该字段并精确 +1，不产生 Command / Entry / Work。YOLO 不与完整 Thread version 做 CAS，最后一次序列化写入生效。
+
+[`ThreadYoloPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadYoloPolicy.java)
+区分根的 `ENABLE/DISABLE` 与子代理的 `FOLLOW(rootThreadId)`。子代理直接 Follow 真实执行根，
+Follow 目标创建后不可变，不复制父开关，也不能指向中间父或其他树。
+根开关更新只推进根行；既有子代理下一次权限决定在树锁内读取根策略，不改子行版本。
+创建与恢复校验祖先链和策略目标一致，创建幂等指纹只保存稳定策略身份。
 
 [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED` 两种持久执行控制：Stop 把目标 Thread 与完整后代置为 `STOPPED`，该事实跨进程重启保留；显式新用户输入或显式新任务可把目标恢复为 `RUNNABLE`，但不会自动重启后代。另持久记录 `inputThroughSequence`（已推进的输入水位）：只有 INPUT 推进它，压缩、CONTINUATION 与 Stop 都不推进。对外的 [`ThreadRuntimeStatus`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadRuntimeStatus.java) 由 [`ThreadSnapshot.runtimeStatus()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 从该 Thread 自身的事实派生，不递归子树：`STOPPED` 直接来自执行控制；其余按本地上下文给出 `IDLE` / `QUEUED` / `CONTINUATION_DUE` / `MODEL_*` / `TOOL_*` / `APPLYING`，其中 `IDLE`（无 queued command）与 `STOPPED` 的 `processing` 均为 false。等待子结果不是本地工作：父 Thread 不因未交付 join 而失去 `IDLE`。
 
@@ -188,7 +194,7 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 成功的 terminal 响应在成为 durable 事实之前先冻结 Tool 历史语义：`ModelExecution` 用本次调用的冻结 `toolBindings` 与注入的 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java)（Platform 实现按冻结贡献身份与完整定义查不可变 `HarnessCatalog`，再调用 Tool 的 `historyRenderer()`）算出每个 READY 调用的自然语言动作，写入 `ProviderToolCall.historyAction` 后再持久化。解析与渲染在 execution monitor 和状态事务之外完成，动态 MCP Tool 不触发数据库查询；任何缺失、blank、异常或定义变化都退化为不冻结 action——历史语义渲染绝不阻断模型调用，也绝不改写 durable arguments。
 
-[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时先看 Thread 的 YOLO 快照——为 true 则跳过 preflight 直接 Allow；否则在事务外调用 `ToolGateway.preflight`（期间 heartbeat 续租），`Allow` 记录免审批并进入 dispatch，`Ask` 转为 `WAITING_APPROVAL` 并完成 TOOL claim（不唤醒 THREAD），`Deny` 标记 `FAILED` 并唤醒 THREAD。preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
+[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时，在执行树锁内沿祖先链核对 YOLO policy；仅真实根的 `ENABLE` 跳过 preflight 直接 Allow，错根 Follow 立即拒绝。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租），`Allow` 记录免审批并进入 dispatch，`Ask` 转为 `WAITING_APPROVAL` 并完成 TOOL claim（不唤醒 THREAD），`Deny` 标记 `FAILED` 并唤醒 THREAD。preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
 
 三个 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java) 的两层模型：注入的 scheduler 只做固定周期唤醒、单在途合并与非阻塞分派，绝不阻塞在数据库上；独立的 heartbeat worker 执行 `renewWork` 短事务与所有权丢失回调。续租事务异常、调度器启动拒绝或分派执行器拒绝都视为所有权无法维系，统一触发一次 `onLostOwnership`；`stop()` 返回前保证不会再有排队的续租事务开始。
 

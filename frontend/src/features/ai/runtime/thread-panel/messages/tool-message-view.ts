@@ -90,11 +90,10 @@ export function buildToolMessageView({
     callMessage != null
     && callMessage.subjectEntryId == null
     && callMessage.status === 'streaming'
-  // durable 结果出现前，正文来自瞬态流式消息：只有这时才是持续日志。
+  // partial 属于执行中的调用，即使调用 Entry 已持久化，输出仍是瞬态流。
   const contentsSource = resultMessage ?? callMessage
   const contentsStreaming =
     contentsSource != null
-    && contentsSource.subjectEntryId == null
     && contentsSource.status === 'streaming'
   const contents = toolMessageContents(message, result)
   const preview = previewForToolCall(toolName, argumentsValue)

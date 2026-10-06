@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
 
 // jsdom 的测量 stub 为 7px/字符、容器宽 1200px：213 字符必然超宽，触发左侧省略。
 const LONG_THINKING = `HEAD-${'x'.repeat(200)}-TAILEND`
@@ -104,5 +105,20 @@ describe('ThinkingBlock', () => {
     expect(container.querySelector('.thread-thinking-line')?.textContent).toBe(
       'step one step two step three',
     )
+  })
+
+  it('announces reading before both expand and collapse layout changes', () => {
+    // 两次样式切换都暂停外层跟随，不能因收起后滚动位置钳制而重新贴底。
+    const { container } = render(<ThinkingBlock thinking={MIXED_THINKING} />)
+    const reading = vi.fn()
+    container.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, reading)
+
+    fireEvent.click(screen.getByRole('button', { name: '展开思考' }))
+    fireEvent.click(screen.getByRole('button', { name: '收起思考' }))
+
+    expect(reading.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([
+      { source: 'thinking-toggle' },
+      { source: 'thinking-toggle' },
+    ])
   })
 })

@@ -6,6 +6,7 @@ import {
   projectThinkingLine,
   type ThinkingLineProjection,
 } from '@/features/ai/runtime/thread-panel/messages/thinking-text'
+import { announceTranscriptReading } from '@/features/ai/runtime/transcript-reading'
 import { useI18n } from '@/shared/i18n'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import './ThinkingBlock.css'
@@ -71,7 +72,10 @@ export function ThinkingBlock({ thinking }: { thinking: string }) {
         className="thread-thinking-toggle"
         aria-expanded={expanded}
         aria-label={t(expanded ? 'ai.runtime.thinking.collapse' : 'ai.runtime.thinking.expand')}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={(event) => {
+          announceTranscriptReading(event.currentTarget, 'thinking-toggle')
+          setExpanded((current) => !current)
+        }}
       >
         {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
       </button>
