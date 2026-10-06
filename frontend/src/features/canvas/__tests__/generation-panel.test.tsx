@@ -88,6 +88,27 @@ const models: CanvasFunctionDefinitionDTO[] = [{
   unavailableReason: null,
 }]
 
+/** 共享下拉没有原生 value：当前选中值以 data-value 暴露。 */
+function expectSelectValue(label: string, value: string) {
+  // 展开的 listbox 与触发器共用相同的无障碍名称，因此按 role 精确定位触发器。
+  expect(screen.getByRole('button', { name: label })).toHaveAttribute('data-value', value)
+}
+
+/** 共享下拉的交互是「点触发器展开 → 点选项」，与原生 select 的 selectOptions 不同。 */
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(screen.getByLabelText(label))
+  await user.click(screen.getByRole('option', { name: option }))
+}
+
+function changeSelect(label: string, option: string) {
+  fireEvent.click(screen.getByLabelText(label))
+  fireEvent.click(screen.getByRole('option', { name: option }))
+}
+
 function resourceNode(
   id: UUIDString,
   name: string,
@@ -270,7 +291,7 @@ describe('Canvas generic generation panel', () => {
     const latestPrompt = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(latestPrompt.prompt).toBe('raw prompt with @user and <tag>')
 
-    await user.selectOptions(screen.getByLabelText('比例'), '16:9')
+    await chooseOption(user, '比例', '16:9')
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(latest.parameters.ratio).toBe('16:9')
   })
@@ -283,7 +304,7 @@ describe('Canvas generic generation panel', () => {
     view.runtime.models = models
     view.rerenderPanel(view.snapshot, view.target)
     expect(await screen.findByRole('textbox', { name: '提示词' })).toHaveValue('frontback')
-    expect(screen.getByLabelText('比例')).toHaveValue('1:1')
+    expectSelectValue('比例', '1:1')
 
     view.rerenderPanel(view.snapshot, {
       ...view.target,
@@ -299,8 +320,8 @@ describe('Canvas generic generation panel', () => {
     expect(await screen.findByRole('textbox', { name: '提示词' })).toHaveValue(
       'server replacement',
     )
-    expect(screen.getByLabelText('模型')).toHaveValue('image-b')
-    expect(screen.getByLabelText('时长')).toHaveValue(9)
+    expectSelectValue('模型', 'image-b')
+    expect(screen.getByLabelText('时长')).toHaveValue('9')
   })
 
   it('keeps a newer focused draft when an earlier debounced config is acknowledged', async () => {
@@ -334,12 +355,12 @@ describe('Canvas generic generation panel', () => {
     const user = userEvent.setup()
     const view = renderPanel()
     await user.click(screen.getByRole('button', { name: '插入参考 @single_0' }))
-    await user.selectOptions(screen.getByLabelText('模型'), 'image-b')
+    await chooseOption(user, '模型', 'Image B')
     const latest = view.scheduleFunctionConfig.mock.calls.at(-1)?.[2] as CanvasFunctionConfig
     expect(view.scheduleFunctionConfig.mock.calls.at(-1)?.[1]).toBe('image-b')
     expect(latest.parameters).toEqual({ duration: 5 })
     expect(latest.references.some((ref) => ref.nodeId === NODE_SINGLE)).toBe(false)
-    expect(screen.getByLabelText('时长')).toHaveValue(5)
+    expect(screen.getByLabelText('时长')).toHaveValue('5')
     const scheduledCount = view.scheduleFunctionConfig.mock.calls.length
     fireEvent.change(screen.getByLabelText('时长'), { target: { value: '20' } })
     expect(view.scheduleFunctionConfig).toHaveBeenCalledTimes(scheduledCount)
@@ -630,27 +651,27 @@ describe('Canvas generic generation panel', () => {
     expect(screen.queryByLabelText('可用参考资源')).not.toBeInTheDocument()
   })
 
-  it('disables an unavailable model option and ignores an unknown model selection', async () => {
+  it('disables an unavailable model option and keeps the current model', async () => {
+    const user = userEvent.setup()
     const unavailable: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       available: false,
       unavailableReason: 'quota exceeded',
     }]
     const view = renderPanel(null, unavailable)
-    const select = screen.getByLabelText('模型')
-    expect(within(select).getByRole('option', { name: 'Image A（quota exceeded）' }))
-      .toBeDisabled()
-    fireEvent.change(select, { target: { value: 'ghost-model' } })
+    await user.click(screen.getByLabelText('模型'))
+    const option = screen.getByRole('option', { name: 'Image A（quota exceeded）' })
+    expect(option).toBeDisabled()
+    fireEvent.click(option)
     expect(view.scheduleFunctionConfig).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('模型')).toHaveValue('image-a')
+    expectSelectValue('模型', 'image-a')
   })
 
   it('rejects non-integer and below-min number edits for INTEGER parameters', async () => {
     const view = renderPanel(null, models)
-    const select = screen.getByLabelText('模型')
-    fireEvent.change(select, { target: { value: 'image-b' } })
+    changeSelect('模型', 'Image B')
     const numberInput = screen.getByLabelText('时长')
-    expect(numberInput).toHaveValue(5)
+    expect(numberInput).toHaveValue('5')
     const scheduled = view.scheduleFunctionConfig.mock.calls.length
 
     fireEvent.change(numberInput, { target: { value: '3.5' } })
@@ -675,8 +696,7 @@ describe('Canvas generic generation panel', () => {
     expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '1:1' })
 
     // 2. 表单联动：当未脏态修改 JSON 时，表单控件（比例选择器）修改会联动同步更新 JSON 文本
-    const ratioSelect = screen.getByLabelText('比例')
-    fireEvent.change(ratioSelect, { target: { value: '16:9' } })
+    changeSelect('比例', '16:9')
     expect(JSON.parse((textarea as HTMLTextAreaElement).value)).toEqual({ ratio: '16:9' })
 
     // 3. 用户在 JSON 编辑器中输入合法 JSON：更新表单与调度

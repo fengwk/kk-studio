@@ -2,6 +2,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useLayoutEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/shared/i18n'
+import './controls.css'
 
 export interface SelectOption {
   value: string

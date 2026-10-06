@@ -14,7 +14,7 @@ import { agentService } from '@/shared/api/agent-service'
 import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 
 /**
  * 保序 permission 规则编辑器（模型可见 tool name + 该 tool 下有序规则数组）。

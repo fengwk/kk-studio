@@ -8,7 +8,7 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
-import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
+import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 function resolveChatAgentName(

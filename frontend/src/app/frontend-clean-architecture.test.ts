@@ -47,6 +47,50 @@ describe('Frontend architecture and entry contracts', () => {
     expect(threadRoute?.workspace).toBe(true)
   })
 
+  it('forbids native select elements in production UI in favor of the shared Select', () => {
+    // 测试意图：生产代码的下拉必须使用共享 Select（主题一致、键盘与 Escape 语义统一），
+    // 禁止退回浏览器原生 <select>。豁免项会在各自 owner 的切片落地后删除，不得长期保留。
+    const PENDING_REMOVAL_EXEMPTIONS = new Set([
+      // 分支 owner 正在用 HistoryTree + history-tree.css 取代该组件；
+      // 集成后此文件被删除，本豁免必须同步移除（否则门禁形同虚设）。
+      'features/ai/chat/HistoryBranchPanel.tsx',
+    ])
+
+    const srcRootPath = path.resolve(process.cwd(), 'src')
+    function collectFiles(dirPath: string): string[] {
+      const entries = readdirSync(dirPath, { withFileTypes: true })
+      const results: string[] = []
+      for (const entry of entries) {
+        const full = path.join(dirPath, entry.name)
+        if (entry.isDirectory()) {
+          if (entry.name !== 'node_modules' && entry.name !== '__tests__') {
+            results.push(...collectFiles(full))
+          }
+        } else if (/\.(ts|tsx)$/.test(entry.name) && !entry.name.includes('.test.')) {
+          results.push(full)
+        }
+      }
+      return results
+    }
+
+    const violations: string[] = []
+    for (const filePath of collectFiles(srcRootPath)) {
+      const relFile = path.relative(srcRootPath, filePath).replace(/\\/g, '/')
+      if (PENDING_REMOVAL_EXEMPTIONS.has(relFile)) {
+        continue
+      }
+      if (/<select[\s>]/.test(readFileSync(filePath, 'utf8'))) {
+        violations.push(relFile)
+      }
+    }
+
+    expect(violations).toEqual([])
+    // 豁免清单必须真实存在，避免过期豁免掩盖已删除文件。
+    for (const exempt of PENDING_REMOVAL_EXEMPTIONS) {
+      expect(readFileSync(path.join(srcRootPath, exempt), 'utf8')).toContain('<select')
+    }
+  })
+
   it('protects shared .code-textarea styles and prevents legacy comfyui page selectors', () => {
     // 测试意图：确保 styles.css 中多个特性共享的 .code-textarea 样式得到持久保障，
     // 同时避免已下线的旧 comfyui 页面级样式选择器重新混入全局样式表。

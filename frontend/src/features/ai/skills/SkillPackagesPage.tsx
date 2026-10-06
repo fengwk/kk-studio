@@ -2,10 +2,11 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
-import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { Button } from '@/shared/ui/controls/Button'
+import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -400,16 +401,13 @@ function CreatePackageModal({
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('ai.skillPackages.create')}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <ModalHeader title={t('ai.skillPackages.create')} onClose={onClose} />
-        <form onSubmit={handleSubmit} noValidate>
+    <Dialog
+      className="resource-modal-card"
+      title={t('ai.skillPackages.create')}
+      pending={createMutation.isPending}
+      onClose={onClose}
+    >
+      <form className="modal-card-form" onSubmit={handleSubmit} noValidate>
           <div className="modal-body">
             {formError ? (
               <div className="form-error-banner" role="alert">
@@ -462,21 +460,15 @@ function CreatePackageModal({
           </div>
 
           <div className="modal-footer">
-            <button
-              type="button"
-              className="ghost-inline-btn"
-              onClick={onClose}
-              disabled={createMutation.isPending}
-            >
+            <Button variant="inline" onClick={onClose} disabled={createMutation.isPending}>
               {t('shared.cancel')}
-            </button>
-            <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
+            </Button>
+            <Button type="submit" disabled={createMutation.isPending}>
               {createMutation.isPending ? '...' : t('ai.catalog.action.confirmCreate')}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }
 
@@ -526,19 +518,13 @@ function EditPackageModal({
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('ai.skillPackages.edit')}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <ModalHeader
-          title={`${t('ai.skillPackages.edit')}: ${target.packageName}`}
-          onClose={onClose}
-        />
-        <form onSubmit={handleSubmit} noValidate>
+    <Dialog
+      className="resource-modal-card"
+      title={`${t('ai.skillPackages.edit')}: ${target.packageName}`}
+      pending={editMutation.isPending}
+      onClose={onClose}
+    >
+      <form className="modal-card-form" onSubmit={handleSubmit} noValidate>
           <div className="modal-body">
             {formError ? (
               <div className="form-error-banner" role="alert">
@@ -577,20 +563,14 @@ function EditPackageModal({
           </div>
 
           <div className="modal-footer">
-            <button
-              type="button"
-              className="ghost-inline-btn"
-              onClick={onClose}
-              disabled={editMutation.isPending}
-            >
+            <Button variant="inline" onClick={onClose} disabled={editMutation.isPending}>
               {t('shared.cancel')}
-            </button>
-            <button type="submit" className="btn-primary" disabled={editMutation.isPending}>
+            </Button>
+            <Button type="submit" disabled={editMutation.isPending}>
               {editMutation.isPending ? '...' : t('ai.catalog.action.saveChanges')}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Code, Pencil, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Code, Pencil, RefreshCw } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { isConflictError } from '@/shared/api/client'
-import { Checkbox } from '@/shared/ui/console/Checkbox'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO, ProjectWorkflowDTO } from '../types'
@@ -82,17 +84,6 @@ function EditProjectModalContent({
       isMountedRef.current = false
     }
   }, [])
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
 
   const advanceVersion = (newVersion: string) => {
     setCurrentVersion((prev) => (BigInt(newVersion) > BigInt(prev) ? newVersion : prev))
@@ -275,36 +266,13 @@ function EditProjectModalContent({
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
+    <Dialog
+      className="resource-modal-card edit-project-modal-card"
+      title="编辑项目配置"
+      headerIcon={<Pencil size={18} aria-hidden="true" />}
+      pending={activeSubmission !== null}
+      onClose={onClose}
     >
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="编辑项目"
-        style={{ maxWidth: '640px' }}
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Pencil size={18} aria-hidden="true" />
-            <h3>编辑项目配置</h3>
-          </div>
-          <button
-            type="button"
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
 
         <div
           style={{
@@ -320,9 +288,8 @@ function EditProjectModalContent({
           <span style={{ color: 'var(--fg-muted)' }}>
             编辑版本: <code>{currentVersion}</code>
           </span>
-          <button
-            type="button"
-            className="ghost-btn"
+          <Button
+            variant="ghost"
             onClick={() => void handleReloadVersionKeepDraft()}
             disabled={activeSubmission !== null}
             style={{ fontSize: '12px', padding: '2px 8px' }}
@@ -333,7 +300,7 @@ function EditProjectModalContent({
               aria-hidden="true"
             />
             <span>刷新版本</span>
-          </button>
+          </Button>
         </div>
 
         <div className="tab-nav" style={{ padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
@@ -435,13 +402,12 @@ function EditProjectModalContent({
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
-                  <button
+                  <Button
                     type="submit"
-                    className="btn-primary"
                     disabled={activeSubmission !== null}
-                  >
+                    >
                     {activeSubmission === 'basic' ? '保存中...' : '保存基础信息'}
-                  </button>
+                  </Button>
                 </div>
               </form>
 
@@ -501,13 +467,12 @@ function EditProjectModalContent({
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button
+                  <Button
                     type="submit"
-                    className="btn-primary"
                     disabled={activeSubmission !== null}
-                  >
+                    >
                     {activeSubmission === 'yolo' ? '保存中...' : '保存 YOLO 模式'}
-                  </button>
+                  </Button>
                 </div>
               </form>
             </div>
@@ -551,16 +516,15 @@ function EditProjectModalContent({
                 <label htmlFor="edit-project-workflow-json" className="form-label" style={{ margin: 0 }}>
                   工作流 (JSON)
                 </label>
-                <button
-                  type="button"
-                  className="ghost-btn"
+                <Button
+                  variant="ghost"
                   onClick={handleFormatJson}
                   disabled={activeSubmission !== null}
                   style={{ fontSize: '12px', padding: '2px 8px' }}
-                >
+                  >
                   <Code size={12} aria-hidden="true" />
                   <span>格式化 JSON</span>
-                </button>
+                </Button>
               </div>
 
               <div className="form-group">
@@ -587,28 +551,22 @@ function EditProjectModalContent({
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
+                <Button
                   type="submit"
-                  className="btn-primary"
                   disabled={activeSubmission !== null}
                 >
                   {activeSubmission === 'workflow' ? '保存中...' : '保存工作流'}
-                </button>
+                </Button>
               </div>
             </form>
           )}
         </div>
 
         <div className="modal-footer">
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={onClose}
-          >
+          <Button variant="ghost" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Trash2, X } from 'lucide-react'
+import { AlertTriangle, Trash2 } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -28,20 +30,6 @@ export function DeleteProjectModal({
     }
   }, [isOpen])
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
-
   if (!isOpen || !project) {
     return null
   }
@@ -61,36 +49,13 @@ export function DeleteProjectModal({
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
+    <Dialog
+      className="confirm-modal-card"
+      title="确认删除项目"
+      headerIcon={<Trash2 size={18} color="var(--danger)" aria-hidden="true" />}
+      pending={isDeleting}
+      onClose={onClose}
     >
-      <div
-        className="modal-card confirm-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="确认删除项目"
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Trash2 size={18} color="var(--danger)" aria-hidden="true" />
-            <h3>确认删除项目</h3>
-          </div>
-          <button
-            type="button"
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-
         <div className="modal-body confirm-modal-body">
           {errorMessage && (
             <div className="form-error-banner" role="alert">
@@ -109,24 +74,13 @@ export function DeleteProjectModal({
         </div>
 
         <div className="modal-footer">
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={onClose}
-            disabled={isDeleting}
-          >
+          <Button variant="ghost" onClick={onClose} disabled={isDeleting}>
             取消
-          </button>
-          <button
-            type="button"
-            className="btn-primary danger"
-            onClick={handleDelete}
-            disabled={isDeleting}
-          >
+          </Button>
+          <Button danger onClick={handleDelete} disabled={isDeleting}>
             {isDeleting ? '删除中...' : '确认删除'}
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }

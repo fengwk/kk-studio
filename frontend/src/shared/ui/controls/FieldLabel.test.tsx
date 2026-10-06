@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 
 describe('FieldLabel', () => {
   it('only renders the required marker for required fields', () => {

@@ -674,11 +674,11 @@ describe('ProjectDetailPage', () => {
 
     // 3. 点击编辑按钮打开 EditProjectModal 并关闭
     fireEvent.click(screen.getByRole('button', { name: '编辑 / 工作流' }))
-    expect(await screen.findByRole('dialog', { name: '编辑项目' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '编辑项目配置' })).toBeInTheDocument()
     const editCloseBtns = screen.getAllByRole('button', { name: '关闭' })
     fireEvent.click(editCloseBtns[editCloseBtns.length - 1])
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: '编辑项目' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: '编辑项目配置' })).not.toBeInTheDocument()
     })
 
     // 4. 点击删除按钮打开 DeleteProjectModal 并关闭

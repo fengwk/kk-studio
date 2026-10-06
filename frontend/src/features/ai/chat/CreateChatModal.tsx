@@ -1,7 +1,8 @@
 import { type FormEventHandler } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { Select } from '@/shared/ui/console/Select'
+import { Button } from '@/shared/ui/controls/Button'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { Select } from '@/shared/ui/controls/Select'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 
@@ -43,15 +44,13 @@ export function CreateChatModal({
     mode === 'edit' ? t('ai.catalog.action.saveChanges') : t('ai.catalog.action.confirmCreate')
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <form
-        className="modal-card create-chat-modal-card"
-        aria-label={modalTitle}
-        onSubmit={onSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-        noValidate
-      >
-        <ModalHeader title={modalTitle} onClose={onClose} />
+    <Dialog
+      className="create-chat-modal-card"
+      title={modalTitle}
+      pending={pending}
+      onClose={onClose}
+    >
+      <form className="modal-card-form" aria-label={modalTitle} onSubmit={onSubmit} noValidate>
         <div className="modal-body">
           {formError ? (
             <div className="form-error-banner" role="alert">
@@ -79,15 +78,15 @@ export function CreateChatModal({
           </label>
         </div>
         <div className="modal-footer">
-          <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
-          </button>
-          <button type="submit" className="btn-primary" disabled={pending}>
+          </Button>
+          <Button type="submit" disabled={pending}>
             {submitLabel}
-          </button>
+          </Button>
         </div>
       </form>
-    </ModalBackdrop>
+    </Dialog>
   )
 }
 

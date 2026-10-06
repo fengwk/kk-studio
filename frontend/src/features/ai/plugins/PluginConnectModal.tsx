@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ExternalLink } from 'lucide-react'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { Button } from '@/shared/ui/controls/Button'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { Select } from '@/shared/ui/controls/Select'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { useI18n } from '@/shared/i18n'
 import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
@@ -88,18 +90,11 @@ export function PluginConnectModal({
   const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('plugins.connectDialog.title', { name: plugin.name })}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <ModalHeader
-          title={t('plugins.connectDialog.title', { name: plugin.name })}
-          onClose={onClose}
-        />
+    <Dialog
+      className="resource-modal-card"
+      title={t('plugins.connectDialog.title', { name: plugin.name })}
+      onClose={onClose}
+    >
         <div className="modal-body">
           {isKeyUnavailable ? (
             <div className="form-error-banner" role="alert">
@@ -123,28 +118,22 @@ export function PluginConnectModal({
           <div className="form-group" style={{ marginBottom: '16px' }}>
             <FieldLabel required>{t('plugins.connectDialog.step1')}</FieldLabel>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
-              <select
-                value={selectedRegion}
-                disabled={isKeyUnavailable || prepareMutation.isPending}
-                onChange={(e) => setSelectedRegion(e.target.value)}
-                style={{ flex: '1', padding: '6px 10px', borderRadius: '4px' }}
-                aria-label={t('plugins.region')}
-              >
-                {candidates.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="btn-primary"
+              <div style={{ flex: '1', minWidth: 0 }}>
+                <Select
+                  aria-label={t('plugins.region')}
+                  value={selectedRegion}
+                  disabled={isKeyUnavailable || prepareMutation.isPending}
+                  options={candidates.map((candidate) => ({ value: candidate, label: candidate }))}
+                  onChange={setSelectedRegion}
+                />
+              </div>
+              <Button
                 disabled={isKeyUnavailable || prepareMutation.isPending}
                 onClick={handleOpenLogin}
               >
-                <ExternalLink size={16} aria-hidden="true" style={{ marginRight: '4px' }} />
+                <ExternalLink size={16} aria-hidden="true" />
                 {prepareMutation.isPending ? '...' : t('plugins.connectDialog.openLogin')}
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -170,25 +159,22 @@ export function PluginConnectModal({
             </div>
 
             <div className="modal-footer" style={{ marginTop: '20px', padding: 0 }}>
-              <button
-                type="button"
-                className="ghost-inline-btn"
+              <Button
+                variant="inline"
                 onClick={onClose}
                 disabled={completeMutation.isPending}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 type="submit"
-                className="btn-primary"
                 disabled={isKeyUnavailable || !callbackUrl.trim() || completeMutation.isPending}
               >
                 {completeMutation.isPending ? '...' : t('plugins.connectDialog.complete')}
-              </button>
+              </Button>
             </div>
           </form>
         </div>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }

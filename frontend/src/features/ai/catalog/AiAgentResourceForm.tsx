@@ -1,4 +1,5 @@
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import {
   buildSkillCandidates,
   buildSubagentCandidates,
@@ -14,7 +15,7 @@ import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai
 import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 import type {
   AgentDefinitionDTO,
   SkillPackageDTO,
@@ -218,16 +219,13 @@ export function AgentForm({
       </fieldset>
 
       <div className="form-group">
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={draft.inheritParentEnvironment}
-            onChange={(event) =>
-              onChange({ ...draft, inheritParentEnvironment: event.target.checked })
-            }
-          />
-          <span>{t('ai.catalog.form.inheritParentEnvironment')}</span>
-        </label>
+        <Checkbox
+          checked={draft.inheritParentEnvironment}
+          onChange={(inheritParentEnvironment) =>
+            onChange({ ...draft, inheritParentEnvironment })
+          }
+          label={t('ai.catalog.form.inheritParentEnvironment')}
+        />
       </div>
 
       {models.length === 0 && (
@@ -297,16 +295,12 @@ function CapabilityChecklist({
         const checked = selected.includes(option.value)
         const stateClass = option.missing ? ' is-offline is-missing' : option.offline ? ' is-offline' : ''
         return (
-          <label
+          <Checkbox
             key={option.value}
             className={`capability-option capability-option-detailed${checked ? ' is-selected' : ''}${stateClass}`}
+            checked={checked}
+            onChange={() => onToggle(option.value)}
           >
-            <input
-              type="checkbox"
-              value={option.value}
-              checked={checked}
-              onChange={() => onToggle(option.value)}
-            />
             <span className="capability-option-body">
               <span className="capability-option-heading">
                 <code className="capability-name">{option.name}</code>
@@ -327,7 +321,7 @@ function CapabilityChecklist({
                 </span>
               ) : null}
             </span>
-          </label>
+          </Checkbox>
         )
       })}
     </div>
