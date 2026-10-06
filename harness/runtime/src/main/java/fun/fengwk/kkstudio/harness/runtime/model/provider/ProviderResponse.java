@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
 import java.util.HashSet;
@@ -20,7 +19,7 @@ import java.util.Set;
  * <p>{@code stopReason} 是规范化生成结束原因（{@link GenerationStopReason}），与 tool calls 正交：{@code COMPLETE}
  * 可以有或没有 calls，{@code LENGTH} 可以有或没有已观测 calls，{@code FILTERED} 的 calls 与 diagnostics 必须为空， {@code
  * CONTINUE} 的 calls 与 diagnostics 同样必须为空（协议要求续写时不得同时表达工具意图）。{@code usage} 是 Provider 归一化后的实际 token
- * 用量，{@code cost} 是基于本次生效价格计算的非空成本快照。 {@code requestId}、{@code serviceTier} 由 Provider
+ * 用量。{@code requestId}、{@code serviceTier} 由 Provider
  * 报告，可为空。{@code rawUsageJson} 是 Provider usage 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为
  * {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
  *
@@ -33,7 +32,6 @@ public record ProviderResponse(
     List<ProviderToolCall> toolCalls,
     GenerationStopReason stopReason,
     ModelUsage usage,
-    ModelCost cost,
     String requestId,
     String serviceTier,
     String rawUsageJson,
@@ -54,7 +52,6 @@ public record ProviderResponse(
     toolCalls = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
     stopReason = Objects.requireNonNull(stopReason, "stopReason");
     usage = Objects.requireNonNull(usage, "usage");
-    cost = Objects.requireNonNull(cost, "cost");
     requestId = optionalNonBlank(requestId, "requestId");
     serviceTier = optionalNonBlank(serviceTier, "serviceTier");
     rawUsageJson = normalizeRawUsageJson(rawUsageJson);
@@ -72,7 +69,6 @@ public record ProviderResponse(
       List<ProviderToolCall> toolCalls,
       GenerationStopReason stopReason,
       ModelUsage usage,
-      ModelCost cost,
       String requestId,
       String serviceTier,
       String rawUsageJson,
@@ -83,7 +79,6 @@ public record ProviderResponse(
         toolCalls,
         stopReason,
         usage,
-        cost,
         requestId,
         serviceTier,
         rawUsageJson,
@@ -97,7 +92,6 @@ public record ProviderResponse(
       List<ProviderToolCall> toolCalls,
       GenerationStopReason stopReason,
       ModelUsage usage,
-      ModelCost cost,
       String requestId,
       String serviceTier,
       String rawUsageJson) {
@@ -107,14 +101,13 @@ public record ProviderResponse(
         toolCalls,
         stopReason,
         usage,
-        cost,
         requestId,
         serviceTier,
         rawUsageJson,
         List.of());
   }
 
-  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/cost/计时）原样保留。 */
+  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/计时）原样保留。 */
   public ProviderResponse withToolCalls(List<ProviderToolCall> value) {
     return new ProviderResponse(
         text,
@@ -122,7 +115,6 @@ public record ProviderResponse(
         value,
         stopReason,
         usage,
-        cost,
         requestId,
         serviceTier,
         rawUsageJson,
@@ -141,7 +133,6 @@ public record ProviderResponse(
         toolCalls,
         stopReason,
         usage,
-        cost,
         requestId,
         serviceTier,
         rawUsageJson,

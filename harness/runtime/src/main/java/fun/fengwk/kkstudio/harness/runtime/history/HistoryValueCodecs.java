@@ -8,12 +8,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
-import java.math.BigDecimal;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
@@ -34,7 +32,7 @@ final class HistoryValueCodecs {
   private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
-  private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
+  private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
 
   /** 可选的 assistantMetadata 字段：缺失或 null 表示无可信流计时（含旧历史记录）。 */
   private static final Set<String> METADATA_OPTIONAL_FIELDS = orderedSet("decodeDurationMillis");
@@ -48,16 +46,6 @@ final class HistoryValueCodecs {
           "cacheWriteLongTokens",
           "reasoningTokens",
           "providerTotalTokens");
-  private static final Set<String> COST_FIELDS =
-      orderedSet(
-          "currency",
-          "input",
-          "output",
-          "cacheRead",
-          "cacheWrite",
-          "cacheWriteLong",
-          "reasoning",
-          "total");
 
   /** canonical 小写 dotted/dashed 标识符（contributorId / customType / rendererKey）的最大字符数。 */
   static final int MAX_IDENTIFIER_CHARS = 64;
@@ -166,16 +154,6 @@ final class HistoryValueCodecs {
     usageNode.put("cacheWriteLongTokens", usage.cacheWriteLongTokens());
     usageNode.put("reasoningTokens", usage.reasoningTokens());
     usageNode.put("providerTotalTokens", usage.providerTotalTokens());
-    ModelCost cost = metadata.cost();
-    ObjectNode costNode = node.putObject("cost");
-    costNode.put("currency", cost.currency());
-    costNode.put("input", cost.input().toPlainString());
-    costNode.put("output", cost.output().toPlainString());
-    costNode.put("cacheRead", cost.cacheRead().toPlainString());
-    costNode.put("cacheWrite", cost.cacheWrite().toPlainString());
-    costNode.put("cacheWriteLong", cost.cacheWriteLong().toPlainString());
-    costNode.put("reasoning", cost.reasoning().toPlainString());
-    costNode.put("total", cost.total().toPlainString());
     if (metadata.decodeDurationMillis() != null) {
       node.put("decodeDurationMillis", metadata.decodeDurationMillis());
     }
@@ -199,21 +177,9 @@ final class HistoryValueCodecs {
             requiredNonNegativeLong(usageNode, "cacheWriteLongTokens", "assistantMetadata.usage"),
             requiredNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
             requiredNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
-    ObjectNode costNode = requireObject(node.get("cost"), "assistantMetadata.cost");
-    requireExactFields(costNode, COST_FIELDS, "assistantMetadata.cost");
-    ModelCost cost =
-        new ModelCost(
-            requiredText(costNode, "currency", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "input", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "output", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "cacheRead", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "cacheWrite", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "cacheWriteLong", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "reasoning", "assistantMetadata.cost"),
-            requiredDecimal(costNode, "total", "assistantMetadata.cost"));
     Long decodeDurationMillis =
         nullableNonNegativeLong(node, "decodeDurationMillis", "assistantMetadata");
-    return new AssistantMessageMetadata(stopReason, usage, cost, decodeDurationMillis);
+    return new AssistantMessageMetadata(stopReason, usage, decodeDurationMillis);
   }
 
   // ---------- 通用 JSON 工具方法 ----------
@@ -311,19 +277,6 @@ final class HistoryValueCodecs {
           context + "." + field + " must be a positive integer or null");
     }
     return value.intValue();
-  }
-
-  static BigDecimal requiredDecimal(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(context + "." + field + " must be text");
-    }
-    try {
-      return new BigDecimal(value.textValue());
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a decimal string", error);
-    }
   }
 
   static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
