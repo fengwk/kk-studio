@@ -453,11 +453,13 @@ describe('ThreadWorkspacePage', () => {
     expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(OTHER_CHILD_THREAD_ID)
   })
 
-  it('opens the relationship tree for a child while keeping its own composer interactive', async () => {
-    // 关系树仍可查看真实 root 与兄弟；子 Thread 工作区同时保有自己可交互的 composer。
-    const user = userEvent.setup()
+  it('does not expose the inactive relationship tree on a child thread', async () => {
+    // 手动关系树已移除：子 Thread 自身不是 root，因此不挂载活跃代理树，也不查询整棵树。
     const rootId = '00000000-0000-4000-8000-000000000010'
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
+      ...snapshotWithPendingTool(CHILD_THREAD_ID),
+      thread: thread({ threadId: CHILD_THREAD_ID, parentThreadId: rootId, name: 'Waiting Parent' }),
+    })
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       {
         threadId: rootId,
@@ -498,18 +500,8 @@ describe('ThreadWorkspacePage', () => {
     ])
 
     renderPage(`/threads/${CHILD_THREAD_ID}`)
-    const toggle = await screen.findByRole('button', { name: 'Agent 关系' })
-    expect(toggle).toBeEnabled()
     expect(await screen.findByRole('button', { name: '允许' })).toBeEnabled()
-    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toHaveAttribute('contenteditable', 'true')
+    expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
     expect(harnessService.getThreadTree).not.toHaveBeenCalled()
-
-    await user.click(toggle)
-    expect(await screen.findByRole('link', { name: 'Root Agent' })).toHaveAttribute('href', `/threads/${rootId}`)
-    expect(screen.getByRole('link', { name: 'Idle Child' })).toHaveAttribute('href', `/threads/${OTHER_CHILD_THREAD_ID}`)
-    expect(screen.getByText('已停止')).toBeInTheDocument()
-    expect(screen.getByText('失败')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '允许' })).toBeEnabled()
-    expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toHaveAttribute('contenteditable', 'true')
   })
 })

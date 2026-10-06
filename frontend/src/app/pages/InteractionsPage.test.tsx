@@ -79,6 +79,7 @@ describe('InteractionsPage', () => {
           interactionId: 'int-1',
           status: 'WAITING_INPUT',
           threadId: 'th-1',
+          rootThreadId: 'root-th-1',
           sessionId: 'sess-1',
           owner: { type: 'CHAT', chatId: 'chat-abc', issueId: null, agentName: null },
           toolCallId: 'call-1',
@@ -93,6 +94,7 @@ describe('InteractionsPage', () => {
           interactionId: 'int-2',
           status: 'WAITING_APPROVAL',
           threadId: 'th-2',
+          rootThreadId: 'root-th-2',
           sessionId: 'sess-2',
           owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-101', agentName: 'architect' },
           toolCallId: 'call-2',
@@ -123,7 +125,7 @@ describe('InteractionsPage', () => {
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
     const chatSourceBtn = screen.getByTitle('打开对话')
     fireEvent.click(chatSourceBtn)
-    expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=th-1')
+    expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=root-th-1')
 
     // 测试意图：验证点击 ISSUE_AGENT 来源时通过 query issue 解析 projectId 并精准跳转至 /projects/{id}?issue={id}&thread={threadId}
     vi.spyOn(projectsApi, 'getIssue').mockResolvedValue({
@@ -140,7 +142,7 @@ describe('InteractionsPage', () => {
     const issueSourceBtn = screen.getByTitle('打开任务对话')
     fireEvent.click(issueSourceBtn)
     await waitFor(() => {
-      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=th-2')
+      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=root-th-2')
     })
   })
 
@@ -151,6 +153,7 @@ describe('InteractionsPage', () => {
           interactionId: 'int-err',
           status: 'WAITING_INPUT',
           threadId: 'th-err',
+          rootThreadId: 'root-th-err',
           sessionId: 'sess-err',
           owner: { type: 'ISSUE_AGENT', chatId: null, issueId: 'issue-missing', agentName: 'coder' },
           toolCallId: 'call-err',
@@ -186,6 +189,7 @@ describe('InteractionsPage', () => {
               interactionId: 'int-raw',
               status: 'COMPLETED' as never,
               threadId: 'th-raw',
+          rootThreadId: 'root-th-raw',
               sessionId: 'sess-raw',
               owner: { type: 'UNKNOWN' as never },
               toolCallId: 'call-raw',
@@ -198,6 +202,7 @@ describe('InteractionsPage', () => {
               interactionId: 'int-appr',
               status: 'WAITING_APPROVAL',
               threadId: 'th-appr',
+          rootThreadId: 'root-th-appr',
               sessionId: 'sess-appr',
               owner: { type: 'CHAT', chatId: 'c1' },
               toolCallId: 'call-appr',
@@ -216,6 +221,7 @@ describe('InteractionsPage', () => {
             interactionId: 'int-more',
             status: 'WAITING_INPUT',
             threadId: 'th-more',
+          rootThreadId: 'root-th-more',
             sessionId: 'sess-more',
             owner: { type: 'CHAT', chatId: 'c1' },
             toolCallId: 'call-more',

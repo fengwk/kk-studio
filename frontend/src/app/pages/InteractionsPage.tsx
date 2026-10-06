@@ -40,6 +40,7 @@ export function InteractionsPage() {
     }
   }
 
+  // 全局交互中心把 owner 导航到执行根：根面板统一承接审批与问卷，来源身份仍是原始调用。
   const renderOwnerSource = (item: InteractionDTO) => {
     const owner = item.owner
     if (owner.type === 'CHAT' && owner.chatId) {
@@ -47,7 +48,7 @@ export function InteractionsPage() {
         <button
           type="button"
           className="interaction-source-link"
-          onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.threadId)}`)}
+          onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.rootThreadId)}`)}
           title={t('ai.interaction.openChatSource')}
         >
           <MessageSquare size={14} aria-hidden="true" />
@@ -62,7 +63,7 @@ export function InteractionsPage() {
         <button
           type="button"
           className="interaction-source-link"
-          onClick={() => void handleOpenIssueSource(owner.issueId!, item.threadId)}
+          onClick={() => void handleOpenIssueSource(owner.issueId!, item.rootThreadId)}
           title={t('ai.interaction.openIssueSource')}
         >
           <Workflow size={14} aria-hidden="true" />
