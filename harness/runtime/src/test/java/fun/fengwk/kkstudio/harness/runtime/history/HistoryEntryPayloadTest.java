@@ -606,6 +606,6 @@ class HistoryEntryPayloadTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.valueOf(2));
-    return new AssistantMessageMetadata(reason, usage, cost);
+    return new AssistantMessageMetadata(reason, usage);
   }
 }

@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -609,7 +608,6 @@ final class HarnessRuntimeTestSupport {
         List.of(new ProviderToolCall(toolCallId, toolName, argumentsJson)),
         GenerationStopReason.COMPLETE,
         usage(),
-        cost(),
         null,
         null,
         null);
@@ -1228,7 +1226,7 @@ final class HarnessRuntimeTestSupport {
       calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
     }
     return new ProviderResponse(
-        "", "", calls, GenerationStopReason.COMPLETE, usage(), cost(), null, null, null);
+        "", "", calls, GenerationStopReason.COMPLETE, usage(), null, null, null);
   }
 
   static ModelInvocationError modelError() {
@@ -1240,7 +1238,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, usage(), cost());
+    return new AssistantMessageMetadata(stopReason, usage());
   }
 
   private static ModelUsage usage() {
@@ -1272,24 +1270,7 @@ final class HarnessRuntimeTestSupport {
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static ToolBinding hostBinding() {

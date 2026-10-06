@@ -9,14 +9,12 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -26,13 +24,12 @@ import java.util.Set;
 
 /**
  * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为 {@code text}、{@code thinking}、{@code
- * toolCalls}、 {@code stopReason}、{@code usage}、{@code cost}、{@code requestId}、{@code
- * serviceTier}、{@code rawUsageJson}、{@code toolCallDiagnostics} 与 {@code
- * decodeDurationMillis}（Harness 观测计时，可空但字段必须存在：{@code null} 显式表达“无可信流计时”，缺失即拒绝）；每个嵌套层都要求精确字段集合，并以
- * {@link IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
+ * toolCalls}、 {@code stopReason}、{@code usage}、{@code requestId}、{@code serviceTier}、{@code
+ * rawUsageJson}、{@code toolCallDiagnostics} 与 {@code decodeDurationMillis}（Harness
+ * 观测计时，可空但字段必须存在：{@code null} 显式表达“无可信流计时”，缺失即拒绝）；每个嵌套层都要求精确字段集合，并以 {@link
+ * IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
  *
- * <p>{@code rawUsageJson} 原样保留；{@link ModelCost} 中的 {@link BigDecimal} 字段以 {@code toPlainString()}
- * 字符串输出。
+ * <p>{@code rawUsageJson} 原样保留。
  */
 public final class ProviderResponseJsonCodec {
 
@@ -46,7 +43,6 @@ public final class ProviderResponseJsonCodec {
           "toolCalls",
           "stopReason",
           "usage",
-          "cost",
           "requestId",
           "serviceTier",
           "rawUsageJson",
@@ -65,16 +61,6 @@ public final class ProviderResponseJsonCodec {
           "cacheWriteLongTokens",
           "reasoningTokens",
           "providerTotalTokens");
-  private static final Set<String> COST_FIELDS =
-      orderedSet(
-          "currency",
-          "input",
-          "output",
-          "cacheRead",
-          "cacheWrite",
-          "cacheWriteLong",
-          "reasoning",
-          "total");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -103,7 +89,6 @@ public final class ProviderResponseJsonCodec {
     }
     node.put("stopReason", response.stopReason().name());
     node.set("usage", encodeUsage(response.usage()));
-    node.set("cost", encodeCost(response.cost()));
     if (response.requestId() == null) {
       node.putNull("requestId");
     } else {
@@ -154,7 +139,6 @@ public final class ProviderResponseJsonCodec {
       throw new IllegalArgumentException("unknown generation stop reason", exception);
     }
     ModelUsage usage = decodeUsage(node.get("usage"));
-    ModelCost cost = decodeCost(node.get("cost"));
     String requestId = decodeNullableText(node, "requestId");
     String serviceTier = decodeNullableText(node, "serviceTier");
     String rawUsageJson = jsonContainerText(node, "rawUsageJson");
@@ -170,7 +154,6 @@ public final class ProviderResponseJsonCodec {
         toolCallList,
         stopReason,
         usage,
-        cost,
         requestId,
         serviceTier,
         rawUsageJson,
@@ -258,33 +241,6 @@ public final class ProviderResponseJsonCodec {
         nonNegativeLong(node, "providerTotalTokens"));
   }
 
-  private ObjectNode encodeCost(ModelCost cost) {
-    ObjectNode node = NODES.objectNode();
-    node.put("currency", cost.currency());
-    node.put("input", cost.input().toPlainString());
-    node.put("output", cost.output().toPlainString());
-    node.put("cacheRead", cost.cacheRead().toPlainString());
-    node.put("cacheWrite", cost.cacheWrite().toPlainString());
-    node.put("cacheWriteLong", cost.cacheWriteLong().toPlainString());
-    node.put("reasoning", cost.reasoning().toPlainString());
-    node.put("total", cost.total().toPlainString());
-    return node;
-  }
-
-  private ModelCost decodeCost(JsonNode value) {
-    ObjectNode node = object(value, "cost");
-    requireFields(node, COST_FIELDS, "cost");
-    return new ModelCost(
-        text(node, "currency"),
-        decimal(node, "input"),
-        decimal(node, "output"),
-        decimal(node, "cacheRead"),
-        decimal(node, "cacheWrite"),
-        decimal(node, "cacheWriteLong"),
-        decimal(node, "reasoning"),
-        decimal(node, "total"));
-  }
-
   private static ObjectNode object(JsonNode value, String name) {
     if (!(value instanceof ObjectNode object)) {
       throw new IllegalArgumentException(name + " must be an object");
@@ -328,18 +284,6 @@ public final class ProviderResponseJsonCodec {
       throw new IllegalArgumentException(field + " must be a non-negative integer");
     }
     return parsed;
-  }
-
-  private static BigDecimal decimal(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    try {
-      return new BigDecimal(value.textValue());
-    } catch (NumberFormatException exception) {
-      throw new IllegalArgumentException(field + " must be a decimal", exception);
-    }
   }
 
   private static String jsonObjectText(ObjectNode node, String field) {

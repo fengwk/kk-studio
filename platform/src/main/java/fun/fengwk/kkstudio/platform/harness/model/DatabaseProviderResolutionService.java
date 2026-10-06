@@ -2,27 +2,19 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 
-import java.util.EnumSet;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -33,9 +25,8 @@ import java.util.UUID;
  * generation，使既有 invocation 确定性拒绝；不轮换 generation 的 timeout-only 更新保持 attempt-time live，删除后确定性 not
  * found。
  *
- * <p>持久 request 中已有的 {@link ProviderCacheControl} 按当前 {@code provider.configJson} 下 factory 的
- * {@link ProviderFactory#promptCacheCapability(String)} 规范化：当前 capability 无法表达时降级为 {@code
- * none()}，否则按当前 capability 重求形态、retention 与断点。
+ * <p>持久 request 中已有的 cache control（retention 与 session key）在规划期冻结，执行期原样沿用，不再按当前 {@code
+ * provider.configJson} 重新规范化；具体到各协议的 cache 参数映射由 Adapter 完成。
  */
 @Component
 public final class DatabaseProviderResolutionService implements ProviderResolutionService {
@@ -123,18 +114,6 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
               + " for "
               + providerType);
     }
-    PromptCacheCapability promptCacheCapability;
-    try {
-      promptCacheCapability = factory.promptCacheCapability(provider.getConfigJson());
-      if (promptCacheCapability == null) {
-        throw new IllegalStateException(
-            "ProviderFactory returned null promptCacheCapability for " + providerName);
-      }
-    } catch (RuntimeException error) {
-      // Provider 扩展可能在异常中携带原始配置；此边界只暴露稳定、安全的定位信息，不保留不可信 cause。
-      throw new IllegalArgumentException(
-          "cannot resolve prompt cache capability for " + providerName);
-    }
     ProviderRequest effectiveRequest =
         new ProviderRequest(
             request.model(),
@@ -146,7 +125,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             resourceMaterializer.materialize(
                 request.messages(), request.model().inputModalities(), adapter.mediaCapabilities()),
             request.tools(),
-            normalizeCacheControl(request, promptCacheCapability));
+            // cache control 已在规划期冻结（retention + session key）；执行期不再按当前 capability 重新规范化。
+            request.cacheControl());
     return new ResolvedExecution(
         effectiveRequest,
         timeoutPolicy,
@@ -178,78 +158,5 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                   providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
           return adapter.encodeRequestBody(bodyRequest, descriptor);
         });
-  }
-
-  /**
-   * 把持久 request 的 cache control 按当前 capability 规范化。仅保留当前 capability 可表达的 retention 与 affinity
-   * key，并按当前 capability 重建形态与断点；无法表达时降级为 {@code none()}。
-   */
-  private static ProviderCacheControl normalizeCacheControl(
-      ProviderRequest request, PromptCacheCapability capability) {
-    ProviderCacheControl persisted = request.cacheControl();
-    if (persisted.retention() == PromptCacheRetention.NONE) {
-      return ProviderCacheControl.none();
-    }
-    PromptCacheMode mode = capability.mode();
-    if (mode == PromptCacheMode.UNKNOWN
-        || mode == PromptCacheMode.UNSUPPORTED
-        || mode == PromptCacheMode.AUTOMATIC) {
-      return ProviderCacheControl.none();
-    }
-    PromptCacheRetention retention = supportedRetention(persisted.retention(), capability);
-    if (retention == PromptCacheRetention.NONE) {
-      return ProviderCacheControl.none();
-    }
-    String affinityKey = persisted.affinityKey();
-    if (mode == PromptCacheMode.AFFINITY) {
-      // AFFINITY 形态只允许空 breakpoints；affinity key 沿用持久值（ProviderCacheControl 构造器已保证非空白）。
-      return ProviderCacheControl.affinity(retention, affinityKey);
-    }
-    return breakpointControl(request, capability, retention, affinityKey);
-  }
-
-  /** BREAKPOINTS 形态：沿用已有 affinityKey（构造器已保证非空白），按当前 capability 与请求实际内容重新求 breakpoint 交集。 */
-  private static ProviderCacheControl breakpointControl(
-      ProviderRequest request,
-      PromptCacheCapability capability,
-      PromptCacheRetention retention,
-      String affinityKey) {
-    Set<PromptCacheBreakpoint> supported = capability.supportedBreakpoints();
-    EnumSet<PromptCacheBreakpoint> resolved = EnumSet.noneOf(PromptCacheBreakpoint.class);
-    // systemInstruction 恒非空，因此 capability 声明支持 SYSTEM 断点时它总是有效前缀。
-    if (supported.contains(PromptCacheBreakpoint.SYSTEM)) {
-      resolved.add(PromptCacheBreakpoint.SYSTEM);
-    }
-    if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
-      resolved.add(PromptCacheBreakpoint.TOOLS);
-    }
-    if (supported.contains(PromptCacheBreakpoint.CONVERSATION) && hasConversationContent(request)) {
-      resolved.add(PromptCacheBreakpoint.CONVERSATION);
-    }
-    if (resolved.isEmpty()) {
-      return ProviderCacheControl.none();
-    }
-    return ProviderCacheControl.breakpoints(retention, affinityKey, resolved);
-  }
-
-  /** retention 优先沿用持久 control，其次 SHORT；都不支持时返回 NONE 使调用方整体降级。 */
-  private static PromptCacheRetention supportedRetention(
-      PromptCacheRetention preferred, PromptCacheCapability capability) {
-    if (capability.supports(preferred)) {
-      return preferred;
-    }
-    if (capability.supports(PromptCacheRetention.SHORT)) {
-      return PromptCacheRetention.SHORT;
-    }
-    return PromptCacheRetention.NONE;
-  }
-
-  private static boolean hasConversationContent(ProviderRequest request) {
-    for (ProviderMessage message : request.messages()) {
-      if (!message.contents().isEmpty()) {
-        return true;
-      }
-    }
-    return false;
   }
 }

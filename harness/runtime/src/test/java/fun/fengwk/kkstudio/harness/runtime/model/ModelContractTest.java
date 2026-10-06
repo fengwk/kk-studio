@@ -9,10 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
@@ -23,52 +19,34 @@ import java.util.Set;
 /** 模型描述、用量与成本公共契约测试。 */
 class ModelContractTest {
 
-  /** 模型描述必须使用非空 name；inputModalities 非空且不可变；pricing 不可为空。 */
+  /** 模型描述必须使用非空 name；inputModalities 非空且不可变。 */
   @Test
   void enforcesDescriptorResourceAndIdentityInvariants() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                "", "model", "model", Set.of(ModelInputModality.TEXT), true, false, pricing()));
+                "", "model", "model", Set.of(ModelInputModality.TEXT), true, false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ModelDescriptor(
-                "provider", "", "", Set.of(ModelInputModality.TEXT), true, false, pricing()));
+            new ModelDescriptor("provider", "", "", Set.of(ModelInputModality.TEXT), true, false));
     assertThrows(
         NullPointerException.class,
-        () -> new ModelDescriptor("provider", "model", "model", null, true, false, pricing()));
+        () -> new ModelDescriptor("provider", "model", "model", null, true, false));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelDescriptor("provider", "model", "model", Set.of(), true, false, pricing()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelDescriptor(
-                "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, false, null));
+        () -> new ModelDescriptor("provider", "model", "model", Set.of(), true, false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                "\u2003provider",
-                "model",
-                "model",
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                pricing()));
+                "\u2003provider", "model", "model", Set.of(ModelInputModality.TEXT), true, false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelDescriptor(
-                "provider/alias",
-                "model",
-                "model",
-                Set.of(ModelInputModality.TEXT),
-                true,
-                false,
-                pricing()));
+                "provider/alias", "model", "model", Set.of(ModelInputModality.TEXT), true, false));
     assertDoesNotThrow(
         () ->
             new ModelDescriptor(
@@ -77,8 +55,7 @@ class ModelContractTest {
                 "model/with/slash",
                 Set.of(ModelInputModality.TEXT),
                 true,
-                false,
-                pricing()));
+                false));
   }
 
   /** inputModalities 必须防御性拷贝：外部集合的后续修改不得影响 descriptor。 */
@@ -87,7 +64,7 @@ class ModelContractTest {
     Set<ModelInputModality> mutable = new HashSet<>();
     mutable.add(ModelInputModality.TEXT);
     ModelDescriptor descriptor =
-        new ModelDescriptor("provider", "model", "model", mutable, true, false, pricing());
+        new ModelDescriptor("provider", "model", "model", mutable, true, false);
     mutable.add(ModelInputModality.IMAGE);
     assertEquals(Set.of(ModelInputModality.TEXT), descriptor.inputModalities());
   }
@@ -142,7 +119,39 @@ class ModelContractTest {
     assertEquals(1_900_000, usage.totalTokens());
     assertEquals(1_900_000, usage.categorizedTokens());
     assertEquals("USD", cost.currency());
-    assertEquals(new BigDecimal("5.800000000000"), cost.amount());
+    assertEquals(new BigDecimal("1.6"), cost.input());
+    assertEquals(new BigDecimal("2"), cost.output());
+    assertEquals(new BigDecimal("0.1"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.3"), cost.cacheWrite());
+    assertEquals(0, BigDecimal.ZERO.compareTo(cost.cacheWriteLong()));
+    assertEquals(new BigDecimal("1.8"), cost.reasoning());
+    assertEquals(new BigDecimal("5.8"), cost.total());
+  }
+
+  /** 精确计算不做分项舍入：真实微费用不会被截断为 0，total 是精确分项之和（先求和后舍入由读取投影负责）。 */
+  @Test
+  void keepsExactMicroCostWithoutPerCategoryRounding() {
+    ModelPricing pricing =
+        new ModelPricing(
+            "USD",
+            "tier-1",
+            "default",
+            BigDecimal.ONE,
+            "v1",
+            new BigDecimal("0.000000000001"),
+            BigDecimal.ZERO,
+            new BigDecimal("0.000000000001"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO);
+    ModelUsage usage = new ModelUsage(1, 0, 1, 0, 0, 0, 2);
+
+    ModelCost cost = ModelCost.calculate(pricing, usage);
+
+    assertEquals(new BigDecimal("0.000000000000000001"), cost.input());
+    assertEquals(new BigDecimal("0.000000000000000001"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.000000000000000002"), cost.total());
+    assertTrue(cost.total().signum() > 0);
   }
 
   /** cost 构造要求 total 等于分项之和；任何不等都必须在公共边界拒绝。 */
@@ -194,7 +203,7 @@ class ModelContractTest {
     assertTrue(new ModelUsage(1, 1, 1, 1, 0, 0, 4).cacheHit());
   }
 
-  /** multiplier 在分项金额上独立应用，避免分项舍入差让 total 校验失败。 */
+  /** multiplier 在每个分项上独立应用并全链路精确计算；total 恒等于精确分项之和。 */
   @Test
   void calculatesCostWithTierMultiplierOnEachCategory() {
     ModelPricing pricing =
@@ -214,13 +223,13 @@ class ModelContractTest {
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
-    assertEquals(new BigDecimal("2.400000000000"), cost.input());
-    assertEquals(new BigDecimal("3.000000000000"), cost.output());
-    assertEquals(new BigDecimal("0.150000000000"), cost.cacheRead());
-    assertEquals(new BigDecimal("0.450000000000"), cost.cacheWrite());
-    assertEquals(new BigDecimal("0.000000000000"), cost.cacheWriteLong());
-    assertEquals(new BigDecimal("2.700000000000"), cost.reasoning());
-    assertEquals(new BigDecimal("8.700000000000"), cost.total());
+    assertEquals(new BigDecimal("2.40"), cost.input());
+    assertEquals(new BigDecimal("3.0"), cost.output());
+    assertEquals(new BigDecimal("0.15"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.45"), cost.cacheWrite());
+    assertEquals(new BigDecimal("0.00"), cost.cacheWriteLong());
+    assertEquals(new BigDecimal("2.70"), cost.reasoning());
+    assertEquals(new BigDecimal("8.70"), cost.total());
     BigDecimal sum =
         cost.input()
             .add(cost.output())
@@ -281,166 +290,36 @@ class ModelContractTest {
                 BigDecimal.ZERO));
   }
 
-  /** UNKNOWN/UNSUPPORTED/AUTOMATIC 不支持非 NONE retention，但 supports(NONE) 始终为 true。 */
+  /** ProviderCacheControl 只保留 retention 与 session key：NONE 时 key 必须为空/null，非 NONE 时 key 必须非空白。 */
   @Test
-  void capabilityNonExplicitModesOnlySupportNone() {
-    PromptCacheCapability automatic = PromptCacheCapability.automatic();
-    PromptCacheCapability unsupported = PromptCacheCapability.unsupported();
-    PromptCacheCapability unknown = PromptCacheCapability.unknown();
-    assertFalse(automatic.supports(PromptCacheRetention.SHORT));
-    assertFalse(unsupported.supports(PromptCacheRetention.LONG));
-    assertFalse(unknown.supports(PromptCacheRetention.SHORT));
-    assertTrue(automatic.supports(PromptCacheRetention.NONE));
-    assertTrue(unsupported.supports(PromptCacheRetention.NONE));
-    assertTrue(unknown.supports(PromptCacheRetention.NONE));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PromptCacheCapability(
-                PromptCacheMode.AUTOMATIC, Set.of(PromptCacheRetention.SHORT), Set.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PromptCacheCapability(
-                PromptCacheMode.UNSUPPORTED, Set.of(), Set.of(PromptCacheBreakpoint.SYSTEM)));
-  }
-
-  /** AFFINITY 必须至少一个非 NONE retention，且 breakpoints 必须为空。 */
-  @Test
-  void capabilityAffinityRequiresRetentionAndForbidsBreakpoints() {
-    assertThrows(IllegalArgumentException.class, () -> PromptCacheCapability.affinity(Set.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PromptCacheCapability.affinity(Set.of(PromptCacheRetention.NONE)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new PromptCacheCapability(
-                PromptCacheMode.AFFINITY,
-                Set.of(PromptCacheRetention.SHORT),
-                Set.of(PromptCacheBreakpoint.SYSTEM)));
-    PromptCacheCapability capability =
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
-    assertTrue(capability.supports(PromptCacheRetention.SHORT));
-    assertTrue(capability.supports(PromptCacheRetention.NONE));
-    assertFalse(capability.supports(PromptCacheRetention.LONG));
-  }
-
-  /** BREAKPOINTS 必须至少一个非 NONE retention 与至少一个 breakpoint。 */
-  @Test
-  void capabilityBreakpointsRequiresBothRetentionAndBreakpoint() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PromptCacheCapability.breakpoints(Set.of(PromptCacheRetention.SHORT), Set.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            PromptCacheCapability.breakpoints(
-                Set.of(PromptCacheRetention.NONE), Set.of(PromptCacheBreakpoint.SYSTEM)));
-    PromptCacheCapability capability =
-        PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS));
-    assertTrue(capability.supports(PromptCacheRetention.SHORT));
-    assertEquals(
-        Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
-        capability.supportedBreakpoints());
-  }
-
-  /** PromptCachePolicy 必须拒绝 capability 不支持的 retention。 */
-  @Test
-  void policyRejectsUnsupportedRetention() {
-    PromptCacheCapability capability =
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PromptCachePolicy.of(capability, PromptCacheRetention.LONG));
-    assertEquals(
-        PromptCacheRetention.SHORT, PromptCachePolicy.affinityShort(capability).retention());
-  }
-
-  /** Policy factories 必须保留 capability mode，并拒绝与工厂语义不匹配的 mode。 */
-  @Test
-  void policyFactoriesValidateModesAndRetentions() {
-    PromptCacheCapability automatic = PromptCacheCapability.automatic();
-    PromptCacheCapability breakpoints =
-        PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-            Set.of(PromptCacheBreakpoint.SYSTEM));
-
-    assertEquals(automatic, PromptCachePolicy.automatic(automatic).capability());
-    assertEquals(
-        PromptCacheRetention.SHORT, PromptCachePolicy.breakpointsShort(breakpoints).retention());
-    assertEquals(
-        PromptCacheRetention.LONG, PromptCachePolicy.breakpointsLong(breakpoints).retention());
-    assertEquals(
-        PromptCacheRetention.LONG,
-        PromptCachePolicy.of(
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.LONG)),
-                PromptCacheRetention.LONG)
-            .retention());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PromptCachePolicy.automatic(PromptCacheCapability.unsupported()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> PromptCachePolicy.breakpointsShort(PromptCacheCapability.automatic()));
-  }
-
-  /** ProviderCacheControl 在 NONE 时不允许携带 key 或 breakpoints。 */
-  @Test
-  void providerCacheControlNoneForbidsKeyAndBreakpoints() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderCacheControl(PromptCacheRetention.NONE, "key", Set.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProviderCacheControl(
-                PromptCacheRetention.NONE, null, Set.of(PromptCacheBreakpoint.SYSTEM)));
+  void providerCacheControlEnforcesRetentionKeyInvariants() {
     assertEquals(PromptCacheRetention.NONE, ProviderCacheControl.none().retention());
+    assertNull(ProviderCacheControl.none().key());
+    assertEquals(
+        ProviderCacheControl.none(), ProviderCacheControl.session(PromptCacheRetention.NONE, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ProviderCacheControl(PromptCacheRetention.NONE, "key"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ProviderCacheControl(PromptCacheRetention.SHORT, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ProviderCacheControl(PromptCacheRetention.SHORT, "  "));
+    ProviderCacheControl control =
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "session-1");
+    assertEquals(PromptCacheRetention.LONG, control.retention());
+    assertEquals("session-1", control.key());
   }
 
-  /** ProviderCacheControl 非 NONE 时 key 必须非空白，breakpoints 由 affinity/breakpoints 工厂显式决定。 */
+  /** session 工厂在 NONE 时忽略 sessionId 并归一化为 none()。 */
   @Test
-  void providerCacheControlEnabledValidatesKeyAndBreakpoints() {
+  void sessionFactoryNormalizesNoneRetention() {
+    assertEquals(
+        ProviderCacheControl.none(),
+        ProviderCacheControl.session(PromptCacheRetention.NONE, "session-ignored"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ProviderCacheControl.affinity(PromptCacheRetention.SHORT, ""));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProviderCacheControl.affinity(PromptCacheRetention.NONE, "key"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProviderCacheControl.breakpoints(PromptCacheRetention.SHORT, "key", Set.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.NONE, "key", Set.of(PromptCacheBreakpoint.SYSTEM)));
-    ProviderCacheControl affinity =
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "model-1");
-    assertEquals(PromptCacheRetention.SHORT, affinity.retention());
-    assertEquals("model-1", affinity.affinityKey());
-    assertTrue(affinity.breakpoints().isEmpty());
-    ProviderCacheControl breakpoints =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.LONG, "model-2", Set.of(PromptCacheBreakpoint.SYSTEM));
-    assertEquals(Set.of(PromptCacheBreakpoint.SYSTEM), breakpoints.breakpoints());
-  }
-
-  private ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
+        () -> ProviderCacheControl.session(PromptCacheRetention.SHORT, "  "));
   }
 }

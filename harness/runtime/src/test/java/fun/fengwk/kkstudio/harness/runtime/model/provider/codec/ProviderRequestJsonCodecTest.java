@@ -16,12 +16,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -44,10 +40,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -120,8 +114,6 @@ class ProviderRequestJsonCodecTest {
         assertInstanceOf(ProviderToolResultBlock.class, decoded.messages().get(2).contents().get(0))
             .detailsJson());
     assertEquals(INPUT_SCHEMA_JSON, decoded.tools().get(0).inputSchemaJson());
-    assertEquals(
-        new BigDecimal("3.000000000000"), decoded.model().pricing().inputPerMillionTokens());
   }
 
   @Test
@@ -155,34 +147,20 @@ class ProviderRequestJsonCodecTest {
     assertEquals(120L, decodedBlock.totalLines());
   }
 
-  /** 所有合法的 cache capability 形态都必须通过同一严格的 request boundary。 */
+  /** NONE 与携带 session key 的 control 都必须通过同一严格的 request boundary。 */
   @Test
-  void roundTripsEveryLegalPromptCacheModeAndControlShape() {
-    List<CacheCase> cases =
+  void roundTripsNoCacheAndSessionCacheControl() {
+    List<ProviderCacheControl> cases =
         List.of(
-            new CacheCase(PromptCacheCapability.unknown(), ProviderCacheControl.none()),
-            new CacheCase(PromptCacheCapability.unsupported(), ProviderCacheControl.none()),
-            new CacheCase(PromptCacheCapability.automatic(), ProviderCacheControl.none()),
-            new CacheCase(
-                PromptCacheCapability.affinity(
-                    EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG)),
-                ProviderCacheControl.affinity(PromptCacheRetention.LONG, "affinity")),
-            new CacheCase(
-                PromptCacheCapability.breakpoints(
-                    EnumSet.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-                    EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)),
-                ProviderCacheControl.breakpoints(
-                    PromptCacheRetention.SHORT,
-                    "affinity",
-                    EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM))));
+            ProviderCacheControl.none(),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "thread-1"),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "thread-1"));
 
-    for (CacheCase cacheCase : cases) {
-      ProviderRequest request = requestWithCache(cacheCase);
-      assertEquals(
-          request, codec.decode(codec.encode(request)), cacheCase.capability().mode().name());
+    for (ProviderCacheControl control : cases) {
+      ProviderRequest request = requestWithControl(control);
+      assertEquals(request.cacheControl(), codec.decode(codec.encode(request)).cacheControl());
+      assertEquals(request, codec.decode(codec.encode(request)));
     }
-
-    assertEquals(PromptCacheMode.values().length, cases.size());
   }
 
   /** String 与 raw-JSON boundary 对 duplicate field 与 trailing document 的拒绝行为对称。 */
@@ -264,13 +242,9 @@ class ProviderRequestJsonCodecTest {
       assertRejected(root -> variant(root).put(removed, NODES.textNode("legacy")));
     }
     assertStrictLayer(
-        root -> pricing(root).put("extra", true),
-        root -> pricing(root).remove("currency"),
-        root -> pricing(root).put("inputPerMillionTokens", 3));
-    assertStrictLayer(
         root -> cacheControl(root).put("extra", true),
-        root -> cacheControl(root).remove("affinityKey"),
-        root -> cacheControl(root).put("affinityKey", true));
+        root -> cacheControl(root).remove("key"),
+        root -> cacheControl(root).put("key", true));
     assertStrictLayer(
         root -> message(root, 0).put("extra", true),
         root -> message(root, 0).remove("role"),
@@ -298,9 +272,7 @@ class ProviderRequestJsonCodecTest {
   void rejectsUnknownEnumsAndDiscriminators() {
     assertRejected(root -> message(root, 0).put("role", "DEVELOPER"));
     assertRejected(root -> cacheControl(root).put("retention", "FOREVER"));
-    assertRejected(
-        root ->
-            ((ArrayNode) cacheControl(root).path("breakpoints")).set(0, NODES.textNode("MESSAGE")));
+    assertRejected(root -> cacheControl(root).put("key", true));
     assertRejected(
         root ->
             ((ArrayNode) model(root).path("inputModalities")).set(0, NODES.textNode("FOREVER")));
@@ -370,20 +342,16 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> ((ArrayNode) model(root).path("inputModalities")).removeAll());
     assertRejected(root -> variant(root).put("reasoningEffort", 1));
     assertRejected(root -> variant(root).put("reasoningEffort", " "));
-    assertRejected(root -> pricing(root).put("serviceTierMultiplier", "bad"));
-    assertRejected(root -> pricing(root).put("serviceTierMultiplier", "0"));
-    assertRejected(root -> cacheControl(root).putNull("affinityKey"));
-    assertRejected(root -> cacheControl(root).put("affinityKey", " "));
+    assertRejected(root -> cacheControl(root).putNull("key"));
     assertRejected(
         root -> {
-          cacheControl(root).put("retention", "NONE");
-          cacheControl(root).put("affinityKey", "not-allowed");
-          cacheControl(root).set("breakpoints", NODES.arrayNode());
+          cacheControl(root).put("retention", "SHORT");
+          cacheControl(root).put("key", " ");
         });
     assertRejected(
         root -> {
           cacheControl(root).put("retention", "NONE");
-          cacheControl(root).putNull("affinityKey");
+          cacheControl(root).put("key", "not-allowed");
         });
     assertRejected(root -> ((ArrayNode) root.path("messages")).set(0, NODES.numberNode(1)));
     assertRejected(root -> ((ArrayNode) root.path("tools")).set(0, NODES.numberNode(1)));
@@ -536,8 +504,7 @@ class ProviderRequestJsonCodecTest {
             "gpt-5-mini-2025-08-07",
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
             true,
-            true,
-            canonicalPricing());
+            true);
     ProviderToolCall call = new ProviderToolCall("call-1", "lookup", ARGUMENTS_JSON);
     return new ProviderRequest(
         model,
@@ -573,28 +540,10 @@ class ProviderRequestJsonCodecTest {
                 ProviderMessageRole.ASSISTANT,
                 List.of(new ProviderTextBlock("The capital of France is Paris.")))),
         List.of(new ProviderToolDefinition("lookup", "Look up facts", INPUT_SCHEMA_JSON)),
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "thread-1",
-            EnumSet.of(PromptCacheBreakpoint.TOOLS, PromptCacheBreakpoint.SYSTEM)));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "thread-1"));
   }
 
-  private static ModelPricing canonicalPricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        new BigDecimal("1.5"),
-        "v1",
-        new BigDecimal("3.000000000000"),
-        new BigDecimal("6.000000000000"),
-        new BigDecimal("0.300000000000"),
-        new BigDecimal("3.750000000000"),
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
-  }
-
-  private static ProviderRequest requestWithCache(CacheCase cacheCase) {
+  private static ProviderRequest requestWithControl(ProviderCacheControl control) {
     ProviderRequest source = canonicalRequest();
     return new ProviderRequest(
         source.model(),
@@ -603,7 +552,7 @@ class ProviderRequestJsonCodecTest {
         "Test system instruction.",
         source.messages(),
         source.tools(),
-        cacheCase.control());
+        control);
   }
 
   private static ObjectNode canonicalNode() {
@@ -636,10 +585,6 @@ class ProviderRequestJsonCodecTest {
     return (ObjectNode) root.path("variant");
   }
 
-  private static ObjectNode pricing(ObjectNode root) {
-    return (ObjectNode) model(root).path("pricing");
-  }
-
   private static ObjectNode cacheControl(ObjectNode root) {
     return (ObjectNode) root.path("cacheControl");
   }
@@ -663,6 +608,4 @@ class ProviderRequestJsonCodecTest {
   private static ObjectNode toolResult(ObjectNode root) {
     return content(root, 2, 0);
   }
-
-  private record CacheCase(PromptCacheCapability capability, ProviderCacheControl control) {}
 }

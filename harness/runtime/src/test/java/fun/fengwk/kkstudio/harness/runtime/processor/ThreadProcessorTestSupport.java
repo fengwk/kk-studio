@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -946,7 +945,7 @@ final class ThreadProcessorTestSupport {
                           List.of(
                               new TextMessageContent(
                                   "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                       null),
                   NOW));
           tx.insertEntry(
@@ -1017,26 +1016,18 @@ final class ThreadProcessorTestSupport {
     GenerationStopReason stopReason =
         callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new ProviderResponse(
-        "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+        "response text", "", calls, stopReason, usage(), "req-1", null, "{}");
   }
 
   static ProviderResponse successResponse(List<ProviderToolCall> calls) {
     return new ProviderResponse(
-        "response text",
-        "",
-        calls,
-        GenerationStopReason.COMPLETE,
-        usage(),
-        cost(),
-        "req-1",
-        null,
-        "{}");
+        "response text", "", calls, GenerationStopReason.COMPLETE, usage(), "req-1", null, "{}");
   }
 
   /** 显式 stop reason 的 SUCCEEDED response（覆盖 LENGTH / FILTERED 等矩阵路径）。 */
   static ProviderResponse successResponse(
       String text, List<ProviderToolCall> calls, GenerationStopReason stopReason) {
-    return new ProviderResponse(text, "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+    return new ProviderResponse(text, "", calls, stopReason, usage(), "req-1", null, "{}");
   }
 
   /**
@@ -1044,7 +1035,7 @@ final class ThreadProcessorTestSupport {
    */
   static ProviderResponse successResponse(ModelUsage usage, ModelCost cost, String text) {
     return new ProviderResponse(
-        text, "", List.of(), GenerationStopReason.COMPLETE, usage, cost, "req-1", null, "{}");
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage, "req-1", null, "{}");
   }
 
   static ToolResult successToolResult(String callId) {
@@ -1052,7 +1043,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, usage(), cost());
+    return new AssistantMessageMetadata(stopReason, usage());
   }
 
   private static ModelUsage usage() {
@@ -1088,24 +1079,7 @@ final class ThreadProcessorTestSupport {
 
   private static ModelDescriptor modelDescriptor(String providerName, String modelName) {
     return new ModelDescriptor(
-        providerName,
-        modelName,
-        modelName,
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        providerName, modelName, modelName, Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static ToolBinding hostBinding(String name) {

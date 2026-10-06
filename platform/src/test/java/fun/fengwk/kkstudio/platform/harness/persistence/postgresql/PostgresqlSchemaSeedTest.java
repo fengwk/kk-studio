@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.persistence.postgresql;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyCanvasTestDatabase;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -139,15 +140,16 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                 "select name || ':' || provider_type from agent_provider"
                     + " where name = 'minimax-anthropic'"),
             "the real E2E credential synchronizer targets the minimax-anthropic provider name");
-        assertEquals(
-            "GPT_5_6_EXPLICIT",
+        // Provider 配置统一由 promptCacheRetention 声明留存档位；具体取值由 crosscutting seed 负责，这里只校验 key。
+        assertFalse(
             OBJECT_MAPPER
                 .readTree(
                     singleString(
                         st, "select config::text from agent_provider where name = 'openai'"))
-                .path("openAiPromptCacheMode")
-                .asText(),
-            "the openai provider config must declare explicit prompt cache mode for GPT-5.6");
+                .path("promptCacheRetention")
+                .asText()
+                .isBlank(),
+            "the openai provider config must declare promptCacheRetention");
         assertEquals(
             "BUDGET",
             OBJECT_MAPPER

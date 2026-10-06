@@ -1198,7 +1198,6 @@ class ProviderResourceMaterializerTest {
           format,
           new ProviderReplayAffinity(
               ProviderType.OPENAI, "test-provider", new UUID(0L, 9L), "test-model"),
-          "0".repeat(64),
           new ObjectMapper().readTree(payload));
     } catch (JsonProcessingException error) {
       throw new IllegalStateException(error);

@@ -12,8 +12,8 @@ import java.util.Set;
  * 布尔直接表达。 本 turn 选中的有效 variant 与输出预算存放在 ephemeral 执行值与 durable invocation request 中，与该 descriptor
  * 并列。
  *
- * <p>Provider 类型、capability 与 prompt-cache policy 不随本 descriptor 冻结，由调用方按需从当前 ProviderFactory
- * 解析并显式传入（例如 {@code PromptCacheRequestFinalizer}）。
+ * <p>Provider 类型与 prompt-cache 留存档位不随本 descriptor 冻结，由调用方按需从当前 ProviderFactory
+ * 解析并显式传入；成本（pricing）不属于执行期描述，读取投影阶段按当前 catalog 价格计算。
  */
 public record ModelDescriptor(
     String providerName,
@@ -21,15 +21,13 @@ public record ModelDescriptor(
     String modelId,
     Set<ModelInputModality> inputModalities,
     boolean tools,
-    boolean reasoning,
-    ModelPricing pricing) {
+    boolean reasoning) {
 
   public ModelDescriptor {
     providerName = requireName(providerName, "providerName");
     modelName = requireName(modelName, "modelName");
     modelId = requireName(modelId, "modelId");
     inputModalities = requireInputModalities(inputModalities);
-    pricing = Objects.requireNonNull(pricing, "pricing");
   }
 
   private static Set<ModelInputModality> requireInputModalities(

@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -58,7 +57,6 @@ import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -210,18 +208,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
   private MessagePayload assistantMessage(AgentMessageContent... contents) {
     ModelUsage usage = new ModelUsage(0, 0, 0, 0, 0, 0, 0);
-    ModelCost cost =
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     AssistantMessageMetadata metadata =
-        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost);
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(contents)), metadata, null);
   }

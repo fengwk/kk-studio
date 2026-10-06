@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
@@ -34,13 +33,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -59,7 +56,6 @@ public final class ProviderRequestJsonCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-  private static final Comparator<Enum<?>> ENUM_NAME_COMPARATOR = Comparator.comparing(Enum::name);
 
   /** 共享 model/variant 子树 codec，确保 wire 与 {@code ModelDescriptorJsonCodec} 单一权威实现一致。 */
   private static final ModelDescriptorJsonCodec SHARED_MODEL_CODEC = new ModelDescriptorJsonCodec();
@@ -73,8 +69,7 @@ public final class ProviderRequestJsonCodec {
           "messages",
           "tools",
           "cacheControl");
-  private static final Set<String> CACHE_CONTROL_FIELDS =
-      orderedSet("retention", "affinityKey", "breakpoints");
+  private static final Set<String> CACHE_CONTROL_FIELDS = orderedSet("retention", "key");
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
   private static final Set<String> TOOL_DEFINITION_FIELDS =
       orderedSet("name", "description", "inputSchemaJson");
@@ -172,14 +167,10 @@ public final class ProviderRequestJsonCodec {
   private ObjectNode encodeCacheControl(ProviderCacheControl control) {
     ObjectNode node = NODES.objectNode();
     node.put("retention", control.retention().name());
-    if (control.affinityKey() == null) {
-      node.putNull("affinityKey");
+    if (control.key() == null) {
+      node.putNull("key");
     } else {
-      node.put("affinityKey", control.affinityKey());
-    }
-    ArrayNode breakpoints = node.putArray("breakpoints");
-    for (PromptCacheBreakpoint breakpoint : sortedEnums(control.breakpoints(), "breakpoints")) {
-      breakpoints.add(breakpoint.name());
+      node.put("key", control.key());
     }
     return node;
   }
@@ -193,26 +184,17 @@ public final class ProviderRequestJsonCodec {
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("unknown prompt cache retention", exception);
     }
-    String affinityKey = decodeNullableText(node, "affinityKey");
-    Set<PromptCacheBreakpoint> breakpoints =
-        decodeEnumSet(node.get("breakpoints"), PromptCacheBreakpoint.class, "breakpoints");
+    String key = decodeNullableText(node, "key");
     if (retention == PromptCacheRetention.NONE) {
-      if (affinityKey != null) {
-        throw new IllegalArgumentException("affinityKey must be null when retention is NONE");
-      }
-      if (!breakpoints.isEmpty()) {
-        throw new IllegalArgumentException("breakpoints must be empty when retention is NONE");
+      if (key != null) {
+        throw new IllegalArgumentException("key must be null when retention is NONE");
       }
       return ProviderCacheControl.none();
     }
-    if (affinityKey == null || affinityKey.isBlank()) {
-      throw new IllegalArgumentException(
-          "affinityKey must be non-blank when retention is " + retention);
+    if (key == null || key.isBlank()) {
+      throw new IllegalArgumentException("key must be non-blank when retention is " + retention);
     }
-    if (breakpoints.isEmpty()) {
-      return ProviderCacheControl.affinity(retention, affinityKey);
-    }
-    return ProviderCacheControl.breakpoints(retention, affinityKey, breakpoints);
+    return new ProviderCacheControl(retention, key);
   }
 
   // ---------- ProviderMessage ----------
@@ -545,33 +527,6 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must contain a JSON object");
     }
     return value;
-  }
-
-  private static <E extends Enum<E>> Set<E> decodeEnumSet(
-      JsonNode value, Class<E> elementType, String field) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(field + " must be an array");
-    }
-    Set<E> result = new TreeSet<>(ENUM_NAME_COMPARATOR);
-    for (JsonNode item : array) {
-      if (!item.isTextual()) {
-        throw new IllegalArgumentException(field + " must contain only enum name strings");
-      }
-      try {
-        result.add(Enum.valueOf(elementType, item.textValue()));
-      } catch (IllegalArgumentException exception) {
-        throw new IllegalArgumentException(
-            "unknown " + elementType.getSimpleName() + " value: " + item.textValue(), exception);
-      }
-    }
-    return result;
-  }
-
-  private static <E extends Enum<E>> Set<E> sortedEnums(Set<E> source, String field) {
-    Objects.requireNonNull(source, field);
-    Set<E> copy = new TreeSet<>(ENUM_NAME_COMPARATOR);
-    copy.addAll(source);
-    return copy;
   }
 
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {

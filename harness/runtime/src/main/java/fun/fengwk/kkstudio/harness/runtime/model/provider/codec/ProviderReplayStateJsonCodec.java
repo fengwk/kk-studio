@@ -22,8 +22,7 @@ import java.util.UUID;
 /**
  * {@link ProviderReplayState} 的严格、确定性 JSON codec。
  *
- * <p>顶层严格字段为 {@code format}、{@code affinity}、{@code sourcePrefixHash}、{@code payload}；
- * 拒绝任何未知、缺失或重复字段。
+ * <p>顶层严格字段为 {@code format}、{@code affinity}、{@code payload}；拒绝任何未知、缺失或重复字段。
  */
 public final class ProviderReplayStateJsonCodec {
 
@@ -35,8 +34,7 @@ public final class ProviderReplayStateJsonCodec {
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
 
-  private static final Set<String> ROOT_FIELDS =
-      orderedSet("format", "affinity", "sourcePrefixHash", "payload");
+  private static final Set<String> ROOT_FIELDS = orderedSet("format", "affinity", "payload");
   private static final Set<String> AFFINITY_FIELDS =
       orderedSet("providerType", "providerName", "connectionGenerationId", "modelId");
 
@@ -50,7 +48,6 @@ public final class ProviderReplayStateJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("format", state.format().wireValue());
     node.set("affinity", encodeAffinity(state.affinity()));
-    node.put("sourcePrefixHash", state.sourcePrefixHash());
     node.set("payload", state.payload());
     return node;
   }
@@ -71,13 +68,12 @@ public final class ProviderReplayStateJsonCodec {
       throw new IllegalArgumentException("unsupported provider replay format");
     }
     ProviderReplayAffinity affinity = decodeAffinity(root.get("affinity"));
-    String sourcePrefixHash = text(root, "sourcePrefixHash");
     JsonNode payloadNode = root.get("payload");
     if (payloadNode == null || !payloadNode.isObject()) {
       throw new IllegalArgumentException("providerReplayState.payload must be a JSON object");
     }
 
-    return new ProviderReplayState(format, affinity, sourcePrefixHash, payloadNode);
+    return new ProviderReplayState(format, affinity, payloadNode);
   }
 
   private ObjectNode encodeAffinity(ProviderReplayAffinity affinity) {

@@ -10,10 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
@@ -29,15 +26,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
-import java.math.BigDecimal;
 import java.time.Duration;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -65,12 +59,12 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         createProvider(name, "openai", "https://original.example/v1", "original-secret", 12_000L);
     UUID firstGen = connectionGenerationId(name);
     ProviderRequest request =
-        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"));
+        request(name, ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc1-stable"));
 
     ProviderResolutionService.ResolvedExecution first =
         resolution.resolve(ProviderType.OPENAI, firstGen, request);
     assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-stable"),
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc1-stable"),
         first.effectiveRequest().cacheControl());
     assertEquals(Duration.ofSeconds(12), first.timeoutPolicy().modelCallTimeout());
     first.openProvider(first.timeoutPolicy());
@@ -128,7 +122,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     providerService.deleteProvider(name, created.getVersion());
 
     ProviderRequest request =
-        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
+        request(name, ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc1-key"));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
@@ -170,96 +164,6 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     assertEquals("0", recreated.getVersion(), "重建行 version 从 0 重新开始");
   }
 
-  @Test
-  void cacheHintUnsupportedByCurrentCapabilityDegradesAfterProviderTypeChange() {
-    String name = "type-change-provider-" + System.nanoTime();
-    CapturingFactory anthropic = new CapturingFactory(ProviderType.ANTHROPIC);
-    CapturingFactory google = new CapturingFactory(ProviderType.GOOGLE);
-    DatabaseProviderResolutionService resolution = resolution(anthropic, google);
-
-    // 持久 request 携带 AFFINITY hint；当前 anthropic capability 会按请求内容重建 BREAKPOINTS 形态。
-    AgentProviderDTO created =
-        createProvider(name, "anthropic", "https://anthropic.example/v1", "secret", 12_000L);
-    UUID generationId = connectionGenerationId(name);
-    // 会话消息为空：此时唯一有效前缀就是恒非空的 systemInstruction。
-    ProviderRequest request =
-        new ProviderRequest(
-            descriptor(name),
-            new ModelVariant("default"),
-            1024,
-            "Test system instruction.",
-            List.of(),
-            List.of(),
-            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
-
-    // 当前 capability 是 BREAKPOINTS：affinity hint 被改写为按请求实际内容求交集的 breakpoints。
-    ProviderResolutionService.ResolvedExecution first =
-        resolution.resolve(ProviderType.ANTHROPIC, generationId, request);
-    assertEquals(
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT, "pc1-key", EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
-        first.effectiveRequest().cacheControl(),
-        "systemInstruction 与当前 BREAKPOINTS capability 求交集得到 SYSTEM");
-
-    // Provider 类型切换到 google（AUTOMATIC）：当前 capability 不接受显式 hint，因此降级为 none()。
-    AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
-    update.setProviderType("google");
-    update.setBaseUrl("https://google.example/v1");
-    update.setExpectedVersion(created.getVersion());
-    providerService.updateProvider(name, update);
-
-    IllegalArgumentException drift =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> resolution.resolve(ProviderType.ANTHROPIC, generationId, request));
-    assertEquals("provider type drift: frozen=ANTHROPIC current=GOOGLE", drift.getMessage());
-    assertEquals(0, google.openCount, "协议漂移不得打开新 factory");
-  }
-
-  /** 意图：验证数据库中 provider 行配置更新后，动态能力工厂在下一次 attempt 立即读取最新 config 并生效。 */
-  @Test
-  void resolveUsesDynamicConfigAwarePromptCacheCapabilityFromDatabase() {
-    String name = "dynamic-cache-provider-" + System.nanoTime();
-    ProviderFactory dynamicFactory =
-        ProviderFactory.of(
-            ProviderType.OPENAI,
-            configJson -> {
-              if (configJson != null && configJson.contains("LEGACY")) {
-                return PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
-              }
-              return PromptCacheCapability.automatic();
-            },
-            (cred, cfg) -> new CapturingFactory(ProviderType.OPENAI).create(cred, cfg));
-    DatabaseProviderResolutionService resolution = resolution(dynamicFactory);
-
-    createProvider(name, "openai", "https://example.com/v1", "secret", 10_000L);
-    UUID firstGenerationId = connectionGenerationId(name);
-    ProviderRequest request =
-        request(name, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
-
-    // 默认配置下能力为 AUTOMATIC，无法表达显式 AFFINITY，故规范化降级为 none()
-    ProviderResolutionService.ResolvedExecution first =
-        resolution.resolve(ProviderType.OPENAI, firstGenerationId, request);
-    assertEquals(ProviderCacheControl.none(), first.effectiveRequest().cacheControl());
-
-    // 更新 provider 配置为 LEGACY 缓存模式
-    AgentProvider provider = providerRepository.getByName(name);
-    provider.setConfigJson("{\"openAiPromptCacheMode\":\"LEGACY\"}");
-    provider.setConnectionGenerationId(UUID.randomUUID());
-    providerRepository.updateByName(provider, provider.getVersion());
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> resolution.resolve(ProviderType.OPENAI, firstGenerationId, request));
-
-    // 重新规划后按新 generation 解析：动态能力变为 AFFINITY，有效请求成功保留 AFFINITY 缓存控制
-    ProviderResolutionService.ResolvedExecution second =
-        resolution.resolve(ProviderType.OPENAI, connectionGenerationId(name), request);
-    assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"),
-        second.effectiveRequest().cacheControl());
-  }
-
   private DatabaseProviderResolutionService resolution(ProviderFactory... factories) {
     return new DatabaseProviderResolutionService(
         providerRepository,
@@ -296,24 +200,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
 
   private static ModelDescriptor descriptor(String providerName) {
     return new ModelDescriptor(
-        providerName,
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        false,
-        false,
-        new ModelPricing(
-            "USD",
-            "default",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        providerName, "model", "model", Set.of(ModelInputModality.TEXT), false, false);
   }
 
   /** 记录每次 factory.create / adapter.create 收到的连接事实，证明解析使用当前行与当前 factory。 */
@@ -335,13 +222,10 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     }
 
     @Override
-    public PromptCacheCapability promptCacheCapability() {
+    public PromptCacheRetention promptCacheRetention() {
       return switch (providerType) {
-        case ANTHROPIC -> PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-            EnumSet.allOf(PromptCacheBreakpoint.class));
-        case GOOGLE -> PromptCacheCapability.automatic();
-        default -> PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
+        case GOOGLE -> PromptCacheRetention.NONE;
+        default -> PromptCacheRetention.SHORT;
       };
     }
 
