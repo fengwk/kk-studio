@@ -312,24 +312,24 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
   })
 
-  test('ThreadStatusFooter keeps a single pipe-separated line with ellipsis and complete hover facts', async ({
+  test('ThreadStatusFooter keeps a single grouped line with ellipsis and complete hover facts', async ({
     page,
   }) => {
     // 确保 reports/layout 目录存在
     fs.mkdirSync(REPORTS_DIR, { recursive: true })
 
-    // 1. 桌面视口 1280x800（验证 split-2 与分屏 split-3 下单行字段分隔与省略截断）
+    // 1. 桌面视口 1280x800（验证 split-2 与分屏 split-3 下单行分组分隔与省略截断）
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/browser-tests/chat-layout-harness.html')
 
     const pane1Footer = page.locator('[data-testid="pane-1-footer"]')
     await expect(pane1Footer).toBeVisible()
 
-    // 全部事实落在唯一一行，字段由竖线分隔
+    // 全部事实落在唯一一行：环境/上下文/用量由 U+2223 分组，组内统计项由 U+00B7 连接
     const pane1Lines = pane1Footer.locator('.thread-status-line')
     await expect(pane1Lines).toHaveCount(1)
     await expect(pane1Lines.nth(0)).toHaveText(
-      'env:production | ctx 16k/128k | ↑12k | ↓800 | R4.0k | $0.042 | cache 25% | 475 tok/s',
+      'production ∣ ctx 16k/128k ∣ ↑12k · ↓800 · R4.0k · $0.042 · cache 25% · 475 tok/s',
     )
 
     // 超宽被省略的信息必须仍能通过 hover 完整读取，且不含内部口径说明
@@ -377,7 +377,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     // 无环境且无闭合回合用量时，零事实与占位符仍稳定落在唯一一行
     const pane3Line = page.locator('[data-testid="pane-3-footer"] .thread-status-line')
     await expect(pane3Line).toHaveCount(1)
-    await expect(pane3Line).toHaveText('未选择环境 | ↑0 | ↓0 | $0.000 | cache — | — tok/s')
+    await expect(pane3Line).toHaveText('未选择环境 ∣ ↑0 · ↓0 · $0.000 · cache — · — tok/s')
     expect((await pane3Line.getAttribute('title')) ?? '').toContain('平均生成速度：暂无数据')
 
     // 桌面分屏截图
@@ -591,5 +591,114 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     expect(box320.x + box320.width).toBeLessThanOrEqual(320)
     expect(box320.x).toBeGreaterThanOrEqual(0)
     expect(Math.abs(box320.width - 80)).toBeLessThanOrEqual(1)
+  })
+})
+
+test.describe('ThinkingBlock collapsed tail', () => {
+  test('keeps one ellipsized tail line, updates the tail, and expands the original Markdown', async ({
+    page,
+  }) => {
+    fs.mkdirSync(REPORTS_DIR, { recursive: true })
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('/browser-tests/chat-layout-harness.html')
+
+    const block = page.locator('[data-testid="pane-1-thinking"]')
+    const line = block.locator('.thread-thinking-line')
+    const tail = block.locator('.thread-thinking-tail')
+    const ellipsis = block.locator('.thread-thinking-ellipsis')
+    const expand = block.getByRole('button', { name: '展开思考' })
+
+    await expect(line).toBeVisible()
+    // 收起态保留最新尾部并丢弃前文：左侧出现省略标记，尾部是 Markdown 结尾。
+    await expect(ellipsis).toBeVisible()
+    await expect(tail).toContainText('第二项')
+    await expect(tail).not.toContainText('前置排查记录')
+
+    // 单行、无横滚/纵滚，且未使用 rtl 反向排列。
+    const lineBox = await line.evaluate((el) => {
+      const style = window.getComputedStyle(el)
+      return {
+        whiteSpace: style.whiteSpace,
+        overflow: style.overflow,
+        direction: style.direction,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      }
+    })
+    expect(lineBox.whiteSpace).toBe('nowrap')
+    expect(lineBox.overflow).toBe('hidden')
+    expect(lineBox.direction).toBe('ltr')
+    expect(lineBox.scrollWidth).toBeLessThanOrEqual(lineBox.clientWidth + 1)
+    expect(lineBox.scrollHeight).toBeLessThanOrEqual(lineBox.clientHeight + 1)
+    expect(lineBox.clientHeight).toBeLessThanOrEqual(24)
+
+    // 省略标记在尾部左侧；展开按钮位于第一行末尾且不覆盖文本。
+    const tailBox = (await tail.boundingBox())!
+    const ellipsisBox = (await ellipsis.boundingBox())!
+    const toggleBox = (await expand.boundingBox())!
+    expect(ellipsisBox.x).toBeLessThan(tailBox.x)
+    expect(tailBox.x + tailBox.width).toBeLessThanOrEqual(toggleBox.x + 2)
+    expect(toggleBox.y).toBeLessThan(tailBox.y + tailBox.height)
+    expect(toggleBox.y + toggleBox.height).toBeGreaterThan(tailBox.y)
+
+    // 追加内容后尾部动态更新，仍然保留左侧省略且不产生滚动条。
+    await block.locator('[data-testid="thinking-append"]').click()
+    await expect(tail).toContainText('补充：尾部更新')
+    await expect(ellipsis).toBeVisible()
+    await expect(tail).not.toContainText('前置排查记录')
+    const appendedBox = await line.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+    }))
+    expect(appendedBox.scrollWidth).toBeLessThanOrEqual(appendedBox.clientWidth + 1)
+    expect(appendedBox.clientHeight).toBeLessThanOrEqual(24)
+
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-thinking-collapsed-desktop.png'),
+      fullPage: false,
+    })
+
+    // 展开同一个框：原始 Markdown 由 MarkdownRenderer 渲染，路径与英文顺序保持原样。
+    await expand.click()
+    const expanded = block.locator('.thread-thinking-text .md-root')
+    await expect(expanded).toBeVisible()
+    await expect(expanded.locator('h1')).toHaveText('结论')
+    await expect(expanded.locator('strong')).toHaveText('未被反转')
+    await expect(expanded.locator('li')).toHaveCount(2)
+    await expect(expanded).toContainText('/usr/local/lib/node_modules/kk-studio 保持原顺序')
+    await expect(block.getByRole('button', { name: '收起思考' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-thinking-expanded-desktop.png'),
+      fullPage: false,
+    })
+
+    // 收起后窄屏仍然单行、无横滚、按钮不覆盖文本。
+    await page.setViewportSize({ width: 375, height: 812 })
+    await block.getByRole('button', { name: '收起思考' }).click()
+    await expect(line).toBeVisible()
+    const narrow = await line.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+    }))
+    expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth + 1)
+    expect(narrow.clientHeight).toBeLessThanOrEqual(24)
+    const overflow375 = await page.evaluate(() => ({
+      pageScrollWidth: document.documentElement.scrollWidth,
+      pageClientWidth: document.documentElement.clientWidth,
+    }))
+    expect(overflow375.pageScrollWidth).toBeLessThanOrEqual(overflow375.pageClientWidth + 1)
+
+    await page.screenshot({
+      path: path.join(REPORTS_DIR, 'chat-thinking-collapsed-mobile-375.png'),
+      fullPage: false,
+    })
   })
 })

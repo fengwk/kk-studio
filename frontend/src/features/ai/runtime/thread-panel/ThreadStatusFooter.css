@@ -1,0 +1,22 @@
+/* ThreadStatusFooter 组件样式：随本组件加载，父级集成后删除 styles.css 中旧的全局 footer 规则。 */
+
+.thread-status-footer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  padding: 6px 16px 8px;
+  min-width: 0;
+}
+
+.thread-status-line {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}

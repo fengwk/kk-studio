@@ -82,7 +82,7 @@ describe('thread status formatting', () => {
       },
     }).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s')
+    expect(usage?.text).toBe('↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s')
     expect(usage?.title).toBe(
       [
         '累计用量',

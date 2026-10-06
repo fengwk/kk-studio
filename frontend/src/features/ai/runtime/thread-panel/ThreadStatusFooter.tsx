@@ -5,6 +5,7 @@ import {
   type ThreadStatusModelInput,
 } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { useI18n } from '@/shared/i18n'
+import './ThreadStatusFooter.css'
 
 /** 只读事实 Footer；不承载任何 Agent/Model/Permission/Notification 交互。 */
 export function ThreadStatusFooter(input: ThreadStatusModelInput) {
