@@ -68,6 +68,7 @@ describe('AgentPane command registry', () => {
       'tree',
       'new',
       'upload',
+      'debug',
       'shortcuts',
       'rename-session',
       'goal',

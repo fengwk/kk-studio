@@ -30,7 +30,10 @@ describe('ThreadStatusFooter', () => {
     expect(title).toHaveLength(5)
     expect(title[0]).toBe('未选择环境')
     // 未知即如实说明无数据：分支累计输入 300000 绝不能冒充上下文占用。
-    expect(title.join('\n')).not.toContain('300000')
+    // 上下文段如实标注无数据，累计用量只在独立的用量段里以完整数字出现。
+    expect(title[1]).toContain('暂无数据')
+    expect(title[1]).not.toContain('300000')
+    expect(title[2]).toContain('300000')
   })
 
   // 全部事实必须落在唯一一行，避免 Footer 因数据增多重新折行。
