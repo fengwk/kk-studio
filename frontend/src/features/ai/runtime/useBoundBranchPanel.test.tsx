@@ -22,6 +22,7 @@ import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
@@ -75,8 +76,9 @@ function branchSettings(
 
 function threadFixture(
   threadId: string,
-  overrides: Partial<HarnessThreadDTO> = {},
+  overrides: Partial<HarnessThreadDTO> & { yoloEnabled?: boolean } = {},
 ): HarnessThreadDTO {
+  const { yoloEnabled = false, ...rest } = overrides
   return {
     threadId,
     /** Thread 名称（服务端权威必填非空）。 */
@@ -84,7 +86,7 @@ function threadFixture(
     sessionId: 's1',
     headEntryId: 'e-assistant',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: rootYoloPolicy(yoloEnabled),
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -93,7 +95,7 @@ function threadFixture(
     branchSettings: branchSettings(),
     createTime: '2026-01-01T00:00:00Z',
     updateTime: '2026-01-02T00:00:00Z',
-    ...overrides,
+    ...rest,
   }
 }
 

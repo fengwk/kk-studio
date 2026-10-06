@@ -163,6 +163,16 @@ export interface HarnessThreadTreeNodeDTO {
 }
 
 /**
+ * Thread 的 YOLO 运行时策略投影。根只可能是 ENABLE/DISABLE（rootThreadId 为 null），
+ * 子代理只可能是 FOLLOW 且指向真实执行根。该投影取代旧 boolean，展示读取根事实，
+ * 不表达实际生效的布尔值。
+ */
+export interface HarnessThreadYoloPolicyDTO {
+  mode: 'ENABLE' | 'DISABLE' | 'FOLLOW'
+  rootThreadId: string | null
+}
+
+/**
  * HarnessThread 查询投影；id 均为 canonical UUID string，version 是持久快照游标。
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
@@ -173,6 +183,7 @@ export interface HarnessThreadTreeNodeDTO {
  * executionControl 是持久执行控制（RUNNABLE / STOPPED），与本地运行阶段无关：
  * 本地已 IDLE 也可能仍有活跃后代需要停止。
  * branchSettings 是 head Entry branch 的完整 settings 快照。
+ * yoloPolicy 是该 Thread 的 YOLO 运行时策略投影。
  */
 export interface HarnessThreadDTO {
   threadId: string
@@ -184,8 +195,8 @@ export interface HarnessThreadDTO {
   headEntryId: string
   /** 父 Thread 主键（根 Thread 为 null）。 */
   parentThreadId: string | null
-  /** 当前冻结的 YOLO 运行时策略。 */
-  yoloEnabled: boolean
+  /** 当前冻结的 YOLO 运行时策略投影；根为 ENABLE/DISABLE，子代理为 FOLLOW。 */
+  yoloPolicy: HarnessThreadYoloPolicyDTO
   /** 已分配的 command sequence 高水位标记 + 1。 */
   nextCommandSequence: string
   /** PostgreSQL 权威持久投影游标（非负十进制 bigint 字符串）。 */

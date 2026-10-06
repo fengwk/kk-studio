@@ -27,6 +27,7 @@ import type {
   ProviderRequestPreviewDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
@@ -156,7 +157,10 @@ const models = [{
   updateTime: null,
 }]
 
-function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
+function thread(
+  overrides: Partial<HarnessThreadDTO> & { yoloEnabled?: boolean } = {},
+): HarnessThreadDTO {
+  const { yoloEnabled = false, ...rest } = overrides
   return {
     /** Thread 名称（服务端权威必填非空）。 */
     name: 'thread-name',
@@ -164,7 +168,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 'session-1',
     headEntryId: 'head-1',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: rootYoloPolicy(yoloEnabled),
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -178,7 +182,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     },
     createTime: null,
     updateTime: null,
-    ...overrides,
+    ...rest,
   }
 }
 

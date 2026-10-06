@@ -14,12 +14,17 @@ export class InteractionService {
 
   /**
    * 查询一页待处理 Interaction（问卷等待与审批等待合并）。
+   * 传入 rootThreadId 时只返回归属该执行根的待办；分页语义与不传时一致。
    */
   async listInteractions(
+    rootThreadId?: string | null,
     cursor?: string | null,
     limit?: number | null,
   ): Promise<InteractionPageDTO> {
     const params: Record<string, unknown> = {}
+    if (rootThreadId) {
+      params.rootThreadId = rootThreadId
+    }
     if (cursor) {
       params.cursor = cursor
     }
