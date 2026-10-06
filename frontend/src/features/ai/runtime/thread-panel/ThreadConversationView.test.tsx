@@ -13,7 +13,9 @@ import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-type
  *
  * 贴底只认显式信号：流式正文更新（stream revision）与消息数量增长。布局尺寸变化
  * （展开卡片、图片加载、懒渲染）不产生信号，绝不移动外层滚动位置；内层只读区域
- * 回看/交互冒泡阅读意图事件即暂停跟随，只有用户把外层滚回底部才恢复。
+ * 回看/交互冒泡阅读意图事件即暂停跟随。恢复跟随必须同时具备「明确的用户滚动意图」
+ * （滚轮 / 滚动键 / 触控 / 滚动条拖拽）与回到贴底阈值内；布局收缩时浏览器把
+ * scrollTop 钳制到底部、以及任何程序化定位，都不构成用户意图。
  * Event 视图的 stick 独立由 ThreadEventView.test 覆盖，互斥切换的集成行为由
  * ChatWorkspacePane.commands.test 覆盖。
  */
@@ -170,7 +172,8 @@ describe('ThreadConversationView', () => {
       await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(390)
 
-      // 用户主动向底部滚回阈值内后恢复跟随。
+      // 用户主动向底部滚回阈值内后恢复跟随（滚动键是明确的用户意图）。
+      fireEvent.keyDown(dialogue(), { key: 'PageDown' })
       dialogue().scrollTop = 395
       fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 4 })
@@ -191,7 +194,8 @@ describe('ThreadConversationView', () => {
       const bodyRef = createRef<HTMLDivElement>()
       const view = renderView(bodyRef, { messageCount: 2, streaming: true })
 
-      // 用户把外层滚回底部 → stick 恢复。
+      // 用户滚轮回到实际底部 → stick 恢复（明确的用户滚动意图）。
+      fireEvent.wheel(dialogue(), { deltaY: 200 })
       dialogue().scrollTop = 400
       fireEvent.scroll(dialogue())
 
@@ -238,9 +242,9 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('does not reopen following after a reading intent even when the layout shrinks', async () => {
-    // 子只读区域回看后：布局变矮（浏览器会把 scrollTop 钳制到新的底部附近）、
-    // 后续流式文本更新都不得重开 stick，位置只能由用户自己滚回底部恢复。
+  it('never reopens following on a layout clamp to the bottom without user intent', async () => {
+    // 页面暂停后内容收起，浏览器把 scrollTop 原生钳制到新的底部：位置变小、距离 0。
+    // 这不是用户手势，不得重开跟随；后续流式更新仍不贴底，只有明确用户意图才恢复。
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
     try {
@@ -248,33 +252,138 @@ describe('ThreadConversationView', () => {
       clientHeightSpy.mockReturnValue(200)
       const bodyRef = createRef<HTMLDivElement>()
       const view = renderView(bodyRef, { messageCount: 3, streaming: true })
+
+      // 用户回看（滚轮上滚）→ 暂停跟随。
+      fireEvent.wheel(dialogue(), { deltaY: -220 })
+      dialogue().scrollTop = 480
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(480)
+
+      // 内容收起：布局变矮，浏览器把位置钳制到新的底部（700 = 900 - 200）。
+      scrollHeightSpy.mockReturnValue(600)
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+
+      // 即使此刻正好在底部，也不是用户回底：下一轮流式更新不得贴底。
+      view.rerender({ messageCount: 5, streaming: true, streamText: 'reply streaming + more + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(400)
+
+      // 程序化定位到新的底部同样不得重开跟随。
+      scrollHeightSpy.mockReturnValue(900)
       dialogue().scrollTop = 700
       fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 6, streaming: true, streamText: 'reply streaming x' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(700)
+
+      // 明确的用户滚动意图（滚轮）回到阈值内 → 恢复跟随。
+      fireEvent.wheel(dialogue(), { deltaY: 200 })
+      dialogue().scrollTop = 700
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 7, streaming: true, streamText: 'reply streaming y' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(900)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('never reopens following after a nested reading intent when the layout clamps to the bottom', async () => {
+    // 内层回看暂停后内容收起，浏览器把外层 scrollTop 钳制到新的底部：位置变小且到底。
+    // 这既不是用户手势也不是流式信号，后续流式更新不得贴底，只有用户用滚动意图回到
+    // 阈值内才恢复跟随。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(900)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 3, streaming: true })
 
       dialogue().dispatchEvent(new CustomEvent(TRANSCRIPT_READING_INTENT_EVENT, {
         bubbles: true,
         detail: { source: 'tool-output' },
       }))
 
-      // 布局变矮：即使位置被钳制到新的底部，也不得重开跟随。
+      // 布局变矮：浏览器钳制到新的底部，并派发一次滚动事件。
       scrollHeightSpy.mockReturnValue(600)
       dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(400)
+
+      // 用户用滚轮意图回到阈值内 → 恢复跟随。
+      fireEvent.wheel(dialogue(), { deltaY: 400 })
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 5, streaming: true, streamText: 'reply streaming + more + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(600)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('reopens following only for explicit wheel, keyboard, touch or scrollbar intent', async () => {
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 2, streaming: true })
+      // 用户回看 → 暂停。
+      dialogue().scrollTop = 300
+      fireEvent.scroll(dialogue())
+
+      // 触控滚动意图 + 回到阈值内 → 恢复跟随。
+      fireEvent.touchStart(dialogue(), { touches: [] })
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 3, streaming: true, streamText: 'reply streaming + more' })
       await flushLayoutFrame()
-      expect(dialogue().scrollTop).toBe(400)
+      expect(dialogue().scrollTop).toBe(600)
 
-      // 后续流式文本继续更新：仍在暂停状态，位置不动。
-      scrollHeightSpy.mockReturnValue(900)
+      // 再次回看 → 暂停；键盘滚动意图 + 回到阈值内 → 恢复跟随。
+      dialogue().scrollTop = 200
+      fireEvent.scroll(dialogue())
+      fireEvent.keyDown(dialogue(), { key: 'End' })
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more + more' })
       await flushLayoutFrame()
-      expect(dialogue().scrollTop).toBe(400)
+      expect(dialogue().scrollTop).toBe(600)
 
-      // 用户自己滚回底部阈值内：恢复跟随。
-      dialogue().scrollTop = 700
+      // 再次回看 → 暂停；抓住滚动条拖动（右侧边缘条带）→ 恢复跟随。
+      dialogue().scrollTop = 150
       fireEvent.scroll(dialogue())
-      view.rerender({ messageCount: 5, streaming: true, streamText: 'reply streaming + more + more + end' })
+      // jsdom 不布局：给出容器矩形，才能判定指针落在右侧滚动条条带内。
+      Object.defineProperty(dialogue(), 'getBoundingClientRect', {
+        configurable: true,
+        value: () => ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 500,
+          bottom: 300,
+          width: 500,
+          height: 300,
+          toJSON: () => ({}),
+        }),
+      })
+      fireEvent.pointerDown(dialogue(), { clientX: 496, clientY: 150 })
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 5, streaming: true, streamText: 'reply streaming z' })
       await flushLayoutFrame()
-      expect(dialogue().scrollTop).toBe(900)
+      expect(dialogue().scrollTop).toBe(600)
     } finally {
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()
@@ -327,11 +436,13 @@ describe('ThreadConversationView', () => {
 
       // 外层贴底但用户正在读内层：流式增长不得移动位置。
       dialogue().scrollTop = 500
+      fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 3, streaming: true, streamText: 'reply streaming + more' })
       await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(500)
 
-      // 用户主动把外层滚回底部阈值内 → 恢复跟随。
+      // 用户主动把外层滚回底部阈值内（滚轮意图）→ 恢复跟随。
+      fireEvent.wheel(dialogue(), { deltaY: 100 })
       dialogue().scrollTop = 595
       fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more + more' })

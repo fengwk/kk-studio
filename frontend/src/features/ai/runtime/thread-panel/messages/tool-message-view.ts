@@ -41,6 +41,8 @@ export interface ToolMessageView {
   /** 正文当前是否可见。 */
   showBody: boolean
   argumentsStreaming: boolean
+  /** 正文内容是否仍来自瞬态流式消息（bash 持续输出）：唯一允许跟随尾部的信号。 */
+  contentsStreaming: boolean
   arguments: string
   toolName: string
 }
@@ -88,6 +90,12 @@ export function buildToolMessageView({
     callMessage != null
     && callMessage.subjectEntryId == null
     && callMessage.status === 'streaming'
+  // durable 结果出现前，正文来自瞬态流式消息：只有这时才是持续日志。
+  const contentsSource = resultMessage ?? callMessage
+  const contentsStreaming =
+    contentsSource != null
+    && contentsSource.subjectEntryId == null
+    && contentsSource.status === 'streaming'
   const contents = toolMessageContents(message, result)
   const preview = previewForToolCall(toolName, argumentsValue)
   const facts = toolErrorFacts({ message, result })
@@ -111,6 +119,7 @@ export function buildToolMessageView({
     hasCallRecordBody,
     showBody: expanded,
     argumentsStreaming,
+    contentsStreaming,
     arguments: argumentsValue,
     toolName,
   }

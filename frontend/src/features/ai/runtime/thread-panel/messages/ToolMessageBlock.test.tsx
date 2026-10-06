@@ -572,6 +572,62 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(collapseButton()).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('follows only the streaming bash tail; settled output is read from the top', () => {
+    // 挂载时的贴底写入必须可观测：用原型级尺寸桩，写入才会落在 mock 的 scrollHeight 上。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(400)
+      clientHeightSpy.mockReturnValue(100)
+      const log = (count: number) =>
+        Array.from({ length: count }, (_, index) => `step-${index + 1}`).join('\n')
+      const settledCall = message({
+        phase: 'call',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        status: 'done',
+        subjectEntryId: 'entry-70',
+        arguments: '{"command":"npm test"}',
+      })
+      const settledResult = message({
+        id: 'tool-result-1',
+        phase: 'result',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        status: 'done',
+        subjectEntryId: 'entry-71',
+        contents: [text(log(20))],
+      })
+
+      // 终态 bash 结果（durable 结果，非流式）：静态正文从顶部读，不自动贴到底部。
+      const settled = render(<ToolMessageBlock message={settledCall} result={settledResult} />)
+      const settledViewport = settled.container.querySelector<HTMLElement>('.thread-tool-output')
+      expect(settledViewport?.scrollTop).toBe(0)
+      settled.unmount()
+
+      // 流式 bash 调用（瞬态 partial 日志）：唯一跟随尾部的正文。
+      const streamingCall = message({
+        phase: 'call',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        status: 'streaming',
+        subjectEntryId: null,
+        arguments: '{"command":"npm test"}',
+        partialContents: [text(log(20))],
+      })
+      const streaming = render(<ToolMessageBlock message={streamingCall} />)
+      const viewport = streaming.container.querySelector<HTMLElement>('.thread-tool-output')
+      expect(viewport?.scrollTop).toBe(400)
+
+      // durable 结果到达：同一节点保留阅读位置，不再自动贴底。
+      streaming.rerender(<ToolMessageBlock message={settledCall} result={settledResult} />)
+      expect(viewport?.scrollTop).toBe(400)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
   it('renders the task prompt and a clickable thread id without acceptance copy', () => {
     const { container } = render(
       <ToolMessageBlock
