@@ -234,6 +234,27 @@ async function installPreviewApiMock(
         await route.fulfill({ json: modelRequestDebug() })
         return
       }
+      if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
+        const thread = threadSnapshot(INITIAL_CURSOR).data.thread
+        await route.fulfill({
+          json: {
+            status: 200,
+            data: [{
+              threadId: thread.threadId,
+              parentThreadId: null,
+              name: thread.name,
+              agentName: thread.branchSettings.agentName,
+              model: thread.branchSettings.model,
+              status: thread.status,
+              processing: false,
+              turnCount: 0,
+              toolCallCount: 0,
+              outcome: null,
+            }],
+          },
+        })
+        return
+      }
       if (path === `/api/harness/threads/${THREAD_ID}`) {
         const cursor = options.cursor()
         recorded.push({ kind: 'snapshot', ...cursor })
@@ -372,6 +393,9 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   const composer = page.locator('.thread-composer')
   await expect(composer.locator('.composer-editor')).toHaveText('')
   await expect(composer).not.toContainText('数据迁移完成')
+  // 仅有执行根时不展示活跃树；mock 的完整 tree 投影不能产生虚假的加载错误。
+  await expect(page.getByText('活跃子代理', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Agent 关系加载失败', { exact: true })).toHaveCount(0)
   await page.screenshot({ path: resolve(reportsDir, 'notification-system-card.png') })
 })
 

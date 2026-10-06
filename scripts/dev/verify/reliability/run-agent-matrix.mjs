@@ -36,6 +36,7 @@ import {
 } from './report.mjs'
 import { assert, envelopeData, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
 import {
+  assertRootYoloPolicy,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -598,7 +599,7 @@ export function assertThreadSettings(accepted, testCase, agentName) {
     Number(thread.version) >= 1,
     `Thread version must be at least 1: ${JSON.stringify(thread)}`,
   )
-  assert(thread.yoloEnabled === true, 'Thread yoloEnabled must be true')
+  assertRootYoloPolicy(thread, true)
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
     JSON.stringify(thread.branchSettings?.model)
@@ -611,9 +612,10 @@ export function assertThreadSettings(accepted, testCase, agentName) {
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,environmentName,model',
+      === 'agentName,environmentName,goal,model',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
+  assert(thread.branchSettings.goal === null, 'New Thread must have no user Goal')
 }
 
 function assertNoAssistantError(entries) {
