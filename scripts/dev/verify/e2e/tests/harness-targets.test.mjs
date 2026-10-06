@@ -40,8 +40,9 @@ test('harness owner helpers expose only the Chat owner shape', async () => {
   )
 })
 
-test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly five keys', () => {
-  // Test intent: the NEW_THREAD wire shape is sealed — no alias token, no name input.
+test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly six keys', () => {
+  // Test intent: the NEW_THREAD wire shape is sealed — no alias token, and the branch display name is a
+  // required, caller-supplied creation input (never a server-derived default).
   const sessionId = cid()
   const startEntryId = cid()
   const threadId = cid()
@@ -49,6 +50,7 @@ test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly five
     sessionId,
     startEntryId,
     threadId,
+    threadName: 'branch',
     yoloEnabled: true,
   })
   assert.equal(target.type, 'NEW_THREAD')
@@ -56,23 +58,26 @@ test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly five
     'sessionId',
     'startEntryId',
     'threadId',
+    'threadName',
     'type',
     'yoloEnabled',
   ])
   assert.equal(target.sessionId, sessionId)
   assert.equal(target.startEntryId, startEntryId)
   assert.equal(target.threadId, threadId)
+  assert.equal(target.threadName, 'branch')
   assert.equal(target.yoloEnabled, true)
-  assert.equal(Object.hasOwn(target, 'name'), false, 'NEW_THREAD must not accept a name input')
+  assert.equal(Object.hasOwn(target, 'name'), false, 'NEW_THREAD must not accept the legacy name input')
   assert.equal(Object.hasOwn(target, 'rootSettings'), false)
 })
 
 test('newThreadTarget defaults yoloEnabled to false and validates canonical ids', () => {
-  // Test intent: NEW_SESSION/THREAD shape and the boolean default must remain strict.
+  // Test intent: NEW_SESSION/THREAD shape, the boolean default and canonical ids must remain strict.
   const target = newThreadTarget({
     sessionId: sampleId(),
     startEntryId: sampleId(),
     threadId: sampleId(),
+    threadName: 'branch',
   })
   assert.equal(target.yoloEnabled, false)
   assert.deepEqual(
@@ -92,9 +97,32 @@ test('newThreadTarget defaults yoloEnabled to false and validates canonical ids'
     ['expectedHeadEntryId', 'expectedNextCommandSequence', 'threadId', 'type'],
   )
   assert.throws(
-    () => newThreadTarget({ sessionId: 'not-uuid', startEntryId: cid(), threadId: cid() }),
+    () =>
+      newThreadTarget({
+        sessionId: 'not-uuid',
+        startEntryId: cid(),
+        threadId: cid(),
+        threadName: 'branch',
+      }),
     /canonical UUID/,
   )
+})
+
+test('newThreadTarget requires a non-blank threadName and normalizes it like the server', () => {
+  // 测试意图：分支名是创建请求身份的一部分，必须非空且按 Names 规则折叠空白、去首尾；
+  // 空白名在 helper 层就被拒绝，不会让服务端替调用方猜测展示名。
+  const base = { sessionId: sampleId(), startEntryId: sampleId(), threadId: sampleId() }
+  assert.equal(
+    newThreadTarget({ ...base, threadName: '  分  支\n名称  ' }).threadName,
+    '分 支 名称',
+  )
+  for (const threadName of [undefined, null, '', '   ', '\t\n']) {
+    assert.throws(() => newThreadTarget({ ...base, threadName }), /threadName/)
+  }
+  assert.throws(() => newThreadTarget({ ...base, threadName: 42 }), /threadName/)
+  // 上限按 Unicode 码点计数（256 合法、257 拒绝），超长绝不静默截断。
+  assert.equal(newThreadTarget({ ...base, threadName: 'a'.repeat(256) }).threadName.length, 256)
+  assert.throws(() => newThreadTarget({ ...base, threadName: 'a'.repeat(257) }), /256/)
 })
 
 test('threadParentIdOf/threadIdOf enforce the immutable execution parent relation', () => {

@@ -25,7 +25,7 @@ insert into agent_provider (
      '00000000-0000-0000-0000-000000000001'::uuid,
      current_timestamp, current_timestamp, 0),
     ('openai', 'OpenAI (OpenAI Responses).', 'openai_response', null, null,
-     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"openAiPromptCacheMode":"GPT_5_6_EXPLICIT"}',
+     '{"modelCallTimeoutMillis":1800000,"modelCallIdleTimeoutMillis":120000,"promptCacheRetention":"SHORT"}',
      '00000000-0000-0000-0000-000000000002'::uuid,
      current_timestamp, current_timestamp, 0),
     ('xai', 'xAI / Grok (OpenAI Responses).', 'openai_response', null, null,

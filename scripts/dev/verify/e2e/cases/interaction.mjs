@@ -14,6 +14,7 @@ import {
   createChat,
   createNewSession,
   getThreadSnapshot,
+  previewHistoricalRequest,
   stopThread,
   userMessageCommand,
   waitForQuiescentThread,
@@ -29,6 +30,7 @@ const INTERACTION_FIELDS = [
   'status',
   'threadId',
   'sessionId',
+  'rootThreadId',
   'owner',
   'toolCallId',
   'toolName',
@@ -36,6 +38,9 @@ const INTERACTION_FIELDS = [
   'approvalJson',
   'createTime',
 ]
+
+/** InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，与当前页长度无关。 */
+const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total']
 
 const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
@@ -57,13 +62,18 @@ function parseArguments(interaction) {
   return JSON.parse(interaction.argumentsJson)
 }
 
-function assertInteraction(interaction, { threadId, sessionId, chatId, questionnaire, label }) {
+function assertInteraction(
+  interaction,
+  { threadId, rootThreadId, sessionId, chatId, questionnaire, label },
+) {
   assertExactFields(interaction, INTERACTION_FIELDS, `${label} interaction`)
   assert(
     UUID_TEXT.test(interaction.interactionId)
       && interaction.status === 'WAITING_INPUT'
       && interaction.threadId === threadId
       && interaction.sessionId === sessionId
+      // 来源 Thread 保持原始坐标；本 case 只有一条执行根，rootThreadId 必须指向它。
+      && interaction.rootThreadId === rootThreadId
       && interaction.toolName === 'ask_user'
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
@@ -90,15 +100,32 @@ function assertInteraction(interaction, { threadId, sessionId, chatId, questionn
  * 以 keyset 游标遍历待处理 Interaction 全集，同时校验分页不变量：页内按 createTime 升序、跨页 id 唯一、
  * 继续翻页必须给出非空游标（服务端只在源耗尽时返回 null）。
  */
-async function collectInteractions(ctx, { pageSize = 100, maxPages = 20 } = {}) {
+async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThreadId = null } = {}) {
   const items = []
   const seen = new Set()
   let cursor = ''
+  let total = null
   for (let page = 0; page < maxPages; page++) {
-    const query = `?limit=${pageSize}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+    const filter = rootThreadId ? `&rootThreadId=${encodeURIComponent(rootThreadId)}` : ''
+    const query = `?limit=${pageSize}${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
     const page$ = envelopeData((await ctx.call('GET', `/api/interactions${query}`)).json)
+    assertExactFields(page$, INTERACTION_PAGE_FIELDS, 'interaction page')
     assert(Array.isArray(page$.items), JSON.stringify(page$))
     assert(page$.items.length <= pageSize, JSON.stringify(page$))
+    // total 是同一过滤条件下的真实待处理总数，不是首页长度：页内、跨页都必须稳定且不小于已返回条数。
+    assert(Number.isInteger(page$.total) && page$.total >= page$.items.length, JSON.stringify(page$))
+    assert(
+      total === null || page$.total === total,
+      `interaction total must stay stable across pages: ${JSON.stringify({ total, pageTotal: page$.total })}`,
+    )
+    if (total === null && rootThreadId === null) {
+      // 未过滤时 total 与遍历出的全集必须一致（遍历上限内）。
+      assert(
+        page$.total >= items.length + page$.items.length,
+        JSON.stringify({ total: page$.total, seen: items.length, page: page$.items.length }),
+      )
+    }
+    total = page$.total
     for (let index = 0; index < page$.items.length; index++) {
       const interaction = page$.items[index]
       assertExactFields(interaction, INTERACTION_FIELDS, 'interaction')
@@ -159,7 +186,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '统一人工交互 API：ask_user 待处理列表、答案物化与门禁',
-  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400）；InteractionDTO 只暴露冻结问卷原文与归属，approvalJson 为 null；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
+  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；InteractionDTO 只暴露冻结问卷原文与归属，approvalJson 为 null；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const marker = `INTERACTION-PENDING-${suffix}`
@@ -262,11 +289,52 @@ registerCase({
 
       const pending = assertInteraction(
         await waitForPendingInteraction(ctx, { threadId }),
-        { threadId, sessionId: String(sessionId), chatId: chat.id, questionnaire, label: 'pending' },
+        {
+          threadId,
+          rootThreadId: threadId,
+          sessionId: String(sessionId),
+          chatId: chat.id,
+          questionnaire,
+          label: 'pending',
+        },
       )
       assert(
         mock.requests.some((request) => request.outcome === 'tool-call'),
         `mock did not emit the ask_user ToolCall: ${JSON.stringify(mock.requests)}`,
+      )
+
+      // rootThreadId 过滤：按执行根返回该根（含后代）的待办，响应项仍保留来源 threadId/sessionId。
+      const filtered = envelopeData(
+        (
+          await ctx.call(
+            'GET',
+            `/api/interactions?limit=100&rootThreadId=${encodeURIComponent(threadId)}`,
+          )
+        ).json,
+      )
+      assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
+      assert(
+        filtered.items.length === 1
+          && filtered.items[0].interactionId === pending.interactionId
+          && filtered.items[0].threadId === threadId
+          && filtered.items[0].rootThreadId === threadId
+          && filtered.total === 1,
+        `root filter must return exactly the pending interaction of that root: ${JSON.stringify(filtered)}`,
+      )
+      // 过滤器身份必须是已存在的执行根：不存在的 Thread 404，非法 canonical 与非根 400。
+      await expectHttpError(
+        () => ctx.call('GET', `/api/interactions?rootThreadId=${cid()}`),
+        { status: 404 },
+      )
+      await expectHttpError(() => ctx.call('GET', '/api/interactions?rootThreadId=not-a-uuid'), {
+        status: 400,
+      })
+      // 过滤器只缩小可见集，不改变未过滤视图：无过滤时仍能看到该待办。
+      assert(
+        (await collectInteractions(ctx)).some(
+          (interaction) => interaction.interactionId === pending.interactionId,
+        ),
+        'unfiltered view must still expose the pending interaction',
       )
 
       // 提交请求形状严格校验：缺失/未知字段、拒答携带答案都在触达领域前 400。
@@ -381,6 +449,26 @@ registerCase({
         resultEntry,
         `materialized ToolResult for ${pending.interactionId} not found: ${JSON.stringify(entries.map((entry) => entry.entryType))}`,
       )
+      // 历史请求预览：以真实模型输出为锚点复现「该输出之前的请求前缀」，必须恒为只读且声明是重建而非原始字节。
+      const assistantOutput = entries
+        .filter((entry) => String(entry?.entryType || '').toUpperCase() === 'MESSAGE')
+        .map((entry) => ({ entry, payload: JSON.parse(entry.payloadJson || '{}') }))
+        .find(({ payload }) => payload?.message?.role === 'ASSISTANT' && payload?.assistantMetadata)
+      assert(
+        assistantOutput,
+        `expected a durable assistant model output: ${JSON.stringify(entries.map((entry) => entry.entryType))}`,
+      )
+      const historical = await previewHistoricalRequest(ctx, sessionId, String(assistantOutput.entry.entryId))
+      assert(
+        historical.sourceHeadEntryId === String(assistantOutput.entry.parentEntryId),
+        `historical preview prefix head must be the output parent: ${JSON.stringify(historical)}`,
+      )
+      // 历史预览与草稿预览共用同一只读面：不写 Entry、不推进 cursor。
+      assert(
+        JSON.stringify((await getThreadSnapshot(ctx, threadId)).entries) === JSON.stringify(entries),
+        'historical preview must not write any Entry',
+      )
+
       const finalRequest = mock.requests.filter((request) => request.outcome === 'final').at(-1)
       assert(
         finalRequest && JSON.stringify(finalRequest.body.messages).includes(chosenAnswer),

@@ -23,6 +23,8 @@ import {
   listChatSessions,
   listSessionEntries,
   listSessionThreads,
+  previewHistoricalRequest,
+  previewSessionDraftRequest,
   renameSession,
   renameThread,
   setAgentCommand,
@@ -319,6 +321,151 @@ registerCase({
     assert(after.thread.headEntryId === thread.headEntryId, 'preview advanced thread head')
     assert(after.thread.nextCommandSequence === thread.nextCommandSequence, 'preview reserved command sequence')
     assert(after.queuedCommands.length === 0, 'preview enqueued a command')
+  },
+})
+
+registerCase({
+  id: 'thread.provider_request_preview_readonly',
+  level: 'L1',
+  title: '草稿与历史请求预览只读且边界严格',
+  docs: 'POST /api/harness/sessions/{sessionId}/provider-request-preview（body 只有 {startEntryId,commands}，无 cursor）返回 200 DRAFT_REQUEST_PREVIEW；GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview 返回 200 HISTORICAL_REQUEST_PREVIEW；两者都是精确 8 字段、固定 notice、bodyByteSize==UTF-8 字节数、bodyJson 不泄漏 endpoint/credential；草稿起点只接受 ROOT 或已闭合 TURN_END（消息/中间 Entry 400），跨 Session 或不属于该 Session 的 Entry 400，Session 缺失 404，非 canonical 路径 400；历史预览只接受携带 assistantMetadata 的模型输出（其它 Entry 400）；全部预览不写任何 durable 状态（Entry Tree/Thread cursor/Thread 列表不变）。历史预览的正向 200 由 interaction.pending_input_contract 在真实模型输出上覆盖。',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const suffix = cid().slice(0, 8)
+    const chat = await createChat(ctx, {
+      title: `e2e-preview-readonly-${suffix}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const sessionId = cid()
+    const threadId = cid()
+    await createNewSession(ctx, {
+      owner: chatOwner(chat.id),
+      sessionId,
+      threadId,
+      rootSettings: branchSettingsOf(ctx.vars.agent, modelSelectionOf(ctx)),
+      yoloEnabled: false,
+      commands: [userMessageCommand(`preview readonly ${suffix}`, cid())],
+    })
+    const quiescent = await waitForQuiescentThread(ctx, threadId, {
+      timeoutMs: 60_000,
+      intervalMs: 100,
+    })
+    assert(quiescent.status === 'IDLE', JSON.stringify(quiescent))
+
+    const before = await listSessionEntries(ctx, sessionId)
+    const threadsBefore = await listSessionThreads(ctx, sessionId)
+    const snapshotBefore = await getThreadSnapshot(ctx, threadId)
+    // 费用投影与 durable 历史解耦：本回合确定性失败、没有真实模型用量，因此所有 Entry 必须显式 null，
+    // 绝不伪装成 0 费用；有价值的正向投影由带真实用量的集成/真实模型用例覆盖。
+    assert(
+      before.every((entry) => entry.usageCost === null),
+      `non-model entries must project usageCost: null rather than a fake zero: ${JSON.stringify(
+        before.map((entry) => [entry.entryType, entry.usageCost]),
+      )}`,
+    )
+    const byType = (type) =>
+      before.filter((entry) => String(entry.entryType || '').toUpperCase() === type)
+    const turnEnd = byType('TURN_END').at(-1)
+    const rootEntry = byType('ROOT')[0]
+    const midTurn = [...byType('MESSAGE'), ...byType('TURN_START')]
+    assert(turnEnd && rootEntry && midTurn.length > 0, JSON.stringify(before))
+    assert(
+      String(snapshotBefore.thread.headEntryId) === String(turnEnd.entryId),
+      `quiescent head must be the closed TURN_END: ${JSON.stringify(snapshotBefore.thread)}`,
+    )
+
+    // 正向：以 ROOT 与已闭合 TURN_END 为起点都能得到只读草稿预览（预览绝不创建 Thread）。
+    for (const startEntryId of [String(rootEntry.entryId), String(turnEnd.entryId)]) {
+      const preview = await previewSessionDraftRequest(ctx, sessionId, {
+        startEntryId,
+        commands: [userMessageCommand(`draft ${suffix}`, cid())],
+      })
+      assert(
+        preview.sourceHeadEntryId === startEntryId,
+        `draft preview source head must be the start entry: ${JSON.stringify(preview)}`,
+      )
+      assert(
+        typeof JSON.parse(preview.bodyJson) === 'object',
+        JSON.stringify(preview.bodyJson),
+      )
+      assert(
+        !/(authorization|api[_-]?key|credential|secret)/i.test(preview.bodyJson),
+        `preview body must not leak endpoint/credential material: ${preview.bodyJson}`,
+      )
+    }
+
+    // 负向：起点不是合法 fork 边界、不属于该 Session、或 Session 缺失都确定性拒绝。
+    for (const entry of midTurn) {
+      await expectHttpError(
+        () =>
+          previewSessionDraftRequest(ctx, sessionId, {
+            startEntryId: String(entry.entryId),
+            commands: [userMessageCommand(`draft ${suffix}`, cid())],
+          }),
+        { status: 400 },
+      )
+    }
+    await expectHttpError(
+      () =>
+        previewSessionDraftRequest(ctx, sessionId, {
+          startEntryId: cid(),
+          commands: [userMessageCommand(`draft ${suffix}`, cid())],
+        }),
+      { status: 400 },
+    )
+    await expectHttpError(
+      () =>
+        previewSessionDraftRequest(ctx, cid(), {
+          startEntryId: String(turnEnd.entryId),
+          commands: [userMessageCommand(`draft ${suffix}`, cid())],
+        }),
+      { status: 404 },
+    )
+    // 历史预览只接受携带 assistantMetadata 的模型输出：非模型输出 Entry 与未知 Entry 都是 400，Session 缺失 404。
+    for (const entry of [turnEnd, ...midTurn]) {
+      await expectHttpError(() => previewHistoricalRequest(ctx, sessionId, String(entry.entryId)), {
+        status: 400,
+      })
+    }
+    await expectHttpError(() => previewHistoricalRequest(ctx, sessionId, cid()), { status: 400 })
+    await expectHttpError(() => previewHistoricalRequest(ctx, cid(), String(turnEnd.entryId)), {
+      status: 404,
+    })
+    await expectHttpError(
+      () =>
+        ctx.call(
+          'GET',
+          `/api/harness/sessions/${encodeURIComponent(String(sessionId))}/entries/not-a-uuid/provider-request-preview`,
+        ),
+      { status: 400 },
+    )
+
+    // 只读：预览绝不写 Entry、不推进 cursor、不创建 Thread。
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, sessionId)) === JSON.stringify(before),
+      'preview must not write any Entry',
+    )
+    assert(
+      JSON.stringify(await listSessionThreads(ctx, sessionId)) === JSON.stringify(threadsBefore),
+      'preview must not create a Thread',
+    )
+    const snapshotAfter = await getThreadSnapshot(ctx, threadId)
+    assert(
+      String(snapshotAfter.thread.headEntryId) === String(snapshotBefore.thread.headEntryId)
+        && String(snapshotAfter.thread.version) === String(snapshotBefore.thread.version)
+        && String(snapshotAfter.thread.nextCommandSequence)
+          === String(snapshotBefore.thread.nextCommandSequence)
+        && snapshotAfter.queuedCommands.length === 0
+        && snapshotAfter.modelInvocation === null,
+      JSON.stringify({ before: snapshotBefore.thread, after: snapshotAfter.thread }),
+    )
+    // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
+    await ctx.call(
+      'DELETE',
+      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    )
   },
 })
 
@@ -856,8 +1003,8 @@ registerCase({
 registerCase({
   id: 'thread.new_thread_same_session',
   level: 'L1',
-  title: 'NEW_THREAD 同 Session 分支创建并派生 branch 默认名',
-  docs: 'NEW_THREAD target 在既有 Session 的既有 Entry 下开新 Thread（不复制 Entry）：sessionId 不变、accepted command sequence=1、branch Thread name 精确等于 branch-<threadId 前 8 位>（服务端派生，不进创建请求）；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence/name 不变；NEW_THREAD 非法 startEntryId（不存在 404/跨 Session 400）',
+  title: 'NEW_THREAD 用显式规范化分支名在合法边界创建新 Thread',
+  docs: 'NEW_THREAD target 在既有 Session 的合法 fork 边界（ROOT 或已闭合 TURN_END）开新 Thread（不复制 Entry）：分支显示名必须显式给出，创建前按 Names 规则把空白折叠为单空格并去首尾（≤256 码点），规范化结果进入创建请求身份并等于 accepted.thread.name；sessionId 不变、accepted command sequence=1、rootEntry 复用 Session ROOT；quiescent 后分支 Thread snapshot path 必须包含 startEntry 与分支 USER；原 Thread head/version/nextCommandSequence/name 不变；NEW_THREAD 非法 startEntryId（不存在 404）由本 case 覆盖，跨 Session 由 thread.new_thread_cross_session_rejected 覆盖',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -884,6 +1031,15 @@ registerCase({
     const idle = await getThreadSnapshot(ctx, threadId)
     const thread = idle.thread
     assert(thread.name === 'main', JSON.stringify(thread))
+    // quiescent 后 head 是已闭合 TURN_END：这是除 ROOT 之外唯一合法的 fork 边界。
+    assert(
+      (idle.entries || []).some(
+        (entry) =>
+          String(entry.entryId) === String(thread.headEntryId)
+          && String(entry.entryType || '').toUpperCase() === 'TURN_END',
+      ),
+      `quiescent head must be a closed TURN_END: ${JSON.stringify(idle.entries)}`,
+    )
     const startEntryId = String(thread.headEntryId)
     const mainBefore = {
       headEntryId: String(thread.headEntryId),
@@ -893,31 +1049,33 @@ registerCase({
     }
     const branchThreadId = cid()
     const branchUserText = `branch on head ${cid().slice(0, 8)}`
+    // 显式给出含多余空白的分支名：服务端与 helper 都必须规范化为折叠后的单空格名称。
+    const rawThreadName = `  branch   ${cid().slice(0, 8)}   name  `
+    const normalizedThreadName = rawThreadName.replace(/\s+/gu, ' ').trim()
     const branched = await createNewThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId,
       threadId: branchThreadId,
+      threadName: rawThreadName,
       // NEW_THREAD 独立 fork 新执行根：根开关从原根 mode 派生，不读取已删除的 boolean 字段。
       yoloEnabled: thread.yoloPolicy.mode === 'ENABLE',
       commands: [userMessageCommand(branchUserText, cid())],
     })
     // NEW_THREAD accepted 后 processor 可能已消费分支命令：不锁定 response head=startEntry；
-    // 只锁定 session/thread 归属、branch 默认名与 accepted command sequence=1。
+    // 只锁定 session/thread 归属、显式分支名与 accepted command sequence=1。
     assert(
       String(branched.thread.sessionId) === String(thread.sessionId),
       JSON.stringify(branched.thread),
     )
     assert(String(branched.thread.threadId) === branchThreadId, JSON.stringify(branched.thread))
     assert(
-      branched.thread.name === `branch-${String(branchThreadId).slice(0, 8)}`,
-      JSON.stringify(branched.thread),
-    )
-    assert(
-      String(branched.acceptedCommands[0].sequence) === '1'
-        && branched.acceptedCommands[0].type === 'USER_MESSAGE'
-        && branched.replayed === false,
-      JSON.stringify(branched),
+      branched.thread.name === normalizedThreadName,
+      `branch name must be the normalized explicit threadName: ${JSON.stringify({
+        rawThreadName,
+        normalizedThreadName,
+        actual: branched.thread.name,
+      })}`,
     )
     assert(branched.rootEntry.entryId === accepted.rootEntry.entryId, JSON.stringify(branched.rootEntry))
     // 原 Thread 不受影响（head/version/nextCommandSequence/name 逐字段不变）。
@@ -956,6 +1114,54 @@ registerCase({
       `branch path must include the branch USER message: ${JSON.stringify(branchedEntries)}`,
     )
 
+    // 非边界 Entry 不得作为 fork 起点：TURN_START / 消息 / ASSISTANT_ERROR 都必须 400，
+    // 且不产生任何写入（预分配 threadId 404、原 Session entries 与 head 完全不变）。
+    const nonBoundary = (idle.entries || []).filter((entry) => {
+      const type = String(entry.entryType || '').toUpperCase()
+      return type === 'TURN_START' || type === 'MESSAGE' || type === 'ASSISTANT_ERROR'
+    })
+    assert(
+      nonBoundary.length > 0,
+      `expected mid-turn entries to be rejected as fork boundaries: ${JSON.stringify(idle.entries)}`,
+    )
+    const entriesBeforeReject = await listSessionEntries(ctx, sessionId)
+    const rejectedName = `must-not-exist ${cid().slice(0, 8)}`
+    for (const entry of nonBoundary) {
+      const rejectedThreadId = cid()
+      await expectHttpError(
+        () =>
+          createNewThread(ctx, {
+            owner: chatOwner(chat.id),
+            sessionId,
+            startEntryId: String(entry.entryId),
+            threadId: rejectedThreadId,
+            threadName: rejectedName,
+            yoloEnabled: false,
+            commands: [userMessageCommand(`illegal fork ${cid().slice(0, 8)}`, cid())],
+          }),
+        { status: 400 },
+      )
+      // 拒绝必须是零写入：预分配 Thread 未创建、Session Entry Tree 与源 Thread head 一字不动。
+      await expectHttpError(() => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`), {
+        status: 404,
+      })
+    }
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, sessionId)) === JSON.stringify(entriesBeforeReject),
+      'rejected fork attempts must not write any Entry',
+    )
+    const afterRejects = await getThreadSnapshot(ctx, threadId)
+    assert(
+      String(afterRejects.thread.headEntryId) === mainBefore.headEntryId
+        && String(afterRejects.thread.version) === String(after.thread.version)
+        && String(afterRejects.thread.nextCommandSequence) === String(after.thread.nextCommandSequence),
+      JSON.stringify({ before: mainBefore, after: afterRejects.thread }),
+    )
+    assert(
+      !(await listSessionThreads(ctx, sessionId)).some((item) => String(item.name) === rejectedName),
+      'rejected forks must not create a Thread',
+    )
+
     // 不存在的 startEntryId => 404（Runtime 找不到 Entry）。
     await expectHttpError(
       () =>
@@ -964,6 +1170,7 @@ registerCase({
           sessionId,
           startEntryId: cid(),
           threadId: cid(),
+          threadName: `unknown entry ${cid().slice(0, 8)}`,
           yoloEnabled: false,
           commands: [userMessageCommand('unknown entry', cid())],
         }),
@@ -1024,13 +1231,14 @@ registerCase({
     await waitForDurableMessages(ctx, threadId, [trunkMessage, originalMessage])
     const original = await getThreadSnapshot(ctx, threadId)
 
-    // 分支：NEW_THREAD 在 branchPoint 下开新 Thread，写 alternate。
+    // 分支：NEW_THREAD 在 branchPoint（已闭合 TURN_END）下开新 Thread，写 alternate。
     const alternateThreadId = cid()
     await createNewThread(ctx, {
       owner: chatOwner(chat.id),
       sessionId,
       startEntryId: branchPointEntryId,
       threadId: alternateThreadId,
+      threadName: `alternate ${suffix}`,
       yoloEnabled: false,
       commands: [userMessageCommand(alternateMessage, cid())],
     })
@@ -1161,6 +1369,7 @@ registerCase({
           sessionId: firstSessionId,
           startEntryId: secondRootEntryId,
           threadId: rejectedThreadId,
+          threadName: `cross session ${cid().slice(0, 8)}`,
           yoloEnabled: false,
           commands: [userMessageCommand('cross session entry', cid())],
         }),
