@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AssistantMessageBlock } from '@/features/ai/runtime/thread-panel/messages/AssistantMessageBlock'
 import type { TextDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
@@ -103,8 +103,8 @@ describe('AssistantMessageBlock', () => {
     expect(screen.queryByText('…')).not.toBeInTheDocument()
   })
 
-  it('normalizes trailing whitespace and newlines from thinking text while preserving paragraph structure', () => {
-    // 测试意图：移除思考末尾多余空白，内部段落结构经 Markdown 渲染为标准段落元素，消除冗余空行。
+  it('flattens thinking into one line by default and expands to normalized Markdown paragraphs', () => {
+    // 测试意图：默认收起把换行空白合并为单行；展开后原始 Markdown 按标准段落渲染，消除冗余空行。
     const { container } = render(
       <AssistantMessageBlock
         message={message({
@@ -113,16 +113,18 @@ describe('AssistantMessageBlock', () => {
         })}
       />,
     )
-    const thinkingEl = container.querySelector('.thread-thinking-text')
-    expect(thinkingEl).not.toBeNull()
-    const paragraphs = thinkingEl?.querySelectorAll('p')
+    const line = container.querySelector('.thread-thinking-line')
+    expect(line?.textContent).toBe('step 1 step 2')
+
+    fireEvent.click(screen.getByRole('button', { name: '展开思考' }))
+    const paragraphs = container.querySelectorAll('.thread-thinking-text p')
     expect(paragraphs).toHaveLength(2)
     expect(paragraphs?.[0]?.textContent).toBe('step 1')
     expect(paragraphs?.[1]?.textContent).toBe('step 2')
   })
 
-  it('renders markdown thinking from triple newlines, bold, lists, and code without modifying raw error pre', () => {
-    // 测试意图：思考内容支持 Markdown 渲染（多空行折叠为段落、加粗、列表、代码块），同时保持 error 状态下 raw pre 不被转义。
+  it('renders expanded markdown thinking while keeping the raw error pre untouched', () => {
+    // 测试意图：展开思考支持 Markdown（多空行折叠为段落、加粗、列表、代码块），error 状态下 raw pre 不被转义。
     const { container } = render(
       <AssistantMessageBlock
         message={message({
@@ -132,6 +134,8 @@ describe('AssistantMessageBlock', () => {
         })}
       />,
     )
+    fireEvent.click(screen.getByRole('button', { name: '展开思考' }))
+
     const thinkingEl = container.querySelector('.thread-thinking-text')
     expect(thinkingEl).not.toBeNull()
     const paragraphs = thinkingEl?.querySelectorAll('p')
@@ -162,8 +166,8 @@ describe('AssistantMessageBlock', () => {
     expect(container.querySelector('.thread-block-thinking')).toBeNull()
   })
 
-  it('maintains normalized text through streaming transition without extra spacing', () => {
-    // 测试意图：流式和终态使用同一渲染边界规则，状态切换不能重新引入尾随空行。
+  it('keeps collapsed thinking as one suffix line through the streaming-to-done transition', () => {
+    // 测试意图：流式到终态沿用同一收起渲染边界，不因状态切换重置为展开或重新引入空行。
     const { container, rerender } = render(
       <AssistantMessageBlock
         message={message({
@@ -173,9 +177,10 @@ describe('AssistantMessageBlock', () => {
         })}
       />,
     )
-    let thinkingBlock = container.querySelector('.thread-block-thinking')
-    expect(thinkingBlock).toHaveClass('streaming')
-    expect(container.querySelector('.thread-thinking-text')?.textContent).toBe('reasoning step')
+    const thinkingBlock = container.querySelector('.thread-block-thinking')
+    expect(thinkingBlock).not.toBeNull()
+    expect(container.querySelector('.thread-thinking-line')?.textContent).toBe('reasoning step')
+    expect(screen.getByRole('button', { name: '展开思考' })).toHaveAttribute('aria-expanded', 'false')
 
     rerender(
       <AssistantMessageBlock
@@ -186,9 +191,8 @@ describe('AssistantMessageBlock', () => {
         })}
       />,
     )
-    thinkingBlock = container.querySelector('.thread-block-thinking')
-    expect(thinkingBlock).not.toHaveClass('streaming')
-    expect(container.querySelector('.thread-thinking-text')?.textContent).toBe('reasoning step')
+    expect(container.querySelector('.thread-thinking-line')?.textContent).toBe('reasoning step')
+    expect(screen.getByRole('button', { name: '展开思考' })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('final answer')).toBeInTheDocument()
   })
 })
