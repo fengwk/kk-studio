@@ -3,7 +3,7 @@ import { ChatCardsPanel } from '@/features/ai/chat/ChatCardsPanel'
 import { ChatRuntime } from '@/features/ai/chat/ChatRuntime'
 import { useChatRuntime } from '@/features/ai/chat/ChatRuntimeContext'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 
 /** Chat 列表路由的完整运行时；整个模块只在进入 `/chats` 时加载。 */
 export default function ChatsRoute({ children }: ExtensionComponentProps) {

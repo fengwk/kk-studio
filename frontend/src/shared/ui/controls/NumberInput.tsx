@@ -2,6 +2,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useId } from 'react'
 import { sanitizeIntegerInput } from '@/shared/lib/numeric-input'
 import { useI18n } from '@/shared/i18n'
+import './controls.css'
 
 /**
  * 整数输入：文本框 + 自定义步进，不使用浏览器原生 number spinner。
@@ -15,6 +16,7 @@ export function NumberInput({
   max,
   step = 1,
   disabled = false,
+  placeholder,
   className,
   'aria-label': ariaLabel,
   'aria-describedby': ariaDescribedBy,
@@ -26,6 +28,7 @@ export function NumberInput({
   max?: number
   step?: number
   disabled?: boolean
+  placeholder?: string
   className?: string
   'aria-label'?: string
   'aria-describedby'?: string
@@ -58,6 +61,7 @@ export function NumberInput({
         spellCheck={false}
         value={value}
         disabled={disabled}
+        placeholder={placeholder}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
         onChange={(event) => onChange(sanitizeIntegerInput(event.target.value))}

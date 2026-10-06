@@ -1,5 +1,6 @@
 import type { FormEventHandler } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { AgentForm, ModelForm, ProviderForm } from '@/features/ai/catalog/AiResourceForms'
 import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
@@ -61,15 +62,13 @@ export function ResourceEditorModal({
 
   const title = resourceTitle(modal)
   return (
-    <ModalBackdrop onClose={onClose}>
-      <form
-        className="modal-card resource-modal-card"
-        aria-label={title}
-        onSubmit={onSubmit}
-        onMouseDown={(event) => event.stopPropagation()}
-        noValidate
-      >
-        <ModalHeader title={title} onClose={onClose} />
+    <Dialog
+      className="resource-modal-card"
+      title={title}
+      pending={pending}
+      onClose={onClose}
+    >
+      <form className="modal-card-form" aria-label={title} onSubmit={onSubmit} noValidate>
         <div className="modal-body">
           {formError ? (
             <div className="form-error-banner" role="alert">
@@ -109,13 +108,13 @@ export function ResourceEditorModal({
           )}
         </div>
         <div className="modal-footer">
-          <button type="submit" className="btn-primary" disabled={pending}>
+          <Button type="submit" disabled={pending}>
             {modal.mode === 'create'
               ? t('ai.catalog.action.confirmCreate')
               : t('ai.catalog.action.saveChanges')}
-          </button>
+          </Button>
         </div>
       </form>
-    </ModalBackdrop>
+    </Dialog>
   )
 }

@@ -1,8 +1,8 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
+import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 
 // 组装删除型确认弹窗（危险色 + 自定义确认文案），使各测试聚焦自身关注点。
 function renderDeleteModal(modal: Partial<ConfirmModalState> = {}) {

@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/shared/i18n'
+import './feedback.css'
 
 export type ToastTone = 'success' | 'error'
 

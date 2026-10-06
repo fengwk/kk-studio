@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { FolderPlus, X } from 'lucide-react'
-import { Checkbox } from '@/shared/ui/console/Checkbox'
+import { FolderPlus } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -33,20 +35,6 @@ export function CreateProjectModal({
     }
   }, [isOpen])
 
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
-
   if (!isOpen) {
     return null
   }
@@ -77,37 +65,14 @@ export function CreateProjectModal({
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
+    <Dialog
+      className="resource-modal-card"
+      title="新建项目"
+      headerIcon={<FolderPlus size={18} aria-hidden="true" />}
+      pending={isSubmitting}
+      onClose={onClose}
     >
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="新建项目"
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FolderPlus size={18} aria-hidden="true" />
-            <h3>新建项目</h3>
-          </div>
-          <button
-            type="button"
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
+        <form className="modal-card-form" onSubmit={handleSubmit}>
           <div className="modal-body">
             {errorMessage && (
               <div className="form-error-banner" role="alert">
@@ -157,24 +122,14 @@ export function CreateProjectModal({
           </div>
 
           <div className="modal-footer">
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
               取消
-            </button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isSubmitting}
-            >
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? '创建中...' : '创建项目'}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }

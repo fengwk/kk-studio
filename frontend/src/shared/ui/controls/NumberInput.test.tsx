@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { NumberInput } from '@/shared/ui/console/NumberInput'
+import { NumberInput } from '@/shared/ui/controls/NumberInput'
 
 /**
  * 受控 Harness：保持与生产用法一致（父组件持有 value），

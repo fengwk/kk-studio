@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 
 const OPTIONS = [
   { value: 'a', label: 'Alpha' },

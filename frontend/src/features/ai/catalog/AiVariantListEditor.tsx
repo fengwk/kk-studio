@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'

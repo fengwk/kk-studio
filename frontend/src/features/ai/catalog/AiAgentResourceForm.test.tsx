@@ -118,7 +118,7 @@ describe('AgentForm current contracts', () => {
     const missingTool = screen.getByLabelText(/missing-tool/)
     expect(missingTool).toBeChecked()
     const bashInput = screen.getByLabelText(/bash/)
-    expect(bashInput).toHaveAttribute('value', 'bash')
+    expect(bashInput.closest('.capability-option')?.textContent).toContain('bash')
     await user.click(missingTool)
     expect(missingTool).not.toBeChecked()
     await user.click(bashInput)

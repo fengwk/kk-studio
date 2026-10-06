@@ -292,7 +292,7 @@ describe('ProjectsPage', () => {
     const createBtn = screen.getByRole('button', { name: '新建项目' })
     fireEvent.click(createBtn)
 
-    expect(screen.getByText('新建项目', { selector: 'h3' })).toBeInTheDocument()
+    expect(screen.getByText('新建项目', { selector: 'h2' })).toBeInTheDocument()
   })
 
   it('renders no-results state when nonblank search yields no matching projects with no duplicate create button', async () => {
