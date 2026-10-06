@@ -1,0 +1,68 @@
+/* NOTIFICATION 系统结果卡：全宽淡色，无图标列与左缩进。 */
+.thread-notification {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--scrim);
+}
+
+.thread-notification-title {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.thread-notification-body {
+  min-width: 0;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.thread-notification-text {
+  color: var(--fg-dim);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.thread-notification-invalid {
+  color: var(--danger, #d9534f);
+  line-height: 1.45;
+}
+
+.thread-notification-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.thread-notification-source-label {
+  color: var(--fg-muted);
+}
+
+.thread-notification-agent {
+  color: var(--fg-muted);
+}
+
+.thread-notification-thread {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-notification-section {
+  margin-top: 6px;
+}
+
+.thread-notification-label {
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}

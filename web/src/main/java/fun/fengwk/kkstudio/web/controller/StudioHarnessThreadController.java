@@ -133,6 +133,7 @@ public class StudioHarnessThreadController {
             () -> {
               RenameThreadCommand command =
                   HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request);
+              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
               ThreadState updated = runtime.renameThread(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
@@ -152,6 +153,7 @@ public class StudioHarnessThreadController {
             () -> {
               CompactThreadCommand command =
                   HarnessRuntimeRequestMapper.toCompactThreadCommand(threadId, request);
+              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
               CompactThreadResult result = runtime.compactThread(command);
               return HarnessRuntimeResponseMapper.toCompactResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
@@ -173,6 +175,7 @@ public class StudioHarnessThreadController {
             () -> {
               SetThreadYoloCommand command =
                   HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request);
+              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
               ThreadState updated = runtime.setThreadYolo(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
@@ -187,6 +190,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () -> {
               StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId, request);
+              ManualThreadControlGuard.requireExecutionRoot(runtime, command.threadId());
               StopResult result = runtime.stop(command);
               return HarnessRuntimeResponseMapper.toStopResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));

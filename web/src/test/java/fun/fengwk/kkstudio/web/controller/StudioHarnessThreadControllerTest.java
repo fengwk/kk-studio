@@ -529,6 +529,60 @@ class StudioHarnessThreadControllerTest {
     verifyNoInteractions(runtime);
   }
 
+  /**
+   * 测试意图：自由输入/Goal/设置/YOLO/Stop/压缩/重命名等人工控制只允许指向执行根；子 Thread 一律 409 且不产生 Runtime
+   * 变更，根目标照常放行。审批与问卷回答写回子调用是合法例外，不经本判定。
+   */
+  @Test
+  void manualControlsRejectChildThreadAsConflictAndAllowExecutionRoot() throws Exception {
+    UUID child = id(7);
+    UUID root = id(1);
+    when(runtime.findAncestorChain(child)).thenReturn(List.of(child, root));
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(7) + "/name")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"ok\"}"))
+        .andExpect(status().isConflict());
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(7) + "/compact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\"}"))
+        .andExpect(status().isConflict());
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(7) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yoloEnabled\":true}"))
+        .andExpect(status().isConflict());
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(7) + "/stop")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
+        .andExpect(status().isConflict());
+
+    verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
+    verify(runtime, never()).compactThread(any(CompactThreadCommand.class));
+    verify(runtime, never()).setThreadYolo(any(SetThreadYoloCommand.class));
+    verify(runtime, never()).stop(any());
+
+    // 根目标照常放行：findAncestorChain 返回单元素链。
+    when(runtime.findAncestorChain(root)).thenReturn(List.of(root));
+    when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
+        .thenReturn(HarnessRuntimeTestFixtures.thread(root));
+    when(runtime.getThreadSnapshot(root)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"yoloEnabled\":true}"))
+        .andExpect(status().isOk());
+  }
+
   /** 意图：非 canonical threadId 在 runtime 变更之前以 400 拒绝。 */
   @Test
   void compactRejectsNonCanonicalThreadIdBeforeRuntimeMutation() throws Exception {

@@ -251,7 +251,23 @@ class StudioHarnessThreadCommandBatchControllerTest {
         .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
         .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
 
-    verifyNoInteractions(runtime);
+    // 类型化拒绝路径不追加 snapshot 回读；仅有根身份判定这一只读探测。
+    verify(runtime, never()).getThreadSnapshot(any());
+  }
+
+  /**
+   * 测试意图：自由输入/Goal/设置等人工写入只允许指向执行根；子 Thread 在映射通过后、进入 acceptance 之前以 409 拒绝，避免把根级输入落到观察树内部。内部
+   * task/resume 不走本 HTTP 边界。
+   */
+  @Test
+  void rejectsChildThreadManualBatchAsConflictBeforeAcceptance() throws Exception {
+    UUID child = UUID.fromString(THREAD_ID);
+    UUID root = UUID.randomUUID();
+    when(runtime.findAncestorChain(child)).thenReturn(List.of(child, root));
+
+    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY))).andExpect(status().isConflict());
+
+    verifyNoInteractions(acceptanceService);
   }
 
   private ResultActions postBatch(String threadId, String body) throws Exception {

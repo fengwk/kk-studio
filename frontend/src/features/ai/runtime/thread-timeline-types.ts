@@ -151,6 +151,14 @@ export interface MetaDialogueMessage extends BaseDialogueMessage {
 }
 
 /**
+ * NOTIFICATION Entry 的权威 kind 与来源。kind 保留后端原文，未知值不得被假定为子代理结果。
+ */
+export interface EntryNotification {
+  kind: string
+  sourceThreadId: string | null
+}
+
+/**
  * 持久 Entry 的独立投影，其语义并非对话回合。
  *
  * 让该形态独立于 Harness DTO，可被任何能提供稳定 timeline 契约的调用方复用 transcript。
@@ -160,7 +168,8 @@ export interface EntryEventDialogueMessage extends BaseDialogueMessage {
   kind: EntryEventKind
   title: string
   text: string
-  rawPayloadJson: string
+  /** 仅 NOTIFICATION Entry 携带的 kind 与来源；原始 payload 不再进入会话时间线。 */
+  notification?: EntryNotification
 }
 
 export type DialogueMessage =

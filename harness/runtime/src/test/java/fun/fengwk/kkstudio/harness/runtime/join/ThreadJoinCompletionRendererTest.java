@@ -2,11 +2,20 @@ package fun.fengwk.kkstudio.harness.runtime.join;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import java.io.StringReader;
 import java.util.UUID;
 
 /**
@@ -14,7 +23,7 @@ import java.util.UUID;
  *
  * <p>测试意图：完成消息外层为 {@code <subagent_result>}（含 thread_id / agent / state 属性）， 内部依次为说明文字、{@code
  * <task>} 本次任务原文与 {@code <result>} 结果； 失败/取消分离 {@code <error>} 与 {@code <partial_result>}。
- * 属性与正文均执行实体转义，长文本不截断。
+ * 属性与正文均执行实体转义，长文本不截断，整封信封可被标准 XML 解析器往返解析。
  */
 class ThreadJoinCompletionRendererTest {
 
@@ -199,6 +208,137 @@ class ThreadJoinCompletionRendererTest {
     assertEquals(receipt.renderCompletionXml(), rendered);
     assertTrue(rendered.contains("<task>\nfix tests\n</task>"), rendered);
     assertTrue(rendered.contains("<result>\nfixed!\n</result>"), rendered);
+  }
+
+  @Test
+  void roundTripsEverySpecialCharacterThroughRealXmlParser() throws Exception {
+    // 测试意图：8 类特殊字符（& < > " ' 换行 回车 制表）在属性与正文中都能被标准 XML 解析器
+    // 逐字解析回原值，而不是只做字符串包含断言；说明文字中的裸 <task> 也必须已被转义。
+    String special = "amp& lt< gt> quote\" apos' nl\n cr\r tab\t end";
+    String message =
+        ThreadJoinCompletionRenderer.render(
+            CHILD_THREAD_ID, special, ThreadJoinOutcome.COMPLETED, special, special, null, null);
+
+    assertFalse(message.contains("<task> block below"), "note's bare <task> would break XML");
+    assertTrue(message.contains("&lt;task&gt; block below"), message);
+
+    Element root = parseXml(message).getDocumentElement();
+    assertEquals("subagent_result", root.getTagName());
+    assertEquals(CHILD_THREAD_ID.toString(), root.getAttribute("thread_id"));
+    assertEquals(special, root.getAttribute("agent"));
+    assertEquals("completed", root.getAttribute("state"));
+    assertEquals(framed(special), directChildText(root, "task"));
+    assertEquals(framed(special), directChildText(root, "result"));
+    assertNull(directChildText(root, "error"));
+    assertNull(directChildText(root, "partial_result"));
+    assertTrue(root.getFirstChild().getTextContent().contains("<task> block below"), "note text");
+  }
+
+  @Test
+  void roundTripsLongPromptAndReportWithoutTruncation() throws Exception {
+    // 测试意图：超长任务原文与报告（>20,000 字符）经真实 XML 解析后仍逐字完整，验证不截断且不被空白规范化。
+    String longPrompt = "p line\r\n".repeat(4_000) + "<end>&";
+    String longReport = "r <tag> & \"q\" \r\n".repeat(4_000) + "_TAIL";
+    String message =
+        ThreadJoinCompletionRenderer.render(
+            CHILD_THREAD_ID,
+            "coder",
+            ThreadJoinOutcome.COMPLETED,
+            longPrompt,
+            longReport,
+            null,
+            null);
+
+    Element root = parseXml(message).getDocumentElement();
+    assertEquals(framed(longPrompt), directChildText(root, "task"));
+    assertEquals(framed(longReport), directChildText(root, "result"));
+  }
+
+  @Test
+  void roundTripsFailedAndCancelledPartialThroughRealXmlParser() throws Exception {
+    // 测试意图：失败/取消回执的 error 与 partial_result（含特殊字符与 CR）分离且可被真实 XML 解析器往返解析。
+    String partial = "half & <report>\r\nkept\t";
+    String error = "failed <because> \"why\"\n";
+    Element failed =
+        parseXml(
+                ThreadJoinCompletionRenderer.render(
+                    CHILD_THREAD_ID,
+                    "explorer",
+                    ThreadJoinOutcome.ERROR,
+                    "explore",
+                    null,
+                    partial,
+                    error))
+            .getDocumentElement();
+    assertEquals("error", failed.getAttribute("state"));
+    assertEquals(framed("explore"), directChildText(failed, "task"));
+    assertEquals(framed(error), directChildText(failed, "error"));
+    assertEquals(framed(partial), directChildText(failed, "partial_result"));
+    assertNull(directChildText(failed, "result"));
+
+    Element cancelledWithoutPartial =
+        parseXml(
+                ThreadJoinCompletionRenderer.render(
+                    CHILD_THREAD_ID,
+                    "coder",
+                    ThreadJoinOutcome.CANCELLED,
+                    "work",
+                    null,
+                    null,
+                    "stopped"))
+            .getDocumentElement();
+    assertEquals("cancelled", cancelledWithoutPartial.getAttribute("state"));
+    assertEquals(framed("stopped"), directChildText(cancelledWithoutPartial, "error"));
+    assertNull(directChildText(cancelledWithoutPartial, "partial_result"));
+  }
+
+  /** 渲染器把每段正文包裹在标签内的换行之间，正文内容本身需与这些框架换行分开断言。 */
+  private static String framed(String body) {
+    return "\n" + body + "\n";
+  }
+
+  @Test
+  void coversPlaceholderAndOptionalBranchBoundaries() {
+    // 测试意图：null 与全空白正文分别走占位分支；全空白 partial 被跳过；null agent/prompt 确定性拒绝。
+    String nullReport =
+        ThreadJoinCompletionRenderer.render(
+            CHILD_THREAD_ID, "coder", ThreadJoinOutcome.COMPLETED, "p", null, null, null);
+    assertTrue(nullReport.contains("(no textual report produced)"), nullReport);
+
+    String blankErrorBlankPartial =
+        ThreadJoinCompletionRenderer.render(
+            CHILD_THREAD_ID, "coder", ThreadJoinOutcome.ERROR, "p", null, "   ", "  ");
+    assertTrue(
+        blankErrorBlankPartial.contains("(no failure detail produced)"), blankErrorBlankPartial);
+    assertFalse(blankErrorBlankPartial.contains("<partial_result>"), blankErrorBlankPartial);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadJoinCompletionRenderer.render(
+                CHILD_THREAD_ID, null, ThreadJoinOutcome.COMPLETED, "p", "r", null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadJoinCompletionRenderer.render(
+                CHILD_THREAD_ID, "coder", ThreadJoinOutcome.COMPLETED, null, "r", null, null));
+  }
+
+  private static Document parseXml(String xml) throws Exception {
+    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+    factory.setNamespaceAware(false);
+    return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+  }
+
+  private static String directChildText(Element parent, String tag) {
+    NodeList children = parent.getChildNodes();
+    for (int i = 0; i < children.getLength(); i++) {
+      Node node = children.item(i);
+      if (node.getNodeType() == Node.ELEMENT_NODE && tag.equals(((Element) node).getTagName())) {
+        return node.getTextContent();
+      }
+    }
+    return null;
   }
 
   private static int countOccurrences(String text, String needle) {

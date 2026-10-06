@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -516,6 +517,54 @@ class StudioHarnessCommandBatchControllerTest {
           .andExpect(status().isConflict());
     }
     verifyNoInteractions(acceptanceService, runtime);
+  }
+
+  @Test
+  void rejectsChildThreadForkFromASessionThatHostsChildThreads() throws Exception {
+    // 测试意图：NEW_THREAD 人工 fork 只允许来自纯执行根会话。来源会话内一旦存在带父关系的 child Thread，
+    // 该会话就可能承载子执行树，不能凭「会话无产品归属」反推来源属于根，一律 409 且不触达 acceptance service。
+    UUID sessionId = UUID.fromString(SESSION_ID);
+    when(runtime.listThreadsBySession(sessionId))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.thread(
+                    UUID.fromString(THREAD_ID),
+                    UUID.fromString(ENTRY_ID),
+                    ThreadExecutionControl.RUNNABLE,
+                    UUID.fromString(ENTRY_ID))));
+
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newThreadTarget())))
+        .andExpect(status().isConflict());
+
+    verify(acceptanceService, never())
+        .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  @Test
+  void acceptsForkFromSessionHostingOnlyRootThreads() throws Exception {
+    // 测试意图：来源会话只承载执行根（无带父关系的 child Thread）时，NEW_THREAD 人工 fork 是合法根级操作，正常 202 接受。
+    UUID sessionId = UUID.fromString(SESSION_ID);
+    when(runtime.listThreadsBySession(sessionId))
+        .thenReturn(
+            List.of(
+                HarnessRuntimeTestFixtures.thread(
+                    UUID.fromString(THREAD_ID),
+                    null,
+                    ThreadExecutionControl.RUNNABLE,
+                    UUID.fromString(ENTRY_ID))));
+
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(batch(newThreadTarget())))
+        .andExpect(status().isAccepted());
+
+    verify(acceptanceService).accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
   private static String batch(String target) {
