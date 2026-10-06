@@ -100,8 +100,7 @@ final class OpenAiChatModelProvider implements ModelProvider {
     }
 
     OpenAiChatStreamAccumulator accumulator =
-        new OpenAiChatStreamAccumulator(
-            request, descriptor, config, encoded.sourcePrefixHash(), bridge);
+        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
 
     HttpSseCallback callback =
         new HttpSseCallback() {

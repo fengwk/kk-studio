@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -40,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -49,16 +47,13 @@ import java.util.Set;
 /**
  * OpenAI Chat Completions 协议请求编码器。
  *
- * <p>负责将运行时 {@link ProviderRequest} 转换为符合 OpenAI 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的
- * sourcePrefixHash。请求体以 variant 的 native protocolOptions
- * 为合并基座：运行时所有权字段（model、messages、stream、输出预算、prompt cache、已声明的 reasoning）优先并在 native 声明时冲突，
- * 其余官方字段原样保留。
+ * <p>负责将运行时 {@link ProviderRequest} 转换为符合 OpenAI 规范的 UTF-8 请求 JSON 字节数组。请求体以 variant 的 native
+ * protocolOptions 为合并基座：运行时所有权字段（model、messages、stream、输出预算、prompt cache、已声明的 reasoning）优先并在 native
+ * 声明时冲突，其余官方字段原样保留。
  *
- * <p>assistant replay 只在 payload 仅含可等价重建的事实（role、文本 content、恰好 {@code
- * id/type/function{name,arguments}} 的现代 function tool_calls）时才允许在 affinity/sourcePrefixHash
- * 失配后退回语义编码。普通 {@code reasoning_content} 与 durable thinking 校验一致后可在同 affinity 下跨前缀变化原样保留， 但不可跨
- * provider/model 转移；{@code refusal} 区分、{@code reasoning_details}、{@code audio}、已废弃的 {@code
- * function_call}、custom/未知调用与任何额外顶层/嵌套字段都是 durable 无法表达的 native-only 事实，失配时必须 fail closed 而不是静默丢弃。
+ * <p>assistant replay 只按 format 与 affinity 判断：同 format 时先严格校验 payload 结构与 durable 一致性（损坏或与 durable
+ * 矛盾必须 INVALID_REQUEST），affinity 匹配即原样回放 opaque 字段；affinity 失配（不同 provider/model/连接代次）或不兼容 format
+ * 时退回语义编码，绝不因为存在 replay 就拒绝请求。
  */
 final class OpenAiChatRequestEncoder {
 
@@ -69,9 +64,6 @@ final class OpenAiChatRequestEncoder {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
-
-  private static final Set<String> ALLOWED_TOOL_CALL_FIELDS = Set.of("id", "type", "function");
-  private static final Set<String> ALLOWED_TOOL_FUNCTION_FIELDS = Set.of("name", "arguments");
 
   /** 运行时所有权字段：native protocolOptions 一旦声明即冲突，避免厂商选项覆盖运行时事实。 */
   private static final Set<String> RUNTIME_OWNED_FIELDS =
@@ -88,10 +80,6 @@ final class OpenAiChatRequestEncoder {
   /** 回放时值为 null 即视为未声明的 known 字段；与语义 fallback 的省略规则保持一致。 */
   private static final List<String> NULLABLE_REPLAY_FIELDS =
       List.of("content", "refusal", "reasoning_content", "reasoning_details", "tool_calls");
-
-  /** 同 affinity 下不依赖历史前缀的文本/函数事实；reasoning_content 仍不可跨 affinity 迁移。 */
-  private static final Set<String> PREFIX_INDEPENDENT_REPLAY_FIELDS =
-      Set.of("role", "content", "tool_calls", "reasoning_content");
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -139,38 +127,23 @@ final class OpenAiChatRequestEncoder {
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
     root.put("max_tokens", request.outputTokens());
 
-    // native 只能声明空 tools；运行时 function tools 构成最终数组并参与 prefix hash
-    ArrayNode toolsArray = mergeTools(root, request.tools());
+    // native 只能声明空 tools；运行时 function tools 构成最终数组
+    mergeTools(root, request.tools());
 
-    // 从左到右构建 wire messages 并维护 prefix hash；系统指令合成为唯一的前导 system message。
+    // 系统指令合成为唯一的前导 system message；assistant replay 按 format 与 affinity 决定原样回放或语义 fallback。
     ArrayNode wireMessagesArray = NODES.arrayNode();
     wireMessagesArray.add(encodeSystemInstruction(request.systemInstruction()));
-    List<ObjectNode> requestEndpoints = new ArrayList<>();
-    ObjectNode lastInputEndpoint = null;
     for (ProviderMessage message : request.messages()) {
       if (message.role() == ProviderMessageRole.ASSISTANT) {
-        // assistant 划定一次模型请求的输入末端；queued USER / parallel TOOL 批次只取末端。
-        addRequestEndpoint(requestEndpoints, lastInputEndpoint);
-        String currentPrefixHash =
-            OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
         wireMessagesArray.add(
-            encodeAssistantMessage(
-                message, descriptor, request.model().modelId(), currentPrefixHash));
+            encodeAssistantMessage(message, descriptor, request.model().modelId()));
       } else {
-        ObjectNode input = encodeMessage(message);
-        wireMessagesArray.add(input);
-        if (cacheableContent(input) != null) {
-          lastInputEndpoint = input;
-        }
+        wireMessagesArray.add(encodeMessage(message));
       }
     }
-    addRequestEndpoint(requestEndpoints, lastInputEndpoint);
 
-    // 冻结当前请求新 assistant 生成前的 sourcePrefixHash
-    String sourcePrefixHash = OpenAiChatPrefixHasher.calculateHash(toolsArray, wireMessagesArray);
-
-    // 应用 Prompt Cache 策略与断点打标
-    applyPromptCache(root, wireMessagesArray, requestEndpoints, request.cacheControl(), config);
+    // 应用 Prompt Cache 策略：key 直接使用运行时提供的会话 key
+    applyPromptCache(root, request.cacheControl());
 
     root.set("messages", wireMessagesArray);
 
@@ -184,7 +157,7 @@ final class OpenAiChatRequestEncoder {
 
     bodySizeGuard.enforce(bodyUtf8Bytes);
 
-    return new OpenAiChatEncodedRequest(bodyUtf8Bytes, sourcePrefixHash);
+    return new OpenAiChatEncodedRequest(bodyUtf8Bytes);
   }
 
   /** native protocolOptions 不得声明运行时所有权字段：冲突一律以 INVALID_REQUEST 明确失败，且错误信息只描述字段名，不回显厂商值。 */
@@ -224,11 +197,11 @@ final class OpenAiChatRequestEncoder {
   }
 
   /**
-   * native tools 必须是空 array，运行时 function tools 追加在其后；返回的合并数组是 wire 事实，参与 prefix hash 与 cache 打标。
+   * native tools 必须是空 array，运行时 function tools 追加在其后；合并结果写回请求体。
    *
-   * <p>native 未声明 tools 且运行时无工具时返回 {@code null}，不产生空的 {@code tools} 字段。
+   * <p>native 未声明 tools 且运行时无工具时不产生空的 {@code tools} 字段。
    */
-  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
+  private static void mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
     JsonNode nativeTools = root.get("tools");
     ArrayNode toolsArray = null;
     if (nativeTools != null) {
@@ -253,7 +226,6 @@ final class OpenAiChatRequestEncoder {
     if (toolsArray != null) {
       root.set("tools", toolsArray);
     }
-    return toolsArray;
   }
 
   /**
@@ -326,7 +298,7 @@ final class OpenAiChatRequestEncoder {
       case TOOL -> encodeToolMessage(message);
       case ASSISTANT -> throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
-          "ASSISTANT message should be encoded with prefix hash context");
+          "ASSISTANT message must be encoded with replay context");
     };
   }
 
@@ -438,36 +410,22 @@ final class OpenAiChatRequestEncoder {
   }
 
   private static ObjectNode encodeAssistantMessage(
-      ProviderMessage message,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      String currentPrefixHash) {
-    ObjectNode msgNode = NODES.objectNode();
-    msgNode.put("role", "assistant");
-
+      ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
     ProviderReplayState replayState = message.replayState();
     if (replayState != null && replayState.format() == ProviderReplayFormat.OPENAI_CHAT) {
-      // 同 format 即使 affinity/hash 失配，也必须先严格校验 shape 与 durable 一致性，损坏必须 INVALID_REQUEST
-      boolean nativeOnly = validateReplayPayload(replayState.payload(), message.contents());
-
-      boolean affinityMatch = replayState.affinity().equals(descriptor.affinity(requestedModel));
-      boolean prefixMatch =
-          currentPrefixHash != null && replayState.sourcePrefixHash().equals(currentPrefixHash);
-      if (affinityMatch && (prefixMatch || !nativeOnly)) {
-        // 普通 reasoning_content 是已验证的文本，不是前缀签名；提示词变化不能使历史思考丢失或阻断下一轮。
+      // 同 format 先严格校验 shape 与 durable 一致性：损坏或与 durable 矛盾必须 INVALID_REQUEST
+      validateReplayPayload(replayState.payload(), message.contents());
+      if (replayState.affinity().equals(descriptor.affinity(requestedModel))) {
+        // affinity 匹配即原样回放 opaque 字段（前缀变化不影响，历史思考不丢失）
         return buildReplayMessage(replayState.payload());
       }
-      if (nativeOnly || replayState.payload().hasNonNull("reasoning_content")) {
-        // 不透明字段仍要求原位回放；普通思考也不得静默丢弃或转移到另一个 provider/model。
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "native replay fields require matching affinity and source prefix hash");
-      }
-      // affinity 或 hash 失配但 payload 只含可等价重建的事实，走语义 fallback
+      // affinity 失配（不同 provider/model/连接代次）时退回语义编码，绝不因为存在 replay 就拒绝请求
     }
-    // 非 OPENAI_CHAT format 或失配时走语义回退
+    // 非 OPENAI_CHAT format 或 affinity 失配时走语义回退
 
     // 语义回退（semantic fallback）
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "assistant");
     StringBuilder textBuilder = new StringBuilder();
     ArrayNode toolCallsArray = NODES.arrayNode();
     for (ProviderContentBlock block : message.contents()) {
@@ -517,8 +475,8 @@ final class OpenAiChatRequestEncoder {
     return msgNode;
   }
 
-  /** 完成 replay payload 的结构、已知字段类型与 durable 一致性校验，并返回它是否携带 durable 无法等价重建的原生事实。 */
-  private static boolean validateReplayPayload(
+  /** 完成 replay payload 的结构、已知字段类型与 durable 一致性校验；损坏或与 durable 矛盾一律 INVALID_REQUEST。 */
+  private static void validateReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
     if (payload == null || !payload.isObject()) {
       throw new ProviderException(
@@ -548,18 +506,6 @@ final class OpenAiChatRequestEncoder {
           || audio.path("id").textValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant replay audio");
-      }
-    }
-
-    // 普通 reasoning_content 由下方逐字校验；refusal/reasoning_details/audio/function_call
-    // 与未知字段仍是不可跨前缀重建的 native-only 事实（显式 null 不承载事实）。
-    boolean nativeOnly = false;
-    Iterator<String> topFields = payload.fieldNames();
-    while (topFields.hasNext()) {
-      String field = topFields.next();
-      JsonNode value = payload.get(field);
-      if (!PREFIX_INDEPENDENT_REPLAY_FIELDS.contains(field) && value != null && !value.isNull()) {
-        nativeOnly = true;
       }
     }
 
@@ -624,15 +570,7 @@ final class OpenAiChatRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay tool call index");
           }
-          // 恰好 id/type/function{name,arguments} 才是可等价重建的现代 function 调用；额外嵌套字段是原生事实
-          boolean reconstructibleCall = true;
-          Iterator<String> callFields = callNode.fieldNames();
-          while (callFields.hasNext()) {
-            String field = callFields.next();
-            if (!ALLOWED_TOOL_CALL_FIELDS.contains(field)) {
-              reconstructibleCall = false;
-            }
-          }
+          // 现代 function 调用要求 id/type/function{name,arguments} 完整且合法；额外嵌套字段属于原生事实可保留
           if (!callNode.has("id")
               || !callNode.get("id").isTextual()
               || callNode.get("id").textValue().isBlank()) {
@@ -646,8 +584,7 @@ final class OpenAiChatRequestEncoder {
                 "invalid OpenAI chat assistant replay payload: tool call type must be function");
           }
           if (!"function".equals(callNode.get("type").textValue())) {
-            // custom/未知调用类型无法用 durable 工具调用重建：只允许原位回放
-            nativeOnly = true;
+            // custom/未知调用类型无法用 durable 工具调用表达：保留原生事实用于回放，不参与 durable 一致性比对
             continue;
           }
           if (!callNode.has("function") || !callNode.get("function").isObject()) {
@@ -656,13 +593,6 @@ final class OpenAiChatRequestEncoder {
                 "invalid OpenAI chat assistant replay payload: tool call function must be a JSON object");
           }
           JsonNode fnNode = callNode.get("function");
-          Iterator<String> fnFields = fnNode.fieldNames();
-          while (fnFields.hasNext()) {
-            String field = fnFields.next();
-            if (!ALLOWED_TOOL_FUNCTION_FIELDS.contains(field)) {
-              reconstructibleCall = false;
-            }
-          }
           if (!fnNode.has("name")
               || !fnNode.get("name").isTextual()
               || fnNode.get("name").textValue().isBlank()) {
@@ -684,9 +614,6 @@ final class OpenAiChatRequestEncoder {
           payloadCalls.add(
               new ProviderToolCall(
                   callNode.get("id").textValue(), fnNode.get("name").textValue(), argumentsStr));
-          if (!reconstructibleCall) {
-            nativeOnly = true;
-          }
         }
       }
     }
@@ -754,8 +681,6 @@ final class OpenAiChatRequestEncoder {
             "invalid OpenAI chat assistant replay payload: mismatch with durable contents");
       }
     }
-
-    return nativeOnly;
   }
 
   private static ObjectNode encodeToolMessage(ProviderMessage message) {
@@ -785,103 +710,20 @@ final class OpenAiChatRequestEncoder {
     return msgNode;
   }
 
-  private static void applyPromptCache(
-      ObjectNode root,
-      ArrayNode wireMessagesArray,
-      List<ObjectNode> requestEndpoints,
-      ProviderCacheControl cacheControl,
-      OpenAiChatConfiguration config) {
-    switch (config.promptCacheMode()) {
-      case AUTOMATIC -> {
-        // AUTOMATIC: 不发任何 cache hint
-      }
-      case LEGACY -> {
-        if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
-          root.put("prompt_cache_key", cacheControl.affinityKey());
-          if (cacheControl.retention() == PromptCacheRetention.SHORT) {
-            root.put("prompt_cache_retention", "in_memory");
-          } else if (cacheControl.retention() == PromptCacheRetention.LONG) {
-            root.put("prompt_cache_retention", "24h");
-          }
-        }
-      }
-      case GPT_5_6_EXPLICIT -> {
-        // 根节点始终发 prompt_cache_options mode=explicit ttl=30m
-        ObjectNode cacheOptions = root.putObject("prompt_cache_options");
-        cacheOptions.put("mode", "explicit");
-        cacheOptions.put("ttl", "30m");
-
-        if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
-          root.put("prompt_cache_key", cacheControl.affinityKey());
-
-          // 哈希和 replay 校验完成后才转换 wire 形态；未打标历史也保持相同的 parts 形态。
-          for (JsonNode message : wireMessagesArray) {
-            normalizeTextContent((ObjectNode) message);
-          }
-          int remaining = 4;
-          if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)) {
-            if (attachBreakpointToMessage((ObjectNode) wireMessagesArray.get(0))) {
-              remaining--;
-            }
-          }
-
-          if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
-            for (int i = Math.max(0, requestEndpoints.size() - remaining);
-                i < requestEndpoints.size();
-                i++) {
-              attachBreakpointToMessage(requestEndpoints.get(i));
-            }
-          }
-        }
-      }
+  /**
+   * 映射 {@link ProviderCacheControl} 到 wire cache 字段：key 直接作为 {@code prompt_cache_key}，retention
+   * 按档位映射为协议值。 {@code NONE} 不发送任何 cache hint。
+   */
+  private static void applyPromptCache(ObjectNode root, ProviderCacheControl cacheControl) {
+    if (cacheControl == null || cacheControl.retention() == PromptCacheRetention.NONE) {
+      return;
     }
-  }
-
-  private static void addRequestEndpoint(List<ObjectNode> endpoints, ObjectNode endpoint) {
-    // 相同文本在不同位置是不同端点；只按引用消除连续 assistant / 历史结束产生的重复端点。
-    if (endpoint != null
-        && (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != endpoint)) {
-      endpoints.add(endpoint);
+    root.put("prompt_cache_key", cacheControl.key());
+    if (cacheControl.retention() == PromptCacheRetention.SHORT) {
+      root.put("prompt_cache_retention", "in_memory");
+    } else if (cacheControl.retention() == PromptCacheRetention.LONG) {
+      root.put("prompt_cache_retention", "24h");
     }
-  }
-
-  private static void normalizeTextContent(ObjectNode message) {
-    JsonNode content = message.get("content");
-    if (content != null && content.isTextual() && !content.textValue().isEmpty()) {
-      ArrayNode parts = NODES.arrayNode();
-      parts.addObject().put("type", "text").put("text", content.textValue());
-      message.set("content", parts);
-    }
-  }
-
-  /** 返回可缓存的内容末端，不为 null/空文本或 tool-call-only assistant 制造内容。 */
-  private static JsonNode cacheableContent(ObjectNode message) {
-    JsonNode content = message.get("content");
-    if (content == null) {
-      return null;
-    }
-    if (content.isTextual()) {
-      return content.textValue().isEmpty() ? null : content;
-    }
-    if (content.isArray() && !content.isEmpty()) {
-      JsonNode lastPart = content.get(content.size() - 1);
-      if (lastPart.isObject()
-          && (!"text".equals(lastPart.path("type").asText())
-              || (lastPart.path("text").isTextual()
-                  && !lastPart.path("text").textValue().isEmpty()))) {
-        return lastPart;
-      }
-    }
-    return null;
-  }
-
-  private static boolean attachBreakpointToMessage(ObjectNode message) {
-    JsonNode part = cacheableContent(message);
-    if (part instanceof ObjectNode objectPart) {
-      objectPart.putObject("prompt_cache_breakpoint").put("mode", "explicit");
-      return true;
-    }
-    return false;
   }
 
   private static JsonNode parseJsonObject(String json, String errorMessage) {

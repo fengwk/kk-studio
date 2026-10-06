@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -42,16 +41,15 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * 测试意图：验证 provider 原生 assistant message 的累积与 replay 保真——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
- * function_call、未来字段可经次轮编码器原样回放，chunk 级 transport metadata 与 n&gt;1 的其他 choice 不混入， 而 known 字段与
- * durable 不一致时仍然失败；native-only 字段在 affinity/hash 失配时必须 fail closed。
+ * 测试意图：验证 provider 原生 assistant message 的累积与 replay 语义——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
+ * function_call、未来字段在 affinity 匹配时经次轮编码器原样 opaque 回放（跨 system/date 前缀变化不丢失），affinity 失配时退回 语义编码，而
+ * malformed payload 或 known 字段与 durable 不一致时无论 affinity 是否匹配都必须 INVALID_REQUEST。
  */
 class OpenAiChatNativeReplayTest {
 
@@ -72,28 +70,9 @@ class OpenAiChatNativeReplayTest {
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai",
-            "gpt-4o-audio",
-            "gpt-4o-audio",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            false,
-            pricing);
+            "openai", "gpt-4o-audio", "gpt-4o-audio", Set.of(ModelInputModality.TEXT), true, false);
     defaultVariant = new ModelVariant("default");
     bridge =
         new ProviderStreamBridge(
@@ -115,12 +94,9 @@ class OpenAiChatNativeReplayTest {
     ProviderMessage turn1User =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Say hi")));
     ProviderRequest turn1Req = request(turn1User);
-    String sourcePrefixHash =
-        encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults()).sourcePrefixHash();
-
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), sourcePrefixHash, bridge);
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     // chunk 级 transport metadata（id/object/created/model/service_tier/usage）不得进入 assistant message
     accumulator.handleData(
         """
@@ -213,14 +189,10 @@ class OpenAiChatNativeReplayTest {
   void rejectsMalformedAudioAndResponseOnlyReplayFields() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String hash =
-        encoder
-            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
     for (String audio : List.of("{}", "{\"id\":\"  \"}", "\"audio_1\"")) {
       OpenAiChatStreamAccumulator accumulator =
           new OpenAiChatStreamAccumulator(
-              request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+              request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
       accumulator.handleData(
           "{\"choices\":[{\"delta\":{\"audio\":" + audio + "},\"finish_reason\":\"stop\"}]}");
       accumulator.handleData("[DONE]");
@@ -241,8 +213,7 @@ class OpenAiChatNativeReplayTest {
       ProviderMessage assistant =
           assistant(
               List.of(new ProviderTextBlock("Hi")),
-              new ProviderReplayState(
-                  ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, payload));
+              new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), payload));
       ProviderException error =
           assertThrows(
               ProviderException.class,
@@ -258,13 +229,9 @@ class OpenAiChatNativeReplayTest {
   void preservesCustomOnlyCallWithoutNormalizingIt() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String hash =
-        encoder
-            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"custom_1","type":"custom",
@@ -288,12 +255,6 @@ class OpenAiChatNativeReplayTest {
                     OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     assertEquals(nativeCall, wire.path("messages").get(2).path("tool_calls").get(0));
-    assertNativeOnlyReplayRejected(
-        user,
-        List.of(new ProviderTextBlock("")),
-        (ObjectNode) completion.replayState().payload(),
-        modelAffinity(),
-        "0".repeat(64));
   }
 
   /** 测试意图：混合调用保留原始顺序及 function 扩展成员，覆盖规范化字段并剔除所有 stream index。 */
@@ -301,13 +262,9 @@ class OpenAiChatNativeReplayTest {
   void preservesFunctionExtrasAndCustomCallInOriginalOrder() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String hash =
-        encoder
-            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[
@@ -348,7 +305,7 @@ class OpenAiChatNativeReplayTest {
     ObjectNode tampered = completion.replayState().payload().deepCopy();
     ((ObjectNode) tampered.path("tool_calls").get(1)).put("index", 7);
     ProviderReplayState badIndex =
-        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, tampered);
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), tampered);
     ProviderException error =
         assertThrows(
             ProviderException.class,
@@ -373,7 +330,7 @@ class OpenAiChatNativeReplayTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            request(user), descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fn_1","type":"function",
@@ -400,7 +357,6 @@ class OpenAiChatNativeReplayTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
             descriptor,
             OpenAiChatConfiguration.defaults(),
-            "0".repeat(64),
             bridge);
     ProviderException error =
         assertThrows(
@@ -420,11 +376,7 @@ class OpenAiChatNativeReplayTest {
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            turn1Req,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     // 一帧携带 n=2：只有 choices[0] 的 delta 与 finish_reason 被消费
     accumulator.handleData(
         """
@@ -465,11 +417,7 @@ class OpenAiChatNativeReplayTest {
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            turn1Req,
-            descriptor,
-            OpenAiChatConfiguration.defaults(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {
@@ -518,12 +466,9 @@ class OpenAiChatNativeReplayTest {
     ProviderRequest turn1Req =
         request(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
-    String sourcePrefixHash =
-        encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults()).sourcePrefixHash();
-
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), sourcePrefixHash, bridge);
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
     accumulator.handleData(
         """
         {"id":"c-tamper","choices":[{"index":0,"delta":{"role":"assistant","content":"honest"},
@@ -538,10 +483,7 @@ class OpenAiChatNativeReplayTest {
     tampered.put("vendor_future_field", "kept");
     ProviderReplayState tamperedState =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_CHAT,
-            descriptor.affinity(modelDesc.modelId()),
-            sourcePrefixHash,
-            tampered);
+            ProviderReplayFormat.OPENAI_CHAT, descriptor.affinity(modelDesc.modelId()), tampered);
     ProviderMessage tamperedAsst =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("honest")), tamperedState);
@@ -572,65 +514,63 @@ class OpenAiChatNativeReplayTest {
   }
 
   /**
-   * 测试意图：native-only 字段（audio、废弃的 function_call、refusal 区分、tool_calls 的额外嵌套字段）无法由 durable
-   * 语义等价重建，affinity 或 prefix hash 失配时必须 fail closed；只含 role/文本 content/现代 function tool_calls 的
-   * payload 仍回退语义编码。
+   * 测试意图：无法由 durable 语义重建的原生字段在 affinity 失配时退回语义编码（既不丢失 durable 语义，也不外泄 native 事实）， 而 malformed
+   * payload 无论 affinity 是否匹配都必须以 INVALID_REQUEST 明确失败。
    */
   @Test
-  @DisplayName("native-only replay 字段失配时 fail closed，最小可重建 payload 仍回退语义编码")
-  void failsClosedForNativeOnlyFieldsAndFallsBackForMinimalPayload() throws Exception {
+  @DisplayName("affinity 失配时 native-only 字段退回语义编码；malformed payload 一律拒绝")
+  void fallsBackSemanticallyOnAffinityMismatchAndRejectsMalformed() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String mismatchedHash = "0".repeat(64);
+    ProviderReplayAffinity other = descriptor.affinity("another-model");
 
-    // 1. audio 属于 native-only：hash 失配时 fail closed
+    // 1. audio 仅请求侧 id 引用属于 native 事实：affinity 失配时退回语义编码而不是外泄
     ObjectNode audioPayload = MAPPER.createObjectNode();
     audioPayload.put("role", "assistant");
     audioPayload.put("content", "Hello");
     audioPayload.putObject("audio").put("id", "audio_1");
-    assertNativeOnlyReplayRejected(
-        user,
-        List.of(new ProviderTextBlock("Hello")),
-        audioPayload,
-        modelAffinity(),
-        mismatchedHash);
+    JsonNode audioAsst =
+        assistantNode(wire(user, List.of(new ProviderTextBlock("Hello")), other, audioPayload));
+    assertEquals("Hello", audioAsst.path("content").asText());
+    assertFalse(audioAsst.has("audio"));
 
-    // 2. 已废弃的 function_call 属于 native-only：affinity 失配时 fail closed
+    // 2. 已废弃的 function_call 属于 native 事实：affinity 失配时丢弃
     ObjectNode legacyCallPayload = MAPPER.createObjectNode();
     legacyCallPayload.put("role", "assistant");
     legacyCallPayload.put("content", "Hello");
     legacyCallPayload.putObject("function_call").put("name", "legacy_lookup");
-    assertNativeOnlyReplayRejected(
-        user,
-        List.of(new ProviderTextBlock("Hello")),
-        legacyCallPayload,
-        descriptor.affinity("another-model"),
-        mismatchedHash);
+    JsonNode legacyAsst =
+        assistantNode(
+            wire(user, List.of(new ProviderTextBlock("Hello")), other, legacyCallPayload));
+    assertEquals("Hello", legacyAsst.path("content").asText());
+    assertFalse(legacyAsst.has("function_call"));
 
-    // 3. reasoning_content 即使与 durable thinking 完全一致，也不能转移到另一个模型。
+    // 3. reasoning_content 即使与 durable thinking 一致，也不跨 affinity 转移
     ObjectNode reasoningPayload = MAPPER.createObjectNode();
     reasoningPayload.put("role", "assistant");
     reasoningPayload.put("content", "Hello");
     reasoningPayload.put("reasoning_content", "hidden chain");
-    assertNativeOnlyReplayRejected(
-        user,
-        List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
-        reasoningPayload,
-        descriptor.affinity("another-model"),
-        mismatchedHash);
+    JsonNode reasoningAsst =
+        assistantNode(
+            wire(
+                user,
+                List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
+                other,
+                reasoningPayload));
+    assertEquals("Hello", reasoningAsst.path("content").asText());
+    assertFalse(reasoningAsst.has("reasoning_content"));
 
-    // 4. refusal 区分属于 native-only：affinity 失配时 fail closed
+    // 4. refusal 属于 native 事实：affinity 失配时退回纯文本
     ObjectNode refusalPayload = MAPPER.createObjectNode();
     refusalPayload.put("role", "assistant");
     refusalPayload.put("refusal", "I cannot help");
-    assertNativeOnlyReplayRejected(
-        user,
-        List.of(new ProviderTextBlock("I cannot help")),
-        refusalPayload,
-        descriptor.affinity("another-model"),
-        mismatchedHash);
+    JsonNode refusalAsst =
+        assistantNode(
+            wire(user, List.of(new ProviderTextBlock("I cannot help")), other, refusalPayload));
+    assertEquals("I cannot help", refusalAsst.path("content").asText());
+    assertFalse(refusalAsst.has("refusal"));
 
-    // 5. tool_calls 的额外嵌套字段属于 native-only：hash 失配时 fail closed
+    // 5. tool_calls 的额外嵌套字段属于 native 事实：affinity 失配时只保留 durable 标准调用
     ObjectNode extendedCallPayload = MAPPER.createObjectNode();
     extendedCallPayload.put("role", "assistant");
     ObjectNode extendedCall = extendedCallPayload.putArray("tool_calls").addObject();
@@ -639,14 +579,38 @@ class OpenAiChatNativeReplayTest {
     extendedFn.put("name", "fn");
     extendedFn.put("arguments", "{}");
     extendedFn.put("vendorField", "v");
-    assertNativeOnlyReplayRejected(
+    JsonNode extendedAsst =
+        assistantNode(
+            wire(
+                user,
+                List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+                other,
+                extendedCallPayload));
+    assertFalse(extendedAsst.path("tool_calls").get(0).path("function").has("vendorField"));
+
+    // 6. malformed payload：即使 affinity 失配也必须严格拒绝
+    ObjectNode badContent = MAPPER.createObjectNode();
+    badContent.put("role", "assistant");
+    badContent.put("content", 123);
+    assertRejected(user, List.of(new ProviderTextBlock("x")), other, badContent);
+
+    ObjectNode badRole = MAPPER.createObjectNode();
+    badRole.put("role", "system");
+    badRole.put("content", "text");
+    assertRejected(user, List.of(new ProviderTextBlock("text")), other, badRole);
+
+    ObjectNode badIndex = MAPPER.createObjectNode();
+    badIndex.put("role", "assistant");
+    ObjectNode badIndexCall = badIndex.putArray("tool_calls").addObject();
+    badIndexCall.put("id", "c1").put("type", "function").put("index", 0);
+    badIndexCall.putObject("function").put("name", "fn").put("arguments", "{}");
+    assertRejected(
         user,
         List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
-        extendedCallPayload,
-        descriptor.affinity("another-model"),
-        mismatchedHash);
+        other,
+        badIndex);
 
-    // 6. 最小可重建 payload（role + 文本 content + 现代 function tool_calls）：affinity/hash 失配都回退语义编码
+    // 7. 最小可重建 payload：affinity 失配退回语义编码，affinity 匹配原样 opaque 回放
     ObjectNode minimalPayload = MAPPER.createObjectNode();
     minimalPayload.put("role", "assistant");
     minimalPayload.put("content", "Hello");
@@ -660,49 +624,26 @@ class OpenAiChatNativeReplayTest {
         List.of(
             new ProviderTextBlock("Hello"),
             new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}")));
-
-    for (ProviderReplayState replayState :
-        List.of(
-            new ProviderReplayState(
-                ProviderReplayFormat.OPENAI_CHAT,
-                descriptor.affinity("another-model"),
-                mismatchedHash,
-                minimalPayload),
-            new ProviderReplayState(
-                ProviderReplayFormat.OPENAI_CHAT,
-                modelAffinity(),
-                mismatchedHash,
-                minimalPayload))) {
-      JsonNode wire =
-          MAPPER.readTree(
-              encoder
-                  .encode(
-                      request(user, assistant(durableBlocks, replayState)),
-                      descriptor,
-                      OpenAiChatConfiguration.defaults())
-                  .bodyUtf8Bytes());
-      JsonNode wireAsst = wire.path("messages").get(2);
+    for (ProviderReplayAffinity affinity : List.of(other, modelAffinity())) {
+      JsonNode wireAsst = assistantNode(wire(user, durableBlocks, affinity, minimalPayload));
       assertEquals("Hello", wireAsst.path("content").asText());
       assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
       assertEquals("fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asText());
     }
   }
 
-  /** 普通思考不绑定 system 日期或工具定义前缀，保留原文且不修改 durable replay。 */
+  /** 普通思考不绑定 system 日期或工具定义前缀：affinity 匹配时原样 opaque 回放且不修改 durable replay。 */
   @Test
+  @DisplayName("affinity 匹配时跨 system/date 前缀变化仍原样 opaque 回放")
   void preservesPlainReasoningAcrossSystemPrefixChanges() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String hash =
-        encoder
-            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
     ObjectNode payload = MAPPER.createObjectNode();
     payload.put("role", "assistant");
     payload.put("content", "Hello");
     payload.put("reasoning_content", "先分析\nthen answer");
     ProviderReplayState replay =
-        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, payload);
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), payload);
     ProviderMessage assistant =
         assistant(
             List.of(new ProviderThinkingBlock("先分析\nthen answer"), new ProviderTextBlock("Hello")),
@@ -710,7 +651,7 @@ class OpenAiChatNativeReplayTest {
     ProviderToolDefinition tool =
         new ProviderToolDefinition("read", "Read a file", "{\"type\":\"object\"}");
     for (boolean changeSystem : List.of(true, false)) {
-      String system = changeSystem ? "Today is a new day." : "Test system instruction.";
+      String system = changeSystem ? "Today is 2026-10-07." : "Test system instruction.";
       ProviderRequest changed =
           new ProviderRequest(
               modelDesc,
@@ -731,19 +672,18 @@ class OpenAiChatNativeReplayTest {
     }
   }
 
-  /** 即使前缀完全相同，普通思考也不自动转移到不同 provider、连接 generation 或 wire 模型。 */
+  /** affinity 失配（不同 provider、连接 generation 或 wire 模型）时普通思考一并退回语义编码，不跨边界转移。 */
   @Test
-  void refusesPlainReasoningAcrossAffinityChanges() {
+  @DisplayName("affinity 变化时普通思考退回语义编码")
+  void fallsBackPlainReasoningAcrossAffinityChanges() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
-    String hash =
-        encoder
-            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
-            .sourcePrefixHash();
     ObjectNode payload = MAPPER.createObjectNode();
     payload.put("role", "assistant");
     payload.put("content", "Hello");
     payload.put("reasoning_content", "reasoning");
+    List<ProviderContentBlock> durable =
+        List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello"));
     ProviderReplayAffinity original = modelAffinity();
     for (ProviderReplayAffinity other :
         List.of(
@@ -758,54 +698,45 @@ class OpenAiChatNativeReplayTest {
                 original.providerName(),
                 new UUID(0L, 1L),
                 original.modelId()))) {
-      assertNativeOnlyReplayRejected(
-          user,
-          List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello")),
-          payload,
-          other,
-          hash);
+      JsonNode asst = assistantNode(wire(user, durable, other, payload));
+      assertEquals("Hello", asst.path("content").asText());
+      assertFalse(asst.has("reasoning_content"));
     }
   }
 
-  /** 放行普通思考不放行混入的 opaque 字段、损坏结构或与 durable 不一致的数据。 */
+  /** affinity 匹配时 opaque 原生字段原样透传；reasoning_content 损坏或与 durable 不一致一律拒绝。 */
   @Test
-  void rejectsOpaqueOrCorruptReasoningEvenAtSameAffinity() {
+  @DisplayName("affinity 匹配时 opaque 字段原样透传，reasoning 损坏或与 durable 不一致拒绝")
+  void replaysOpaqueFieldsAtSameAffinityButRejectsCorruptReasoning() throws Exception {
     ProviderMessage user =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     List<ProviderContentBlock> contents =
         List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello"));
-    for (String field : List.of("reasoning_details", "vendor_signature", "audio", "refusal")) {
-      ObjectNode payload = MAPPER.createObjectNode();
-      payload.put("role", "assistant");
-      payload.put("content", "Hello");
-      payload.put("reasoning_content", "reasoning");
-      switch (field) {
-        case "reasoning_details" -> payload.putArray(field).addObject().put("signature", "opaque");
-        case "audio" -> payload.putObject(field).put("id", "audio_1");
-        case "refusal" -> payload.put(field, "");
-        default -> payload.put(field, "opaque");
-      }
-      assertNativeOnlyReplayRejected(user, contents, payload, modelAffinity(), "0".repeat(64));
-    }
-    for (JsonNode badReasoning :
-        List.of(MAPPER.getNodeFactory().textNode("tampered"), MAPPER.createObjectNode())) {
-      ObjectNode payload = MAPPER.createObjectNode();
-      payload.put("role", "assistant");
-      payload.put("content", "Hello");
-      payload.set("reasoning_content", badReasoning);
-      ProviderReplayState replay =
-          new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), "0".repeat(64), payload);
-      ProviderException error =
-          assertThrows(
-              ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(user, assistant(contents, replay)),
-                      descriptor,
-                      OpenAiChatConfiguration.defaults()));
-      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    }
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "reasoning");
+    payload.putArray("reasoning_details").addObject().put("signature", "opaque");
+    payload.put("vendor_future_field", "opaque");
+    JsonNode asst = assistantNode(wire(user, contents, modelAffinity(), payload));
+    assertEquals("opaque", asst.path("reasoning_details").get(0).path("signature").asText());
+    assertEquals("opaque", asst.path("vendor_future_field").asText());
+    assertEquals("reasoning", asst.path("reasoning_content").asText());
+
+    // reasoning_content 形态损坏（非文本）拒绝
+    ObjectNode objectReasoning = MAPPER.createObjectNode();
+    objectReasoning.put("role", "assistant");
+    objectReasoning.put("content", "Hello");
+    objectReasoning.putObject("reasoning_content").put("bad", "shape");
+    assertRejected(user, contents, modelAffinity(), objectReasoning);
+
+    // reasoning_content 与 durable thinking 不一致拒绝
+    ObjectNode mismatchedThinking = MAPPER.createObjectNode();
+    mismatchedThinking.put("role", "assistant");
+    mismatchedThinking.put("content", "Hello");
+    mismatchedThinking.put("reasoning_content", "tampered");
+    assertRejected(user, contents, modelAffinity(), mismatchedThinking);
   }
 
   private ProviderReplayAffinity modelAffinity() {
@@ -817,16 +748,34 @@ class OpenAiChatNativeReplayTest {
     return new ProviderMessage(ProviderMessageRole.ASSISTANT, durableBlocks, replayState);
   }
 
-  /** 断言该 replay 因携带 native-only 字段而在 affinity/hash 失配时 fail closed。 */
-  private void assertNativeOnlyReplayRejected(
+  private JsonNode wire(
       ProviderMessage user,
       List<ProviderContentBlock> durableBlocks,
-      ObjectNode payload,
       ProviderReplayAffinity affinity,
-      String sourcePrefixHash) {
+      ObjectNode payload)
+      throws Exception {
     ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_CHAT, affinity, sourcePrefixHash, payload);
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, affinity, payload);
+    return MAPPER.readTree(
+        encoder
+            .encode(
+                request(user, assistant(durableBlocks, replayState)),
+                descriptor,
+                OpenAiChatConfiguration.defaults())
+            .bodyUtf8Bytes());
+  }
+
+  private static JsonNode assistantNode(JsonNode wire) {
+    return wire.path("messages").get(2);
+  }
+
+  private void assertRejected(
+      ProviderMessage user,
+      List<ProviderContentBlock> durableBlocks,
+      ProviderReplayAffinity affinity,
+      ObjectNode payload) {
+    ProviderReplayState replayState =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, affinity, payload);
     ProviderException error =
         assertThrows(
             ProviderException.class,
@@ -836,9 +785,6 @@ class OpenAiChatNativeReplayTest {
                     descriptor,
                     OpenAiChatConfiguration.defaults()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay fields require matching affinity and source prefix hash",
-        error.getMessage());
   }
 
   private ProviderRequest request(ProviderMessage... messages) {

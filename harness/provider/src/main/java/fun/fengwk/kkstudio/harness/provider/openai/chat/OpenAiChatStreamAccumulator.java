@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -60,7 +59,6 @@ final class OpenAiChatStreamAccumulator {
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
   private final OpenAiChatConfiguration config;
-  private final String frozenSourcePrefixHash;
   private final ProviderStreamBridge bridge;
 
   private String messageId = null;
@@ -99,13 +97,10 @@ final class OpenAiChatStreamAccumulator {
       ProviderRequest request,
       ProviderDescriptor descriptor,
       OpenAiChatConfiguration config,
-      String frozenSourcePrefixHash,
       ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.config = Objects.requireNonNull(config, "config");
-    this.frozenSourcePrefixHash =
-        Objects.requireNonNull(frozenSourcePrefixHash, "frozenSourcePrefixHash");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
@@ -652,8 +647,6 @@ final class OpenAiChatStreamAccumulator {
             reasoningTokensVal,
             providerTotalTokens);
 
-    ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
-
     ProviderResponse response =
         new ProviderResponse(
             contentBuilder.toString() + refusalBuilder,
@@ -661,7 +654,6 @@ final class OpenAiChatStreamAccumulator {
             Collections.unmodifiableList(toolCalls),
             stopReason,
             usage,
-            cost,
             messageId,
             serviceTier,
             rawUsageJson,
@@ -748,7 +740,6 @@ final class OpenAiChatStreamAccumulator {
           new ProviderReplayState(
               ProviderReplayFormat.OPENAI_CHAT,
               descriptor.affinity(request.model().modelId()),
-              frozenSourcePrefixHash,
               payload);
     }
 

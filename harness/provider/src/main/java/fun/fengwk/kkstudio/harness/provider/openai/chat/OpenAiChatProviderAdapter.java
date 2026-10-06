@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
@@ -45,8 +45,9 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
     this.configuration = Objects.requireNonNull(configuration, "configuration");
   }
 
-  public static PromptCacheCapability promptCacheCapability(String configJson) {
-    return OpenAiChatConfiguration.parse(configJson).promptCacheCapability();
+  /** 解析配置 JSON 得到该 Provider 的提示缓存留存档位，供平台 ProviderFactory 动态解析。 */
+  public static PromptCacheRetention promptCacheRetention(String configJson) {
+    return OpenAiChatConfiguration.parse(configJson).promptCacheRetention();
   }
 
   @Override
