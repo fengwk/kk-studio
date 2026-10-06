@@ -11,6 +11,7 @@ import { toolCallIdentity as strictToolCallIdentity } from '@/features/ai/runtim
 import {
   contentText,
   toResourceAttachment,
+  toToolContents,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import {
@@ -322,8 +323,7 @@ function projectToolCall(
     toolName: getString(content.toolName),
     rendererKey: getString(content.rendererKey),
     arguments: getString(content.argumentsJson),
-    text: '',
-    attachments: [],
+    contents: [],
     createdAt: entry.createTime,
     status: 'done',
     callIdentity: strictToolCallIdentity(entry.entryId, callIndex),
@@ -349,8 +349,7 @@ function projectToolResult(
     toolName: getString(content.toolName),
     rendererKey: getString(content.rendererKey),
     arguments: projected.arguments,
-    text: projected.text,
-    attachments: projected.attachments,
+    contents: projected.contents,
     errorMessage: projected.errorMessage,
     createdAt: entry.createTime,
     status: projected.status,
@@ -361,19 +360,17 @@ function projectToolResult(
 }
 
 /**
- * 从规范 ToolResult JSON 解析展示正文、附件和错误。
+ * 从规范 ToolResult JSON 解析有序展示内容和错误。
  * durable Entry 与尚未物化的 invocation resultJson 共用这一事实，避免两套结果格式。
  */
 export function projectToolResultContent(
   content: Record<string, unknown>,
   argumentsJson: string,
-): Pick<ToolDialogueMessage, 'arguments' | 'text' | 'attachments' | 'errorMessage' | 'status'> {
-  const contents = getRecordList(content.contents)
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> {
   const error = content.error === true
   return {
     arguments: argumentsJson,
-    text: contents.map(contentText).filter(Boolean).join('\n'),
-    attachments: contents.flatMap(toResourceAttachment),
+    contents: toToolContents(getRecordList(content.contents)),
     errorMessage: error ? translate('ai.runtime.entry.toolFailed') : undefined,
     status: error ? 'error' : 'done',
   }

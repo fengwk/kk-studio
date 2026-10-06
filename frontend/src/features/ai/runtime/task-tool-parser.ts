@@ -45,7 +45,7 @@ export function parseTaskArguments(json: string): TaskToolArguments {
  * 缺少 thread_id、非规范 UUID、completed、未知 status、畸形 JSON、XML 等一律返回 null，
  * 由调用方完整降级到原始文本展示，绝不把受理收据混淆为终态，也不隐瞒畸形收据。
  */
-export function parseTaskReceipt(text: string): TaskToolReceipt | null {
+export function parseTaskReceipt(text: string | null): TaskToolReceipt | null {
   if (!text || !text.trim()) {
     return null
   }

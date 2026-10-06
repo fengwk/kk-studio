@@ -1615,14 +1615,6 @@ export const aiCatalog = {
     'en-US': '(no arguments)',
     'zh-CN': '（无参数）',
   },
-  'ai.runtime.message.toolCall': {
-    'en-US': 'Tool call ·',
-    'zh-CN': '工具调用 ·',
-  },
-  'ai.runtime.message.toolResult': {
-    'en-US': 'Tool result ·',
-    'zh-CN': '工具结果 ·',
-  },
   'ai.runtime.message.expandTool': {
     'en-US': 'Expand tool preview',
     'zh-CN': '展开工具预览',
@@ -1634,14 +1626,6 @@ export const aiCatalog = {
   'ai.runtime.message.toolFailed': {
     'en-US': 'Tool execution failed.',
     'zh-CN': '工具执行失败。',
-  },
-  'ai.runtime.message.waitingTool': {
-    'en-US': 'Waiting for tool result…',
-    'zh-CN': '等待工具结果…',
-  },
-  'ai.runtime.message.noTextOutput': {
-    'en-US': 'No text output',
-    'zh-CN': '无文本输出',
   },
   'ai.runtime.message.rawEntry': {
     'en-US': 'View raw data',

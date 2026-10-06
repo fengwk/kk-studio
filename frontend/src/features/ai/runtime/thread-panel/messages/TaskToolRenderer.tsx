@@ -1,135 +1,84 @@
-import { Link } from 'react-router'
-import {
-  parseTaskArguments,
-  parseTaskReceipt,
-} from '@/features/ai/runtime/task-tool-parser'
-import { formatToolResultPreview } from '@/features/ai/runtime/thread-panel/messages/tool-display'
+import { ToolContentView } from '@/features/ai/runtime/thread-panel/messages/ToolContentView'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
-import type { ToolRendererProps } from '@/platform/extensions/types'
-import { useI18n } from '@/shared/i18n'
+import { parseTaskArguments, parseTaskReceipt } from '@/features/ai/runtime/task-tool-parser'
+import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
+import { jsonContentText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensions/types'
+import { translate } from '@/shared/i18n'
 
-/** task 工具调用的组件化 renderer：call 展开展示参数；result 展示受理收据（绝不展示已完成/报告）。 */
-export function TaskToolRenderer({ message, expanded = false }: ToolRendererProps) {
+/**
+ * task renderer：Header 展示小参数，正文展示 prompt 与可点击 Thread 链接。
+ * 受理只说明子线程已创建，绝不显示「已受理/后台执行」之类的完成暗示，也不展示子任务报告。
+ */
+export function TaskToolRenderer({ message }: ToolRendererProps) {
   if (message.phase === 'call') {
-    return <TaskToolCall message={message} expanded={expanded} />
+    return <TaskToolCall message={message} />
   }
-  return <TaskToolResult message={message} expanded={expanded} />
+  return <TaskToolResult message={message} />
 }
 
-function TaskToolCall({ message, expanded = false }: ToolRendererProps) {
-  const { t } = useI18n()
+function TaskToolCall({ message }: { message: ToolRendererMessage }) {
   const args = parseTaskArguments(message.arguments)
-  const hasParsedField =
-    args.subagentType != null
-    || args.prompt != null
-    || args.threadId != null
-    || args.maxTurns != null
-
-  if (!expanded) {
-    return null
-  }
-
+  const hasParsedField = args.prompt != null || args.threadId != null
   return (
     <div className="task-tool-renderer">
-      {hasParsedField ? (
-        <dl className="task-tool-fields">
-          {args.subagentType != null ? (
-            <div className="task-tool-field">
-              <dt>{t('ai.runtime.task.subagent')}</dt>
-              <dd>{args.subagentType}</dd>
-            </div>
-          ) : null}
-          {args.threadId != null ? (
-            <div className="task-tool-field">
-              <dt>{t('ai.runtime.task.thread')}</dt>
-              <dd>
-                <Link to={`/threads/${args.threadId}`} className="task-tool-thread-link">
-                  {args.threadId}
-                </Link>
-              </dd>
-            </div>
-          ) : null}
-          {args.maxTurns != null ? (
-            <div className="task-tool-field">
-              <dt>{t('ai.runtime.task.maxTurns')}</dt>
-              <dd>{args.maxTurns}</dd>
-            </div>
-          ) : null}
-        </dl>
+      {args.threadId != null ? (
+        <div className="task-tool-fields">
+          <div className="task-tool-field">
+            <dt>{threadLabel()}</dt>
+            <dd>
+              <ThreadLink threadId={args.threadId} className="task-tool-thread-link">
+                {args.threadId}
+              </ThreadLink>
+            </dd>
+          </div>
+        </div>
       ) : null}
       {args.prompt != null ? (
-        <div className="task-tool-section">
-          <span className="task-tool-section-label">{t('ai.runtime.task.prompt')}</span>
-          <ToolOutputViewport text={args.prompt} maxLines={null} />
-        </div>
+        <ToolOutputViewport followKey={args.prompt}>{args.prompt}</ToolOutputViewport>
       ) : null}
       {/* 参数不是合法 JSON 时回退展示原始参数。 */}
       {!hasParsedField && message.arguments.trim() ? (
-        <ToolOutputViewport text={message.arguments} maxLines={null} />
+        <ToolOutputViewport followKey={message.arguments}>
+          {message.arguments}
+        </ToolOutputViewport>
       ) : null}
     </div>
   )
 }
 
-function TaskToolResult({ message, expanded = false }: ToolRendererProps) {
-  const { t } = useI18n()
+function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   const isError = message.status === 'error' || Boolean(message.errorMessage)
-  const receipt = isError ? null : parseTaskReceipt(message.text)
-
+  const receipt = isError ? null : parseTaskReceipt(resultJson(message))
   if (receipt == null) {
-    // 终态文本不是合法的 accepted 收据，或者调用失败：完整降级到原始文本 + 错误消息（不吞错误，不假造报告）。
+    // 终态文本不是合法的受理收据，或者调用失败：完整展示原始结果（不吞错误，不假造报告）。
     return (
       <div className="task-tool-renderer">
-        {message.text.trim() ? (
-          <TaskResultOutput
-            text={message.text}
-            expanded={expanded}
-            error={isError}
-          />
-        ) : null}
-        {message.errorMessage && message.errorMessage !== message.text ? (
-          <p className="thread-tool-error">{message.errorMessage}</p>
-        ) : null}
+        <ToolContentView contents={message.contents} />
       </div>
     )
   }
-
   return (
     <div className="task-tool-renderer">
-      <p className="task-tool-final accepted">
-        {t('ai.runtime.task.state.accepted')}
-      </p>
-      <dl className="task-tool-fields">
-        <div className="task-tool-field">
-          <dt>{t('ai.runtime.task.thread')}</dt>
-          <dd>
-            <Link to={`/threads/${receipt.threadId}`} className="task-tool-thread-link">
-              {receipt.threadId}
-            </Link>
-          </dd>
-        </div>
-      </dl>
+      <ThreadLink threadId={receipt.threadId} className="task-tool-thread-link">
+        {receipt.threadId}
+      </ThreadLink>
     </div>
   )
 }
 
-function TaskResultOutput({
-  text,
-  expanded,
-  error,
-  className,
-}: {
-  text: string
-  expanded: boolean
-  error: boolean
-  className?: string
-}) {
-  const preview = formatToolResultPreview('task', text, { expanded, error })
-  return (
-    <ToolOutputViewport
-      text={preview.text}
-      maxLines={preview.maxLines}
-      className={className}
-    />
-  )
+function resultJson(message: ToolRendererMessage): string | null {
+  for (const content of message.contents) {
+    if (content.type === 'json') {
+      return jsonContentText(content.value)
+    }
+    if (content.type === 'text' && content.text.trim()) {
+      return content.text
+    }
+  }
+  return null
+}
+
+function threadLabel(): string {
+  return translate('ai.runtime.task.thread')
 }

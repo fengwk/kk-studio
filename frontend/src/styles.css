@@ -3267,84 +3267,44 @@ div.is-error {
   color: var(--danger);
 }
 
-.thread-tool-call-body {
+/* 卡片正文：调用正文与结果内容共用一层分隔与间距，展开/收起只切换这一层。 */
+.thread-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
   margin-top: 9px;
   padding-top: 9px;
   border-top: 1px solid var(--border);
+}
+
+.thread-tool-body:empty {
+  display: none;
 }
 
 .thread-tool-call-body:empty {
   display: none;
 }
 
-.thread-tool-result-body {
-  margin-top: 9px;
-  padding-top: 9px;
-  border-top: 1px solid var(--border);
-}
-
-.thread-tool-result-body:empty {
-  display: none;
-}
-
-/* 审批条：决策点击后立即在同一行展示 pending 指示，两个决策按钮同步禁用。 */
-.thread-tool-approval {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 9px;
-}
-
-.thread-tool-approval-text {
+/* 只读审批记录：人工决策在根交互区完成，时间线不提供写入路径。 */
+.thread-tool-approval-note {
+  margin: 9px 0 0;
   color: var(--fg-muted);
   font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
-.thread-tool-approval-pending {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--fg-dim);
-  font-size: 12px;
-}
-
-.thread-tool-approval-spinner {
-  width: 12px;
-  height: 12px;
-  animation: thread-approval-spin 700ms linear infinite;
-}
-
-@keyframes thread-approval-spin {
-  to { transform: rotate(360deg); }
-}
-
-.thread-tool-input {
-  max-height: none;
-  overflow: visible;
-}
-
-.thread-tool-preview-body {
-  max-height: calc(8 * 1.45em);
-  overflow: hidden;
-}
-
-.thread-tool-preview-body.is-streaming {
-  max-height: calc(5 * 1.45em);
-}
-
-.thread-tool-preview-body.is-expanded,
-.thread-tool-preview-body.is-unbounded {
-  max-height: none;
-  overflow: visible;
-}
-
+/* write 正文与 edit diff 使用同一个只读视口；内部滚动不把外层卡片滚走。 */
 .thread-tool-preview-body.is-edit .is-added {
   color: var(--green);
 }
 
 .thread-tool-preview-body.is-edit .is-removed {
   color: var(--danger);
+}
+
+.thread-tool-preview-body.is-streaming {
+  opacity: 0.85;
 }
 
 .thread-streaming-hint {
@@ -3429,32 +3389,40 @@ div.is-error {
   overflow-wrap: anywhere;
 }
 
+/* 唯一只读有界视口：长内容/持续日志在卡片内滚动，不撑高外层 transcript。 */
 .thread-tool-output {
   line-height: 1.5;
-  max-height: calc(var(--thread-tool-output-lines, 5) * 1.5em);
-  overflow: hidden;
+  max-height: min(24em, 42vh);
+  overflow: auto;
+  /* 内部滚动链不外泄；滚动位置只由跟随逻辑与用户操作决定，浏览器不做隐式锚定补偿。 */
+  overscroll-behavior: contain;
+  overflow-anchor: none;
 }
 
-.thread-tool-output.is-expanded {
-  max-height: none;
-  overflow: visible;
+.thread-tool-output:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.thread-tool-contents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thread-tool-output.is-json {
+  color: var(--fg-muted);
 }
 
 .thread-tool-placeholder,
 .thread-tool-error {
-  margin: 0;
+  margin: 9px 0 0;
   font-size: 12px;
   color: var(--fg-dim);
 }
 
 .thread-tool-error { color: var(--danger); }
-
-.thread-tool-attachments {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
 
 .thread-tool-resource {
   margin: 0;
@@ -3471,28 +3439,48 @@ div.is-error {
   width: min(100%, 520px);
 }
 
-/* task 工具 renderer：参数/状态/最终报告。 */
-.task-tool-renderer {
+.thread-tool-attachment-uri {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.thread-tool-attachment-uri-text {
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.thread-tool-attachment-preview {
+  max-height: min(12em, 30vh);
+}
+
+/* ask_user 只读问题/回答记录：没有输入控件，也没有提交路径。 */
+.ask-user-record {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.task-tool-final {
-  margin: 0;
+.ask-user-question-record {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  font-size: 12px;
-  color: var(--fg-muted);
-  font-weight: 600;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.task-tool-final.accepted { color: var(--info); }
-.task-tool-final.completed { color: var(--info); }
-.task-tool-final.error { color: var(--danger); }
-.task-tool-final.cancelled { color: var(--warning); }
+.ask-user-q-icon {
+  flex: 0 0 auto;
+  color: var(--fg-dim);
+}
+
+/* task 工具 renderer：prompt 与可点击 Thread 链接；不显示受理/完成文案。 */
+.task-tool-renderer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
 .task-tool-fields {
   margin: 0;
@@ -3527,27 +3515,11 @@ div.is-error {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+  overflow-wrap: anywhere;
 }
 
 .task-tool-thread-link:hover {
   color: var(--primary-hover, var(--primary));
-}
-
-.task-tool-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.task-tool-section-label {
-  color: var(--fg-dim);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.task-tool-error-viewport {
-  color: var(--danger);
 }
 
 .thread-state,

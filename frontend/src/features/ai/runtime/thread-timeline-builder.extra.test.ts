@@ -82,7 +82,11 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages.some((m) => m.role === 'user' && m.text === '系统提示')).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'assistant' && String(m.text).includes('boom'))).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'tool' && m.status === 'error')).toBe(true)
-    expect(timeline.messages.some((m) => m.role === 'tool' && m.attachments.length > 0)).toBe(true)
+    // 工具结果保留有序内容：资源作为 contents 里的 resource 项，而不是扁平附件列表。
+    expect(timeline.messages.some((m) =>
+      m.role === 'tool'
+      && m.contents.some((content) => content.type === 'resource'),
+    )).toBe(true)
     expect(timeline.hasPendingInputs).toBe(false)
     expect(timeline.queuedMessages).toEqual([])
   })
@@ -267,7 +271,15 @@ describe('thread timeline edge branches', () => {
       {
         role: 'tool',
         phase: 'result',
-        attachments: [{ blobId, name: 'result.txt', preview: 'excerpt' }],
+        contents: [{
+          type: 'resource',
+          attachment: {
+            type: 'file',
+            name: 'result.txt',
+            blobId,
+            preview: 'excerpt',
+          },
+        }],
       },
     ])
   })
@@ -504,7 +516,10 @@ describe('thread timeline edge branches', () => {
     const result = timeline.messages.find(
       (message) => message.role === 'tool' && message.phase === 'result',
     )
-    expect(result).toMatchObject({ toolCallId: 'call-1', text: 'ok' })
+    expect(result).toMatchObject({
+      toolCallId: 'call-1',
+      contents: [{ type: 'text', text: 'ok' }],
+    })
     expect(result).not.toHaveProperty('invocationId')
 
     // parseApproval 的防御分支：null / 非法 JSON / 非 record 都返回 null。
@@ -575,7 +590,7 @@ describe('thread timeline edge branches', () => {
     )
     expect(assistantOnlyCall.messages).toMatchObject([
       { role: 'tool', phase: 'call', toolCallId: 'call-x', status: 'done' },
-      { role: 'tool', phase: 'result', arguments: '', text: 'ok' },
+      { role: 'tool', phase: 'result', arguments: '', contents: [{ type: 'text', text: 'ok' }] },
     ])
   })
 

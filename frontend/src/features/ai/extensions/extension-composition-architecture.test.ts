@@ -27,9 +27,9 @@ describe('AI extension composition architecture', () => {
       'ai.delete-resource',
     ])
     // task renderer 必须通过 extension 注册（rendererKey = contribution id），
-    // MessageList 不做 name switch，展开能力也由 contribution 声明。
+    // MessageList 不做 name switch；展开/收起由宿主外壳统一负责，不再由 contribution 声明。
     expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
-    expect(aiExtension.toolRenderers?.[0]?.isExpandable).toBeTypeOf('function')
+    expect(aiExtension.toolRenderers?.[0]?.component).toBeTypeOf('function')
     expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['canvas.home', 'canvas'],
       ['canvas.editor', 'canvas/:canvasId'],
