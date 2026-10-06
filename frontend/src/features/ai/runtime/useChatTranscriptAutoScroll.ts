@@ -8,8 +8,38 @@ import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcrip
 const CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX = 210
 const CHAT_BOTTOM_EPSILON_PX = 1
 
+/** 浏览器原生滚动键：键盘滚动同样属于明确的用户滚动意图。 */
+const USER_SCROLL_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+  'Spacebar',
+])
+
+/**
+ * 滚动条判定条带宽度。overlay 滚动条不占 clientWidth（经典滚动条占用宽度时用实际
+ * 宽度），指针落在这条边缘条带里可能是抓住了原生滚动条拖动。
+ */
+const SCROLLBAR_EDGE_PX = 16
+
 function distanceFromBottom(element: HTMLElement): number {
   return element.scrollHeight - element.scrollTop - element.clientHeight
+}
+
+/** 指针是否落在容器右侧/底部边缘条带（原生滚动条所在位置）。 */
+function isScrollbarPointer(element: HTMLElement, event: PointerEvent): boolean {
+  const rect = element.getBoundingClientRect()
+  if (rect.width === 0 && rect.height === 0) {
+    return false
+  }
+  const gutterX = Math.max(element.offsetWidth - element.clientWidth, SCROLLBAR_EDGE_PX)
+  const gutterY = Math.max(element.offsetHeight - element.clientHeight, SCROLLBAR_EDGE_PX)
+  return event.clientX - rect.left >= rect.width - gutterX
+    || event.clientY - rect.top >= rect.height - gutterY
 }
 
 function isNearBottom(element: HTMLElement, thresholdPx = CHAT_RESTICK_TO_BOTTOM_THRESHOLD_PX): boolean {
@@ -51,8 +81,10 @@ function afterLayout(callback: () => void): () => void {
  * 绝不触发滚动。
  *
  * 暂停跟随只有三条来源：外层向历史滚动、用户输入、子只读区域冒泡阅读意图
- * （`TRANSCRIPT_READING_INTENT_EVENT`）；恢复只有一条路径——用户把 transcript
- * 自己滚回贴底阈值内。布局尺寸变化永不重开跟随。
+ * （`TRANSCRIPT_READING_INTENT_EVENT`）；恢复只有一条路径——用户用明确的滚动意图
+ * （滚轮 / 滚动键 / 触控 / 滚动条拖拽）把 transcript 自己滚回贴底阈值内。
+ * 布局尺寸变化、程序化定位（包括布局收缩时浏览器把 scrollTop 钳制到底部）
+ * 既不重开跟随，也不改变跟随态。
  */
 export function useChatTranscriptAutoScroll(
   bodyRef: RefObject<HTMLDivElement | null>,
@@ -64,6 +96,9 @@ export function useChatTranscriptAutoScroll(
 ) {
   const stickToBottomRef = useRef(true)
   const lastScrollTopRef = useRef(0)
+  // 明确的用户滚动意图：只有它允许「恢复跟随」。布局收缩导致的原生 scrollTop
+  // 钳制、子区域阅读意图、程序化定位都不设置它。
+  const userScrollIntentRef = useRef(false)
   // 已处理的增长签名：挂载/重绑时由初始定位 effect 记录，增长 effect 只对
   // 之后的计数变化生效，绝不把挂载时恢复的历史位置拉回底部。
   const lastGrowthSignatureRef = useRef<string | null>(null)
@@ -84,12 +119,39 @@ export function useChatTranscriptAutoScroll(
       const movedTowardHistory = scrollTop < lastScrollTopRef.current
       const reachedBottom = distanceFromBottom(chatBody) <= CHAT_BOTTOM_EPSILON_PX
       const movedTowardBottom = scrollTop > lastScrollTopRef.current
-      if (movedTowardHistory && !reachedBottom) {
-        stickToBottomRef.current = false
-      } else if (reachedBottom || (movedTowardBottom && isNearBottom(chatBody))) {
+      if (movedTowardHistory) {
+        // 向上移动：回看历史，立即暂停跟随。
+        if (!reachedBottom) {
+          stickToBottomRef.current = false
+        }
+        // 位置变小却仍然到底：只可能是布局收缩时浏览器把 scrollTop 钳制到新的底部
+        // （卡片收起、图片尺寸变动）。这不是用户手势，既不重开跟随也不改变跟随态。
+        userScrollIntentRef.current = false
+      } else if (
+        userScrollIntentRef.current
+        && (reachedBottom || (movedTowardBottom && isNearBottom(chatBody)))
+      ) {
+        // 只有明确的用户滚动意图回到贴底阈值内才恢复跟随。
         stickToBottomRef.current = true
+        userScrollIntentRef.current = false
       }
       lastScrollTopRef.current = scrollTop
+    }
+
+    // 明确的用户滚动意图接线：滚轮、滚动键、触控滚动，以及抓住原生滚动条拖动。
+    // 键盘滚动只在容器内（或其后代）按键时才算，避免全局快捷键误判。
+    const markUserScrollIntent = () => {
+      userScrollIntentRef.current = true
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (USER_SCROLL_KEYS.has(event.key)) {
+        markUserScrollIntent()
+      }
+    }
+    const onPointerDown = (event: PointerEvent) => {
+      if (isScrollbarPointer(chatBody, event)) {
+        markUserScrollIntent()
+      }
     }
 
     // 首次进入（无保存位置）贴底；恢复历史位置时 stick 状态跟随该位置。
@@ -101,11 +163,19 @@ export function useChatTranscriptAutoScroll(
       scrollToBottom(chatBody)
     }
     lastScrollTopRef.current = chatBody.scrollTop
+    userScrollIntentRef.current = false
     chatBody.addEventListener('scroll', onScroll, { passive: true })
+    chatBody.addEventListener('wheel', markUserScrollIntent, { passive: true })
+    chatBody.addEventListener('touchstart', markUserScrollIntent, { passive: true })
+    chatBody.addEventListener('touchmove', markUserScrollIntent, { passive: true })
+    chatBody.addEventListener('keydown', onKeyDown)
+    chatBody.addEventListener('pointerdown', onPointerDown)
     // 子只读区域的回看/交互意图：暂停跟随并撤销待执行的贴底帧；恢复只有
-    // 「用户自己把 transcript 滚回底部」一条路径。
+    // 「用户自己用滚动意图把 transcript 滚回底部」一条路径。
     const onReadingIntent = () => {
       stickToBottomRef.current = false
+      // 用户正在读内容：作废尚未兑现的滚动意图，避免它稍后重开跟随。
+      userScrollIntentRef.current = false
       cancelPendingScrollRef.current?.()
       cancelPendingScrollRef.current = null
     }
@@ -114,6 +184,11 @@ export function useChatTranscriptAutoScroll(
     lastGrowthSignatureRef.current = growthSignature(messageCount, eventCount)
     return () => {
       chatBody.removeEventListener('scroll', onScroll)
+      chatBody.removeEventListener('wheel', markUserScrollIntent)
+      chatBody.removeEventListener('touchstart', markUserScrollIntent)
+      chatBody.removeEventListener('touchmove', markUserScrollIntent)
+      chatBody.removeEventListener('keydown', onKeyDown)
+      chatBody.removeEventListener('pointerdown', onPointerDown)
       chatBody.removeEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
     }
     // 初始定位只发生在挂载/重绑；计数变化由增长 effect 单独处理，

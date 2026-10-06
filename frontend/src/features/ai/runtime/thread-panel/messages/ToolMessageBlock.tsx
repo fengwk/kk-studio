@@ -152,6 +152,9 @@ function ToolBody({
   Renderer?: ComponentType<ToolRendererProps>
   expanded: boolean
 }) {
+  // 只有 bash 的持续日志跟随尾部；其余静态正文（结果 Text/JSON、write/edit/task
+  // 参数）一律从顶部读，内容增长也不强拉到底部。
+  const followTail = view.toolName.trim().toLowerCase() === 'bash' && view.contentsStreaming
   if (view.toolName === 'ask_user') {
     return <AskUserRecord arguments={view.arguments} contents={view.contents} />
   }
@@ -169,7 +172,7 @@ function ToolBody({
         <Renderer message={view.resultMessage} expanded={expanded} />
       ) : null}
       {!Renderer && view.contents.length > 0 ? (
-        <ToolContentView contents={view.contents} />
+        <ToolContentView contents={view.contents} followTail={followTail} />
       ) : null}
     </>
   )

@@ -21,8 +21,20 @@ type HarnessState = {
   initialScrollTop?: number | null
 }
 
+/**
+ * 初始就是终态场景：任何夹具都会先 publish，避免「挂载时是流式卡片、随后被替换成
+ * 静态卡片」影响「静态正文从顶部读」的断言。`currentState` 与初始渲染状态同源，
+ * 使 `restorePosition` 这类基于当前状态的夹具在首帧也能工作。
+ */
+function initialState(): HarnessState {
+  return {
+    messages: [...filler(6), bashTool('call-bash', 40, false), bashResult('call-bash', 40)],
+    streaming: false,
+  }
+}
+
 let publish: (state: HarnessState) => void = () => {}
-let currentState: HarnessState = { messages: [], streaming: false }
+let currentState: HarnessState = initialState()
 
 function assistant(id: string, text: string): DialogueMessage {
   return {
@@ -245,10 +257,7 @@ function createBlobResolver(delayMs: number, imageUrl: string) {
 }
 
 export function ToolCardHarnessApp() {
-  const [state, setState] = useState<HarnessState>(() => ({
-    messages: [...filler(6), bashTool('call-bash', 40, true)],
-    streaming: true,
-  }))
+  const [state, setState] = useState<HarnessState>(initialState)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const imageUrl = useMemo(() => bigImageDataUrl(), [])
   const resolveBlobUrls = useMemo(() => createBlobResolver(600, imageUrl), [imageUrl])

@@ -6,7 +6,8 @@ import type { Locator, Page } from './fixture'
  *
  * 覆盖设计文档中只能在真实浏览器验证的契约——流式增长跟随、空闲高度变化（手动展开、
  * 图片加载）不抢外层锚点、内部日志回看不移动卡片、流式转终态保持身份与滚动位置、
- * read 图片按权威 MIME 默认预览。
+ * read 图片按权威 MIME 默认预览；恢复跟随必须来自真实用户滚动意图（滚轮等），
+ * 布局收缩把 scrollTop 钳制到底部不构成用户回底。
  */
 
 type HarnessApi = {
@@ -49,6 +50,16 @@ async function scrollTop(target: Locator): Promise<number> {
   return target.evaluate((element) => element.scrollTop)
 }
 
+/**
+ * 真实用户滚轮：唯一允许「恢复跟随」的意图来源。指针放在 transcript 顶部条带
+ * （普通消息/卡片 Header，必然不是内层可滚动视口），确保滚轮作用在外层。
+ */
+async function scrollTranscript(page: Page, deltaY: number): Promise<void> {
+  const box = await dialogue(page).boundingBox()
+  await page.mouse.move((box?.x ?? 0) + 20, (box?.y ?? 0) + 12)
+  await page.mouse.wheel(0, deltaY)
+}
+
 async function scrollMetrics(target: Locator): Promise<{
   scrollTop: number
   scrollHeight: number
@@ -86,20 +97,17 @@ test('follows streaming growth, pauses on user scroll-up, and resumes at the bot
   await expect(bashViewport(page)).toContainText('build step 60')
   await expect(bashViewport(page)).toContainText('build step 1')
 
-  // 用户向历史方向滚动：立即暂停跟随，后续增长不得把手势拉回底部。
-  await body.evaluate((element) => {
-    element.scrollTop = Math.max(0, element.scrollTop - 120)
-  })
+  // 用户用真实滚轮向历史方向滚动：立即暂停跟随，后续增长不得把手势拉回底部。
+  await scrollTranscript(page, -240)
+  await expect.poll(outerDistance).toBeGreaterThan(1)
   const pausedTop = await scrollTop(body)
   await harness(page, 'grow', 120)
   await page.waitForTimeout(200)
   expect(await scrollTop(body)).toBe(pausedTop)
 
-  // 主动回到底部：恢复跟随。
-  await body.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
-  await page.waitForTimeout(50)
+  // 用户用真实滚轮主动回到底部：恢复跟随。
+  await scrollTranscript(page, 10_000)
+  await expect.poll(outerDistance).toBeLessThanOrEqual(1)
   await harness(page, 'grow', 160)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
 })
@@ -201,6 +209,9 @@ test('contains inner log scrollback without moving the card', async ({ page }) =
   const body = dialogue(page)
   const viewport = bashViewport(page)
 
+  // 终态 bash 结果是静态正文：挂载即从顶部读，不自动贴到底部。
+  expect(await scrollTop(viewport)).toBe(0)
+
   // 先把内部视口滚到中间，再让它在视口内就位；之后所有测量都不再触发自动定位。
   await viewport.scrollIntoViewIfNeeded()
   await viewport.evaluate((element) => {
@@ -285,14 +296,15 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
   expect(await scrollTop(body)).toBe(pausedTop)
   expect(await topEdge(bash)).toBeCloseTo(pausedBashTop, 0)
 
-  // 2) 用户主动回底恢复跟随，然后展开末尾卡片（交互意图）→ 再次暂停。
-  await body.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
+  // 2) 用户用真实滚轮回底恢复跟随，然后展开末尾卡片（交互意图）→ 再次暂停。
+  await scrollTranscript(page, 10_000)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
   await readToggle.click()
   await expect(readToggle).toHaveAttribute('aria-expanded', 'true')
   await page.waitForTimeout(150)
+
+  // 展开的静态正文（read 文本结果）从顶部读，绝不自动贴到底部。
+  expect(await scrollTop(readCard.locator('.thread-tool-output').first())).toBe(0)
 
   // 展开让内容在下方长出来：外层已不贴底，出现贴底就说明阅读位置被抢走。
   const expandedTop = await scrollTop(body)
@@ -330,9 +342,10 @@ test('keeps the card anchor while streaming growth runs with expansion, media lo
   expect(await topEdge(readCard)).toBeCloseTo(mediaReadTop, 0)
 })
 
-test('does not reopen following after a reading intent when the layout shrinks', async ({ page }) => {
-  // 需求：内层回看（阅读意图）暂停跟随之后，即使后续布局变矮、且流式 revision
-  // 继续变化，也绝不能重开跟随或把用户正在读的位置拉回底部。
+test('does not reopen following when a shrink clamps the outer position to the bottom', async ({ page }) => {
+  // 需求：用户暂停后内容收起，浏览器把外层 scrollTop 原生钳制到新的底部（位置变小且
+  // 距离为 0）——这不是用户手势，下一轮流式更新仍不得贴底；只有用户真实滚回底部
+  // （滚轮意图）才恢复跟随。
   await harness(page, 'streamingTail', 40)
   const body = dialogue(page)
   const viewport = bashViewport(page)
@@ -340,38 +353,34 @@ test('does not reopen following after a reading intent when the layout shrinks',
     scrollMetrics(body).then((m) => m.scrollHeight - m.scrollTop - m.clientHeight)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1, { timeout: 2500 })
 
-  // 1) 内层回看：冒泡阅读意图，外层暂停跟随（即使此刻外层仍然贴底）。
+  // 1) 内层回看（冒泡阅读意图）＋ 用户真实滚轮上滚：外层暂停跟随。
   await viewport.evaluate((element) => {
     element.scrollTop = 20
   })
   await page.waitForTimeout(120)
+  await scrollTranscript(page, -240)
+  await expect.poll(() => outerDistance()).toBeGreaterThan(1)
+  const pausedTop = await scrollTop(body)
+  await harness(page, 'growTail', 60)
+  await page.waitForTimeout(250)
+  expect(await scrollTop(body)).toBe(pausedTop)
 
-  // 2) 外层也回到中段回看，随后布局变矮（填充消息减少 + 流式 revision 变化）。
-  await body.evaluate((element) => {
-    element.scrollTop = Math.max(0, element.scrollHeight - 900)
-  })
-  await page.waitForTimeout(150)
-  const beforeShrinkHeight = await body.evaluate((element) => element.scrollHeight)
+  // 2) 内容大幅收起：外层 scrollTop 被浏览器钳制到新的底部。
   await harness(page, 'shrinkTail', 60)
-  await page.waitForTimeout(300)
-  expect(await body.evaluate((element) => element.scrollHeight)).toBeLessThan(beforeShrinkHeight)
-
-  // 布局变矮不得重开跟随：既没有贴回底部，也没有把位置改写成新的底部。
-  expect(await outerDistance(body)).toBeGreaterThan(1)
-
-  // 3) 之后流式继续增长：位置一动不动。
-  const afterShrinkTop = await scrollTop(body)
-  await harness(page, 'growTail', 160)
-  await page.waitForTimeout(300)
-  expect(await scrollTop(body)).toBe(afterShrinkTop)
-  expect(await outerDistance(body)).toBeGreaterThan(1)
-
-  // 4) 用户自己滚回底部：恢复跟随，后续增长重新贴底。
-  await body.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-  })
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
+  const clampedTop = await scrollTop(body)
+  expect(clampedTop).toBeLessThan(pausedTop)
+
+  // 3) 下一轮流式更新：暂停没有被 clamp 重开，位置一动不动。
   await harness(page, 'growTail', 200)
+  await page.waitForTimeout(300)
+  expect(await scrollTop(body)).toBe(clampedTop)
+  expect(await outerDistance(body)).toBeGreaterThan(1)
+
+  // 4) 用户真实滚轮回到新的底部：恢复跟随，后续增长重新贴底。
+  await scrollTranscript(page, 10_000)
+  await expect.poll(outerDistance).toBeLessThanOrEqual(1)
+  await harness(page, 'growTail', 260)
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
 })
 
