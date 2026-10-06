@@ -101,6 +101,37 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   )
 })
 
+test('accepted Thread requires an enabled root policy and an explicit null Goal', () => {
+  // 查询快照必须区分根策略与创建请求的 boolean，并完整投影未设置的 Goal。
+  const chat = fakeChat()
+  const model = fakeModel()
+  const accepted = acceptedEnvelope(chat, model)
+  for (const policy of [
+    undefined,
+    { mode: 'DISABLE', rootThreadId: null },
+    { mode: 'FOLLOW', rootThreadId: cid() },
+    { mode: 'ENABLE', rootThreadId: cid() },
+  ]) {
+    const invalid = structuredClone(accepted)
+    invalid.thread.yoloPolicy = policy
+    invalid.thread.yoloEnabled = true
+    assert.throws(() => assertThreadSettings(invalid, fakeCase(model), chat.agentName))
+  }
+
+  const missingGoal = structuredClone(accepted)
+  delete missingGoal.thread.branchSettings.goal
+  assert.throws(
+    () => assertThreadSettings(missingGoal, fakeCase(model), chat.agentName),
+    /Thread branch settings shape mismatch/,
+  )
+  const unexpectedGoal = structuredClone(accepted)
+  unexpectedGoal.thread.branchSettings.goal = { id: cid(), text: 'Unexpected user Goal' }
+  assert.throws(
+    () => assertThreadSettings(unexpectedGoal, fakeCase(model), chat.agentName),
+    /New Thread must have no user Goal/,
+  )
+})
+
 // ---------- 最小保真 fixture（只承载被测函数真正读取的字段） ----------
 
 function fakeChat() {
@@ -137,8 +168,9 @@ function acceptedEnvelope(chat, model) {
       headEntryId: cid(),
       nextCommandSequence: '2',
       version: '1',
-      yoloEnabled: true,
-      branchSettings: branchSettingsOf(fakeAgent(), model),
+      parentThreadId: null,
+      yoloPolicy: { mode: 'ENABLE', rootThreadId: null },
+      branchSettings: { ...branchSettingsOf(fakeAgent(), model), goal: null },
       status: 'PROCESSING',
       processing: true,
     },
