@@ -939,29 +939,9 @@ export const aiCatalog = {
     'en-US': 'Tab switch sort',
     'zh-CN': 'Tab 切换排序',
   },
-  'ai.chat.history.title': {
-    'en-US': 'History branches',
-    'zh-CN': '历史分支',
-  },
-  'ai.chat.history.filter': {
-    'en-US': 'Show records',
-    'zh-CN': '显示记录',
-  },
   'ai.chat.history.search': {
     'en-US': 'Search records',
     'zh-CN': '搜索记录',
-  },
-  'ai.chat.history.list': {
-    'en-US': 'History list',
-    'zh-CN': '历史列表',
-  },
-  'ai.chat.history.conversation': {
-    'en-US': 'Conversation',
-    'zh-CN': '对话',
-  },
-  'ai.chat.history.allRecords': {
-    'en-US': 'All records',
-    'zh-CN': '全部记录',
   },
   'ai.chat.history.user': {
     'en-US': 'User',
@@ -984,12 +964,12 @@ export const aiCatalog = {
     'zh-CN': '系统',
   },
   'ai.chat.history.loading': {
-    'en-US': 'Loading history branches…',
-    'zh-CN': '正在加载历史分支…',
+    'en-US': 'Loading history tree…',
+    'zh-CN': '正在加载历史树…',
   },
   'ai.chat.history.loadFailed': {
-    'en-US': 'History branches failed to load',
-    'zh-CN': '历史分支加载失败',
+    'en-US': 'History tree failed to load',
+    'zh-CN': '历史树加载失败',
   },
   'ai.chat.history.noMatch': {
     'en-US': 'No records match “{{query}}”',
@@ -1023,9 +1003,65 @@ export const aiCatalog = {
     'en-US': 'Cancel',
     'zh-CN': '取消',
   },
-  'ai.chat.history.continue': {
-    'en-US': 'Continue current Thread from here',
-    'zh-CN': '从这里继续当前 Thread',
+  'ai.chat.branch.historyTree': {
+    'en-US': 'History tree',
+    'zh-CN': '历史树',
+  },
+  'ai.chat.branch.fromHere': {
+    'en-US': 'Branch from here',
+    'zh-CN': '从此处分支',
+  },
+  'ai.chat.branch.notBoundary': {
+    'en-US': 'Only ROOT or a closed turn end can branch',
+    'zh-CN': '仅 ROOT 或已关闭的回合末尾可分支',
+  },
+  'ai.chat.branch.kindRoot': {
+    'en-US': 'Root',
+    'zh-CN': '根',
+  },
+  'ai.chat.branch.kindNotification': {
+    'en-US': 'Notification',
+    'zh-CN': '通知',
+  },
+  'ai.chat.branch.newBranch': {
+    'en-US': 'New branch',
+    'zh-CN': '新建分支',
+  },
+  'ai.chat.branch.name': {
+    'en-US': 'Branch name',
+    'zh-CN': '分支名称',
+  },
+  'ai.chat.branch.nameRequired': {
+    'en-US': 'Enter a branch name.',
+    'zh-CN': '请输入分支名称。',
+  },
+  'ai.chat.branch.nameTooLong': {
+    'en-US': 'Branch name must be at most 256 characters.',
+    'zh-CN': '分支名称最多 256 个字符。',
+  },
+  'ai.chat.branch.destination': {
+    'en-US': 'Open in',
+    'zh-CN': '打开位置',
+  },
+  'ai.chat.branch.openDraft': {
+    'en-US': 'Open branch draft',
+    'zh-CN': '打开分支草稿',
+  },
+  'ai.chat.branch.confirmOverwrite': {
+    'en-US': 'Overwrite unsent draft',
+    'zh-CN': '覆盖未发送草稿',
+  },
+  'ai.chat.branch.overwriteDraft': {
+    'en-US': 'The target position has an unsent draft; confirming overwrites it.',
+    'zh-CN': '目标位置存在未发送草稿，确认后将覆盖。',
+  },
+  'ai.chat.branch.destinationBusy': {
+    'en-US': 'The target position is busy; choose another position.',
+    'zh-CN': '目标位置正忙，请选择其它位置。',
+  },
+  'ai.chat.branch.breadcrumb': {
+    'en-US': 'Branch breadcrumb',
+    'zh-CN': '分支面包屑',
   },
   'ai.chat.sessionSubtitle': {
     'en-US': 'Session {{id}}',
@@ -1615,10 +1651,6 @@ export const aiCatalog = {
     'en-US': 'Collapse tool preview',
     'zh-CN': '收起工具预览',
   },
-  'ai.runtime.message.toolFailed': {
-    'en-US': 'Tool execution failed.',
-    'zh-CN': '工具执行失败。',
-  },
   'ai.runtime.message.attachment': {
     'en-US': '{{type}} attachment',
     'zh-CN': '{{type}} 附件',
@@ -1671,21 +1703,29 @@ export const aiCatalog = {
     'en-US': 'No data',
     'zh-CN': '暂无数据',
   },
-  'ai.runtime.status.branchUsageTitle': {
-    'en-US': 'Cumulative usage\nUncached input: {{input}} tokens; output: {{output}} tokens\nCache read: {{cacheRead}} tokens; write: {{cacheWrite}} tokens\nCost: ${{cost}}; cache hit: {{cache}}\nAverage generation speed: {{speed}}',
-    'zh-CN': '累计用量\n未缓存输入：{{input}} tokens；输出：{{output}} tokens\n缓存读取：{{cacheRead}} tokens；写入：{{cacheWrite}} tokens\n费用：${{cost}}；缓存命中：{{cache}}\n平均生成速度：{{speed}}',
-  },
   'ai.runtime.status.contextText': {
     'en-US': 'ctx {{used}}/{{total}}',
     'zh-CN': 'ctx {{used}}/{{total}}',
   },
-  'ai.runtime.status.contextTitleKnown': {
-    'en-US': 'Last request context: ~{{used}} / {{total}} tokens',
-    'zh-CN': '上次请求上下文：约 {{used}} / {{total}} tokens',
+  'ai.runtime.status.contextUsageTitleKnown': {
+    'en-US': 'Context occupancy (latest model call estimate): ~{{used}} / {{total}} tokens',
+    'zh-CN': '上下文占用（最近一次模型调用估算）：约 {{used}} / {{total}} tokens',
   },
-  'ai.runtime.status.contextTitleUnknown': {
-    'en-US': 'Last request context: no data (limit {{total}} tokens)',
-    'zh-CN': '上次请求上下文：暂无数据（上限 {{total}} tokens）',
+  'ai.runtime.status.contextUsageTitleUnknown': {
+    'en-US': 'Context occupancy (latest model call estimate): no data (limit {{total}} tokens)',
+    'zh-CN': '上下文占用（最近一次模型调用估算）：暂无数据（上限 {{total}} tokens）',
+  },
+  'ai.runtime.status.usageTokensDetail': {
+    'en-US': 'Uncached input: {{input}} tokens; output: {{output}} tokens; reasoning: {{reasoning}} tokens',
+    'zh-CN': '未缓存输入：{{input}} tokens；输出：{{output}} tokens；推理：{{reasoning}} tokens',
+  },
+  'ai.runtime.status.usageCacheDetail': {
+    'en-US': 'Cache read: {{cacheRead}} tokens; write: {{cacheWrite}} tokens',
+    'zh-CN': '缓存读取：{{cacheRead}} tokens；缓存写入：{{cacheWrite}} tokens',
+  },
+  'ai.runtime.status.usageCostDetail': {
+    'en-US': 'Estimated cost: {{cost}}; cache hit rate: {{cache}}; generation speed: {{speed}}',
+    'zh-CN': '估算费用：{{cost}}；缓存命中率：{{cache}}；生成速度：{{speed}}',
   },
   'ai.runtime.usage.metaTooltip': {
     'en-US': '↑ Uncached input · ↓ Output · R Cache read · W Cache write · $ Cost · cache Cache hit rate · tok/s Generation speed',
@@ -2099,6 +2139,14 @@ export const aiCatalog = {
     'en-US': 'Request Snapshot',
     'zh-CN': '请求快照',
   },
+  'ai.runtime.debug.historicalRequest': {
+    'en-US': 'Historical Request',
+    'zh-CN': '历史请求',
+  },
+  'ai.runtime.debug.backToConversation': {
+    'en-US': 'Back to conversation',
+    'zh-CN': '返回会话',
+  },
   'ai.runtime.debug.inspectorClose': {
     'en-US': 'Close inspector',
     'zh-CN': '关闭检查器',
@@ -2183,13 +2231,9 @@ export const aiCatalog = {
     'en-US': 'Retention',
     'zh-CN': '留存档位',
   },
-  'ai.runtime.debug.inspector.cacheAffinityKey': {
-    'en-US': 'Affinity Key',
-    'zh-CN': '前缀标识 (Affinity Key)',
-  },
-  'ai.runtime.debug.inspector.cacheBreakpoints': {
-    'en-US': 'Breakpoints',
-    'zh-CN': 'Cache 断点',
+  'ai.runtime.debug.inspector.cacheKey': {
+    'en-US': 'Session Cache Key',
+    'zh-CN': '会话缓存键',
   },
   'ai.runtime.debug.inspector.cacheProviderDisclaimer': {
     'en-US': 'Provider automatic caching is not guaranteed',
@@ -2283,9 +2327,9 @@ export const aiCatalog = {
     'en-US': 'Request Preview',
     'zh-CN': '请求预览',
   },
-  'ai.runtime.debug.inspector.clickTimeSnapshot': {
-    'en-US': 'Click-time Snapshot',
-    'zh-CN': '点击快照',
+  'ai.runtime.debug.inspector.historicalPreviewTitle': {
+    'en-US': 'Historical Request Preview',
+    'zh-CN': '历史请求预览',
   },
   'ai.runtime.debug.inspector.providerType': {
     'en-US': 'Provider Type',
@@ -2307,9 +2351,9 @@ export const aiCatalog = {
     'en-US': 'Base Entry ID',
     'zh-CN': '基础 Entry ID',
   },
-  'ai.runtime.debug.inspector.snapshotNotice': {
+  'ai.runtime.debug.inspector.previewNotice': {
     'en-US': 'Notice',
-    'zh-CN': '快照说明',
+    'zh-CN': '说明',
   },
   'ai.runtime.debug.inspector.requestBodyJson': {
     'en-US': 'Provider Request Body (JSON)',
@@ -2498,10 +2542,6 @@ export const aiCatalog = {
   'ai.runtime.entry.assistantRequestFailed': {
     'en-US': 'Assistant request failed',
     'zh-CN': '助手请求失败',
-  },
-  'ai.runtime.entry.toolFailed': {
-    'en-US': 'Tool execution failed.',
-    'zh-CN': '工具执行失败。',
   },
   'ai.runtime.action.requestFailed': {
     'en-US': 'Request failed',
