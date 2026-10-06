@@ -16,6 +16,7 @@ import {
   parseCompletedResult,
   parseQuestionnaire,
 } from './questionnaire-parser'
+import './interaction-cards.css'
 
 export interface QuestionnaireCardProps {
   interactionId: string
