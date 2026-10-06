@@ -2611,7 +2611,8 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
     })
 
     it('hides the Debug preview trigger for a new session draft target', async () => {
-      // 测试意图：新建草稿没有可预览的绑定 Thread，即使切到 Debug 也没有预览入口。
+      // 测试意图：新建草稿没有可预览的绑定 Thread、也不是会话内分支草稿，
+      // 因此既进不了 Debug 视图，也没有任何预览入口。
       const user = userEvent.setup()
       mockDebugProjection()
       renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -2620,8 +2621,10 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       await user.click(composer)
       await user.keyboard('/debug{Enter}')
 
+      expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /下一次请求预览/ })).not.toBeInTheDocument()
       expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+      expect(harnessService.previewBranchRequest).not.toHaveBeenCalled()
     })
 
     it('enables the Debug preview trigger only once the bound draft is previewable', async () => {
@@ -3150,6 +3153,157 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       // 草稿已被继续编辑（插入点落在开头），两段文字都必须保留
       expect(composer).toHaveTextContent('before')
       expect(composer).toHaveTextContent('after')
+    })
+  })
+
+  describe('local branch draft Debug preview (session endpoint, no Thread creation)', () => {
+    const BRANCH_START_ENTRY_ID = 'entry-turn-end'
+
+    /** 会话里的 ROOT → TURN_END 前缀：分叉点是一个已关闭回合。 */
+    function branchEntries(): HarnessSessionEntryDTO[] {
+      return [
+        {
+          entryId: 'entry-root',
+          sessionId: 'session-1',
+          parentEntryId: null,
+          entryType: 'ROOT',
+          payloadJson: '{}',
+          createTime: null,
+        },
+        {
+          entryId: BRANCH_START_ENTRY_ID,
+          sessionId: 'session-1',
+          parentEntryId: 'entry-root',
+          entryType: 'TURN_END',
+          payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+          createTime: null,
+        },
+      ]
+    }
+
+    /** 本地分支草稿目标：会话与分叉点已定，Thread 尚未创建。 */
+    function bindBranchDraftTarget() {
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({
+          kind: 'NEW_THREAD_DRAFT',
+          sessionId: 'session-1',
+          startEntryId: BRANCH_START_ENTRY_ID,
+          threadName: 'branch-1',
+        }),
+      )
+    }
+
+    /** 用真实的 /debug 斜杠命令进入本地分支草稿的 Debug 视图。 */
+    async function openBranchDraftDebugView(user: ReturnType<typeof userEvent.setup>) {
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.keyboard('/debug{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      return composer
+    }
+
+    it('opens the branch draft Debug view, previews through the session endpoint and never creates a Thread', async () => {
+      // 测试意图：本地分支草稿同样能进入 Debug 并触发真实预检；预检只走会话级
+      // branch preview（startEntryId + commands），绝不为了预览创建 Thread，也不发
+      // per-thread 预览（草稿没有可绑定的 threadId）。
+      const user = userEvent.setup()
+      bindBranchDraftTarget()
+      vi.mocked(harnessService.previewBranchRequest).mockResolvedValue(previewResponse())
+      const composer = await openBranchDraftDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'branch debug message')
+
+      // Debug 覆盖整个 pane：控制区保持挂载但隐藏且惰性。
+      const controlArea = document.querySelector<HTMLElement>('.thread-control-area')
+      expect(controlArea).toHaveClass('debug-hidden')
+      expect(controlArea).toHaveProperty('inert', true)
+
+      const trigger = screen.getByRole('button', { name: '下一次请求预览' })
+      expect(trigger).toBeEnabled()
+      await user.click(trigger)
+
+      await waitFor(() => expect(harnessService.previewBranchRequest).toHaveBeenCalledTimes(1))
+      const [sessionId, request] = vi.mocked(harnessService.previewBranchRequest).mock.calls[0]!
+      expect(sessionId).toBe('session-1')
+      expect(request).not.toHaveProperty('owner')
+      expect(request).not.toHaveProperty('target')
+      expect(request.startEntryId).toBe(BRANCH_START_ENTRY_ID)
+      expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+      expect(request.commands[0]?.contents)
+        .toEqual([expect.objectContaining({ type: 'TEXT', text: 'branch debug message' })])
+
+      // 预览是纯读取：不创建 Thread、不提交批次、不发 per-thread 预览。
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+      expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+      expect(harnessService.previewProviderRequest).not.toHaveBeenCalled()
+
+      expect(await screen.findByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toHaveTextContent('draft')
+      // 成功预览不清空草稿，也不落地任何目标写入。
+      expect(composer).toHaveTextContent('branch debug message')
+    })
+
+    it('returns from the branch draft Debug view with the draft, settings and target intact', async () => {
+      // 测试意图：草稿侧 Debug 由同一工具条提供可见的返回入口；退出只切换视图，
+      // 草稿、设置控件与 NEW_THREAD_DRAFT 绑定原地保留，且没有任何写请求。
+      const user = userEvent.setup()
+      bindBranchDraftTarget()
+      const composer = await openBranchDraftDebugView(user)
+      await user.click(composer)
+      await user.type(composer, 'draft kept across branch debug')
+      const permissionBefore = screen.getByRole('button', { name: '权限模式' }).textContent
+
+      await user.click(document.querySelector<HTMLButtonElement>('.thread-debug-back')!)
+
+      expect(document.querySelector('.thread-debug-back')).toBeNull()
+      expect(screen.queryByRole('listbox', { name: '事件' })).not.toBeInTheDocument()
+      const conversation = await screen.findByLabelText('给 AI 发送消息')
+      expect(conversation).toHaveTextContent('draft kept across branch debug')
+      expect(screen.getByRole('button', { name: '权限模式' }).textContent).toBe(permissionBefore)
+      expect(localStorage.getItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      )).toContain('NEW_THREAD_DRAFT')
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+      expect(harnessService.previewBranchRequest).not.toHaveBeenCalled()
+    })
+
+    it('drops the branch preview response when the draft settings changed while the POST was in flight', async () => {
+      // 测试意图：消息草稿一个字都没动，只改了分支草稿设置（YOLO）；迟到的回包属于
+      // 旧设置组合，迟到的预览不得写进检查器，也不得进入错误通道。
+      const user = userEvent.setup()
+      bindBranchDraftTarget()
+      vi.mocked(harnessService.listSessionEntries).mockResolvedValue(branchEntries())
+      const gate = deferred<ProviderRequestPreviewDTO>()
+      vi.mocked(harnessService.previewBranchRequest).mockReturnValue(gate.promise)
+
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.click(composer)
+      await user.keyboard('/debug{Enter}')
+      await screen.findByRole('listbox', { name: '事件' })
+      await user.click(composer)
+      await user.type(composer, 'settings moved in branch draft')
+      await user.click(screen.getByRole('button', { name: '下一次请求预览' }))
+      await waitFor(() => expect(harnessService.previewBranchRequest).toHaveBeenCalledTimes(1))
+
+      await user.click(screen.getByRole('button', { name: '权限模式' }))
+      await user.click(await screen.findByRole('option', { name: 'YOLO' }))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('YOLO'))
+
+      await act(async () => {
+        gate.resolve(previewResponse())
+        await gate.promise
+      })
+
+      expect(screen.queryByTestId('preview-request-body')).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      // 草稿未被清除，说明拦截来自设置变化而不是输入变化。
+      expect(composer).toHaveTextContent('settings moved in branch draft')
     })
   })
 

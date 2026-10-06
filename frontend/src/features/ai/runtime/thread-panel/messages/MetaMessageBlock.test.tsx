@@ -6,14 +6,24 @@ import type { MetaDialogueMessage } from '@/features/ai/runtime/thread-timeline-
 import { translate } from '@/shared/i18n'
 
 describe('MetaMessageBlock', () => {
-  // 意图：验证 turn_usage 消息在截断或省略时，title 完整保留实际数值摘要和本地化图例两部分，避免信息丢失。
-  it('combines full usage text and localized legend into title for kind-turn_usage', () => {
+  // 意图：回合 footer 的 hover 明细必须由真实 turnUsage 事实生成完整数字与全称字段，
+  // 而不是复述可见的紧凑缩写，也不带任何缩略图例。
+  it('builds the hover readout from the turn usage facts instead of a compact legend', () => {
     const usageText = '↑203 · ↓51 · R4.1k · $0.003 · cache 95% · 87 tok/s'
     const message: MetaDialogueMessage = {
       id: 'meta-msg-1',
       role: 'meta',
       kind: 'turn_usage',
       text: usageText,
+      turnUsage: {
+        input: 203,
+        output: 51,
+        cacheRead: 4_100,
+        cacheWrite: 0,
+        reasoning: 12,
+        providerTotal: 4_366,
+        cost: { currency: 'USD', amount: '0.003' },
+      },
       createdAt: 1000,
     }
 
@@ -23,8 +33,35 @@ describe('MetaMessageBlock', () => {
     expect(block).toBeInTheDocument()
     expect(block).toHaveClass('thread-meta-text')
 
-    const expectedLegend = translate('ai.runtime.usage.metaTooltip')
-    expect(block).toHaveAttribute('title', `${usageText}\n${expectedLegend}`)
+    const title = block.getAttribute('title') ?? ''
+    // 完整数字 + 全称字段：无缓存输入含推理，费用如实引用读取投影。
+    expect(title).toContain('203 tokens')
+    expect(title).toContain('51 tokens')
+    expect(title).toContain('12 tokens')
+    expect(title).toContain('4100 tokens')
+    expect(title).toContain('$0.003')
+    // 不再把紧凑缩写图例当作 hover 内容。
+    expect(title).not.toContain(translate('ai.runtime.usage.metaTooltip'))
+    expect(title.split('\n')).toHaveLength(3)
+  })
+
+  // 意图：没有 usage 事实的回合 footer 不得伪造读数，hover 明细整段省略。
+  it('omits the hover readout when the turn carries no usage facts', () => {
+    const message: MetaDialogueMessage = {
+      id: 'meta-msg-nousage',
+      role: 'meta',
+      kind: 'turn_usage',
+      text: '',
+      endEntryId: 'end-nousage',
+      createdAt: 1000,
+    }
+
+    render(<MetaMessageBlock message={message} />)
+
+    const block = document.querySelector('.thread-meta-text')
+    expect(block).not.toHaveAttribute('title')
+    expect(document.querySelector('.thread-block-meta'))
+      .toHaveAttribute('data-turn-end', 'end-nousage')
   })
 
   // 意图：绑定真实 TURN_END 的回合 footer 即使没有 usage 文本也必须渲染结束信息与分支入口。

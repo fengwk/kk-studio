@@ -106,17 +106,20 @@ export function buildThreadStatusModel(
   segments.push({
     key: 'usage',
     text: formatTurnUsageText(usage),
-    title: buildBranchUsageTitle(usage, t),
+    title: formatUsageDetails(usage, t),
   })
 
   return { segments }
 }
 
 /**
- * 累计用量 hover 读数：完整数字 + 全称字段（含推理），不带冗余的累计标题；
+ * 用量 hover 读数：完整数字 + 全称字段（含推理），不带冗余的累计标题；
  * 无可用定价/无测速样本时如实标注暂无数据，绝不伪造成 $0。
+ *
+ * Footer 的累计用量与回合 footer 的单回合用量共用同一份详情格式化：调用方必须
+ * 传入真实存在的 usage facts（缺失时不得调用，避免伪造读数）。
  */
-function buildBranchUsageTitle(usage: TurnUsage, t: TranslateFn): string {
+export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
   const cacheHitRate = calculateCacheHitRate(usage)
   const speed = calculateDecodeTokensPerSecond(usage)
   const noData = t('ai.runtime.status.noData')
