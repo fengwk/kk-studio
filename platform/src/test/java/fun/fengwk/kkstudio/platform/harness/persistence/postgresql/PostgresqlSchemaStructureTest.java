@@ -949,6 +949,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_stop_receipt_root_thread",
             "fk_harness_thread_stop_receipt_thread",
             "fk_harness_thread_stop_receipt_turn_end",
+            "fk_harness_thread_yolo_root",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model",
             "fk_harness_work_environment",
@@ -976,7 +977,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 62 declared foreign keys must exist in public schema");
+        "all 63 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1072,10 +1073,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_stop_receipt_root_thread",
             "fk_harness_thread_stop_receipt_thread",
             "fk_harness_thread_stop_receipt_turn_end",
+            "fk_harness_thread_yolo_root",
             "fk_harness_tool_invocation_assistant",
             "fk_harness_tool_invocation_model"),
         noActionFks,
-        "exact set of 24 NO ACTION foreign keys");
+        "exact set of 25 NO ACTION foreign keys");
   }
 
   @Test
@@ -1485,12 +1487,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             }
           });
       insertThreadRow(conn, childThreadId, childSessionId, childRootEntryId);
+      // 子 Thread 必须同时 FOLLOW 真实执行根，不能保留独立根的 DISABLE 策略。
       try (PreparedStatement ps =
           conn.prepareStatement(
-              "update harness_thread set parent_thread_id = ?, execution_control = 'STOPPED'"
+              "update harness_thread set parent_thread_id = ?, yolo_mode = 'FOLLOW',"
+                  + " yolo_root_thread_id = ?, execution_control = 'STOPPED'"
                   + " where id = ?")) {
         ps.setObject(1, parentThreadId);
-        ps.setObject(2, childThreadId);
+        ps.setObject(2, parentThreadId);
+        ps.setObject(3, childThreadId);
         assertEquals(1, ps.executeUpdate());
       }
       assertTransactionConstraintViolation(

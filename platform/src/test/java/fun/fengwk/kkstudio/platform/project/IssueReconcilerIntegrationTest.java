@@ -1132,9 +1132,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         sessionId,
         parentThreadId,
         rootEntryId,
-        parentThreadId,
         "0".repeat(64),
-        "delegated-" + childThreadId);
+        "delegated-" + childThreadId,
+        parentThreadId);
     return childThreadId;
   }
 
