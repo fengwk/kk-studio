@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.util.Objects;
 
@@ -24,7 +25,15 @@ public final class CompactionResultEvaluator {
     CompactionPayload payload = null;
     if (error == null) {
       try {
-        payload = CompactionSummaryAssembler.resultPayload(path, start, response.text());
+        CompactionPayload summary =
+            CompactionSummaryAssembler.resultPayload(path, start, response.text());
+        // 正式模型输出的原始 provider 元数据（stopReason / usage / decodeDuration）随结果 durable 保存；cost /
+        // pricing / replay hash 不进入 payload。重放校验复用同一 evaluate，保证 durable 结果与冻结事实逐字段一致。
+        payload =
+            new CompactionPayload(
+                summary.summaryText(),
+                new AssistantMessageMetadata(
+                    response.stopReason(), response.usage(), response.decodeDurationMillis()));
       } catch (IllegalArgumentException invalidSummary) {
         error = new AssistantError("COMPACTION_INVALID_SUMMARY", invalidSummary.getMessage());
       }

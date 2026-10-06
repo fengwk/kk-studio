@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -721,7 +721,8 @@ class ModelAttemptMaterializationTest {
     EntryPath preResult =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
     CompactionPayload exact =
-        CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary");
+        (CompactionPayload)
+            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result());
     Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
     EntryPath path =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
@@ -732,7 +733,12 @@ class ModelAttemptMaterializationTest {
 
     // summaryText 漂移（同一 phase/trigger/tokens，仅文本不同）必须被拒。
     Entry drifted =
-        new Entry(id(4L), id(100L), id(2L), new CompactionPayload("drifted summary"), T6);
+        new Entry(
+            id(4L),
+            id(100L),
+            id(2L),
+            new CompactionPayload("drifted summary", exact.assistantMetadata()),
+            T6);
     EntryPath driftedPath =
         new EntryPath(
             List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), drifted));
@@ -773,7 +779,7 @@ class ModelAttemptMaterializationTest {
             id(4L),
             id(100L),
             id(2L),
-            CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary"),
+            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result()),
             T6);
     EntryPath path =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
@@ -797,7 +803,8 @@ class ModelAttemptMaterializationTest {
     EntryPath preResult =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
     CompactionPayload exact =
-        CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary");
+        (CompactionPayload)
+            CompactionResultEvaluator.evaluate(preResult, compaction, stored.result());
     Entry result = new Entry(id(4L), id(100L), id(2L), exact, T6);
     EntryPath minimum =
         new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));

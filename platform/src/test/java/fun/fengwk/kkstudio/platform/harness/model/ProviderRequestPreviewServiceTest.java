@@ -26,10 +26,10 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -141,10 +141,14 @@ class ProviderRequestPreviewServiceTest {
 
   /** 历史输出的记录时间：与固定 clock 明显不同，用来证明历史预览用的是记录时间而不是「现在」。 */
   private static final Instant TOOL_CALL_TIME = NOW.plusSeconds(60);
+
   private static final Instant TOOL_RESULT_TIME = NOW.plusSeconds(120);
   private static final Instant TURN_TWO_ASSISTANT_TIME = NOW.plusSeconds(300);
   private static final Instant LATER_USER_TIME = NOW.plusSeconds(420);
   private static final Instant LATER_ASSISTANT_TIME = NOW.plusSeconds(480);
+
+  /** 压缩结果的记录时间：历史预览必须用它而非「现在」。 */
+  private static final Instant COMPACTION_RESULT_TIME = NOW.plusSeconds(240);
 
   private HarnessRuntime runtime;
   private DatabaseTurnResolver turnResolver;
@@ -186,6 +190,7 @@ class ProviderRequestPreviewServiceTest {
     verifyNoMoreInteractions(runtime, uploadService, refManager, blobManager);
     // 预览只调用冻结规划与 Provider 解析，绝不经过接受/游标/压缩等任何其它 resolver 能力。
     verify(turnResolver, atLeast(0)).planLive(any(), any(), any());
+    verify(turnResolver, atLeast(0)).planHistorical(any(), any(), any());
     verifyNoMoreInteractions(turnResolver);
     verify(providerResolution, atLeast(0)).resolve(any(), any(), any());
     verifyNoMoreInteractions(providerResolution);
@@ -638,9 +643,17 @@ class ProviderRequestPreviewServiceTest {
     ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
     verify(turnResolver).planLive(any(), pathCaptor.capture(), eq(NOW));
     EntryPath candidate = pathCaptor.getValue();
-    assertEquals(sessionTree.entries(), candidate.entries().subList(0, sessionTree.entries().size()));
+    assertEquals(
+        sessionTree.entries(), candidate.entries().subList(0, sessionTree.entries().size()));
     Entry appended = lastUserEntry(candidate);
-    assertEquals(TURN_TWO_END_ID, appended.parentEntryId());
+    // 草稿接在分支起点之后：新增 TURN_START 的父才是分支起点，追加的 USER 挂在它下面。
+    Entry appendedStart =
+        candidate.entries().stream()
+            .filter(entry -> entry.payload() instanceof TurnStartPayload)
+            .reduce((first, second) -> second)
+            .orElseThrow();
+    assertEquals(TURN_TWO_END_ID, appendedStart.parentEntryId());
+    assertEquals(appendedStart.id(), appended.parentEntryId());
     // SET_MODEL 作为设置前缀冻结进 candidate 的 TURN_START，不产生模型可见消息。
     assertEquals("model", candidate.baseSettings().model().modelName());
     List<AgentMessageContent> contents = lastUserMessage(candidate).message().contents();
@@ -663,8 +676,9 @@ class ProviderRequestPreviewServiceTest {
   /** 测试意图：ROOT 上的全新 Session 也能预览首个输入；候选历史只有 ROOT，绝不因为「还没有任何 Turn」而拒绝。 */
   @Test
   void previewsLocalBranchDraftFromTheRootOfAFreshSession() {
-    EntryPath emptySession = new EntryPath(List.of(
-        new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW)));
+    EntryPath emptySession =
+        new EntryPath(
+            List.of(new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW)));
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(emptySession.entries());
     when(turnResolver.planLive(any(), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
@@ -686,7 +700,9 @@ class ProviderRequestPreviewServiceTest {
     EntryPath candidate = pathCaptor.getValue();
     assertEquals(ROOT_ID, candidate.root().id());
     assertEquals(ROOT_ID, candidate.entries().get(1).parentEntryId());
-    assertEquals("first input", ((TextMessageContent) lastUserMessage(candidate).message().contents().getFirst()).text());
+    assertEquals(
+        "first input",
+        ((TextMessageContent) lastUserMessage(candidate).message().contents().getFirst()).text());
   }
 
   /** 测试意图：草稿起点必须与 NEW_THREAD 的合法落点一致，且必须属于目标 Session；两者都在任何规划之前拒绝。 */
@@ -710,14 +726,14 @@ class ProviderRequestPreviewServiceTest {
   }
 
   /**
-   * 测试意图：历史预览的请求前缀严格是「该输出的 parent」，因此同一用户可见回合里更早的模型调用与合法工具结果必须保留，而本次输出与其后的
-   * （含未来回合的）历史绝不进入请求体，也绝不用整个 Turn 甚至整个 Session 冒充前缀。
+   * 测试意图：历史预览的请求前缀严格是「该输出的 parent」，因此同一用户可见回合里更早的模型调用与合法工具结果必须保留，而本次输出与其后的 （含未来回合的）历史绝不进入请求体，也绝不用整个
+   * Turn 甚至整个 Session 冒充前缀。
    */
   @Test
   void previewsHistoricalOutputsAgainstTheirOwnRequestPrefix() {
     EntryPath sessionTree = toolRoundPath();
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
-    when(turnResolver.planLive(any(), any(), any()))
+    when(turnResolver.planHistorical(any(), any(), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
     when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
         .thenAnswer(
@@ -731,7 +747,8 @@ class ProviderRequestPreviewServiceTest {
     // 第一次模型调用（带工具调用）：前缀是它自己的输入段，工具结果与后续回合都不在其中。
     HarnessProviderRequestPreviewDTO toolCallDto =
         service.previewHistorical(SESSION_ID, TURN_ONE_ASSISTANT_ID);
-    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, toolCallDto.getKind());
+    assertEquals(
+        HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, toolCallDto.getKind());
     assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, toolCallDto.getNotice());
     assertEquals(TURN_ONE_USER_ID.toString(), toolCallDto.getSourceHeadEntryId());
     // 历史规划时间显式取该输出的记录时间，绝不用「现在」冒充。
@@ -746,12 +763,12 @@ class ProviderRequestPreviewServiceTest {
     assertEquals(TURN_TWO_ASSISTANT_TIME, finalDto.getGeneratedAt());
 
     ArgumentCaptor<EntryPath> toolCallPath = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(any(), toolCallPath.capture(), eq(TOOL_CALL_TIME));
+    verify(turnResolver).planHistorical(any(), toolCallPath.capture(), eq(TOOL_CALL_TIME));
     assertEquals(
         List.of(ROOT_ID, TURN_ONE_START_ID, TURN_ONE_USER_ID), ids(toolCallPath.getValue()));
 
     ArgumentCaptor<EntryPath> finalPath = ArgumentCaptor.forClass(EntryPath.class);
-    verify(turnResolver).planLive(any(), finalPath.capture(), eq(TURN_TWO_ASSISTANT_TIME));
+    verify(turnResolver).planHistorical(any(), finalPath.capture(), eq(TURN_TWO_ASSISTANT_TIME));
     assertEquals(
         List.of(
             ROOT_ID,
@@ -772,46 +789,100 @@ class ProviderRequestPreviewServiceTest {
   }
 
   /**
-   * 测试意图：压缩 Turn 的模型调用属于压缩专用 planning/encoder，live 入口无法重建，必须显式 typed 拒绝，绝不重建一个错误的 live 请求并
-   * 当作历史输出返回。
+   * 测试意图：压缩输出也是真实模型调用，历史预览按 durable COMPACTION TURN_START 冻结的 executionModel 与预算走 planHistorical
+   * 重建；请求前缀是 ROOT 到该 TURN_START，输出自身绝不进入前缀，也不再用人为 unsupported 拒绝。
    */
   @Test
-  void rejectsHistoricalPreviewOfCompactionTurnsAsTypedUnsupported() {
-    when(runtime.getSessionEntries(SESSION_ID))
-        .thenReturn(List.of(
+  void previewsHistoricalCompactionOutputThroughItsDurableTurnStart() {
+    EntryPath sessionTree = compactionOutputPath();
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+    when(turnResolver.planHistorical(any(), any(), eq(COMPACTION_RESULT_TIME)))
+        .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+
+    HarnessProviderRequestPreviewDTO dto =
+        service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
+
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, dto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, dto.getNotice());
+    assertEquals(COMPACTION_TURN_START_ID.toString(), dto.getSourceHeadEntryId());
+    assertEquals(COMPACTION_RESULT_TIME, dto.getGeneratedAt());
+    assertEquals(new String(BODY, StandardCharsets.UTF_8), dto.getBodyJson());
+
+    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver).planHistorical(any(), pathCaptor.capture(), eq(COMPACTION_RESULT_TIME));
+    assertEquals(COMPACTION_TURN_START_ID, pathCaptor.getValue().head().id());
+    // 被预览的压缩结果自身绝不进入它自己的请求前缀。
+    assertFalse(ids(pathCaptor.getValue()).contains(COMPACTION_ENTRY_ID));
+    // 压缩输出走专用历史规划，绝不被当作普通 live 请求。
+    verify(turnResolver, never()).planLive(any(), any(), any());
+    verify(runtime, never()).getThreadSnapshot(any());
+  }
+
+  /** ROOT + 一个关闭 INPUT turn + 其 parent 为 COMPACTION TURN_START 的压缩结果。 */
+  private static EntryPath compactionOutputPath() {
+    UUID inputStart = id(31L);
+    UUID user = id(32L);
+    UUID assistant = id(33L);
+    UUID end = id(34L);
+    CompactionStart start =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            assistant,
+            null,
+            null);
+    return new EntryPath(
+        List.of(
             new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW),
+            new Entry(inputStart, SESSION_ID, ROOT_ID, inputTurnStart(), NOW),
+            new Entry(
+                user,
+                SESSION_ID,
+                inputStart,
+                new MessagePayload(AgentMessage.user("compaction source"), null, null),
+                NOW.plusSeconds(1)),
+            new Entry(
+                assistant,
+                SESSION_ID,
+                user,
+                assistantMessage("prior reply", BELOW_THRESHOLD_USAGE),
+                NOW.plusSeconds(2)),
+            new Entry(
+                end,
+                SESSION_ID,
+                assistant,
+                new TurnEndPayload(inputStart, TurnEndOutcome.COMPLETED, false, null, null),
+                NOW.plusSeconds(3)),
             new Entry(
                 COMPACTION_TURN_START_ID,
                 SESSION_ID,
-                ROOT_ID,
+                end,
                 new TurnStartPayload(
                     TurnStartReason.COMPACTION,
                     SETTINGS,
                     THREAD_ID,
-                    null,
-                    null,
-                    new CompactionStart(
-                        CompactionPhase.FULL,
-                        CompactionTrigger.THRESHOLD,
-                        SETTINGS.model(),
-                        ROOT_ID,
-                        null,
-                        null)),
-                NOW),
+                    CONTEXT_WINDOW,
+                    MAX_OUTPUT_TOKENS,
+                    start),
+                COMPACTION_RESULT_TIME.minusSeconds(1)),
             new Entry(
                 COMPACTION_ENTRY_ID,
                 SESSION_ID,
                 COMPACTION_TURN_START_ID,
-                new CompactionPayload("compaction summary"),
-                NOW)));
-
-    ProviderRequestPreviewUnavailableException error =
-        assertThrows(
-            ProviderRequestPreviewUnavailableException.class,
-            () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
-    assertEquals(Reason.PREVIEW_UNSUPPORTED, error.reason());
-    assertTrue(error.getMessage().contains("not reconstructible"), error.getMessage());
-    verify(turnResolver, never()).planLive(any(), any(), any());
+                new CompactionPayload(
+                    "compaction summary",
+                    new AssistantMessageMetadata(
+                        GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, 50L)),
+                COMPACTION_RESULT_TIME)));
   }
 
   /** 测试意图：历史预览只接受模型输出本身；非模型输出与不属于该 Session 的 id 都在任何规划之前拒绝。 */
@@ -970,12 +1041,7 @@ class ProviderRequestPreviewServiceTest {
 
   private static TurnStartPayload continuationTurnStart() {
     return new TurnStartPayload(
-        TurnStartReason.CONTINUATION,
-        SETTINGS,
-        THREAD_ID,
-        CONTEXT_WINDOW,
-        MAX_OUTPUT_TOKENS,
-        null);
+        TurnStartReason.CONTINUATION, SETTINGS, THREAD_ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, null);
   }
 
   /**
@@ -1039,11 +1105,7 @@ class ProviderRequestPreviewServiceTest {
             LATER_USER_TIME));
     entries.add(
         new Entry(
-            TURN_THREE_START_ID,
-            SESSION_ID,
-            TURN_TWO_END_ID,
-            inputTurnStart(),
-            LATER_USER_TIME));
+            TURN_THREE_START_ID, SESSION_ID, TURN_TWO_END_ID, inputTurnStart(), LATER_USER_TIME));
     entries.add(
         new Entry(
             LATER_USER_ID,
@@ -1067,8 +1129,7 @@ class ProviderRequestPreviewServiceTest {
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(new ToolCallMessageContent("call-1", "read", "builtin:read", "{}"))),
-        new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, null),
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, null),
         null);
   }
 
@@ -1079,8 +1140,12 @@ class ProviderRequestPreviewServiceTest {
             AgentMessageRole.TOOL,
             List.of(
                 new ToolResultMessageContent(
-                    "call-1", "read", "builtin:read", List.of(new TextMessageContent("body")),
-                    false, "{}"))),
+                    "call-1",
+                    "read",
+                    "builtin:read",
+                    List.of(new TextMessageContent("body")),
+                    false,
+                    "{}"))),
         null,
         new ToolResultMetadata(
             INVOCATION_ID,

@@ -212,7 +212,11 @@ class CompactionSummaryAssemblerTest {
     UUID historyResultEntryId = id(7L);
     entries.add(
         new Entry(
-            historyResultEntryId, SESSION_ID, id(6L), new CompactionPayload(historySummary), NOW));
+            historyResultEntryId,
+            SESSION_ID,
+            id(6L),
+            new CompactionPayload(historySummary, null),
+            NOW));
     entries.add(
         new Entry(
             id(8L),

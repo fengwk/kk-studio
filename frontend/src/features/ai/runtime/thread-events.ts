@@ -77,6 +77,8 @@ export interface ThreadEventRecord {
   details: ThreadEventDetailRow[]
   /** 事件的完整原始 JSON（durable Entry 为 payload JSON，synthetic 活跃记录为其 DTO / realtime stream 的 pretty JSON）。 */
   rawJson: string | null
+  /** COMPACTION 结果实际携带真实模型输出 metadata（可读取历史请求预览）；其它 durable 记录为 false/省略。 */
+  historicalPreviewEligible?: boolean
 }
 
 export interface ThreadEventTimelineInput {
@@ -131,6 +133,22 @@ function prettyJson(raw: string): string {
   } catch {
     return raw
   }
+}
+
+/**
+ * 把一条真实模型输出（ASSISTANT MESSAGE 或 COMPACTION 结果）的 canonical metadata 与
+ * 读取投影费用并入当前 Turn 的挂起 usage；无事实时原样返回。
+ */
+function accumulateUsage(
+  pending: TurnUsage | null,
+  payload: Record<string, unknown>,
+  entry: HarnessSessionEntryDTO,
+): TurnUsage | null {
+  const parsed = parseAssistantUsage(asRecord(payload.assistantMetadata), entry.usageCost ?? null)
+  if (parsed == null) {
+    return pending
+  }
+  return pending == null ? parsed : mergeTurnUsage(pending, parsed)
 }
 
 function formatDisplayJson(value: unknown): string {
@@ -229,13 +247,7 @@ export function buildThreadEventTimeline(
       const message = asRecord(payload.message)
       // Turn usage 挂起：该 Turn 最后一个 ASSISTANT 的 metadata 在 TURN_END 发射。
       if (entry.entryType === 'MESSAGE' && getString(message.role) === 'ASSISTANT') {
-        const parsed = parseAssistantUsage(
-          asRecord(payload.assistantMetadata),
-          entry.usageCost ?? null,
-        )
-        if (parsed != null) {
-          pendingUsage = pendingUsage == null ? parsed : mergeTurnUsage(pendingUsage, parsed)
-        }
+        pendingUsage = accumulateUsage(pendingUsage, payload, entry)
       }
       for (const content of getRecordList(message.contents)) {
         // 只有物化的 durable tool_result 才让活跃 tool overlay 退休：durable
@@ -247,6 +259,10 @@ export function buildThreadEventTimeline(
           }
         }
       }
+    }
+    if (entry.entryType === 'COMPACTION') {
+      // 压缩结果是真实模型输出：其 canonical metadata 的 usage 同样归入该压缩 turn。
+      pendingUsage = accumulateUsage(pendingUsage, payload, entry)
     }
     if (entry.entryType === 'TURN_END') {
       // usage 已发射进 TURN_END 记录；防止后续重复 TURN_END 复用。
@@ -393,6 +409,8 @@ function projectEntryRecord(
         status: 'completed',
         title: kindTitle('COMPACTION'),
         summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
+        // 只有真实模型输出（携带 canonical metadata）才可读取历史请求预览；纯摘要无请求可重建。
+        historicalPreviewEligible: Object.keys(asRecord(payload.assistantMetadata)).length > 0,
         details: withTime(base.details, entry.createTime),
       }
     case 'TURN_END': {

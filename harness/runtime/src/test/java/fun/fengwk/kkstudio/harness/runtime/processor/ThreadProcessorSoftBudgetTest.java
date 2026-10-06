@@ -647,7 +647,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   compactionEntry,
                   sessionId,
                   compactionTurnStart,
-                  new CompactionPayload("summary text"),
+                  new CompactionPayload("summary text", null),
                   NOW));
           tx.insertEntry(
               new Entry(

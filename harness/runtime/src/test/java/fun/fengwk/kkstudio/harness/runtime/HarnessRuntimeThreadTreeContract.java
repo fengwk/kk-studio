@@ -471,7 +471,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                   compactionBody,
                   sessionId,
                   compactionStart,
-                  new CompactionPayload("summary"),
+                  new CompactionPayload("summary", null),
                   T2));
           tx.insertEntry(
               new Entry(

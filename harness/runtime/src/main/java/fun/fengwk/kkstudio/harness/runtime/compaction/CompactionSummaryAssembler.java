@@ -38,7 +38,7 @@ public final class CompactionSummaryAssembler {
     }
     if (start.phase() == CompactionPhase.HISTORY) {
       // HISTORY partial：只存摘要文本；文件 section 只在最终 complete 结果由 Runtime 累加重算。
-      return new CompactionPayload(canonicalResponse);
+      return new CompactionPayload(canonicalResponse, null);
     }
     String summary;
     if (start.phase() == CompactionPhase.TURN_PREFIX) {
@@ -51,7 +51,7 @@ public final class CompactionSummaryAssembler {
       summary = canonicalResponse;
     }
     summary = CompactionFileSections.append(path, start.cutEntryId(), summary);
-    return new CompactionPayload(summary);
+    return new CompactionPayload(summary, null);
   }
 
   /** TURN_PREFIX 最终 summary 中 history 部分：精确引用紧邻 HISTORY 结果 Entry，缺失/类型不符即分支损坏 fail closed。 */
