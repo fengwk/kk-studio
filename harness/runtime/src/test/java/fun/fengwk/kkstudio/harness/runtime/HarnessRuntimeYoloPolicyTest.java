@@ -8,11 +8,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.AdditionalAnswers.delegatesTo;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -22,7 +28,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * 根唯一 YOLO 与直接 Follow 策略的创建面契约：子 Session 在树锁内派生真实执行根；独立 fork 创建新根并初始化自身开关；creation 幂等 hash
@@ -155,6 +163,71 @@ class HarnessRuntimeYoloPolicyTest {
                 AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(402)).isEmpty()));
     assertTrue(runtime.findJoin(TestIds.id(4001)).isEmpty());
+  }
+
+  /**
+   * 坏存储读投影（fail-closed）：子 Session 创建在锁内读取的执行根返回 FOLLOW 策略（存储读不一致）。创建边界必须立即拒绝，且不创建子 Thread / Join /
+   * Command。
+   */
+  @Test
+  void childCreationRejectsFollowExecutionRootProjection() {
+    HarnessRuntimeTestSupport.Baseline root = HarnessRuntimeTestSupport.seedBaseline(store);
+    ThreadState realRoot = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    ThreadState projectedRoot = spy(realRoot);
+    doReturn(ThreadYoloPolicy.follow(TestIds.id(900))).when(projectedRoot).yoloPolicy();
+    HarnessRuntime projectedRuntime =
+        HarnessRuntimeTestSupport.runtime(
+            wrapRootReads(store, root.threadId(), projectedRoot), Clock.fixed(T0, ZoneOffset.UTC));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                projectedRuntime.acceptCommandsAndJoin(
+                    childSession(root.threadId(), TestIds.id(501), TestIds.id(502)),
+                    join(TestIds.id(5001), root.threadId(), root.rootEntryId()),
+                    AcceptancePreflight.IDENTITY));
+
+    assertEquals(
+        "execution root " + root.threadId() + " must not follow another thread",
+        failure.getMessage());
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(502)).isEmpty()));
+    assertTrue(projectedRuntime.findJoin(TestIds.id(5001)).isEmpty());
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(TestIds.id(502)).isEmpty()));
+  }
+
+  /**
+   * 坏存储读投影注入：委托真实 store 与事务，执行根的 {@code findThread} 返回不一致投影；{@code lockThread} 先调用真实锁保留取锁
+   * 语义再返回同一投影，其余读取与锁全部走真实委托。
+   */
+  private static HarnessStore wrapRootReads(
+      InMemoryHarnessStore store, UUID rootThreadId, ThreadState projectedRoot) {
+    return new HarnessStore() {
+      @Override
+      public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
+        return store.transaction(
+            realTx -> {
+              HarnessStore.Transaction injected =
+                  mock(HarnessStore.Transaction.class, delegatesTo(realTx));
+              doReturn(Optional.of(projectedRoot)).when(injected).findThread(rootThreadId);
+              doAnswer(ignored -> realTx.lockThread(rootThreadId).map(locked -> projectedRoot))
+                  .when(injected)
+                  .lockThread(rootThreadId);
+              return callback.apply(injected);
+            });
+      }
+
+      @Override
+      public void afterCommit(Runnable action) {
+        store.afterCommit(action);
+      }
+
+      @Override
+      public void assertNoAmbientTransaction() {
+        store.assertNoAmbientTransaction();
+      }
+    };
   }
 
   private static AcceptCommandsCommand childSession(
