@@ -268,6 +268,24 @@ public final class HarnessRuntimeRequestMapper {
     return new AcceptCommandsCommand(target, commands);
   }
 
+  /**
+   * 映射本地分支草稿预览的命令批：与正式接受完全同一套严格校验（固定 SET_AGENT/SET_MODEL/SET_ENVIRONMENT 顺序 + 恰好一条终止 USER_MESSAGE /
+   * GOAL），因此预览不会接受任何正式发送会拒绝的形状；草稿尚无 Thread，故这里只返回 domain 命令而不构造 target。
+   */
+  public static List<NewThreadCommand> toNewThreadCommands(
+      List<HarnessCommandCreateDTO> commands, String field) {
+    List<HarnessCommandCreateDTO> requestCommands = requireList(commands, field);
+    if (requestCommands.isEmpty()) {
+      throw new IllegalArgumentException("commands must not be empty");
+    }
+    List<NewThreadCommand> mapped = new ArrayList<>(requestCommands.size());
+    for (HarnessCommandCreateDTO command : requestCommands) {
+      mapped.add(toNewHttpCommand(command));
+    }
+    validateHttpCommandShape(mapped);
+    return List.copyOf(mapped);
+  }
+
   /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");

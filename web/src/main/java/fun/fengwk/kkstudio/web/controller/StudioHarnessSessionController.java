@@ -16,16 +16,19 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -37,11 +40,16 @@ public class StudioHarnessSessionController {
 
   private final HarnessOwnerQueryService harnessQueryService;
   private final HarnessRuntime runtime;
+  private final UsageCostProjectionService usageCostProjectionService;
 
   public StudioHarnessSessionController(
-      HarnessOwnerQueryService harnessQueryService, HarnessRuntime runtime) {
+      HarnessOwnerQueryService harnessQueryService,
+      HarnessRuntime runtime,
+      UsageCostProjectionService usageCostProjectionService) {
     this.harnessQueryService = Objects.requireNonNull(harnessQueryService, "harnessQueryService");
     this.runtime = Objects.requireNonNull(runtime, "runtime");
+    this.usageCostProjectionService =
+        Objects.requireNonNull(usageCostProjectionService, "usageCostProjectionService");
   }
 
   /** 重命名 Session（name 由 Core 权威规范化；同名 no-op），返回最新权威 Session DTO。 */
@@ -69,7 +77,7 @@ public class StudioHarnessSessionController {
             }));
   }
 
-  /** 返回 Session 的完整 Entry tree；每个 Entry 通过 parentEntryId 连接到父节点。 */
+  /** 返回 Session 的完整 Entry tree；每个 Entry 通过 parentEntryId 连接到父节点，并带上读取时费用投影。 */
   @GetMapping("/{sessionId}/entries")
   public Result<List<HarnessSessionEntryDTO>> listEntries(@PathVariable String sessionId) {
     return Results.ok(
@@ -77,16 +85,19 @@ public class StudioHarnessSessionController {
             () -> {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(sessionId, "sessionId");
               List<Entry> entries = harnessQueryService.listSessionEntries(id);
+              Map<UUID, HarnessUsageCostDTO> usageCosts =
+                  usageCostProjectionService.project(entries);
               List<HarnessSessionEntryDTO> mapped = new ArrayList<>(entries.size());
               for (Entry entry : entries) {
-                mapped.add(HarnessRuntimeResponseMapper.toEntryDto(entry));
+                mapped.add(
+                    HarnessRuntimeResponseMapper.toEntryDto(entry, usageCosts.get(entry.id())));
               }
               return List.copyOf(mapped);
             }));
   }
 
-  /** 将 Runtime 查询异常翻译为统一 HTTP 错误响应。 */
-  private static <T> T withRuntimeTranslation(Supplier<T> operation) {
+  /** 将 Runtime 查询异常翻译为统一 HTTP 错误响应；同包 controller 复用同一套 404/409/400 语义。 */
+  static <T> T withRuntimeTranslation(Supplier<T> operation) {
     try {
       return operation.get();
     } catch (HarnessRuntimeNotFoundException error) {

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -10,7 +9,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -125,7 +123,6 @@ public final class ScriptedModelGateway implements ModelGateway {
         List.of(new ProviderToolCall("call-" + script.hashCode(), REVIEW_TOOL_NAME, argumentsJson)),
         GenerationStopReason.COMPLETE,
         usage(),
-        cost(),
         null,
         null,
         null);
@@ -133,7 +130,7 @@ public final class ScriptedModelGateway implements ModelGateway {
 
   private ProviderResponse textResponse(String text) {
     return new ProviderResponse(
-        text, null, List.of(), GenerationStopReason.COMPLETE, usage(), cost(), null, null, null);
+        text, null, List.of(), GenerationStopReason.COMPLETE, usage(), null, null, null);
   }
 
   /**
@@ -200,18 +197,6 @@ public final class ScriptedModelGateway implements ModelGateway {
 
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
-  }
-
-  private static ModelCost cost() {
-    return new ModelCost(
-        "USD",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 
   /** 一次 Reviewer Run 的脚本化决定。 */

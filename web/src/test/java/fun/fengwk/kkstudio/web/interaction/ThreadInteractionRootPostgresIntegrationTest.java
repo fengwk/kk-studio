@@ -45,10 +45,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -86,7 +84,6 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -783,7 +780,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         List.of(new ProviderToolCall(callId, toolName, argumentsJson)),
         GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-        zeroCost(),
         null,
         null,
         null);
@@ -791,29 +787,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
-  }
-
-  private static ModelCost zeroCost() {
-    BigDecimal zero = BigDecimal.ZERO;
-    return new ModelCost("USD", zero, zero, zero, zero, zero, zero, zero);
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   // ------------------------------------------------------------------ reads / helpers
