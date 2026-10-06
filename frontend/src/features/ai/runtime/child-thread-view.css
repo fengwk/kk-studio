@@ -1,0 +1,27 @@
+/* 只读子代理视图与 pane 层：仅影响 pane 内部布局，不写全局 styles.css。 */
+.chat-pane-layer {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.chat-pane-layer[hidden] {
+  display: none;
+}
+
+.thread-readonly-badge {
+  margin-inline-start: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-muted, rgba(128, 128, 128, 1));
+}
+
+.thread-child-return-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}

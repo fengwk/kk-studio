@@ -1415,6 +1415,18 @@ export const aiCatalog = {
     'en-US': 'Rename',
     'zh-CN': '重命名',
   },
+  'ai.runtime.childThread.readOnly': {
+    'en-US': 'Read-only view',
+    'zh-CN': '只读查看',
+  },
+  'ai.runtime.childThread.back': {
+    'en-US': 'Back to previous agent',
+    'zh-CN': '返回上一层',
+  },
+  'ai.runtime.childThread.backToRoot': {
+    'en-US': 'Back to execution root',
+    'zh-CN': '返回执行根',
+  },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',
     'zh-CN': '活跃子代理',
@@ -3134,6 +3146,10 @@ export const aiCatalog = {
   'ai.interaction.refresh': {
     'en-US': 'Refresh',
     'zh-CN': '刷新',
+  },
+  'ai.interaction.loadFailed': {
+    'en-US': 'Failed to load pending interactions',
+    'zh-CN': '待处理交互加载失败',
   },
   'ai.interaction.loadMore': {
     'en-US': 'Load More',

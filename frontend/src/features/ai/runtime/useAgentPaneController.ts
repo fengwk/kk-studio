@@ -3,12 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   useBoundBranchPanel,
 } from '@/features/ai/runtime/useBoundBranchPanel'
-import {
-  useBoundThreadPanelLabels,
-  useBoundThreadPanelViews,
-  buildBoundThreadTranscript,
-} from '@/features/ai/runtime/useBoundThreadPanelViews'
-import type { ChatPanelComposerInput } from '@/features/ai/runtime/ChatPanel'
+import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPanelViews'
+import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-panel/ThreadPanel'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   branchDraftFromThread,
@@ -1309,7 +1305,6 @@ export function useAgentPaneController({
   useEffect(() => {
     boundViewsRef.current = boundViews
   })
-  const boundLabels = useBoundThreadPanelLabels(environments, controller)
   const rootEntryId = controller.entries?.find((e) => e.parentEntryId == null)?.entryId
     ?? treeEntriesQuery.data?.find((e) => e.parentEntryId == null)?.entryId
     ?? null
@@ -1341,7 +1336,7 @@ export function useAgentPaneController({
 
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
-  const composer: ChatPanelComposerInput = {
+  const composer: ThreadPanelComposerInput = {
     scope: composerScope,
     parts: composerDraft,
     pending,
@@ -1364,7 +1359,6 @@ export function useAgentPaneController({
     focusOnEscape: focused,
     composerRef,
     onPreviewReadinessChange: setComposerReadiness,
-    displayOnly: Boolean(capabilities?.readOnly),
     settings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,
@@ -1451,7 +1445,6 @@ export function useAgentPaneController({
     controller,
     branchPanel,
     boundViews,
-    boundLabels,
     boundGoal,
     boundGoalProgress,
     goalDraft,
@@ -1499,7 +1492,6 @@ export function useAgentPaneController({
     selectThread,
     sessionSelectionItem,
     threadSelectionItem,
-    buildBoundThreadTranscript,
     boundEnvironment,
     environmentReady,
   }

@@ -11,8 +11,7 @@ import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
-import { ApprovalCard } from '@/features/ai/runtime/interactions/ApprovalCard'
-import { QuestionnaireCard } from '@/features/ai/runtime/interactions/QuestionnaireCard'
+import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
 import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
 
 export function InteractionsPage() {
@@ -146,28 +145,10 @@ export function InteractionsPage() {
                 </header>
 
                 <div className="interaction-item-body">
-                  {item.status === 'WAITING_INPUT' ? (
-                    <QuestionnaireCard
-                      interactionId={item.interactionId}
-                      threadId={item.threadId}
-                      argumentsJson={item.argumentsJson}
-                      resultJson={null}
-                      onSuccess={() => removeItem(item.interactionId)}
-                    />
-                  ) : item.status === 'WAITING_APPROVAL' ? (
-                    <ApprovalCard
-                      threadId={item.threadId}
-                      invocationId={item.interactionId}
-                      toolName={item.toolName}
-                      approvalJson={item.approvalJson}
-                      argumentsJson={item.argumentsJson}
-                      onSuccess={() => removeItem(item.interactionId)}
-                    />
-                  ) : (
-                    <pre className="interaction-raw-pre">
-                      {item.argumentsJson}
-                    </pre>
-                  )}
+                  <InteractionCardBody
+                    item={item}
+                    onSuccess={() => removeItem(item.interactionId)}
+                  />
                 </div>
               </div>
             ))}

@@ -3,14 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBoundBranchPanel } from '@/features/ai/runtime/useBoundBranchPanel'
-import {
-  buildBoundThreadTranscript,
-} from '@/features/ai/runtime/useBoundThreadPanelViews'
 import { createTextPart } from '@/features/ai/composer/composer-parts'
-import type {
-  DialogueMessage,
-  ToolDialogueMessage,
-} from '@/features/ai/runtime/thread-timeline-types'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
@@ -1070,65 +1063,5 @@ describe('useBoundBranchPanel', () => {
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)
-  })
-})
-
-describe('buildBoundThreadTranscript', () => {
-  const controller = {
-    timeline: {
-      messages: [] as DialogueMessage[],
-      queuedMessages: [],
-      hasPendingInputs: false,
-    },
-    bodyRef: { current: null },
-    entries: [{ entryId: 'e1' }] as HarnessSessionEntryDTO[],
-    queuedCommands: [{ sequence: '1' }] as HarnessThreadCommandDTO[],
-    messagesLoading: false,
-    messagesError: null,
-    approvalPending: false,
-    decideApproval: vi.fn(async () => undefined),
-  }
-
-  it('forwards approval decisions to the controller and marks DENY via the scene callback', () => {
-    const onDenyApproval = vi.fn()
-    const transcript = buildBoundThreadTranscript({
-      controller,
-      threadId: THREAD_ID,
-      initialConversationScrollTop: 42,
-      onDenyApproval,
-    })
-    const message = {
-      invocationId: 'inv-1',
-    } as ToolDialogueMessage
-
-    transcript.onDecideApproval?.(message, 'DENY')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'DENY', THREAD_ID)
-    expect(onDenyApproval).toHaveBeenCalledTimes(1)
-
-    transcript.onDecideApproval?.(message, 'ALLOW')
-    expect(controller.decideApproval).toHaveBeenCalledWith('inv-1', 'ALLOW', THREAD_ID)
-    expect(onDenyApproval).toHaveBeenCalledTimes(1)
-
-    // 无 invocationId 的消息不触发任何副作用。
-    transcript.onDecideApproval?.({} as ToolDialogueMessage, 'DENY')
-    expect(controller.decideApproval).toHaveBeenCalledTimes(2)
-    expect(onDenyApproval).toHaveBeenCalledTimes(1)
-
-    // 带子 Thread 身份的审批必须直达子节点，不能落到当前父面板。
-    transcript.onDecideApproval?.({ invocationId: 'child-inv', threadId: 'child-thread' } as ToolDialogueMessage, 'ALLOW')
-    expect(controller.decideApproval).toHaveBeenCalledWith('child-inv', 'ALLOW', 'child-thread')
-  })
-
-  it('projects the scene-neutral transcript facts (scroll/resetKey/eventCount)', () => {
-    const transcript = buildBoundThreadTranscript({
-      controller,
-      threadId: THREAD_ID,
-      initialConversationScrollTop: null,
-    })
-    expect(transcript.resetKey).toBe(THREAD_ID)
-    expect(transcript.initialScrollTop).toBeNull()
-    expect(transcript.eventCount).toBe(2)
-    expect(transcript.bodyRef).toBe(controller.bodyRef)
-    expect(transcript.onDecideApproval).toBeDefined()
   })
 })

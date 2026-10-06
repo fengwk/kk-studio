@@ -1,9 +1,14 @@
+import { useRef } from 'react'
+import { ThreadPanel, ThreadShortcutsPanel, ThreadStatusFooter } from '@/features/ai/runtime'
+import { ThreadPane } from '@/features/ai/runtime/ThreadPane'
+import { RootThreadControlArea } from '@/features/ai/runtime/RootThreadControlArea'
 import {
-  ChatPanel,
-  ThreadPanel,
-  ThreadShortcutsPanel,
-  ThreadStatusFooter,
-} from '@/features/ai/runtime'
+  ChildThreadBackBar,
+  ChildThreadRootLink,
+  ChildThreadView,
+} from '@/features/ai/runtime/ChildThreadView'
+import { ThreadNavigationContext } from '@/features/ai/runtime/ThreadLink'
+import { useThreadNavigation } from '@/features/ai/runtime/useThreadNavigation'
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -22,6 +27,7 @@ import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePa
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
+import '@/features/ai/runtime/child-thread-view.css'
 
 export type { AgentPaneCapabilities, AgentPaneDefaults }
 
@@ -61,6 +67,7 @@ export function AgentPane({
     onTargetConsumed,
     capabilities,
   })
+  const paneSectionRef = useRef<HTMLElement | null>(null)
   const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
     pane.dismissActionError()
@@ -84,27 +91,56 @@ export function AgentPane({
   // 自动活跃树只挂执行根面板；根自身不重复出一行。
   const boundIsRoot = boundThreadName != null && pane.controller.thread?.parentThreadId == null
   const boundThreadId = pane.target.kind === 'BOUND_THREAD' ? pane.target.threadId : null
+  // pane 内查看路径只属于执行根面板；身份未加载完成前（null）不提供查看入口。
+  const navigation = useThreadNavigation({
+    rootThreadId: boundThreadId,
+    enabled: boundIsRoot,
+    fallbackFocusRef: paneSectionRef,
+  })
+  const childRootThreadId = pane.controller.thread?.yoloPolicy.rootThreadId ?? null
+  const composer = { ...pane.composer, interactionPanel }
+  const rootControls = boundThreadId == null
+    ? null
+    : (
+      <RootThreadControlArea
+        rootThreadId={boundThreadId}
+        composer={composer}
+        messages={pane.controller.timeline.messages}
+        queuedMessages={pane.controller.timeline.queuedMessages}
+      />
+    )
 
   const content = pane.target.kind === 'BOUND_THREAD'
     ? (
-      <ChatPanel
+      <ThreadPane
+        projection={pane.controller}
+        environments={environments}
         heading={renderBoundThreadHeading(boundThreadName)}
-        labels={pane.boundLabels}
-        transcript={pane.buildBoundThreadTranscript({
-          controller: pane.controller,
-          threadId: pane.target.threadId,
-          initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
-        })}
-        mainView={pane.boundViews.mainView}
-        composer={{ ...pane.composer, interactionPanel }}
         activity={{
-          working: pane.controller.working,
+          working: pane.controller.working || pane.composer.pending,
           workingLabel: boundWorkingLabel,
           actionError: pane.error,
           onDismissActionError,
           widgets: boundIsRoot && boundThreadId != null
-            ? <ActiveThreadTree rootThreadId={boundThreadId} currentThreadId={boundThreadId} />
+            ? <ActiveThreadTree
+                rootThreadId={boundThreadId}
+                currentThreadId={navigation.activeThreadId ?? boundThreadId}
+              />
             : undefined,
+        }}
+        controls={
+          // 根面板：根控制区（草稿/提交/设置/Stop/审批/问卷）。
+          // 子代理绑定：没有任何输入区，只保留返回执行根入口。
+          // 身份未加载完成：不暴露控制区。
+          boundIsRoot === true
+            ? rootControls
+            : boundIsRoot === false && childRootThreadId != null
+              ? <ChildThreadRootLink rootThreadId={childRootThreadId} />
+              : null
+        }
+        views={{
+          mainView: pane.boundViews.mainView,
+          initialConversationScrollTop: pane.boundViews.initialConversationScrollTop,
         }}
       />
     )
@@ -118,7 +154,14 @@ export function AgentPane({
           loading: false,
           error: null,
         }}
-        composer={{ ...pane.composer, interactionPanel }}
+        controls={(
+          <RootThreadControlArea
+            rootThreadId={null}
+            composer={composer}
+            messages={[]}
+            queuedMessages={[]}
+          />
+        )}
         activity={{
           working: false,
           actionError: pane.error,
@@ -142,12 +185,19 @@ export function AgentPane({
       />
     )
 
+  // 根面板与查看层都保持挂载：查看期间根草稿、上传与滚动位置原地保留；
+  // 非顶层隐藏（不可聚焦、不响应快捷键），返回时不重建。
+  const topLayerIndex = navigation.layers.length - 1
   return (
+    <ThreadNavigationContext.Provider value={navigation.openThread}>
     <section
+      ref={paneSectionRef}
+      tabIndex={-1}
       className={`chat-pane ${focused ? 'focused' : ''}`}
       data-pane-id={paneId}
       onMouseDown={onFocus}
     >
+      <div className="chat-pane-layer" hidden={navigation.layers.length > 0}>
       {content}
       {pane.pendingAcceptance ? (
         <div className="thread-acceptance-retry">
@@ -206,7 +256,22 @@ export function AgentPane({
         }
         onClose={pane.dismissConflict}
       />
+      </div>
+      {navigation.layers.map((layerThreadId, index) => (
+        <div
+          key={layerThreadId}
+          className="chat-pane-layer"
+          hidden={index !== topLayerIndex}
+        >
+          <ChildThreadView
+            threadId={layerThreadId}
+            environments={environments}
+            controls={<ChildThreadBackBar onBack={navigation.goBack} />}
+          />
+        </div>
+      ))}
     </section>
+    </ThreadNavigationContext.Provider>
   )
 
   function renderBoundThreadHeading(name: string | null) {
