@@ -27,10 +27,8 @@ import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -55,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -85,9 +82,6 @@ class ProviderRequestBodyPreviewTest {
   private static final String TOOL_CALL_ID = "call_preview_1";
   private static final String TOOL_NAME = "preview_tool";
   private static final String REPLAY_TEXT = "replayed answer";
-
-  /** 失配的合法 64 位 hex hash：保证 replay 走语义 fallback 而不是原生回放或 fail closed。 */
-  private static final String MISMATCHED_PREFIX_HASH = "0".repeat(64);
 
   private HttpServer server;
   private int port;
@@ -342,9 +336,9 @@ class ProviderRequestBodyPreviewTest {
   private ProviderAdapter adapterFor(Protocol protocol, JdkHttpSseTransport transport) {
     return switch (protocol) {
       case OPENAI_CHAT -> new OpenAiChatProviderAdapter(
-          transport, API_KEY, "{\"openAiPromptCacheMode\":\"LEGACY\"}");
+          transport, API_KEY, "{\"promptCacheRetention\":\"SHORT\"}");
       case OPENAI_RESPONSES -> new OpenAiResponsesProviderAdapter(
-          transport, API_KEY, "{\"openAiPromptCacheMode\":\"LEGACY\"}");
+          transport, API_KEY, "{\"promptCacheRetention\":\"SHORT\"}");
       case ANTHROPIC -> new AnthropicProviderAdapter(transport, API_KEY);
       case GEMINI -> new GeminiProviderAdapter(transport, API_KEY);
     };
@@ -359,27 +353,13 @@ class ProviderRequestBodyPreviewTest {
   }
 
   private static ModelDescriptor model(Protocol protocol) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     return new ModelDescriptor(
         protocol.label,
         protocol.wireModelId,
         protocol.wireModelId,
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        pricing);
+        false);
   }
 
   private static ModelVariant variant(Protocol protocol) {
@@ -420,15 +400,12 @@ class ProviderRequestBodyPreviewTest {
         cacheControl(protocol));
   }
 
-  /** 带 durable replay state 的请求；hash 故意失配，编码器必须以语义 fallback 继续。 */
+  /** 兼容的 durable replay 与正式 transport 必须使用相同的编码结果。 */
   private static ProviderRequest replayRequest(Protocol protocol, ProviderDescriptor descriptor) {
     ModelDescriptor model = model(protocol);
     ProviderReplayState replayState =
         new ProviderReplayState(
-            protocol.replayFormat,
-            descriptor.affinity(model.modelId()),
-            MISMATCHED_PREFIX_HASH,
-            replayPayload(protocol));
+            protocol.replayFormat, descriptor.affinity(model.modelId()), replayPayload(protocol));
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -461,15 +438,8 @@ class ProviderRequestBodyPreviewTest {
   /** Gemini 只支持隐式缓存，显式 cacheControl 会被编码器拒绝，因此只在该协议退化为 NONE。 */
   private static ProviderCacheControl cacheControl(Protocol protocol) {
     return switch (protocol) {
-      case OPENAI_CHAT, OPENAI_RESPONSES -> ProviderCacheControl.affinity(
-          PromptCacheRetention.SHORT, "preview-affinity");
-      case ANTHROPIC -> ProviderCacheControl.breakpoints(
-          PromptCacheRetention.SHORT,
-          "preview-affinity",
-          Set.of(
-              PromptCacheBreakpoint.SYSTEM,
-              PromptCacheBreakpoint.TOOLS,
-              PromptCacheBreakpoint.CONVERSATION));
+      case OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC -> ProviderCacheControl.session(
+          PromptCacheRetention.SHORT, "00000000-0000-0000-0000-000000000001");
       case GEMINI -> ProviderCacheControl.none();
     };
   }
