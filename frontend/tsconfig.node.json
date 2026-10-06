@@ -22,6 +22,8 @@
     "vite.layout.config.ts",
     "playwright.layout.config.ts",
     "vite.pane.config.ts",
-    "playwright.pane.config.ts"
+    "playwright.pane.config.ts",
+    "vite.composer-editor.config.ts",
+    "playwright.composer-editor.config.ts"
   ]
 }
