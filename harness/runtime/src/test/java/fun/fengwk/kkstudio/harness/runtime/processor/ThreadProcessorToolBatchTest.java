@@ -243,7 +243,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             new ProviderReplayAffinity(
                 ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 1L), "claude-3-5-sonnet"),
-            "0123456789abcdef".repeat(4),
             JsonNodeFactory.instance.objectNode().put("k", "v"));
     UUID modelId =
         seedModelInvocation(

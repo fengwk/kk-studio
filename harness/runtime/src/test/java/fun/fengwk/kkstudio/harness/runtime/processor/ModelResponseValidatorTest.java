@@ -5,13 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /** ModelResponseValidator 直接单元测试：只校验所有调用共享的 canonical response 不变量。 */
@@ -146,15 +144,6 @@ class ModelResponseValidatorTest {
         calls,
         stopReason,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO),
         "req-1",
         null,
         null);

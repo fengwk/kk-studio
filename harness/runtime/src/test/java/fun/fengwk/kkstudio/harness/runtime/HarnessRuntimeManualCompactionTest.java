@@ -430,7 +430,7 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   private static AssistantMessageMetadata metadata() {
-    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST);
+    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE);
   }
 
   private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {

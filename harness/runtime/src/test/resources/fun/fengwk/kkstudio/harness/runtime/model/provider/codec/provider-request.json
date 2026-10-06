@@ -5,20 +5,7 @@
     "modelId": "gpt-5-mini-2025-08-07",
     "inputModalities": ["IMAGE", "TEXT"],
     "tools": true,
-    "reasoning": true,
-    "pricing": {
-      "currency": "USD",
-      "pricingTier": "tier-1",
-      "serviceTier": "default",
-      "serviceTierMultiplier": "1.5",
-      "version": "v1",
-      "inputPerMillionTokens": "3.000000000000",
-      "outputPerMillionTokens": "6.000000000000",
-      "cacheReadPerMillionTokens": "0.300000000000",
-      "cacheWritePerMillionTokens": "3.750000000000",
-      "cacheWriteLongPerMillionTokens": "0",
-      "reasoningPerMillionTokens": "0"
-    }
+    "reasoning": true
   },
   "variant": {
     "id": "balanced",
@@ -58,7 +45,6 @@
   ],
   "cacheControl": {
     "retention": "SHORT",
-    "affinityKey": "thread-1",
-    "breakpoints": ["SYSTEM", "TOOLS"]
+    "key": "thread-1"
   }
 }

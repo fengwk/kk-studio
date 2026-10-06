@@ -11,11 +11,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 
-import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -39,14 +37,13 @@ import java.util.Set;
  * <ul>
  *   <li>对象字段按声明顺序写入。
  *   <li>enum {@code Set} 字段（{@code inputModalities}）按 enum name 排序，使输出在跨 JVM 时保持 deterministic。
- *   <li>{@link BigDecimal} 字段以 {@code toPlainString()} 文本输出。
  *   <li>{@code ModelVariant} 的 nullable 字段 {@code reasoningEffort} 显式输出 {@code null} 而非省略，便于 schema
  *       对照。
  *   <li>{@code ModelVariant} 的 {@code protocolOptions} 以嵌套 JSON object 输出（空选项输出 {@code {}}），保持厂商原生
  *       选项在 durable payload 中仍是结构化的 object，数值不经过二进制浮点数。
  * </ul>
  *
- * <p>durable descriptor 固定七个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
+ * <p>durable descriptor 固定六个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
  * {@code reasoningEffort} / {@code protocolOptions} 三个字段，codec 严格要求完整且精确的字段集合。
  */
 public final class ModelDescriptorJsonCodec {
@@ -56,32 +53,11 @@ public final class ModelDescriptorJsonCodec {
 
   /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
-      orderedSet(
-          "providerName",
-          "modelName",
-          "modelId",
-          "inputModalities",
-          "tools",
-          "reasoning",
-          "pricing");
+      orderedSet("providerName", "modelName", "modelId", "inputModalities", "tools", "reasoning");
 
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
       orderedSet("id", "reasoningEffort", "protocolOptions");
-
-  private static final Set<String> PRICING_FIELDS =
-      orderedSet(
-          "currency",
-          "pricingTier",
-          "serviceTier",
-          "serviceTierMultiplier",
-          "version",
-          "inputPerMillionTokens",
-          "outputPerMillionTokens",
-          "cacheReadPerMillionTokens",
-          "cacheWritePerMillionTokens",
-          "cacheWriteLongPerMillionTokens",
-          "reasoningPerMillionTokens");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -162,7 +138,6 @@ public final class ModelDescriptorJsonCodec {
     }
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
-    node.set("pricing", writePricing(descriptor.pricing()));
     return node;
   }
 
@@ -174,9 +149,7 @@ public final class ModelDescriptorJsonCodec {
     Set<ModelInputModality> inputModalities = readInputModalities(node);
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
-    ModelPricing pricing = readPricing(node.get("pricing"));
-    return new ModelDescriptor(
-        providerName, modelName, modelId, inputModalities, tools, reasoning, pricing);
+    return new ModelDescriptor(providerName, modelName, modelId, inputModalities, tools, reasoning);
   }
 
   private static Set<ModelInputModality> readInputModalities(ObjectNode node) {
@@ -250,42 +223,6 @@ public final class ModelDescriptorJsonCodec {
     }
   }
 
-  // ---------- ModelPricing ----------
-
-  private static ObjectNode writePricing(ModelPricing pricing) {
-    ObjectNode node = NODES.objectNode();
-    node.put("currency", pricing.currency());
-    node.put("pricingTier", pricing.pricingTier());
-    node.put("serviceTier", pricing.serviceTier());
-    node.put("serviceTierMultiplier", pricing.serviceTierMultiplier().toPlainString());
-    node.put("version", pricing.version());
-    node.put("inputPerMillionTokens", pricing.inputPerMillionTokens().toPlainString());
-    node.put("outputPerMillionTokens", pricing.outputPerMillionTokens().toPlainString());
-    node.put("cacheReadPerMillionTokens", pricing.cacheReadPerMillionTokens().toPlainString());
-    node.put("cacheWritePerMillionTokens", pricing.cacheWritePerMillionTokens().toPlainString());
-    node.put(
-        "cacheWriteLongPerMillionTokens", pricing.cacheWriteLongPerMillionTokens().toPlainString());
-    node.put("reasoningPerMillionTokens", pricing.reasoningPerMillionTokens().toPlainString());
-    return node;
-  }
-
-  private static ModelPricing readPricing(JsonNode value) {
-    ObjectNode node = object(value, "pricing");
-    requireFields(node, PRICING_FIELDS, "pricing");
-    return new ModelPricing(
-        text(node, "currency"),
-        text(node, "pricingTier"),
-        text(node, "serviceTier"),
-        decimal(node, "serviceTierMultiplier"),
-        text(node, "version"),
-        decimal(node, "inputPerMillionTokens"),
-        decimal(node, "outputPerMillionTokens"),
-        decimal(node, "cacheReadPerMillionTokens"),
-        decimal(node, "cacheWritePerMillionTokens"),
-        decimal(node, "cacheWriteLongPerMillionTokens"),
-        decimal(node, "reasoningPerMillionTokens"));
-  }
-
   // ---------- 共享工具方法 ----------
 
   /**
@@ -331,18 +268,6 @@ public final class ModelDescriptorJsonCodec {
       throw new IllegalArgumentException(field + " must be boolean");
     }
     return value.booleanValue();
-  }
-
-  static BigDecimal decimal(ObjectNode node, String field) {
-    JsonNode value = node.get(field);
-    if (!value.isTextual()) {
-      throw new IllegalArgumentException(field + " must be text");
-    }
-    try {
-      return new BigDecimal(value.textValue());
-    } catch (NumberFormatException exception) {
-      throw new IllegalArgumentException(field + " must be a decimal", exception);
-    }
   }
 
   static void requireFields(ObjectNode node, Set<String> expected, String name) {

@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,11 +63,10 @@ class ToolHistoryActionsTest {
 
     assertEquals("read a.txt", frozen.toolCalls().get(0).historyAction());
     assertNull(frozen.toolCalls().get(1).historyAction());
-    // 除 action 外的 durable 事实（顺序、身份、arguments、usage/cost）逐字不变。
+    // 除 action 外的 durable 事实（顺序、身份、arguments、usage）逐字不变。
     assertEquals(List.of("call-1", "call-2"), ids(frozen));
     assertEquals("{\"path\":\"a.txt\"}", frozen.toolCalls().get(0).argumentsJson());
     assertEquals(response.usage(), frozen.usage());
-    assertEquals(response.cost(), frozen.cost());
     // 未冻结任何 action 时返回同一个实例，避免无意义的 durable 改写。
     assertSame(
         response, ToolHistoryActions.freeze(response, bindings(), (b, c) -> Optional.empty()));
@@ -279,15 +276,6 @@ class ToolHistoryActionsTest {
         calls,
         stopReason,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO),
         "req-1",
         null,
         "{}");

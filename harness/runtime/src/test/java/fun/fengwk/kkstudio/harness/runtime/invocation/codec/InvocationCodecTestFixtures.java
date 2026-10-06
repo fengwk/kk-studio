@@ -92,13 +92,7 @@ final class InvocationCodecTestFixtures {
     }
     return new ProviderRequest(
         new ModelDescriptor(
-            "provider",
-            "model",
-            "model",
-            Set.of(ModelInputModality.TEXT),
-            tools.length > 0,
-            true,
-            pricing()),
+            "provider", "model", "model", Set.of(ModelInputModality.TEXT), tools.length > 0, true),
         new ModelVariant("v1"),
         1024,
         "Test system instruction.",

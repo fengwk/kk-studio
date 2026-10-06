@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -418,7 +417,6 @@ class ModelAttemptMaterializationTest {
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
         new ProviderReplayAffinity(
             ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
@@ -529,7 +527,7 @@ class ModelAttemptMaterializationTest {
                         List.of(
                             new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                             new ToolCallMessageContent("call-2", "bash", "bash", "{}"))),
-                    new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                    new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                     null),
                 T2));
     assertThrows(
@@ -553,7 +551,6 @@ class ModelAttemptMaterializationTest {
                 List.of(new ProviderToolCall("call-1", "bash", "{\"a\":1}")),
                 GenerationStopReason.COMPLETE,
                 usage(),
-                cost(),
                 null,
                 null,
                 "{}"),
@@ -608,7 +605,7 @@ class ModelAttemptMaterializationTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                         new TextMessageContent("unexpected text"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                 null));
     // metadata 差异：tool call 相同但 stop reason / usage 不同。
     Entry metadataDrifted =
@@ -620,7 +617,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage()),
                 null));
     // renderer 差异：冻结 binding 的 rendererKey=bash，head 却使用 fallback renderer=tool。
     Entry rendererDrifted =
@@ -632,7 +629,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                 null));
     for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
       assertThrows(
@@ -681,7 +678,7 @@ class ModelAttemptMaterializationTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                         new TextMessageContent("unexpected text"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                 null));
     Entry metadataDrifted =
         assistantToolMessageAt(
@@ -692,7 +689,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage()),
                 null));
     Entry rendererDrifted =
         assistantToolMessageAt(
@@ -703,7 +700,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                 null));
     for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
       assertThrows(
@@ -952,24 +949,7 @@ class ModelAttemptMaterializationTest {
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   /**
@@ -1068,7 +1048,7 @@ class ModelAttemptMaterializationTest {
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
         null);
   }
 
@@ -1158,7 +1138,7 @@ class ModelAttemptMaterializationTest {
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
             null),
         T2);
   }
@@ -1170,7 +1150,6 @@ class ModelAttemptMaterializationTest {
         List.of(new ProviderToolCall("call-1", "bash", "{}")),
         GenerationStopReason.COMPLETE,
         usage(),
-        cost(),
         null,
         null,
         "{}");
@@ -1178,7 +1157,7 @@ class ModelAttemptMaterializationTest {
 
   private static ProviderResponse compactionResponse(String text) {
     return new ProviderResponse(
-        text, "", List.of(), GenerationStopReason.COMPLETE, usage(), cost(), null, null, "{}");
+        text, "", List.of(), GenerationStopReason.COMPLETE, usage(), null, null, "{}");
   }
 
   private static ModelUsage usage() {

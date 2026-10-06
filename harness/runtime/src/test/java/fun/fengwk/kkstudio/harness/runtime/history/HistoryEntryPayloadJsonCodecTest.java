@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -27,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -147,9 +145,7 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
-            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
-            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"}},"
+            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
             + "\"toolResultMetadata\":null}";
     MessagePayload legacyPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, legacy);
     assertNull(legacyPayload.assistantMetadata().decodeDurationMillis());
@@ -163,8 +159,6 @@ class HistoryEntryPayloadJsonCodecTest {
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
             + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
-            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
-            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"},"
             + "\"decodeDurationMillis\":1234},\"toolResultMetadata\":null}",
         CODEC.encode(timed));
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
@@ -243,9 +237,7 @@ class HistoryEntryPayloadJsonCodecTest {
     String base =
         "{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,\"outputTokens\":1,"
             + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteLongTokens\":0,"
-            + "\"reasoningTokens\":0,\"providerTotalTokens\":2},"
-            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
-            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"}";
+            + "\"reasoningTokens\":0,\"providerTotalTokens\":2}";
 
     assertEquals(
         0L,
@@ -678,10 +670,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]},"
                     + "\"assistantMetadata\":{\"stopReason\":\"FOO\",\"usage\":{\"inputTokens\":1,"
                     + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-                    + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
-                    + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\","
-                    + "\"cacheRead\":\"0\",\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\","
-                    + "\"reasoning\":\"0\",\"total\":\"2\"}},\"toolResultMetadata\":null}"));
+                    + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
+                    + "\"toolResultMetadata\":null}"));
   }
 
   @Test
@@ -1075,24 +1065,13 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
-    ModelCost cost =
-        new ModelCost(
-            "USD",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.valueOf(2));
-    return new AssistantMessageMetadata(reason, usage, cost);
+    return new AssistantMessageMetadata(reason, usage);
   }
 
   private static AssistantMessageMetadata metadata(
       GenerationStopReason reason, Long decodeDurationMillis) {
     AssistantMessageMetadata base = metadata(reason);
-    return new AssistantMessageMetadata(
-        base.stopReason(), base.usage(), base.cost(), decodeDurationMillis);
+    return new AssistantMessageMetadata(base.stopReason(), base.usage(), decodeDurationMillis);
   }
 
   private static BranchSettings settings() {

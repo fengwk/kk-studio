@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -38,7 +37,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -132,7 +130,7 @@ class ResolvedRequestValidatorTest {
         preparation(),
         List.of(),
         List.of(),
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "key"));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "key"));
   }
 
   @Test
@@ -159,7 +157,7 @@ class ResolvedRequestValidatorTest {
         preparation(),
         List.of(),
         List.of(),
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "compaction-cache"));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "compaction-cache"));
   }
 
   @Test
@@ -277,19 +275,7 @@ class ResolvedRequestValidatorTest {
             model.modelName(),
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            new ModelPricing(
-                "USD",
-                "standard",
-                "standard",
-                BigDecimal.ONE,
-                "1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+            true),
         new ModelVariant(model.variant()),
         1024,
         "Test system instruction.",

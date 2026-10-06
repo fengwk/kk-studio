@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -20,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -65,7 +63,6 @@ class ProviderResponseJsonCodecTest {
     assertEquals("look up the capital of paris", decoded.toolCalls().get(0).historyAction());
     assertNull(decoded.toolCalls().get(1).historyAction());
     assertEquals(RAW_USAGE, decoded.rawUsageJson());
-    assertEquals(new BigDecimal("0.000911250000"), decoded.cost().total());
   }
 
   /**
@@ -115,7 +112,6 @@ class ProviderResponseJsonCodecTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             new ModelUsage(1, 2, 3, 4, 5, 6, 21),
-            zeroCost(),
             "request-7",
             "priority",
             rawUsageJson);
@@ -151,7 +147,6 @@ class ProviderResponseJsonCodecTest {
             List.of(new ProviderToolCall("call", "weather", "{\"q\":1,\"q\":2}")),
             response.stopReason(),
             response.usage(),
-            response.cost(),
             response.requestId(),
             response.serviceTier(),
             response.rawUsageJson());
@@ -166,7 +161,6 @@ class ProviderResponseJsonCodecTest {
                 response.toolCalls(),
                 response.stopReason(),
                 response.usage(),
-                response.cost(),
                 response.requestId(),
                 response.serviceTier(),
                 "{\"total\":1,\"total\":2}"));
@@ -190,10 +184,6 @@ class ProviderResponseJsonCodecTest {
         root -> usage(root).put("extra", true),
         root -> usage(root).remove("inputTokens"),
         root -> usage(root).put("inputTokens", "100"));
-    assertStrictLayer(
-        root -> cost(root).put("extra", true),
-        root -> cost(root).remove("currency"),
-        root -> cost(root).put("input", 0.1));
   }
 
   /** 未知 stop reason 与非文本 enum 值必须被拒绝，不得降级处理。 */
@@ -213,7 +203,6 @@ class ProviderResponseJsonCodecTest {
             List.of(),
             GenerationStopReason.CONTINUE,
             new ModelUsage(1, 2, 0, 0, 0, 0, 3),
-            zeroCost(),
             "request-8",
             null,
             "{}");
@@ -261,9 +250,6 @@ class ProviderResponseJsonCodecTest {
                 .set(
                     "inputTokens",
                     NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE))));
-    assertRejected(root -> cost(root).put("input", "bad"));
-    assertRejected(root -> cost(root).put("input", "-0.1"));
-    assertRejected(root -> cost(root).put("total", "1"));
   }
 
   private void assertStrictLayer(
@@ -291,30 +277,9 @@ class ProviderResponseJsonCodecTest {
             new ProviderToolCall("call-2", "weather", SECOND_ARGUMENTS)),
         GenerationStopReason.COMPLETE,
         new ModelUsage(100, 20, 0, 50, 0, 5, 175),
-        new ModelCost(
-            "USD",
-            new BigDecimal("0.000450000000"),
-            new BigDecimal("0.000180000000"),
-            BigDecimal.ZERO,
-            new BigDecimal("0.000281250000"),
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            new BigDecimal("0.000911250000")),
         null,
         null,
         RAW_USAGE);
-  }
-
-  private static ModelCost zeroCost() {
-    return new ModelCost(
-        "USD",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 
   private static ObjectNode canonicalNode() {
@@ -341,9 +306,5 @@ class ProviderResponseJsonCodecTest {
 
   private static ObjectNode usage(ObjectNode root) {
     return (ObjectNode) root.path("usage");
-  }
-
-  private static ObjectNode cost(ObjectNode root) {
-    return (ObjectNode) root.path("cost");
   }
 }

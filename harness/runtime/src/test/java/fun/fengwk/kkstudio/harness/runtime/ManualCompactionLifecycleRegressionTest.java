@@ -375,7 +375,7 @@ class ManualCompactionLifecycleRegressionTest {
   }
 
   private static AssistantMessageMetadata metadata() {
-    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE, COST);
+    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE);
   }
 
   private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {

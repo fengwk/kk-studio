@@ -7,11 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -21,8 +19,7 @@ class ProviderFactoriesTest {
   @Test
   void rejectsDuplicateProviderType() {
     ProviderFactory openai =
-        ProviderFactory.of(
-            ProviderType.OPENAI, PromptCacheCapability.unsupported(), (c, j) -> null);
+        ProviderFactory.of(ProviderType.OPENAI, PromptCacheRetention.NONE, (c, j) -> null);
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> new ProviderFactories(List.of(openai, openai)));
@@ -34,7 +31,7 @@ class ProviderFactoriesTest {
   void rejectsNullAdapterConstructor() {
     assertThrows(
         NullPointerException.class,
-        () -> ProviderFactory.of(ProviderType.OPENAI, PromptCacheCapability.unsupported(), null));
+        () -> ProviderFactory.of(ProviderType.OPENAI, PromptCacheRetention.NONE, null));
   }
 
   @Test
@@ -42,7 +39,7 @@ class ProviderFactoriesTest {
     ProviderFactory factory =
         ProviderFactory.of(
             ProviderType.OPENAI,
-            PromptCacheCapability.unsupported(),
+            PromptCacheRetention.NONE,
             (c, j) -> new AdapterStub(ProviderType.ANTHROPIC));
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> factory.create("", ""));
@@ -55,7 +52,7 @@ class ProviderFactoriesTest {
     ProviderFactory openai =
         ProviderFactory.of(
             ProviderType.OPENAI,
-            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+            PromptCacheRetention.SHORT,
             (c, j) -> new AdapterStub(ProviderType.OPENAI));
     ProviderFactories factories = new ProviderFactories(List.of(openai));
     assertSame(openai, factories.lookup(ProviderType.OPENAI).orElseThrow());
@@ -73,33 +70,31 @@ class ProviderFactoriesTest {
           return new AdapterStub(ProviderType.OPENAI);
         };
     ProviderFactory factory =
-        ProviderFactory.of(
-            ProviderType.OPENAI,
-            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-            ctor);
+        ProviderFactory.of(ProviderType.OPENAI, PromptCacheRetention.SHORT, ctor);
     ProviderAdapter adapter = factory.create("cred", "cfg");
     assertEquals(ProviderType.OPENAI, adapter.providerType());
     assertEquals(1, calls.get());
   }
 
-  /** 意图：固定能力工厂的 promptCacheCapability(configJson) 默认回退至无参方法，确保历史适配器无缝兼容。 */
+  /** 意图：固定档位工厂的 promptCacheRetention(configJson) 默认回退至无参方法，确保历史适配器无缝兼容。 */
   @Test
-  void fixedFactoryDelegatesConfigAwareCapabilityToParameterlessMethod() {
-    PromptCacheCapability fixedCapability =
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
+  void fixedFactoryDelegatesConfigAwareRetentionToParameterlessMethod() {
     ProviderFactory factory =
         ProviderFactory.of(
-            ProviderType.OPENAI, fixedCapability, (c, j) -> new AdapterStub(ProviderType.OPENAI));
+            ProviderType.OPENAI,
+            PromptCacheRetention.LONG,
+            (c, j) -> new AdapterStub(ProviderType.OPENAI));
 
-    assertSame(fixedCapability, factory.promptCacheCapability());
-    assertSame(fixedCapability, factory.promptCacheCapability("{\"mode\":\"anything\"}"));
-    assertSame(fixedCapability, factory.promptCacheCapability(null));
+    assertEquals(PromptCacheRetention.LONG, factory.promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.LONG, factory.promptCacheRetention("{\"mode\":\"anything\"}"));
+    assertEquals(PromptCacheRetention.LONG, factory.promptCacheRetention(null));
   }
 
   /** 意图：动态工厂 of 重载必须严格校验参数非空。 */
   @Test
   void dynamicFactoryRejectsNullParameters() {
-    Function<String, PromptCacheCapability> resolver = cfg -> PromptCacheCapability.automatic();
+    Function<String, PromptCacheRetention> resolver = cfg -> PromptCacheRetention.NONE;
     BiFunction<String, String, ProviderAdapter> ctor =
         (c, j) -> new AdapterStub(ProviderType.OPENAI);
 
@@ -108,43 +103,42 @@ class ProviderFactoriesTest {
         NullPointerException.class,
         () ->
             ProviderFactory.of(
-                ProviderType.OPENAI, (Function<String, PromptCacheCapability>) null, ctor));
+                ProviderType.OPENAI, (Function<String, PromptCacheRetention>) null, ctor));
     assertThrows(
         NullPointerException.class, () -> ProviderFactory.of(ProviderType.OPENAI, resolver, null));
   }
 
-  /** 意图：动态工厂依据配置 JSON 解析提示缓存能力，且无参调用必须等价于传 null 空配置的默认能力。 */
+  /** 意图：动态工厂依据配置 JSON 解析留存档位，且无参调用必须等价于传 null 空配置的默认档位。 */
   @Test
-  void dynamicFactoryResolvesCapabilityFromConfigAndEquatesNoArgToNullConfig() {
-    PromptCacheCapability defaultConfig = PromptCacheCapability.automatic();
-    PromptCacheCapability explicitConfig =
-        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT));
-
+  void dynamicFactoryResolvesRetentionFromConfigAndEquatesNoArgToNullConfig() {
     ProviderFactory factory =
         ProviderFactory.of(
             ProviderType.OPENAI,
             configJson ->
-                "{\"useAffinity\":true}".equals(configJson) ? explicitConfig : defaultConfig,
+                "{\"useAffinity\":true}".equals(configJson)
+                    ? PromptCacheRetention.SHORT
+                    : PromptCacheRetention.NONE,
             (c, j) -> new AdapterStub(ProviderType.OPENAI));
 
-    assertSame(defaultConfig, factory.promptCacheCapability());
-    assertSame(defaultConfig, factory.promptCacheCapability(null));
-    assertSame(defaultConfig, factory.promptCacheCapability(""));
-    assertSame(explicitConfig, factory.promptCacheCapability("{\"useAffinity\":true}"));
+    assertEquals(PromptCacheRetention.NONE, factory.promptCacheRetention());
+    assertEquals(PromptCacheRetention.NONE, factory.promptCacheRetention(null));
+    assertEquals(PromptCacheRetention.NONE, factory.promptCacheRetention(""));
+    assertEquals(
+        PromptCacheRetention.SHORT, factory.promptCacheRetention("{\"useAffinity\":true}"));
   }
 
-  /** 意图：动态工厂严格校验能力解析器不得返回 null。 */
+  /** 意图：动态工厂严格校验留存解析器不得返回 null。 */
   @Test
-  void dynamicFactoryRejectsNullResolvedCapability() {
+  void dynamicFactoryRejectsNullResolvedRetention() {
     ProviderFactory factory =
         ProviderFactory.of(
             ProviderType.OPENAI,
             configJson -> null,
             (c, j) -> new AdapterStub(ProviderType.OPENAI));
 
-    assertThrows(NullPointerException.class, factory::promptCacheCapability);
+    assertThrows(NullPointerException.class, factory::promptCacheRetention);
     assertThrows(
-        NullPointerException.class, () -> factory.promptCacheCapability("{\"some\":\"config\"}"));
+        NullPointerException.class, () -> factory.promptCacheRetention("{\"some\":\"config\"}"));
   }
 
   /** 意图：动态工厂创建 adapter 时严格校验 adapter 的 providerType 与 factory 声明一致。 */
@@ -153,7 +147,7 @@ class ProviderFactoriesTest {
     ProviderFactory factory =
         ProviderFactory.of(
             ProviderType.OPENAI,
-            cfg -> PromptCacheCapability.automatic(),
+            cfg -> PromptCacheRetention.NONE,
             (c, j) -> new AdapterStub(ProviderType.ANTHROPIC));
 
     IllegalArgumentException error =

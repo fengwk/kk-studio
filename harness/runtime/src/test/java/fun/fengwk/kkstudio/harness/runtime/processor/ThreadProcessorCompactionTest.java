@@ -1129,7 +1129,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           List.of(
                               new ToolCallMessageContent(callId, "bash", "bash", "{}"),
                               new TextMessageContent("working"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost()),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
                       null),
                   NOW));
           UUID toolResultEntryId = tx.nextId();
@@ -1275,7 +1275,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           List.of(
                               new TextMessageContent(
                                   "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                       null),
                   NOW));
           tx.insertEntry(
@@ -1439,7 +1439,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       new AgentMessage(
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant reply"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
                       null),
                   NOW));
           tx.insertEntry(
@@ -1484,7 +1484,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant reply"))),
                       new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE, cost()),
+                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
                       null),
                   NOW));
           tx.insertEntry(

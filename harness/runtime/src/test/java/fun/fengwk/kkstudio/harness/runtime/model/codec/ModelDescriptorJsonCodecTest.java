@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -174,35 +172,14 @@ class ModelDescriptorJsonCodecTest {
     ArrayNode names = NODES.arrayNode();
     root.fieldNames().forEachRemaining(names::add);
     assertEquals(
-        List.of(
-            "providerName",
-            "modelName",
-            "modelId",
-            "inputModalities",
-            "tools",
-            "reasoning",
-            "pricing"),
+        List.of("providerName", "modelName", "modelId", "inputModalities", "tools", "reasoning"),
         List.of(
             names.get(0).asText(),
             names.get(1).asText(),
             names.get(2).asText(),
             names.get(3).asText(),
             names.get(4).asText(),
-            names.get(5).asText(),
-            names.get(6).asText()));
-  }
-
-  /** BigDecimal 字段以 plain 字符串输出。 */
-  @Test
-  void bigDecimalsAreEmittedAsPlainString() throws Exception {
-    ModelDescriptor descriptor = canonicalDescriptor();
-    JsonNode root = OBJECT_MAPPER.readTree(codec.encodeDescriptor(descriptor));
-    JsonNode pricing = root.get("pricing");
-    assertTrue(pricing.get("serviceTierMultiplier").isTextual());
-    assertTrue(pricing.get("inputPerMillionTokens").isTextual());
-    assertEquals(
-        new BigDecimal("3.000000000000"),
-        new BigDecimal(pricing.get("inputPerMillionTokens").asText()));
+            names.get(5).asText()));
   }
 
   // ---------- 严格拒绝 ----------
@@ -247,15 +224,6 @@ class ModelDescriptorJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
   }
 
-  /** 未知 pricing 字段必须拒绝。 */
-  @Test
-  void rejectsUnknownPricingField() {
-    ObjectNode node = canonicalDescriptorNode();
-    ObjectNode pricing = (ObjectNode) node.get("pricing");
-    pricing.put("extra", true);
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptorNode(node));
-  }
-
   /** 顶层不是 object 必须拒绝。 */
   @Test
   void rejectsNonObjectRoot() {
@@ -290,12 +258,7 @@ class ModelDescriptorJsonCodecTest {
             + "\"providerName\":\"provider\",\"providerName\":\"other\","
             + "\"modelName\":\"x\","
             + "\"inputModalities\":[\"TEXT\"],"
-            + "\"tools\":false,\"reasoning\":false,"
-            + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"t\","
-            + "\"serviceTier\":\"s\",\"serviceTierMultiplier\":\"1\",\"version\":\"v\","
-            + "\"inputPerMillionTokens\":\"0\",\"outputPerMillionTokens\":\"0\","
-            + "\"cacheReadPerMillionTokens\":\"0\",\"cacheWritePerMillionTokens\":\"0\","
-            + "\"cacheWriteLongPerMillionTokens\":\"0\",\"reasoningPerMillionTokens\":\"0\"}"
+            + "\"tools\":false,\"reasoning\":false"
             + "}";
     assertThrows(IllegalArgumentException.class, () -> codec.decodeDescriptor(json));
   }
@@ -425,23 +388,7 @@ class ModelDescriptorJsonCodecTest {
         "gpt-5-mini",
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
         true,
-        true,
-        canonicalPricing());
-  }
-
-  private static ModelPricing canonicalPricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        new BigDecimal("1.5"),
-        "v1",
-        new BigDecimal("3.000000000000"),
-        new BigDecimal("6.000000000000"),
-        new BigDecimal("0.300000000000"),
-        new BigDecimal("3.750000000000"),
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
+        true);
   }
 
   private static ObjectNode canonicalDescriptorNode() {

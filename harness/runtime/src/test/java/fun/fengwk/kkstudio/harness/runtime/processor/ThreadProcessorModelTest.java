@@ -921,7 +921,6 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         ProviderReplayFormat.GEMINI_CONTENT,
         new ProviderReplayAffinity(
             ProviderType.GOOGLE, "google", new UUID(0L, 88L), "gemini-3.8-flash"),
-        "0".repeat(64),
         payload);
   }
 }

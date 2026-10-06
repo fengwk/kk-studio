@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
-import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -31,17 +29,12 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -119,7 +112,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
   private final SchemaJsonCodec schemaCodec;
-  private final PromptCacheAffinityKeyFactory cacheKeyFactory;
 
   public DatabaseTurnResolver(
       AgentDefinitionRepository agentDefinitionRepository,
@@ -158,7 +150,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.schemaCodec = new SchemaJsonCodec();
-    this.cacheKeyFactory = new PromptCacheAffinityKeyFactory();
   }
 
   @Override
@@ -170,7 +161,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         return resolveCompaction(path, compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
-      return resolved(plan(path));
+      return resolved(plan(path, clock.instant()));
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
       return rejected(rejection.getMessage());
@@ -184,10 +175,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * projector 等基础设施或编程异常照常传播， 绝不伪装成 planning 失败。压缩路径不属于本入口。
    */
   public LiveTurnPlan planLive(UUID threadId, EntryPath path) {
+    return planLive(threadId, path, clock.instant());
+  }
+
+  /**
+   * 指定历史时刻的只读 live 规划：与 {@link #planLive(UUID, EntryPath)} 共用同一 planner，仅把 Environment
+   * 宿主事实的「当前时间」替换为显式 {@code now}，供历史请求预览在所选 Entry 的真实时间点上重建。
+   */
+  public LiveTurnPlan planLive(UUID threadId, EntryPath path, Instant now) {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(now, "now");
     try {
-      return plan(path);
+      return plan(path, now);
     } catch (Rejection rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
@@ -197,7 +197,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
   }
 
-  private LiveTurnPlan.Planned plan(EntryPath path) {
+  private LiveTurnPlan.Planned plan(EntryPath path, Instant now) {
     BranchSettings settings = path.baseSettings();
     UUID sessionId = path.root().sessionId();
 
@@ -245,7 +245,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + providerType
                 + ")");
 
-    Instant now = clock.instant();
     // Environment 只由 branch settings 的可空 environmentName 决定：Issue Run 在启动时已显式 SET_ENVIRONMENT，
     // 运行时不再按 Issue/阶段反查或覆写。
     String environmentName = settings.environmentName();
@@ -281,8 +280,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             model.getModelId(),
             parsedModel.inputModalities(),
             parsedModel.tools(),
-            parsedModel.reasoning(),
-            parsedModel.pricing());
+            parsedModel.reasoning());
     String systemInstruction =
         systemInstruction(
             agent.getSystemPrompt(),
@@ -297,15 +295,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
             contextWindow,
             CompactionPlanner.estimateRequestTokens(path, systemInstruction));
     ProviderCacheControl cacheControl =
-        cacheControl(
-            descriptor,
-            variant,
-            outputTokens,
-            systemInstruction,
-            toolBindings,
-            sessionId,
-            providerConnectionGenerationId,
-            cachePolicy(providerFactory, provider.getConfigJson(), selection.providerName()));
+        ProviderCacheControl.session(
+            promptCacheRetention(
+                providerFactory, provider.getConfigJson(), selection.providerName()),
+            sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             providerType,
@@ -339,8 +332,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   /**
    * 压缩 resolver 路径：只按 preparation 的 executionModel 查找 provider/model/variant 构造请求——不查 Agent system
-   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不做 prompt-cache finalizer / cache
-   * 写入。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec。
+   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不启用 cache（{@code
+   * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec。
    */
   private Result resolveCompaction(EntryPath path, CompactionPreparation preparation) {
     ModelSelection selection = preparation.executionModel();
@@ -398,8 +391,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 model.getModelId(),
                 parsedModel.inputModalities(),
                 parsedModel.tools(),
-                parsedModel.reasoning(),
-                parsedModel.pricing()),
+                parsedModel.reasoning()),
             variant,
             maxOutput,
             CompactionPrompts.summarizationSystemPrompt(),
@@ -688,22 +680,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
         .orElse(null);
   }
 
-  private static PromptCachePolicy cachePolicy(
+  /** Provider 当前配置下的提示缓存留存档位；配置非法或解析失败时确定性拒绝规划（绝不静默降级或不缓存）。 */
+  private static PromptCacheRetention promptCacheRetention(
       ProviderFactory providerFactory, String configJson, String providerName) {
-    PromptCacheCapability capability;
+    PromptCacheRetention retention;
     try {
-      capability = providerFactory.promptCacheCapability(configJson);
-      if (capability == null) {
-        throw new IllegalStateException("promptCacheCapability returned null");
+      retention = providerFactory.promptCacheRetention(configJson);
+      if (retention == null) {
+        throw new IllegalStateException("promptCacheRetention returned null");
       }
     } catch (Exception error) {
       throw rejection("invalid prompt cache configuration for provider: " + providerName);
     }
-    PromptCacheRetention retention =
-        capability.supports(PromptCacheRetention.SHORT)
-            ? PromptCacheRetention.SHORT
-            : PromptCacheRetention.NONE;
-    return PromptCachePolicy.of(capability, retention);
+    return retention;
   }
 
   /**
@@ -748,38 +737,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (section != null && !section.isBlank()) {
       sections.add(section);
     }
-  }
-
-  private ProviderCacheControl cacheControl(
-      ModelDescriptor descriptor,
-      ModelVariant variant,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      UUID sessionId,
-      UUID providerConnectionGenerationId,
-      PromptCachePolicy cachePolicy) {
-    List<ProviderToolDefinition> providerTools = new ArrayList<>(toolBindings.size());
-    for (ToolBinding binding : toolBindings) {
-      ToolDescriptor tool = binding.descriptor();
-      providerTools.add(
-          new ProviderToolDefinition(
-              tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
-    }
-    // 只有稳定 prefix 用于派生缓存策略与 key；durable 历史消息在执行期物化。
-    ProviderRequest prefixRequest =
-        new ProviderRequest(
-            descriptor,
-            variant,
-            outputTokens,
-            systemInstruction,
-            List.of(),
-            providerTools,
-            ProviderCacheControl.none());
-    return new PromptCacheRequestFinalizer(
-            sessionId, providerConnectionGenerationId, cacheKeyFactory)
-        .apply(prefixRequest, cachePolicy)
-        .cacheControl();
   }
 
   /** 一次工具规划的全部事实：冻结进 spec 的 SENT bindings 与「SENT 在前、FILTERED 在后」的完整候选投影。 */
