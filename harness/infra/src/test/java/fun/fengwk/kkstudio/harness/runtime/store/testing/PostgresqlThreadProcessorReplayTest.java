@@ -84,7 +84,6 @@ class PostgresqlThreadProcessorReplayTest {
                 request.model().providerName(),
                 request.providerConnectionGenerationId(),
                 request.model().modelId()),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             JsonNodeFactory.instance
                 .objectNode()
                 .put("role", "assistant")

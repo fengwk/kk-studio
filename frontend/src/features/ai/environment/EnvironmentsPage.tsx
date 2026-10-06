@@ -8,10 +8,11 @@ import {
 } from '@/features/ai/environment/environment-utils'
 import { EnvironmentInstallModal } from '@/features/ai/environment/EnvironmentInstallModal'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
-import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { environmentService } from '@/shared/api/environment-service'
 import { useApplicationEvents } from '@/shared/app-events'
 import { isConflictError } from '@/shared/api/client'
@@ -369,20 +370,12 @@ export function EnvironmentsPage() {
       </div>
 
       {createModalOpen && (
-        <ModalBackdrop onClose={() => setCreateModalOpen(false)}>
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('ai.environment.create')}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <ModalHeader
-              title={t('ai.environment.create')}
-              onClose={() => setCreateModalOpen(false)}
-              closeDisabled={createMutation.isPending}
-            />
-            <form onSubmit={handleCreateSubmit}>
+        <Dialog
+          title={t('ai.environment.create')}
+          onClose={() => setCreateModalOpen(false)}
+          pending={createMutation.isPending}
+        >
+            <form className="modal-card-form" onSubmit={handleCreateSubmit}>
               <div className="modal-body">
                 <label className="form-group">
                   <FieldLabel required>{t('ai.environment.name')}</FieldLabel>
@@ -415,8 +408,7 @@ export function EnvironmentsPage() {
                 </button>
               </div>
             </form>
-          </div>
-        </ModalBackdrop>
+        </Dialog>
       )}
 
       {rotateTarget && (

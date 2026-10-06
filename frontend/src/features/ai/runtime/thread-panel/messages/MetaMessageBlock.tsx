@@ -19,7 +19,7 @@ export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) 
     : undefined
   const endEntryId = message.endEntryId ?? null
   const canBranch = endEntryId != null && requestBranch != null
-  const branchLabel = t('ai.runtime.action.branchFromEntry')
+  const branchLabel = t('ai.chat.branch.fromHere')
   return (
     <section
       className={`thread-block thread-block-meta kind-${message.kind}`}

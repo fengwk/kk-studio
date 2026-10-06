@@ -26,7 +26,7 @@ import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 import '@/features/ai/chat/chat-workspace.css'
 
 const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [

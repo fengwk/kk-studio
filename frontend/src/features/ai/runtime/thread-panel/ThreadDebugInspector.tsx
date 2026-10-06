@@ -283,7 +283,7 @@ export function ThreadDebugInspector({
               </dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>{t('ai.runtime.debug.inspector.cacheAffinityKey')}</dt>
+              <dt>{t('ai.runtime.debug.inspector.cacheKey')}</dt>
               <dd>
                 {debug?.cacheControl?.key ? (
                   <code>{debug.cacheControl.key}</code>
