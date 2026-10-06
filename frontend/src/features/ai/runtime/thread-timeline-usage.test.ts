@@ -197,7 +197,7 @@ describe('Turn usage after TURN_END', () => {
         entry('aborted-1', 'ASSISTANT_ABORTED', {
           message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'partial' }] },
         }),
-        turnEnd('STOPPED'),
+        turnEnd('end-1', 'STOPPED'),
         entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
         userMessage('b'),
         entry('error-1', 'ASSISTANT_ERROR', { error: { message: 'boom' } }),
@@ -207,7 +207,17 @@ describe('Turn usage after TURN_END', () => {
       [],
     )
 
-    expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
+    // 两个回合都拿不到 assistant metadata：不得投影 usage 摘要（id 前缀 meta-usage-），
+    // 但 TURN_END 页脚 meta 仍然存在并各自携带真实 TURN_END Entry id。
+    const metas = timeline.messages.filter((message) => message.role === 'meta')
+    expect(metas.map((message) => message.id)).toEqual([
+      'meta-turn-end-end-1',
+      'meta-turn-end-end-2',
+    ])
+    expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual([
+      'end-1',
+      'end-2',
+    ])
   })
 
   it('does not leak usage from an unclosed turn into the next TURN_END', () => {
@@ -268,7 +278,10 @@ describe('Turn usage after TURN_END', () => {
       [],
       [],
     )
-    expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
+    // 全零使用量不投影 usage 摘要；TURN_END 页脚 meta 仍保留并携带真实 Entry id。
+    const metas = timeline.messages.filter((message) => message.role === 'meta')
+    expect(metas.map((message) => message.id)).toEqual(['meta-turn-end-end-1'])
+    expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
   })
 
   it('projects usage from cost aliases, string numbers, and cache aliases', () => {

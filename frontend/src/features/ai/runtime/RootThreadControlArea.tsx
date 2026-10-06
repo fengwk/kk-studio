@@ -27,6 +27,7 @@ export function RootThreadControlArea({
   messages,
   queuedMessages,
   tree,
+  hidden = false,
 }: {
   /** 执行根；null 表示尚未绑定根面板（新建草稿），不查询也不渲染交互卡片。 */
   rootThreadId: string | null
@@ -35,6 +36,11 @@ export function RootThreadControlArea({
   queuedMessages: QueuedThreadMessage[]
   /** 执行树（同一份查询）：交互来源的 Thread 名称与代理身份从这里解析。 */
   tree?: ReturnType<typeof useActiveThreadTree>
+  /**
+   * Debug 主视图激活时为真：整个输入/审批/分支控制区保持挂载但完全隐藏且惰性
+   * （草稿、上传注册表与绑定原地保留，退出 Debug 立即恢复，不重新初始化）。
+   */
+  hidden?: boolean
 }) {
   const {
     composerRef,
@@ -68,7 +74,10 @@ export function RootThreadControlArea({
     [queuedMessages],
   )
   return (
-    <div className="thread-control-area">
+    <div
+      className={hidden ? 'thread-control-area debug-hidden' : 'thread-control-area'}
+      inert={hidden}
+    >
       {rootThreadId == null
         ? null
         : <RootInteractionList rootThreadId={rootThreadId} tree={tree} />}

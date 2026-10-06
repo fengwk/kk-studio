@@ -1,5 +1,6 @@
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
+import { isCanonicalThreadName } from '@/features/ai/chat/thread-name'
 import type {
   AgentCommandTargetDTO,
   AgentCommandBatchRequestDTO,
@@ -14,7 +15,7 @@ import type {
 
 export type PaneTarget =
   | { kind: 'NEW_SESSION_DRAFT' }
-  | { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string }
+  | { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string; threadName: string }
   | { kind: 'BOUND_THREAD'; threadId: string }
 
 export type PaneTargetKind = PaneTarget['kind']
@@ -139,12 +140,13 @@ function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
       && typeof value.yoloEnabled === 'boolean'
   }
   if (value.type === 'NEW_THREAD') {
-    return keys.length === 5
+    return keys.length === 6
       && keys.every((key) => key === 'type' || key === 'sessionId' || key === 'startEntryId'
-        || key === 'threadId' || key === 'yoloEnabled')
+        || key === 'threadId' || key === 'threadName' || key === 'yoloEnabled')
       && nonBlank(value.sessionId)
       && nonBlank(value.startEntryId)
       && nonBlank(value.threadId)
+      && isCanonicalThreadName(value.threadName)
       && typeof value.yoloEnabled === 'boolean'
   }
   return false
@@ -288,10 +290,12 @@ export function isPaneTarget(value: unknown): value is PaneTarget {
     return keys.length === 1 && keys[0] === 'kind'
   }
   if (value.kind === 'NEW_THREAD_DRAFT') {
-    return keys.length === 3
-      && keys.every((key) => key === 'kind' || key === 'sessionId' || key === 'startEntryId')
+    return keys.length === 4
+      && keys.every((key) => key === 'kind' || key === 'sessionId' || key === 'startEntryId'
+        || key === 'threadName')
       && nonBlank(value.sessionId)
       && nonBlank(value.startEntryId)
+      && isCanonicalThreadName(value.threadName)
   }
   if (value.kind === 'BOUND_THREAD') {
     return keys.length === 2
@@ -313,6 +317,7 @@ export function normalizePaneTarget(value: unknown): PaneTarget {
       kind: value.kind,
       sessionId: value.sessionId.trim(),
       startEntryId: value.startEntryId.trim(),
+      threadName: value.threadName,
     }
   }
   return { kind: value.kind, threadId: value.threadId.trim() }
@@ -326,7 +331,9 @@ export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
     return true
   }
   if (left.kind === 'NEW_THREAD_DRAFT' && right.kind === 'NEW_THREAD_DRAFT') {
-    return left.sessionId === right.sessionId && left.startEntryId === right.startEntryId
+    return left.sessionId === right.sessionId
+      && left.startEntryId === right.startEntryId
+      && left.threadName === right.threadName
   }
   if (left.kind === 'BOUND_THREAD' && right.kind === 'BOUND_THREAD') {
     return left.threadId === right.threadId
@@ -340,7 +347,7 @@ export function isNewSessionTarget(target: PaneTarget): target is { kind: 'NEW_S
 
 export function isNewThreadTarget(
   target: PaneTarget,
-): target is { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string } {
+): target is { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string; threadName: string } {
   return target.kind === 'NEW_THREAD_DRAFT'
 }
 
@@ -355,7 +362,7 @@ export function targetIdentity(target: PaneTarget): string {
     return 'new-session'
   }
   if (target.kind === 'NEW_THREAD_DRAFT') {
-    return `thread-draft:${target.sessionId}:${target.startEntryId}`
+    return `thread-draft:${target.sessionId}:${target.startEntryId}:${target.threadName}`
   }
   return `thread:${target.threadId}`
 }

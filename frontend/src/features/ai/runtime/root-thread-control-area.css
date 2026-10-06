@@ -1,4 +1,10 @@
 /* 根控制区与根交互卡片：只影响 pane 输入区，不改动全局 styles.css。 */
+/* Debug 主视图下隐藏控制区（保持挂载）：display:none 与 inert 同时把它移出
+   渲染与可访问性树，草稿/上传/绑定原地保留，退出 Debug 立即恢复。 */
+.thread-control-area.debug-hidden {
+  display: none;
+}
+
 .thread-control-area {
   display: flex;
   flex-direction: column;

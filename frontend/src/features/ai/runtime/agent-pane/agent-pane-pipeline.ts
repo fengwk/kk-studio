@@ -222,6 +222,7 @@ function buildCreationTarget(target: PaneTarget, draft: BranchDraft) {
       sessionId: target.sessionId,
       startEntryId: target.startEntryId,
       threadId: createThreadId(),
+      threadName: target.threadName,
       yoloEnabled: draft.yoloEnabled,
     }
   }

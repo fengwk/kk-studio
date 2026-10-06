@@ -120,6 +120,25 @@ export interface AgentPaneDefaults {
   yoloEnabled?: boolean
 }
 
+/** 新建分支请求：命名与目标 pane 由 Chat workspace 统一持有。 */
+export interface BranchRequestInput {
+  sessionId: string
+  startEntryId: string
+  /** 触发分支的 pane 当前分支名（用于目标选择与提示）；未知时为 null。 */
+  sourceLabel: string | null
+}
+
+/**
+ * 面板运行时摘要。只用于 workspace 的目标路由（草稿确认/在途阻止）与顶栏面包屑，
+ * 不参与任何持久化，也不是跨 pane 的 storage sidechannel。
+ */
+export interface PaneReport {
+  pending: boolean
+  hasUnsentDraft: boolean
+  sessionId: string | null
+  branchName: string | null
+}
+
 export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -131,6 +150,10 @@ export interface UseRootThreadControlOptions {
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
+  /** 新建分支入口：由 Chat workspace 提供；缺失时分支动作不可用（只读/非 Chat 宿主）。 */
+  onRequestBranch?: (request: BranchRequestInput) => void
+  /** 面板运行时摘要上报；缺失时不产生任何跨 pane 通信。 */
+  onReport?: (report: PaneReport) => void
   /** 由父面板持有的 Pane 绑定目标；本 Hook 只读取并请求切换。 */
   target: PaneTarget
   setTarget: (next: PaneTarget) => void
@@ -152,6 +175,8 @@ export function useRootThreadControl({
   initialTarget,
   onTargetConsumed,
   capabilities,
+  onRequestBranch,
+  onReport,
 }: UseRootThreadControlOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -222,12 +247,19 @@ export function useRootThreadControl({
 
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
 
+  // 预览作用域：绑定的 Thread 或本地新建分支草稿（sessionId:startEntryId）。作用域
+  // 变化即作废在途预览，避免旧响应污染新的绑定/草稿。
+  const previewScope = isBoundTarget(target)
+    ? `thread:${target.threadId}`
+    : isNewThreadTarget(target)
+      ? `branch:${target.sessionId}:${target.startEntryId}:${target.threadName}`
+      : ''
   useEffect(() => {
     previewRequestIdRef.current += 1
     previewInFlightRef.current = false
     setPreviewLoading(false)
     setPreviewError(null)
-  }, [boundThreadId])
+  }, [previewScope])
   const branchPanel = useBoundBranchPanel({
     threadId: boundThreadId,
     projection,
@@ -240,6 +272,9 @@ export function useRootThreadControl({
     branchPanelRef.current = branchPanel
   })
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
+  const boundThreadName = isBoundTarget(target) && controller.thread?.threadId === target.threadId
+    ? controller.thread.name
+    : null
   const models = controller.models
 
   useEffect(() => {
@@ -395,7 +430,7 @@ export function useRootThreadControl({
     if (!isNewThreadTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
       return
     }
-    const identity = `${target.sessionId}:${target.startEntryId}`
+    const identity = `${target.sessionId}:${target.startEntryId}:${target.threadName}`
     if (initializedEntryDraftRef.current === identity) {
       return
     }
@@ -662,6 +697,23 @@ export function useRootThreadControl({
     [activeDraft, hasPendingOperation, owner, setTarget, t],
   )
 
+  /**
+   * 外部（deep-link/workspace 路由）目标应用边界：与本地切换共用同一门禁，
+   * 并在落入新建分支草稿时清空该 pane 既有的未发送输入（新分支是全新草稿）。
+   */
+  const applyExternalTarget = useCallback(
+    (next: PaneTarget): boolean => {
+      if (!changeTarget(next)) {
+        return false
+      }
+      if (next.kind === 'NEW_THREAD_DRAFT') {
+        setParts([])
+      }
+      return true
+    },
+    [changeTarget],
+  )
+
   useEffect(() => {
     if (!initialTarget) {
       return
@@ -674,10 +726,10 @@ export function useRootThreadControl({
       setActionError(t('ai.runtime.action.operationPending'))
       return
     }
-    if (changeTarget(initialTarget)) {
+    if (applyExternalTarget(initialTarget)) {
       onTargetConsumed?.(initialTarget)
     }
-  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t, target])
+  }, [applyExternalTarget, hasPendingOperation, initialTarget, onTargetConsumed, t, target])
 
   function abandonPendingAcceptance(): void {
     const pending = pendingAcceptanceRef.current
@@ -946,11 +998,73 @@ export function useRootThreadControl({
     }
   }
 
+  /**
+   * 本地新建分支草稿的预检：只调用会话级预览端点，绝不为了预览先创建 Thread。
+   * 命令批次与真正的首次提交完全一致（settings diff + USER_MESSAGE）。
+   */
+  async function previewLocalBranchDraft(
+    frozenPayload: ComposerPart[],
+    frozenLocalDraft: ComposerPart[],
+  ) {
+    if (!owner || !isNewThreadTarget(target)) {
+      return
+    }
+    const frozenTarget = target
+    const frozenBranchDraft = activeDraft ? cloneDraft(activeDraft) : null
+    const frozenBase = entryBaseDraft ? cloneDraft(entryBaseDraft) : null
+    if (!frozenBranchDraft || !frozenBase) {
+      return
+    }
+    const requestId = ++previewRequestIdRef.current
+    const requestPartsKey = partsKey(frozenLocalDraft)
+    previewInFlightRef.current = true
+    setPreviewLoading(true)
+    setPreviewError(null)
+    setActionError(null)
+    const isCurrentDraftPreview = () => isMountedRef.current
+      && previewRequestIdRef.current === requestId
+      && samePaneTarget(targetRef.current, frozenTarget)
+      && partsKey(trimMessageParts(controllerRef.current.draft)) === requestPartsKey
+    try {
+      const frozen = buildAcceptanceRequest({
+        owner,
+        target: frozenTarget,
+        draft: frozenBranchDraft,
+        base: frozenBase,
+        parts: frozenPayload,
+        localParts: frozenLocalDraft,
+      })
+      const response = await harnessService.previewBranchRequest(frozenTarget.sessionId, {
+        startEntryId: frozenTarget.startEntryId,
+        commands: frozen.request.commands,
+      })
+      if (!isCurrentDraftPreview()) {
+        return
+      }
+      if (response.kind !== 'DRAFT_REQUEST_PREVIEW') {
+        throw new Error(t('ai.runtime.debug.previewFailed'))
+      }
+      boundViewsRef.current?.selectDebugInspector({ type: 'preview', preview: response })
+    } catch (error) {
+      if (!isCurrentDraftPreview()) {
+        return
+      }
+      const msg = formatPreviewErrorMessage(error, t)
+      setPreviewError(msg)
+      setActionError(msg)
+    } finally {
+      if (isMountedRef.current && previewRequestIdRef.current === requestId) {
+        previewInFlightRef.current = false
+        setPreviewLoading(false)
+      }
+    }
+  }
+
   async function handlePreview() {
     if (capabilities?.readOnly) {
       return
     }
-    if (!isBoundTarget(target)) {
+    if (!isBoundTarget(target) && !isNewThreadTarget(target)) {
       return
     }
     if (previewInFlightRef.current || previewDisabled) {
@@ -968,6 +1082,14 @@ export function useRootThreadControl({
       return
     }
     if (slashQueryOf(frozenPayload) != null) {
+      return
+    }
+
+    if (isNewThreadTarget(target)) {
+      await previewLocalBranchDraft(frozenPayload, frozenLocalDraft)
+      return
+    }
+    if (!isBoundTarget(target)) {
       return
     }
 
@@ -1110,10 +1232,11 @@ export function useRootThreadControl({
         }
         if (capabilities?.allowNewSession === false) {
           if (currentSessionId && rootEntryId) {
-            changeTarget(
-              { kind: 'NEW_THREAD_DRAFT', sessionId: currentSessionId, startEntryId: rootEntryId },
-              activeDraft,
-            )
+            requestBranch({
+              sessionId: currentSessionId,
+              startEntryId: rootEntryId,
+              sourceLabel: boundThreadName,
+            })
             return
           }
           if (!currentSessionId) {
@@ -1200,18 +1323,39 @@ export function useRootThreadControl({
     setActionError(null)
   }
 
-  function selectEntry(entry: HarnessSessionEntryDTO): void {
-    if (!owner || capabilities?.allowBranching === false) {
+  /**
+   * 统一的“从此处分支”入口：分支名称与目标 pane 由 Chat workspace 决定，
+   * 本 pane 只请求，不本地改写自己的目标（新建 Thread 落在目标 pane）。
+   * 无 owner/无 workspace 回调（如只读宿主）时保持此前的无操作语义。
+   */
+  function requestBranch(input: BranchRequestInput): boolean {
+    if (owner == null || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
-      return
+      return false
     }
-    const draft = branchDraftFromEntry(entry, activeDraft)
-    setThreadNavigationSessionId(null)
-    changeTarget({
-      kind: 'NEW_THREAD_DRAFT',
+    // 没有 workspace 回调的宿主（只读嵌入）没有新建分支的去处，保持无操作。
+    if (onRequestBranch == null) {
+      return false
+    }
+    if (hasPendingOperation()) {
+      setActionError(t('ai.runtime.action.operationPending'))
+      return false
+    }
+    setActionError(null)
+    onRequestBranch(input)
+    return true
+  }
+
+  /** 历史树行的分叉动作：只对 ROOT / 已关闭 TURN_END 可用（面板已禁用其它行）。 */
+  function requestBranchFromEntry(entry: HarnessSessionEntryDTO): void {
+    if (requestBranch({
       sessionId: entry.sessionId,
       startEntryId: entry.entryId,
-    }, draft)
+      sourceLabel: boundThreadName,
+    })) {
+      setThreadNavigationSessionId(null)
+      setInteraction(null)
+    }
   }
 
   function selectSession(session: RuntimeSessionSummaryDTO): void {
@@ -1253,14 +1397,84 @@ export function useRootThreadControl({
     || controller.approvalPending
     || controller.replayPending
 
-  const canExposePreview = isBoundTarget(target)
+  const unsentDraft = isBoundTarget(target)
+    ? trimMessageParts(controller.draft).length > 0
+    : trimMessageParts(parts).length > 0
+  const reportSessionId = currentSessionId
+  const reportBranchName = isBoundTarget(target)
+    ? boundThreadName
+    : isNewThreadTarget(target) ? target.threadName : null
+  const onReportRef = useRef(onReport)
+  useEffect(() => {
+    onReportRef.current = onReport
+  })
+  useEffect(() => {
+    onReportRef.current?.({
+      pending,
+      hasUnsentDraft: unsentDraft,
+      sessionId: reportSessionId,
+      branchName: reportBranchName,
+    })
+  }, [pending, reportBranchName, reportSessionId, unsentDraft])
+  // 卸载时清除本 pane 的摘要，避免 workspace 依据陈旧状态路由。
+  useEffect(() => () => {
+    onReportRef.current?.({
+      pending: false,
+      hasUnsentDraft: false,
+      sessionId: null,
+      branchName: null,
+    })
+  }, [])
+
+  const canExposePreview = isBoundTarget(target) || isNewThreadTarget(target)
 
   const { previewDisabled, previewDisabledReason } = useMemo(() => {
-    if (!isBoundTarget(target)) {
+    if (!isBoundTarget(target) && !isNewThreadTarget(target)) {
       return {
         previewDisabled: true,
         previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
       }
+    }
+    if (isNewThreadTarget(target)) {
+      if (capabilities?.readOnly) {
+        return {
+          previewDisabled: true,
+          previewDisabledReason: t('ai.runtime.debug.previewDisabled.readOnly'),
+        }
+      }
+      if (pending) {
+        return {
+          previewDisabled: true,
+          previewDisabledReason: t('ai.runtime.debug.previewDisabled.busy'),
+        }
+      }
+      if (treeEntriesQuery.data == null || activeDraft == null || entryBaseDraft == null) {
+        return {
+          previewDisabled: true,
+          previewDisabledReason: t('ai.runtime.debug.previewDisabled.unsupported'),
+        }
+      }
+      if (previewLoading) {
+        return {
+          previewDisabled: true,
+          previewDisabledReason: t('ai.runtime.composer.previewLoading'),
+        }
+      }
+      if (!composerReadiness.canPreview) {
+        let draftReasonText: string = t('ai.runtime.debug.previewDisabled.emptyDraft')
+        if (composerReadiness.reason === 'SLASH_COMMAND') {
+          draftReasonText = t('ai.runtime.debug.previewDisabled.slashCommand')
+        } else if (composerReadiness.reason === 'GOAL_COMMAND') {
+          draftReasonText = t('ai.runtime.debug.previewDisabled.goalCommand')
+        } else if (composerReadiness.reason === 'UPLOADS_PENDING') {
+          draftReasonText = t('ai.runtime.debug.previewDisabled.uploading')
+        }
+        return {
+          previewDisabled: true,
+          previewDisabledReason: draftReasonText,
+        }
+      }
+      return { previewDisabled: false, previewDisabledReason: null }
     }
     if (capabilities?.readOnly) {
       return {
@@ -1322,6 +1536,9 @@ export function useRootThreadControl({
     previewLoading,
     t,
     target,
+    activeDraft,
+    entryBaseDraft,
+    treeEntriesQuery.data,
     branchPanel.branchState,
     branchPanel.effectiveBase,
   ])
@@ -1519,7 +1736,9 @@ export function useRootThreadControl({
     retryPendingMessage: controller.retryPendingMessage,
     abandonPendingMessage: controller.abandonPendingMessage,
     selectAgent,
-    selectEntry,
+    requestBranch,
+    requestBranchFromEntry,
+    boundBranchName: boundThreadName,
     selectSession,
     selectThread,
     sessionSelectionItem,

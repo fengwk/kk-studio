@@ -110,7 +110,12 @@ describe('AgentPane acceptance pipeline', () => {
     const draft = { ...baseDraft, agentName: 'coder', yoloEnabled: true }
     const entry = buildAcceptanceRequest({
       owner: { type: 'CHAT', chatId: 'chat-1' },
-      target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' },
+      target: {
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId: 's1',
+        startEntryId: 'e1',
+        threadName: 'branch-1',
+      },
       draft,
       base: baseDraft,
       parts: [createTextPart('continue')],
@@ -124,10 +129,12 @@ describe('AgentPane acceptance pipeline', () => {
       'SET_AGENT',
       'USER_MESSAGE',
     ])
+    // 名称是创建事实的一部分：必须原样出现在 NEW_THREAD target 中，绝不初建后再改名。
     expect(entry.request.target).toMatchObject({
       type: 'NEW_THREAD',
       sessionId: 's1',
       startEntryId: 'e1',
+      threadName: 'branch-1',
     })
 
     // 既有 Thread 不再伪造创建批次，必须走无 owner/target 的 thread command batch 契约。
@@ -177,7 +184,7 @@ describe('AgentPane acceptance pipeline', () => {
     ).toBe(true)
     expect(
       acceptanceCompletionApplies(
-        { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e2' },
+        { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e2', threadName: 'branch-1' },
         { target: plan.target, generation: 2 },
         2,
       ),
@@ -284,7 +291,7 @@ describe('AgentPane acceptance pipeline', () => {
       const target = kind === 'NEW_SESSION_DRAFT'
         ? { kind }
         : kind === 'NEW_THREAD_DRAFT'
-          ? { kind, sessionId: 's1', startEntryId: 'e1' }
+          ? { kind, sessionId: 's1', startEntryId: 'e1', threadName: 'branch-1' }
           : { kind, threadId: thread.threadId }
       const commands = threadCommandsForTarget(target)
       expect(commands.filter((command) => !command.disabled).map((command) => command.id))
