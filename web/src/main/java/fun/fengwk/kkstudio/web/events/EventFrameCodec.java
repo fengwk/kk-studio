@@ -24,10 +24,11 @@ import java.util.UUID;
  * 事件通道帧的严格 JSON codec：所有帧（客户端与服务端）都带 {@code version:1}；客户端帧手工字段校验（duplicate/trailing/unknown/
  * missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
- * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource}} 字段集精确；Thread/Canvas
- * resource 带 canonical UUID id，Projects 是无 id 的全局 resource。服务端帧 {@code subscribed{resource,cursor}}
- * / {@code event{resource,name,data}} / {@code resync{resource}} / {@code heartbeat} / {@code
- * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）。
+ * <p>客户端帧 {@code {version:1, type:'subscribe'|'unsubscribe', resource}} 字段集精确；Thread/Canvas/Tree
+ * resource 带 canonical UUID id，Projects/Interactions/Environments 是无 id 的全局 resource。服务端帧 {@code
+ * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
+ * {@code heartbeat} / {@code error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code
+ * 0|[1-9][0-9]*}，不超 bigint）；提示型 resource（Projects/Tree/Interactions/Environments）无持久游标，ack 恒为 0。
  */
 final class EventFrameCodec {
 
@@ -46,6 +47,9 @@ final class EventFrameCodec {
   private static final String THREAD = ResourceKind.THREAD.name().toLowerCase();
   private static final String CANVAS = ResourceKind.CANVAS.name().toLowerCase();
   private static final String PROJECTS = ResourceKind.PROJECTS.name().toLowerCase();
+  private static final String TREE = ResourceKind.TREE.name().toLowerCase();
+  private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
+  private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -96,8 +100,9 @@ final class EventFrameCodec {
     if (cursor < 0) {
       throw new IllegalArgumentException("cursor must be non-negative");
     }
-    if (resource.kind() == ResourceKind.PROJECTS && cursor != 0) {
-      throw new IllegalArgumentException("global resource cursor must be zero");
+    // 提示型资源没有持久游标：全局资源与按 key 提示的 Tree 资源 ack 恒为 0。
+    if (cursor != 0 && isHintResource(resource.kind())) {
+      throw new IllegalArgumentException("hint resource cursor must be zero");
     }
     ObjectNode node = NODES.objectNode();
     node.put("version", 1);
@@ -139,6 +144,29 @@ final class EventFrameCodec {
       ObjectNode data = NODES.objectNode();
       data.put("projectId", projectChanged.projectId().toString());
       node.set("data", data);
+    } else if (signal instanceof Signal.TreeChanged) {
+      if (resource.kind() != ResourceKind.TREE) {
+        throw new IllegalArgumentException("tree change signal requires the tree resource");
+      }
+      // 根 id 已在 resource 中，事件 data 无需重复携带。
+      node.put("name", "changed");
+      node.set("data", NODES.objectNode());
+    } else if (signal instanceof Signal.InteractionsChanged interactionsChanged) {
+      if (resource.kind() != ResourceKind.INTERACTIONS) {
+        throw new IllegalArgumentException(
+            "interactions change signal requires the interactions resource");
+      }
+      node.put("name", "changed");
+      ObjectNode data = NODES.objectNode();
+      data.put("rootThreadId", interactionsChanged.rootThreadId().toString());
+      node.set("data", data);
+    } else if (signal instanceof Signal.EnvironmentChanged) {
+      if (resource.kind() != ResourceKind.ENVIRONMENTS) {
+        throw new IllegalArgumentException(
+            "environment change signal requires the environments resource");
+      }
+      node.put("name", "changed");
+      node.set("data", NODES.objectNode());
     } else if (signal instanceof Signal.Resync) {
       throw new IllegalArgumentException("resync signal is not an event frame");
     } else {
@@ -230,22 +258,33 @@ final class EventFrameCodec {
     ObjectNode node = requireObject(value, "frame.resource");
     String kindName = requiredText(node, "kind", "frame.resource");
     if (THREAD.equals(kindName)) {
-      requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
-      return new ResourceKey(
-          ResourceKind.THREAD,
-          parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id"));
+      return new ResourceKey(ResourceKind.THREAD, resourceId(node));
     }
     if (CANVAS.equals(kindName)) {
-      requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
-      return new ResourceKey(
-          ResourceKind.CANVAS,
-          parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id"));
+      return new ResourceKey(ResourceKind.CANVAS, resourceId(node));
+    }
+    if (TREE.equals(kindName)) {
+      return new ResourceKey(ResourceKind.TREE, resourceId(node));
     }
     if (PROJECTS.equals(kindName)) {
       requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
       return new ResourceKey(ResourceKind.PROJECTS, null);
     }
-    throw new IllegalArgumentException("frame.resource.kind must be thread, canvas, or projects");
+    if (INTERACTIONS.equals(kindName)) {
+      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(ResourceKind.INTERACTIONS, null);
+    }
+    if (ENVIRONMENTS.equals(kindName)) {
+      requireExactFields(node, GLOBAL_RESOURCE_FIELDS, "frame.resource");
+      return new ResourceKey(ResourceKind.ENVIRONMENTS, null);
+    }
+    throw new IllegalArgumentException(
+        "frame.resource.kind must be thread, canvas, tree, projects, interactions, or environments");
+  }
+
+  private static UUID resourceId(ObjectNode node) {
+    requireExactFields(node, RESOURCE_FIELDS, "frame.resource");
+    return parseUuid(requiredText(node, "id", "frame.resource"), "frame.resource.id");
   }
 
   private static ObjectNode resourceNode(ResourceKey resource) {
@@ -253,12 +292,23 @@ final class EventFrameCodec {
     switch (resource.kind()) {
       case THREAD -> node.put("kind", THREAD);
       case CANVAS -> node.put("kind", CANVAS);
+      case TREE -> node.put("kind", TREE);
       case PROJECTS -> node.put("kind", PROJECTS);
+      case INTERACTIONS -> node.put("kind", INTERACTIONS);
+      case ENVIRONMENTS -> node.put("kind", ENVIRONMENTS);
     }
     if (resource.id() != null) {
       node.put("id", resource.id().toString());
     }
     return node;
+  }
+
+  /** 提示型（无持久游标）资源：ack cursor 恒为 0，只提示回读。 */
+  private static boolean isHintResource(ResourceKind kind) {
+    return kind == ResourceKind.PROJECTS
+        || kind == ResourceKind.TREE
+        || kind == ResourceKind.INTERACTIONS
+        || kind == ResourceKind.ENVIRONMENTS;
   }
 
   private static ObjectNode requireObject(JsonNode value, String field) {

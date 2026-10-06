@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
+import { readInteractionsChangedRoot, useApplicationEvents } from '@/shared/app-events'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 export interface UseInteractionsControllerResult {
@@ -22,6 +23,7 @@ export function useInteractionsController(
   limit = 20,
 ): UseInteractionsControllerResult {
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [accumulatedItems, setAccumulatedItems] = useState<InteractionDTO[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [isFetchingMore, setIsFetchingMore] = useState(false)
@@ -101,6 +103,36 @@ export function useInteractionsController(
   const scopedCursor = inScope ? nextCursor : initialPage?.nextCursor ?? null
   const scopedFetchingMore = inScope && isFetchingMore
   const scopedLoadMoreError = inScope ? loadMoreError : null
+
+  // 待处理事实（pending 进入/离开）由服务端在提交后按真实根推送：只提示回读，因此不存在轮询，
+  // 也不靠本地累加推断总数。与当前过滤范围无关的根不做无谓回读；subscribed（首订与每次重连重订阅）
+  // 与 resync 都表示本地分页可能已不是权威事实，必须回读本根。
+  useEffect(() => {
+    const invalidateScoped = () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.interactions.list(rootThreadId, null, limit),
+      })
+    }
+    return applicationEvents.subscribe(
+      { kind: 'interactions' },
+      {
+        onSubscribed: invalidateScoped,
+        onEvent: (name, data) => {
+          if (name !== 'changed') {
+            return
+          }
+          const changedRootThreadId = readInteractionsChangedRoot(data)
+          if (rootThreadId != null && changedRootThreadId !== rootThreadId) {
+            return
+          }
+          invalidateScoped()
+        },
+        onResync: () => {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all })
+        },
+      },
+    )
+  }, [applicationEvents, limit, queryClient, rootThreadId])
 
   // 恢复刷新：清空下游游标并重新拉取第一页，开启新世代
   const refresh = useCallback(async () => {

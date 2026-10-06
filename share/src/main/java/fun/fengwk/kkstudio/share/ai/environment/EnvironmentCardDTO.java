@@ -17,11 +17,18 @@ public class EnvironmentCardDTO {
   @JsonInclude(JsonInclude.Include.NON_NULL)
   private String registrationToken;
 
-  /** 当前连接状态：CONNECTING / READY / OFFLINE。 */
+  /** 当前连接状态：CONNECTING / READY / OFFLINE（租约或心跳窗口已过期的连接派生为 OFFLINE）。 */
   private String status;
 
   /** 是否就绪。 */
   private boolean ready;
+
+  /**
+   * 当前状态仍然成立的截止时间：有效连接取 {@code min(leaseUntil, lastSeen + heartbeatTimeout)}；无连接或已失效时为 null。
+   *
+   * <p>它是同一连接行事实的只读时间投影（不是被持久化的过期状态）：服务端读取时用同一时钟派生，浏览器只按它安排一次回读。
+   */
+  private Instant statusExpiresAt;
 
   /** 最近活跃时间。 */
   private Instant lastSeen;

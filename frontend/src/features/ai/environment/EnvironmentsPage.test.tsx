@@ -6,6 +6,8 @@ import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'
 import { environmentService } from '@/shared/api/environment-service'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { ApiError } from '@/shared/api/client'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -25,12 +27,15 @@ vi.mock('@/features/ai/extensions/AiNavigation', () => ({
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const sockets = new FakeWebSocketHarness()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <EnvironmentsPage />
+      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <EnvironmentsPage />
+      </ApplicationEventProvider>
     </QueryClientProvider>,
   )
-  return { queryClient, view }
+  return { queryClient, view, sockets }
 }
 
 function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO {
@@ -39,6 +44,7 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     name: 'env',
     status: 'READY',
     ready: true,
+    statusExpiresAt: null,
     lastSeen: null,
     capabilities: [],
     userName: null,
@@ -65,6 +71,20 @@ function installClipboard(): { writeText: ReturnType<typeof vi.fn> } {
   return { writeText }
 }
 
+/**
+ * 在 fake timers 下推进微任务直到条件成立。
+ *
+ * `waitFor` / `findBy*` 的超时依赖真实定时器，启用 fake timers 后会挂起，因此截止点相关用例显式按轮次推进。
+ */
+async function flushUntil(condition: () => boolean, rounds = 20): Promise<void> {
+  for (let round = 0; round < rounds && !condition(); round += 1) {
+    await act(async () => {
+      // 同时清空微任务队列并执行零延迟定时器（react-query 的读取完成与提交调度都在其中）。
+      await vi.advanceTimersByTimeAsync(0)
+    })
+  }
+}
+
 describe('EnvironmentsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -81,6 +101,7 @@ describe('EnvironmentsPage', () => {
         homeDirectory: '/home/dev',
         status: 'READY',
         ready: true,
+        statusExpiresAt: '2026-07-20T01:03:03.000Z',
         lastSeen: '2026-07-20T01:02:03.000Z',
         capabilities: [{ id: 'process.exec', version: '2' }],
         version: '1',
@@ -94,6 +115,7 @@ describe('EnvironmentsPage', () => {
         homeDirectory: '/srv/operations',
         status: 'READY',
         ready: false,
+        statusExpiresAt: null,
         lastSeen: '2026-07-19T00:00:00.000Z',
         capabilities: [],
         version: '1',
@@ -107,6 +129,7 @@ describe('EnvironmentsPage', () => {
         homeDirectory: null,
         status: 'CONNECTING',
         ready: false,
+        statusExpiresAt: '2026-07-20T00:01:00.000Z',
         lastSeen: null,
         capabilities: [],
         version: '1',
@@ -156,6 +179,33 @@ describe('EnvironmentsPage', () => {
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
   })
 
+  it('refetches the registry on a committed environment change event instead of polling', async () => {
+    // 测试意图：环境事实（注册表/租约）变化只由服务端事件提示回读：一次 changed 恰好触发一次权威回读，
+    // 因此页面不需要固定轮询就能保持状态闭环。
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'local-dev' }),
+    ])
+    const { sockets } = renderPage()
+    expect(await screen.findByText('local-dev')).toBeInTheDocument()
+    expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+    const socket = sockets.openLatest()
+
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-2', name: 'fresh-box' }),
+    ])
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'environments' },
+        name: 'changed',
+        data: {},
+      })
+    })
+
+    expect(await screen.findByText('fresh-box')).toBeInTheDocument()
+    expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+  })
+
   it('creates an environment and opens installation settings without showing credentials', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
@@ -165,6 +215,7 @@ describe('EnvironmentsPage', () => {
       registrationToken: 'secret-token-12345',
       status: 'CONNECTING',
       ready: false,
+      statusExpiresAt: null,
       lastSeen: null,
       capabilities: [],
       userName: null,
@@ -435,5 +486,153 @@ describe('EnvironmentsPage', () => {
     expect(within(errorCard).getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
     expect(within(cleanCard).queryByText('SKILL_SYNC_FAILED')).not.toBeInTheDocument()
     expect(within(cleanCard).queryByText('ERROR')).not.toBeInTheDocument()
+  })
+
+  /**
+   * 测试意图：连接失效是时间事实，页面只按权威数据里最早的 statusExpiresAt 排一次回读，
+   * 既不在截止点之前提前回读，也不在之后退化为轮询。
+   */
+  it('rechecks once at the earliest lease deadline instead of polling', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'later-box', statusExpiresAt: '2026-07-20T00:01:00.000Z' }),
+        environment({ id: 'env-2', name: 'sooner-box', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+      ])
+      renderPage()
+      await flushUntil(() => screen.queryByText('later-box') != null)
+      expect(screen.getByText('later-box')).toBeInTheDocument()
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+
+      // 最早的截止点之前不得回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(9000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+
+      // 越过最早截止点（含容差）后只回读一次；更晚的截止点不产生第二次。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+
+      // 之后不再有任何定时回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 测试意图：心跳续租会把截止点推后；页面必须取消旧定时器并按新截止点重排，而不是在旧截止点提前回读。
+   */
+  it('cancels and rearms the deadline when a committed change renews the lease', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+      ])
+      const { sockets } = renderPage()
+      await flushUntil(() => screen.queryByText('local-dev') != null)
+      expect(screen.getByText('local-dev')).toBeInTheDocument()
+      const socket = sockets.openLatest()
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+
+      // 续租提交后推送 changed：权威数据把截止点推后 70s。
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:01:10.000Z' }),
+      ])
+      await act(async () => {
+        socket.emitServer({
+          type: 'event',
+          resource: { kind: 'environments' },
+          name: 'changed',
+          data: {},
+        })
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+
+      // 旧的截止点已被取消：越过它不产生回读。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+
+      // 新截止点到达后恰好回读一次。
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 测试意图：Daemon 静默死亡（无断开事件）时只由租约截止点触发一次回读，
+   * 回读得到 OFFLINE（statusExpiresAt 为空）后不再排新的回读。
+   */
+  it('stops re-reading after a silent lease expiry', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'dying-box', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+      ])
+      renderPage()
+      await flushUntil(() => screen.queryByText('dying-box') != null)
+      expect(screen.getByText('dying-box')).toBeInTheDocument()
+
+      // 静默死亡：没有关闭帧，只有服务端在租约结束后派生的 OFFLINE。
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({
+          id: 'env-1',
+          name: 'dying-box',
+          status: 'OFFLINE',
+          ready: false,
+          statusExpiresAt: null,
+        }),
+      ])
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(11000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+      expect(screen.getByText('OFFLINE')).toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /** 测试意图：卸载必须清掉待触发的回读定时器，页面离开后不再有环境回读。 */
+  it('clears the pending deadline timer on unmount', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+      ])
+      const { view } = renderPage()
+      await flushUntil(() => screen.queryByText('local-dev') != null)
+      expect(screen.getByText('local-dev')).toBeInTheDocument()
+
+      view.unmount()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000)
+      })
+      expect(vi.mocked(environmentService.listEnvironments)).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

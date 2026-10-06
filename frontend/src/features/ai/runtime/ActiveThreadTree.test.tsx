@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -6,6 +7,8 @@ import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
 import { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/harness-service', () => ({
@@ -46,16 +49,41 @@ function TreeHarness({ rootId, currentThreadId }: { rootId: string; currentThrea
 
 function renderTree(rootId: string, currentThreadId?: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const sockets = new FakeWebSocketHarness()
   return {
     queryClient,
+    sockets,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
-        </MemoryRouter>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <MemoryRouter>
+            <TreeHarness rootId={rootId} currentThreadId={currentThreadId} />
+          </MemoryRouter>
+        </ApplicationEventProvider>
       </QueryClientProvider>,
     ),
   }
+}
+
+function TreePane({ rootId }: { rootId: string }) {
+  return <ActiveThreadTree tree={useActiveThreadTree(rootId)} />
+}
+
+/** 常驻 Provider 的可增删面板床：wire 订阅只随面板增减变化，Provider 断开不是释放路径。 */
+function RefcountHarness({ rootId }: { rootId: string }) {
+  const [panes, setPanes] = useState(2)
+  return (
+    <div>
+      <button type="button" onClick={() => setPanes(1)}>
+        remove-pane
+      </button>
+      <button type="button" onClick={() => setPanes(0)}>
+        remove-all-panes
+      </button>
+      {panes >= 1 ? <TreePane rootId={rootId} /> : null}
+      {panes >= 2 ? <TreePane rootId={rootId} /> : null}
+    </div>
+  )
 }
 
 /** 执行树读取失败/加载中都不许出现“没有活跃”这类断言式空态。 */
@@ -90,18 +118,38 @@ describe('ActiveThreadTree', () => {
     expect(screen.getByText('1 个活跃')).toBeInTheDocument()
   })
 
-  it('stays hidden with no active descendants but keeps polling the execution root', async () => {
+  it('stays hidden with no active descendants and refreshes on the root tree change event', async () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, true, 'root'),
       treeNode(IDLE_ID, ROOT_ID, false, 'idle-child'),
     ])
 
-    const { container } = renderTree(ROOT_ID)
+    const { container, sockets } = renderTree(ROOT_ID)
 
     await waitFor(() => {
       expect(harnessService.getThreadTree).toHaveBeenCalledWith(ROOT_ID)
     })
     expect(container.querySelector('.thread-widget-panel')).toBeNull()
+    const socket = sockets.openLatest()
+
+    // 子代理写入由服务端聚合到真实执行根后推送：changed 只提示回读该根，不需要固定轮询。
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, true, 'root'),
+      treeNode(IDLE_ID, ROOT_ID, false, 'idle-child'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'tree', id: ROOT_ID },
+        name: 'changed',
+        data: {},
+      })
+    })
+
+    expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(screen.getByText('1 个活跃')).toBeInTheDocument()
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
   })
 
   it('intercepts ordinary row clicks through the pane navigation provider', async () => {
@@ -111,13 +159,16 @@ describe('ActiveThreadTree', () => {
     ])
     const observe = vi.fn()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <ThreadNavigationContext.Provider value={observe}>
-            <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
-          </ThreadNavigationContext.Provider>
-        </MemoryRouter>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <MemoryRouter>
+            <ThreadNavigationContext.Provider value={observe}>
+              <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
+            </ThreadNavigationContext.Provider>
+          </MemoryRouter>
+        </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 
@@ -194,5 +245,145 @@ describe('ActiveThreadTree', () => {
     ])
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByRole('link', { name: /worker/ })
+  })
+
+  /** fake timers 下 waitFor/findBy 的超时依赖真实定时器会挂起，这里显式清空零延迟定时器与微任务。 */
+  async function flushApplicationEvents(): Promise<void> {
+    for (let round = 0; round < 5; round += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+  }
+
+  /** wire 上的 subscribe/unsubscribe 在 open/释放后的微任务里发送：断言前必须先清空微任务。 */
+  async function flushMicrotasks(): Promise<void> {
+    for (let round = 0; round < 5; round += 1) {
+      await act(async () => {
+        await Promise.resolve()
+      })
+    }
+  }
+
+  it('reads back the root tree when a reconnect re-subscribes and acks', async () => {
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, true, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
+    const { sockets } = renderTree(ROOT_ID)
+    await screen.findByRole('link', { name: /worker/ })
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    const first = sockets.openLatest()
+    expect(first.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ])
+
+    // 断线后管理器按退避重连：重连必须重新订阅同一执行根，并在服务端 ack 后回读，
+    // 否则面板会永远停在断线前的执行树状态。
+    vi.useFakeTimers()
+    try {
+      first.closeWith()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+      expect(sockets.sockets).toHaveLength(2)
+      // openLatest() 已经完成 open：重连后管理器必须重新订阅同一执行根。
+      const reconnected = sockets.openLatest()
+      await flushApplicationEvents()
+      expect(reconnected.sentMessages()).toEqual([
+        { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      ])
+
+      act(() => {
+        reconnected.emitServer({
+          type: 'subscribed',
+          resource: { kind: 'tree', id: ROOT_ID },
+          cursor: '0',
+        })
+      })
+      await flushApplicationEvents()
+      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads back the root tree on resync', async () => {
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, true, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
+    const { sockets } = renderTree(ROOT_ID)
+    await screen.findByRole('link', { name: /worker/ })
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    const socket = sockets.openLatest()
+
+    // resync 表示服务端要求整体回读：此时不能装作本地状态仍然权威。
+    act(() => {
+      socket.emitServer({ type: 'resync', resource: { kind: 'tree', id: ROOT_ID } })
+    })
+    await waitFor(() => {
+      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('refcounts panes on one root and ignores events after the last release', async () => {
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, true, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const sockets = new FakeWebSocketHarness()
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <MemoryRouter>
+            <RefcountHarness rootId={ROOT_ID} />
+          </MemoryRouter>
+        </ApplicationEventProvider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: /worker/ })).toHaveLength(2)
+    })
+    // 同一执行根上的两个面板只有一条 wire 订阅与一次权威回读。
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    const socket = sockets.openLatest()
+    await flushMicrotasks()
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ])
+
+    // 释放一个面板：仍有消费者，wire 订阅不拆，也不产生多余回读。
+    fireEvent.click(screen.getByRole('button', { name: 'remove-pane' }))
+    await flushMicrotasks()
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ])
+
+    // 末次释放拆掉 wire 订阅；此后的迟到事件不得触发任何回读。
+    fireEvent.click(screen.getByRole('button', { name: 'remove-all-panes' }))
+    await flushMicrotasks()
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 1, type: 'unsubscribe', resource: { kind: 'tree', id: ROOT_ID } },
+    ])
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'tree', id: ROOT_ID },
+        name: 'changed',
+        data: {},
+      })
+    })
+    await flushMicrotasks()
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+
+    // Provider 卸载即断开唯一连接：之后不再有任何 wire 消费者。
+    unmount()
+    expect(socket.closed).toBe(true)
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
   })
 })

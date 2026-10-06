@@ -141,7 +141,11 @@ class FreshInstallSchemaContractTest {
       List.of(
           "trg_canvas_document_revision_notify",
           "trg_canvas_function_work_notify",
+          "trg_environment_connection_changed",
+          "trg_environment_registry_changed",
+          "trg_harness_thread_tree_notify",
           "trg_harness_thread_version_notify",
+          "trg_harness_tool_invocation_interaction_notify",
           "trg_project_issue_work_due",
           "trg_skill_package_changed",
           "trg_system_setting_version_notify");

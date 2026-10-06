@@ -9,6 +9,8 @@ import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-tes
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 vi.mock('@/shared/api/system-settings-service', () => ({
   systemSettingsService: { get: vi.fn(), getSchema: vi.fn(), update: vi.fn() },
@@ -39,17 +41,21 @@ describe('settings extension architecture', () => {
     const host = new ExtensionHost()
     host.register(settingsExtension)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    // WorkbenchShell 通过唯一应用事件连接读取全局 pending：测试注入替身 WebSocket。
+    const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ExtensionHostProvider host={host}>
-          <BrowserPreferencesProvider>
-            <MemoryRouter initialEntries={['/settings']}>
-              <Routes>
-                <Route path="/*" element={<WorkbenchShell navItems={[]} />} />
-              </Routes>
-            </MemoryRouter>
-          </BrowserPreferencesProvider>
-        </ExtensionHostProvider>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <ExtensionHostProvider host={host}>
+            <BrowserPreferencesProvider>
+              <MemoryRouter initialEntries={['/settings']}>
+                <Routes>
+                  <Route path="/*" element={<WorkbenchShell navItems={[]} />} />
+                </Routes>
+              </MemoryRouter>
+            </BrowserPreferencesProvider>
+          </ExtensionHostProvider>
+        </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 

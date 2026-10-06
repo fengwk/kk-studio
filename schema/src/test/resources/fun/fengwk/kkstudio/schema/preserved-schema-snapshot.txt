@@ -498,6 +498,10 @@ table	storage_blob		preserved
 table	storage_object_cleanup		preserved
 table	storage_upload		preserved
 table	system_setting		preserved
+trigger	environment	trg_environment_registry_changed	CREATE TRIGGER trg_environment_registry_changed AFTER INSERT OR DELETE OR UPDATE ON public.environment FOR EACH ROW EXECUTE FUNCTION environment_registry_changed_notify() enabled=O
+trigger	environment_connection	trg_environment_connection_changed	CREATE TRIGGER trg_environment_connection_changed AFTER INSERT OR DELETE OR UPDATE ON public.environment_connection FOR EACH ROW EXECUTE FUNCTION environment_connection_changed_notify() enabled=O
+trigger	harness_thread	trg_harness_thread_tree_notify	CREATE TRIGGER trg_harness_thread_tree_notify AFTER INSERT OR UPDATE OF version ON public.harness_thread FOR EACH ROW EXECUTE FUNCTION harness_thread_tree_notify() enabled=O
 trigger	harness_thread	trg_harness_thread_version_notify	CREATE TRIGGER trg_harness_thread_version_notify AFTER INSERT OR UPDATE OF version ON public.harness_thread FOR EACH ROW EXECUTE FUNCTION harness_thread_version_notify() enabled=O
+trigger	harness_tool_invocation	trg_harness_tool_invocation_interaction_notify	CREATE TRIGGER trg_harness_tool_invocation_interaction_notify AFTER INSERT OR DELETE OR UPDATE ON public.harness_tool_invocation FOR EACH ROW EXECUTE FUNCTION harness_tool_interaction_notify() enabled=O
 trigger	skill_package	trg_skill_package_changed	CREATE TRIGGER trg_skill_package_changed AFTER INSERT OR DELETE OR UPDATE ON public.skill_package FOR EACH ROW EXECUTE FUNCTION skill_package_changed_notify() enabled=O
 trigger	system_setting	trg_system_setting_version_notify	CREATE TRIGGER trg_system_setting_version_notify AFTER INSERT OR UPDATE OF version ON public.system_setting FOR EACH ROW EXECUTE FUNCTION system_setting_version_notify() enabled=O
