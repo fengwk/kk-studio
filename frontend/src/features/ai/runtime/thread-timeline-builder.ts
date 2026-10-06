@@ -25,12 +25,28 @@ import {
   projectToolResultContent,
   type EntryProjectionContext,
 } from '@/features/ai/runtime/thread-timeline/entry-projection'
+import { projectCompactionEntry } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
 import { contentText } from '@/features/ai/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
 
 /** 仍在 mailbox 中排队的人类输入类型；NOTIFICATION / CUSTOM_MESSAGE 是系统事实与编排产物。 */
 const HUMAN_INPUT_COMMAND_TYPES = new Set(['USER_MESSAGE', 'GOAL'])
+
+/**
+ * 压缩回合的挂起状态：FULL / TURN_PREFIX 的完整成功才产生卡片。
+ * HISTORY 只是中间 partial，失败/取消/未关闭回合同样不产生卡片。
+ */
+interface CompactionTurnContext {
+  startEntryId: string
+  phase: string
+  summaryEntry: HarnessSessionEntryDTO | null
+  summaryText: string
+}
+
+function isSuccessfulCompactionPhase(phase: string): boolean {
+  return phase === 'FULL' || phase === 'TURN_PREFIX'
+}
 
 /**
  * Thread transcript 投影：
@@ -57,18 +73,49 @@ export function buildThreadTimeline(
   let hasPendingInputs = false
   let inCompactionTurn = false
   let latestTurnIsCompaction = false
+  // 压缩回合的最小挂起上下文：只在回合内累积，成功关闭时才发射一张摘要卡片。
+  let compactionTurn: CompactionTurnContext | null = null
 
   for (const entry of entries) {
     if (entry.entryType === 'TURN_START') {
       const payload = asRecord(parsePayload(entry.payloadJson))
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
       inCompactionTurn = latestTurnIsCompaction
+      compactionTurn = latestTurnIsCompaction
+        ? {
+            startEntryId: entry.entryId,
+            phase: getString(asRecord(payload.compaction).phase),
+            summaryEntry: null,
+            summaryText: '',
+          }
+        : null
       projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
       continue
     }
     if (inCompactionTurn) {
-      if (entry.entryType === 'TURN_END') {
+      if (entry.entryType === 'COMPACTION') {
+        const summaryText = getString(asRecord(parsePayload(entry.payloadJson)).summaryText)
+        if (compactionTurn != null && summaryText.trim() !== '') {
+          // 只保留最后一次仍是唯一结果；原回合的内流/思考/usage 继续屏蔽。
+          compactionTurn.summaryEntry = entry
+          compactionTurn.summaryText = summaryText
+        }
+      } else if (entry.entryType === 'TURN_END') {
+        const payload = asRecord(parsePayload(entry.payloadJson))
+        if (
+          compactionTurn != null
+          && compactionTurn.summaryEntry != null
+          && isSuccessfulCompactionPhase(compactionTurn.phase)
+          && getString(payload.turnStartEntryId) === compactionTurn.startEntryId
+          && getString(payload.outcome) === 'COMPLETED'
+        ) {
+          // 卡片留在原压缩回合的位置（此前对话之后、后续对话之前），与切点无关。
+          messages.push(
+            projectCompactionEntry(compactionTurn.summaryEntry, compactionTurn.summaryText),
+          )
+        }
         inCompactionTurn = false
+        compactionTurn = null
       }
       continue
     }

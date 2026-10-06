@@ -1,4 +1,5 @@
 import { CircleDot, FileWarning } from 'lucide-react'
+import { CompactionEntryBlock } from '@/features/ai/runtime/thread-panel/messages/CompactionEntryBlock'
 import { NotificationEntryBlock } from '@/features/ai/runtime/thread-panel/messages/NotificationEntryBlock'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
@@ -7,6 +8,9 @@ import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-tim
  * 而不是 Harness DTO、controller 或 query state。
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
+  if (message.kind === 'compaction') {
+    return <CompactionEntryBlock message={message} />
+  }
   if (message.kind === 'notification') {
     return (
       <NotificationEntryBlock
