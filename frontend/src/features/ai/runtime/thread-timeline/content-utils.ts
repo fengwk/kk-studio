@@ -4,6 +4,7 @@ import type {
   ToolAttachmentType,
   ToolContent,
   TurnUsage,
+  UsageCost,
 } from '@/features/ai/runtime/thread-timeline-types'
 import { apiBaseUrl } from '@/shared/api/client'
 
@@ -233,45 +234,162 @@ export function formatCompactTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`
 }
 
-/**
- * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取完整 usage/cost。
- * 字段名以 harness 持久 codec 为准（camelCase），并容忍常见别名。
- */
-export function parseAssistantUsage(metadata: Record<string, unknown>): TurnUsage | null {
-  const usage = asRecord(metadata.usage)
-  const costNode = metadata.cost
-  const input = numberField(usage, 'inputTokens', 'input_tokens', 'promptTokens')
-  const output = numberField(usage, 'outputTokens', 'output_tokens', 'completionTokens')
-  const cacheRead = numberField(
-    usage,
-    'cacheReadTokens',
-    'cache_read_tokens',
-    'cacheRead',
-    'cachedTokens',
-  )
-  const cacheWrite =
-    numberField(usage, 'cacheWriteTokens', 'cache_write_tokens', 'cacheWrite')
-    + numberField(usage, 'cacheWriteLongTokens', 'cache_write_long_tokens', 'cacheWriteLong')
-  const reasoning = numberField(usage, 'reasoningTokens', 'reasoning_tokens')
-  const providerTotal = numberField(
-    usage,
-    'providerTotalTokens',
-    'provider_total_tokens',
-    'totalTokens',
-  )
-  let cost = 0
-  if (typeof costNode === 'number' && Number.isFinite(costNode)) {
-    cost = costNode
-  } else if (typeof costNode === 'string' && costNode.trim()) {
-    const parsed = Number(costNode)
-    if (Number.isFinite(parsed)) {
-      cost = parsed
-    }
-  } else if (costNode && typeof costNode === 'object') {
-    cost = numberField(asRecord(costNode), 'total', 'amount', 'usd')
-  }
+/** 读取投影的精确十进制文本：可选整数、可选小数，非负（后端金额不允许为负）。 */
+const DECIMAL_PATTERN = /^\+?(\d+)(?:\.(\d+))?$/
 
-  // decodeDurationMillis 是 harness 新持久字段，无历史包袱：只接受 backend 形态的安全整数 > 0。
+interface DecimalParts {
+  int: string
+  frac: string
+}
+
+function parseDecimal(value: string): DecimalParts | null {
+  const match = DECIMAL_PATTERN.exec(value.trim())
+  if (match == null) {
+    return null
+  }
+  return { int: match[1]!, frac: match[2] ?? '' }
+}
+
+/**
+ * 两个十进制文本的精确求和（BigInt 对齐小数位，无浮点误差）。
+ * 任一输入非法时返回 null，绝不用近似值兜底。
+ */
+export function addDecimalStrings(left: string, right: string): string | null {
+  const a = parseDecimal(left)
+  const b = parseDecimal(right)
+  if (a == null || b == null) {
+    return null
+  }
+  const scale = Math.max(a.frac.length, b.frac.length)
+  const sum =
+    BigInt(a.int + a.frac.padEnd(scale, '0')) + BigInt(b.int + b.frac.padEnd(scale, '0'))
+  const digits = sum.toString().padStart(scale + 1, '0')
+  if (scale === 0) {
+    return digits
+  }
+  const intPart = digits.slice(0, digits.length - scale)
+  const fracPart = digits.slice(digits.length - scale).replace(/0+$/, '')
+  return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
+/** 费用展示阈值（1e-6）：精确金额落在 (0, 1e-6) 时展示为该下界，而不是伪造成 0 或夸大成 0.000001。 */
+export const COST_DISPLAY_THRESHOLD = '0.000001'
+
+/**
+ * 精确十进制金额与阈值 1e-6 的比较：>0 大于、0 相等（含精确 0）、<0 小于、null 非法。
+ * 用 BigInt 对齐小数位，不做任何浮点近似。
+ */
+function compareDecimalToThreshold(amount: string): number | null {
+  const parts = parseDecimal(amount)
+  if (parts == null) {
+    return null
+  }
+  const scale = Math.max(parts.frac.length, 6)
+  const value = BigInt(parts.int + parts.frac.padEnd(scale, '0'))
+  if (value === 0n) {
+    return 0
+  }
+  return value < 10n ** BigInt(scale - 6) ? -1 : 1
+}
+
+/**
+ * 十进制金额的数值展示文本：统一四舍五入到最多 6 位小数并去掉尾随 0。
+ * 只负责数值部分（不含货币与阈值下界）；非法输入返回 null。
+ */
+export function formatDecimalAmount(amount: string): string | null {
+  const parts = parseDecimal(amount)
+  if (parts == null) {
+    return null
+  }
+  // 保留 6 位展示 + 1 位用于 HALF_UP 进位。
+  const padded = (parts.frac + '0000000').slice(0, 7)
+  let scaled = BigInt(parts.int + padded.slice(0, 6))
+  if (padded[6] != null && padded[6] >= '5') {
+    scaled += 1n
+  }
+  const digits = scaled.toString().padStart(7, '0')
+  const intPart = digits.slice(0, digits.length - 6)
+  const fracPart = digits.slice(digits.length - 6).replace(/0+$/, '')
+  return fracPart ? `${intPart}.${fracPart}` : intPart
+}
+
+const CURRENCY_SYMBOLS: Record<string, string | undefined> = {
+  USD: '$',
+  CNY: '¥',
+  EUR: '€',
+  GBP: '£',
+}
+
+/** 货币展示前缀：常见币种用符号，其余用 "CODE "。 */
+function currencyPrefix(currency: string): string {
+  const symbol = CURRENCY_SYMBOLS[currency]
+  return symbol == null ? `${currency} ` : symbol
+}
+
+/**
+ * 读取投影 -> 展示文本；null 表示无可用定价（绝不显示成 $0）。
+ * 精确金额落在 (0, 1e-6) 时展示 `<$0.000001`："<" 在货币符号/代码之前。
+ */
+export function formatUsageCost(cost: UsageCost | null): string | null {
+  if (cost == null || !cost.currency.trim()) {
+    return null
+  }
+  const order = compareDecimalToThreshold(cost.amount)
+  if (order == null) {
+    return null
+  }
+  const prefix = currencyPrefix(cost.currency)
+  if (order < 0) {
+    return `<${prefix}${COST_DISPLAY_THRESHOLD}`
+  }
+  const amount = formatDecimalAmount(cost.amount)
+  return amount == null ? null : `${prefix}${amount}`
+}
+
+/** 校验后端 usageCost 读取投影；currency/amount 任一非法即视为无定价。 */
+export function normalizeUsageCost(value: unknown): UsageCost | null {
+  const record = asRecord(value)
+  const currency = getString(record.currency).trim()
+  const amount = getString(record.amount).trim()
+  if (!currency || parseDecimal(amount) == null) {
+    return null
+  }
+  return { currency, amount }
+}
+
+/**
+ * 合并两次调用的读取投影费用。
+ * 缺失（未定价）或跨币种时返回 null：绝不给出误导性的完整总额，也绝不伪造成 $0。
+ */
+export function mergeUsageCost(left: UsageCost | null, right: UsageCost | null): UsageCost | null {
+  if (left == null || right == null || left.currency !== right.currency) {
+    return null
+  }
+  const amount = addDecimalStrings(left.amount, right.amount)
+  return amount == null ? null : { currency: left.currency, amount }
+}
+
+/**
+ * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取 provider usage。
+ *
+ * 只接受 harness 持久 codec 的 canonical 字段名，不兼容 snake_case / 常见别名；
+ * 费用来自 Entry 的 usageCost 读取投影，绝不从 metadata.cost 自行定价。
+ */
+export function parseAssistantUsage(
+  metadata: Record<string, unknown>,
+  usageCost: unknown = null,
+): TurnUsage | null {
+  const usage = asRecord(metadata.usage)
+  const input = numberField(usage, 'inputTokens')
+  const output = numberField(usage, 'outputTokens')
+  const cacheRead = numberField(usage, 'cacheReadTokens')
+  const cacheWrite =
+    numberField(usage, 'cacheWriteTokens') + numberField(usage, 'cacheWriteLongTokens')
+  const reasoning = numberField(usage, 'reasoningTokens')
+  const providerTotal = numberField(usage, 'providerTotalTokens')
+  const cost = normalizeUsageCost(usageCost)
+
+  // decodeDurationMillis 是 harness 持久字段：只接受 backend 形态的安全整数 > 0。
   // 小数、Infinity、超安全整数、字符串以及 snake_case 别名一律视为无效（null）。
   const decodeDurationMillis =
     typeof metadata.decodeDurationMillis === 'number'
@@ -289,7 +407,7 @@ export function parseAssistantUsage(metadata: Record<string, unknown>): TurnUsag
     && cacheWrite <= 0
     && reasoning <= 0
     && providerTotal <= 0
-    && cost <= 0
+    && cost == null
     && decodeDurationMillis == null
   ) {
     return null
@@ -359,7 +477,8 @@ export function calculateDecodeTokensPerSecond(usage: {
 
 /**
  * 合并同一 Turn 内多个 ASSISTANT 调用的 Usage。
- * 消耗累加；最新一次调用上下文覆盖 contextInputTokens；测速样本仅累加有效样本分子与分母。
+ * 消耗累加；费用按精确十进制求和（缺失或跨币种 -> null）；最新一次调用上下文覆盖
+ * contextInputTokens；测速样本仅累加有效样本分子与分母。
  */
 export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage {
   const input = existing.input + next.input
@@ -368,7 +487,7 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
   const cacheWrite = existing.cacheWrite + next.cacheWrite
   const reasoning = existing.reasoning + next.reasoning
   const providerTotal = existing.providerTotal + next.providerTotal
-  const cost = existing.cost + next.cost
+  const cost = mergeUsageCost(existing.cost, next.cost)
   const contextInputTokens = next.contextInputTokens ?? existing.contextInputTokens ?? null
 
   let decodeTokens: number | null = null
@@ -401,8 +520,9 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
 
 /**
  * Turn usage 摘要文本（Conversation TurnSummary、Event TURN_END 与 Footer 共用）：
- * `↑input · ↓output · RcacheRead · WcacheWrite · $cost · cache N% · X tok/s`。
- * 缺失/为零的 cacheRead/cacheWrite 缩写省略，分母为 0 显示 cache —，无测速样本显示 — tok/s。
+ * `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N% · X tok/s`。
+ * 缺失/为零的 cacheRead/cacheWrite 缩写省略，分母为 0 显示 cache —，无测速样本显示 — tok/s，
+ * 无可用定价显示 —（绝不伪造成 $0）。
  * 统计项分隔符统一为 U+00B7，Footer 只在其外层使用 U+2223 分组，不覆盖本函数。
  */
 export function formatTurnUsageText(usage: {
@@ -410,7 +530,7 @@ export function formatTurnUsageText(usage: {
   output: number
   cacheRead: number
   cacheWrite: number
-  cost: number
+  cost: UsageCost | null
   decodeTokens?: number | null
   decodeDurationMillis?: number | null
 }): string {
@@ -424,7 +544,7 @@ export function formatTurnUsageText(usage: {
   if (usage.cacheWrite > 0) {
     parts.push(`W${formatCompactTokens(usage.cacheWrite)}`)
   }
-  parts.push(`$${usage.cost.toFixed(3)}`)
+  parts.push(formatUsageCost(usage.cost) ?? '—')
   const cacheHitRate = calculateCacheHitRate(usage)
   parts.push(cacheHitRate != null ? `cache ${cacheHitRate}%` : 'cache —')
   const speed = calculateDecodeTokensPerSecond(usage)

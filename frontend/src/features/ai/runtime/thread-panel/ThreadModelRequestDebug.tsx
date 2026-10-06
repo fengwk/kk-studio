@@ -122,8 +122,8 @@ export function ThreadModelRequestDebug({
       return t('ai.runtime.debug.cacheRetention.none')
     }
     const retentionText = formatCacheRetention(debug.cacheControl.retention, t)
-    if (debug.cacheControl.affinityKey) {
-      return `${retentionText} (${debug.cacheControl.affinityKey})`
+    if (debug.cacheControl.key) {
+      return `${retentionText} (${debug.cacheControl.key})`
     }
     return retentionText
   }, [debug.cacheControl, t])
