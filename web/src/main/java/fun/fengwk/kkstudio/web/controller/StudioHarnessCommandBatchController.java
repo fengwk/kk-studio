@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -58,6 +59,9 @@ public class StudioHarnessCommandBatchController {
               }
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
+              if (command.target() instanceof AcceptCommandsTarget.NewThread fork) {
+                ManualThreadControlGuard.requireForkRootSession(runtime, fork.sessionId());
+              }
               AcceptedCommands accepted = acceptanceService.accept(owner, command);
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
               return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);

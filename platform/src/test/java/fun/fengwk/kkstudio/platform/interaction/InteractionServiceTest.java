@@ -18,6 +18,7 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
@@ -58,6 +59,9 @@ class InteractionServiceTest {
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
+    // 默认：任意存在的 Thread 自身即执行根（链含自身）；后代/不存在场景在具体测试中覆盖该 stub。
+    when(runtime.findAncestorChain(any()))
+        .thenAnswer(invocation -> List.of(invocation.<UUID>getArgument(0)));
     service =
         new InteractionService(
             issueAgentThreadRepository, issueRepository, projectRepository, runtimes);
@@ -74,6 +78,7 @@ class InteractionServiceTest {
     UUID projectId = id(300);
 
     IssueAgentThread binding = new IssueAgentThread(issueId, "coder", threadId);
+    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
     when(issueAgentThreadRepository.findByThreadId(threadId)).thenReturn(binding);
 
     Issue initialIssue = Issue.builder().id(issueId).projectId(projectId).build();
@@ -96,6 +101,7 @@ class InteractionServiceTest {
     assertSame(expectedAcceptance, actual);
 
     InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
+    inOrder.verify(runtime).findAncestorChain(threadId);
     inOrder.verify(issueRepository).getById(issueId);
     inOrder.verify(projectRepository).lockForKeyShare(projectId);
     inOrder.verify(issueRepository).lockById(issueId);
@@ -114,6 +120,7 @@ class InteractionServiceTest {
     UUID projectId = id(300);
 
     IssueAgentThread binding = new IssueAgentThread(issueId, "reviewer", threadId);
+    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
     when(issueAgentThreadRepository.findByThreadId(threadId)).thenReturn(binding);
 
     Issue initialIssue = Issue.builder().id(issueId).projectId(projectId).build();
@@ -136,10 +143,51 @@ class InteractionServiceTest {
     assertSame(expectedInvocation, actual);
 
     InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
+    inOrder.verify(runtime).findAncestorChain(threadId);
     inOrder.verify(issueRepository).getById(issueId);
     inOrder.verify(projectRepository).lockForKeyShare(projectId);
     inOrder.verify(issueRepository).lockById(issueId);
     inOrder.verify(runtime).decideToolApproval(command);
+    inOrder.verifyNoMoreInteractions();
+  }
+
+  /**
+   * 测试意图：验证后代任务没有直接 IssueAgent 绑定时，submitInput 沿祖先链解析真实根，并按根绑定完成 {@code Project SHARE -> Issue
+   * UPDATE} 产品锁序后才进入 Runtime；写回的目标仍是原始子 invocation，不被根替代。
+   */
+  @Test
+  void submitInputOnDescendantLocksRootProductScopeBeforeRuntime() {
+    UUID childThreadId = id(100);
+    UUID rootThreadId = id(101);
+    UUID issueId = id(200);
+    UUID projectId = id(300);
+
+    when(runtime.findAncestorChain(childThreadId)).thenReturn(List.of(childThreadId, rootThreadId));
+    when(issueAgentThreadRepository.findByThreadId(childThreadId)).thenReturn(null);
+    when(issueAgentThreadRepository.findByThreadId(rootThreadId))
+        .thenReturn(new IssueAgentThread(issueId, "coder", rootThreadId));
+    when(issueRepository.getById(issueId))
+        .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
+    when(projectRepository.lockForKeyShare(projectId)).thenReturn(mock(Project.class));
+    when(issueRepository.lockById(issueId))
+        .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
+
+    ToolInputSubmissionCommand command =
+        new ToolInputSubmissionCommand(
+            childThreadId, id(102), id(103), "alice", false, List.of(List.of("ans")));
+    ToolInputAcceptance expectedAcceptance = mock(ToolInputAcceptance.class);
+    when(runtime.submitToolInput(command)).thenReturn(expectedAcceptance);
+
+    ToolInputAcceptance actual = service.submitInput(command);
+
+    assertSame(expectedAcceptance, actual);
+
+    InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
+    inOrder.verify(runtime).findAncestorChain(childThreadId);
+    inOrder.verify(issueRepository).getById(issueId);
+    inOrder.verify(projectRepository).lockForKeyShare(projectId);
+    inOrder.verify(issueRepository).lockById(issueId);
+    inOrder.verify(runtime).submitToolInput(command);
     inOrder.verifyNoMoreInteractions();
   }
 
@@ -258,7 +306,8 @@ class InteractionServiceTest {
         assertThrows(IllegalStateException.class, () -> service.submitInput(command));
     assertEquals("Issue owner does not exist", exception.getMessage());
 
-    verifyNoInteractions(projectRepository, runtime);
+    verifyNoInteractions(projectRepository);
+    verify(runtime, never()).submitToolInput(any());
   }
 
   /**
@@ -285,7 +334,7 @@ class InteractionServiceTest {
     assertEquals("Project owner does not exist", exception.getMessage());
 
     verify(issueRepository, never()).lockById(any());
-    verifyNoInteractions(runtime);
+    verify(runtime, never()).submitToolInput(any());
   }
 
   /**
@@ -313,7 +362,7 @@ class InteractionServiceTest {
     IllegalStateException exception1 =
         assertThrows(IllegalStateException.class, () -> service.submitInput(command));
     assertEquals("Issue owner hierarchy is inconsistent", exception1.getMessage());
-    verifyNoInteractions(runtime);
+    verify(runtime, never()).submitToolInput(any());
 
     // 分支 2：lockById 返回的 Issue 其 projectId 与前次读取不一致
     UUID differentProjectId = id(999);
@@ -323,7 +372,7 @@ class InteractionServiceTest {
     IllegalStateException exception2 =
         assertThrows(IllegalStateException.class, () -> service.submitInput(command));
     assertEquals("Issue owner hierarchy is inconsistent", exception2.getMessage());
-    verifyNoInteractions(runtime);
+    verify(runtime, never()).submitToolInput(any());
   }
 
   /** 测试意图：验证 decideApproval 在产品层级事实损坏时同样 fail closed 抛出 IllegalStateException 且不调用 runtime。 */
@@ -343,7 +392,27 @@ class InteractionServiceTest {
     IllegalStateException exception =
         assertThrows(IllegalStateException.class, () -> service.decideApproval(command));
     assertEquals("Issue owner does not exist", exception.getMessage());
-    verifyNoInteractions(runtime);
+    verify(runtime, never()).decideToolApproval(any());
+  }
+
+  /** 测试意图：来源 Thread 不存在（祖先链为空）时共用根解析显式抛 not-found，绝不静默回退为自身，也不进入产品锁与 Runtime。 */
+  @Test
+  void missingThreadFailsWithNotFoundBeforeProductScopeAndRuntime() {
+    UUID threadId = id(999);
+    when(runtime.findAncestorChain(threadId)).thenReturn(List.of());
+
+    ToolInputSubmissionCommand submit =
+        new ToolInputSubmissionCommand(threadId, id(101), id(102), "alice", true, List.of());
+    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.submitInput(submit));
+
+    ToolApprovalCommand approval =
+        new ToolApprovalCommand(
+            threadId, id(101), ToolApprovalDecision.ALLOWED, id(102), "alice", "ok");
+    assertThrows(HarnessRuntimeNotFoundException.class, () -> service.decideApproval(approval));
+
+    verifyNoInteractions(projectRepository, issueRepository);
+    verify(runtime, never()).submitToolInput(any());
+    verify(runtime, never()).decideToolApproval(any());
   }
 
   /** 测试意图：验证 HarnessRuntime 未就绪时抛出 IllegalStateException。 */

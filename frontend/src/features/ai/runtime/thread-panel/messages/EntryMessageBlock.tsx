@@ -1,13 +1,20 @@
-import { Bell, CircleDot, FileWarning } from 'lucide-react'
+import { CircleDot, FileWarning } from 'lucide-react'
+import { NotificationEntryBlock } from '@/features/ai/runtime/thread-panel/messages/NotificationEntryBlock'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
-import { useI18n } from '@/shared/i18n'
 
 /**
  * 可复用的持久 Entry 审计块。它接收的是稳定的 timeline 契约，
  * 而不是 Harness DTO、controller 或 query state。
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
-  const { t } = useI18n()
+  if (message.kind === 'notification') {
+    return (
+      <NotificationEntryBlock
+        message={message}
+        notification={message.notification ?? { kind: '', sourceThreadId: null }}
+      />
+    )
+  }
   const singleLine = message.kind === 'root'
     || message.kind === 'settings_change'
     || message.kind === 'invalid_settings'
@@ -23,13 +30,7 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
         <div className="thread-entry-content">
           <div className="thread-entry-title" title={singleLine ? message.title : undefined}>{message.title}</div>
           {!singleLine && (
-            <>
-              <div className="thread-block-body thread-entry-text">{message.text}</div>
-              <details className="thread-entry-payload">
-                <summary>{t('ai.runtime.message.rawEntry')}</summary>
-                <pre>{message.rawPayloadJson}</pre>
-              </details>
-            </>
+            <div className="thread-block-body thread-entry-text">{message.text}</div>
           )}
         </div>
       </div>
@@ -40,9 +41,6 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
 function EntryIcon({ kind }: { kind: EntryEventDialogueMessage['kind'] }) {
   if (kind === 'unsupported_message' || kind === 'unknown_entry') {
     return <FileWarning />
-  }
-  if (kind === 'notification') {
-    return <Bell />
   }
   return <CircleDot />
 }
