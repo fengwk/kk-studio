@@ -35,7 +35,7 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 | --- | --- |
 | `harness_session` | Session 聚合根标识、显示名称与创建时间 |
 | `harness_entry` | append-only Entry Tree 节点与 payload |
-| `harness_thread` | Session 归属、不可变执行父关系、head 游标、持久 `execution_control`（`RUNNABLE` / `STOPPED`）、`input_through_sequence` 接纳水位、creation request hash、显示名称、YOLO 开关、命令序号与 version |
+| `harness_thread` | Session 归属、不可变执行父关系、head 游标、持久 `execution_control`（`RUNNABLE` / `STOPPED`）、`input_through_sequence` 接纳水位、creation request hash、显示名称、`yolo_mode/yolo_root_thread_id` 策略、命令序号与 version |
 | `harness_thread_command` | 有序命令邮箱、请求哈希与 `applied_entry_id`（APPLIED 时指向应用的 Entry，未应用为 null）；CANCELLED 用 `stop_request_id` + `cancelled_at` 成对标记 |
 | `harness_model_invocation` | Model 请求规格、状态、attempt、流式 checkpoint、结果与错误 |
 | `harness_tool_invocation` | Tool 调用参数、绑定、审批记录、状态、副作用批与错误 |
@@ -44,6 +44,10 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 | `harness_thread_stop_receipt` | 一次 Stop 在每个受影响 Thread 上的持久回执：`stop_request_id`、`stopped_turn_end_entry_id`、`cancelled_command_count` 与 `cancelled_inputs`；集合身份为 `(root_thread_id, root_stop_request_id)` |
 
 数据库只做形状防御，语义由应用层负责：`(session_id, parent_entry_id)` 外键保证父子同 Session，部分唯一索引 `uk_harness_entry_single_root` 保证每个 Session 至多一个 ROOT；`harness_thread_command` 以 `(thread_id, sequence)` 为主键、`(thread_id, idempotency_key)` 唯一；`harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一；`harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，且非 `SUCCEEDED` 时 `effects` 必须为空批 `{"version": 1, "customEntries": []}`；`harness_work` 要求租约 token 与租约到期时刻同空同非空、且 `required_environment_id` 只允许出现在 `TOOL` 行。`harness_thread` 要求 `execution_control` 取 `RUNNABLE` / `STOPPED` 且 `input_through_sequence < next_command_sequence`；`harness_thread_command` 的 `applied_entry_id` 与 `cancelled_at` 互斥、CANCELLED 必须 `stop_request_id` 与 `cancelled_at` 成对；`harness_thread_join` 的 `final_answer_entry_id` 只在 `terminal_entry_id` 非空时可非空、`delivery_command_sequence` 非空必须已 matched 且父 Thread 非空；`harness_thread_stop_receipt` 以 `(thread_id, stop_request_id)` 为主键、集合身份为 `(root_thread_id, root_stop_request_id)`，`cancelled_inputs` 必须是 JSON array。所有时间列是 `timestamptz(3)` 毫秒精度，version 与业务 ID 完全由应用生成。
+
+YOLO 形状约束要求根为 `ENABLE/DISABLE` 且目标为空，子代理为 `FOLLOW` 且目标非空、
+不等于自身；目标有 Thread 外键。目标必须是真实执行根的语义由 Runtime 在树锁内复验。
+根策略更新不递归写子行，子代理策略与父关系均在创建时固定。
 
 `loadEntryPath` 用单条 `WITH RECURSIVE ... CYCLE id SET is_cycle USING path` 递归 CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出，同时以环路哨兵检测并拒绝父子成环。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 

@@ -69,8 +69,9 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 终态必须冻结区间、FAILED/UNKNOWN 必须给出原因等不变量由 `project_issue_run` 的检查约束与
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
-Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` Thread 时随 `NEW_SESSION` 写入；
-修改项目开关不改写既有 Thread。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_MODEL` /
+Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初始化其
+`ENABLE/DISABLE` policy；修改项目开关不改写既有 Thread。该根委派的后代直接 Follow 根，
+后续人工开关只更新根行。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_MODEL` /
 `SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE` 与末尾任务输入；阶段 Environment 就来自该 Run 的
 显式命令，Platform 不再按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
 Thread `BranchSettings` 的带外重写。

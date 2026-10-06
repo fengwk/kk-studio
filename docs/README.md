@@ -63,6 +63,7 @@
 | [Platform](modules/platform.md) | Catalog、Plugin、Chat、Project、Storage、Environment 与外部系统如何编排？ |
 | [Web](modules/web.md) | Spring Boot composition root 如何按 Maven dependency 装配可选 Plugin、HTTP、WebSocket、Worker 和生命周期？ |
 | [Frontend](modules/frontend.md) | 浏览器如何把 durable Snapshot 与 lossy realtime 合并为可恢复体验？ |
+| [Thread 控制与展示](modules/thread-control-and-presentation.md) | 根人工控制、子代理只读、交互归属与消息阅读如何协作？ |
 
 ## 仓库与文档维护
 

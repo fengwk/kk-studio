@@ -1,5 +1,4 @@
-/* ThinkingBlock 组件样式：随本组件加载，父级集成后删除 styles.css 中旧的全局思考块规则。
-   选择器提高到 (0,2,0) 以上，避免组件 CSS 早于全局 styles.css 时被 .thread-block 基类覆盖。 */
+/* 组件样式优先于通用 .thread-block 基类。 */
 
 .thread-block.thread-block-thinking {
   display: flex;

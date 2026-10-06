@@ -7,7 +7,7 @@ import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-type
 /**
  * Conversation 主视图：实际挂载的滚动容器（与 Event 视图互斥，各自拥有独立的
  * 自动贴底生命周期——切到 Event 时本视图卸载，切回时重新挂载并重新绑定
- * scroll listener / ResizeObserver）。
+ * 滚动与阅读意图监听）。
  *
  * - `initialScrollTop` 非空时挂载即恢复该位置（重新进入 conversation），stick
  *   状态由恢复后的位置按 210px 阈值决定；

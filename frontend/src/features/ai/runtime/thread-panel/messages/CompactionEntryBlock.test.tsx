@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/ai/runtime/thread-panel/messages/EntryMessageBlock'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
 import type { EntryEventDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import {
   FULL_COMPACTION_SUMMARY,
@@ -75,6 +76,26 @@ describe('CompactionEntryBlock', () => {
 
     expect(screen.getByRole('button', { name: '收起压缩摘要' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('refresh stable')).toBeInTheDocument()
+  })
+
+  it('announces reading on toggles and inner scrolling without resuming outer follow', () => {
+    // 展开和内部回看都只通知暂停；正文可用键盘滚动。
+    const { container } = renderCard(LONG_COMPACTION_SUMMARY)
+    const reading = vi.fn()
+    container.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, reading)
+
+    fireEvent.click(screen.getByRole('button', { name: '展开压缩摘要' }))
+    const body = container.querySelector('.thread-compaction-body') as HTMLElement
+    expect(body).toHaveAttribute('tabindex', '0')
+    expect(body).toHaveAttribute('aria-label', '上下文已压缩')
+    fireEvent.scroll(body, { target: { scrollTop: 120 } })
+    fireEvent.click(screen.getByRole('button', { name: '收起压缩摘要' }))
+
+    expect(reading.mock.calls.map(([event]) => (event as CustomEvent).detail)).toEqual([
+      { source: 'compaction-toggle' },
+      { source: 'compaction-body' },
+      { source: 'compaction-toggle' },
+    ])
   })
 
   it('renders normal Markdown while keeping reserved XML tags as text', () => {

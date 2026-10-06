@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test'
 /** Pane 控制面真实浏览器回归：独立端口与独立报告目录，不影响 layout / install 矩阵。 */
 export default defineConfig({
   testDir: './browser-tests',
-  testMatch: '**/*.browser.ts',
+  testMatch: 'pane-control.browser.ts',
   outputDir: '../reports/pane',
   use: {
     baseURL: 'http://127.0.0.1:5184',

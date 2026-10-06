@@ -2734,58 +2734,10 @@ div.is-error {
   white-space: pre-wrap;
 }
 
-.thread-entry-payload {
-  margin-top: 5px;
-  color: var(--fg-dim);
-  font-size: 11px;
-}
-
-.thread-entry-payload summary {
-  width: fit-content;
-  cursor: pointer;
-}
-
-.thread-entry-payload pre {
-  max-height: 240px;
-  margin: 6px 0 0;
-  overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg-muted);
-  font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-
 /*
  * 不使用 content-visibility：占位高度会在懒渲染落地时跳变成真实高度，使
  * 「容器高度变化」与「内容变化」脱钩，自动贴底与阅读锚点都失去确定布局。
  */
-
-.thread-block-thinking {
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--scrim);
-}
-
-.thread-block-thinking .thread-block-body,
-.thread-thinking-text {
-  color: var(--fg-dim);
-  font-style: italic;
-  font-size: 13px;
-  line-height: 1.55;
-  /* Markdown 思考块：段落空白为 normal，段落间空行由 Markdown 本身折叠，代码块/公式由自身预格式化接管 */
-  white-space: normal;
-  word-break: normal;
-  overflow-wrap: break-word;
-}
-
-.thread-block-thinking .thread-block-body .md-root,
-.thread-thinking-text .md-root {
-  white-space: normal;
-}
 
 .thread-block-assistant .thread-block-body {
   color: var(--fg);
@@ -3899,57 +3851,6 @@ div.is-error {
 .thread-dock-send svg {
   width: 14px;
   height: 14px;
-}
-
-.composer-editor {
-  position: relative;
-  min-width: 0;
-  min-height: 36px; /* one 20px text line centered by symmetric padding */
-  max-height: 190px; /* ~10 lines at 18px line-height */
-  overflow-y: auto;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--fg);
-  font-size: 14px;
-  line-height: 20px;
-  padding: 8px 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
-  cursor: text;
-}
-
-.composer-editor[data-placeholder-visible='true']::before {
-  content: attr(data-placeholder);
-  position: absolute;
-  top: 8px;
-  right: 6px;
-  left: 7px;
-  color: var(--fg-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.composer-editor[aria-disabled='true'] {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.composer-pill {
-  display: inline-block;
-  white-space: nowrap;
-  vertical-align: bottom;
-  margin: 0 3px;
-  padding: 0 2px;
-  border-radius: 3px;
-  color: var(--info);
-  background: transparent;
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 20px;
-  user-select: none;
 }
 
 .thread-composer-strip {
@@ -5656,27 +5557,6 @@ select.settings-input option {
   font-size: 11px;
 }
 
-.thread-status-footer {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  background: var(--bg);
-  padding: 6px 16px 8px;
-  min-width: 0;
-}
-
-.thread-status-line {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  font-variant-numeric: tabular-nums;
-  text-align: left;
-}
-
 .run-status {
   min-width: 132px;
   min-height: 38px;
@@ -6611,7 +6491,6 @@ select.settings-input option {
   white-space: nowrap;
 }
 
-.agent-pane-thread-tree,
 .agent-pane-thread-rename {
   width: 26px;
   height: 26px;
@@ -6625,14 +6504,8 @@ select.settings-input option {
   cursor: pointer;
 }
 
-.agent-pane-thread-tree:hover:not(:disabled),
 .agent-pane-thread-rename:hover:not(:disabled) {
   background: var(--stage-dot);
-  color: var(--fg);
-}
-
-.agent-pane-thread-tree[aria-expanded='true'] {
-  background: var(--green-soft);
   color: var(--fg);
 }
 
@@ -6641,167 +6514,9 @@ select.settings-input option {
   cursor: not-allowed;
 }
 
-.agent-pane-thread-tree svg,
 .agent-pane-thread-rename svg {
   width: 14px;
   height: 14px;
-}
-
-/* 父子 Agent 关系树：标题下独立滚动，不替换对话或 composer。 */
-.thread-agent-tree {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-height: min(420px, 56vh);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.thread-agent-tree-toolbar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px 4px;
-}
-
-.thread-agent-tree-toolbar h3 {
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-agent-tree-refresh {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 26px;
-  padding: 2px 8px;
-  font-size: 12px;
-}
-
-.thread-agent-tree-refresh svg {
-  width: 13px;
-  height: 13px;
-}
-
-.thread-agent-tree-state {
-  margin: 0;
-  padding: 8px 12px 12px;
-  color: var(--fg-muted);
-  font-size: 12px;
-}
-
-.thread-agent-tree-state.danger {
-  color: var(--danger);
-}
-
-.thread-agent-tree-list {
-  margin: 0;
-  min-width: 0;
-  padding: 0 0 8px;
-  overflow: auto;
-  list-style: none;
-}
-
-.thread-agent-tree-row {
-  min-width: 0;
-  max-width: 100%;
-  padding-block: 6px;
-  padding-inline-end: 12px;
-  border-top: 1px solid transparent;
-  overflow-wrap: anywhere;
-}
-
-.thread-agent-tree-row[aria-current='true'] {
-  background: var(--green-soft);
-}
-
-.thread-agent-tree-row.is-processing {
-  box-shadow: inset 2px 0 0 var(--green-primary);
-}
-
-.thread-agent-tree-row.is-failed {
-  background: var(--danger-soft);
-}
-
-.thread-agent-tree-row.is-stopped,
-.thread-agent-tree-row.is-cancelled {
-  box-shadow: inset 2px 0 0 var(--warning);
-}
-
-.thread-agent-tree-main,
-.thread-agent-tree-secondary,
-.thread-agent-tree-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.thread-agent-tree-secondary,
-.thread-agent-tree-meta {
-  flex-wrap: wrap;
-  margin: 2px 0 0;
-  color: var(--fg-muted);
-  font-size: 11px;
-}
-
-.thread-agent-tree-name,
-.thread-agent-tree-model {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-agent-tree-name {
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.thread-agent-tree-badge {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--stage-dot);
-  color: var(--fg-muted);
-  font-size: 10px;
-  line-height: 16px;
-}
-
-.thread-agent-tree-badge.is-current {
-  background: var(--green-soft);
-  color: var(--fg);
-}
-
-.thread-agent-tree-status.is-processing {
-  color: var(--green-primary);
-  font-weight: 600;
-}
-
-.thread-agent-tree-status.is-failed {
-  color: var(--danger);
-}
-
-.thread-agent-tree-status.is-completed {
-  color: var(--fg-muted);
-}
-
-.thread-agent-tree-status.is-stopped,
-.thread-agent-tree-status.is-cancelled {
-  color: var(--warning);
 }
 
 /* 单输入重命名面板（Session / Thread 名称编辑）。 */

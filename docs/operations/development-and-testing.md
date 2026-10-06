@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.6.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.7.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -253,6 +253,24 @@ Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
 
+Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
+
+```bash
+npm --prefix frontend run test:pane
+(
+  cd frontend
+  npx playwright test --config playwright.tool-card.config.ts
+  npx playwright test --config playwright.compaction.config.ts
+  npx vite build --config vite.composer-editor.config.ts
+  npx playwright test --config playwright.composer-editor.config.ts
+)
+```
+
+各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
+共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读与根 Stop；tool-card 验证
+流式日志和阅读锚点；compaction 验证完整安全正文与外层阅读保护；composer-editor 验证
+真实 contenteditable、IME、Pill 与隐藏根失活。
+
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
 
@@ -267,14 +285,16 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 不能将受理当作完成；
 它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
 payload 只含 settings、不物化任何委派运行树元数据。
-受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立交互面板，不依赖 Chat 归属。
-消息、设置、Goal、预览、Stop 和工具审批都寻址 URL 指定的 Thread；
+受理卡片与回执的 Thread 链接在当前 pane 只读查看子代理，并保留根草稿与逐层返回路径；
+修饰键或独立地址进入 `/threads/:threadId`。独立根提供人工控制，独立子代理只读并可返回根，
+不依赖 Chat 归属。消息、设置、Goal、预览和 Stop 只允许执行根；根面板汇聚后代审批和问卷，
+操作写回原始调用 Thread；
 已有 Thread 的命令使用 `/api/harness/threads/{threadId}/command-batches`，body 不带 owner/target，
 创建 Session/Thread 才使用 owner-aware 的 `/api/harness/command-batches`。
 同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
 等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
-通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
+通过真实组件验证根/子代理身份分流、子代理零控制入口，以及非法 ID、加载失败与返回根入口；
 这些是 jsdom 回归，不替代真实浏览器验证。
 
 真实 `read` 工具的 L4 用例 `tool.read_turn` 需要 `--real --with-tools --with-canvas-storage`，

@@ -151,6 +151,31 @@ test.describe('Compaction summary system card', () => {
     await expect(card.locator('.thread-compaction-body')).toBeVisible()
   })
 
+  test('does not move a reading card when later streaming content grows', async ({ page }) => {
+    // 展开与键盘回看接入真实外层 Hook；后续流式增长不能抢回卡片。
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(HARNESS_URL)
+    await page.locator('#start-stream').click()
+    await expect(page.getByText('stream line 2', { exact: true })).toBeVisible()
+
+    const outer = page.locator('.thread-dialogue')
+    const card = page.locator('[data-entry-kind="compaction"]').first()
+    await card.getByRole('button', { name: '展开压缩摘要' }).click()
+    const body = card.locator('.thread-compaction-body')
+    await body.focus()
+    await body.press('PageDown')
+    await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+
+    const anchor = await outer.evaluate((element) => element.scrollTop)
+    const top = (await card.boundingBox())!.y
+    await page.locator('#grow-stream').click()
+    await expect(outer).toContainText('stream line 42')
+    await expect.poll(() => outer.evaluate((element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight)).toBeGreaterThan(210)
+    expect(await outer.evaluate((element) => element.scrollTop)).toBe(anchor)
+    expect((await card.boundingBox())!.y).toBeCloseTo(top, 0)
+  })
+
   test('stays usable on a narrow mobile viewport', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(HARNESS_URL)

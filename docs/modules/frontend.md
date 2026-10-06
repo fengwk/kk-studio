@@ -84,7 +84,8 @@ Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A
 Pane target 与布局独立：NEW_SESSION_DRAFT 携 root settings 创建 Session；
 NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequence 提交。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
-已有 Thread（含 Issue 和子任务 Thread）可调整 Agent。配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
+已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
+配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送，YOLO 走独立控制入口。
 
 命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
@@ -93,20 +94,25 @@ NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequ
 明确 409 保留草稿，只有同分支纯消息的 STALE_COMMAND_CURSOR 才有限更新 cursor 重试。
 
 Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
-逐 Thread `stoppedThreads` 回执把被取消的 `USER_MESSAGE` 放回对应 Composer，`GOAL` 放回目标编辑区；
+`stoppedThreads` 保留逐 Thread 取消事实，根 Composer 与目标编辑区只恢复该根的
+人工 `USER_MESSAGE` / `GOAL`，子代理不建立人工草稿；
 `CUSTOM_MESSAGE`、`NOTIFICATION` 与配置命令不恢复草稿。
 IndexedDB 在同一事务保存草稿与已合并的回执身份；响应和 snapshot 共用幂等恢复通道。
 恢复 generation 拒绝跨标签页的陈旧覆盖写，失败明确提示并支持手动重试。
 NOTIFICATION 使用系统样式展示，不进入人类消息队列、上下键历史或草稿。
 审批复用 decisionId，操作者由服务端解析；切换 ALLOW/DENY 生成新身份。
-`/threads/:threadId` 是无 owner 的交互页，提供消息、设置、预览、Goal、Stop 与审批；
-对已完成子任务的继续对话不会再次交付旧 Join。
-已绑定 Thread 的标题提供“Agent 关系”入口，主 Chat、Issue Agent 和独立 Thread 页都可打开。
-面板默认收起，展开后按当前 Thread 每 5 秒读取 `GET /harness/threads/{id}/tree`，
-返回值是该 Thread 真实 root 的整棵关系，包含运行中、空闲和已结束后代。
-每行展示名称、Agent、模型、状态或终态、回合数和工具调用数，并在新标签打开对应 Thread。
-未绑定草稿不显示入口；关闭面板后停止请求，切换 Thread 不沿用上一棵树。
-刷新失败或返回不完整关系时保留上一棵有效树并标明刷新失败，不把缺失父节点补成根。
+`/threads/:threadId` 按执行身份分流：根 Thread 提供人工输入与控制，子代理只读取
+Snapshot、Debug 和 usage，并在顶部提供返回执行根入口；身份未确认时不挂载控制 Hook。
+根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
+执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
+
+根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
+不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
+树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；
+查看栈逐层返回，根层保持挂载但隐藏且 inert，草稿、上传和阅读位置不被重建。
+修饰键与中键保留独立 Thread 地址的浏览器行为。刷新失败明确提示，不伪造最新树。
+输入编排由 `ThreadComposer` 持有，DOM、光标、IME 与 Pill 由 `ComposerEditor` 隔离。
+控制、投影和阅读规则见 [Thread 控制与展示](thread-control-and-presentation.md)。
 工具卡片按各自 invocation 的结果判定终态：同批其他调用尚未物化 durable 结果时，
 已完成调用仍显示其结果，等待审批的调用保持未决。结果配对使用
 `assistantEntryId:callIndex`，相同 toolCallId 的历史结果不会占用当前调用。

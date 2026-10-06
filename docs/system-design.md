@@ -111,10 +111,13 @@ Goal 由用户通过 typed `GOAL` 命令设置或清除。Agent 使用 `get_goal
 `update_goal` 回报 `complete` / `blocked` 进度；进度 Entry 绑定目标 id。用户正文是
 目标事实，Agent 进度供用户判断完成情况。压缩后仍生效的 Goal 作为 USER 级历史背景恢复。
 
-YOLO 是 Thread 的即时策略 `yoloEnabled`，通过
-`PUT /api/harness/threads/{threadId}/yolo` 直接更新。它不与完整 Thread version 做 CAS，同值请求不推进 version，变化时 version 精确 +1，最后一次序列化写入生效。开启时跳过普通工具权限
-preflight，关闭时按工具权限审批；`ask_user` 始终等待人工回答。子 Thread 首次创建时
-继承父 Thread 的 YOLO，后续恢复保留已有值。
+YOLO 是一棵执行树共享的即时策略：根 Thread 保存 `ENABLE/DISABLE`，子代理保存
+`FOLLOW(rootThreadId)`，直接指向真实执行根。`PUT /api/harness/threads/{threadId}/yolo`
+只更新根，不与完整 Thread version 做 CAS；同值不推进 version，变化时只推进根 version
+精确 +1，最后一次序列化写入生效。子代理在权限决定时通过树锁内的祖先链校验读取根值，
+不复制开关，也不因根切换而更新自身 version。开启时跳过普通工具 preflight；
+已等待的审批仍需人工处理，`ask_user` 始终等待回答。控制与投影规则见
+[Thread 控制与展示](modules/thread-control-and-presentation.md)。
 
 Project Agent 的 Agent、Model、阶段 Environment、业务工具与身份上下文不由 live turn 反查：
 Run 接受时由 Project 以显式命令提交（`SET_AGENT` / `SET_MODEL` / `SET_ENVIRONMENT` /
@@ -161,7 +164,8 @@ Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [P
 Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
 返回 `{"thread_id":"...","status":"accepted"}`；父 Thread 可以继续工作，root Join 在子执行
 首次到达终态（`COMPLETED` / `ERROR` / `CANCELLED`）时冻结 `terminalEntryId` / `finalAnswerEntryId`，
-再以 `NOTIFICATION` 交付结果，不等待其永久子树 idle。继续委派使用 `thread_id` 并复验父子归属；
+再以 `NOTIFICATION` 交付给直接派发的父 Thread，不等待其永久子树 idle。
+后代审批和问卷归属人工控制根，但不会改变 Join 的直接父订阅。继续委派使用 `thread_id` 并复验父子归属；
 深度、单父并发与全局并发额度由 Runtime 裁决。子 Agent 使用自身默认 Model，
 `inheritParentEnvironment` 决定是否继承父调用冻结的 Environment。完整契约见
 [异步委派](modules/builtin-tools-design.md)与 [Harness Runtime](modules/harness-runtime.md)。

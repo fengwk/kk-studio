@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
+import { transcriptStreamRevision } from '@/features/ai/runtime/transcript-reading'
+import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
 import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import {
@@ -73,25 +75,51 @@ const HARNESS_ENTRIES: HarnessSessionEntryDTO[] = [
 ]
 
 /**
- * 只渲染真实 MessageList 与现行 styles：数据来自真实 buildThreadTimeline 投影，
+ * 真实 MessageList、外层滚动 Hook 与现行 styles：数据来自 buildThreadTimeline 投影，
  * 不依赖后端、模型或任何主机服务。
  */
 export function CompactionCardHarnessApp() {
   const [, setGeneration] = useState(0)
+  const [streamLines, setStreamLines] = useState(0)
+  const bodyRef = useRef<HTMLDivElement>(null)
   // 每次渲染都重建投影（新的 message 对象、相同的摘要 Entry 身份）。
   const messages = buildThreadTimeline(HARNESS_ENTRIES, [], []).messages
+  if (streamLines > 0) {
+    messages.push({
+      id: 'streaming-assistant',
+      role: 'assistant',
+      text: Array.from({ length: streamLines }, (_, index) => `stream line ${index + 1}`).join('\n\n'),
+      createdAt: null,
+      status: 'streaming',
+    })
+  }
+  useChatTranscriptAutoScroll(
+    bodyRef,
+    messages.length,
+    HARNESS_ENTRIES.length,
+    undefined,
+    'compaction-harness',
+    transcriptStreamRevision(messages),
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <button
-        type="button"
-        id="refresh-timeline"
-        style={{ flex: '0 0 auto' }}
-        onClick={() => setGeneration((current) => current + 1)}
-      >
-        refresh
-      </button>
-      <div className="thread-dialogue">
+      <div style={{ display: 'flex', flex: '0 0 auto', gap: 8 }}>
+        <button
+          type="button"
+          id="refresh-timeline"
+          onClick={() => setGeneration((current) => current + 1)}
+        >
+          refresh
+        </button>
+        <button type="button" id="start-stream" onClick={() => setStreamLines(2)}>
+          start stream
+        </button>
+        <button type="button" id="grow-stream" onClick={() => setStreamLines((current) => current + 40)}>
+          grow stream
+        </button>
+      </div>
+      <div ref={bodyRef} className="thread-dialogue">
         <div className="thread-blocks">
           <MessageList messages={messages} />
         </div>

@@ -100,7 +100,7 @@ interface ThreadPanelProps {
   /** 互斥主视图：传入 debug 时替换 transcript（Debug view）。 */
   mainView?: ThreadPanelMainView
   /**
-   * 输入与控制区：根面板传入 `RootThreadControlArea`，只读子代理视图传入返回栏。
+   * 根面板的输入与控制区；只读子代理只在顶部标题区提供返回导航。
    * 缺省时面板不渲染任何输入区，也不存在草稿或提交入口。
    */
   controls?: ReactNode
