@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react'
+import { AlertCircle } from 'lucide-react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { ThreadModelRequestDebug } from '@/features/ai/runtime/thread-panel/ThreadModelRequestDebug'
 import {
@@ -14,7 +15,10 @@ import {
   type DebugInspectorSelection,
 } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { ThreadEventDetail } from '@/features/ai/runtime/thread-panel/ThreadEventDetail'
-import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
+import type {
+  ThreadModelRequestDebugData,
+  ThreadProviderRequestPreviewData,
+} from '@/features/ai/runtime/thread-timeline-types'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 
@@ -51,6 +55,12 @@ export interface ThreadEventViewProps {
   previewDisabled?: boolean
   previewDisabledReason?: string | null
   previewError?: string | null
+  /** 选中历史 ASSISTANT Entry 后按需读取到的调用前请求预览（只读）。 */
+  historicalPreview?: ThreadProviderRequestPreviewData | null
+  historicalPreviewLoading?: boolean
+  historicalPreviewError?: string | null
+  onRequestHistoricalPreview?: (entryId: string) => void
+  onDismissHistoricalPreview?: () => void
 }
 
 /**
@@ -75,6 +85,11 @@ export function ThreadEventView({
   previewDisabled = false,
   previewDisabledReason = null,
   previewError = null,
+  historicalPreview = null,
+  historicalPreviewLoading = false,
+  historicalPreviewError = null,
+  onRequestHistoricalPreview,
+  onDismissHistoricalPreview,
 }: ThreadEventViewProps) {
   const { t } = useI18n()
   const baseId = useId()
@@ -226,6 +241,8 @@ export function ThreadEventView({
       bodyRef.current?.focus({ preventScroll: true })
     }
     onSelectInspector?.(null)
+    // 选中新的历史事件即结束上一次历史请求预览，避免张冠李戴。
+    onDismissHistoricalPreview?.()
     onSelectedEventIdChange(id)
   }
 
@@ -441,7 +458,15 @@ export function ThreadEventView({
           tabIndex={-1}
           className="thread-debug-col thread-debug-col-detail"
         >
-          {debugSelection && (debug || debugSelection.type === 'preview') ? (
+          {historicalPreview != null ? (
+            <ThreadDebugInspector
+              selection={{ type: 'preview', preview: historicalPreview }}
+              debug={debug}
+              onClose={() => onDismissHistoricalPreview?.()}
+              closeButtonRef={detailCloseBtnRef}
+              autoFocusCloseButton={!isWide}
+            />
+          ) : debugSelection && (debug || debugSelection.type === 'preview') ? (
             <ThreadDebugInspector
               selection={debugSelection}
               debug={debug}
@@ -450,12 +475,22 @@ export function ThreadEventView({
               autoFocusCloseButton={!isWide}
             />
           ) : selectedRecord ? (
-            <ThreadEventDetail
-              record={selectedRecord}
-              onClose={handleCloseDetail}
-              closeButtonRef={detailCloseBtnRef}
-              autoFocusCloseButton={!isWide}
-            />
+            <>
+              {historicalPreviewError ? (
+                <div role="alert" className="thread-debug-planning-error thread-debug-preview-error">
+                  <AlertCircle size={14} aria-hidden="true" />
+                  <span>{historicalPreviewError}</span>
+                </div>
+              ) : null}
+              <ThreadEventDetail
+                record={selectedRecord}
+                onClose={handleCloseDetail}
+                closeButtonRef={detailCloseBtnRef}
+                autoFocusCloseButton={!isWide}
+                onRequestHistoricalPreview={onRequestHistoricalPreview}
+                historicalPreviewLoading={historicalPreviewLoading}
+              />
+            </>
           ) : (
             <div className="thread-debug-placeholder" data-testid="thread-debug-placeholder">
               <p>{t('ai.runtime.debug.noSelection')}</p>

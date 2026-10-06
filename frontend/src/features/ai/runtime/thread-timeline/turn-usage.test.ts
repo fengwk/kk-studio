@@ -1,56 +1,67 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
-import { calculateCacheHitRate } from '@/features/ai/runtime/thread-timeline/content-utils'
-import type {
-  DialogueMessage,
-  MetaDialogueMessage,
-  TurnUsage,
-} from '@/features/ai/runtime/thread-timeline-types'
+import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import { aggregateEntryUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 
-function usageMessage(id: string, turnUsage: TurnUsage): MetaDialogueMessage {
+/**
+ * aggregateEntryUsage 只从全部 Entry 事实（ASSISTANT assistantMetadata + usageCost 读取投影）派生，
+ * 不依赖对话消息、卡片 visible、TURN_END 投影或任何 flag；compaction 等隐藏内容里真实发生的
+ * token/费用同样进入累计。费用按精确十进制求和，缺失/跨币种不伪造完整总额。
+ */
+function assistantEntry(
+  entryId: string,
+  usage: Record<string, number>,
+  usageCost?: { currency: string; amount: string } | null,
+  entryType: HarnessSessionEntryDTO['entryType'] = 'MESSAGE',
+): HarnessSessionEntryDTO {
   return {
-    id,
-    role: 'meta',
-    kind: 'turn_usage',
-    subjectEntryId: id,
-    text: 'usage',
-    turnUsage,
-    createdAt: null,
-    status: 'done',
+    entryId,
+    sessionId: 's1',
+    parentEntryId: null,
+    entryType,
+    payloadJson: JSON.stringify({
+      message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
+      ...(Object.keys(usage).length > 0 ? { assistantMetadata: { usage } } : {}),
+    }),
+    createTime: '2026-07-28T10:00:00Z',
+    usageCost: usageCost ?? null,
   }
 }
 
-describe('aggregateBranchUsage', () => {
-  it('sums every completed Turn usage field on the current branch', () => {
-    const messages: DialogueMessage[] = [
-      {
-        id: 'user-1',
-        role: 'user',
-        subjectEntryId: 'user-1',
-        text: 'hello',
-        createdAt: null,
-      },
-      usageMessage('usage-1', {
-        input: 10,
-        output: 2,
-        cacheRead: 3,
-        cacheWrite: 4,
-        reasoning: 5,
-        providerTotal: 24,
-        cost: 0.125,
-      }),
-      usageMessage('usage-2', {
-        input: 20,
-        output: 7,
-        cacheRead: 11,
-        cacheWrite: 13,
-        reasoning: 17,
-        providerTotal: 68,
-        cost: 0.375,
-      }),
-    ]
+function otherEntry(entryId: string, entryType: HarnessSessionEntryDTO['entryType']): HarnessSessionEntryDTO {
+  return {
+    entryId,
+    sessionId: 's1',
+    parentEntryId: null,
+    entryType,
+    payloadJson: JSON.stringify({ reason: 'USER_MESSAGE' }),
+    createTime: '2026-07-28T09:59:00Z',
+  }
+}
 
-    const aggregated = aggregateBranchUsage(messages)
+describe('aggregateEntryUsage', () => {
+  it('returns null when no Entry carries usage facts', () => {
+    expect(aggregateEntryUsage([])).toBeNull()
+    expect(aggregateEntryUsage([
+      otherEntry('turn-1', 'TURN_START'),
+      assistantEntry('assistant-1', {}),
+    ])).toBeNull()
+  })
+
+  it('sums every model call across the whole branch', () => {
+    const aggregated = aggregateEntryUsage([
+      otherEntry('turn-1', 'TURN_START'),
+      assistantEntry('assistant-1', {
+        inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4,
+        reasoningTokens: 5, providerTotalTokens: 24,
+      }, { currency: 'USD', amount: '0.125000000000' }),
+      otherEntry('end-1', 'TURN_END'),
+      otherEntry('turn-2', 'TURN_START'),
+      assistantEntry('assistant-2', {
+        inputTokens: 20, outputTokens: 7, cacheReadTokens: 11, cacheWriteTokens: 13,
+        reasoningTokens: 17, providerTotalTokens: 68,
+      }, { currency: 'USD', amount: '0.375000000000' }),
+    ])
+
     expect(aggregated).toMatchObject({
       input: 30,
       output: 9,
@@ -60,121 +71,75 @@ describe('aggregateBranchUsage', () => {
       providerTotal: 92,
       decodeTokens: null,
       decodeDurationMillis: null,
-      contextInputTokens: null,
     })
-    // 费用按浮点原值累加，不做低精度 round
-    expect(aggregated?.cost).toBeCloseTo(0.5, 10)
+    // 精确十进制求和：0.125 + 0.375 必须正好等于 0.5，无浮点残差
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '0.5' })
   })
 
-  // 验证费用不再 toFixed(6) 截断：亚微级费用必须原样保留
-  it('preserves sub-micro cost precision without truncation', () => {
-    const aggregated = aggregateBranchUsage([
-      usageMessage('usage-1', {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 0,
-        cost: 0.0000004,
-      }),
+  // compaction 回合的 usage 是真实事实：不能被隐藏内容/卡片不可见而从累计漏计
+  it('includes model usage that happened inside a compaction turn', () => {
+    const aggregated = aggregateEntryUsage([
+      otherEntry('compact-turn', 'TURN_START'),
+      assistantEntry('assistant-compact', {
+        inputTokens: 1000, outputTokens: 100, providerTotalTokens: 1100,
+      }, { currency: 'USD', amount: '1.5' }),
+      otherEntry('compact-end', 'TURN_END'),
+      assistantEntry('assistant-real', {
+        inputTokens: 10, outputTokens: 1, providerTotalTokens: 11,
+      }, { currency: 'USD', amount: '0.25' }),
     ])
-    expect(aggregated?.cost).toBe(0.0000004)
+    expect(aggregated).toMatchObject({ input: 1010, output: 101, providerTotal: 1111 })
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '1.75' })
   })
 
-  // 验证多回合聚合时，contextInputTokens 取最新调用，而测速有效样本分子与分母各自累加
-  it('takes latest contextInputTokens and accumulates speed samples across closed turns', () => {
-    const messages: DialogueMessage[] = [
-      usageMessage('usage-1', {
-        input: 100,
-        output: 50,
-        cacheRead: 20,
-        cacheWrite: 10,
-        reasoning: 0,
-        providerTotal: 180,
-        cost: 0.01,
-        contextInputTokens: 130,
-        decodeTokens: 50,
-        decodeDurationMillis: 1000, // 50 tok/s
-      }),
-      usageMessage('usage-2', {
-        input: 200,
-        output: 100,
-        cacheRead: 50,
-        cacheWrite: 0,
-        reasoning: 20,
-        providerTotal: 370,
-        cost: 0.02,
-        contextInputTokens: 250, // latest
-        decodeTokens: 120, // 100 + 20 reasoning
-        decodeDurationMillis: 2000, // 60 tok/s
-      }),
-      // 第三个回合无测速样本（旧记录/未测），不参与测速分子分母累加
-      usageMessage('usage-3', {
-        input: 50,
-        output: 10,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 60,
-        cost: 0.005,
-        contextInputTokens: 50, // latest
-        decodeTokens: null,
-        decodeDurationMillis: null,
-      }),
-    ]
+  // 亚微级费用必须精确保留：先 sum 后 round，绝不在中间截断
+  it('preserves sub-micro cost precision before formatting', () => {
+    const aggregated = aggregateEntryUsage([
+      assistantEntry('a', { inputTokens: 1, providerTotalTokens: 1 }, { currency: 'USD', amount: '0.0000004' }),
+      assistantEntry('b', { inputTokens: 1, providerTotalTokens: 1 }, { currency: 'USD', amount: '0.0000005' }),
+    ])
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '0.0000009' })
+  })
 
-    const aggregated = aggregateBranchUsage(messages)
-    expect(aggregated).toMatchObject({
-      input: 350,
-      output: 160,
-      cacheRead: 70,
-      cacheWrite: 10,
-      reasoning: 20,
-      providerTotal: 610,
-      decodeTokens: 170, // 50 + 120
-      decodeDurationMillis: 3000, // 1000 + 2000
-      contextInputTokens: 50, // 取最新 usage-3 的 contextInputTokens
+  // 缺失定价或跨币种：不给误导性的完整总额，也不伪造成 $0
+  it('drops the total when pricing is missing or mixed', () => {
+    const usd = assistantEntry('a', { inputTokens: 1 }, { currency: 'USD', amount: '0.1' })
+    const unpriced = assistantEntry('b', { inputTokens: 1 })
+    const eur = assistantEntry('c', { inputTokens: 1 }, { currency: 'EUR', amount: '0.1' })
+
+    expect(aggregateEntryUsage([usd, unpriced])?.cost).toBeNull()
+    expect(aggregateEntryUsage([usd, eur])?.cost).toBeNull()
+    // 全部无定价时整体 cost 仍为 null（不是 0）
+    expect(aggregateEntryUsage([unpriced])?.cost).toBeNull()
+  })
+
+  // 测速样本按 token/duration 分子分母加权累加，无样本项不参与；上下文取最新调用
+  it('weights speed samples and takes the latest context estimate', () => {
+    const withSpeed = (entryId: string, input: number, tokens: number, millis: number): HarnessSessionEntryDTO => ({
+      ...assistantEntry(entryId, { inputTokens: input, outputTokens: tokens, reasoningTokens: 0, providerTotalTokens: input + tokens }),
+      payloadJson: JSON.stringify({
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
+        assistantMetadata: { usage: { inputTokens: input, outputTokens: tokens }, decodeDurationMillis: millis },
+      }),
     })
-    // 0.01 + 0.02 + 0.005 的浮点原值不应被 round 篡改
-    expect(aggregated?.cost).toBeCloseTo(0.035, 10)
+
+    const aggregated = aggregateEntryUsage([
+      withSpeed('a', 100, 50, 1000), // 50 tok/s
+      withSpeed('b', 200, 120, 2000), // 60 tok/s
+      assistantEntry('c', { inputTokens: 50, outputTokens: 10 }), // 无测速样本
+    ])
+    // 加权总速率 = (50 + 120) / (1000 + 2000) * 1000 = 56.67 -> 57
+    expect(aggregated?.decodeTokens).toBe(170)
+    expect(aggregated?.decodeDurationMillis).toBe(3000)
+    expect(aggregated?.contextInputTokens).toBe(50)
   })
 
-  // 累计缓存率包含冷启动，不能偷换成最新调用的比率，也不能平均各回合百分比。
-  it('includes cold-start input in cumulative cache hit rate', () => {
-    const usage = (input: number, cacheRead: number): TurnUsage => ({
-      input,
-      cacheRead,
-      output: 0,
-      cacheWrite: 0,
-      reasoning: 0,
-      providerTotal: input + cacheRead,
-      cost: 0,
-    })
-    const turns = [
-      usage(4347, 0),
-      usage(161, 4224),
-      usage(260, 4352),
-      usage(322, 4608),
-    ]
-    const aggregated = aggregateBranchUsage(
-      turns.map((turn, index) => usageMessage(`usage-${index}`, turn)),
-    )
-    expect(calculateCacheHitRate(turns[2])).toBe(94)
-    expect(calculateCacheHitRate(turns[3])).toBe(93)
-    expect(aggregated).toMatchObject({ input: 5090, cacheRead: 13184 })
-    expect(calculateCacheHitRate(aggregated!)).toBe(72)
-  })
-
-  it('returns null when the branch has no TURN_END usage summary', () => {
-    expect(aggregateBranchUsage([
-      {
-        id: 'assistant-1',
-        role: 'assistant',
-        subjectEntryId: 'assistant-1',
-        text: 'still running',
-        createdAt: null,
-      },
+  it('ignores non-assistant and non-message entries', () => {
+    expect(aggregateEntryUsage([
+      otherEntry('root', 'ROOT'),
+      otherEntry('turn-1', 'TURN_START'),
+      otherEntry('end-1', 'TURN_END'),
+      otherEntry('compaction-1', 'COMPACTION'),
     ])).toBeNull()
   })
 })

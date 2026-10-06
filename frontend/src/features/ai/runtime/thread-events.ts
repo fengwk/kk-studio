@@ -12,6 +12,7 @@ import type {
 import {
   contentText,
   formatTurnUsageText,
+  formatUsageCost,
   mergeTurnUsage,
   parseAssistantUsage,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
@@ -228,7 +229,10 @@ export function buildThreadEventTimeline(
       const message = asRecord(payload.message)
       // Turn usage 挂起：该 Turn 最后一个 ASSISTANT 的 metadata 在 TURN_END 发射。
       if (entry.entryType === 'MESSAGE' && getString(message.role) === 'ASSISTANT') {
-        const parsed = parseAssistantUsage(asRecord(payload.assistantMetadata))
+        const parsed = parseAssistantUsage(
+          asRecord(payload.assistantMetadata),
+          entry.usageCost ?? null,
+        )
         if (parsed != null) {
           pendingUsage = pendingUsage == null ? parsed : mergeTurnUsage(pendingUsage, parsed)
         }
@@ -406,7 +410,10 @@ function projectEntryRecord(
             label: translate('ai.runtime.event.detail.providerTotal'),
             value: String(usage.providerTotal),
           },
-          { label: translate('ai.runtime.event.detail.cost'), value: usage.cost.toFixed(3) },
+          {
+            label: translate('ai.runtime.event.detail.cost'),
+            value: formatUsageCost(usage.cost) ?? translate('ai.runtime.status.noData'),
+          },
         )
       }
       return {

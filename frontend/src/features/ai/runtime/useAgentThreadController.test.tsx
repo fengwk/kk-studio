@@ -1300,7 +1300,7 @@ describe('useAgentThreadController', () => {
     expect(result.current.thread?.nextCommandSequence).toBe('1')
   })
 
-  it('derives Branch Usage from completed TURN_END summaries in the current snapshot', async () => {
+  it('derives Branch Usage from the current snapshot entries and their read-time cost projection', async () => {
     const currentThread = threadFixture()
     const entry = (
       entryId: string,
@@ -1318,20 +1318,23 @@ describe('useAgentThreadController', () => {
       snapshotOf(currentThread, {
         entries: [
           entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
-          entry('assistant-1', 'MESSAGE', {
-            message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
-            assistantMetadata: {
-              usage: {
-                inputTokens: 1_200,
-                outputTokens: 80,
-                cacheReadTokens: 300,
-                cacheWriteTokens: 40,
-                reasoningTokens: 20,
-                providerTotalTokens: 1_640,
+          {
+            ...entry('assistant-1', 'MESSAGE', {
+              message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
+              assistantMetadata: {
+                usage: {
+                  inputTokens: 1_200,
+                  outputTokens: 80,
+                  cacheReadTokens: 300,
+                  cacheWriteTokens: 40,
+                  reasoningTokens: 20,
+                  providerTotalTokens: 1_640,
+                },
               },
-              cost: { total: 0.25 },
-            },
-          }),
+            }),
+            // 费用只来自读取投影，不来自 payload 内的任何 cost 字段
+            usageCost: { currency: 'USD', amount: '0.25' },
+          },
           entry('end-1', 'TURN_END', { outcome: 'COMPLETED', continueModel: false }),
         ],
       }),
@@ -1348,7 +1351,7 @@ describe('useAgentThreadController', () => {
       cacheWrite: 40,
       reasoning: 20,
       providerTotal: 1_640,
-      cost: 0.25,
+      cost: { currency: 'USD', amount: '0.25' },
       decodeTokens: null,
       decodeDurationMillis: null,
       contextInputTokens: 1_540,

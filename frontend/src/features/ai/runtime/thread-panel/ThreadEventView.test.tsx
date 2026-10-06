@@ -112,6 +112,52 @@ describe('ThreadEventView', () => {
     expect(listbox().closest('.thread-events-shell')).not.toBeNull()
   })
 
+  // 意图：选中历史 ASSISTANT 模型调用 Entry 时按需拉取「该次调用之前的请求」只读预览，
+  // 拿到结果后就地替换详情列（而不是替换列表或触发任何写入）。
+  it('requests and renders the on-demand historical request preview for the selected assistant entry', async () => {
+    const user = userEvent.setup()
+    const onRequest = vi.fn()
+    const preview = {
+      kind: 'HISTORICAL_REQUEST_PREVIEW' as const,
+      providerType: 'anthropic',
+      modelName: 'claude',
+      bodyByteSize: 24,
+      bodyJson: '{"reconstructed":true}',
+      sourceHeadEntryId: 'head-1',
+      generatedAt: '2026-09-21T00:00:00.000Z',
+      notice: 'reconstructed under current definitions',
+    }
+
+    const { rerender } = render(
+      <ThreadEventView
+        events={[record('e1')]}
+        selectedEventId="e1"
+        onSelectedEventIdChange={vi.fn()}
+        onRequestHistoricalPreview={onRequest}
+      />,
+    )
+
+    await user.click(screen.getByTestId('historical-request-preview'))
+    expect(onRequest).toHaveBeenCalledWith('e1')
+
+    rerender(
+      <ThreadEventView
+        events={[record('e1')]}
+        selectedEventId="e1"
+        onSelectedEventIdChange={vi.fn()}
+        onRequestHistoricalPreview={onRequest}
+        historicalPreview={preview}
+      />,
+    )
+
+    const inspector = screen.getByTestId('thread-debug-inspector')
+    // 历史重放不能标成草稿预览
+    expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
+    expect(inspector.textContent).toContain('HISTORICAL_REQUEST_PREVIEW')
+    expect(inspector.textContent).toContain('reconstructed under current definitions')
+    expect(screen.getByTestId('preview-request-body')).toHaveTextContent('"reconstructed": true')
+  })
+
   it('renders a pulse dot only for running rows and failed rows keep the danger class', () => {
     render(
       <Harness
@@ -564,8 +610,7 @@ describe('ThreadEventView', () => {
           initialDebug={sampleDebugData({
             cacheControl: {
               retention: 'SHORT',
-              affinityKey: 'key-1',
-              breakpoints: ['SYSTEM'],
+              key: 'key-1',
             },
           })}
         />,
