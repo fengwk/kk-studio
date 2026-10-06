@@ -22,7 +22,8 @@ export interface ThinkingLineProjection {
 
 /**
  * 在可用宽度内保留思考最新尾部：返回能放下的最长后缀，前文放不下时由省略标记取代。
- * 逐字符二分测量真实宽度，不假设固定字符数，也不用 rtl 反排文本阅读顺序。
+ * 以字素簇（grapheme）为最小单位二分测量真实宽度：不切断 emoji/组合字符，不假设
+ * 固定字符数，也不用 rtl 反排文本阅读顺序。
  */
 export function projectThinkingLine(
   flattened: string,
@@ -37,20 +38,34 @@ export function projectThinkingLine(
     return { text: flattened, truncated: false }
   }
 
-  // 二分最短能放下的后缀起点；measureText 随文本变长单调不减。
+  const clusters = splitGraphemes(flattened)
+  const suffix = (start: number) => clusters.slice(start).join('')
   let low = 0
-  let high = flattened.length
+  let high = clusters.length
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
-    if (measureText(ellipsis + flattened.slice(mid)) <= availableWidth) {
+    if (measureText(ellipsis + suffix(mid)) <= availableWidth) {
       high = mid
     } else {
       low = mid + 1
     }
   }
-  // 连省略标记都放不下时只保留省略标记，避免渲染超出容器的假尾部。
-  if (measureText(ellipsis + flattened.slice(low)) > availableWidth) {
-    return { text: '', truncated: true }
+  // 快速路径未命中时整行必然放不下，low=0 只可能来自非单调度量；此时按整行处理。
+  if (low === 0) {
+    return { text: flattened, truncated: false }
   }
-  return { text: flattened.slice(low), truncated: true }
+  // low = clusters.length 表示连省略标记都放不下，只保留省略标记，不渲染假尾部。
+  return { text: suffix(low), truncated: true }
+}
+
+/**
+ * 按字素簇切分文本。浏览器内建 Intl.Segmenter 保证不切断 emoji ZWJ 序列与组合
+ * 字符；不可用时退化为码点切分，至少不切断代理对。
+ */
+function splitGraphemes(text: string): string[] {
+  if (typeof Intl.Segmenter === 'function') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    return Array.from(segmenter.segment(text), (entry) => entry.segment)
+  }
+  return Array.from(text)
 }

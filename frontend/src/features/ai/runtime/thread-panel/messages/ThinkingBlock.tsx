@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   flattenThinkingText,
   normalizeThinkingText,
@@ -17,31 +17,33 @@ const FULL_LINE: ThinkingLineProjection = { text: '', truncated: false }
 
 /**
  * 思考块：一个框，没有 Header、标题或内部分隔线，按钮固定在第一行末尾。
- * 默认收起为按可用宽度投影的单行尾部；展开后由 MarkdownRenderer 原样渲染完整
- * 思考 Markdown。展开/收起是用户状态，不随流式刷新或终态重置。
+ * 默认收起为按可用宽度投影的单行尾部（ChevronRight 展开）；展开后同一框由
+ * MarkdownRenderer 原样渲染完整思考 Markdown（ChevronDown 收起）。展开/收起是
+ * 用户状态，不随流式刷新或终态重置。
  */
 export function ThinkingBlock({ thinking }: { thinking: string }) {
   const { t } = useI18n()
   const normalized = normalizeThinkingText(thinking)
+  const hasContent = normalized.length > 0
   const flattened = flattenThinkingText(thinking)
   const [expanded, setExpanded] = useState(false)
   const lineRef = useRef<HTMLDivElement>(null)
-  const lineWidth = useElementWidth(lineRef, !expanded)
+  // 收起态单行节点只在有内容时挂载；节点出现（空 -> 流式非空）必须重新注册测量。
+  const lineVisible = hasContent && !expanded
+  const lineWidth = useElementWidth(lineRef, lineVisible)
   const [projection, setProjection] = useState<ThinkingLineProjection>(FULL_LINE)
 
   // 投影依赖真实字体度量与元素宽度，只能在布局完成后计算；未测得宽度时保留整行由 CSS 裁剪。
   useLayoutEffect(() => {
     const element = lineRef.current
-    if (expanded || !element || lineWidth <= 0) {
+    if (!lineVisible || !element || lineWidth <= 0) {
       setProjection(flattened ? { text: flattened, truncated: false } : FULL_LINE)
       return
     }
-    setProjection(
-      projectThinkingLine(flattened, lineWidth, (text) => measureTextWidth(element, text)),
-    )
-  }, [expanded, flattened, lineWidth])
+    setProjection(projectThinkingLine(flattened, lineWidth, createTextMeasurer(element)))
+  }, [flattened, lineVisible, lineWidth])
 
-  if (!normalized) {
+  if (!hasContent) {
     return null
   }
 
@@ -71,7 +73,7 @@ export function ThinkingBlock({ thinking }: { thinking: string }) {
         aria-label={t(expanded ? 'ai.runtime.thinking.collapse' : 'ai.runtime.thinking.expand')}
         onClick={() => setExpanded((current) => !current)}
       >
-        {expanded ? <ChevronUp aria-hidden="true" /> : <ChevronDown aria-hidden="true" />}
+        {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
       </button>
     </section>
   )
@@ -106,17 +108,22 @@ function useElementWidth(ref: RefObject<HTMLElement | null>, enabled: boolean): 
 let measureContext: CanvasRenderingContext2D | null | undefined
 
 /**
- * 用收起态单行一致的字形测量文本宽度。canvas 是浏览器标准度量方式；
+ * 为一次投影创建文本度量：字体只从元素读取一次，二分期间复用同一度量。
  * 无法取得 2D 上下文时返回 0，即不制造截断，交给 CSS 裁剪。
  */
-function measureTextWidth(element: HTMLElement, text: string): number {
+function createTextMeasurer(element: HTMLElement): (text: string) => number {
+  const context = getMeasureContext()
+  if (!context) {
+    return () => 0
+  }
+  const style = window.getComputedStyle(element)
+  context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+  return (text) => context.measureText(text).width
+}
+
+function getMeasureContext(): CanvasRenderingContext2D | null {
   if (measureContext === undefined) {
     measureContext = document.createElement('canvas').getContext('2d')
   }
-  if (!measureContext) {
-    return 0
-  }
-  const style = window.getComputedStyle(element)
-  measureContext.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
-  return measureContext.measureText(text).width
+  return measureContext
 }
