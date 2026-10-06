@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -64,19 +62,6 @@ class OpenAiChatThinkingTest {
             ProviderType.OPENAI,
             "https://api.deepseek.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
             "deepseek",
@@ -84,8 +69,7 @@ class OpenAiChatThinkingTest {
             "deepseek-reasoner",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     defaultVariant = new ModelVariant("default");
     encoder = new OpenAiChatRequestEncoder();
     recordedEvents = new ArrayList<>();
@@ -124,12 +108,11 @@ class OpenAiChatThinkingTest {
 
     OpenAiChatEncodedRequest encoded1 =
         encoder.encode(turn1Request, descriptor, OpenAiChatConfiguration.defaults());
-    String prefixHash = encoded1.sourcePrefixHash();
 
     // 2. 模拟收到包含 reasoning_content 与 reasoning_details 的 SSE 流
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
-            turn1Request, descriptor, OpenAiChatConfiguration.defaults(), prefixHash, bridge);
+            turn1Request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
         """
@@ -168,7 +151,6 @@ class OpenAiChatThinkingTest {
     assertNotNull(replayState);
     assertEquals(ProviderReplayFormat.OPENAI_CHAT, replayState.format());
     assertEquals(descriptor.affinity("deepseek-reasoner"), replayState.affinity());
-    assertEquals(prefixHash, replayState.sourcePrefixHash());
 
     JsonNode payload = replayState.payload();
     assertEquals("The sum is 2.", payload.path("content").asText());

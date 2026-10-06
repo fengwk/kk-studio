@@ -72,7 +72,6 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatConfiguration</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatEndpoints</include>
-                                        <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatRequestEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatStreamAccumulator</include>
