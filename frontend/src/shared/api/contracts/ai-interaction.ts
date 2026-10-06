@@ -34,10 +34,14 @@ export interface InteractionDTO {
 
 /**
  * 待处理 Interaction 的一页稳定分页结果。
+ *
+ * `total` 是同一过滤条件下的真实可见待处理总数（与 `nextCursor` 指向的分页位置无关），
+ * 供全局待处理角标直接读取，不需要客户端自行累加或维护台账。
  */
 export interface InteractionPageDTO {
   items: InteractionDTO[]
   nextCursor: string | null
+  total: number
 }
 
 /**

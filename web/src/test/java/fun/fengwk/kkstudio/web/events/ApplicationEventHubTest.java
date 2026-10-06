@@ -57,6 +57,9 @@ class ApplicationEventHubTest {
   private RealtimeEventSource realtimeSource;
   private CanvasVersionEventSource canvasVersionSource;
   private ProjectInvalidationHub projectInvalidationHub;
+  private InvalidationEventSource executionTreeChangeSource;
+  private InvalidationEventSource interactionChangeSource;
+  private InvalidationEventSource environmentChangeSource;
   private ApplicationEventHub hub;
 
   @BeforeEach
@@ -65,18 +68,30 @@ class ApplicationEventHubTest {
     realtimeSource = mock(RealtimeEventSource.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
     projectInvalidationHub = mock(ProjectInvalidationHub.class);
+    executionTreeChangeSource = mock(InvalidationEventSource.class);
+    interactionChangeSource = mock(InvalidationEventSource.class);
+    environmentChangeSource = mock(InvalidationEventSource.class);
     when(threadVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(5L, () -> {}));
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(() -> {});
     when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
+    when(executionTreeChangeSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(0L, () -> {}));
+    when(interactionChangeSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(0L, () -> {}));
+    when(environmentChangeSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(0L, () -> {}));
     hub =
         new ApplicationEventHub(
             threadVersionSource,
             realtimeSource,
             canvasVersionSource,
             projectInvalidationHub,
+            executionTreeChangeSource,
+            interactionChangeSource,
+            environmentChangeSource,
             BUFFER_CAPACITY);
   }
 
@@ -283,9 +298,99 @@ class ApplicationEventHubTest {
   @Test
   void resourceKeysEnforceVersionedAndGlobalShapes() {
     assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD, null));
+    assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.TREE, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> new ResourceKey(ResourceKind.PROJECTS, UUID.randomUUID()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceKey(ResourceKind.INTERACTIONS, UUID.randomUUID()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceKey(ResourceKind.ENVIRONMENTS, UUID.randomUUID()));
+  }
+
+  @Test
+  void treeChangeIsKeyedByRootAndAggregatesToTheSameResource() {
+    // 测试意图：执行树失效以真实根为资源 key（ack 游标恒为 0），上游通知只落成「回读本根树」的最小信号。
+    AtomicReference<UUID> subscribedKey = new AtomicReference<>();
+    AtomicReference<Consumer<InvalidationEventSource.Event>> consumer = new AtomicReference<>();
+    when(executionTreeChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              subscribedKey.set(inv.getArgument(0));
+              consumer.set(inv.getArgument(1));
+              return new SourceSubscribed(0L, () -> {});
+            });
+
+    List<Signal> signals = new ArrayList<>();
+    Subscription subscription =
+        hub.subscribe(new ResourceKey(ResourceKind.TREE, THREAD), signals::add);
+    assertEquals(THREAD, subscribedKey.get(), "树上游必须按真实根订阅");
+    assertEquals(0L, subscription.cursor());
+    subscription.activate();
+
+    consumer.get().accept(InvalidationEventSource.Event.changed(THREAD));
+    assertEquals(List.of(new Signal.TreeChanged()), signals);
+
+    // 提示型资源没有持久游标：resync 必须同样到达（不因 cursor 过滤被丢弃）。
+    consumer.get().accept(InvalidationEventSource.Event.fullResync());
+    assertEquals(List.of(new Signal.TreeChanged(), new Signal.Resync()), signals);
+  }
+
+  @Test
+  void interactionsAndEnvironmentsFanOutAsGlobalHintResources() {
+    // 测试意图：交互与 Environment 是全局资源，单个上游事件向全部本地订阅者投递一次最小失效信号。
+    AtomicReference<Consumer<InvalidationEventSource.Event>> interactionsConsumer =
+        new AtomicReference<>();
+    AtomicReference<Consumer<InvalidationEventSource.Event>> environmentsConsumer =
+        new AtomicReference<>();
+    when(interactionChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              interactionsConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(0L, () -> {});
+            });
+    when(environmentChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            inv -> {
+              environmentsConsumer.set(inv.getArgument(1));
+              return new SourceSubscribed(0L, () -> {});
+            });
+
+    List<Signal> interactionSignals = new ArrayList<>();
+    List<Signal> environmentSignals = new ArrayList<>();
+    Subscription interactionsSub =
+        hub.subscribe(new ResourceKey(ResourceKind.INTERACTIONS, null), interactionSignals::add);
+    Subscription environmentsSub =
+        hub.subscribe(new ResourceKey(ResourceKind.ENVIRONMENTS, null), environmentSignals::add);
+    interactionsSub.activate();
+    environmentsSub.activate();
+
+    UUID rootThreadId = UUID.randomUUID();
+    interactionsConsumer.get().accept(InvalidationEventSource.Event.changed(rootThreadId));
+    environmentsConsumer.get().accept(InvalidationEventSource.Event.changed(UUID.randomUUID()));
+    environmentsConsumer.get().accept(InvalidationEventSource.Event.fullResync());
+
+    assertEquals(List.of(new Signal.InteractionsChanged(rootThreadId)), interactionSignals);
+    assertEquals(List.of(new Signal.EnvironmentChanged(), new Signal.Resync()), environmentSignals);
+  }
+
+  @Test
+  void hintResourcesReleaseUpstreamsWhenLastSubscriberCloses() throws Exception {
+    AutoCloseable handle = mock(AutoCloseable.class);
+    when(interactionChangeSource.subscribe(any(), any()))
+        .thenReturn(new SourceSubscribed(0L, handle));
+
+    ResourceKey key = new ResourceKey(ResourceKind.INTERACTIONS, null);
+    Subscription first = hub.subscribe(key, sink());
+    Subscription second = hub.subscribe(key, sink());
+    verify(interactionChangeSource, times(1)).subscribe(any(), any());
+
+    first.close();
+    verify(handle, never()).close();
+    second.close();
+    verify(handle).close();
   }
 
   @Test

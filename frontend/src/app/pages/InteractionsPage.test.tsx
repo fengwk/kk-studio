@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { interactionService } from '@/shared/api/interaction-service'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { projectsApi } from '@/features/projects/projects-api'
 import type { IssueDetailDTO } from '@/features/projects/types'
 import { InteractionsPage } from './InteractionsPage'
@@ -19,14 +21,20 @@ vi.mock('react-router', async () => {
 
 describe('InteractionsPage', () => {
   let queryClient: QueryClient
+  let sockets: FakeWebSocketHarness
 
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          {children}
+        </ApplicationEventProvider>
+      </QueryClientProvider>
     </MemoryRouter>
   )
 
   beforeEach(() => {
+    sockets = new FakeWebSocketHarness()
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })

@@ -4,16 +4,25 @@ import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { useInteractionsController } from './useInteractionsController'
 
 describe('useInteractionsController', () => {
   let queryClient: QueryClient
+  let sockets: FakeWebSocketHarness
 
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        {children}
+      </ApplicationEventProvider>
+    </QueryClientProvider>
   )
 
   beforeEach(() => {
+    sockets = new FakeWebSocketHarness()
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
@@ -75,6 +84,47 @@ describe('useInteractionsController', () => {
     expect(listSpy).toHaveBeenLastCalledWith(null, 'cursor-page-2', 10)
     expect(result.current.items).toHaveLength(2)
     expect(result.current.hasMore).toBe(false)
+  })
+
+  it('refetches its own root list on a pending change event and ignores other roots', async () => {
+    // 测试意图：待处理变化由服务端按真实根推送——本根事件触发一次权威回读，其他根的事件不触发无谓回读。
+    const rootThreadId = '11111111-2222-4333-8444-555555555555'
+    const otherRootThreadId = '99999999-2222-4333-8444-555555555555'
+    const listSpy = vi
+      .spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce({ items: [mockItem1], nextCursor: null })
+      .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
+
+    const { result } = renderHook(() => useInteractionsController(rootThreadId, 10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.items[0].interactionId).toBe('int-1')
+    const socket = sockets.openLatest()
+
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'interactions' },
+        name: 'changed',
+        data: { rootThreadId: otherRootThreadId },
+      })
+    })
+    expect(listSpy).toHaveBeenCalledTimes(1)
+    expect(
+      queryClient.getQueryState(queryKeys.interactions.list(rootThreadId, null, 10))
+        ?.isInvalidated,
+    ).toBe(false)
+
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'interactions' },
+        name: 'changed',
+        data: { rootThreadId },
+      })
+    })
+
+    await waitFor(() => expect(result.current.items[0].interactionId).toBe('int-2'))
+    expect(listSpy).toHaveBeenCalledTimes(2)
   })
 
   it('handles refresh by resetting cursor and invalidating queries', async () => {
@@ -521,5 +571,53 @@ describe('useInteractionsController', () => {
     expect(result.current.isError).toBe(true)
     expect(result.current.error?.message).toBe('Network error on loadMore')
     expect(result.current.isFetchingMore).toBe(false)
+  })
+
+  it('reads back its own root list on resync and after a reconnect re-subscribe', async () => {
+    // 测试意图：resync 与重连后的重新订阅都表示本地分页可能已经不是权威事实，
+    // 必须主动回读本根的待处理列表，而不是停在断线前的页。
+    const rootThreadId = '11111111-2222-4333-8444-555555555555'
+    const listSpy = vi
+      .spyOn(interactionService, 'listInteractions')
+      .mockResolvedValue({ items: [mockItem1], nextCursor: null })
+
+    const { result } = renderHook(() => useInteractionsController(rootThreadId, 10), { wrapper })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(listSpy).toHaveBeenCalledTimes(1)
+    const socket = sockets.openLatest()
+    expect(socket.sentMessages()).toEqual([
+      { version: 1, type: 'subscribe', resource: { kind: 'interactions' } },
+    ])
+
+    act(() => {
+      socket.emitServer({ type: 'resync', resource: { kind: 'interactions' } })
+    })
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2))
+
+    vi.useFakeTimers()
+    try {
+      socket.closeWith()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+      expect(sockets.sockets).toHaveLength(2)
+      // openLatest() 已经完成 open：重连后重新订阅，服务端 ack 触发一次权威回读。
+      const reconnected = sockets.openLatest()
+      act(() => {
+        reconnected.emitServer({
+          type: 'subscribed',
+          resource: { kind: 'interactions' },
+          cursor: '0',
+        })
+      })
+      for (let round = 0; round < 5; round += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0)
+        })
+      }
+      expect(listSpy).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

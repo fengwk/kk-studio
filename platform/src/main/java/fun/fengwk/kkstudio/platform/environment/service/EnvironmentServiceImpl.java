@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -44,6 +45,9 @@ import java.util.UUID;
 public class EnvironmentServiceImpl implements EnvironmentService {
 
   private static final String RESOURCE = "environment";
+
+  /** 无有效连接（从未连接或连接已失效）时对外派生的状态。 */
+  private static final String OFFLINE = "OFFLINE";
 
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentRegistry environmentRegistry;
@@ -404,18 +408,25 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     Optional<EnvironmentConnection> connOpt = environmentRegistry.find(envId);
     if (connOpt.isEmpty()) {
       // 无连接行：从未连接过，无任何已保留的宿主 metadata。
-      dto.setStatus("OFFLINE");
+      dto.setStatus(OFFLINE);
       dto.setReady(false);
       dto.setCapabilities(List.of());
       return dto;
     }
     // 连接状态、就绪判定、能力列表与 lastSeen 都是 live 事实；宿主 metadata 是连接行保留的最近一次 READY 事实。
     EnvironmentConnection conn = connOpt.get();
-    dto.setStatus(conn.status().name());
+    Instant now = clock.instant();
+    // 连接行只在状态截止时间之前仍是有效路由事实：租约与心跳窗口取更早者作为唯一上界，
+    // 过期后同一时钟派生出 OFFLINE，并且不再把该连接的能力当作可用。
+    Instant statusDeadline =
+        statusDeadline(
+            conn, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis()));
+    boolean statusValid = statusDeadline.isAfter(now);
+    dto.setStatus(statusValid ? conn.status().name() : OFFLINE);
+    dto.setStatusExpiresAt(statusValid ? statusDeadline : null);
     dto.setReady(
         conn.isReady(
-            clock.instant(),
-            Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
+            now, Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
     dto.setLastSeen(conn.lastSeenAt());
     DaemonEnvironmentInfo host =
         conn.daemonCapabilities() == null ? null : conn.daemonCapabilities().environment();
@@ -426,15 +437,23 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
     dto.setLastEvent(conn.lastAlert().map(EnvironmentServiceImpl::toEventDto).orElse(null));
     dto.setCapabilities(
-        conn.capabilities().stream()
-            .map(
-                c -> {
-                  LiveEnvironmentCapabilityDTO cdto = new LiveEnvironmentCapabilityDTO();
-                  cdto.setId(c.id().value());
-                  cdto.setVersion(c.version());
-                  return cdto;
-                })
-            .toList());
+        statusValid
+            ? conn.capabilities().stream()
+                .map(
+                    c -> {
+                      LiveEnvironmentCapabilityDTO cdto = new LiveEnvironmentCapabilityDTO();
+                      cdto.setId(c.id().value());
+                      cdto.setVersion(c.version());
+                      return cdto;
+                    })
+                .toList()
+            : List.of());
     return dto;
+  }
+
+  /** 有效连接的状态截止时间：租约到期与心跳窗口到期两个上界取更早者，二者都由同一连接行事实给出。 */
+  private static Instant statusDeadline(EnvironmentConnection conn, Duration heartbeatTimeout) {
+    Instant heartbeatDeadline = conn.lastSeenAt().plus(heartbeatTimeout);
+    return conn.leaseUntil().isBefore(heartbeatDeadline) ? conn.leaseUntil() : heartbeatDeadline;
   }
 }

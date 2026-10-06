@@ -64,10 +64,16 @@ export interface EnvironmentCardDTO {
   installConfig?: EnvironmentInstallConfigDTO | null
   name: string
   registrationToken?: string | null
-  /** 当前连接状态：CONNECTING / READY / OFFLINE。 */
+  /** 当前连接状态：CONNECTING / READY / OFFLINE（租约或心跳窗口已过期的连接由服务端派生为 OFFLINE）。 */
   status: string
   /** 是否就绪。 */
   ready: boolean
+  /**
+   * 当前状态仍然成立的截止时间：有效连接取 min(leaseUntil, lastSeen + heartbeatTimeout)；无连接或已失效时为 null。
+   *
+   * 它是服务端用同一时钟给出的只读时间投影；页面只按它安排一次回读，不轮询。
+   */
+  statusExpiresAt: InstantTimestamp | null
   /** 最近活跃时间；从未连接过的 Environment 为 null。 */
   lastSeen: InstantTimestamp | null
   /** 支持的原子能力列表。 */

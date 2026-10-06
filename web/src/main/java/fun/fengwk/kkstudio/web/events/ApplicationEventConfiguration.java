@@ -72,6 +72,9 @@ public class ApplicationEventConfiguration {
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
       EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
+      ExecutionTreeChangeHub executionTreeChangeHub,
+      InteractionChangeHub interactionChangeHub,
+      EnvironmentChangeHub environmentChangeHub,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new PostgresqlNotificationLoop(
@@ -121,7 +124,22 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 EnvironmentSkillSyncOrchestrator.CHANNEL,
                 environmentSkillSyncOrchestrator::onPackageChanged,
-                environmentSkillSyncOrchestrator::reconcileReadyEnvironments)),
+                environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
+            // 11. 执行树失效：Thread 行提交后触发器把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            new PostgresqlNotificationHandler(
+                ExecutionTreeChangeHub.CHANNEL,
+                executionTreeChangeHub::onNotification,
+                executionTreeChangeHub::broadcastResync),
+            // 12. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
+            new PostgresqlNotificationHandler(
+                InteractionChangeHub.CHANNEL,
+                interactionChangeHub::onNotification,
+                interactionChangeHub::broadcastResync),
+            // 13. Environment 连接状态失效：连接状态/被接受 metadata/租约代币变化，以及租约到期扫描
+            new PostgresqlNotificationHandler(
+                EnvironmentChangeHub.CHANNEL,
+                environmentChangeHub::onNotification,
+                environmentChangeHub::broadcastResync)),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }
@@ -132,12 +150,18 @@ public class ApplicationEventConfiguration {
       RealtimeEventSource realtimeSource,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
+      ExecutionTreeChangeHub executionTreeChangeHub,
+      InteractionChangeHub interactionChangeHub,
+      EnvironmentChangeHub environmentChangeHub,
       ApplicationEventSettings settings) {
     return new ApplicationEventHub(
         threadVersionSource,
         realtimeSource,
         canvasVersionSource,
         projectInvalidationHub,
+        executionTreeChangeHub,
+        interactionChangeHub,
+        environmentChangeHub,
         settings.queueCapacity());
   }
 

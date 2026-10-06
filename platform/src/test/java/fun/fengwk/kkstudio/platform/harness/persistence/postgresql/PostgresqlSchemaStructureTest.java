@@ -1098,12 +1098,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "trg_canvas_document_revision_notify",
             "trg_canvas_function_work_notify",
+            "trg_environment_connection_changed",
+            "trg_environment_registry_changed",
+            "trg_harness_thread_tree_notify",
             "trg_harness_thread_version_notify",
+            "trg_harness_tool_invocation_interaction_notify",
             "trg_project_issue_work_due",
             "trg_skill_package_changed",
             "trg_system_setting_version_notify"),
         triggers,
-        "public triggers must equal the exact set of 6 user triggers");
+        "public triggers must equal the exact set of 10 user triggers");
 
     String systemSettingsDefinition =
         singleString(
@@ -1248,14 +1252,18 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     }
     assertEquals(
         Set.of(
+            "environment_connection_changed_notify",
+            "environment_registry_changed_notify",
+            "harness_thread_tree_notify",
             "harness_thread_version_notify",
+            "harness_tool_interaction_notify",
             "notify_canvas_document_revision",
             "notify_canvas_function_work",
             "notify_project_issue_work_due",
             "skill_package_changed_notify",
             "system_setting_version_notify"),
         functions,
-        "only declared 6 notification helpers may exist");
+        "only declared 10 notification helpers may exist");
 
     // 行为：trigger 在 INSERT 与 version 写入时触发，但绝不修改存储的
     // version 值；非 version 的应用层更新则完全不会动到 version。

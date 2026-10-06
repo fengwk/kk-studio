@@ -78,6 +78,18 @@ class InteractionQueryServiceTest {
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
   }
 
+  /** 计数扫描固定从首屏游标按 {@link InteractionQueryService#COUNT_PAGE_SIZE} 推进，因此每个用例都要显式给出该源。 */
+  private void stubCountPage(List<PendingInteraction> rows, boolean hasMore) {
+    stubCountPage(Instant.EPOCH, ZERO_UUID, rows, hasMore);
+  }
+
+  private void stubCountPage(
+      Instant afterCreatedAt, UUID afterId, List<PendingInteraction> rows, boolean hasMore) {
+    when(runtime.listPendingInteractions(
+            afterCreatedAt, afterId, InteractionQueryService.COUNT_PAGE_SIZE))
+        .thenReturn(new PendingInteractionPage(rows, hasMore));
+  }
+
   private static PendingInteraction waitingInput(
       UUID invocationId, UUID threadId, UUID sessionId, Instant createdAt) {
     return new PendingInteraction(
@@ -139,11 +151,13 @@ class InteractionQueryServiceTest {
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row1, row2, row3), false));
+    stubCountPage(List.of(row1, row2, row3), false);
 
     InteractionPageDTO page = service.listInteractions(null, null, 10);
 
     assertEquals(2, page.getItems().size());
     assertNull(page.getNextCursor());
+    assertEquals(2, page.getTotal(), "total 统计的是可见待处理行，而不是原始源行数");
 
     InteractionDTO dto1 = page.getItems().get(0);
     assertEquals(invocationId1.toString(), dto1.getInteractionId());
@@ -194,10 +208,12 @@ class InteractionQueryServiceTest {
         .thenReturn(new ChatSession(rootSessionId, id(700)));
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(childRow), false));
+    stubCountPage(List.of(childRow), false);
 
     InteractionPageDTO page = service.listInteractions(null, null, 10);
 
     assertEquals(1, page.getItems().size());
+    assertEquals(1, page.getTotal());
     InteractionDTO dto = page.getItems().get(0);
     assertEquals(childThreadId.toString(), dto.getThreadId());
     assertEquals(childSessionId.toString(), dto.getSessionId());
@@ -243,6 +259,10 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(t2, id(902), 1))
         .thenReturn(new PendingInteractionPage(List.of(childRow), false));
 
+    // 计数同样按根过滤跨页扫描完整源：其他根的行不进入 total。
+    stubCountPage(List.of(rootRow, otherRow), true);
+    stubCountPage(t2, id(902), List.of(childRow), false);
+
     InteractionPageDTO page = service.listInteractions(rootThreadId, null, 2);
 
     assertEquals(2, page.getItems().size());
@@ -252,6 +272,7 @@ class InteractionQueryServiceTest {
     assertEquals(childThreadId.toString(), page.getItems().get(1).getThreadId());
     assertEquals(rootThreadId.toString(), page.getItems().get(1).getRootThreadId());
     assertNull(page.getNextCursor());
+    assertEquals(2, page.getTotal(), "total 必须与列表使用同一根过滤");
 
     verify(runtime).listPendingInteractions(Instant.EPOCH, ZERO_UUID, 2);
     verify(runtime).listPendingInteractions(t2, id(902), 1);
@@ -320,6 +341,8 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(t3, id(30), 2))
         .thenReturn(new PendingInteractionPage(List.of(row4, row5), false));
 
+    stubCountPage(List.of(row1, row2, row3, row4, row5), false);
+
     InteractionPageDTO page = service.listInteractions(null, null, 3);
 
     assertEquals(3, page.getItems().size());
@@ -327,6 +350,7 @@ class InteractionQueryServiceTest {
     assertEquals(id(40).toString(), page.getItems().get(1).getInteractionId());
     assertEquals(id(50).toString(), page.getItems().get(2).getInteractionId());
     assertNull(page.getNextCursor());
+    assertEquals(3, page.getTotal(), "total 只统计可见行（row3/row4/row5）");
 
     verify(runtime).listPendingInteractions(Instant.EPOCH, ZERO_UUID, 3);
     verify(runtime).listPendingInteractions(t3, id(30), 2);
@@ -364,10 +388,14 @@ class InteractionQueryServiceTest {
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
         .thenReturn(new PendingInteractionPage(List.of(row1), true));
 
+    // 计数页始终从首屏游标扫描完整源，与当前请求的 limit/游标无关。
+    stubCountPage(List.of(row1, row2, row3), false);
+
     InteractionPageDTO firstPage = service.listInteractions(null, null, 1);
     assertEquals(1, firstPage.getItems().size());
     String expectedCursor1 = t1.toEpochMilli() + ":" + id(10);
     assertEquals(expectedCursor1, firstPage.getNextCursor());
+    assertEquals(2, firstPage.getTotal(), "row1 与 row3 可见，row2 不可见");
 
     // 第二次调用：携带 expectedCursor1，limit=1。
     // 第 1 轮 runtime 返回 row2（整页不可见，hasMore=true），验证服务内部以 row2 (t2, id(20)) 自动继续推进扫描下一页
@@ -380,22 +408,25 @@ class InteractionQueryServiceTest {
     assertEquals(1, secondPage.getItems().size());
     assertEquals(id(30).toString(), secondPage.getItems().get(0).getInteractionId());
     assertNull(secondPage.getNextCursor());
+    assertEquals(2, secondPage.getTotal(), "total 与分页位置无关，翻页后仍然是全局可见总数");
 
     verify(runtime).listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1);
     verify(runtime).listPendingInteractions(t1, id(10), 1);
     verify(runtime).listPendingInteractions(t2, id(20), 1);
   }
 
-  /** 测试意图：验证底层源耗尽（hasMore 为 false 或空列表）时，返回的 nextCursor 必须为 null。 */
+  /** 测试意图：验证底层源耗尽（hasMore 为 false 或空列表）时，返回的 nextCursor 必须为 null，且 total 为 0/可见行数。 */
   @Test
   void exhaustedSourceYieldsNullNextCursor() {
     // 场景 A：首屏即为空列表
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(), false));
+    stubCountPage(List.of(), false);
 
     InteractionPageDTO pageEmpty = service.listInteractions(null, null, 10);
     assertEquals(0, pageEmpty.getItems().size());
     assertNull(pageEmpty.getNextCursor());
+    assertEquals(0, pageEmpty.getTotal());
 
     // 场景 B：首屏有数据但 hasMore 为 false
     UUID sessionId = id(10);
@@ -407,10 +438,48 @@ class InteractionQueryServiceTest {
         .thenReturn(new ChatSession(sessionId, id(1001)));
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 5))
         .thenReturn(new PendingInteractionPage(List.of(row), false));
+    stubCountPage(List.of(row), false);
 
     InteractionPageDTO pageWithItems = service.listInteractions(null, null, 5);
     assertEquals(1, pageWithItems.getItems().size());
     assertNull(pageWithItems.getNextCursor());
+    assertEquals(1, pageWithItems.getTotal());
+  }
+
+  /** 测试意图：验证 total 是完整源的真实可见数，而不是本页长度——limit=1 时仍要跨页统计出 3 条可见待处理。 */
+  @Test
+  void totalCoversWholeSourceInsteadOfReturnedPage() {
+    Instant t1 = Instant.parse("2026-03-01T10:00:00Z");
+    Instant t2 = Instant.parse("2026-03-01T10:01:00Z");
+    Instant t3 = Instant.parse("2026-03-01T10:02:00Z");
+    Instant t4 = Instant.parse("2026-03-01T10:03:00Z");
+
+    PendingInteraction row1 = waitingInput(id(10), id(2), id(1), t1);
+    PendingInteraction row2 = waitingInput(id(20), id(4), id(3), t2);
+    PendingInteraction row3 = waitingInput(id(30), id(6), id(5), t3);
+    PendingInteraction row4 = waitingInput(id(40), id(8), id(7), t4);
+
+    // row1/row3/row4 可见；row2 无产品归属（内部委派）必须被统计排除。
+    stubRoot(id(2));
+    when(chatSessionRepository.findBySessionId(id(1))).thenReturn(new ChatSession(id(1), id(100)));
+    stubRoot(id(4));
+    when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
+    when(issueAgentThreadRepository.findByThreadId(id(4))).thenReturn(null);
+    stubRoot(id(6));
+    when(chatSessionRepository.findBySessionId(id(5))).thenReturn(new ChatSession(id(5), id(300)));
+    stubRoot(id(8));
+    when(chatSessionRepository.findBySessionId(id(7))).thenReturn(new ChatSession(id(7), id(400)));
+
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
+        .thenReturn(new PendingInteractionPage(List.of(row1), true));
+    stubCountPage(List.of(row1, row2), true);
+    stubCountPage(t2, id(20), List.of(row3, row4), false);
+
+    InteractionPageDTO page = service.listInteractions(null, null, 1);
+
+    assertEquals(1, page.getItems().size());
+    assertEquals(id(10).toString(), page.getItems().get(0).getInteractionId());
+    assertEquals(3, page.getTotal(), "total 必须统计完整源的可见行，不能等于首页长度");
   }
 
   /** 测试意图：验证各种非法格式游标均抛出 IllegalArgumentException，且不触碰 runtime。 */

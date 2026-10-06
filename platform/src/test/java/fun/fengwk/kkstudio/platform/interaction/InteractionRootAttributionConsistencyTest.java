@@ -108,6 +108,9 @@ class InteractionRootAttributionConsistencyTest {
             Instant.parse("2026-03-01T10:00:00Z"));
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row), false));
+    when(runtime.listPendingInteractions(
+            Instant.EPOCH, ZERO_UUID, InteractionQueryService.COUNT_PAGE_SIZE))
+        .thenReturn(new PendingInteractionPage(List.of(row), false));
 
     InteractionPageDTO page = queryService.listInteractions(null, null, 10);
 

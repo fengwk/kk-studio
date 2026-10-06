@@ -224,6 +224,7 @@ class EnvironmentServiceImplTest {
     assertNull(single.getRegistrationToken());
     assertEquals("READY", single.getStatus());
     assertTrue(single.isReady());
+    assertEquals(NOW.plusSeconds(60), single.getStatusExpiresAt());
     assertEquals("linux", single.getOperatingSystem());
     assertEquals("Asia/Shanghai", single.getTimeZone());
     assertEquals("Note", single.getNote());
@@ -1021,6 +1022,69 @@ class EnvironmentServiceImplTest {
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
   }
 
+  /** 测试意图：租约/心跳窗口已过期的连接用同一时钟派生为 OFFLINE，并且不再对外暴露可用能力。 */
+  @Test
+  void expiredConnectionReadsAsOfflineWithoutUsableCapabilities() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(
+                connectionAt(
+                    LiveEnvironmentStatus.READY, NOW.minusSeconds(120), NOW.minusSeconds(60))));
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+
+    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+
+    assertEquals("OFFLINE", card.getStatus());
+    assertFalse(card.isReady());
+    assertNull(card.getStatusExpiresAt(), "失效连接没有未来的状态截止时间");
+    assertTrue(card.getCapabilities().isEmpty(), "过期连接的能力不得再当作可用");
+  }
+
+  /** 测试意图：statusExpiresAt 是租约与心跳窗口两个上界中更早者；未过期的 CONNECTING 同样给出截止时间。 */
+  @Test
+  void statusExpiresAtFollowsTheEarlierOfLeaseAndHeartbeatWindow() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+    when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+
+    // 心跳窗口（默认 60s）先到：截止时间取 lastSeen + heartbeatTimeout，而不是更晚的租约。
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(connectionAt(LiveEnvironmentStatus.READY, NOW, NOW.plusSeconds(300))));
+    EnvironmentCardDTO heartbeatBound = service.get(EnvironmentId.of(ENV_ID));
+    assertEquals("READY", heartbeatBound.getStatus());
+    assertEquals(NOW.plusSeconds(60), heartbeatBound.getStatusExpiresAt());
+
+    // 租约先到：截止时间取 leaseUntil。
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(connectionAt(LiveEnvironmentStatus.READY, NOW, NOW.plusSeconds(10))));
+    EnvironmentCardDTO leaseBound = service.get(EnvironmentId.of(ENV_ID));
+    assertEquals(NOW.plusSeconds(10), leaseBound.getStatusExpiresAt());
+
+    // 未过期的 CONNECTING 也必须给出截止时间：否则一个永远不 READY 的连接会让浏览器无限期保留旧状态。
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(connectionAt(LiveEnvironmentStatus.CONNECTING, NOW, NOW.plusSeconds(30))));
+    EnvironmentCardDTO connecting = service.get(EnvironmentId.of(ENV_ID));
+    assertEquals("CONNECTING", connecting.getStatus());
+    assertEquals(NOW.plusSeconds(30), connecting.getStatusExpiresAt());
+  }
+
   private static Environment environment(String registrationToken, long version) {
     Environment env = new Environment();
     env.setId(ENV_ID);
@@ -1046,5 +1110,22 @@ class EnvironmentServiceImplTest {
         events,
         NOW,
         NOW.plusSeconds(60));
+  }
+
+  private static EnvironmentConnection connectionAt(
+      LiveEnvironmentStatus status, Instant lastSeenAt, Instant leaseUntil) {
+    return new EnvironmentConnection(
+        EnvironmentId.of(ENV_ID),
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        status,
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+        List.of(),
+        List.of(),
+        lastSeenAt,
+        leaseUntil);
   }
 }
