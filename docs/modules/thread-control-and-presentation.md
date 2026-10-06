@@ -56,14 +56,15 @@ ThreadJoin 的订阅方持有，结果通知与执行唤醒仍交给直接派发
 ```text
 AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投影
   -> RootAgentPane（仅草稿或已确认的根）：useRootThreadControl
-     -> ThreadPane -> ThreadPanel：标题、对话/Debug、Widget、Footer
+     -> ThreadPane -> ThreadPanel：对话/Debug、Widget、Footer（标题只留在只读子代理视图）
         -> RootThreadControlArea：Composer、Stop、审批、问卷
   -> BoundThreadView（只读子代理）：ThreadPane -> ThreadPanel，无控制区
 ```
 
 只读子代理不初始化编辑草稿、上传注册表和人工执行 Hook。Thread 身份未加载完成前不能
-暴露控制区。Debug 切换是查看入口，不依赖 Composer。资源解析和 Footer 由 ThreadPane
-组装，不增加重复参数转发层。
+暴露控制区。Debug 是只读查看入口：进入后输入、审批、分支控制与活跃树整体隐藏并失活，
+只切换视图，不改草稿或 pane 绑定，退出即恢复。根面板与草稿 pane 不自渲染标题，
+身份由顶栏面包屑承载。资源解析和 Footer 由 ThreadPane 组装，不增加重复参数转发层。
 
 `ThreadComposer` 保留 `contenteditable + ComposerPart[]` 的输入协议，负责附件注册、
 上传、输入历史和提交生命周期；`ComposerEditor` 只负责 DOM、光标、IME、换行和 Pill 编辑。
@@ -118,6 +119,25 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 宿主统一状态、展开和外壳；工具组件只优化必要内容部位。默认值可随首次结果类型确定，
 用户主动选择优先，刷新与流式到终态不能重置选择。失败摘要、取消、未知结果及人工等待
 不能被默认折叠完全隐藏。task 受理仅显示 Thread 链接，不代表子任务完成。
+展开按钮固定在第一行最右侧；能否展开只看是否存在有意义正文，默认展开由工具身份与当前结果事实
+推导（错误结果、write/edit/bash/task/ask_user，以及权威 MIME 解析完成后的 read 图片默认展开，
+未知/MCP 成功结果默认折叠），用户选择一旦产生就不再被流式转终态或重渲染重置。
+失败摘要只在正文未完整呈现同一失败文本时出现，durable 结果到达后旧 partial 错误不再展示，
+失败文案一律来自真实 payload，没有通用兜底。长内容与持续日志只在唯一有界 mono 视口内滚动，
+`overscroll-behavior: auto` 让滚轮在内部触底/顶后自然链到外层 transcript，不做 JS 滚轮路由。
+
+## Session 树与命名分支
+
+`/tree` 是当前 Session 的只读历史树，与根面板的活跃执行树是两份不同投影：前者按真实 Entry
+画 Git commit lanes（`●` 节点、`│` 连线，线性链同一列，只有真实 sibling 分叉才开新列），
+每行一个 Entry，只有 ROOT 与已关闭 TURN_END 可手工分叉；后者按执行父子关系展示 processing
+后代。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写 Thread 状态。
+
+命名分支有两个呈现入口并汇入同一命名流程：`/tree` 面板底部对选中 ROOT 或已关闭 TURN_END 的
+“从此处分支”，以及对话中已关闭 TURN_END 回合 footer 的分支按钮（即使该回合没有 usage 文本也
+照常展示）。弹窗要求规范化名称并选择目标位置 1..9；确认只把草稿目标路由到目标 pane，
+不预创建 Thread，隐藏位置先扩展布局显露并移动焦点，在途目标被拒绝，覆盖未发送草稿需二次确认；
+首次发送才原子创建命名 Thread。模型与存储见 [Frontend](frontend.md#chat-提交与控制)。
 
 ## 思考与阅读
 
@@ -180,7 +200,12 @@ archlinux ∣ ctx 245k/272k ∣ ↑1.4k · ↓1.8k · R244k · $0.055 · cache 9
 ```
 
 组间使用 U+2223，统计项使用 U+00B7，环境没有 `env:`。保留未知值、环境不可用、
-窄屏完整信息及中英文语义一致性。
+窄屏完整信息及中英文语义一致性；金额、上下文占用与累计口径见
+[Frontend](frontend.md#用量与状态-footer)。
+
+这是 pane 底部的只读事实条，不承载任何 Agent/Model/Permission 交互。对话内另有一种回合
+footer：已关闭 TURN_END 在正常时间线留下结束信息与“从此处分支”入口，即使该回合没有 usage
+文本也照常展示，两者不可混为一条。
 
 ## 验证与存储边界
 

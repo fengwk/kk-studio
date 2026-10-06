@@ -230,7 +230,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线组件回归 | 图片尺寸与窄屏约束、Debug 预览、`/agent` 模型联动及无效配置保护；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、Chat 1–9 pane 布局、Agent 执行树、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 生成布局与耐用性、Catalog i18n、Project Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
@@ -267,9 +267,10 @@ npm --prefix frontend run test:pane
 ```
 
 各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
-共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读与根 Stop；tool-card 验证
-流式日志和阅读锚点；compaction 验证完整安全正文与外层阅读保护；composer-editor 验证
-真实 contenteditable、IME、Pill 与隐藏根失活。
+共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
+1–9 目标路由、隐藏 pane 显露与 Debug 覆盖返回；tool-card 验证流式日志和阅读锚点；
+compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
+IME、Pill 与隐藏根失活。
 
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
@@ -407,6 +408,9 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   查询不改变 head 或版本；非法 UUID 为 400，缺失 Thread 为 404。
   根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
   跨 Session 的多层父子树与锁序由内存及 PostgreSQL 契约测试覆盖。
+- `events.heartbeat_keepalive` / `events.project_invalidation`：应用事件 WebSocket 的周期
+  heartbeat 保活，以及 Project 全局 changed 失效；Thread/Canvas 的 snapshot-first 对账、
+  tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
 
 `interaction.pending_input_contract`、`thread.queued_command_batch`、
 `model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此
