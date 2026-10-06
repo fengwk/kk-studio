@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -47,6 +48,9 @@ public class StudioHarnessThreadCommandBatchController {
             () -> {
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(threadId, request);
+              if (command.target() instanceof AcceptCommandsTarget.Thread thread) {
+                ManualThreadControlGuard.requireExecutionRoot(runtime, thread.threadId());
+              }
               AcceptedCommands accepted = acceptanceService.acceptOnThread(command);
               ThreadSnapshot currentSnapshot = runtime.getThreadSnapshot(accepted.thread().id());
               return HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
