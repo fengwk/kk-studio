@@ -18,6 +18,11 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
@@ -37,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
@@ -56,12 +62,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPay
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -751,22 +761,197 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(grandChildThreadId, threadState(grandChildThreadId).id());
     assertEquals(childThreadId, threadState(grandChildThreadId).parentThreadId());
 
-    // 每直接父恰收一次结果通知：child 收孙结果，root 收 child 的 first-final，祖先不下传孙身份。
+    // 每直接父恰收一次结果通知：child 收孙结果，root 收 child 的 first-final；typed payload 精确表达
+    // target/source/idempotencyKey/notificationId，祖先绝不下传孙身份。
     awaitTrue(
         () -> resultCommands(childThreadId).size() == 1,
         "child must receive the grandchild result exactly once");
-    String childDelivery = resultMessageText(resultCommands(childThreadId).getFirst());
-    assertTrue(childDelivery.contains(grandChildThreadId.toString()), childDelivery);
-    assertTrue(childDelivery.contains("state=\"completed\""), childDelivery);
+    ThreadCommand childDelivery = resultCommands(childThreadId).getFirst();
+    assertSubagentDelivery(
+        childDelivery, childThreadId, grandChildThreadId, grandChildInvocationId);
+    assertTrue(
+        resultMessageText(childDelivery).contains("state=\"completed\""),
+        resultMessageText(childDelivery));
 
     awaitTrue(
         () -> resultCommands(rootThreadId).size() == 1,
         "root must receive the child result exactly once");
-    String rootDelivery = resultMessageText(resultCommands(rootThreadId).getFirst());
-    assertTrue(rootDelivery.contains(childThreadId.toString()), rootDelivery);
-    assertTrue(rootDelivery.contains("state=\"completed\""), rootDelivery);
-    // 祖先只收直接 child 的 first-final，绝不下传孙身份。
-    assertFalse(rootDelivery.contains(grandChildThreadId.toString()), rootDelivery);
+    ThreadCommand rootDelivery = resultCommands(rootThreadId).getFirst();
+    assertSubagentDelivery(rootDelivery, rootThreadId, childThreadId, childInvocationId);
+    // 祖先只收直接 child 的 first-final：target/source/keys 都不带孙身份。
+    NotificationCommandPayload rootPayload =
+        assertInstanceOf(NotificationCommandPayload.class, rootDelivery.payload());
+    assertNotEquals(grandChildInvocationId, rootDelivery.idempotencyKey());
+    assertNotEquals(grandChildThreadId, rootPayload.sourceThreadId());
+    assertNotEquals(
+        ThreadJoinCompletion.notificationId(grandChildInvocationId), rootPayload.notificationId());
+  }
+
+  /**
+   * 并行兄弟隔离：R 直接派发 A 与 B，A 再派发孙 C。每个 invocation 的结果通知只交付给它的直接派发者——C 只到 A、A/B 只到 R， B 与 R 绝不收到 C
+   * 的通知；typed payload 的 target/source/idempotencyKey/notificationId 精确对应，交付不重复、不遗留 pending/Work。
+   *
+   * <p>测试意图：只有真实 dispatcher + 真实 join 持久化 + 真实 Processor 才能证明「结果严格沿直接父边界路由」这一并行隔离事实，而不是靠 文本或树形状猜测。
+   */
+  @Test
+  void parallelSiblingsDeliverEachResultOnlyToItsImmediateDispatcher() {
+    UUID rootThreadId = UUID.randomUUID();
+    acceptRootSession(UUID.randomUUID(), rootThreadId, "root work");
+
+    UUID childAThreadId = UUID.randomUUID();
+    UUID invocationA = UUID.randomUUID();
+    acceptChildSession(
+        UUID.randomUUID(),
+        childAThreadId,
+        rootThreadId,
+        invocationA,
+        headEntryId(rootThreadId),
+        "A work");
+
+    UUID childBThreadId = UUID.randomUUID();
+    UUID invocationB = UUID.randomUUID();
+    acceptChildSession(
+        UUID.randomUUID(),
+        childBThreadId,
+        rootThreadId,
+        invocationB,
+        headEntryId(rootThreadId),
+        "B work");
+
+    UUID grandChildCThreadId = UUID.randomUUID();
+    UUID invocationC = UUID.randomUUID();
+    acceptChildSession(
+        UUID.randomUUID(),
+        grandChildCThreadId,
+        childAThreadId,
+        invocationC,
+        headEntryId(childAThreadId),
+        "C work");
+
+    // 订阅关系（join 的 parent/child）来自接受时的不可变事实：C 的直接派发者是 A，A/B 的直接派发者是 R。
+    assertEquals(childAThreadId, joinOf(invocationC).parentThreadId());
+    assertEquals(grandChildCThreadId, joinOf(invocationC).childThreadId());
+    assertEquals(rootThreadId, joinOf(invocationA).parentThreadId());
+    assertEquals(childAThreadId, joinOf(invocationA).childThreadId());
+    assertEquals(rootThreadId, joinOf(invocationB).parentThreadId());
+
+    startTestDispatcher();
+
+    awaitTrue(
+        () -> runtime.projectJoinReceipt(invocationC).isPresent(), "grandchild C must settle");
+    awaitTrue(() -> runtime.projectJoinReceipt(invocationA).isPresent(), "child A must settle");
+    awaitTrue(() -> runtime.projectJoinReceipt(invocationB).isPresent(), "child B must settle");
+    awaitTrue(
+        () -> resultCommands(childAThreadId).size() == 1, "A must receive exactly the C result");
+    awaitTrue(
+        () -> resultCommands(rootThreadId).size() == 2,
+        "root must receive exactly the A and B results");
+
+    // C 的交付只落在 A：target/source/keys 全部精确。
+    assertSubagentDelivery(
+        resultCommands(childAThreadId).getFirst(),
+        childAThreadId,
+        grandChildCThreadId,
+        invocationC);
+
+    // 兄弟 B 绝不收到 C 的结果。
+    assertTrue(resultCommands(childBThreadId).isEmpty(), "sibling B must not receive C's result");
+
+    // R 只收 A/B 的直接结果：没有 C 的 idempotencyKey、没有 C 的 source、也没有 C 派生的 notificationId。
+    List<ThreadCommand> deliveriesToRoot = resultCommands(rootThreadId);
+    assertEquals(
+        Set.of(invocationA, invocationB),
+        deliveriesToRoot.stream().map(ThreadCommand::idempotencyKey).collect(Collectors.toSet()));
+    for (ThreadCommand delivery : deliveriesToRoot) {
+      assertEquals(rootThreadId, delivery.threadId());
+      NotificationCommandPayload payload =
+          assertInstanceOf(NotificationCommandPayload.class, delivery.payload());
+      assertTrue(
+          payload.sourceThreadId().equals(childAThreadId)
+              || payload.sourceThreadId().equals(childBThreadId),
+          "root only sees direct children as sources");
+      assertNotEquals(grandChildCThreadId, payload.sourceThreadId());
+      assertNotEquals(ThreadJoinCompletion.notificationId(invocationC), payload.notificationId());
+    }
+
+    // 订阅关系在交付后保持不变。
+    assertEquals(childAThreadId, joinOf(invocationC).parentThreadId());
+    assertEquals(grandChildCThreadId, joinOf(invocationC).childThreadId());
+
+    // 整棵树收敛回 IDLE 后：没有任何 pending delivery、没有排队命令、也没有残留 THREAD Work——
+    // 结算不会重复通知或重复唤醒任何节点。
+    awaitTrue(
+        () -> allIdle(rootThreadId, childAThreadId, childBThreadId, grandChildCThreadId),
+        "the whole tree must converge back to IDLE");
+    assertEquals(1, resultCommands(childAThreadId).size(), "A keeps exactly one C result");
+    assertEquals(2, resultCommands(rootThreadId).size(), "root keeps exactly A and B results");
+    assertTrue(resultCommands(childBThreadId).isEmpty(), "sibling B never receives C's result");
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(rootThreadId).isEmpty()),
+        "no pending delivery may remain on the root");
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(childAThreadId).isEmpty()),
+        "no pending delivery may remain on A");
+    for (UUID threadId :
+        List.of(rootThreadId, childAThreadId, childBThreadId, grandChildCThreadId)) {
+      assertFalse(hasWork(WorkTargetType.THREAD, threadId), "no residual wake for " + threadId);
+      assertTrue(
+          store.<Boolean>transaction(
+              tx -> {
+                tx.lockThread(threadId);
+                return tx.loadQueuedCommands(threadId).isEmpty();
+              }),
+          "no queued command may remain for " + threadId);
+    }
+  }
+
+  /** 四个执行节点都投影为本地 IDLE：durable work 已全部消费完毕。 */
+  private boolean allIdle(UUID... threadIds) {
+    for (UUID threadId : threadIds) {
+      if (runtime.getThreadSnapshot(threadId).runtimeStatus() != ThreadRuntimeStatus.IDLE) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * task prompt 携带字面量 {@code <task>}、{@code &}、引号、换行与制表符时，必须经真实 join 交付路径按合法 XML 信封逐字往返。
+   *
+   * <p>测试意图：交付正文是模型消费的 XML，只断言 {@code contains} 会掩盖转义/截断缺陷；这里用标准 DOM 解析器解析真实 delivered
+   * SUBAGENT_RESULT 后才比较 {@code <task>} 正文，证明特殊字符不丢正文也不破坏信封结构。
+   */
+  @Test
+  void taskPromptWithXmlSpecialCharactersRoundTripsThroughRealReceipt() throws Exception {
+    UUID parentThreadId = UUID.randomUUID();
+    acceptRootSession(UUID.randomUUID(), parentThreadId, "root work");
+
+    String prompt = "plan <task>inner & \"quoted\" 'apos'</task>\nsecond\tline";
+    UUID childThreadId = UUID.randomUUID();
+    UUID invocationId = UUID.randomUUID();
+    acceptChildSession(
+        UUID.randomUUID(),
+        childThreadId,
+        parentThreadId,
+        invocationId,
+        headEntryId(parentThreadId),
+        prompt);
+
+    startTestDispatcher();
+
+    awaitTrue(
+        () -> resultCommands(parentThreadId).size() == 1,
+        "the receipt must be delivered exactly once");
+    ThreadCommand delivery = resultCommands(parentThreadId).getFirst();
+    assertSubagentDelivery(delivery, parentThreadId, childThreadId, invocationId);
+
+    Document document = parseXml(resultMessageText(delivery));
+    Element root = document.getDocumentElement();
+    assertEquals("subagent_result", root.getTagName());
+    assertEquals(childThreadId.toString(), root.getAttribute("thread_id"));
+    assertEquals("completed", root.getAttribute("state"));
+    // 渲染器在 <task> 正文两侧各加一个换行；解析后的正文必须与原 prompt 逐字相同。
+    assertEquals("\n" + prompt + "\n", directChildText(root, "task"));
   }
 
   /**
@@ -1060,6 +1245,49 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
   private static String resultMessageText(ThreadCommand command) {
     return messageText(((NotificationCommandPayload) command.payload()).message());
+  }
+
+  /**
+   * 断言一条 join 结果交付命令的 typed 身份：target 是 {@code command.threadId()}，source 与 notificationId 在
+   * payload， idempotencyKey 恒为 invocationId，kind 恒为 SUBAGENT_RESULT，requestHash 与 payload 一致。
+   */
+  private static void assertSubagentDelivery(
+      ThreadCommand command, UUID expectedTarget, UUID expectedSource, UUID expectedInvocationId) {
+    assertEquals(expectedTarget, command.threadId(), "result command target");
+    assertEquals(ThreadCommandType.NOTIFICATION, command.type());
+    assertEquals(
+        expectedInvocationId, command.idempotencyKey(), "idempotencyKey must be the invocationId");
+    NotificationCommandPayload payload =
+        assertInstanceOf(NotificationCommandPayload.class, command.payload());
+    assertEquals(NotificationKind.SUBAGENT_RESULT, payload.kind());
+    assertEquals(expectedSource, payload.sourceThreadId(), "result command source");
+    assertEquals(
+        ThreadJoinCompletion.notificationId(expectedInvocationId),
+        payload.notificationId(),
+        "notificationId must be derived from the invocationId");
+    assertEquals(
+        ThreadCommandPayloadJsonCodec.requestHash(payload),
+        command.requestHash(),
+        "requestHash must match the typed payload");
+  }
+
+  /** 用标准命名空间非感知 DOM 解析器解析交付 XML，验证信封本身是合法 XML。 */
+  private static Document parseXml(String xml) throws Exception {
+    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+    factory.setNamespaceAware(false);
+    return factory.newDocumentBuilder().parse(new InputSource(new StringReader(xml)));
+  }
+
+  /** 返回 root 下同名直接子元素的文本内容；缺失返回 null。 */
+  private static String directChildText(Element root, String tag) {
+    NodeList children = root.getChildNodes();
+    for (int index = 0; index < children.getLength(); index++) {
+      Node node = children.item(index);
+      if (node.getNodeType() == Node.ELEMENT_NODE && node.getNodeName().equals(tag)) {
+        return node.getTextContent();
+      }
+    }
+    return null;
   }
 
   private static String messageText(AgentMessage message) {

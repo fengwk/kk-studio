@@ -1,0 +1,20 @@
+{
+  "questions": [
+    {
+      "question": "Which release channel should the three-level nested regression use before the grandchild receipt is handed back to its immediate dispatcher?",
+      "options": [
+        {"label": "stable"},
+        {"label": "canary", "recommended": true}
+      ]
+    },
+    {
+      "question": "Which verification tracks must be recorded for the grandchild invocation?",
+      "multiple": true,
+      "options": [
+        {"label": "typed-routing"},
+        {"label": "idempotency"},
+        {"label": "stop-boundary"}
+      ]
+    }
+  ]
+}
