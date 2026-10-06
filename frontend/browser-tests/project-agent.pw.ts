@@ -98,7 +98,7 @@ function createThreadSnapshot() {
         sessionId: '50000000-0000-0000-0000-000000000001',
         headEntryId: 'e1',
         parentThreadId: null,
-        yoloEnabled: false,
+        yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
         nextCommandSequence: '1',
         version: '1',
         status: 'IDLE',

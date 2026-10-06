@@ -63,7 +63,9 @@ export function AgentPane({
     : projection.thread?.threadId === boundThreadId
       ? projection.thread.parentThreadId == null
       : null
-  const needsControl = isRoot !== false
+  // 只有草稿目标或已确认为执行根的绑定才允许挂载根控制面：身份未确认的绑定可能
+  // 是子代理，绝不提前挂载草稿、上传与人工执行 Hook（也不给它们造上传注册表）。
+  const needsControl = !isBoundTarget(target) || isRoot === true
   const navigation = useThreadNavigation({
     rootThreadId: boundThreadId === '' ? null : boundThreadId,
     enabled: isRoot === true,
