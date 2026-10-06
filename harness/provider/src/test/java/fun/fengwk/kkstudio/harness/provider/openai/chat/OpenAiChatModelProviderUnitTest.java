@@ -19,10 +19,8 @@ import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
@@ -41,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
@@ -80,22 +77,9 @@ class OpenAiChatModelProviderUnitTest {
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
     defaultVariant = new ModelVariant("default");
   }
 
@@ -133,19 +117,18 @@ class OpenAiChatModelProviderUnitTest {
   }
 
   @Test
-  @DisplayName("静态 promptCacheCapability API 支持三种模式解析")
-  void testStaticPromptCacheCapability() {
-    PromptCacheCapability capAuto = OpenAiChatProviderAdapter.promptCacheCapability("{}");
-    assertEquals(PromptCacheMode.AUTOMATIC, capAuto.mode());
+  @DisplayName("静态 promptCacheRetention API 按配置解析留存档位")
+  void testStaticPromptCacheRetention() {
+    // AUTOMATIC（默认）不启用 Provider 端缓存
+    assertEquals(PromptCacheRetention.NONE, OpenAiChatProviderAdapter.promptCacheRetention("{}"));
+    assertEquals(PromptCacheRetention.NONE, OpenAiChatProviderAdapter.promptCacheRetention(null));
 
-    PromptCacheCapability capLegacy =
-        OpenAiChatProviderAdapter.promptCacheCapability("{\"openAiPromptCacheMode\":\"LEGACY\"}");
-    assertEquals(PromptCacheMode.AFFINITY, capLegacy.mode());
-
-    PromptCacheCapability capGpt =
-        OpenAiChatProviderAdapter.promptCacheCapability(
-            "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}");
-    assertEquals(PromptCacheMode.BREAKPOINTS, capGpt.mode());
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        OpenAiChatProviderAdapter.promptCacheRetention("{\"promptCacheRetention\":\"SHORT\"}"));
+    assertEquals(
+        PromptCacheRetention.LONG,
+        OpenAiChatProviderAdapter.promptCacheRetention("{\"promptCacheRetention\":\"LONG\"}"));
   }
 
   @Test

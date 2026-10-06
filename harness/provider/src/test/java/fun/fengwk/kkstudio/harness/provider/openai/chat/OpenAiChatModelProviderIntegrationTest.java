@@ -22,9 +22,7 @@ import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -51,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,7 +56,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
@@ -106,22 +102,9 @@ class OpenAiChatModelProviderIntegrationTest {
             ProviderType.OPENAI,
             "http://127.0.0.1:" + port,
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "standard",
-            "tier1",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2.50"),
-            new BigDecimal("10.00"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("1.25"),
-            new BigDecimal("10.00"));
     modelDesc =
         new ModelDescriptor(
-            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false, pricing);
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
     defaultVariant = new ModelVariant("default");
   }
 
@@ -569,29 +552,23 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   /**
-   * 测试意图：捕获三轮本地 HTTP 工具续跑请求，验证显式缓存端点保留、并行工具批末端及文本 parts。 原生 reasoning_content
-   * 与未知字段必须回放，tool-call-only assistant 不制造 content。
+   * 测试意图：捕获三轮本地 HTTP 工具续跑请求，验证会话缓存 key/retention 直接映射、并行工具批末端与文本消息。原生 reasoning_content 与未知字段在
+   * affinity 匹配时回放，tool-call-only assistant 不制造 content。
    */
   @Test
-  @DisplayName("离线 HTTP：显式缓存三轮工具续跑")
-  void testOfflineHttpExplicitPromptCacheMultiTurnCycle() throws Exception {
-    ModelDescriptor explicitModel =
+  @DisplayName("离线 HTTP：会话缓存三轮工具续跑")
+  void testOfflineHttpSessionPromptCacheMultiTurnCycle() throws Exception {
+    ModelDescriptor sessionModel =
         new ModelDescriptor(
-            "openai",
-            "gpt-5.6",
-            "gpt-5.6",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true,
-            modelDesc.pricing());
+            "openai", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
     List<JsonNode> capturedRequests = Collections.synchronizedList(new ArrayList<>());
     AtomicReference<Exception> serverError = new AtomicReference<>();
     CountDownLatch serverFinished = new CountDownLatch(3);
     List<byte[]> responses =
         List.of(
-            loadFixtureBytes("explicit-cache-multiturn-turn1.sse"),
-            loadFixtureBytes("explicit-cache-multiturn-turn2.sse"),
-            loadFixtureBytes("explicit-cache-multiturn-turn3.sse"));
+            loadFixtureBytes("session-cache-multiturn-turn1.sse"),
+            loadFixtureBytes("session-cache-multiturn-turn2.sse"),
+            loadFixtureBytes("session-cache-multiturn-turn3.sse"));
     server.createContext(
         "/chat/completions",
         exchange -> {
@@ -611,11 +588,10 @@ class OpenAiChatModelProviderIntegrationTest {
           }
         });
 
-    OpenAiChatConfiguration explicitConfig =
-        new OpenAiChatConfiguration(
-            true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
+    OpenAiChatConfiguration sessionConfig =
+        new OpenAiChatConfiguration(true, true, PromptCacheRetention.SHORT);
     ModelProvider provider =
-        new OpenAiChatProviderAdapter(transport, "sk-test", explicitConfig).create(descriptor);
+        new OpenAiChatProviderAdapter(transport, "sk-test", sessionConfig).create(descriptor);
 
     List<ProviderToolDefinition> tools =
         List.of(
@@ -623,10 +599,7 @@ class OpenAiChatModelProviderIntegrationTest {
             new ProviderToolDefinition("get_weather", "Get weather", "{\"type\":\"object\"}"),
             new ProviderToolDefinition("read_file", "Read file", "{\"type\":\"object\"}"));
     ProviderCacheControl cacheControl =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "test-explicit-key",
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-session-key");
 
     // Turn 1: 初始用户提问
     ProviderMessage userMsg =
@@ -635,7 +608,7 @@ class OpenAiChatModelProviderIntegrationTest {
             List.of(new ProviderTextBlock("Find files and get weather in Tokyo")));
     ProviderRequest req1 =
         new ProviderRequest(
-            explicitModel,
+            sessionModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -681,7 +654,7 @@ class OpenAiChatModelProviderIntegrationTest {
                     "{}")));
     ProviderRequest req2 =
         new ProviderRequest(
-            explicitModel,
+            sessionModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -713,7 +686,7 @@ class OpenAiChatModelProviderIntegrationTest {
                     "{}")));
     ProviderRequest req3 =
         new ProviderRequest(
-            explicitModel,
+            sessionModel,
             defaultVariant,
             1024,
             "Test system instruction.",
@@ -731,62 +704,53 @@ class OpenAiChatModelProviderIntegrationTest {
     assertNull(serverError.get(), "server handlers must not fail");
     assertEquals(3, capturedRequests.size());
     JsonNode wireReq1 = capturedRequests.get(0);
-    assertExplicitRootOptions(wireReq1, "test-explicit-key");
+    assertSessionCacheRootOptions(wireReq1, "test-session-key");
     assertEquals(2, wireReq1.path("messages").size());
-    assertTextContent(wireReq1.path("messages").get(0), "Test system instruction.", true);
-    assertTextContent(
-        wireReq1.path("messages").get(1), "Find files and get weather in Tokyo", true);
+    assertTextContent(wireReq1.path("messages").get(0), "Test system instruction.");
+    assertTextContent(wireReq1.path("messages").get(1), "Find files and get weather in Tokyo");
 
     JsonNode wireReq2 = capturedRequests.get(1);
-    assertExplicitRootOptions(wireReq2, "test-explicit-key");
+    assertSessionCacheRootOptions(wireReq2, "test-session-key");
     assertEquals(5, wireReq2.path("messages").size());
-    assertTextContent(wireReq2.path("messages").get(0), "Test system instruction.", true);
-    assertTextContent(
-        wireReq2.path("messages").get(1), "Find files and get weather in Tokyo", true);
+    assertTextContent(wireReq2.path("messages").get(0), "Test system instruction.");
+    assertTextContent(wireReq2.path("messages").get(1), "Find files and get weather in Tokyo");
     assertWireAssistant(
         wireReq2.path("messages").get(2),
         "Thinking: file_search and get_weather concurrently.",
         "custom_v1",
         2);
-    assertTextContent(wireReq2.path("messages").get(3), "file report.txt found", false);
-    assertTextContent(wireReq2.path("messages").get(4), "Tokyo 22C Sunny", true);
+    assertTextContent(wireReq2.path("messages").get(3), "file report.txt found");
+    assertTextContent(wireReq2.path("messages").get(4), "Tokyo 22C Sunny");
 
     JsonNode wireReq3 = capturedRequests.get(2);
-    assertExplicitRootOptions(wireReq3, "test-explicit-key");
+    assertSessionCacheRootOptions(wireReq3, "test-session-key");
     assertEquals(7, wireReq3.path("messages").size());
-    assertTextContent(wireReq3.path("messages").get(0), "Test system instruction.", true);
-    assertTextContent(
-        wireReq3.path("messages").get(1), "Find files and get weather in Tokyo", true);
+    assertTextContent(wireReq3.path("messages").get(0), "Test system instruction.");
+    assertTextContent(wireReq3.path("messages").get(1), "Find files and get weather in Tokyo");
     assertWireAssistant(
         wireReq3.path("messages").get(2),
         "Thinking: file_search and get_weather concurrently.",
         "custom_v1",
         2);
-    assertTextContent(wireReq3.path("messages").get(3), "file report.txt found", false);
-    assertTextContent(wireReq3.path("messages").get(4), "Tokyo 22C Sunny", true);
+    assertTextContent(wireReq3.path("messages").get(3), "file report.txt found");
+    assertTextContent(wireReq3.path("messages").get(4), "Tokyo 22C Sunny");
     assertWireAssistant(
         wireReq3.path("messages").get(5), "Thinking: read report content.", "custom_v2", 1);
-    assertTextContent(wireReq3.path("messages").get(6), "Report: System OK", true);
+    assertTextContent(wireReq3.path("messages").get(6), "Report: System OK");
   }
 
-  private static void assertExplicitRootOptions(JsonNode req, String expectedKey) {
+  private static void assertSessionCacheRootOptions(JsonNode req, String expectedKey) {
     assertEquals("gpt-5.6", req.path("model").asText());
-    assertEquals("explicit", req.path("prompt_cache_options").path("mode").asText());
-    assertEquals("30m", req.path("prompt_cache_options").path("ttl").asText());
+    // 会话缓存只映射 key 与留存档位，不再有协议私有 options/breakpoint
     assertEquals(expectedKey, req.path("prompt_cache_key").asText());
+    assertEquals("in_memory", req.path("prompt_cache_retention").asText());
+    assertFalse(req.has("prompt_cache_options"));
   }
 
-  private static void assertTextContent(JsonNode message, String expectedText, boolean breakpoint) {
-    assertTrue(message.path("content").isArray(), "content must be parts array");
-    JsonNode part = message.path("content").get(0);
-    assertEquals("text", part.path("type").asText());
-    assertEquals(expectedText, part.path("text").asText());
-    if (breakpoint) {
-      assertEquals(1, part.path("prompt_cache_breakpoint").size());
-      assertEquals("explicit", part.path("prompt_cache_breakpoint").path("mode").asText());
-    } else {
-      assertFalse(part.has("prompt_cache_breakpoint"), "breakpoint must not be present");
-    }
+  private static void assertTextContent(JsonNode message, String expectedText) {
+    assertTrue(message.path("content").isTextual(), "content must be plain text");
+    assertEquals(expectedText, message.path("content").asText());
+    assertFalse(message.has("prompt_cache_breakpoint"), "breakpoint must not be present");
   }
 
   private static void assertWireAssistant(
