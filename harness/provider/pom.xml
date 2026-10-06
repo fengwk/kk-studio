@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-harness</artifactId>
-        <version>1.0.7</version>
+        <version>1.0.8</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -55,7 +55,6 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.TransportException</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicConfiguration</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEndpoints</include>
-                                        <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicRequestEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicStreamAccumulator</include>
@@ -63,7 +62,6 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiEndpoints</include>
-                                        <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiRequestEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.gemini.GeminiStreamAccumulator</include>
@@ -80,7 +78,6 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesConfig</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesEndpoints</include>
-                                        <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesPrefixHasher</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesRequestEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesStrictSchema</include>
