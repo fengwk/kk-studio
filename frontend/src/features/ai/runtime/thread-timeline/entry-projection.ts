@@ -65,9 +65,10 @@ export function projectDurableEntry(
       const summary = context.pendingTurnSummary
       context.pendingTurnSummary = null
       context.pendingTurnUsage = null
-      if (summary != null) {
-        messages.push(summary)
-      }
+      // 无论该回合是否有 usage，TURN_END 都必须产出一条携带真实 TURN_END Entry id 的
+      // 结束 meta：回合 footer 的“从此处分支”只以这个 id 分叉（未消费 usage 的回合、
+      // 以及作为 head 的最新回合同样可用）。
+      messages.push(turnEndMeta(summary, entry, getString(payload.outcome)))
     } else {
       // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
       context.pendingTurnSummary = null
@@ -213,7 +214,9 @@ export function projectDurableEntry(
       messages.push(projectEmptyMessageEntry(entry, role))
     }
     const metadata = asRecord(payload.assistantMetadata)
-    const usage = parseAssistantUsage(metadata)
+    // 价格是读取投影（entry.usageCost），不属于历史 payload；usage 的 token 事实仍来自
+    // assistantMetadata。两参 API 由 usage-owner 提供。
+    const usage = parseAssistantUsage(metadata, entry.usageCost)
     if (usage != null) {
       context.pendingTurnUsage =
         context.pendingTurnUsage == null ? usage : mergeTurnUsage(context.pendingTurnUsage, usage)
@@ -243,6 +246,35 @@ export function projectDurableEntry(
     return
   }
   messages.push(projectUnsupportedMessageEntry(entry, role))
+}
+
+/**
+ * 回合结束 meta 一定携带真实 TURN_END Entry id。
+ *
+ * `endEntryId` 字段由 usage-owner 在 `MetaDialogueMessage` 上新增（本切片不修改该共享
+ * 类型文件，父合并时可直接删除此交叉类型）；meta-projection 的“可空 usage + endEntryId”
+ * 工厂落地后，这里改用其工厂，字段语义不变。
+ */
+type TurnEndMeta = MetaDialogueMessage & { endEntryId: string }
+
+function turnEndMeta(
+  summary: MetaDialogueMessage | null,
+  entry: HarnessSessionEntryDTO,
+  outcome: string,
+): TurnEndMeta {
+  if (summary != null) {
+    return { ...summary, endEntryId: entry.entryId }
+  }
+  return {
+    id: `meta-turn-end-${entry.entryId}`,
+    role: 'meta',
+    kind: 'turn_usage',
+    subjectEntryId: entry.entryId,
+    text: outcome,
+    createdAt: entry.createTime,
+    status: 'done',
+    endEntryId: entry.entryId,
+  }
 }
 
 function parseModelAttemptFailure(

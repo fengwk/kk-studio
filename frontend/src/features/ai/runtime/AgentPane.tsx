@@ -12,14 +12,19 @@ import {
 import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import { isBoundTarget, samePaneTarget } from '@/features/ai/runtime/agent-pane'
-import type { AgentPaneCapabilities, AgentPaneDefaults } from '@/features/ai/runtime/useRootThreadControl'
+import type {
+  AgentPaneCapabilities,
+  AgentPaneDefaults,
+  BranchRequestInput,
+  PaneReport,
+} from '@/features/ai/runtime/useRootThreadControl'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import '@/features/ai/runtime/child-thread-view.css'
 
-export type { AgentPaneCapabilities, AgentPaneDefaults }
+export type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport }
 
 /**
  * Pane 父面板：只管理绑定目标、Thread 身份分流与 pane 内查看路径。
@@ -41,6 +46,8 @@ export function AgentPane({
   initialTarget,
   onTargetConsumed,
   capabilities,
+  onRequestBranch,
+  onReport,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -52,6 +59,10 @@ export function AgentPane({
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
+  /** 新建分支入口；由 Chat workspace 提供（命名与目标 pane 在 workspace 统一决定）。 */
+  onRequestBranch?: (request: BranchRequestInput) => void
+  /** 面板运行时摘要上报；只读路径由本组件按投影派生。 */
+  onReport?: (report: PaneReport) => void
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { target, targetRef, setTarget } = usePaneTarget({ owner, paneId, initialTarget })
@@ -86,6 +97,27 @@ export function AgentPane({
     onTargetConsumed?.(initialTarget)
   }, [initialTarget, needsControl, onTargetConsumed, setTarget, targetRef])
 
+  // 只读路径没有控制面：由本组件按投影派生摘要，供 workspace 的路由与面包屑使用。
+  const readOnlyReportRef = useRef(onReport)
+  useEffect(() => {
+    readOnlyReportRef.current = onReport
+  })
+  const readOnlySessionId = projection.thread?.sessionId ?? null
+  const readOnlyBranchName = projection.thread?.threadId === boundThreadId
+    ? projection.thread.name
+    : null
+  useEffect(() => {
+    if (needsControl) {
+      return
+    }
+    readOnlyReportRef.current?.({
+      pending: false,
+      hasUnsentDraft: false,
+      sessionId: readOnlySessionId,
+      branchName: readOnlyBranchName,
+    })
+  }, [needsControl, readOnlyBranchName, readOnlySessionId])
+
   const covered = navigation.layers.length > 0
   const childRootThreadId = projection.thread?.yoloPolicy.rootThreadId ?? null
   const topLayerIndex = navigation.layers.length - 1
@@ -113,6 +145,8 @@ export function AgentPane({
               initialTarget={initialTarget}
               onTargetConsumed={onTargetConsumed}
               capabilities={capabilities}
+              onRequestBranch={onRequestBranch}
+              onReport={onReport}
               target={target}
               setTarget={setTarget}
               projection={projection}

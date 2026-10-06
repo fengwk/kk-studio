@@ -1,4 +1,6 @@
 import { useState, type RefObject } from 'react'
+import { useI18n } from '@/shared/i18n'
+import '@/features/ai/runtime/thread-panel/debug-view-toolbar.css'
 import {
   ThreadEventView,
   useThreadPanelViewState,
@@ -29,6 +31,7 @@ export function useBoundThreadPanelViews(
   },
   previewOptions?: BoundThreadPreviewOptions,
 ) {
+  const { t } = useI18n()
   const {
     mode,
     switchMode: internalSwitchMode,
@@ -61,31 +64,47 @@ export function useBoundThreadPanelViews(
   const mainView: ThreadPanelMainView = {
     debug:
       mode === 'debug' ? (
-        <ThreadEventView
-          events={controller.events}
-          selectedEventId={selectedEventId}
-          onSelectedEventIdChange={(id) => {
-            if (id != null) {
-              setDebugSelection(null)
-            }
-            selectEvent(id)
-          }}
-          bodyRef={eventsBodyRef}
-          initialScrollTop={initialEventsScrollTop}
-          debug={debug}
-          debugSelection={debugSelection}
-          onSelectInspector={(selection) => {
-            if (selection != null) {
-              selectEvent(null)
-            }
-            setDebugSelection(selection)
-          }}
-          onPreview={previewOptions?.onPreview}
-          previewLoading={previewOptions?.previewLoading}
-          previewDisabled={previewOptions?.previewDisabled}
-          previewDisabledReason={previewOptions?.previewDisabledReason}
-          previewError={previewOptions?.previewError}
-        />
+        <>
+          {/*
+            Debug 主视图下的唯一退出入口：只读工具条上的“返回会话”。Debug 覆盖整个 pane，
+            底部 Composer（含 /debug）按设计被隐藏，因此返回必须由 Debug 自身的 chrome 提供，
+            而不是依赖被隐藏的控制区。这里只切换视图，不触碰草稿、上传注册表与 pane 绑定。
+          */}
+          <div className="thread-debug-toolbar">
+            <button
+              type="button"
+              className="ghost-btn thread-debug-back"
+              onClick={() => switchMode('conversation')}
+            >
+              {t('ai.runtime.debug.backToConversation')}
+            </button>
+          </div>
+          <ThreadEventView
+            events={controller.events}
+            selectedEventId={selectedEventId}
+            onSelectedEventIdChange={(id) => {
+              if (id != null) {
+                setDebugSelection(null)
+              }
+              selectEvent(id)
+            }}
+            bodyRef={eventsBodyRef}
+            initialScrollTop={initialEventsScrollTop}
+            debug={debug}
+            debugSelection={debugSelection}
+            onSelectInspector={(selection) => {
+              if (selection != null) {
+                selectEvent(null)
+              }
+              setDebugSelection(selection)
+            }}
+            onPreview={previewOptions?.onPreview}
+            previewLoading={previewOptions?.previewLoading}
+            previewDisabled={previewOptions?.previewDisabled}
+            previewDisabledReason={previewOptions?.previewDisabledReason}
+            previewError={previewOptions?.previewError}
+          />
+        </>
       ) : undefined,
   }
   return {

@@ -37,6 +37,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     getChat: vi.fn(),
+    listChatSessions: vi.fn(),
   },
 }))
 vi.mock('@/shared/api/environment-service', () => ({
@@ -175,6 +176,14 @@ beforeEach(() => {
     totalCount: 1,
     results: [model],
   })
+  vi.mocked(chatService.listChatSessions).mockResolvedValue([{
+    sessionId: 'session-1',
+    name: 'Session One',
+    createdAt: null,
+    lastActivityAt: null,
+    firstMessagePreview: null,
+    threadCount: 1,
+  }])
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   // 根控制区以已加载的 Thread 身份为准：快照必须回显请求的 threadId，
   // 否则面板会一直停留“身份未加载”而不暴露控制区。
@@ -527,3 +536,219 @@ function renderWorkspace(chatId = CHAT_ID) {
     </QueryClientProvider>,
   )
 }
+
+describe('ChatWorkspacePage 新建分支路由', () => {
+  const ROOT_ENTRY: HarnessSessionEntryDTO = {
+    entryId: 'entry-1',
+    sessionId: 'session-1',
+    parentEntryId: null,
+    entryType: 'ROOT',
+    payloadJson: '{}',
+    createTime: null,
+  }
+  const TURN_END_ENTRY: HarnessSessionEntryDTO = {
+    entryId: 'entry-2',
+    sessionId: 'session-1',
+    parentEntryId: 'entry-1',
+    entryType: 'TURN_END',
+    payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+    createTime: null,
+  }
+  const MESSAGE_ENTRY: HarnessSessionEntryDTO = {
+    entryId: 'entry-3',
+    sessionId: 'session-1',
+    parentEntryId: 'entry-2',
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({
+      message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
+    }),
+    createTime: null,
+  }
+
+  function paneTargetKey(paneId: string) {
+    return `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:${paneId}`
+  }
+
+  function seedLayout(layout: string, focusedPaneId = 'pane-1') {
+    localStorage.setItem(
+      `kk-studio.chat-pane.${CHAT_ID}`,
+      JSON.stringify({
+        layout,
+        focusedPaneId,
+        panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
+      }),
+    )
+  }
+
+  /** 绑定 pane 到既有 Thread，并让快照/entries 反映给定的分支结构。 */
+  function bindPaneThread(
+    paneId: string,
+    entries: HarnessSessionEntryDTO[],
+    headEntryId: string,
+  ) {
+    localStorage.setItem(
+      paneTargetKey(paneId),
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => ({
+      ...snapshot(),
+      thread: { ...snapshot().thread, threadId, headEntryId, sessionId: 'session-1' },
+      entries,
+    }))
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entries)
+  }
+
+  async function openBranchDialogFromTree(user: ReturnType<typeof userEvent.setup>, paneIndex = 0) {
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.click(composers[paneIndex]!)
+    await user.keyboard('/tree{Enter}')
+    const rows = await waitFor(() => {
+      const found = document.querySelectorAll('.history-tree-entry')
+      expect(found.length).toBeGreaterThan(0)
+      return found
+    })
+    // 已关闭 TURN_END 行（head 之前的最后一个边界）是合法分叉点。
+    await user.click(rows[1] as HTMLElement)
+    const fork = document.querySelector<HTMLButtonElement>('.history-tree-actions .btn-primary')!
+    expect(fork).toBeEnabled()
+    await user.click(fork)
+    return await waitFor(() => {
+      const dialog = document.querySelector<HTMLElement>('.new-branch-dialog')
+      expect(dialog).not.toBeNull()
+      return dialog as HTMLElement
+    })
+  }
+
+  async function chooseDestination(user: ReturnType<typeof userEvent.setup>, position: number) {
+    await user.click(document.querySelector<HTMLButtonElement>('.new-branch-form .ui-select-trigger')!)
+    const options = await waitFor(() => {
+      const found = [...document.querySelectorAll<HTMLButtonElement>('.ui-select-option')]
+      expect(found.length).toBe(9)
+      return found
+    })
+    await user.click(options.find((option) => option.textContent?.startsWith(String(position)))!)
+  }
+
+  async function confirmBranch(user: ReturnType<typeof userEvent.setup>) {
+    const dialog = document.querySelector<HTMLElement>('.new-branch-dialog')!
+    await user.click(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!)
+  }
+
+  it('opens the shared naming flow from /tree and routes the draft into a hidden pane', async () => {
+    const user = userEvent.setup()
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
+
+    const dialog = await openBranchDialogFromTree(user)
+    // 名称是创建事实：对话框只做规范化提交，绝不预创建 Thread。
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, '  branch-1  ')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+
+    // 隐藏的 pane-3 被显露（布局扩展到刚好容纳它），目标 pane 获得草稿并取得焦点。
+    await waitFor(() => {
+      expect(document.querySelector('.chat-pane-grid.layout-split-3')).not.toBeNull()
+    })
+    expect(document.querySelector('.chat-workspace-breadcrumb')?.getAttribute('data-focused-pane'))
+      .toBe('pane-3')
+    await waitFor(() => {
+      expect(localStorage.getItem(paneTargetKey('pane-3')))
+        .toContain('"threadName":"branch-1"')
+    })
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_THREAD_DRAFT')
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(document.querySelector('.new-branch-dialog')).toBeNull()
+    // 顶栏面包屑跟随聚焦 pane 展示分支名（规范化后的权威名称）。
+    await waitFor(() => {
+      const branch = document.querySelector('[data-breadcrumb="branch"]')
+      expect(branch?.textContent).toBe('branch-1')
+    })
+    expect(await screen.findAllByLabelText('给 AI 发送消息')).toHaveLength(3)
+  })
+
+  it('requires a second confirmation before overwriting the destination pane draft', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-3')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.type(composers[2]!, 'pane three draft')
+    // 目标 pane 的草稿摘要由 effect 上报；下面的确认要求就是它生效的判据
+    // （若未上报，第一次提交会直接改写目标 pane 而不是要求确认）。
+
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-1')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+
+    // 第一次提交只要求确认覆盖，绝不静默改写目标 pane 的未发送草稿。
+    await waitFor(() =>
+      expect(document.querySelector('.new-branch-overwrite')).not.toBeNull())
+    expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+
+    await confirmBranch(user)
+    await waitFor(() => {
+      expect(localStorage.getItem(paneTargetKey('pane-3')))
+        .toContain('"threadName":"branch-1"')
+    })
+    expect(document.querySelector('.new-branch-dialog')).toBeNull()
+  })
+
+  it('blocks a destination pane that has a pending operation', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-3')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementation(
+      () => new Promise(() => undefined),
+    )
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    const composers = await screen.findAllByLabelText('给 AI 发送消息')
+    await user.type(composers[2]!, 'pending message')
+    await user.click(screen.getAllByRole('button', { name: '发送消息' })[2]!)
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+
+    const dialog = await openBranchDialogFromTree(user)
+    await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-1')
+    await chooseDestination(user, 3)
+    await confirmBranch(user)
+
+    await waitFor(() =>
+      expect(document.querySelector('.new-branch-dialog .form-error-banner')).not.toBeNull())
+    expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).not.toContain('NEW_THREAD_DRAFT')
+    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+  })
+
+  it('follows the focused pane in the topbar breadcrumb', async () => {
+    const user = userEvent.setup()
+    seedLayout('split-2')
+    bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
+    renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
+    // 绑定的 pane-1：Session 名称 + 分支名（Thread 名称）。
+    await waitFor(() => {
+      expect(document.querySelector('[data-breadcrumb="session"]')?.textContent).toBe('Session One')
+      expect(document.querySelector('[data-breadcrumb="branch"]')?.textContent).toBe('thread-name')
+    })
+
+    const composers = screen.getAllByLabelText('给 AI 发送消息')
+    await user.click(composers[1]!)
+    // 未绑定的 pane-2 还没有 Session/分支身份：面包屑只剩 Chat 层级。
+    await waitFor(() => {
+      expect(document.querySelector('.chat-workspace-breadcrumb')?.getAttribute('data-focused-pane'))
+        .toBe('pane-2')
+    })
+    expect(document.querySelector('[data-breadcrumb="session"]')).toBeNull()
+    expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
+  })
+
+  // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片
+  // RootAgentPane 提供的 EntryBranchContext（null = 不渲染）；按钮到达 workspace 的
+  // 请求形状与 /tree 完全一致，因此上面的用例同时覆盖两条入口的命名与目标流程。
+})
