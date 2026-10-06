@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -763,7 +762,7 @@ class ThreadContextClassifierTest {
         callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(stopReason, usage(), cost()),
+        new AssistantMessageMetadata(stopReason, usage()),
         null);
   }
 
@@ -876,24 +875,7 @@ class ThreadContextClassifierTest {
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static ProviderResponse response(List<String> callIds) {
@@ -904,7 +886,7 @@ class ThreadContextClassifierTest {
     GenerationStopReason stopReason =
         callIds.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
     return new ProviderResponse(
-        "response text", "", calls, stopReason, usage(), cost(), "req-1", null, "{}");
+        "response text", "", calls, stopReason, usage(), "req-1", null, "{}");
   }
 
   private static ModelUsage usage() {

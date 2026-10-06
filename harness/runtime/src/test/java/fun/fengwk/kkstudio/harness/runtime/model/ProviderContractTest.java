@@ -170,7 +170,7 @@ class ProviderContractTest {
         NullPointerException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), GenerationStopReason.COMPLETE, null, cost, null, null, "{}"));
+                "", "", List.of(), GenerationStopReason.COMPLETE, null, null, null, "{}"));
     ProviderResponse response =
         new ProviderResponse(
             "",
@@ -178,7 +178,6 @@ class ProviderContractTest {
             List.of(),
             GenerationStopReason.COMPLETE,
             usage,
-            cost,
             "req-1",
             "default",
             "{\"prompt_tokens\":1}");
@@ -197,44 +196,28 @@ class ProviderContractTest {
     assertEquals(
         "{}",
         new ProviderResponse(
-                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, null)
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, null)
             .rawUsageJson());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, "   "));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "   "));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "",
-                "",
-                List.of(),
-                GenerationStopReason.COMPLETE,
-                usage,
-                cost,
-                null,
-                null,
-                "not-json"));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "not-json"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "",
-                "",
-                List.of(),
-                GenerationStopReason.COMPLETE,
-                usage,
-                cost,
-                null,
-                null,
-                "\"scalar\""));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "\"scalar\""));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ProviderResponse(
-                "", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, " ", null, "{}"));
+                "", "", List.of(), GenerationStopReason.COMPLETE, usage, " ", null, "{}"));
     assertEquals(
         "[{\"cached_tokens\":1}]",
         new ProviderResponse(
@@ -243,7 +226,6 @@ class ProviderContractTest {
                 List.of(),
                 GenerationStopReason.COMPLETE,
                 usage,
-                cost,
                 null,
                 null,
                 "[{\"cached_tokens\":1}]")

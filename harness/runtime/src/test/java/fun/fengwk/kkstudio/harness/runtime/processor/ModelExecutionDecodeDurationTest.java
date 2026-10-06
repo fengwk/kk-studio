@@ -387,7 +387,7 @@ class ModelExecutionDecodeDurationTest {
 
   private static ProviderResponse response(String text) {
     return new ProviderResponse(
-        text, "", List.of(), GenerationStopReason.COMPLETE, USAGE, COST, "req-1", null, "{}");
+        text, "", List.of(), GenerationStopReason.COMPLETE, USAGE, "req-1", null, "{}");
   }
 
   private static ProviderResponse toolResponse() {
@@ -401,7 +401,6 @@ class ModelExecutionDecodeDurationTest {
         List.of(new ProviderToolCall("call-1", "bash", "{\"q\":1}")),
         GenerationStopReason.COMPLETE,
         USAGE,
-        COST,
         "req-1",
         null,
         "{}");

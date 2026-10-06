@@ -613,7 +613,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       new AgentMessage(
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant 1"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
                       null),
                   NOW));
           tx.insertEntry(
@@ -679,7 +679,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       new AgentMessage(
                           AgentMessageRole.ASSISTANT,
                           List.of(new TextMessageContent("assistant 2"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost),
+                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
                       null),
                   NOW));
           tx.insertEntry(

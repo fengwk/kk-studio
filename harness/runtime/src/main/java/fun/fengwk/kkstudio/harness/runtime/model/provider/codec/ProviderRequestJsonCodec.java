@@ -56,6 +56,7 @@ public final class ProviderRequestJsonCodec {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
   /** 共享 model/variant 子树 codec，确保 wire 与 {@code ModelDescriptorJsonCodec} 单一权威实现一致。 */
   private static final ModelDescriptorJsonCodec SHARED_MODEL_CODEC = new ModelDescriptorJsonCodec();
 

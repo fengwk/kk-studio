@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -283,17 +281,7 @@ class CompactionFileSectionsTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      GenerationStopReason.COMPLETE,
-                      new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-                      new ModelCost(
-                          "USD",
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO,
-                          BigDecimal.ZERO)),
+                      GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
                   null),
               BASE));
       return cur;

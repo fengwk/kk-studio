@@ -19,9 +19,8 @@ import java.util.Set;
  * <p>{@code stopReason} 是规范化生成结束原因（{@link GenerationStopReason}），与 tool calls 正交：{@code COMPLETE}
  * 可以有或没有 calls，{@code LENGTH} 可以有或没有已观测 calls，{@code FILTERED} 的 calls 与 diagnostics 必须为空， {@code
  * CONTINUE} 的 calls 与 diagnostics 同样必须为空（协议要求续写时不得同时表达工具意图）。{@code usage} 是 Provider 归一化后的实际 token
- * 用量。{@code requestId}、{@code serviceTier} 由 Provider
- * 报告，可为空。{@code rawUsageJson} 是 Provider usage 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为
- * {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
+ * 用量。{@code requestId}、{@code serviceTier} 由 Provider 报告，可为空。{@code rawUsageJson} 是 Provider usage
+ * 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为 {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
  *
  * <p>{@code decodeDurationMillis} 是 Harness 观测的流式生成计时（首个非空输出 delta 到成功回调观察时间的毫秒数），不是 Provider
  * 报告的事实：Provider 构造响应时一律为 null，仅 runtime 在成功提交前冻结。null 表示无可信流计时。

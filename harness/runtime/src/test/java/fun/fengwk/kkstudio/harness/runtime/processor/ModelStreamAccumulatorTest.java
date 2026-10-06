@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -17,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /** ModelStreamAccumulator 直接单元测试：text/thinking 累积、prefix/gap reconcile 与 tool-call fragment 校验。 */
@@ -199,15 +197,6 @@ class ModelStreamAccumulatorTest {
         calls,
         calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO),
         "req-1",
         null,
         null);
@@ -356,15 +345,6 @@ class ModelStreamAccumulatorTest {
             List.of(completeCall),
             GenerationStopReason.LENGTH,
             new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             null,
             null,
             "{}",
@@ -400,15 +380,6 @@ class ModelStreamAccumulatorTest {
             List.of(completeCall),
             GenerationStopReason.LENGTH,
             new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             null,
             null,
             "{}",
@@ -438,15 +409,6 @@ class ModelStreamAccumulatorTest {
             List.of(),
             GenerationStopReason.LENGTH,
             new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             null,
             null,
             "{}",
@@ -472,15 +434,6 @@ class ModelStreamAccumulatorTest {
             List.of(),
             GenerationStopReason.LENGTH,
             new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             null,
             null,
             "{}",
@@ -507,15 +460,6 @@ class ModelStreamAccumulatorTest {
             List.of(),
             GenerationStopReason.FILTERED,
             new ModelUsage(10L, 5L, 0L, 0L, 0L, 0L, 15L),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             null,
             null,
             "{}",

@@ -720,7 +720,6 @@ class ProviderMessageProjectorTest {
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
         new ProviderReplayAffinity(
             ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 

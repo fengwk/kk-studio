@@ -25,11 +25,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -61,8 +57,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
-import java.math.BigDecimal;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -70,8 +64,8 @@ import java.util.UUID;
 /**
  * {@link DatabaseProviderResolutionService} 的单元测试：不依赖 PostgreSQL，mock {@link
  * AgentProviderRepository} 并使用真实 {@link AgentProviderConfigurationCodec}，覆盖 resolve 全部分支——Provider
- * 行缺失 / 类型非法 / factory 未注册 / 空白 endpoint / adapter 构造失败，opener 的 ModelProvider 构造失败，以及 cache hint
- * 按当前 capability 的安全规范化。
+ * 行缺失 / 类型非法 / factory 未注册 / 空白 endpoint / adapter 构造失败，opener 的 ModelProvider 构造失败，以及规划期冻结的 cache
+ * control 原样透传。
  */
 class DatabaseProviderResolutionServiceTest {
 
@@ -129,7 +123,7 @@ class DatabaseProviderResolutionServiceTest {
     AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
     p.setConnectionGenerationId(null);
     when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
-    ProviderFactory factory = openAiFactory(PromptCacheCapability.unsupported());
+    ProviderFactory factory = openAiFactory(PromptCacheRetention.NONE);
     DatabaseProviderResolutionService resolution = resolution(factory);
 
     IllegalStateException error =
@@ -147,8 +141,7 @@ class DatabaseProviderResolutionServiceTest {
     provider.setConnectionGenerationId(new UUID(0L, 2L));
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider);
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
-    ProviderFactory factory =
-        factory(ProviderType.OPENAI, PromptCacheCapability.unsupported(), adapter);
+    ProviderFactory factory = factory(ProviderType.OPENAI, PromptCacheRetention.NONE, adapter);
     DatabaseProviderResolutionService resolution = resolution(factory);
 
     IllegalArgumentException failure =
@@ -172,7 +165,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.ANTHROPIC,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.ANTHROPIC, mock(ModelProvider.class))));
     IllegalArgumentException failure =
         assertThrows(
@@ -191,7 +184,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.ANTHROPIC,
-                PromptCacheCapability.unknown(),
+                PromptCacheRetention.NONE,
                 adapter(ProviderType.ANTHROPIC, mock(ModelProvider.class))));
     IllegalArgumentException failure =
         assertThrows(
@@ -206,8 +199,7 @@ class DatabaseProviderResolutionServiceTest {
   void resolveRejectsBlankBaseUrlAtAdmission() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, "  "));
     DatabaseProviderResolutionService resolution =
-        resolution(
-            openAiFactory(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))));
+        resolution(openAiFactory(PromptCacheRetention.SHORT));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
@@ -225,7 +217,7 @@ class DatabaseProviderResolutionServiceTest {
     p.setConfigJson("{\"credential\":\"sensitive-value\"");
     when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
     DatabaseProviderResolutionService resolution =
-        resolution(openAiFactory(PromptCacheCapability.automatic()));
+        resolution(openAiFactory(PromptCacheRetention.NONE));
 
     IllegalArgumentException failure =
         assertThrows(
@@ -242,11 +234,7 @@ class DatabaseProviderResolutionServiceTest {
   @Test
   void resolveWrapsFactoryCreateFailure() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    ProviderFactory factory =
-        factory(
-            ProviderType.OPENAI,
-            PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-            null);
+    ProviderFactory factory = factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, null);
     when(factory.create(anyString(), anyString()))
         .thenThrow(new IllegalStateException("factory boom"));
     DatabaseProviderResolutionService resolution = resolution(factory);
@@ -260,94 +248,11 @@ class DatabaseProviderResolutionServiceTest {
     assertNull(failure.getCause());
   }
 
-  /** 意图：当 factory.promptCacheCapability(configJson) 抛出异常时，包装为明确的安全异常，不回显 config payload。 */
-  @Test
-  void resolveWrapsPromptCacheCapabilityResolutionFailureSafely() {
-    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
-    p.setConfigJson("{\"secretCredential\":\"bearer-12345\"}");
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
-
-    ProviderFactory factory =
-        factory(
-            ProviderType.OPENAI,
-            PromptCacheCapability.automatic(),
-            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
-    when(factory.promptCacheCapability("{\"secretCredential\":\"bearer-12345\"}"))
-        .thenThrow(
-            new IllegalArgumentException("cannot resolve prompt cache capability: bearer-12345"));
-
-    DatabaseProviderResolutionService resolution = resolution(factory);
-    IllegalArgumentException failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
-    assertEquals(
-        "cannot resolve prompt cache capability for " + PROVIDER_NAME, failure.getMessage());
-    assertFalse(failure.getMessage().contains("bearer-12345"));
-    assertNull(failure.getCause());
-  }
-
-  /** 意图：当 factory.promptCacheCapability(configJson) 返回 null 时，严格抛出安全异常。 */
-  @Test
-  void resolveRejectsNullPromptCacheCapabilityFromFactory() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-
-    ProviderFactory factory =
-        factory(
-            ProviderType.OPENAI,
-            PromptCacheCapability.automatic(),
-            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
-    when(factory.promptCacheCapability(any())).thenReturn(null);
-
-    DatabaseProviderResolutionService resolution = resolution(factory);
-    IllegalArgumentException failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
-    assertEquals(
-        "cannot resolve prompt cache capability for " + PROVIDER_NAME, failure.getMessage());
-  }
-
-  /** 意图：验证 resolve 传递 provider.configJson 动态解析能力，并基于解析结果规范化 effective request。 */
-  @Test
-  void resolveNormalizesEffectiveRequestUsingConfigAwareCapability() {
-    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
-    String dynamicConfig = "{\"openAiPromptCacheMode\":\"LEGACY\"}";
-    p.setConfigJson(dynamicConfig);
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
-
-    ProviderFactory factory =
-        factory(
-            ProviderType.OPENAI,
-            PromptCacheCapability.automatic(),
-            adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
-    when(factory.promptCacheCapability(dynamicConfig))
-        .thenReturn(PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)));
-
-    DatabaseProviderResolutionService resolution = resolution(factory);
-    ProviderRequest req =
-        request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, req);
-
-    assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"),
-        resolved.effectiveRequest().cacheControl());
-  }
-
   @Test
   void resolveRejectsNullAdapterFromFactory() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                null));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, null));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
@@ -366,7 +271,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.GOOGLE, mock(ModelProvider.class))));
     IllegalArgumentException failure =
         assertThrows(
@@ -388,7 +293,7 @@ class DatabaseProviderResolutionServiceTest {
           resolution(
               factory(
                   providerType,
-                  PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                  PromptCacheRetention.SHORT,
                   adapter(providerType, mock(ModelProvider.class))));
       resolution
           .resolve(providerType, GENERATION_ID, request(ProviderCacheControl.none()))
@@ -402,24 +307,20 @@ class DatabaseProviderResolutionServiceTest {
     ModelProvider modelProvider = mock(ModelProvider.class);
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, modelProvider);
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
 
     ProviderRequest persisted =
-        request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"));
+        request(ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc-key"));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
 
-    // 有效 request 与持久 request 共享模型 / variant / 消息 / tools，只按当前 capability 规范化 cache control。
+    // 有效 request 与持久 request 共享模型 / variant / 消息 / tools 与规划期冻结的 cache control。
     assertEquals(persisted.model(), resolved.effectiveRequest().model());
     assertEquals(persisted.variant(), resolved.effectiveRequest().variant());
     assertEquals(persisted.messages(), resolved.effectiveRequest().messages());
     assertEquals(persisted.tools(), resolved.effectiveRequest().tools());
     assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc-key"),
         resolved.effectiveRequest().cacheControl());
     assertEquals(ModelCallTimeoutPolicy.DEFAULT, resolved.timeoutPolicy(), "config 未配置超时字段时使用默认策略");
 
@@ -444,7 +345,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
     ProviderTextBlock sibling = new ProviderTextBlock("before");
     ProviderToolResultBlock persistedResult =
@@ -491,7 +392,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
     ProviderReplayState replayState = sampleReplayState(format);
     ProviderMessage assistant =
@@ -526,7 +427,6 @@ class DatabaseProviderResolutionServiceTest {
         effective.get(1).replayState().payload(),
         "不同 Provider 的 replay payload 必须逐字段保持不变（本边界不得解析或重写 payload）");
     assertEquals(replayState.affinity(), effective.get(1).replayState().affinity());
-    assertEquals(replayState.sourcePrefixHash(), effective.get(1).replayState().sourcePrefixHash());
     assertSame(
         assistant.contents().get(1),
         effective.get(1).contents().get(1),
@@ -539,7 +439,6 @@ class DatabaseProviderResolutionServiceTest {
       return new ProviderReplayState(
           format,
           new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, GENERATION_ID, "model"),
-          "0".repeat(64),
           new ObjectMapper()
               .readTree("{\"output\":[{\"type\":\"opaque-" + format.name() + "\"}]}"));
     } catch (JsonProcessingException error) {
@@ -554,7 +453,7 @@ class DatabaseProviderResolutionServiceTest {
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, null)));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
@@ -574,11 +473,7 @@ class DatabaseProviderResolutionServiceTest {
     when(adapter.create(any(ProviderDescriptor.class)))
         .thenThrow(new IllegalStateException("adapter boom"));
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
             ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
@@ -595,11 +490,7 @@ class DatabaseProviderResolutionServiceTest {
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     when(adapter.create(any(ProviderDescriptor.class))).thenThrow(new IllegalArgumentException());
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
             ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
@@ -618,11 +509,7 @@ class DatabaseProviderResolutionServiceTest {
     when(adapter.create(any(ProviderDescriptor.class)))
         .thenThrow(new IllegalArgumentException("broken adapter"));
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
             ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
@@ -642,11 +529,7 @@ class DatabaseProviderResolutionServiceTest {
         new IllegalArgumentException("cannot create ModelProvider for x: sensitive-value");
     when(adapter.create(any(ProviderDescriptor.class))).thenThrow(original);
     DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter));
+        resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
             ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
@@ -658,39 +541,16 @@ class DatabaseProviderResolutionServiceTest {
     assertNull(failure.getCause());
   }
 
-  // ---------- cache hint 规范化 ----------
-
-  @ParameterizedTest
-  @EnumSource(
-      value = PromptCacheMode.class,
-      names = {"UNKNOWN", "UNSUPPORTED", "AUTOMATIC"})
-  void cacheHintDegradesToNoneForUnsupportedModes(PromptCacheMode mode) {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                new PromptCacheCapability(mode, Set.of(), Set.of()),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key")));
-    assertEquals(
-        ProviderCacheControl.none(),
-        resolved.effectiveRequest().cacheControl(),
-        "无能力 / 不支持 / 自动模式下持久 hint 一律安全降级为 none()");
-  }
+  // ---------- 冻结 cache control 透传 ----------
 
   @Test
-  void cacheHintWithNoneRetentionStaysNone() {
+  void resolveKeepsNoneCacheControlUnchanged() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
     ProviderResolutionService.ResolvedExecution resolved =
         resolution.resolve(
@@ -698,199 +558,23 @@ class DatabaseProviderResolutionServiceTest {
     assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
   }
 
+  /** 意图：cache control 在规划期冻结（retention + session key），resolve 只原样透传，绝不按当前配置重新规范化。 */
   @Test
-  void affinityCapabilityKeepsPersistedKeyAndDropsBreakpoints() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // 持久 control 是 BREAKPOINTS 形态，当前 capability 是 AFFINITY：丢弃 breakpoints、沿用 key 与
-    // retention。
-    ProviderCacheControl persisted =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "pc-key",
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, request(persisted));
-    assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-        resolved.effectiveRequest().cacheControl());
-  }
-
-  @Test
-  void preferredRetentionDowngradesToShortWhenSupported() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // 持久 retention 为 LONG 但当前 capability 只支持 SHORT：降级 SHORT 并沿用 key。
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(ProviderCacheControl.affinity(PromptCacheRetention.LONG, "pc-key")));
-    assertEquals(
-        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-        resolved.effectiveRequest().cacheControl());
-  }
-
-  @Test
-  void retentionDegradesToNoneWhenNothingSupported() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // capability 只支持 LONG：持久 SHORT 与降级档 SHORT 都不支持，整体降级 none()。
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.LONG), EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key")));
-    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
-  }
-
-  @Test
-  void breakpointsCapabilityResolvesSystemAndToolsIntersection() {
+  void resolvePassesFrozenCacheControlThroughUnchanged() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
                 ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT),
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+                PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
-                List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
-    assertEquals(
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "pc-key",
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-        resolved.effectiveRequest().cacheControl(),
-        "systemInstruction 与 tools 都命中 capability 断点能力");
-  }
+    ProviderCacheControl frozen =
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "session-key");
 
-  /** 意图：执行期使用完整历史重新求交集，确保原生 Anthropic 的最新对话断点不会被 durable spec 丢弃。 */
-  @Test
-  void breakpointsCapabilityResolvesSystemToolsAndConversationIntersection() {
-    when(repository.getByName(PROVIDER_NAME))
-        .thenReturn(provider(ProviderType.ANTHROPIC, ENDPOINT));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.ANTHROPIC,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-                    EnumSet.allOf(PromptCacheBreakpoint.class)),
-                adapter(ProviderType.ANTHROPIC, mock(ModelProvider.class))));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.ANTHROPIC,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.breakpoints(
-                    PromptCacheRetention.LONG,
-                    "pc-key",
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("history")))),
-                List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
-    assertEquals(
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.LONG, "pc-key", EnumSet.allOf(PromptCacheBreakpoint.class)),
-        resolved.effectiveRequest().cacheControl());
-  }
+        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, request(frozen));
 
-  @Test
-  void breakpointsCapabilityKeepsSystemAndToolsWhenConversationIsEmpty() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT),
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(),
-                List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
-    assertEquals(
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "pc-key",
-            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-        resolved.effectiveRequest().cacheControl(),
-        "systemInstruction 恒有效前缀：无会话消息时仍保留 SYSTEM 与 tools 断点");
-  }
-
-  @Test
-  void breakpointsCapabilityDegradesToNoneOnEmptyMessages() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT), EnumSet.of(PromptCacheBreakpoint.TOOLS)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(),
-                List.of()));
-    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
-  }
-
-  @Test
-  void breakpointsCapabilityDegradesToNoneWithSystemOnlyRequest() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // capability 只支持 TOOLS 断点，但请求只有 systemInstruction 且无 tools：无交集 → none()。
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT), EnumSet.of(PromptCacheBreakpoint.TOOLS)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(),
-                List.of()));
-    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
+    assertSame(frozen, resolved.effectiveRequest().cacheControl());
   }
 
   // ---------- adapter 内联媒体能力 ----------
@@ -920,11 +604,7 @@ class DatabaseProviderResolutionServiceTest {
             blobManager,
             contentService,
             new ProviderFactories(
-                List.of(
-                    factory(
-                        ProviderType.OPENAI,
-                        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
-                        adapter))));
+                List.of(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter))));
     ProviderRequest persisted =
         request(
             ProviderCacheControl.none(),
@@ -968,7 +648,7 @@ class DatabaseProviderResolutionServiceTest {
                 List.of(
                     factory(
                         ProviderType.OPENAI,
-                        PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                        PromptCacheRetention.SHORT,
                         adapter(ProviderType.OPENAI, mock(ModelProvider.class))))));
     ProviderRequest persisted =
         request(
@@ -1012,17 +692,17 @@ class DatabaseProviderResolutionServiceTest {
         new ProviderResourceMaterializer(blobManager, contentService));
   }
 
-  private static ProviderFactory openAiFactory(PromptCacheCapability capability) {
+  private static ProviderFactory openAiFactory(PromptCacheRetention retention) {
     return factory(
-        ProviderType.OPENAI, capability, adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
+        ProviderType.OPENAI, retention, adapter(ProviderType.OPENAI, mock(ModelProvider.class)));
   }
 
   private static ProviderFactory factory(
-      ProviderType type, PromptCacheCapability capability, ProviderAdapter adapter) {
+      ProviderType type, PromptCacheRetention retention, ProviderAdapter adapter) {
     ProviderFactory factory = mock(ProviderFactory.class);
     when(factory.providerType()).thenReturn(type);
-    when(factory.promptCacheCapability()).thenReturn(capability);
-    when(factory.promptCacheCapability(any())).thenReturn(capability);
+    when(factory.promptCacheRetention()).thenReturn(retention);
+    when(factory.promptCacheRetention(any())).thenReturn(retention);
     when(factory.create(anyString(), anyString())).thenReturn(adapter);
     return factory;
   }
@@ -1072,25 +752,7 @@ class DatabaseProviderResolutionServiceTest {
       List<ProviderToolDefinition> tools,
       Set<ModelInputModality> inputModalities) {
     return new ProviderRequest(
-        new ModelDescriptor(
-            PROVIDER_NAME,
-            "model",
-            "model",
-            inputModalities,
-            false,
-            false,
-            new ModelPricing(
-                "USD",
-                "default",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO)),
+        new ModelDescriptor(PROVIDER_NAME, "model", "model", inputModalities, false, false),
         new ModelVariant("default"),
         1024,
         "Test system instruction.",

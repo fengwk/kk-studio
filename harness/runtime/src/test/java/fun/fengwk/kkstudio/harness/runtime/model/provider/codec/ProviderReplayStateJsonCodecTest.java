@@ -18,10 +18,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -39,7 +37,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -75,7 +72,6 @@ class ProviderReplayStateJsonCodecTest {
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             new ProviderReplayAffinity(
                 ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             payload);
 
     // 修改传入的原始 ObjectNode，不应影响 state 内部
@@ -91,7 +87,6 @@ class ProviderReplayStateJsonCodecTest {
   @Test
   void toStringDoesNotLeakPayloadHashOrAffinityDetails() {
     String sentinelPayload = "SENTINEL_PAYLOAD_SECRET_TOKEN_42";
-    String sentinelHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     String sentinelProvider = "SENTINEL_PROVIDER_NAME_LEAK";
     String sentinelModel = "SENTINEL_MODEL_NAME_LEAK";
     UUID sentinelGenerationId = UUID.fromString("12345678-1234-1234-1234-1234567890ab");
@@ -105,14 +100,12 @@ class ProviderReplayStateJsonCodecTest {
             ProviderType.OPENAI_RESPONSES, sentinelProvider, sentinelGenerationId, sentinelModel);
 
     ProviderReplayState state =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES, affinity, sentinelHash, payload);
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_RESPONSES, affinity, payload);
 
     String repr = state.toString();
-    // 证明 ProviderReplayState.toString() 绝不泄漏 payload、sourcePrefixHash 以及 affinity 细节
+    // 证明 ProviderReplayState.toString() 绝不泄漏 payload 以及 affinity 细节
     assertFalse(repr.contains(sentinelPayload), "state.toString() must not leak payload");
     assertFalse(repr.contains("sensitive"), "state.toString() must not leak payload fields");
-    assertFalse(repr.contains(sentinelHash), "state.toString() must not leak sourcePrefixHash");
     assertFalse(repr.contains(sentinelProvider), "state.toString() must not leak providerName");
     assertFalse(repr.contains(sentinelModel), "state.toString() must not leak modelName");
     assertFalse(
@@ -165,24 +158,13 @@ class ProviderReplayStateJsonCodecTest {
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("reply")), state);
     String msgJson = OBJECT_MAPPER.writeValueAsString(msg);
     assertFalse(msgJson.contains("replayState"));
-    assertFalse(msgJson.contains("sourcePrefixHash"));
 
     // 2. Entry (ASSISTANT message)
     MessagePayload msgPayload =
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE,
-                new ModelUsage(1, 1, 0, 0, 0, 0, 0),
-                new ModelCost(
-                    "USD",
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 0)),
             null);
     Entry entry =
         new Entry(
@@ -194,7 +176,6 @@ class ProviderReplayStateJsonCodecTest {
             state);
     String entryJson = OBJECT_MAPPER.writeValueAsString(entry);
     assertFalse(entryJson.contains("providerReplayState"));
-    assertFalse(entryJson.contains("sourcePrefixHash"));
 
     // 3. ModelInvocation
     ModelInvocation invocation =
@@ -207,24 +188,7 @@ class ProviderReplayStateJsonCodecTest {
                 ProviderType.OPENAI,
                 new UUID(0L, 1L),
                 new ModelDescriptor(
-                    "provider",
-                    "model",
-                    "model",
-                    Set.of(ModelInputModality.TEXT),
-                    true,
-                    true,
-                    new ModelPricing(
-                        "USD",
-                        "standard",
-                        "standard",
-                        BigDecimal.ONE,
-                        "1",
-                        BigDecimal.ZERO,
-                        BigDecimal.ZERO,
-                        BigDecimal.ZERO,
-                        BigDecimal.ZERO,
-                        BigDecimal.ZERO,
-                        BigDecimal.ZERO)),
+                    "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true),
                 new ModelVariant("v1"),
                 1024,
                 "Test system instruction.",
@@ -240,15 +204,6 @@ class ProviderReplayStateJsonCodecTest {
                 List.of(),
                 GenerationStopReason.COMPLETE,
                 new ModelUsage(1, 1, 0, 0, 0, 0, 0),
-                new ModelCost(
-                    "USD",
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO,
-                    BigDecimal.ZERO),
                 null,
                 null,
                 "{}",
@@ -261,7 +216,6 @@ class ProviderReplayStateJsonCodecTest {
             state);
     String invocationJson = OBJECT_MAPPER.writeValueAsString(invocation);
     assertFalse(invocationJson.contains("providerReplayState"));
-    assertFalse(invocationJson.contains("sourcePrefixHash"));
   }
 
   @Test
@@ -283,7 +237,6 @@ class ProviderReplayStateJsonCodecTest {
             "connectionGenerationId": "00000000-0000-0000-0000-000000000001",
             "modelId": "claude-3-5"
           },
-          "sourcePrefixHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
           "payload": {"key":"val"},
           "format": "anthropic_messages"
         }
@@ -292,31 +245,8 @@ class ProviderReplayStateJsonCodecTest {
   }
 
   @Test
-  void rejectsInvalidHexHash() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                new ProviderReplayAffinity(
-                    ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "model"),
-                "short-hash",
-                NODES.objectNode()));
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProviderReplayState(
-                ProviderReplayFormat.ANTHROPIC_MESSAGES,
-                new ProviderReplayAffinity(
-                    ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "model"),
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeG",
-                NODES.objectNode()));
-  }
-
-  @Test
   void rejectsMissingRootFields() {
-    for (String field : List.of("format", "affinity", "sourcePrefixHash", "payload")) {
+    for (String field : List.of("format", "affinity", "payload")) {
       ObjectNode node = (ObjectNode) codec.encodeNode(sampleState());
       node.remove(field);
       assertThrows(IllegalArgumentException.class, () -> codec.decode(node.toString()));
@@ -479,7 +409,6 @@ class ProviderReplayStateJsonCodecTest {
             "anthropic",
             UUID.fromString("11111111-2222-3333-4444-555555555555"),
             "claude-3-5-sonnet"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         payload);
   }
 }

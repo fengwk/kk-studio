@@ -16,13 +16,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
@@ -105,23 +103,7 @@ class CompactionResultEvaluatorTest {
   private static ProviderResponse response(
       String text, GenerationStopReason stopReason, List<ProviderToolCall> calls) {
     return new ProviderResponse(
-        text,
-        "",
-        calls,
-        stopReason,
-        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO),
-        null,
-        null,
-        null);
+        text, "", calls, stopReason, new ModelUsage(1, 1, 0, 0, 0, 0, 2), null, null, null);
   }
 
   private static void assertError(String code, EntryPayload result) {

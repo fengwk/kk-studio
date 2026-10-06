@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -2372,28 +2371,18 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static ProviderResponse response(String text, GenerationStopReason stopReason) {
-    return new ProviderResponse(
-        text, null, List.of(), stopReason, usage(), cost(), "req-1", null, null);
+    return new ProviderResponse(text, null, List.of(), stopReason, usage(), "req-1", null, null);
   }
 
   private static ProviderResponse response(
       String text, List<ProviderToolCall> toolCalls, GenerationStopReason stopReason) {
-    return new ProviderResponse(
-        text, null, toolCalls, stopReason, usage(), cost(), "req-1", null, null);
+    return new ProviderResponse(text, null, toolCalls, stopReason, usage(), "req-1", null, null);
   }
 
   private static ProviderResponse response(
       String text, String thinking, List<ProviderToolCall> toolCalls) {
     return new ProviderResponse(
-        text,
-        thinking,
-        toolCalls,
-        GenerationStopReason.COMPLETE,
-        usage(),
-        cost(),
-        "req-1",
-        null,
-        null);
+        text, thinking, toolCalls, GenerationStopReason.COMPLETE, usage(), "req-1", null, null);
   }
 
   private static ModelUsage usage() {
@@ -2406,7 +2395,6 @@ class ModelExecutionStreamFlushTest {
         ProviderReplayFormat.OPENAI_RESPONSES,
         new ProviderReplayAffinity(
             ProviderType.OPENAI_RESPONSES, "minimax", new UUID(0L, 63L), "minimax-m2"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
@@ -2460,24 +2448,7 @@ class ModelExecutionStreamFlushTest {
 
   private static ModelDescriptor modelDescriptor() {
     return new ModelDescriptor(
-        "provider",
-        "model",
-        "model",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        new ModelPricing(
-            "USD",
-            "standard",
-            "standard",
-            BigDecimal.ONE,
-            "1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static Baseline seedBaseline(HarnessStore store, Instant now) {

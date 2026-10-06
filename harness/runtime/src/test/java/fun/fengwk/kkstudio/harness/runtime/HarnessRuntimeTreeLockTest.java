@@ -28,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -45,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.lang.reflect.Proxy;
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -521,16 +519,7 @@ class HarnessRuntimeTreeLockTest {
           AssistantMessageMetadata metadata =
               new AssistantMessageMetadata(
                   GenerationStopReason.COMPLETE,
-                  new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L),
-                  new ModelCost(
-                      "USD",
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO,
-                      BigDecimal.ZERO));
+                  new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L));
           tx.insertEntry(
               new Entry(
                   firstAssistantId,

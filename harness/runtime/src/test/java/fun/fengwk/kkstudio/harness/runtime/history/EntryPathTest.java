@@ -1522,7 +1522,6 @@ class EntryPathTest {
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
         new ProviderReplayAffinity(
             ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 9L), "claude-3-5-sonnet"),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
@@ -1562,7 +1561,7 @@ class EntryPathTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.valueOf(2));
-    return new AssistantMessageMetadata(reason, usage, cost);
+    return new AssistantMessageMetadata(reason, usage);
   }
 
   private static Instant time(UUID id) {

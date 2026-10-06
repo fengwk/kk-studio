@@ -131,7 +131,7 @@ class HistoryNormalizationTest {
     contents.add(new TextMessageContent("answer"));
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage(), cost()),
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
         null);
   }
 

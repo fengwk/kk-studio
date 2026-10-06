@@ -14,11 +14,9 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -40,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -194,7 +191,7 @@ class PlatformModelGatewayTest {
 
   @Test
   void transportUsesEffectiveRequestFromResolutionNotTheOriginal() throws Exception {
-    // 解析器把持久 request 的 cache control 按当前 capability 规范化后返回有效请求；transport 必须使用它。
+    // 解析器返回与持久 request 不同的有效请求（规划期冻结的 cache control 原样透传）；transport 必须使用它。
     ProviderRequest effective =
         new ProviderRequest(
             PROVIDER_REQUEST.model(),
@@ -203,7 +200,7 @@ class PlatformModelGatewayTest {
             "Test system instruction.",
             PROVIDER_REQUEST.messages(),
             PROVIDER_REQUEST.tools(),
-            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-effective-key"));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc1-effective-key"));
     ControlledProvider provider = new ControlledProvider();
     try (Fixture fixture =
         new Fixture(
@@ -1065,19 +1062,7 @@ class PlatformModelGatewayTest {
             "frozen-model",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            new ModelPricing(
-                "USD",
-                "batch",
-                "priority",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO));
+            false);
     return new ProviderRequest(
         descriptor,
         variant,
@@ -1090,18 +1075,8 @@ class PlatformModelGatewayTest {
 
   private static ProviderResponse response() {
     ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
-    ModelCost cost =
-        new ModelCost(
-            "USD",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     return new ProviderResponse(
-        "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, null, null, "{}");
+        "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "{}");
   }
 
   private static ProviderReplayState replayState() {
@@ -1113,7 +1088,6 @@ class PlatformModelGatewayTest {
         ProviderReplayFormat.GEMINI_CONTENT,
         new ProviderReplayAffinity(
             ProviderType.GOOGLE, "google", CONNECTION_GENERATION_ID, "gemini-3.8-flash"),
-        "0".repeat(64),
         payload);
   }
 
