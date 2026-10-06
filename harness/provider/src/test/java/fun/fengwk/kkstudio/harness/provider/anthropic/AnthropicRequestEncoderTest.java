@@ -19,14 +19,11 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -62,10 +59,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -98,7 +93,6 @@ class AnthropicRequestEncoderTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     assertNotNull(encoded);
-    assertNotNull(encoded.sourcePrefixHash());
 
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     assertEquals("claude-3-5-sonnet", root.path("model").asText());
@@ -121,8 +115,7 @@ class AnthropicRequestEncoderTest {
             "claude-fable-5-dd-3M-xaMiniM",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            pricing());
+            false);
     ProviderRequest request =
         new ProviderRequest(
             logicalModel,
@@ -333,28 +326,11 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
-  void replayingAssistantMatchesWhenAffinityAndPrefixHashMatch() throws IOException {
+  void replaysAssistantWhenAffinityMatches() throws IOException {
     // 构造第一条用户消息
     ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
 
-    // 预计算当时的 prefix hash
-    String expectedHash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(NODES.objectNode().put("type", "text").put("text", "hi")))));
-
-    // 构造匹配的 ReplayState
+    // 构造与 wire modelId 亲和性匹配的 ReplayState
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
     ArrayNode content = payload.putArray("content");
@@ -369,7 +345,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             payload);
 
     ProviderMessage assistantMsg =
@@ -394,13 +369,13 @@ class AnthropicRequestEncoderTest {
   }
 
   /**
-   * 测试意图：affinity/hash 失配时按 payload 承载的事实分流——只含可等价重建的 text / tool_use 时仍回退语义编码；一旦携带 durable
-   * 无法重建的原生事实（如 thinking 的 signature）就必须 fail closed，绝不静默丢弃。
+   * 测试意图：affinity 失配时按 durable 语义投影（semantic fallback），绝不因为存在 replay 而拒绝请求；携带原生 thinking signature
+   * 的原生事实无法由 durable 重建，随 fallback 安全降级为普通文本。
    */
   @Test
-  void fallsBackForReconstructibleReplayAndFailsClosedForNativeOnlyReplay() throws IOException {
+  void fallsBackToDurableProjectionWhenAffinityDiffers() throws IOException {
     ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
-    String forgedHash = "0000000000000000000000000000000000000000000000000000000000000001";
+    ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("other-model");
 
     // 1. 恰好 type+text 的 text 与恰好 type+id+name+input 的 tool_use 都可由 durable 语义等价重建 -> 语义 fallback
     ObjectNode reconstructiblePayload = NODES.objectNode();
@@ -413,10 +388,7 @@ class AnthropicRequestEncoderTest {
 
     ProviderReplayState reconstructibleState =
         new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            forgedHash,
-            reconstructiblePayload);
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, reconstructiblePayload);
     ProviderMessage reconstructibleAsstMsg =
         asstMsg(
             List.of(
@@ -443,7 +415,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("calc", asstWire.path("content").get(1).path("name").asText());
     assertEquals(1, asstWire.path("content").get(1).path("input").path("x").asInt());
 
-    // 2. thinking 的 signature 无法用 durable thinking 文本重建：失配时 fail closed
+    // 2. thinking 的 signature 不在 durable 中：失配时仍回退，thinking 降级为普通 text 且不泄漏 signature
     ObjectNode nativePayload = NODES.objectNode();
     nativePayload.put("role", "assistant");
     ArrayNode nativeContent = nativePayload.putArray("content");
@@ -456,10 +428,7 @@ class AnthropicRequestEncoderTest {
 
     ProviderReplayState nativeState =
         new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            descriptor.affinity("claude-3-5-sonnet"),
-            forgedHash,
-            nativePayload);
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, nativePayload);
     ProviderMessage nativeAsstMsg =
         asstMsg(
             List.of(
@@ -473,12 +442,14 @@ class AnthropicRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(nativeRequest, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        error.getMessage());
+    JsonNode nativeWire =
+        MAPPER.readTree(encoder.encode(nativeRequest, descriptor).bodyUtf8Bytes());
+    JsonNode nativeAsst = nativeWire.path("messages").get(1);
+    assertEquals("text", nativeAsst.path("content").get(0).path("type").asText());
+    assertEquals("think text", nativeAsst.path("content").get(0).path("text").asText());
+    assertFalse(nativeAsst.path("content").get(0).has("signature"));
+    assertEquals("text", nativeAsst.path("content").get(1).path("type").asText());
+    assertEquals("response text", nativeAsst.path("content").get(1).path("text").asText());
   }
 
   @Test
@@ -494,13 +465,7 @@ class AnthropicRequestEncoderTest {
                 asstMsg(List.of(new ProviderTextBlock("Asst 1")), null),
                 userMsg(new ProviderTextBlock("User 2"))),
             List.of(tool),
-            new ProviderCacheControl(
-                PromptCacheRetention.LONG,
-                "test-affinity",
-                Set.of(
-                    PromptCacheBreakpoint.TOOLS,
-                    PromptCacheBreakpoint.SYSTEM,
-                    PromptCacheBreakpoint.CONVERSATION)));
+            new ProviderCacheControl(PromptCacheRetention.LONG, "test-affinity"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -514,29 +479,46 @@ class AnthropicRequestEncoderTest {
     assertEquals(1, root.path("system").size());
     assertEquals(
         "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
+    assertEquals("1h", root.path("system").get(0).path("cache_control").path("ttl").asText());
 
-    // CONVERSATION: 标记在最新的合格 block (User 2 的 text)
+    // CONVERSATION: 剩余两个名额给最近的两个历史端点（User 2 与 User 1），assistant 文本不是请求边界
     JsonNode lastMsgBlock = root.path("messages").get(2).path("content").get(0);
     assertEquals("ephemeral", lastMsgBlock.path("cache_control").path("type").asText());
+    assertEquals("1h", lastMsgBlock.path("cache_control").path("ttl").asText());
+    assertTrue(root.path("messages").get(0).path("content").get(0).has("cache_control"));
+    assertFalse(root.path("messages").get(1).path("content").get(0).has("cache_control"));
+    assertEquals(4, countCacheMarkers(root));
   }
 
-  /** 意图：Anthropic 只接受显式断点控制，AFFINITY 形态必须在发起网络请求前确定性拒绝。 */
+  /**
+   * 意图：cacheControl 只表达留存档位，不需要（也不再接受）显式断点集合；SHORT 会话请求在 tools/system/最近历史端点写入 ephemeral 标记且不带
+   * ttl，会话 key 不进入请求体。
+   */
   @Test
-  void rejectsAffinityCacheControlWithoutBreakpoints() {
+  void appliesFixedCacheMarkersForSessionRetention() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("User"))),
-            List.of(),
-            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "test-affinity"));
+            List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-affinity"));
 
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    // TOOLS 与 SYSTEM 各占一个名额，最后一个名额给唯一历史端点 User；SHORT 不带 ttl
     assertEquals(
-        "Anthropic prompt cache control requires at least one breakpoint (SYSTEM, TOOLS, CONVERSATION)",
-        error.getMessage());
+        "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asText());
+    assertFalse(root.path("tools").get(0).path("cache_control").has("ttl"));
+    assertEquals(
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
+    assertFalse(root.path("system").get(0).path("cache_control").has("ttl"));
+    assertEquals("ephemeral", cacheBlock(root, 0, 0).path("cache_control").path("type").asText());
+    assertFalse(cacheBlock(root, 0, 0).path("cache_control").has("ttl"));
+    assertEquals(3, countCacheMarkers(root));
+
+    // 会话 key 是 runtime 事实，Anthropic 无原生 cache-key 选项，绝不写入请求体
+    assertFalse(root.toString().contains("test-affinity"));
   }
 
   @Test
@@ -548,8 +530,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
     ModelVariant variantWithReasoning = new ModelVariant("v", "high");
 
     ProviderRequest req =
@@ -582,8 +563,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // reasoning effort 精确映射为预算；max_tokens 原样使用请求输出预算。
     List<String> efforts = List.of("low", "medium", "high");
@@ -630,8 +610,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // high 固定映射 16384；请求预算不足时必须拒绝，不能静默降档到 outputTokens - 1。
     ProviderRequest req =
@@ -661,8 +640,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // outputTokens = 1 时无法容纳 low 固定映射的 2048 token reasoning budget。
     ProviderRequest req =
@@ -692,8 +670,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // off 是显式关闭，不进入 budget 映射：只发 thinking:{type:"disabled"}，不发 budget_tokens
     ProviderRequest offRequest =
@@ -742,8 +719,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            pricing());
+            false);
     ModelVariant variantWithEffort = new ModelVariant("v", "high");
     ProviderRequest req1 =
         new ProviderRequest(
@@ -768,8 +744,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
     ModelVariant variantNullEffort = new ModelVariant("v");
     ProviderRequest req2 =
         new ProviderRequest(
@@ -832,8 +807,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // variant.reasoningEffort = "off" -> 显式关闭，且不发 output_config
     ProviderRequest reqOff =
@@ -866,8 +840,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
 
     // ADAPTIVE 模式不受 budget constraint 限制：输出预算较小也照常下发 effort
     ProviderRequest req =
@@ -1032,25 +1005,10 @@ class AnthropicRequestEncoderTest {
             null));
   }
 
+  /** 意图：affinity 匹配时 redacted_thinking 作为原生事实逐字节回放，不由 durable 重建。 */
   @Test
-  void encodesRedactedThinkingInReplayAndDetectsMismatches() throws IOException {
+  void encodesRedactedThinkingInReplay() throws IOException {
     ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
-
-    String expectedHash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(NODES.objectNode().put("type", "text").put("text", "hi")))));
 
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
@@ -1062,7 +1020,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             payload);
 
     ProviderMessage assistantMsg =
@@ -1134,26 +1091,6 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void skipsThinkingBlocksWhenApplyingConversationCacheMarker() throws IOException {
-    String hash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(
-                                    NODES
-                                        .objectNode()
-                                        .put("type", "text")
-                                        .put("text", "Text before")))));
-
     ObjectNode payload = NODES.objectNode();
     payload.put("role", "assistant");
     payload
@@ -1167,7 +1104,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            hash,
             payload);
 
     ProviderRequest req =
@@ -1177,8 +1113,7 @@ class AnthropicRequestEncoderTest {
                 userMsg(new ProviderTextBlock("Text before")),
                 asstMsg(List.of(new ProviderThinkingBlock("Last thinking")), replay)),
             List.of(),
-            new ProviderCacheControl(
-                PromptCacheRetention.SHORT, "aff", Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            new ProviderCacheControl(PromptCacheRetention.SHORT, "aff"));
 
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode messages = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages");
@@ -1196,22 +1131,6 @@ class AnthropicRequestEncoderTest {
   void handlesReplayPayloadValidationMismatches() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
 
-    String expectedHash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(NODES.objectNode().put("type", "text").put("text", "hi")))));
-
     // 1. payload contains bad tool_use without input object
     ObjectNode badPayload1 = NODES.objectNode();
     badPayload1.put("role", "assistant");
@@ -1221,7 +1140,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             badPayload1);
     ProviderMessage asst1 =
         asstMsg(
@@ -1232,7 +1150,7 @@ class AnthropicRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
-    // 2. payload contains unknown block type
+    // 2. payload 含未知 block type：未知块 opaque 透传，但 durable text 缺失导致一致性校验失败
     ObjectNode badPayload2 = NODES.objectNode();
     badPayload2.put("role", "assistant");
     badPayload2.putArray("content").addObject().put("type", "unknown_type");
@@ -1240,7 +1158,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             badPayload2);
     ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("text")), replay2);
     ProviderRequest req2 =
@@ -1308,22 +1225,6 @@ class AnthropicRequestEncoderTest {
   void handlesReplayTextThinkingOrToolMismatches() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
 
-    String expectedHash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(NODES.objectNode().put("type", "text").put("text", "hi")))));
-
     // 1. payloadText mismatch
     ObjectNode payloadTextMismatch = NODES.objectNode();
     payloadTextMismatch.put("role", "assistant");
@@ -1332,7 +1233,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             payloadTextMismatch);
     ProviderMessage asstText = asstMsg(List.of(new ProviderTextBlock("B")), replayText);
     ProviderRequest req1 =
@@ -1354,7 +1254,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             payloadThinkMismatch);
     ProviderMessage asstThink = asstMsg(List.of(new ProviderThinkingBlock("think B")), replayThink);
     ProviderRequest req2 =
@@ -1374,7 +1273,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             payloadToolMismatch);
     ProviderMessage asstTool =
         asstMsg(
@@ -1390,22 +1288,6 @@ class AnthropicRequestEncoderTest {
   @Test
   void rejectsReplayStateMissingAssistantRoleOrHavingExtraProperties() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-    String expectedHash =
-        AnthropicPrefixHasher.calculateHash(
-            systemBlocks(),
-            NODES.arrayNode(),
-            NODES
-                .arrayNode()
-                .add(
-                    NODES
-                        .objectNode()
-                        .put("role", "user")
-                        .set(
-                            "content",
-                            NODES
-                                .arrayNode()
-                                .add(NODES.objectNode().put("type", "text").put("text", "hi")))));
-
     // 缺少 role: assistant
     ObjectNode noRolePayload = NODES.objectNode();
     noRolePayload.putArray("content").addObject().put("type", "text").put("text", "hi");
@@ -1413,7 +1295,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             noRolePayload);
     ProviderMessage asst1 = asstMsg(List.of(new ProviderTextBlock("hi")), replayNoRole);
     ProviderRequest req1 =
@@ -1431,7 +1312,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            expectedHash,
             extraPropPayload);
     ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("hi")), replayExtra);
     ProviderRequest req2 =
@@ -1506,15 +1386,6 @@ class AnthropicRequestEncoderTest {
             List.of(),
             GenerationStopReason.LENGTH,
             new ModelUsage(10, 15, 0, 0, 0, 0, 25),
-            new ModelCost(
-                "USD",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO),
             "msg_len_1",
             null,
             "{}",
@@ -1563,7 +1434,7 @@ class AnthropicRequestEncoderTest {
     assertEquals(diagnostic.message(), decodedDiag.message());
   }
 
-  /** 意图：从真实 AgentMessage 投影，少量和超过 20 个独立块的增长都必须保留上轮请求端点。 */
+  /** 意图：从真实 AgentMessage 投影，少量和超过 20 个独立块的增长都必须保留最近请求端点。 */
   @ParameterizedTest
   @MethodSource("cacheGrowthCases")
   void retainsPreviousRequestEndpointAcrossGrowth(int growth) throws IOException {
@@ -1576,21 +1447,21 @@ class AnthropicRequestEncoderTest {
       additions.add(new TextMessageContent("new-" + i));
     }
     history.add(new AgentMessage(AgentMessageRole.USER, new ArrayList<>(additions)));
-    JsonNode wire =
-        cacheWire(
-            ProviderMessageProjector.byNames(Set.of()).project(history),
-            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+    JsonNode wire = cacheWire(ProviderMessageProjector.byNames(Set.of()).project(history));
+    // tools、system 与最近两个历史请求端点（User 的最后一个新增块、Assistant answer）共 4 个标记
+    assertTrue(wire.path("tools").get(0).has("cache_control"));
+    assertTrue(wire.path("system").get(0).has("cache_control"));
     assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
     assertTrue(cacheBlock(wire, 2, growth - 1).has("cache_control"));
     assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
-    assertEquals(3, countCacheMarkers(wire));
+    assertEquals(4, countCacheMarkers(wire));
   }
 
   private static Stream<Integer> cacheGrowthCases() {
     return Stream.of(1, 21, 25);
   }
 
-  /** 意图：四个名额按 SYSTEM/TOOLS 组合分配给最近请求边界，不是任意最后两条消息；相同文本按 identity 区分。 */
+  /** 意图：四个名额固定分给 tools、system 与最近两个历史请求边界（更早的端点被舍去）；相同文本按 identity 区分。 */
   @Test
   void allocatesFourMarkersToMostRecentRequestBoundaries() throws IOException {
     List<ProviderMessage> messages =
@@ -1604,30 +1475,16 @@ class AnthropicRequestEncoderTest {
             userMsg(new ProviderTextBlock("same")),
             asstMsg(List.of(new ProviderTextBlock("a")), null),
             userMsg(new ProviderTextBlock("same")));
-    for (boolean system : List.of(false, true)) {
-      for (boolean tools : List.of(false, true)) {
-        Set<PromptCacheBreakpoint> breakpoints = new HashSet<>();
-        breakpoints.add(PromptCacheBreakpoint.CONVERSATION);
-        if (system) {
-          breakpoints.add(PromptCacheBreakpoint.SYSTEM);
-        }
-        if (tools) {
-          breakpoints.add(PromptCacheBreakpoint.TOOLS);
-        }
-        JsonNode wire = cacheWire(messages, breakpoints);
-        assertEquals(4, countCacheMarkers(wire));
-        int conversationBudget = 4 - (system ? 1 : 0) - (tools ? 1 : 0);
-        for (int i = 0; i < messages.size(); i++) {
-          assertEquals(
-              i % 2 == 0 && i >= 10 - 2 * conversationBudget,
-              cacheBlock(wire, i, 0).has("cache_control"),
-              "message " + i);
-        }
-      }
+    JsonNode wire = cacheWire(messages);
+    assertEquals(4, countCacheMarkers(wire));
+    assertTrue(wire.path("tools").get(0).has("cache_control"));
+    assertTrue(wire.path("system").get(0).has("cache_control"));
+    for (int i = 0; i < messages.size(); i++) {
+      assertEquals(i == 6 || i == 8, cacheBlock(wire, i, 0).has("cache_control"), "message " + i);
     }
   }
 
-  /** 意图：queued users、并行工具批次只把批末端作为请求边界；连续 assistant 续写仍记录之前的端点。 */
+  /** 意图：queued users、并行工具批次只把批末端作为请求边界；连续 assistant 续写记录之前的端点，只保留最近两个为 marker。 */
   @Test
   void retainsQueuedUserAndParallelToolBatchEndpoints() throws IOException {
     ProviderMessage calls =
@@ -1658,14 +1515,14 @@ class AnthropicRequestEncoderTest {
                 secondResult,
                 asstMsg(List.of(new ProviderTextBlock("continue")), null),
                 asstMsg(List.of(new ProviderTextBlock("continued")), null),
-                userMsg(new ProviderTextBlock("third"))),
-            Set.of(PromptCacheBreakpoint.CONVERSATION));
+                userMsg(new ProviderTextBlock("third"))));
+    // 历史端点为 queued-2、第二个 tool_result、continue、third；tools/system 占两个名额，仅最近两个端点打标
     assertEquals(4, countCacheMarkers(wire));
     assertFalse(cacheBlock(wire, 0, 0).has("cache_control"));
-    assertTrue(cacheBlock(wire, 1, 0).has("cache_control"));
+    assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
     assertFalse(cacheBlock(wire, 2, 1).has("cache_control"));
     assertFalse(cacheBlock(wire, 3, 0).has("cache_control"));
-    assertTrue(cacheBlock(wire, 4, 0).has("cache_control"));
+    assertFalse(cacheBlock(wire, 4, 0).has("cache_control"));
     assertTrue(cacheBlock(wire, 5, 0).has("cache_control"));
     assertTrue(cacheBlock(wire, 7, 0).has("cache_control"));
   }
@@ -1679,8 +1536,11 @@ class AnthropicRequestEncoderTest {
             asstMsg(List.of(new ProviderTextBlock("")), null),
             asstMsg(List.of(new ProviderTextBlock("")), null),
             userMsg(new ProviderTextBlock("")));
-    JsonNode wire = cacheWire(messages, Set.of(PromptCacheBreakpoint.CONVERSATION));
-    assertEquals(1, countCacheMarkers(wire));
+    JsonNode wire = cacheWire(messages);
+    // tools + system 固定打标，空/重复端点只留一个 conversation marker
+    assertEquals(3, countCacheMarkers(wire));
+    assertTrue(wire.path("tools").get(0).has("cache_control"));
+    assertTrue(wire.path("system").get(0).has("cache_control"));
     assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
     for (int i = 1; i < 4; i++) {
       assertEquals("", cacheBlock(wire, i, 0).path("text").asText());
@@ -1697,18 +1557,12 @@ class AnthropicRequestEncoderTest {
                     .bodyUtf8Bytes())));
   }
 
-  /** 意图：未知/签名块原样保留且不打标，marker 不影响原生 replay hash 校验或修改持久 payload。 */
+  /**
+   * 意图：replay 只由 affinity（Provider/连接世代/wire 模型）决定，跨用户消息前缀与系统指令变化都保持有效的原生回放； opaque 尾部不打
+   * conversation marker，且 marker 不修改持久 payload。
+   */
   @Test
-  void skipsOpaqueTailWithoutChangingSignedReplayValidation() throws IOException {
-    ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
-    ProviderRequest prefix =
-        request(
-            defaultVariant(),
-            List.of(user),
-            List.of(),
-            new ProviderCacheControl(
-                PromptCacheRetention.SHORT, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION)));
-    String hash = encoder.encode(prefix, descriptor).sourcePrefixHash();
+  void replaysOpaquePayloadAcrossChangedPrefixAndSystem() throws IOException {
     ObjectNode payload = NODES.objectNode().put("role", "assistant");
     ArrayNode content = payload.putArray("content");
     content.addObject().put("type", "thinking").put("thinking", "t").put("signature", "sig");
@@ -1718,41 +1572,57 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            hash,
             payload);
     ProviderMessage assistant = asstMsg(List.of(new ProviderThinkingBlock("t")), replay);
+    ProviderMessage user = userMsg(new ProviderTextBlock("valid"));
+
+    // 1. 同前缀：opaque 尾部逐字节回放；无 tools，system 与最近可用端点各 1 个 marker
     ProviderRequest next =
-        request(defaultVariant(), List.of(user, assistant), List.of(), prefix.cacheControl());
+        request(
+            defaultVariant(),
+            List.of(user, assistant),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "cache"));
     JsonNode wire = MAPPER.readTree(encoder.encode(next, descriptor).bodyUtf8Bytes());
-    assertEquals(1, countCacheMarkers(wire));
+    assertTrue(wire.path("system").get(0).has("cache_control"));
     assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
+    assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
+    assertEquals(2, countCacheMarkers(wire));
     assertEquals(content, wire.path("messages").get(1).path("content"));
     assertEquals(0, countCacheMarkers(payload));
+
+    // 2. 改变用户消息：affinity 不变，兼容 replay 仍然有效
+    ProviderRequest changedPrefix =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("changed")), assistant),
+            List.of(),
+            ProviderCacheControl.none());
+    assertReplayedOpaqueContent(changedPrefix);
+
+    // 3. 改变系统指令：同样不使兼容 replay 失效
+    ProviderRequest changedSystem =
+        requestWithSystem(
+            "Different system instruction.",
+            defaultVariant(),
+            List.of(user, assistant),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode changedSystemWire = assertReplayedOpaqueContent(changedSystem);
     assertEquals(
-        encoder
-            .encode(
-                request(
-                    defaultVariant(),
-                    List.of(user, assistant),
-                    List.of(),
-                    ProviderCacheControl.none()),
-                descriptor)
-            .sourcePrefixHash(),
-        encoder.encode(next, descriptor).sourcePrefixHash());
-    ProviderMessage changedUser = userMsg(new ProviderTextBlock("changed"));
-    assertEquals(
-        ProviderErrorKind.INVALID_REQUEST,
-        assertThrows(
-                ProviderException.class,
-                () ->
-                    encoder.encode(
-                        request(
-                            defaultVariant(),
-                            List.of(changedUser, assistant),
-                            List.of(),
-                            prefix.cacheControl()),
-                        descriptor))
-            .kind());
+        "Different system instruction.",
+        changedSystemWire.path("system").get(0).path("text").asText());
+  }
+
+  private JsonNode assertReplayedOpaqueContent(ProviderRequest request) throws IOException {
+    JsonNode wire = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
+    JsonNode replayed = wire.path("messages").get(1).path("content");
+    assertEquals("thinking", replayed.get(0).path("type").asText());
+    assertEquals("sig", replayed.get(0).path("signature").asText());
+    assertEquals("redacted_thinking", replayed.get(1).path("type").asText());
+    assertEquals("future_block", replayed.get(2).path("type").asText());
+    assertEquals("kept", replayed.get(2).path("value").asText());
+    return wire;
   }
 
   /** 意图：compaction 必须丢弃已裁历史的缓存候选，否则旧引用会浪费四个 marker 名额。 */
@@ -1764,16 +1634,6 @@ class AnthropicRequestEncoderTest {
                 userMsg(new ProviderTextBlock("old")),
                 asstMsg(List.of(new ProviderTextBlock("old-answer")), null),
                 userMsg(new ProviderTextBlock("old-next"))));
-    String hash =
-        encoder
-            .encode(
-                request(
-                    defaultVariant(),
-                    messages,
-                    List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
-                    ProviderCacheControl.none()),
-                descriptor)
-            .sourcePrefixHash();
     ObjectNode payload = NODES.objectNode().put("role", "assistant");
     payload.putArray("content").addObject().put("type", "compaction").put("content", "summary");
     messages.add(
@@ -1782,14 +1642,16 @@ class AnthropicRequestEncoderTest {
             new ProviderReplayState(
                 ProviderReplayFormat.ANTHROPIC_MESSAGES,
                 descriptor.affinity("claude-3-5-sonnet"),
-                hash,
                 payload)));
     messages.add(userMsg(new ProviderTextBlock("new")));
-    JsonNode wire = cacheWire(messages, Set.of(PromptCacheBreakpoint.CONVERSATION));
+    JsonNode wire = cacheWire(messages);
     assertEquals(2, wire.path("messages").size());
     assertEquals(payload.path("content"), wire.path("messages").get(0).path("content"));
+    // 已摘要历史被整体省略，其缓存候选也随 compaction 清空：只剩 tools/system 与摘要后的 "new" 端点
     assertTrue(cacheBlock(wire, 1, 0).has("cache_control"));
-    assertEquals(1, countCacheMarkers(wire));
+    assertTrue(wire.path("tools").get(0).has("cache_control"));
+    assertTrue(wire.path("system").get(0).has("cache_control"));
+    assertEquals(3, countCacheMarkers(wire));
   }
 
   /** 意图：原生工具直接 cache_control（含 null/NONE）侵犯 marker 所有权，错误不回显值。 */
@@ -1807,8 +1669,7 @@ class AnthropicRequestEncoderTest {
     ProviderCacheControl control =
         retention == PromptCacheRetention.NONE
             ? ProviderCacheControl.none()
-            : new ProviderCacheControl(
-                retention, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION));
+            : new ProviderCacheControl(retention, "cache");
     ProviderException error =
         assertThrows(
             ProviderException.class,
@@ -1879,14 +1740,11 @@ class AnthropicRequestEncoderTest {
             defaultVariant(),
             List.of(user),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT, "cache", Set.of(PromptCacheBreakpoint.CONVERSATION)));
-    String hash = encoder.encode(prefix, descriptor).sourcePrefixHash();
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "cache"));
     ProviderReplayState replay =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            hash,
             payload);
     ProviderMessage assistant =
         asstMsg(
@@ -1917,8 +1775,7 @@ class AnthropicRequestEncoderTest {
     }
   }
 
-  private JsonNode cacheWire(List<ProviderMessage> messages, Set<PromptCacheBreakpoint> breakpoints)
-      throws IOException {
+  private JsonNode cacheWire(List<ProviderMessage> messages) throws IOException {
     return MAPPER.readTree(
         encoder
             .encode(
@@ -1926,7 +1783,7 @@ class AnthropicRequestEncoderTest {
                     defaultVariant(),
                     messages,
                     List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
-                    new ProviderCacheControl(PromptCacheRetention.LONG, "cache", breakpoints)),
+                    new ProviderCacheControl(PromptCacheRetention.LONG, "cache")),
                 descriptor)
             .bodyUtf8Bytes());
   }
@@ -1960,8 +1817,7 @@ class AnthropicRequestEncoderTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
-            false,
-            pricing());
+            false);
     return new ProviderRequest(
         model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }
@@ -1970,11 +1826,22 @@ class AnthropicRequestEncoderTest {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
   }
 
-  /** 与编码器冻结前缀哈希时一致的唯一系统指令块（未打 cache 标记）。 */
-  private static ArrayNode systemBlocks() {
-    ArrayNode system = NODES.arrayNode();
-    system.addObject().put("type", "text").put("text", SYSTEM_INSTRUCTION);
-    return system;
+  private static ProviderRequest requestWithSystem(
+      String systemInstruction,
+      ModelVariant variant,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
+            Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+            true,
+            false);
+    return new ProviderRequest(
+        model, variant, 1024, systemInstruction, messages, tools, cacheControl);
   }
 
   private static ProviderMessage asstMsg(
@@ -1986,31 +1853,15 @@ class AnthropicRequestEncoderTest {
     return new ModelVariant("default");
   }
 
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
-  }
-
   /**
-   * 意图：验证同 format (ANTHROPIC_MESSAGES) 回放时，即使 affinity 或 sourcePrefixHash 失配，如果 payload 损坏或与
-   * durable 内容不一致，必须严格抛出 INVALID_REQUEST，杜绝被判定为可 fallback。
+   * 意图：affinity 匹配的同 format replay 一旦 payload 损坏或与 durable 不一致必须 fail closed；affinity 失配则按 durable
+   * 语义回退而非抛错。
    */
   @Test
-  void rejectsCorruptedSameFormatReplayEvenUnderAffinityOrHashMismatch() {
+  void rejectsCorruptedCompatibleReplayAndFallsBackOnAffinityMismatch() throws IOException {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
-    String mismatchedHash = "0000000000000000000000000000000000000000000000000000000000000002";
 
-    // 1. hash 不匹配且 tool_use input 缺失
+    // 1. affinity 匹配但 payload 的 tool_use 缺少 input：损坏的兼容 replay 必须抛出 INVALID_REQUEST
     ObjectNode badPayload = NODES.objectNode();
     badPayload.put("role", "assistant");
     badPayload
@@ -2023,7 +1874,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            mismatchedHash,
             badPayload);
     ProviderMessage asst1 =
         asstMsg(
@@ -2035,7 +1885,7 @@ class AnthropicRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
-    // 2. affinity 不匹配且 payload 文本与 durable 不一致
+    // 2. affinity 失配：payload 文本与 durable 不一致也不抛错，改由 durable 语义重建
     ProviderReplayAffinity mismatchedAffinity = descriptor.affinity("other-model");
     ObjectNode textMismatchPayload = NODES.objectNode();
     textMismatchPayload.put("role", "assistant");
@@ -2046,16 +1896,14 @@ class AnthropicRequestEncoderTest {
         .put("text", "mismatched");
     ProviderReplayState replay2 =
         new ProviderReplayState(
-            ProviderReplayFormat.ANTHROPIC_MESSAGES,
-            mismatchedAffinity,
-            mismatchedHash,
-            textMismatchPayload);
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, mismatchedAffinity, textMismatchPayload);
     ProviderMessage asst2 = asstMsg(List.of(new ProviderTextBlock("original")), replay2);
     ProviderRequest req2 =
         request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+    JsonNode asstWire =
+        MAPPER.readTree(encoder.encode(req2, descriptor).bodyUtf8Bytes()).path("messages").get(1);
+    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
+    assertEquals("original", asstWire.path("content").get(0).path("text").asText());
   }
 
   /**
@@ -2096,7 +1944,6 @@ class AnthropicRequestEncoderTest {
           new ProviderReplayState(
               ProviderReplayFormat.ANTHROPIC_MESSAGES,
               descriptor.affinity("claude-3-5-sonnet"),
-              "0000000000000000000000000000000000000000000000000000000000000000",
               validPayload);
       ProviderMessage asstReplay =
           asstMsg(
@@ -2122,7 +1969,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            "0000000000000000000000000000000000000000000000000000000000000000",
             payloadArrayInput);
     ProviderMessage asstArrayInput =
         asstMsg(
@@ -2149,7 +1995,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
             descriptor.affinity("claude-3-5-sonnet"),
-            "0000000000000000000000000000000000000000000000000000000000000000",
             openAiPayload);
 
     ProviderMessage asst =
@@ -2200,14 +2045,7 @@ class AnthropicRequestEncoderTest {
   /** 意图：回放亲和性（replay affinity）严格绑定真实 wire modelId，逻辑名不参与亲和性判定。 */
   @Test
   void bindsReplayAffinityToWireModelId() throws IOException {
-    // 构建前缀并计算 canonical prefix hash
     ProviderMessage user1 = userMsg(new ProviderTextBlock("question 1"));
-    ArrayNode priorMessages = NODES.arrayNode();
-    ObjectNode userWire = NODES.objectNode();
-    userWire.put("role", "user");
-    userWire.putArray("content").addObject().put("type", "text").put("text", "question 1");
-    priorMessages.add(userWire);
-    String prefixHash = AnthropicPrefixHasher.calculateHash(systemBlocks(), null, priorMessages);
 
     // Assistant 携带针对 wire modelId 的亲和性与有效 payload（包含 thinking 块与签名）
     ObjectNode anthropicPayload = NODES.objectNode();
@@ -2230,7 +2068,6 @@ class AnthropicRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-fable-5-dd-3M-xaMiniM"),
-            prefixHash,
             anthropicPayload);
 
     List<ProviderContentBlock> durableBlocks =
@@ -2279,13 +2116,12 @@ class AnthropicRequestEncoderTest {
     assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asText());
     assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asText());
 
-    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则亲和性校验失败——payload 含 thinking signature，
-    //    无法用 durable 语义等价重建，因此必须 fail closed，绝不静默丢弃 signature。
+    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
+    //    原生 thinking signature 无法由 durable 重建，只能降级为普通文本，绝不抛错。
     ProviderReplayState logicalAffinityState =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("MiniMax-M3"),
-            prefixHash,
             anthropicPayload);
     ProviderMessage asstMismatch = asstMsg(durableBlocks, logicalAffinityState);
     ProviderRequest requestMismatch =
@@ -2296,12 +2132,16 @@ class AnthropicRequestEncoderTest {
             List.of(user1, asstMismatch, toolResult),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException mismatchError =
-        assertThrows(ProviderException.class, () -> encoder.encode(requestMismatch, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, mismatchError.kind());
-    assertEquals(
-        "native replay blocks require matching affinity and source prefix hash",
-        mismatchError.getMessage());
+    JsonNode mismatchAsst =
+        MAPPER
+            .readTree(encoder.encode(requestMismatch, descriptor).bodyUtf8Bytes())
+            .path("messages")
+            .get(1);
+    assertEquals("text", mismatchAsst.path("content").get(0).path("type").asText());
+    assertEquals("deep reasoning", mismatchAsst.path("content").get(0).path("text").asText());
+    assertFalse(mismatchAsst.path("content").get(0).has("signature"));
+    assertEquals("text", mismatchAsst.path("content").get(1).path("type").asText());
+    assertEquals("tool_use", mismatchAsst.path("content").get(2).path("type").asText());
   }
 
   private static ProviderRequest requestWithModelId(
@@ -2318,8 +2158,7 @@ class AnthropicRequestEncoderTest {
             modelId,
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
-            false,
-            pricing());
+            false);
     return new ProviderRequest(
         model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }
@@ -2337,8 +2176,7 @@ class AnthropicRequestEncoderTest {
             modelName,
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
-            false,
-            pricing());
+            false);
     return new ProviderRequest(
         model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }

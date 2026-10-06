@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -63,9 +61,7 @@ class AnthropicCitationsReplayTest {
   @Test
   void accumulatesCitationsInOrderAndReplaysExactly() throws IOException {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start",
         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_cite\",\"usage\":{\"input_tokens\":1}}}");
@@ -128,9 +124,7 @@ class AnthropicCitationsReplayTest {
   @Test
   void preservesStartDeclaredCitationsAndAppendsDeltasAfterThem() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -167,8 +161,7 @@ class AnthropicCitationsReplayTest {
   @Test
   void rejectsCitationsDeltaWithoutObjectCitation() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -199,8 +192,7 @@ class AnthropicCitationsReplayTest {
   @Test
   void rejectsNonTextDeltaForTextBlock() {
     ProviderRequest firstRequest = request(List.of(userMsg()));
-    String frozenHash = encoder.encode(firstRequest, descriptor).sourcePrefixHash();
-    AnthropicStreamAccumulator accumulator = accumulator(firstRequest, frozenHash);
+    AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
         "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
     accumulator.handleEvent(
@@ -218,10 +210,9 @@ class AnthropicCitationsReplayTest {
     assertEquals("mismatched delta type for text block", error.getMessage());
   }
 
-  private AnthropicStreamAccumulator accumulator(
-      ProviderRequest request, String frozenSourcePrefixHash) {
+  private AnthropicStreamAccumulator accumulator(ProviderRequest request) {
     return new AnthropicStreamAccumulator(
-        request, descriptor, frozenSourcePrefixHash, new ProviderStreamBridge(new NoopHandler()));
+        request, descriptor, new ProviderStreamBridge(new NoopHandler()));
   }
 
   private static JsonNode wire(AnthropicEncodedRequest encoded) throws IOException {
@@ -255,19 +246,7 @@ class AnthropicCitationsReplayTest {
         "claude-3-5-sonnet",
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO));
+        false);
   }
 
   private static final class NoopHandler implements ProviderStreamHandler {

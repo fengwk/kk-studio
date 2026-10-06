@@ -15,9 +15,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -41,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -52,7 +49,7 @@ import java.util.stream.Stream;
 /**
  * 适配 LangChain4j Anthropic Mapper、Schema 与 Cache 测试到 kk-studio 原生请求编码器的端到端映射套件。
  *
- * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、缓存断点注入、诊断隔离、系统指令单一承载
+ * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、固定缓存标记注入、诊断隔离、系统指令单一承载
  * 与非法结构拒绝。
  */
 class AnthropicRequestMapperTest {
@@ -720,10 +717,10 @@ class AnthropicRequestMapperTest {
   }
 
   // =========================================================================================
-  // 4. 缓存标记控制适配测试（ProviderCacheControl 驱动）
+  // 4. 固定缓存标记适配测试（ProviderCacheControl 驱动）
   // =========================================================================================
 
-  /** 测试意图：当配置 CONVERSATION 断点时，单条文本用户消息的内容块应被打上 ephemeral 缓存标记。 */
+  /** 测试意图：当 retention 非 NONE 时，单条文本用户消息作为最近历史端点应被打上 ephemeral 缓存标记。 */
   @Test
   void should_map_user_message_with_cache_control_metadata() throws IOException {
     ProviderRequest request =
@@ -731,10 +728,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Hello cached world"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-1",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-1"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -755,10 +749,7 @@ class AnthropicRequestMapperTest {
             List.of(
                 userMsg(new ProviderTextBlock("First item"), new ProviderTextBlock("Second item"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-2",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-2"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -780,10 +771,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Hello")), asstMsg(new ProviderTextBlock("Hi"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-3",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-3"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -811,10 +799,7 @@ class AnthropicRequestMapperTest {
                         new ProviderToolCall(
                             "12345", "calculator", "{\"first\": 2, \"second\": 2}")))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-4",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-4"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -859,10 +844,7 @@ class AnthropicRequestMapperTest {
                     new ProviderToolCall("12345", "calculator", "{\"first\": 2, \"second\": 2}")),
                 toolResultMsg("12345", "calculator", false, new ProviderTextBlock("4"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-5",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-5"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -896,10 +878,7 @@ class AnthropicRequestMapperTest {
                         false,
                         "{}"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-6",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-6"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -948,10 +927,7 @@ class AnthropicRequestMapperTest {
                     new ProviderTextBlock("What is on this image?"),
                     new ProviderImageBlock("image/png", DICE_IMAGE_URL))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-7",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-7"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -976,10 +952,7 @@ class AnthropicRequestMapperTest {
                     new ProviderDocumentBlock(
                         "application/pdf", "data:application/pdf;base64," + BASE64_PDF_DATA))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-8",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-8"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1003,10 +976,7 @@ class AnthropicRequestMapperTest {
                     new ProviderImageBlock("image/png", DICE_IMAGE_URL),
                     new ProviderTextBlock("What is on this image?"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-9",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-9"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1030,10 +1000,7 @@ class AnthropicRequestMapperTest {
                     new ProviderImageBlock(
                         "image/jpeg", "data:image/jpeg;base64," + BASE64_IMAGE_DATA))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-10",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-10"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1054,10 +1021,7 @@ class AnthropicRequestMapperTest {
                     new ProviderDocumentBlock(
                         "application/pdf", "data:application/pdf;base64," + BASE64_PDF_DATA))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-11",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-11"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1087,7 +1051,7 @@ class AnthropicRequestMapperTest {
 
   /** 测试意图：当策略为 NONE 时，PDF 内容块绝不带 cache_control 标记。 */
   @Test
-  void should_not_apply_cache_control_to_base64_pdf_without_breakpoint() throws IOException {
+  void should_not_apply_cache_control_to_base64_pdf_when_retention_is_none() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
@@ -1113,10 +1077,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderImageBlock("image/png", DICE_IMAGE_URL))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-12",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-12"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1146,10 +1107,7 @@ class AnthropicRequestMapperTest {
                     new ProviderDocumentBlock(
                         "application/pdf", "data:application/pdf;base64," + BASE64_PDF_DATA))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-13",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-13"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1182,10 +1140,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Cached text"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.LONG,
-                "affinity-long",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "affinity-long"));
 
     AnthropicEncodedRequest encLong = encoder.encode(reqLong, descriptor);
     JsonNode rootLong = MAPPER.readTree(encLong.bodyUtf8Bytes());
@@ -1200,10 +1155,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Cached text"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-short",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-short"));
 
     AnthropicEncodedRequest encShort = encoder.encode(reqShort, descriptor);
     JsonNode rootShort = MAPPER.readTree(encShort.bodyUtf8Bytes());
@@ -1213,16 +1165,15 @@ class AnthropicRequestMapperTest {
     assertFalse(markerShort.has("ttl"));
   }
 
-  /** 测试意图：当指定 SYSTEM 断点时，缓存标记打在请求唯一的顶层系统指令块上。 */
+  /** 测试意图：retention 非 NONE 时缓存标记固定打在请求唯一的顶层系统指令块上，且用户消息尾部作为最近历史端点同样被标记。 */
   @Test
-  void should_mark_system_instruction_block_when_system_breakpoint_is_enabled() throws IOException {
+  void should_always_mark_system_instruction_block_when_retention_is_active() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Hi"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT, "affinity-sys", Set.of(PromptCacheBreakpoint.SYSTEM)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-sys"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1231,40 +1182,41 @@ class AnthropicRequestMapperTest {
     assertEquals(1, systemArray.size());
     assertEquals("Test system instruction.", systemArray.get(0).path("text").asText());
 
-    JsonNode systemBlock = systemArray.get(0);
-    assertEquals("ephemeral", systemBlock.path("cache_control").path("type").asText());
+    JsonNode systemMarker = systemArray.get(0).path("cache_control");
+    assertEquals("ephemeral", systemMarker.path("type").asText());
+    assertFalse(systemMarker.has("ttl"));
 
-    // messages 数组无标记
-    assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
+    // 系统标记与历史端点标记相互独立：用户消息尾部同样是固定标记边界
+    JsonNode userTail = root.path("messages").get(0).path("content").get(0);
+    assertEquals("ephemeral", userTail.path("cache_control").path("type").asText());
   }
 
-  /** 测试意图：当断点集合中未包含 SYSTEM 时，顶层系统指令块不注入缓存标记。 */
+  /** 测试意图：即使没有任何工具，LONG retention 也始终标记系统指令块，并让系统标记与历史端点统一携带 ttl="1h"。 */
   @Test
-  void should_leave_system_blocks_unmarked_without_system_breakpoint() throws IOException {
+  void should_mark_system_block_and_history_tail_with_long_retention() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Hi"))),
             List.of(),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-conv",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "affinity-long-sys"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    JsonNode systemNode = root.path("system").get(0);
-    assertFalse(systemNode.has("cache_control"));
+    JsonNode systemMarker = root.path("system").get(0).path("cache_control");
+    assertEquals("ephemeral", systemMarker.path("type").asText());
+    assertEquals("1h", systemMarker.path("ttl").asText());
 
-    // CONVERSATION 断点仍生效
-    JsonNode userNode = root.path("messages").get(0).path("content").get(0);
-    assertEquals("ephemeral", userNode.path("cache_control").path("type").asText());
+    JsonNode userTailMarker =
+        root.path("messages").get(0).path("content").get(0).path("cache_control");
+    assertEquals("ephemeral", userTailMarker.path("type").asText());
+    assertEquals("1h", userTailMarker.path("ttl").asText());
   }
 
-  /** 测试意图：当指定 TOOLS 断点时，缓存标记必须打在最后一个工具定义上，前面的工具不带标记。 */
+  /** 测试意图：retention 非 NONE 时缓存标记固定打在最后一个工具定义上，前面的工具不带标记，系统块同样被标记。 */
   @Test
-  void should_mark_last_tool_when_tools_breakpoint_is_enabled() throws IOException {
+  void should_always_mark_last_tool_when_retention_is_active() throws IOException {
     ProviderToolDefinition tool1 =
         new ProviderToolDefinition(
             "calc1", "first calculator", "{\"type\":\"object\",\"properties\":{}}");
@@ -1277,8 +1229,7 @@ class AnthropicRequestMapperTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("What is the weather?"))),
             List.of(tool1, tool2),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT, "affinity-tools", Set.of(PromptCacheBreakpoint.TOOLS)));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "affinity-tools"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1289,28 +1240,40 @@ class AnthropicRequestMapperTest {
 
     JsonNode lastTool = toolsArray.get(1);
     assertEquals("ephemeral", lastTool.path("cache_control").path("type").asText());
+    assertFalse(lastTool.path("cache_control").has("ttl"));
+
+    // 工具标记不排斥系统标记：两者都是固定边界
+    assertEquals(
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
   }
 
-  /** 测试意图：当断点集合中未包含 TOOLS 时，工具定义数组中不注入缓存标记。 */
+  /** 测试意图：LONG retention 下最后一个工具定义携带 ttl="1h"，其余工具不带标记。 */
   @Test
-  void should_leave_tools_unmarked_without_tools_breakpoint() throws IOException {
-    ProviderToolDefinition tool =
-        new ProviderToolDefinition("calc", "calculator", "{\"type\":\"object\",\"properties\":{}}");
+  void should_mark_last_tool_with_long_retention_ttl() throws IOException {
+    ProviderToolDefinition tool1 =
+        new ProviderToolDefinition(
+            "calc1", "first calculator", "{\"type\":\"object\",\"properties\":{}}");
+    ProviderToolDefinition tool2 =
+        new ProviderToolDefinition(
+            "calc2", "second calculator", "{\"type\":\"object\",\"properties\":{}}");
 
     ProviderRequest request =
         request(
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("What is the weather?"))),
-            List.of(tool),
-            ProviderCacheControl.breakpoints(
-                PromptCacheRetention.SHORT,
-                "affinity-conv-only",
-                Set.of(PromptCacheBreakpoint.CONVERSATION)));
+            List.of(tool1, tool2),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "affinity-tools-long"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    assertFalse(root.path("tools").get(0).has("cache_control"));
+    JsonNode toolsArray = root.path("tools");
+    assertEquals(2, toolsArray.size());
+    assertFalse(toolsArray.get(0).has("cache_control"));
+
+    JsonNode lastToolMarker = toolsArray.get(1).path("cache_control");
+    assertEquals("ephemeral", lastToolMarker.path("type").asText());
+    assertEquals("1h", lastToolMarker.path("ttl").asText());
   }
 
   /** 测试意图：当请求指定 ProviderCacheControl.none() 时，整条请求中的 system、tools 与 messages 均无缓存标记。 */
@@ -1629,25 +1592,6 @@ class AnthropicRequestMapperTest {
     assertEquals("unsupported assistant block type", exception.getMessage());
   }
 
-  /** 测试意图：当启用缓存（retention 非 NONE）但 breakpoints 集合为空时，确定性抛出 INVALID_REQUEST。 */
-  @Test
-  void should_reject_cache_control_without_breakpoints_when_retention_is_active() {
-    // 使用 affinity 构造一个没有 breakpoints 的缓存控制指令传入 encoder
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "aff-no-breakpoints"));
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertEquals(
-        "Anthropic prompt cache control requires at least one breakpoint (SYSTEM, TOOLS, CONVERSATION)",
-        exception.getMessage());
-  }
-
   // =========================================================================================
   // 辅助方法与数据结构
   // =========================================================================================
@@ -1707,25 +1651,9 @@ class AnthropicRequestMapperTest {
             "claude-3-5-sonnet",
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
-            false,
-            pricing());
+            false);
     return new ProviderRequest(
         model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
   }
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
