@@ -61,7 +61,7 @@ describe('ChatPanel', () => {
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
-  it('keeps working visible while an interaction panel hides Composer, queue, and widgets', () => {
+  it('keeps working, queue and widgets visible while an interaction panel takes over the input area', () => {
     const { container } = render(
       <ChatPanel
         labels={{}}
@@ -98,17 +98,17 @@ describe('ChatPanel', () => {
       />,
     )
 
-    // Interaction mode keeps only the global working signal; queue/widgets and input are mutually exclusive.
+    // 选择面板只接管输入区域：工作状态、排队与 widget（含审批/活跃树）保持可见，Composer 保留挂载。
     expect(screen.getByText('Working...')).toBeInTheDocument()
-    expect(screen.queryByText('queued input')).not.toBeInTheDocument()
-    expect(screen.queryByText('task widget')).not.toBeInTheDocument()
+    expect(screen.getByText('queued input')).toBeInTheDocument()
+    expect(screen.getByText('task widget')).toBeInTheDocument()
     expect(screen.getByLabelText('Inline picker')).toBeInTheDocument()
     expect(container.querySelector('.thread-composer')).toHaveAttribute('hidden')
     expect(screen.getByLabelText('会话状态')).toHaveTextContent('未选择环境')
   })
 
   it('renders localized QUEUED status label alongside interaction panel without interference', () => {
-    // 测试意图：验证当线程处于 QUEUED 排队状态且交互面板激活时，正确展示“排队中”且隐藏输入框与常规队列。
+    // 测试意图：验证当线程处于 QUEUED 排队状态且交互面板激活时，正确展示“排队中”并保留 Composer 挂载。
     const queuedLabel = '排队中'
     const { container } = render(
       <ChatPanel

@@ -149,9 +149,9 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
         <ThreadWidgetStack
           working={activity.working || composer.pending}
           workingLabel={activity.workingLabel}
-          queuedMessages={interactionOpen ? [] : transcript.queuedMessages}
+          queuedMessages={transcript.queuedMessages}
         >
-          {interactionOpen ? null : activity.widgets}
+          {activity.widgets}
         </ThreadWidgetStack>
         {activity.actionError ? (
           <ThreadErrorPanel message={activity.actionError} onDismiss={activity.onDismissActionError} />

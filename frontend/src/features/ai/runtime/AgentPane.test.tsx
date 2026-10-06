@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
@@ -805,7 +806,9 @@ describe('AgentPane orchestration', () => {
     })
     view.rerender(
       <QueryClientProvider client={replacementClient}>
-        <AgentPane owner={{ type: 'CHAT', chatId: CHAT_ID }} paneId="pane-1" agents={agents} focused />
+        <MemoryRouter>
+          <AgentPane owner={{ type: 'CHAT', chatId: CHAT_ID }} paneId="pane-1" agents={agents} focused />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
 
@@ -1088,82 +1091,81 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 Thread' })).not.toBeInTheDocument())
     expect(await screen.findByRole('heading', { name: 'renamed thread' })).toBeInTheDocument()
     expect(composer).toBeInTheDocument()
-    expect(harnessService.getThreadTree).not.toHaveBeenCalled()
+    expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
   })
 
-  it('opens the agent relationship tree only for a bound thread and keeps pane toggles independent', async () => {
-    // 关系树不是 slash 面板；打开才请求，关闭后不再轮询，多个 Pane 不共享展开状态。
-    const user = userEvent.setup()
-    vi.useFakeTimers({ shouldAdvanceTime: true })
+  it('auto-mounts the active subagent tree for a bound root without a manual toggle', async () => {
+    // 活跃树是根面板的自动 widget：无需 toggle，挂载即查询；无活跃后代时不留空壳。
+    const workerId = '00000000-0000-4000-8000-0000000000aa'
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    vi.mocked(harnessService.getThreadTree).mockResolvedValue([{
-      threadId: THREAD_ID,
-      parentThreadId: null,
-      name: 'thread-name',
-      agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      status: 'IDLE',
-      processing: false,
-      turnCount: 1,
-      toolCallCount: 0,
-      outcome: 'COMPLETED',
-    }])
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      {
+        threadId: THREAD_ID,
+        parentThreadId: null,
+        name: 'thread-name',
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        status: 'IDLE',
+        processing: false,
+        turnCount: 1,
+        toolCallCount: 0,
+        outcome: null,
+      },
+      {
+        threadId: workerId,
+        parentThreadId: THREAD_ID,
+        name: 'worker',
+        agentName: 'coder',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        status: 'MODEL_STREAM',
+        processing: true,
+        turnCount: 1,
+        toolCallCount: 0,
+        outcome: null,
+      },
+    ])
     const bound = renderPane({ type: 'CHAT', chatId: CHAT_ID })
-    const toggle = await screen.findByRole('button', { name: 'Agent 关系' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(harnessService.getThreadTree).not.toHaveBeenCalled()
-    await user.click(toggle)
-    expect(await screen.findByRole('region', { name: 'Agent 关系' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
     await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
-    expect(await screen.findByText('已完成')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '活跃子代理' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toBeInTheDocument()
-
-    const callsAfterOpen = vi.mocked(harnessService.getThreadTree).mock.calls.length
-    await user.click(toggle)
-    expect(screen.queryByRole('region', { name: 'Agent 关系' })).not.toBeInTheDocument()
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000)
-    })
-    expect(vi.mocked(harnessService.getThreadTree).mock.calls.length).toBe(callsAfterOpen)
     bound.unmount()
+
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      {
+        threadId: THREAD_ID,
+        parentThreadId: null,
+        name: 'thread-name',
+        agentName: 'assistant',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        status: 'IDLE',
+        processing: false,
+        turnCount: 1,
+        toolCallCount: 0,
+        outcome: null,
+      },
+    ])
+    const idle = renderPane({ type: 'CHAT', chatId: 'chat-idle' })
+    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
+    expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
+    idle.unmount()
 
     const draft = renderPane({ type: 'CHAT', chatId: 'chat-draft' })
     await screen.findByLabelText('给 AI 发送消息')
-    expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
     draft.unmount()
-
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
-    render(
-      <QueryClientProvider client={client}>
-        {['pane-a', 'pane-b'].map((paneId) => (
-          <AgentPane
-            key={paneId}
-            owner={{ type: 'CHAT', chatId: CHAT_ID }}
-            paneId={paneId}
-            agents={agents}
-            initialTarget={{ kind: 'BOUND_THREAD', threadId: THREAD_ID }}
-          />
-        ))}
-      </QueryClientProvider>,
-    )
-    const toggles = await screen.findAllByRole('button', { name: 'Agent 关系' })
-    expect(toggles).toHaveLength(2)
-    await user.click(toggles[0]!)
-    expect(toggles[0]).toHaveAttribute('aria-expanded', 'true')
-    expect(toggles[1]).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getAllByRole('region', { name: 'Agent 关系' })).toHaveLength(1)
-    vi.useRealTimers()
   })
 
-  it('isolates an open agent tree when the bound thread changes', async () => {
-    // 打开后的关系树跟随当前绑定；切换 Thread 时不得继续展示上一棵树。
+  it('isolates the active tree when the bound thread changes', async () => {
+    // 活跃树跟随当前绑定；切换 Thread 时不得继续展示上一棵树。
     const user = userEvent.setup()
     const threadB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const childA = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
+    const childB = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
@@ -1178,7 +1180,18 @@ describe('AgentPane orchestration', () => {
       processing: false,
       turnCount: 1,
       toolCallCount: 0,
-      outcome: 'COMPLETED',
+      outcome: null,
+    }, {
+      threadId: threadId === THREAD_ID ? childA : childB,
+      parentThreadId: threadId,
+      name: threadId === THREAD_ID ? 'active A' : 'active B',
+      agentName: 'coder',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      status: 'MODEL_STREAM',
+      processing: true,
+      turnCount: 1,
+      toolCallCount: 0,
+      outcome: null,
     }])
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
       snapshot(thread({ threadId, name: threadId === THREAD_ID ? 'thread A' : 'thread B' })),
@@ -1202,8 +1215,7 @@ describe('AgentPane orchestration', () => {
       headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
-    await user.click(await screen.findByRole('button', { name: 'Agent 关系' }))
-    expect(await screen.findByRole('link', { name: 'tree A' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /active A/ })).toBeInTheDocument()
 
     const composer = screen.getByRole('textbox', { name: '给 AI 发送消息' })
     await user.click(composer)
@@ -1211,8 +1223,8 @@ describe('AgentPane orchestration', () => {
     await user.click(await screen.findByRole('option', { name: /session/ }))
     await user.click(await screen.findByRole('option', { name: /thread B/ }))
 
-    expect(await screen.findByRole('link', { name: 'tree B' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'tree A' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /active B/ })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /active A/ })).not.toBeInTheDocument()
     expect(harnessService.getThreadTree).toHaveBeenCalledWith(threadB)
   })
 
@@ -1798,13 +1810,15 @@ function renderPane(
   })
   const result = render(
     <QueryClientProvider client={client}>
-      <AgentPane
-        owner={owner}
-        paneId="pane-1"
-        agents={agents}
-        environments={environments}
-        focused
-      />
+      <MemoryRouter>
+        <AgentPane
+          owner={owner}
+          paneId="pane-1"
+          agents={agents}
+          environments={environments}
+          focused
+        />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return { ...result, client }
