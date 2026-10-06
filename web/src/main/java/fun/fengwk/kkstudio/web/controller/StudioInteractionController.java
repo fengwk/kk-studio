@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.security.Principal;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 统一人工交互 API：一个入口同时覆盖 Chat 与 Issue+Agent 的问卷回答。
@@ -50,14 +51,26 @@ public class StudioInteractionController {
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
   }
 
-  /** 查询一页待处理 Interaction（问卷等待与审批等待合并，按 {@code (createTime, interactionId)} 稳定升序）。 */
+  /**
+   * 查询一页待处理 Interaction（问卷等待与审批等待合并，按 {@code (createTime, interactionId)} 稳定升序）。
+   *
+   * <p>{@code rootThreadId} 可选：给出时只返回该执行根（含其全部后代来源）的待办，且必须是已存在的执行根（不存在 {@literal ->} 404、非根或非
+   * canonical {@literal ->} 400）。响应项保留原始 {@code threadId/sessionId}，另给 {@code rootThreadId}。
+   */
   @GetMapping
   public Result<InteractionPageDTO> listInteractions(
+      @RequestParam(name = "rootThreadId", required = false) String rootThreadId,
       @RequestParam(name = "cursor", required = false) String cursor,
       @RequestParam(name = "limit", required = false) String limit) {
     return Results.ok(
         StudioHarnessThreadController.withRuntimeTranslation(
-            () -> interactionQueryService.listInteractions(cursor, parseLimit(limit))));
+            () -> {
+              UUID root =
+                  rootThreadId == null
+                      ? null
+                      : HarnessRuntimeRequestMapper.parseUuid(rootThreadId, "rootThreadId");
+              return interactionQueryService.listInteractions(root, cursor, parseLimit(limit));
+            }));
   }
 
   /**
