@@ -1298,13 +1298,14 @@ async function createBranchedHistoryFixture(
       [trunkMessage, ...originalMessages],
     )
 
-    // 分支：NEW_THREAD 在同 Session branchPoint 下开新 Thread，写 alternateMessage。
+    // 分支：NEW_THREAD 在同 Session branchPoint（已闭合 TURN_END）下开新 Thread，写 alternateMessage。
     const alternateThreadId = cid()
     const branched = await createNewThread(apiCtx, {
       owner,
       sessionId,
       startEntryId: branchPointEntryId,
       threadId: alternateThreadId,
+      threadName: `alternate ${cid().slice(0, 8)}`,
       yoloEnabled: false,
       commands: [userMessageCommand(alternateMessage, cid())],
     })
