@@ -158,12 +158,11 @@ public class SubagentTaskRunner implements SubagentRunner {
       return appendCommand(runtime, request, parent, settings, childThreadId);
     }
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
+        new AcceptCommandsTarget.NewChildSession(
             derive(request.invocationId(), CHILD_SESSION_NAMESPACE),
             childThreadId,
             settings,
-            parent.threadId(),
-            parent.yoloEnabled()),
+            parent.threadId()),
         List.of(
             command(
                 request.invocationId(),
@@ -253,7 +252,6 @@ public class SubagentTaskRunner implements SubagentRunner {
     return new ParentInvocation(
         request.parentThreadId(),
         parent.thread().headEntryId(),
-        parent.thread().yoloEnabled(),
         parent.entryPath().baseSettings().environmentName(),
         configProvider.subagentConfig());
   }
@@ -362,9 +360,5 @@ public class SubagentTaskRunner implements SubagentRunner {
 
   /** 校验并冻结的父调用上下文：允许的 subagent 已由调用方校验，这里冻结 settings 事实与当前额度参数。 */
   private record ParentInvocation(
-      UUID threadId,
-      UUID headEntryId,
-      boolean yoloEnabled,
-      String environmentName,
-      SubagentConfig config) {}
+      UUID threadId, UUID headEntryId, String environmentName, SubagentConfig config) {}
 }

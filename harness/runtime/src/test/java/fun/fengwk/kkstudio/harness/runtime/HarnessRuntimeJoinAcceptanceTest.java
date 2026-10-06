@@ -50,10 +50,14 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   private static AcceptCommandsCommand session(int session, int thread, UUID parent) {
+    AcceptCommandsTarget target =
+        parent == null
+            ? new AcceptCommandsTarget.NewRootSession(
+                TestIds.id(session), TestIds.id(thread), settings(), false)
+            : new AcceptCommandsTarget.NewChildSession(
+                TestIds.id(session), TestIds.id(thread), settings(), parent);
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            TestIds.id(session), TestIds.id(thread), settings(), parent, false),
-        List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
+        target, List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
   }
 
   private static ThreadJoinRequest request(int invocation, UUID parent, UUID head) {
@@ -571,8 +575,8 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands goalAccepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(
-                    TestIds.id(121), TestIds.id(122), settings(), null, false),
+                new AcceptCommandsTarget.NewRootSession(
+                    TestIds.id(121), TestIds.id(122), settings(), false),
                 List.of(goalCmd)),
             AcceptancePreflight.IDENTITY);
     assertEquals("custom goal objective text", goalAccepted.session().name());
@@ -586,8 +590,8 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands customAccepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(
-                    TestIds.id(124), TestIds.id(125), settings(), null, false),
+                new AcceptCommandsTarget.NewRootSession(
+                    TestIds.id(124), TestIds.id(125), settings(), false),
                 List.of(customMsgCmd)),
             AcceptancePreflight.IDENTITY);
     assertNotNull(customAccepted);
@@ -746,8 +750,8 @@ class HarnessRuntimeJoinAcceptanceTest {
     NewThreadCommand initCmd = userMessageCommand(TestIds.id(134), "initial message");
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(
-                TestIds.id(135), TestIds.id(136), settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(
+                TestIds.id(135), TestIds.id(136), settings(), false),
             List.of(initCmd)),
         AcceptancePreflight.IDENTITY);
 
@@ -758,8 +762,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         () ->
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewSession(
-                        TestIds.id(135), TestIds.id(136), settings(), null, false),
+                    new AcceptCommandsTarget.NewRootSession(
+                        TestIds.id(135), TestIds.id(136), settings(), false),
                     List.of(tamperedHashCmd)),
                 AcceptancePreflight.IDENTITY));
 
@@ -769,8 +773,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         () ->
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewSession(
-                        TestIds.id(999), TestIds.id(136), settings(), null, false),
+                    new AcceptCommandsTarget.NewRootSession(
+                        TestIds.id(999), TestIds.id(136), settings(), false),
                     List.of(initCmd)),
                 AcceptancePreflight.IDENTITY));
   }

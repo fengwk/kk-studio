@@ -317,8 +317,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     UUID expectedParentHead = headEntryId(parentThreadId);
     AcceptCommandsCommand command =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(
-                childSessionId, childThreadId, SETTINGS, parentThreadId, false),
+            new AcceptCommandsTarget.NewChildSession(
+                childSessionId, childThreadId, SETTINGS, parentThreadId),
             List.of(promptCommand(UUID.randomUUID(), "child work")));
     ThreadJoinRequest join =
         taskJoin(invocationId, parentThreadId, expectedParentHead, "child work");
@@ -375,8 +375,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             () ->
                 runtime.acceptCommandsAndJoin(
                     new AcceptCommandsCommand(
-                        new AcceptCommandsTarget.NewSession(
-                            UUID.randomUUID(), UUID.randomUUID(), SETTINGS, parentThreadId, false),
+                        new AcceptCommandsTarget.NewChildSession(
+                            UUID.randomUUID(), UUID.randomUUID(), SETTINGS, parentThreadId),
                         List.of(promptCommand(UUID.randomUUID(), "child work"))),
                     join,
                     AcceptancePreflight.IDENTITY));
@@ -416,12 +416,11 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                       try {
                         runtime.acceptCommandsAndJoin(
                             new AcceptCommandsCommand(
-                                new AcceptCommandsTarget.NewSession(
+                                new AcceptCommandsTarget.NewChildSession(
                                     childSessions.get(attempt),
                                     childThreads.get(attempt),
                                     SETTINGS,
-                                    parentThreadId,
-                                    false),
+                                    parentThreadId),
                                 List.of(promptCommand(UUID.randomUUID(), "child work"))),
                             taskJoin(
                                 invocations.get(attempt),
@@ -498,12 +497,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             () ->
                 runtime.acceptCommandsAndJoin(
                     new AcceptCommandsCommand(
-                        new AcceptCommandsTarget.NewSession(
-                            grandChildSessionId,
-                            grandChildThreadId,
-                            SETTINGS,
-                            childThreadId,
-                            false),
+                        new AcceptCommandsTarget.NewChildSession(
+                            grandChildSessionId, grandChildThreadId, SETTINGS, childThreadId),
                         List.of(promptCommand(UUID.randomUUID(), "grandchild work"))),
                     taskJoin(
                         grandChildInvocationId,
@@ -841,7 +836,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(sessionId, threadId, SETTINGS, null, false),
+                new AcceptCommandsTarget.NewRootSession(sessionId, threadId, SETTINGS, false),
                 List.of(promptCommand(UUID.randomUUID(), prompt))),
             AcceptancePreflight.IDENTITY);
     assertEquals(threadId, accepted.thread().id());
@@ -880,8 +875,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     AcceptedCommands accepted =
         runtime.acceptCommandsAndJoin(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(
-                    childSessionId, childThreadId, SETTINGS, parentThreadId, false),
+                new AcceptCommandsTarget.NewChildSession(
+                    childSessionId, childThreadId, SETTINGS, parentThreadId),
                 List.of(source)),
             taskJoin(invocationId, parentThreadId, expectedParentHeadEntryId, prompt, maxDepth),
             AcceptancePreflight.IDENTITY);

@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -482,7 +483,9 @@ final class HarnessRuntimeTestSupport {
                   turnStartEntryId,
                   CREATION_REQUEST_HASH,
                   "main",
-                  false,
+                  parentThreadId == null
+                      ? ThreadYoloPolicy.root(false)
+                      : ThreadYoloPolicy.follow(parentThreadId),
                   status,
                   0L,
                   1,
@@ -798,7 +801,7 @@ final class HarnessRuntimeTestSupport {
                   rootEntryId,
                   CREATION_REQUEST_HASH,
                   "parent",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -1045,7 +1048,7 @@ final class HarnessRuntimeTestSupport {
         headEntryId,
         CREATION_REQUEST_HASH,
         name,
-        yoloEnabled,
+        ThreadYoloPolicy.root(yoloEnabled),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -427,6 +428,62 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, fixture.gateway.preflightCallsCount);
+    assertEquals(0, fixture.gateway.startCalls);
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** FOLLOW 子代理读取真实执行根：root ENABLE 时子代理同样 Allow，且绝不调用 gateway.preflight。 */
+  @Test
+  void followChildReadsEnabledRootWithoutGatewayPreflight() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.followChildFixture(true, 1);
+    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    assertEquals(0, fixture.gateway.preflightCallsCount);
+    assertEquals(1, fixture.gateway.startCalls);
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.RUNNING, tool.status());
+    assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
+  }
+
+  /** FOLLOW 子代理读取真实执行根：root DISABLE 时子代理走正常 gateway preflight，不因自身无开关而静默 Allow。 */
+  @Test
+  void followChildReadsDisabledRootAndPreflights() {
+    ToolProcessorTestSupport.Fixture fixture =
+        ToolProcessorTestSupport.followChildFixture(false, 1);
+    fixture.gateway.queuePreflightAllow();
+    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    assertEquals(1, fixture.gateway.preflightCallsCount);
+    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(fixture.request, fixture.gateway.preflightCalls.get(0).request());
+  }
+
+  /** FOLLOW 目标不是执行根（跟随中间节点）时 fail closed：显式抛错，绝不 preflight / dispatch。 */
+  @Test
+  void followChainTargetingNonRootFailsClosed() {
+    ToolProcessorTestSupport.Fixture fixture =
+        ToolProcessorTestSupport.followChildFixture(false, 2);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            fixture.processor.process(
+                ToolProcessorTestSupport.claim(
+                    fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
     assertEquals(0, fixture.gateway.preflightCallsCount);
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());

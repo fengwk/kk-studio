@@ -164,8 +164,9 @@ class IssueRunServiceImplTest {
     ArgumentCaptor<ThreadJoinRequest> joinCaptor = ArgumentCaptor.forClass(ThreadJoinRequest.class);
     verify(runtime).acceptCommandsAndJoin(commandCaptor.capture(), joinCaptor.capture(), any());
 
-    AcceptCommandsTarget.NewSession target =
-        assertInstanceOf(AcceptCommandsTarget.NewSession.class, commandCaptor.getValue().target());
+    AcceptCommandsTarget.NewRootSession target =
+        assertInstanceOf(
+            AcceptCommandsTarget.NewRootSession.class, commandCaptor.getValue().target());
     List<NewThreadCommand> commands = commandCaptor.getValue().commands();
     assertEquals(
         List.of(

@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -149,7 +150,7 @@ class CompactionHistoryTest {
         headEntryId,
         CREATION_REQUEST_HASH,
         "main",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,

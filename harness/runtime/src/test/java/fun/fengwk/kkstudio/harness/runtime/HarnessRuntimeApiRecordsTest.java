@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -57,13 +58,13 @@ class HarnessRuntimeApiRecordsTest {
     // NEW_SESSION 必需字段。
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptCommandsTarget.NewSession(null, TestIds.id(2), settings(), null, false));
+        () -> new AcceptCommandsTarget.NewRootSession(null, TestIds.id(2), settings(), false));
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptCommandsTarget.NewSession(TestIds.id(1), null, settings(), null, false));
+        () -> new AcceptCommandsTarget.NewRootSession(TestIds.id(1), null, settings(), false));
     assertThrows(
         NullPointerException.class,
-        () -> new AcceptCommandsTarget.NewSession(TestIds.id(1), TestIds.id(2), null, null, false));
+        () -> new AcceptCommandsTarget.NewRootSession(TestIds.id(1), TestIds.id(2), null, false));
 
     // NEW_THREAD 必需字段。
     assertThrows(
@@ -83,8 +84,8 @@ class HarnessRuntimeApiRecordsTest {
         NullPointerException.class, () -> new AcceptCommandsTarget.Thread(TestIds.id(1), null, 1));
 
     // target 只保存定位 / materialization 语义，不携带 commands。
-    AcceptCommandsTarget.NewSession target =
-        new AcceptCommandsTarget.NewSession(TestIds.id(1), TestIds.id(2), settings(), null, true);
+    AcceptCommandsTarget.NewRootSession target =
+        new AcceptCommandsTarget.NewRootSession(TestIds.id(1), TestIds.id(2), settings(), true);
     assertEquals(TestIds.id(1), target.sessionId());
     assertEquals(TestIds.id(2), target.threadId());
     assertTrue(target.yoloEnabled());
@@ -288,7 +289,7 @@ class HarnessRuntimeApiRecordsTest {
                 thread.headEntryId(),
                 "not-a-hash",
                 thread.name(),
-                false,
+                ThreadYoloPolicy.root(false),
                 thread.executionControl(),
                 0L,
                 1,
@@ -304,7 +305,7 @@ class HarnessRuntimeApiRecordsTest {
             thread.headEntryId(),
             thread.creationRequestHash(),
             thread.name(),
-            false,
+            thread.yoloPolicy(),
             thread.executionControl(),
             0L,
             1,
@@ -324,7 +325,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     thread.creationRequestHash(),
                     thread.name(),
-                    false,
+                    thread.yoloPolicy(),
                     thread.executionControl(),
                     0L,
                     1,
@@ -343,15 +344,15 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     "9999999999999999999999999999999999999999999999999999999999999999",
                     thread.name(),
-                    false,
+                    thread.yoloPolicy(),
                     thread.executionControl(),
                     0L,
                     1,
                     0,
                     thread.createdAt(),
                     thread.updatedAt())));
-    // 任何可见变更（YOLO/head/seq）都必须 version +1；setYoloEnabled 自身恰好 bump 一次是可接受的精确迁移。
-    ThreadState bumped = thread.setYoloEnabled(true, T0.plusMillis(1));
+    // 任何可见变更（YOLO/head/seq）都必须 version +1；setRootYolo 自身恰好 bump 一次是可接受的精确迁移。
+    ThreadState bumped = thread.setRootYolo(true, T0.plusMillis(1));
     assertEquals(1L, bumped.version());
     ThreadState.validateTransition(thread, bumped);
     // 显式构造 yolo 变更但 version 未 +1 的候选必须被拒。
@@ -367,7 +368,7 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     thread.creationRequestHash(),
                     thread.name(),
-                    true,
+                    ThreadYoloPolicy.root(true),
                     thread.executionControl(),
                     0L,
                     1,

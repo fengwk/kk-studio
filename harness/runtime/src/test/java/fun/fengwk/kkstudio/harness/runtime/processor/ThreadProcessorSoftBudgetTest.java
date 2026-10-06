@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -484,7 +485,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       stopTurnEndId,
                       CREATION_REQUEST_HASH,
                       "parent",
-                      false,
+                      ThreadYoloPolicy.root(false),
                       ThreadExecutionControl.RUNNABLE,
                       0L,
                       1L,
@@ -886,6 +887,9 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
+          // 根线程使用独立开关；子线程恒 FOLLOW 传入的执行根（fixture 的 parent 即执行根）。
+          ThreadYoloPolicy yoloPolicy =
+              parentId == null ? ThreadYoloPolicy.root(false) : ThreadYoloPolicy.follow(parentId);
           tx.insertThread(
               new ThreadState(
                   threadId,
@@ -894,7 +898,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   rootEntryId,
                   CREATION_REQUEST_HASH,
                   "thread-" + threadId,
-                  false,
+                  yoloPolicy,
                   status,
                   0L,
                   1L,

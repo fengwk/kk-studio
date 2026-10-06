@@ -530,7 +530,7 @@ public abstract class HarnessStoreEntryTreeContract {
         });
     ThreadState committed =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertTrue(committed.yoloEnabled());
+    assertTrue(committed.yoloPolicy().isEnabled());
     assertEquals(3L, committed.nextCommandSequence());
     assertEquals(1L, committed.version());
     assertEquals(T2, committed.updatedAt());
@@ -576,7 +576,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.id(),
                           locked.sessionId(),
                           locked.headEntryId(),
-                          locked.yoloEnabled(),
+                          locked.yoloPolicy().isEnabled(),
                           locked.nextCommandSequence(),
                           locked.version(),
                           T1,
@@ -601,7 +601,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.sessionId(),
                           locked.headEntryId(),
                           "branch 分析",
-                          locked.yoloEnabled(),
+                          locked.yoloPolicy().isEnabled(),
                           locked.nextCommandSequence(),
                           locked.version(),
                           locked.createdAt(),
@@ -631,7 +631,8 @@ public abstract class HarnessStoreEntryTreeContract {
               return id;
             });
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.findThread(threadId).orElseThrow().yoloEnabled()));
+        store.<Boolean>transaction(
+            tx -> tx.findThread(threadId).orElseThrow().yoloPolicy().isEnabled()));
   }
 
   @Test

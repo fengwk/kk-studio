@@ -89,8 +89,8 @@ public final class HarnessOneShotService {
     AcceptedCommands accepted =
         runtime.acceptCommandsAndJoin(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(
-                    UUID.randomUUID(), threadId, settings, null, false),
+                new AcceptCommandsTarget.NewRootSession(
+                    UUID.randomUUID(), threadId, settings, false),
                 List.of(command)),
             new ThreadJoinRequest(
                 ticket.invocationId(),

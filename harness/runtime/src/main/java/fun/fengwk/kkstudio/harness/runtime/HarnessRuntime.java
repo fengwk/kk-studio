@@ -334,11 +334,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在一个短 transaction 内直接更新 Thread 的 YOLO runtime policy。
+   * 在一个短 transaction 内直接更新执行根的 YOLO runtime policy。
    *
-   * <p>锁 Thread 后先比较当前值：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求
-   * Work），否则在最新锁定行上更新 {@code yoloEnabled} 且 version 精确 +1。无关的执行 version
-   * 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的 WAITING_APPROVAL。
+   * <p>锁树与目标行后先校验目标必须是执行根（{@code parentThreadId} 为 null）；子代理恒 Follow 执行根，不能维护独立开关。比较当前根
+   * mode：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求 Work），否则在最新锁定行上更新
+   * {@code yolo_mode} 且 version 精确 +1，只修改根行——不递归修改子行、子行版本或子行 Follow 目标。无关的执行 version
+   * 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的 WAITING_APPROVAL、不回答问卷、不回滚已派发的工具。
    */
   public ThreadState setThreadYolo(SetThreadYoloCommand command) {
     Objects.requireNonNull(command, "command");
@@ -351,10 +352,16 @@ public final class HarnessRuntime {
                       () ->
                           new HarnessRuntimeNotFoundException(
                               "thread " + command.threadId() + " does not exist"));
-          if (thread.yoloEnabled() == command.enabled()) {
+          if (thread.parentThreadId() != null) {
+            throw new IllegalArgumentException(
+                "thread "
+                    + command.threadId()
+                    + " follows its execution root and does not own a yolo switch");
+          }
+          if (thread.yoloPolicy().isEnabled() == command.enabled()) {
             return thread;
           }
-          ThreadState updated = thread.setYoloEnabled(command.enabled(), clock.instant());
+          ThreadState updated = thread.setRootYolo(command.enabled(), clock.instant());
           tx.updateThread(updated);
           return updated;
         });

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -81,7 +83,9 @@ final class AcceptCommandsControl {
     Objects.requireNonNull(preflight, "preflight");
     List<NewThreadCommand> commands = command.commands();
     return switch (command.target()) {
-      case AcceptCommandsTarget.NewSession target -> acceptNewSession(
+      case AcceptCommandsTarget.NewRootSession target -> acceptNewRootSession(
+          target, commands, join, preflight);
+      case AcceptCommandsTarget.NewChildSession target -> acceptNewChildSession(
           target, commands, join, preflight);
       case AcceptCommandsTarget.NewThread target -> acceptNewThread(
           target, commands, join, preflight);
@@ -99,69 +103,105 @@ final class AcceptCommandsControl {
     }
   }
 
-  private AcceptedCommands acceptNewSession(
-      AcceptCommandsTarget.NewSession target,
+  /**
+   * NEW_ROOT_SESSION：在树锁内以调用方给定的根开关创建独立执行根 Thread；从 root settings 初始化 Session 与 ROOT Entry。
+   * 根开关只初始化该根自身，不来自任何既有执行树。
+   */
+  private AcceptedCommands acceptNewRootSession(
+      AcceptCommandsTarget.NewRootSession target,
       List<NewThreadCommand> commands,
       ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
+    return acceptNewSession(
+        target.sessionId(),
+        target.threadId(),
+        target.rootSettings(),
+        null,
+        target.yoloEnabled(),
+        commands,
+        join,
+        preflight);
+  }
+
+  /**
+   * NEW_CHILD_SESSION：在树锁内派生真实执行根，创建执行子代理 Thread 并写入不可变的 {@code FOLLOW(rootThreadId)}。调用方不提供任何 YOLO
+   * 输入，Follow 目标绝不由调用者指定。子 Session 准入沿用同一全局 Join 准入锁与树锁顺序。
+   */
+  private AcceptedCommands acceptNewChildSession(
+      AcceptCommandsTarget.NewChildSession target,
+      List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
+      AcceptancePreflight preflight) {
+    validateBatchShape(target, commands);
+    return acceptNewSession(
+        target.sessionId(),
+        target.threadId(),
+        target.rootSettings(),
+        target.parentThreadId(),
+        null,
+        commands,
+        join,
+        preflight);
+  }
+
+  /**
+   * NEW_ROOT_SESSION / NEW_CHILD_SESSION 的共性创建：{@code parentThreadId} 为空表示独立执行根，使用 {@code
+   * rootYoloEnabled} 初始化自身开关；否则在树锁内把 {@code parentThreadId} 的真实执行根派生为不可变 {@code
+   * FOLLOW(rootThreadId)}。creation request hash 由稳定 Follow 目标派生，不冻结解析时的 effective 开关值。
+   */
+  private AcceptedCommands acceptNewSession(
+      UUID sessionId,
+      UUID threadId,
+      BranchSettings rootSettings,
+      UUID parentThreadId,
+      Boolean rootYoloEnabled,
+      List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
+      AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
           // 携带 frozen task 策略的子 Session 准入必须先取全局 Join 准入锁（即使本次额度 unlimited），
           // 否则并发的有限额度请求会在“判定额度 + 创建”之间竞态。
-          if (target.parentThreadId() != null) {
+          if (parentThreadId != null) {
             tx.lockJoinAdmission();
           }
           // 子身份必须在树锁内复读：并发重放可能在等待锁期间才看到第一次接受。
           LockedAncestors lockedAncestors =
-              target.parentThreadId() != null
-                  ? lockTreeAndAncestors(
-                      tx, target.parentThreadId(), true, Set.of(target.threadId()))
-                  : lockTreeAndAncestors(tx, target.threadId(), false, null);
+              parentThreadId != null
+                  ? lockTreeAndAncestors(tx, parentThreadId, true, Set.of(threadId))
+                  : lockTreeAndAncestors(tx, threadId, false, null);
+          ThreadYoloPolicy yoloPolicy =
+              parentThreadId == null
+                  ? ThreadYoloPolicy.root(rootYoloEnabled)
+                  : ThreadYoloPolicy.follow(
+                      lockedAncestors.chain.get(lockedAncestors.chain.size() - 1));
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
-                  target.sessionId(),
-                  target.threadId(),
-                  target.rootSettings(),
-                  target.parentThreadId(),
-                  target.yoloEnabled(),
-                  commands);
-          ThreadState existing = lockedAncestors.threads.get(target.threadId());
+                  sessionId, threadId, rootSettings, parentThreadId, yoloPolicy, commands);
+          ThreadState existing = lockedAncestors.threads.get(threadId);
           if (existing != null) {
             return attachJoin(
                 tx,
-                replayInitial(
-                    tx,
-                    target.sessionId(),
-                    target.threadId(),
-                    existing,
-                    commands,
-                    creationRequestHash),
+                replayInitial(tx, sessionId, threadId, existing, commands, creationRequestHash),
                 join);
           }
-          admitJoin(tx, target.threadId(), target.parentThreadId(), join, true);
+          admitJoin(tx, threadId, parentThreadId, join, true);
           Instant now = clock.instant();
-          Session session =
-              new Session(
-                  target.sessionId(), initialSessionName(commands, target.sessionId()), now);
+          Session session = new Session(sessionId, initialSessionName(commands, sessionId), now);
           tx.insertSession(session);
           UUID rootEntryId = tx.nextId();
           tx.insertEntry(
-              new Entry(
-                  rootEntryId,
-                  target.sessionId(),
-                  null,
-                  new RootPayload(target.rootSettings()),
-                  now));
+              new Entry(rootEntryId, sessionId, null, new RootPayload(rootSettings), now));
           ThreadState thread =
               new ThreadState(
-                  target.threadId(),
-                  target.sessionId(),
-                  target.parentThreadId(),
+                  threadId,
+                  sessionId,
+                  parentThreadId,
                   rootEntryId,
                   creationRequestHash,
                   Names.rootThreadName(),
-                  target.yoloEnabled(),
+                  yoloPolicy,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -181,9 +221,10 @@ final class AcceptCommandsControl {
       ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
+    ThreadYoloPolicy yoloPolicy = ThreadYoloPolicy.root(target.yoloEnabled());
     return store.transaction(
         tx -> {
-          // 与 NEW_SESSION 相同：复用既有 Thread id 时先按真实执行树完成规范加锁，避免 replay 阶段逆序补锁。
+          // 与创建执行根相同：复用既有 Thread id 时先按真实执行树完成规范加锁，避免 replay 阶段逆序补锁。
           LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState existing = locked.threads.get(target.threadId());
           if (existing != null) {
@@ -192,7 +233,7 @@ final class AcceptCommandsControl {
                     target.sessionId(),
                     target.startEntryId(),
                     target.threadId(),
-                    target.yoloEnabled(),
+                    yoloPolicy,
                     commands);
             return attachJoin(
                 tx,
@@ -235,7 +276,7 @@ final class AcceptCommandsControl {
                   target.sessionId(),
                   target.startEntryId(),
                   target.threadId(),
-                  target.yoloEnabled(),
+                  yoloPolicy,
                   commands);
           Instant now = clock.instant();
           ThreadState thread =
@@ -246,7 +287,7 @@ final class AcceptCommandsControl {
                   target.startEntryId(),
                   creationRequestHash,
                   Names.defaultThreadName(target.threadId()),
-                  target.yoloEnabled(),
+                  yoloPolicy,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
