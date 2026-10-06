@@ -34,7 +34,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
           <div className="thread-block-body">{t('ai.runtime.message.stopped')}</div>
         </div>
       ) : null}
-      <ThinkingBlock thinking={thinking} streaming={streaming} />
+      <ThinkingBlock thinking={thinking} />
       {hasText ? (
         <section className="thread-block thread-block-assistant thread-assistant-shell">
           <CopyButton

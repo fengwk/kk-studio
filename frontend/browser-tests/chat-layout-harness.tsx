@@ -10,6 +10,7 @@ import {
   type ChatPaneState,
 } from '@/features/ai/chat/chat-pane-state'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
+import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
 import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
 import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
 import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
@@ -73,6 +74,18 @@ const SAMPLE_TURN_USAGE_MESSAGE: MetaDialogueMessage = {
   createdAt: 1001,
 }
 
+/** 思考收起态必须超出 pane 宽度：前置长段落 + 尾部 Markdown 结构，覆盖省略、尾部更新与展开还原。 */
+const INITIAL_THINKING = [
+  `前置排查记录：${'逐项核对容器宽度与路径顺序。'.repeat(10)}`,
+  '',
+  '# 结论',
+  '',
+  '路径 /usr/local/lib/node_modules/kk-studio 保持原顺序，**未被反转**。',
+  '',
+  '- 第一项',
+  '- 第二项',
+].join('\n')
+
 const SAMPLE_BRANCH_USAGE: TurnUsage = {
   input: 12000,
   output: 800,
@@ -101,6 +114,7 @@ const SAMPLE_LONG_BRANCH_USAGE: TurnUsage = {
 
 export function ChatLayoutHarnessApp() {
   const [paneState, setPaneState] = useState<ChatPaneState>(INITIAL_PANE_STATE)
+  const [thinking, setThinking] = useState(INITIAL_THINKING)
   const visiblePanes = visibleChatPanes(paneState)
 
   return (
@@ -148,6 +162,17 @@ export function ChatLayoutHarnessApp() {
                     <UserMessageBlock message={SAMPLE_USER_MESSAGE} />
                     {/* 测试真实 MetaMessageBlock 用量统计单行截断与完整 title */}
                     <MetaMessageBlock message={SAMPLE_TURN_USAGE_MESSAGE} />
+                    {/* 真实 ThinkingBlock：收起单行尾部省略、追加后尾部更新、展开还原原始 Markdown */}
+                    <div data-testid="pane-1-thinking">
+                      <ThinkingBlock thinking={thinking} />
+                      <button
+                        type="button"
+                        data-testid="thinking-append"
+                        onClick={() => setThinking((current) => `${current}\n\n补充：尾部更新`)}
+                      >
+                        append thinking
+                      </button>
+                    </div>
                     {/* 隔离验证基础 meta 样式，不构造类型契约外的消息。 */}
                     <div className="thread-block-meta" data-testid="base-meta-style">
                       <div className="thread-block-body thread-meta-text">

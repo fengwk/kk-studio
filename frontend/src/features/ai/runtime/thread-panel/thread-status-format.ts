@@ -6,8 +6,8 @@ import {
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
-/** Footer 唯一一行的字段分隔符；可见文本与用量摘要共用同一常量，避免格式漂移。 */
-export const FOOTER_SEGMENT_SEPARATOR = ' | '
+/** Footer 唯一一行的分组分隔符（U+2223）；组内统计项由 formatTurnUsageText 使用 U+00B7。 */
+export const FOOTER_SEGMENT_SEPARATOR = ' ∣ '
 
 /**
  * Footer 展示所需的 Environment 身份。
@@ -95,10 +95,10 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     })
   }
 
-  // 累计用量与回合摘要共用格式；hover 用同一份事实给出简明读数。
+  // 累计用量与回合摘要共用 U+00B7 统计项分隔；hover 用同一份事实给出简明读数。
   segments.push({
     key: 'usage',
-    text: formatTurnUsageText(usage, FOOTER_SEGMENT_SEPARATOR),
+    text: formatTurnUsageText(usage),
     title: buildBranchUsageTitle(usage),
   })
 

@@ -1,0 +1,69 @@
+/* ThinkingBlock 组件样式：随本组件加载，父级集成后删除 styles.css 中旧的全局思考块规则。
+   选择器提高到 (0,2,0) 以上，避免组件 CSS 早于全局 styles.css 时被 .thread-block 基类覆盖。 */
+
+.thread-block.thread-block-thinking {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--scrim);
+}
+
+/* 文本区只占按钮左侧的可用宽度，展开按钮不覆盖正文。 */
+.thread-block-thinking .thread-thinking-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.thread-block-thinking .thread-block-body.thread-thinking-text {
+  color: var(--fg-dim);
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.55;
+  /* Markdown 思考块：段落空白为 normal，段落间空行由 Markdown 自己折叠，代码块/公式由自身预格式化接管 */
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* 收起态：唯一一行保留最新尾部，前文由左侧省略标记替代；不折行、无滚动条。 */
+.thread-block-thinking .thread-block-body.thread-thinking-text.thread-thinking-line {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.thread-block-thinking .thread-thinking-ellipsis {
+  color: var(--fg-muted);
+}
+
+.thread-block.thread-block-thinking .thread-thinking-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.thread-block-thinking .thread-thinking-toggle:hover {
+  color: var(--fg);
+}
+
+.thread-block-thinking .thread-thinking-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.thread-block-thinking .thread-thinking-toggle svg {
+  width: 16px;
+  height: 16px;
+}

@@ -52,7 +52,7 @@ export function ModelAttemptFailureMessageBlock({
           ) : null}
         </div>
       </section>
-      <ThinkingBlock thinking={message.thinking} streaming={false} />
+      <ThinkingBlock thinking={message.thinking} />
       {hasText ? (
         <section className="thread-block thread-block-assistant thread-assistant-shell">
           <CopyButton
