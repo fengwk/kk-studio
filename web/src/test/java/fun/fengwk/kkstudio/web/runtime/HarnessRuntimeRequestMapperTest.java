@@ -647,7 +647,17 @@ class HarnessRuntimeRequestMapperTest {
     newThread.setRootSettings(branchSettings());
     assertTargetRejected(newThread);
 
-    // 既有 Thread 不再由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。
+    // threadName 是 NEW_THREAD 必填：缺失或空白都拒绝；且 NEW_SESSION 不得携带 threadName。
+    HarnessCommandTargetDTO missingThreadName = newThreadTarget();
+    missingThreadName.setThreadName(null);
+    assertTargetRejected(missingThreadName);
+    HarnessCommandTargetDTO blankThreadName = newThreadTarget();
+    blankThreadName.setThreadName("   ");
+    assertTargetRejected(blankThreadName);
+    HarnessCommandTargetDTO sessionWithThreadName = newSessionTarget();
+    sessionWithThreadName.setThreadName("branch");
+    assertTargetRejected(sessionWithThreadName);
+
     HarnessCommandTargetDTO thread = new HarnessCommandTargetDTO();
     thread.setType("THREAD");
     thread.setThreadId(idText(1));
@@ -850,6 +860,7 @@ class HarnessRuntimeRequestMapperTest {
     target.setSessionId(idText(2));
     target.setStartEntryId(idText(3));
     target.setThreadId(idText(1));
+    target.setThreadName("branch");
     target.setYoloEnabled(false);
     return target;
   }

@@ -7,10 +7,10 @@ import java.util.UUID;
 
 /**
  * 单次 {@code acceptCommands} 的 sealed target：NEW_ROOT_SESSION（新建 Session + ROOT + 独立执行根 Thread）、
- * NEW_CHILD_SESSION（新建 Session + 作为既有 Thread 执行子代理的子 Thread）、NEW_THREAD（在既有 Session 的既有 Entry 下 独立
+ * NEW_CHILD_SESSION（新建 Session + 作为既有 Thread 执行子代理的子 Thread）、NEW_THREAD（在既有 Session 的既有合法边界下 独立
  * fork 新执行根）与 THREAD（在既有 Thread 上继续接受 Commands）。本批 Commands 由 {@link
- * AcceptCommandsCommand#commands()} 携带，target 只负责定位 / 初始创建语义，不携带名称——初始名称由 Runtime 在创建时按 Commands
- * 内容派生。
+ * AcceptCommandsCommand#commands()} 携带，target 只负责定位 / 初始创建语义；Session 与 ROOT Thread 的名称由 Runtime
+ * 在创建时 按 Commands 内容派生，NEW_THREAD 的分支名称则由调用方显式给出并经 {@link Names#normalize} 规范。
  *
  * <p>NEW_ROOT_SESSION / NEW_CHILD_SESSION / NEW_THREAD 的 {@code sessionId} / {@code threadId}
  * 由调用方预分配（initial creation replay 以 client threadId 为查找键）；THREAD 使用 exact 的 head / next-sequence
@@ -53,14 +53,19 @@ public sealed interface AcceptCommandsTarget {
     }
   }
 
-  /** 在既有 Session 的 {@code startEntryId} 下独立 fork 新执行根；不复制 Entry，Thread head 直接指向该 Entry。 */
-  record NewThread(UUID sessionId, UUID startEntryId, UUID threadId, boolean yoloEnabled)
+  /**
+   * 在既有 Session 的合法 fork 边界 {@code startEntryId}（ROOT 或已闭合 {@code TURN_END}）下独立 fork 新执行根；不复制
+   * Entry， Thread head 直接指向该 Entry。分支显示名由调用方显式给出并经 {@link Names#normalize} 规范，是创建请求身份的一部分。
+   */
+  record NewThread(
+      UUID sessionId, UUID startEntryId, UUID threadId, String threadName, boolean yoloEnabled)
       implements AcceptCommandsTarget {
 
     public NewThread {
       Objects.requireNonNull(sessionId, "sessionId");
       Objects.requireNonNull(startEntryId, "startEntryId");
       Objects.requireNonNull(threadId, "threadId");
+      threadName = Names.normalize(threadName);
     }
   }
 

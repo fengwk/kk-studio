@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -182,20 +183,65 @@ class HarnessNamesTest {
   }
 
   @Test
-  void newThreadFromEntryIsNamedBranchWithThreadUuidPrefix() {
-    // NEW_THREAD 创建的分支 Thread 固定命名为 branch- + Thread UUID 前 8 位；Session 名不被触碰。
+  void newThreadUsesCallerProvidedNormalizedName() {
+    // NEW_THREAD 分支名由调用方给出并经 Names.normalize 折叠为单行；Session 名不被触碰。
     Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     UUID branchThreadId = TestIds.id(401);
     AcceptCommandsCommand command =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.NewThread(
-                baseline.sessionId(), baseline.rootEntryId(), branchThreadId, false),
+                baseline.sessionId(), baseline.rootEntryId(), branchThreadId, "  发布  分支 ", false),
             List.of(userMessage("branch hello")));
     AcceptedCommands accepted = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
-    assertEquals("branch-" + branchThreadId.toString().substring(0, 8), accepted.thread().name());
+    assertEquals("发布 分支", accepted.thread().name());
+    ThreadState stored = store.transaction(tx -> tx.findThread(branchThreadId).orElseThrow());
+    assertEquals("发布 分支", stored.name());
     // 分支创建不改既有 Session 名称（seedBaseline 直接以 session-<uuid> 落库）。
     Session session = store.transaction(tx -> tx.findSession(baseline.sessionId()).orElseThrow());
     assertEquals("session-" + baseline.sessionId(), session.name());
+  }
+
+  /**
+   * 测试意图：分支名进入 creation request hash。同 threadId + 同规范化名称（即使原始空白不同）精确 replay；仅改 name 就使 hash 变化， 映射为
+   * THREAD_ID_REUSED 冲突且不新增 Thread / Command / Work 事实。
+   */
+  @Test
+  void newThreadNamedCreationReplaysAfterNormalizationAndConflictsOnChangedName() {
+    Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    UUID branchThreadId = TestIds.id(402);
+    NewThreadCommand message =
+        HarnessRuntimeTestSupport.userMessageCommand(TestIds.id(9001), "branch hello");
+    AcceptCommandsCommand command =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewThread(
+                baseline.sessionId(), baseline.rootEntryId(), branchThreadId, "  发布分支 ", false),
+            List.of(message));
+    AcceptedCommands first = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    assertFalse(first.replayed());
+    assertEquals("发布分支", first.thread().name());
+
+    // 同 threadId + 同规范化名称：精确 replay（原始空白差异被 normalize 吸收），不写第二套事实。
+    AcceptedCommands replay = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
+    assertTrue(replay.replayed());
+    assertEquals(branchThreadId, replay.thread().id());
+    assertEquals("发布分支", replay.thread().name());
+    assertEquals(first.thread().creationRequestHash(), replay.thread().creationRequestHash());
+
+    // 仅改 name（同 threadId / startEntry / commands）→ creationRequestHash 变化 → THREAD_ID_REUSED。
+    AcceptCommandsCommand renamed =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewThread(
+                baseline.sessionId(), baseline.rootEntryId(), branchThreadId, "另一个分支", false),
+            List.of(message));
+    HarnessRuntimeConflictException error =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.acceptCommands(renamed, AcceptancePreflight.IDENTITY));
+    assertEquals(HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, error.reason());
+
+    // seedBaseline 的根 Thread + 新建分支 = 2，且分支只有初始一条 Command / 一份 Work。
+    assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(branchThreadId)).size());
   }
 
   @Test

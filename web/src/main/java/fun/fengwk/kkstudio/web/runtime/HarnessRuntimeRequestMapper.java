@@ -223,6 +223,7 @@ public final class HarnessRuntimeRequestMapper {
     return switch (type) {
       case "NEW_SESSION" -> {
         requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
+        requireForbidden(dto.hasThreadNameField(), "target.threadName", "target type " + type);
         yield new AcceptCommandsTarget.NewRootSession(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
@@ -235,6 +236,7 @@ public final class HarnessRuntimeRequestMapper {
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getStartEntryId(), "target.startEntryId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
+            requireText(dto.getThreadName(), "target.threadName"),
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
       default -> throw new IllegalArgumentException("unknown target type: " + type);
