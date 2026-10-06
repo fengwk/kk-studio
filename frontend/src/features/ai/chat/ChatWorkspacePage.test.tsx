@@ -100,7 +100,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 'session-1',
     headEntryId: 'head-1',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',

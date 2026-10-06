@@ -57,7 +57,7 @@ describe('useInteractionsController', () => {
         nextCursor: null,
       })
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
 
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
@@ -70,7 +70,7 @@ describe('useInteractionsController', () => {
       await result.current.loadMore()
     })
 
-    expect(listSpy).toHaveBeenLastCalledWith('cursor-page-2', 10)
+    expect(listSpy).toHaveBeenLastCalledWith(null, 'cursor-page-2', 10)
     expect(result.current.items).toHaveLength(2)
     expect(result.current.hasMore).toBe(false)
   })
@@ -80,7 +80,7 @@ describe('useInteractionsController', () => {
       .mockResolvedValueOnce({ items: [mockItem1], nextCursor: 'cursor-1' })
       .mockResolvedValueOnce({ items: [mockItem2], nextCursor: null })
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     expect(result.current.items[0].interactionId).toBe('int-1')
@@ -109,7 +109,7 @@ describe('useInteractionsController', () => {
       .mockImplementationOnce(() => slowLoadMorePromise) // loadMore 挂起
       .mockResolvedValueOnce(refreshedPage) // refresh 重新拉取第一页
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.items).toHaveLength(1)
     expect(result.current.nextCursor).toBe('cursor-page-2')
@@ -163,7 +163,7 @@ describe('useInteractionsController', () => {
       .mockResolvedValueOnce(externalInvalidatedPage) // 外部 invalidate 触发首屏重新拉取
       .mockResolvedValueOnce(subsequentPage) // 新代后续 loadMore
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.items[0].interactionId).toBe('int-1')
     expect(result.current.nextCursor).toBe('cursor-page-2')
@@ -201,7 +201,7 @@ describe('useInteractionsController', () => {
     await act(async () => {
       await result.current.loadMore()
     })
-    expect(listSpy).toHaveBeenLastCalledWith('cursor-new-page-2', 10)
+    expect(listSpy).toHaveBeenLastCalledWith(null, 'cursor-new-page-2', 10)
     expect(result.current.items).toHaveLength(2)
     expect(result.current.items[1].interactionId).toBe('int-2')
     expect(result.current.hasMore).toBe(false)
@@ -223,7 +223,7 @@ describe('useInteractionsController', () => {
       .mockImplementationOnce(() => slowLoadMorePromise)
       .mockResolvedValueOnce(refreshedPage)
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     act(() => {
@@ -255,7 +255,7 @@ describe('useInteractionsController', () => {
       .mockResolvedValueOnce(initialPage)
       .mockResolvedValue({ items: [mockItem2], nextCursor: null })
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     // 同一 tick 内同时发起两次 loadMore
@@ -285,7 +285,7 @@ describe('useInteractionsController', () => {
       .mockImplementationOnce(() => slowLoadMorePromise)
       .mockResolvedValue(refreshedPage)
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     let loadMorePromise!: Promise<void>
@@ -315,7 +315,7 @@ describe('useInteractionsController', () => {
     vi.spyOn(interactionService, 'listInteractions')
       .mockResolvedValue(samePage)
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.items).toHaveLength(1)
 
@@ -350,7 +350,7 @@ describe('useInteractionsController', () => {
       .mockResolvedValueOnce(sameFirstPage) // 外部 invalidate 触发 refetch (结构共享 same object)
       .mockImplementationOnce(() => slowLoadMore2Promise) // loadMore 2 (新代)
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.items).toHaveLength(1)
     expect(result.current.nextCursor).toBe('cursor-page-2')
@@ -410,7 +410,7 @@ describe('useInteractionsController', () => {
       .mockResolvedValueOnce(initialPage)
       .mockRejectedValueOnce(new Error('Network error on loadMore'))
 
-    const { result } = renderHook(() => useInteractionsController(10), { wrapper })
+    const { result } = renderHook(() => useInteractionsController(null, 10), { wrapper })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
 
     // 调用方直接 void 调用，验证不会产生未捕获的 rejection

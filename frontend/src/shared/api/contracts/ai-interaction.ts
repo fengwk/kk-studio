@@ -16,7 +16,13 @@ export interface InteractionOwnerDTO {
 export interface InteractionDTO {
   interactionId: string
   status: 'WAITING_INPUT' | 'WAITING_APPROVAL' | string
+  /** 来源调用的原始 Thread；提交与审批必须回写该 id。 */
   threadId: string
+  /**
+   * 沿来源 Thread 祖先链解析出的真实执行根；根面板以此过滤，产品归属同样基于它。
+   * 不替代原始来源身份。
+   */
+  rootThreadId: string
   sessionId: string
   owner: InteractionOwnerDTO
   toolCallId: string

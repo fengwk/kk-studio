@@ -17,7 +17,10 @@ export interface UseInteractionsControllerResult {
   removeItem: (interactionId: string) => void
 }
 
-export function useInteractionsController(limit = 20): UseInteractionsControllerResult {
+export function useInteractionsController(
+  rootThreadId: string | null = null,
+  limit = 20,
+): UseInteractionsControllerResult {
   const queryClient = useQueryClient()
   const [accumulatedItems, setAccumulatedItems] = useState<InteractionDTO[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -28,7 +31,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
   const lastAppliedInitialPageRef = useRef<unknown>(null)
   const lastDataUpdatedAtRef = useRef(0)
 
-  // 初始第一页查询
+  // 初始第一页查询；rootThreadId 变化即视为新的过滤代际。
   const {
     data: initialPage,
     dataUpdatedAt,
@@ -37,8 +40,8 @@ export function useInteractionsController(limit = 20): UseInteractionsController
     error: initialError,
     refetch,
   } = useQuery({
-    queryKey: queryKeys.interactions.list(null, limit),
-    queryFn: () => interactionService.listInteractions(null, limit),
+    queryKey: queryKeys.interactions.list(rootThreadId, null, limit),
+    queryFn: () => interactionService.listInteractions(rootThreadId, null, limit),
   })
 
   // 当第一页数据更新时（包括外部 invalidate 后重新拉取到新数据），重置累加列表、游标与分页代际
@@ -93,7 +96,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
     isFetchingMoreRef.current = true
     setIsFetchingMore(true)
     try {
-      const nextPage = await interactionService.listInteractions(cursor, limit)
+      const nextPage = await interactionService.listInteractions(rootThreadId, cursor, limit)
       if (generation !== generationRef.current) {
         return
       }
@@ -118,7 +121,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
         setIsFetchingMore(false)
       }
     }
-  }, [nextCursor, limit])
+  }, [nextCursor, limit, rootThreadId])
 
   // 某项交互完成后的乐观移除
   const removeItem = useCallback((interactionId: string) => {
