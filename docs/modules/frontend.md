@@ -47,9 +47,20 @@ Java long 游标保持字符串，版本比较使用长度与字典序，保留�
 ## Snapshot、realtime 与恢复
 
 Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v1`。
-subscribed（含重连）、resync、资源 error 和版本提示触发回读。
-Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账。
-Canvas revision 提示严格大于本地值时才触发读取。
+浏览器只有一个应用事件 WebSocket，连接与订阅由应用级 manager 按资源引用计数管理：
+同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
+资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
+projects/tree/interactions/environments 只发 changed 提示、不携带 cursor。
+subscribed（含重连）、resync、资源 error 和版本提示触发回读；
+Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，
+Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；
+没有 EventSource，也不用固定轮询兜底。
+
+执行树按执行根订阅，服务端聚合后代写入后推送 changed，只回读该根，根本地空闲也保持订阅。
+交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
+环境注册表与连接租约订阅 environments：changed、subscribed 与 resync 都回读权威列表；
+连接失效是时间事实而非写入事实，客户端只按最早的 `statusExpiresAt` 排一次回读（越过截止点一个短容差），
+不轮询、也不维护本地过期集合，租约续期或任何 changed 更新数据后自动重排。
 
 MODEL_DELTA 按连续 sequence 累积；gap 启动单飞 Snapshot recovery，使用有界退避。
 TOOL_PARTIAL 按 thread/invocation/attempt 内 eventId 精确去重，process.output 按 offset。
@@ -64,16 +75,22 @@ Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于
 
 ### Thread Debug
 
-Debug 主区域包含下一次请求预览、事件与详情：宽 Pane 三列，窄 Pane 页签切换，
+Debug 是全 pane 的只读视图：接管主滚动区时输入、审批、分支控制与活跃树整体隐藏
+（保持挂载并置为 inert），退出后立即恢复，草稿、上传、阅读位置与 pane 绑定原地保留。
+主区域包含下一次请求预览、事件与详情：宽 Pane 三列，窄 Pane 页签切换，
 选择/关闭详情保留焦点返回路径。Tool、Skill、Subagent 和 Cache 检查器展示结构化事实。
 诊断 GET 区分 NEXT_REQUEST_PREVIEW 与活动 FROZEN_INVOCATION，
 包含发送/过滤工具、稳定 Skill 路径与冻结请求，排除 credential、认证 header 和 Base64 正文。
 
-已有空闲 Thread 的预览按钮通过 Composer.preparePreview 冻结草稿和附件身份，
-先读取最新 Snapshot，复验设置基线、空闲、队列和活动 Invocation，再用精确 cursor 请求
-provider-request-preview。成功展示点击时协议 JSON（可能包含内联媒体）。
-等待期间草稿或目标变更、组件卸载使迟到结果失效；请求单飞，409 使用 PREVIEW reason
-白名单文案。预览保持草稿、上传与命令未消费状态，随后发送仍须独立接受。
+下一次请求预览冻结草稿与附件身份，先读取最新 Snapshot，复验设置基线、空闲、队列与活动 Invocation，
+再用精确 cursor 请求 provider-request-preview。等待期间草稿或目标变更、组件卸载使迟到结果失效；
+请求单飞，409 使用 PREVIEW reason 白名单文案，预览不消费草稿、上传与命令，随后发送仍须独立接受。
+运行中的 Thread 另给 FROZEN_INVOCATION：只读取当时已存在的活动 Invocation 的冻结请求，不新建、
+复制或延长任何持久事实，现算预览被拒时冻结事实仍然成立。事件详情可按需重建某个历史模型输出的请求：
+它只接受模型输出 Entry，请求前缀严格截断在该输出的 parent，展示的是用当前 catalog 与配置重建的结果，
+不是原始网络快照，压缩回合不支持重建。
+本地新建分支草稿的预览走 session 级 POST provider-request-preview，body 只带 `startEntryId` 与
+有序命令（起点必须是 ROOT 或 TURN_END），只为预览检查协议 JSON，绝不为此预创建 Thread。
 
 ## Chat 提交与控制
 
@@ -81,15 +98,34 @@ Chat 局部组件树以 `chat.id` 为 key，切换 Chat 时重建局部状态。
 Thread 异步操作按 `(threadId, binding epoch)` 隔离；即使 A → B → A，旧绑定的迟到结果
 也不能改写当前 UI 或清除新 pending 记录，原 Thread 的草稿持久化仍按自身身份处理。
 
-Pane target 与布局独立：NEW_SESSION_DRAFT 携 root settings 创建 Session；
-NEW_THREAD_DRAFT 从同 Session Entry fork；BOUND_THREAD 使用精确 head/sequence 提交。
+Session 的完整 Entry 历史是一棵树，Thread 只是树上一条已命名的分支；pane 自身只保存
+view 绑定（PaneTarget）与布局，不复制 Thread、draft 或执行状态。
+`/tree` 打开当前 Session 的历史树：每个真实 Entry 恰好一行，按 Git commit lanes 画节点与连线，
+线性链始终留在同一列，只有真实 sibling 分叉才开新列；只有 ROOT 与已关闭 TURN_END 是可手工
+分叉的边界。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写任何 Thread 状态。
+
+命名分支有两个等价入口并汇入同一次命名与目标选择：`/tree` 面板底部对选中行的“从此处分支”，
+以及对话中已关闭 TURN_END 回合 footer 的分支按钮。弹窗要求一个按后端规则规范化的名称，
+并选择目标位置 1..9；确认只把 `NEW_THREAD_DRAFT` 路由到目标 pane（隐藏位置先扩展布局显露、
+焦点随之移动），名称是创建 target 的必需事实，此处不预创建 Thread。目标有在途操作时拒绝路由，
+已有未发送草稿时要求二次确认覆盖，用户输入的本地草稿按 pane 作用域持久化。
+首次发送才在一次原子命令批里创建该命名 Thread（`NEW_THREAD` = settings diff + `USER_MESSAGE`），
+随后 pane 绑定到返回的 Thread。pane 与布局的存储键分别以 owner 身份和 pane 隔离，
+ISSUE_AGENT 与独立地址不落 Chat target 存储。
+
+PaneTarget 只有三种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
+`NEW_THREAD_DRAFT`（携带 `sessionId`、`startEntryId` 与已规范化 `threadName`）、
+`BOUND_THREAD`（既有 Thread 用精确 head/sequence 提交）。
 显式选 Agent 同步其模型/变体并保留环境、YOLO、输入与附件；
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
-前缀发送，YOLO 走独立控制入口。
+前缀发送，YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
+根面板与草稿 pane 不再渲染自身标题，只读子代理视图仍保留标题与返回执行根入口。
 
 命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
-写入失败中止发送。不确定网络结果保留 exact replay，锁定请求身份并提供相同请求重试或显式放弃。
+写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
+既有 Thread 的发送用只按 threadId 隔离的 `kk-studio.agent-thread-pending` 记录，互不伪造 owner。
+不确定网络结果保留 exact replay，锁定请求身份并提供相同请求重试或显式放弃。
 恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
 明确 409 保留草稿，只有同分支纯消息的 STALE_COMMAND_CURSOR 才有限更新 cursor 重试。
 
@@ -144,6 +180,18 @@ attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas Inf
 每个 await 后校验 batch epoch；切换目标或卸载作废整批。已完成上传由服务端过期回收。
 下载/渲染时签发短期 URL，客户端按返回的 URL 和安全 headers 访问。
 
+## 用量与状态 Footer
+
+Footer 的 token 与费用只取 Entry 的读取投影事实：费用只来自 `usageCost` 投影，绝不从 assistant
+metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回历史，无法定价时如实待定而非 $0。
+金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
+时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
+（input + cacheRead + cacheWrite），缺失时显示未知，绝不用分支累计量替代。
+单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
+措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，
+包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事。
+展示规则见 [Thread 控制与展示](thread-control-and-presentation.md#状态-footer)。
+
 ## 功能入口
 
 AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作区。
@@ -190,6 +238,15 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 ## 共享 UI 与测试
 
 全局 token 在 [`styles.css`](../../frontend/src/styles.css)，Canvas 样式由 feature 拥有。
+[`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
+Select、NumberInput、SearchField、FieldLabel）、overlays（Dialog、ConfirmActionModal）、
+feedback（Toast、StateBlock、CreateCard），以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
+生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
+[`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
+焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、
+遮罩与关闭按钮。[`NumberInput`](../../frontend/src/shared/ui/controls/NumberInput.tsx) 是整数输入
+（字符串值、自绘步进），十进制参数保留原生 `step=any` 输入语义。Escape 优先级由
+[`blocking-overlay`](../../frontend/src/shared/ui/blocking-overlay.ts) 统一，弹层与菜单优先于 pane 输入。
 i18n 支持 zh-CN/en-US，浏览器偏好保存 locale，切换同步 document.lang。
 ConflictPresenter 统一展示 409；modal/lightbox 优先消费快捷键。
 
