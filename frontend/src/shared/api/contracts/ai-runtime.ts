@@ -92,8 +92,7 @@ export interface HarnessModelRequestDebugSubagentDTO {
 /** Provider cache control 事实。 */
 export interface HarnessModelRequestDebugCacheControlDTO {
   retention: 'NONE' | 'SHORT' | 'LONG'
-  affinityKey: string | null
-  breakpoints: string[]
+  key: string | null
 }
 
 /** 活动 ModelInvocation 的冻结 canonical ProviderRequest。 */
@@ -123,14 +122,20 @@ export interface HarnessModelRequestDebugDTO {
  * 草稿请求预览 (POST /api/harness/threads/{threadId}/provider-request-preview)。
  */
 export interface ProviderRequestPreviewDTO {
-  kind: 'DRAFT_REQUEST_PREVIEW'
+  kind: 'DRAFT_REQUEST_PREVIEW' | 'HISTORICAL_REQUEST_PREVIEW'
   providerType: string
   modelName: string
   bodyByteSize: number
   bodyJson: string
   sourceHeadEntryId: string | null
   generatedAt: string
-  snapshotNotice?: string | null
+  notice?: string | null
+}
+
+/** 以当前目录价格计算的读取投影，不属于历史 payload。 */
+export interface UsageCostDTO {
+  currency: string
+  amount: string
 }
 
 /** Session Entry 查询投影；id 均为 canonical UUID string。 */
@@ -141,6 +146,7 @@ export interface HarnessSessionEntryDTO {
   entryType: EntryType
   payloadJson: string
   createTime: BackendDateTime
+  usageCost?: UsageCostDTO | null
 }
 
 /**
@@ -426,6 +432,7 @@ export interface NewThreadCommandTargetDTO {
   sessionId: string
   startEntryId: string
   threadId: string
+  threadName: string
   yoloEnabled: boolean
 }
 

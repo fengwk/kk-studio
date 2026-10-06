@@ -2,6 +2,7 @@ import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   AgentCommandBatchRequestDTO,
   AgentCommandBatchResponseDTO,
+  HarnessCommandCreateDTO,
   HarnessSessionEntryDTO,
   HarnessSessionDTO,
   HarnessSessionRenameDTO,
@@ -93,6 +94,20 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: ThreadCommandBatchRequestDTO,
     ): Promise<ProviderRequestPreviewDTO> =>
       client.post(`/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`, data),
+
+    previewBranchRequest: (
+      sessionId: string,
+      data: { startEntryId: string; commands: HarnessCommandCreateDTO[] },
+    ): Promise<ProviderRequestPreviewDTO> =>
+      client.post(`/harness/sessions/${encodeURIComponent(sessionId)}/provider-request-preview`, data),
+
+    previewHistoricalRequest: (
+      sessionId: string,
+      entryId: string,
+    ): Promise<ProviderRequestPreviewDTO> =>
+      client.get(
+        `/harness/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/provider-request-preview`,
+      ),
 
     setThreadYolo: (
       threadId: string,
