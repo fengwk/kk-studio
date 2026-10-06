@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -22,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,19 +40,6 @@ class GeminiStreamingDecoderTest {
   }
 
   private static ProviderRequest request() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
         new ModelDescriptor(
@@ -63,8 +48,7 @@ class GeminiStreamingDecoderTest {
             "gemini-2.5-flash",
             Set.of(ModelInputModality.TEXT),
             true,
-            false,
-            pricing),
+            false),
         variant,
         1024,
         "Test system instruction.",
@@ -92,11 +76,7 @@ class GeminiStreamingDecoderTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
 
     String c1 =
         """
@@ -144,11 +124,7 @@ class GeminiStreamingDecoderTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
 
     String chunk =
         """

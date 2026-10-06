@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,7 +19,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -50,8 +48,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
-import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -74,27 +72,13 @@ class GeminiRequestEncoderTest {
   }
 
   private static ModelDescriptor model(boolean reasoning) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     return new ModelDescriptor(
         "google-test",
         "gemini-2.5-flash",
         "gemini-2.5-flash",
         Set.of(ModelInputModality.TEXT),
         true,
-        reasoning,
-        pricing);
+        reasoning);
   }
 
   /** 验证基本的用户文本消息能够正确编码为 Gemini contents wire 格式。 */
@@ -114,7 +98,6 @@ class GeminiRequestEncoderTest {
 
     GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
     assertNotNull(encoded.bodyUtf8Bytes());
-    assertNotNull(encoded.sourcePrefixHash());
 
     JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
     assertTrue(json.has("contents"));
@@ -405,7 +388,7 @@ class GeminiRequestEncoderTest {
     assertEquals(
         "getWeather", tools.get(4).path("functionDeclarations").get(0).path("name").asText());
 
-    // hosted tools 属于 cacheable 前缀：同一请求去掉 native tools 后 prefix hash 必须改变
+    // hosted tools 属于请求前缀：同一请求去掉 native tools 后 wire tools 只剩 runtime functionDeclarations
     ProviderRequest withoutNativeTools =
         new ProviderRequest(
             model(false),
@@ -417,9 +400,14 @@ class GeminiRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather?")))),
             List.of(tool),
             ProviderCacheControl.none());
-    assertNotEquals(
-        encoder.encode(withoutNativeTools, descriptor()).sourcePrefixHash(),
-        encoder.encode(request, descriptor()).sourcePrefixHash());
+    ArrayNode toolsWithoutNative =
+        (ArrayNode)
+            MAPPER
+                .readTree(encoder.encode(withoutNativeTools, descriptor()).bodyUtf8Bytes())
+                .get("tools");
+    assertEquals(1, toolsWithoutNative.size());
+    assertTrue(toolsWithoutNative.get(0).has("functionDeclarations"));
+    assertFalse(toolsWithoutNative.get(0).has("googleSearch"));
   }
 
   /** 验证 runtime 未声明 function 时，native hosted tools 仍原样保留。 */
@@ -576,24 +564,29 @@ class GeminiRequestEncoderTest {
     assertFalse(ex.getMessage().contains(sensitiveValue), "error must not echo the native value");
   }
 
-  /** 验证显式 cacheControl 标记被明确拒绝（Gemini 仅支持隐式自动缓存）。 */
+  /** 验证任何非 NONE retention 的显式 cacheControl 被明确拒绝：Gemini 仅支持服务端自动缓存，不发送任何 hint。 */
   @Test
   void rejectsExplicitCacheControl() {
-    ProviderCacheControl explicitCache =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "aff1", Set.of());
-    ProviderRequest request =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
-            List.of(),
-            explicitCache);
+    for (ProviderCacheControl explicitCache :
+        List.of(
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "session-1"),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "session-2"))) {
+      ProviderRequest request =
+          new ProviderRequest(
+              model(false),
+              DEFAULT_VARIANT,
+              1024,
+              "Test system instruction.",
+              List.of(
+                  new ProviderMessage(
+                      ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+              List.of(),
+              explicitCache);
 
-    assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    }
   }
 
   /** 验证结构化工具声明被正确编码为 tools:[{functionDeclarations:[...]}]，且 JSON Schema 保持保真。 */
@@ -945,24 +938,9 @@ class GeminiRequestEncoderTest {
     assertEquals("toolA", parts.get(2).get("functionCall").get("name").asText());
   }
 
-  /** 验证当 ASSISTANT 具有合法 GEMINI_CONTENT replayState 时，原位回放其 parts 白名单。 */
+  /** 验证当 ASSISTANT 具有合法 GEMINI_CONTENT replayState 时，原位回放其 native parts（含 thoughtSignature）。 */
   @Test
   void encodesAssistantMessage_replaysNativePartsWhenReplayMatches() throws Exception {
-    // 构造第一轮请求计算 prefix hash
-    ProviderRequest req1 =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1")))),
-            List.of(),
-            ProviderCacheControl.none());
-    GeminiEncodedRequest enc1 = encoder.encode(req1, descriptor());
-    String hash1 = enc1.sourcePrefixHash();
-
     // 构造包含合法 replayState 的第二轮 ASSISTANT
     ObjectNode replayPayload = MAPPER.createObjectNode();
     replayPayload.put("role", "model");
@@ -978,7 +956,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash1,
             replayPayload);
 
     ProviderRequest req2 =
@@ -1009,12 +986,9 @@ class GeminiRequestEncoderTest {
     assertTrue(parts.get(0).get("thought").asBoolean());
   }
 
-  /** 意图：affinity/hash 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
+  /** 意图：affinity 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
   @Test
   void replaysOpaqueUnknownPartsAndFieldsVerbatim() throws Exception {
-    ProviderRequest req1 = userOnlyRequest("Q1");
-    String hash1 = encoder.encode(req1, descriptor()).sourcePrefixHash();
-
     ObjectNode replayPayload = MAPPER.createObjectNode();
     replayPayload.put("role", "model");
     ArrayNode replayedParts = replayPayload.putArray("parts");
@@ -1031,7 +1005,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash1,
             replayPayload);
 
     ProviderRequest req2 =
@@ -1060,49 +1033,31 @@ class GeminiRequestEncoderTest {
     assertEquals("QQ==", wireParts.get(1).path("inlineData").path("data").asText());
   }
 
-  /** 意图：payload 带有可 opaque 透传的未知字段时，已知 text 与 durable 不一致仍必须 INVALID_REQUEST。 */
+  /** 意图：payload 的已知 text 与 durable 不一致（历史被改写）时，即使带 opaque 未知字段也绝不回放陈旧 payload，而是退回 durable 语义编码。 */
   @Test
-  void rejectsKnownTextMismatchEvenWithOpaqueUnknownFields() {
+  void fallsBackToDurableTextWhenPayloadTextDiffersEvenWithOpaqueUnknownFields() throws Exception {
     ObjectNode payload = MAPPER.createObjectNode();
     payload.put("role", "model");
     ObjectNode part = payload.putArray("parts").addObject();
     part.put("text", "payload_text");
     part.put("futurePartField", "opaque");
 
-    assertReplayInvalid(
-        payload,
-        List.of(new ProviderTextBlock("durable_text")),
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-  }
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("gemini-2.5-flash"),
+            payload);
 
-  private ProviderRequest userOnlyRequest(String text) {
-    return new ProviderRequest(
-        model(false),
-        DEFAULT_VARIANT,
-        1024,
-        "Test system instruction.",
-        List.of(
-            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock(text)))),
-        List.of(),
-        ProviderCacheControl.none());
+    JsonNode json = encodeWithReplay(replayState, List.of(new ProviderTextBlock("durable_text")));
+    ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
+    assertEquals(1, parts.size());
+    assertEquals("durable_text", parts.get(0).path("text").asText());
+    assertFalse(parts.get(0).has("futurePartField"));
   }
 
   /** 验证同格式的非法/损坏 replay payload 明确抛出 INVALID_REQUEST，而非静默吞掉。 */
   @Test
   void rejectsReplay_whenSameFormatCorruptedPayload() throws Exception {
-    ProviderRequest req1 =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1")))),
-            List.of(),
-            ProviderCacheControl.none());
-    String hash1 = encoder.encode(req1, descriptor()).sourcePrefixHash();
-
     // 损坏的 payload：missing parts 数组
     ObjectNode badPayload = MAPPER.createObjectNode();
     badPayload.put("role", "model");
@@ -1112,7 +1067,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash1,
             badPayload);
 
     ProviderRequest req2 =
@@ -1140,7 +1094,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor().affinity("gemini-2.5-flash"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             MAPPER.createObjectNode());
 
     ProviderRequest request =
@@ -1164,79 +1117,37 @@ class GeminiRequestEncoderTest {
         "fallback text", json.get("contents").get(1).get("parts").get(0).get("text").asText());
   }
 
-  /** 验证 affinity 不匹配或 prefixHash 不匹配时安全降级为语义 fallback。 */
+  /** 验证 affinity（provider / connection generation / wire model）不匹配时安全退回 durable 语义编码。 */
   @Test
-  void fallsBackToSemanticWhenAffinityOrPrefixHashMismatches() throws Exception {
+  void fallsBackToSemanticWhenAffinityMismatches() throws Exception {
     ObjectNode validPayload = MAPPER.createObjectNode();
     validPayload.put("role", "model");
     validPayload.putArray("parts").addObject().put("text", "text");
 
-    // 1. affinity mismatch
-    ProviderReplayState diffAffinity =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
+    for (ProviderReplayAffinity mismatched :
+        List.of(
             new ProviderReplayAffinity(
                 ProviderType.GOOGLE, "other-provider", UUID.randomUUID(), "gemini-2.5-flash"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            validPayload);
-
-    ProviderRequest req1 =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("text")),
-                    diffAffinity)),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest enc1 = encoder.encode(req1, descriptor());
-    assertNotNull(enc1);
-
-    // 2. prefixHash mismatch
-    ProviderReplayState diffHash =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-            validPayload);
-
-    ProviderRequest req2 =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("text")),
-                    diffHash)),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest enc2 = encoder.encode(req2, descriptor());
-    assertNotNull(enc2);
+            descriptor().affinity("gemini-2.5-pro"))) {
+      ProviderReplayState replayState =
+          new ProviderReplayState(ProviderReplayFormat.GEMINI_CONTENT, mismatched, validPayload);
+      JsonNode json = encodeWithReplay(replayState, List.of(new ProviderTextBlock("text")));
+      assertEquals("text", json.get("contents").get(1).get("parts").get(0).get("text").asText());
+    }
   }
 
   /**
-   * 意图：native-only part（thoughtSignature、inlineData、额外成员）在 affinity 或 prefix hash 失配时必须 fail
-   * closed，绝不静默丢弃； 而恰好 text / functionCall{name,args} 的可等价重建 part 仍回退语义编码。
+   * 意图：payload 携带 durable 无法表达的原生事实（thoughtSignature、inlineData、functionCall 额外成员）时，affinity 不匹配只退回
+   * durable 语义编码：既绝不静默丢弃，也绝不因为存在 replay 就拒绝请求。
    */
   @Test
-  void replay_failsClosedForNativeOnlyPartsAndFallsBackForReconstructibleParts() throws Exception {
-    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  void replay_fallsBackToDurableSemanticsForNativeOnlyPartsWhenAffinityMismatches()
+      throws Exception {
     ProviderReplayAffinity otherAffinity =
         new ProviderReplayAffinity(
             ProviderType.GOOGLE, "other-provider", UUID.randomUUID(), "gemini-2.5-flash");
 
-    // 1. thought part 携带 thoughtSignature：affinity 失配时 fail closed
+    // 1. thought part 携带 thoughtSignature：退回 durable 语义后不携带原生签名
     ObjectNode thoughtPayload = MAPPER.createObjectNode();
     thoughtPayload.put("role", "model");
     ArrayNode thoughtParts = thoughtPayload.putArray("parts");
@@ -1245,24 +1156,22 @@ class GeminiRequestEncoderTest {
     thoughtPart.put("thought", true);
     thoughtPart.put("thoughtSignature", "sig_123");
     thoughtParts.addObject().put("text", "answer");
-    assertNativeOnlyRejected(
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT, otherAffinity, dummyHash, thoughtPayload),
-        List.of(new ProviderThinkingBlock("thought text"), new ProviderTextBlock("answer")));
+    ArrayNode fallbackThoughtParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    new ProviderReplayState(
+                        ProviderReplayFormat.GEMINI_CONTENT, otherAffinity, thoughtPayload),
+                    List.of(
+                        new ProviderThinkingBlock("thought text"), new ProviderTextBlock("answer")))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(2, fallbackThoughtParts.size());
+    assertTrue(fallbackThoughtParts.get(0).path("thought").asBoolean());
+    assertFalse(fallbackThoughtParts.get(0).has("thoughtSignature"));
+    assertEquals("answer", fallbackThoughtParts.get(1).path("text").asText());
 
-    // 2. thought part 携带额外成员：prefix hash 失配时同样 fail closed
-    ObjectNode extraMemberPayload = MAPPER.createObjectNode();
-    extraMemberPayload.put("role", "model");
-    extraMemberPayload.putArray("parts").addObject().put("text", "answer").put("futureField", "v");
-    assertNativeOnlyRejected(
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            dummyHash,
-            extraMemberPayload),
-        List.of(new ProviderTextBlock("answer")));
-
-    // 3. inlineData 等原生媒体 part 无法用 durable 语义表达：失配时 fail closed
+    // 2. inlineData 等原生媒体 part 无法用 durable 语义表达：只编码 durable 内容
     ObjectNode inlineDataPayload = MAPPER.createObjectNode();
     inlineDataPayload.put("role", "model");
     ArrayNode inlineParts = inlineDataPayload.putArray("parts");
@@ -1272,15 +1181,19 @@ class GeminiRequestEncoderTest {
         .putObject("inlineData")
         .put("mimeType", "image/png")
         .put("data", "QQ==");
-    assertNativeOnlyRejected(
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            dummyHash,
-            inlineDataPayload),
-        List.of(new ProviderTextBlock("answer")));
+    ArrayNode fallbackInlineParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    new ProviderReplayState(
+                        ProviderReplayFormat.GEMINI_CONTENT, otherAffinity, inlineDataPayload),
+                    List.of(new ProviderTextBlock("answer")))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(1, fallbackInlineParts.size());
+    assertEquals("answer", fallbackInlineParts.get(0).path("text").asText());
 
-    // 4. functionCall part 顶层携带 thoughtSignature：失配时 fail closed
+    // 3. functionCall part 顶层携带 thoughtSignature：只编码 durable 工具调用
     ObjectNode signedCallPayload = MAPPER.createObjectNode();
     signedCallPayload.put("role", "model");
     ObjectNode signedCallPart = signedCallPayload.putArray("parts").addObject();
@@ -1289,60 +1202,65 @@ class GeminiRequestEncoderTest {
     signedFn.put("name", "fn");
     signedFn.put("id", "c1");
     signedFn.putObject("args").put("x", 1);
-    assertNativeOnlyRejected(
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT, otherAffinity, dummyHash, signedCallPayload),
-        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{\"x\":1}"))));
+    ArrayNode fallbackCallParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    new ProviderReplayState(
+                        ProviderReplayFormat.GEMINI_CONTENT, otherAffinity, signedCallPayload),
+                    List.of(
+                        new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{\"x\":1}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(1, fallbackCallParts.size());
+    assertEquals("fn", fallbackCallParts.get(0).path("functionCall").path("name").asText());
+    assertFalse(fallbackCallParts.get(0).has("thoughtSignature"));
+  }
 
-    // 5. functionCall 内部携带未知成员：prefix hash 失配时 fail closed
-    ObjectNode extraFnFieldPayload = MAPPER.createObjectNode();
-    extraFnFieldPayload.put("role", "model");
-    ObjectNode extraFnPart = extraFnFieldPayload.putArray("parts").addObject();
-    ObjectNode extraFn = extraFnPart.putObject("functionCall");
-    extraFn.put("name", "fn");
-    extraFn.put("id", "c1");
-    extraFn.putObject("args").put("x", 1);
-    extraFn.put("vendorField", "v");
-    assertNativeOnlyRejected(
+  /**
+   * 意图：同一 affinity 下 system/date/tools 等前缀内容变化不影响 native replay：thoughtSignature 原样上线，证明回放只依赖
+   * provider/connection/wire model。
+   */
+  @Test
+  void replay_usesNativePayloadAcrossSystemAndToolsChanges() throws Exception {
+    ObjectNode replayPayload = MAPPER.createObjectNode();
+    replayPayload.put("role", "model");
+    ArrayNode replayedParts = replayPayload.putArray("parts");
+    ObjectNode thoughtPart = replayedParts.addObject();
+    thoughtPart.put("text", "signed thinking");
+    thoughtPart.put("thought", true);
+    thoughtPart.put("thoughtSignature", "sig_cross_system");
+    replayedParts.addObject().put("text", "answer");
+
+    ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            dummyHash,
-            extraFnFieldPayload),
-        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{\"x\":1}"))));
+            replayPayload);
 
-    // 6. 恰好 text / functionCall{name,args} 的可重建 payload：affinity 与 prefix 失配都回退语义编码
-    ObjectNode reconstructiblePayload = MAPPER.createObjectNode();
-    reconstructiblePayload.put("role", "model");
-    ArrayNode reconstructibleParts = reconstructiblePayload.putArray("parts");
-    reconstructibleParts.addObject().put("text", "answer");
-    ObjectNode reconstructibleCall = reconstructibleParts.addObject().putObject("functionCall");
-    reconstructibleCall.put("name", "fn");
-    reconstructibleCall.put("id", "c1");
-    reconstructibleCall.putObject("args").put("x", 1);
-    List<ProviderContentBlock> durableBlocks =
-        List.of(
-            new ProviderTextBlock("answer"),
-            new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{\"x\":1}")));
+    ProviderRequest request =
+        new ProviderRequest(
+            model(true),
+            DEFAULT_VARIANT,
+            1024,
+            "A different system instruction for the next turn.",
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderThinkingBlock("signed thinking"),
+                        new ProviderTextBlock("answer")),
+                    replayState)),
+            List.of(
+                new ProviderToolDefinition(
+                    "lateTool", "tool added later", "{\"type\":\"object\"}")),
+            ProviderCacheControl.none());
 
-    for (ProviderReplayState replayState :
-        List.of(
-            new ProviderReplayState(
-                ProviderReplayFormat.GEMINI_CONTENT,
-                otherAffinity,
-                dummyHash,
-                reconstructiblePayload),
-            new ProviderReplayState(
-                ProviderReplayFormat.GEMINI_CONTENT,
-                descriptor().affinity("gemini-2.5-flash"),
-                dummyHash,
-                reconstructiblePayload))) {
-      JsonNode parts = encodeWithReplay(replayState, durableBlocks).get("contents").get(1);
-      ArrayNode fallbackParts = (ArrayNode) parts.get("parts");
-      assertEquals("answer", fallbackParts.get(0).path("text").asText());
-      assertEquals("fn", fallbackParts.get(1).path("functionCall").path("name").asText());
-      assertEquals(1, fallbackParts.get(1).path("functionCall").path("args").path("x").asInt());
-    }
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.get("contents").get(1).get("parts");
+    assertEquals(2, parts.size());
+    assertEquals("sig_cross_system", parts.get(0).path("thoughtSignature").asText());
   }
 
   /** 编码一次带 replay 的 assistant 消息并返回 wire 根节点（语义 fallback 路径）。 */
@@ -1366,43 +1284,10 @@ class GeminiRequestEncoderTest {
     }
   }
 
-  /** 断言该 replay 因携带 native-only part 而在 affinity/prefix 失配时 fail closed。 */
-  private void assertNativeOnlyRejected(
-      ProviderReplayState replayState, List<ProviderContentBlock> durableBlocks) {
-    ProviderRequest request =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(ProviderMessageRole.ASSISTANT, durableBlocks, replayState)),
-            List.of(),
-            ProviderCacheControl.none());
-    ProviderException error =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
-    assertEquals(
-        "native replay parts require matching affinity and source prefix hash", error.getMessage());
-  }
-
-  /** 验证同格式下 payload 内容与 durable contents 不匹配时明确失败。 */
+  /** 意图：payload 结构合法但与 durable 语义不一致（历史被改写）时绝不回放陈旧 payload，而是退回 durable 语义编码。 */
   @Test
-  void rejectsReplay_whenPayloadContentMismatchesDurable() throws Exception {
-    ProviderRequest baseReq =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
-            List.of(),
-            ProviderCacheControl.none());
-    String hash = encoder.encode(baseReq, descriptor()).sourcePrefixHash();
-
-    // 1. 文本内容不匹配
+  void fallsBackToDurableSemanticsWhenValidPayloadDiffersFromDurable() throws Exception {
+    // 1. 文本内容不一致 -> 编码 durable 文本
     ObjectNode mismatchTextPayload = MAPPER.createObjectNode();
     mismatchTextPayload.put("role", "model");
     mismatchTextPayload.putArray("parts").addObject().put("text", "tampered text");
@@ -1411,27 +1296,17 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash,
             mismatchTextPayload);
+    ArrayNode textParts =
+        (ArrayNode)
+            encodeWithReplay(replay1, List.of(new ProviderTextBlock("original text")))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(1, textParts.size());
+    assertEquals("original text", textParts.get(0).path("text").asText());
 
-    ProviderRequest req1 =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("original text")),
-                    replay1)),
-            List.of(),
-            ProviderCacheControl.none());
-
-    assertThrows(ProviderException.class, () -> encoder.encode(req1, descriptor()));
-
-    // 2. 工具调用名称不匹配
+    // 2. 工具调用名称不一致 -> 编码 durable 工具调用
     ObjectNode mismatchToolPayload = MAPPER.createObjectNode();
     mismatchToolPayload.put("role", "model");
     ObjectNode fnPart = mismatchToolPayload.putArray("parts").addObject().putObject("functionCall");
@@ -1442,26 +1317,19 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash,
             mismatchToolPayload);
-
-    ProviderRequest req2 =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
+    ArrayNode callParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    replay2,
                     List.of(
-                        new ProviderToolCallBlock(new ProviderToolCall("c1", "tool_real", "{}"))),
-                    replay2)),
-            List.of(),
-            ProviderCacheControl.none());
-
-    assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor()));
+                        new ProviderToolCallBlock(new ProviderToolCall("c1", "tool_real", "{}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(1, callParts.size());
+    assertEquals("tool_real", callParts.get(0).path("functionCall").path("name").asText());
+    assertEquals("c1", callParts.get(0).path("functionCall").path("id").asText());
   }
 
   /** 验证未声明 reasoningEffort（null 协议默认）时完全不生成 thinkingConfig。 */
@@ -2032,10 +1900,9 @@ class GeminiRequestEncoderTest {
     assertEquals("invalid JSON block in tool result", ex2.getMessage());
   }
 
-  /** 验证连续 TOOL 与 USER 消息合并在同一 wire user content 中，sourcePrefixHash 与实际构建的 wire contents 一致。 */
+  /** 验证连续 TOOL 与 USER 消息合并在同一 wire user content 中，且顺序与 functionResponse 绑定保持一致。 */
   @Test
-  void sourcePrefixHash_mergesConsecutiveToolAndUserMessages_consistentWithWireContents()
-      throws Exception {
+  void mergesConsecutiveToolAndUserMessagesIntoUserContent() throws Exception {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
@@ -2081,22 +1948,15 @@ class GeminiRequestEncoderTest {
     assertEquals("toolA", parts.get(1).get("functionResponse").get("name").asText());
     assertEquals("toolB", parts.get(2).get("functionResponse").get("name").asText());
     assertEquals("Follow-up text", parts.get(3).get("text").asText());
-
-    // 验证 sourcePrefixHash 与对该 wire systemInstruction/tools/contents 计算出的 hash 100% 一致
-    String expectedHash =
-        GeminiPrefixHasher.calculateHash(json.get("systemInstruction"), null, contents);
-    assertEquals(expectedHash, encoded.sourcePrefixHash());
   }
 
   /**
-   * 验证并行 tool result 后下一轮 replay 时，相同顺序 hash 匹配并保留 thoughtSignature，顺序变化导致 hash 改变后必须 fail
-   * closed（绝不丢弃签名）。
+   * 意图：native replay 只依赖 affinity（provider/connection/wire model），前置 tool result 顺序变化不影响回放，
+   * thoughtSignature 始终原样保留。
    */
   @Test
-  void
-      replay_parallelToolResultsNextTurn_matchesHashAndPreservesThoughtSignature_failsClosedOnOrderChange()
-          throws Exception {
-    // 轮次 1：构建包含两个并行 tool result 的消息
+  void replay_parallelToolResultsNextTurn_preservesThoughtSignatureRegardlessOfPrecedingOrder()
+      throws Exception {
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Do both")));
     ProviderMessage assistantCallMsg =
@@ -2118,19 +1978,6 @@ class GeminiRequestEncoderTest {
                 new ProviderToolResultBlock(
                     "c2", "fn2", List.of(new ProviderTextBlock("res2")), false, "{}")));
 
-    ProviderRequest turn1Request =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(userMsg, assistantCallMsg, tool1Msg, tool2Msg),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest turn1Encoded = encoder.encode(turn1Request, descriptor());
-    String turn1FrozenHash = turn1Encoded.sourcePrefixHash();
-
     // 构造模型输出的带 thought/thoughtSignature 的 assistant 回放状态
     ObjectNode replayPayload = MAPPER.createObjectNode();
     replayPayload.put("role", "model");
@@ -2139,14 +1986,12 @@ class GeminiRequestEncoderTest {
     thoughtPart.put("text", "thinking about 1 and 2");
     thoughtPart.put("thought", true);
     thoughtPart.put("thoughtSignature", "sig_parallel_12345");
-    ObjectNode answerPart = replayedParts.addObject();
-    answerPart.put("text", "both completed successfully");
+    replayedParts.addObject().put("text", "both completed successfully");
 
     ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            turn1FrozenHash,
             replayPayload);
 
     ProviderMessage assistantWithReplay =
@@ -2157,68 +2002,41 @@ class GeminiRequestEncoderTest {
                 new ProviderTextBlock("both completed successfully")),
             replayState);
 
-    // 轮次 2A：顺序一致 (tool1, tool2) -> 应该命中 replay，保留 thoughtSignature
-    ProviderRequest turn2MatchRequest =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                userMsg,
-                assistantCallMsg,
-                tool1Msg,
-                tool2Msg,
-                assistantWithReplay,
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("next turn")))),
-            List.of(),
-            ProviderCacheControl.none());
+    for (List<ProviderMessage> toolResults :
+        List.of(List.of(tool1Msg, tool2Msg), List.of(tool2Msg, tool1Msg))) {
+      List<ProviderMessage> messages = new ArrayList<>();
+      messages.add(userMsg);
+      messages.add(assistantCallMsg);
+      messages.addAll(toolResults);
+      messages.add(assistantWithReplay);
+      messages.add(
+          new ProviderMessage(
+              ProviderMessageRole.USER, List.of(new ProviderTextBlock("next turn"))));
 
-    GeminiEncodedRequest turn2MatchEncoded = encoder.encode(turn2MatchRequest, descriptor());
-    JsonNode turn2MatchJson = MAPPER.readTree(turn2MatchEncoded.bodyUtf8Bytes());
-    ArrayNode turn2ModelParts = (ArrayNode) turn2MatchJson.get("contents").get(3).get("parts");
-    assertEquals(2, turn2ModelParts.size());
-    assertEquals("sig_parallel_12345", turn2ModelParts.get(0).get("thoughtSignature").asText());
+      ProviderRequest request =
+          new ProviderRequest(
+              model(true),
+              DEFAULT_VARIANT,
+              1024,
+              "Test system instruction.",
+              messages,
+              List.of(),
+              ProviderCacheControl.none());
 
-    // 轮次 2B：并行 tool results 顺序发生调换 (tool2, tool1) -> hash 改变，携带 thoughtSignature 的原生
-    // replayState 无法用 durable 语义等价重建，因此必须 fail closed，绝不静默丢弃签名。
-    ProviderRequest turn2ReorderedRequest =
-        new ProviderRequest(
-            model(true),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                userMsg,
-                assistantCallMsg,
-                tool2Msg, // 颠倒顺序
-                tool1Msg,
-                assistantWithReplay,
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("next turn")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException reorderedError =
-        assertThrows(
-            ProviderException.class, () -> encoder.encode(turn2ReorderedRequest, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, reorderedError.kind());
-    assertEquals(
-        "native replay parts require matching affinity and source prefix hash",
-        reorderedError.getMessage());
+      JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+      ArrayNode modelParts = (ArrayNode) json.get("contents").get(3).get("parts");
+      assertEquals(2, modelParts.size());
+      assertEquals("sig_parallel_12345", modelParts.get(0).get("thoughtSignature").asText());
+    }
   }
 
   /**
-   * 验证同为 GEMINI_CONTENT 格式的 payload，即使 affinity 或 hash 不匹配也必须先严格校验：结构损坏与 native-only
-   * part（额外成员等）都必须抛出 INVALID_REQUEST。
+   * 意图：同为 GEMINI_CONTENT 格式的 payload，无论 affinity 是否匹配，结构损坏（role 非 model、顶级注入字段）都必须
+   * INVALID_REQUEST，绝不静默吞掉。
    */
   @Test
-  void replay_validatesPayloadShapeAndFieldsStrictly_evenWhenAffinityOrHashMismatches()
-      throws Exception {
-    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    // 1. role 不是 model
+  void replay_rejectsStructurallyMalformedPayloadEvenWhenAffinityMismatches() throws Exception {
+    // 1. role 不是 model（affinity 也不匹配）
     ObjectNode payloadWrongRole = MAPPER.createObjectNode();
     payloadWrongRole.put("role", "user");
     payloadWrongRole.putArray("parts").addObject().put("text", "text");
@@ -2226,7 +2044,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("other-mismatched-model"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             payloadWrongRole);
     ProviderRequest req1 =
         new ProviderRequest(
@@ -2256,7 +2073,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            dummyHash,
             payloadInjectedTop);
     ProviderRequest req2 =
         new ProviderRequest(
@@ -2275,57 +2091,13 @@ class GeminiRequestEncoderTest {
     ProviderException ex2 =
         assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
-
-    // 3. part 内的未知字段属于 durable 无法重建的原生事实：hash 失配时必须 fail closed，
-    //    既不静默剥离该字段、也不把陈旧的原生 part 发往 wire。
-    ObjectNode payloadInjectedPart = MAPPER.createObjectNode();
-    payloadInjectedPart.put("role", "model");
-    ObjectNode p = payloadInjectedPart.putArray("parts").addObject();
-    p.put("text", "text");
-    p.put("unrecognizedField", "bad");
-    ProviderReplayState replayInjectedPart =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor().affinity("gemini-2.5-flash"),
-            dummyHash,
-            payloadInjectedPart);
-    ProviderRequest req3 =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("text")),
-                    replayInjectedPart)),
-            List.of(),
-            ProviderCacheControl.none());
-    ProviderException ex3 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req3, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
-    assertEquals(
-        "native replay parts require matching affinity and source prefix hash", ex3.getMessage());
+    assertEquals("invalid Gemini replay payload", ex2.getMessage());
   }
 
-  /** 验证回放 payload 中 tool call 的 id 与 arguments 与 durable contents 必须全一致，不一致抛出 INVALID_REQUEST。 */
+  /** 意图：payload 的 tool call id / arguments 与 durable 不一致（历史被改写）时绝不回放陈旧 payload，退回 durable 语义编码。 */
   @Test
-  void replay_validatesDurableToolCallIdAndArgumentsStrictly() throws Exception {
-    ProviderRequest baseReq =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
-            List.of(),
-            ProviderCacheControl.none());
-    String hash = encoder.encode(baseReq, descriptor()).sourcePrefixHash();
-
-    // 1. Tool Call ID 不一致
+  void replay_fallsBackWhenDurableToolCallIdOrArgumentsDiffer() throws Exception {
+    // 1. Tool Call ID 不一致 -> 编码 durable id
     ObjectNode payloadIdMismatch = MAPPER.createObjectNode();
     payloadIdMismatch.put("role", "model");
     ObjectNode fnPart1 = payloadIdMismatch.putArray("parts").addObject().putObject("functionCall");
@@ -2337,7 +2109,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash,
             payloadIdMismatch);
     ProviderRequest reqIdMismatch =
         new ProviderRequest(
@@ -2355,24 +2126,26 @@ class GeminiRequestEncoderTest {
                     replayIdMismatch)),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException ex1 =
-        assertThrows(ProviderException.class, () -> encoder.encode(reqIdMismatch, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
+    JsonNode idFallback =
+        MAPPER.readTree(encoder.encode(reqIdMismatch, descriptor()).bodyUtf8Bytes());
+    JsonNode idFn = idFallback.get("contents").get(1).get("parts").get(0).get("functionCall");
+    assertEquals("real_id", idFn.path("id").asText());
+    assertEquals("tool_fn", idFn.path("name").asText());
+    assertEquals(1, idFn.path("args").path("k").asInt());
 
-    // 2. Tool Call arguments 不一致
+    // 2. Tool Call arguments 不一致 -> 编码 durable arguments
     ObjectNode payloadArgsMismatch = MAPPER.createObjectNode();
     payloadArgsMismatch.put("role", "model");
     ObjectNode fnPart2 =
         payloadArgsMismatch.putArray("parts").addObject().putObject("functionCall");
     fnPart2.put("name", "tool_fn");
     fnPart2.put("id", "real_id");
-    fnPart2.putObject("args").put("k", 999); // args 不一致
+    fnPart2.putObject("args").put("k", 999);
 
     ProviderReplayState replayArgsMismatch =
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash,
             payloadArgsMismatch);
     ProviderRequest reqArgsMismatch =
         new ProviderRequest(
@@ -2390,9 +2163,10 @@ class GeminiRequestEncoderTest {
                     replayArgsMismatch)),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException ex2 =
-        assertThrows(ProviderException.class, () -> encoder.encode(reqArgsMismatch, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
+    JsonNode argsFallback =
+        MAPPER.readTree(encoder.encode(reqArgsMismatch, descriptor()).bodyUtf8Bytes());
+    JsonNode argsFn = argsFallback.get("contents").get(1).get("parts").get(0).get("functionCall");
+    assertEquals(1, argsFn.path("args").path("k").asInt());
   }
 
   /** 验证工具定义的 inputSchemaJson 必须是 JSON Object，非 Object 时抛出 INVALID_REQUEST。 */
@@ -2691,19 +2465,18 @@ class GeminiRequestEncoderTest {
   /** 验证 Replay Payload 结构边界校验（必须为 Object、parts 数组、每个 part 的类型与合法字段）。 */
   @Test
   void replay_validatesPayloadStructureAndPartsExhaustively() {
-    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     // 1. parts 不是 Array
     ObjectNode p1 = MAPPER.createObjectNode();
     p1.put("role", "model");
     p1.put("parts", "not_an_array");
-    assertReplayInvalid(p1, List.of(new ProviderTextBlock("text")), dummyHash);
+    assertReplayInvalid(p1, List.of(new ProviderTextBlock("text")));
 
     // 2. parts 元素不是 Object
     ObjectNode p2 = MAPPER.createObjectNode();
     p2.put("role", "model");
     p2.putArray("parts").add(12345);
-    assertReplayInvalid(p2, List.of(new ProviderTextBlock("text")), dummyHash);
+    assertReplayInvalid(p2, List.of(new ProviderTextBlock("text")));
 
     // 3. part 同时包含 text 和 functionCall
     ObjectNode p3 = MAPPER.createObjectNode();
@@ -2711,19 +2484,13 @@ class GeminiRequestEncoderTest {
     ObjectNode item3 = p3.putArray("parts").addObject();
     item3.put("text", "text");
     item3.putObject("functionCall").put("name", "fn");
-    assertReplayInvalid(p3, List.of(new ProviderTextBlock("text")), dummyHash);
+    assertReplayInvalid(p3, List.of(new ProviderTextBlock("text")));
 
-    // 4. part 既没有 text 也没有 functionCall
-    ObjectNode p4 = MAPPER.createObjectNode();
-    p4.put("role", "model");
-    p4.putArray("parts").addObject().put("dummy", true);
-    assertReplayInvalid(p4, List.of(new ProviderTextBlock("text")), dummyHash);
-
-    // 5. text part 中 text 不是 string
+    // 4. text part 中 text 不是 string
     ObjectNode p5 = MAPPER.createObjectNode();
     p5.put("role", "model");
     p5.putArray("parts").addObject().put("text", 123);
-    assertReplayInvalid(p5, List.of(new ProviderTextBlock("123")), dummyHash);
+    assertReplayInvalid(p5, List.of(new ProviderTextBlock("123")));
 
     // 6. text part 中 thought 不是 boolean
     ObjectNode p6 = MAPPER.createObjectNode();
@@ -2731,7 +2498,7 @@ class GeminiRequestEncoderTest {
     ObjectNode item6 = p6.putArray("parts").addObject();
     item6.put("text", "think");
     item6.put("thought", "not_a_boolean");
-    assertReplayInvalid(p6, List.of(new ProviderThinkingBlock("think")), dummyHash);
+    assertReplayInvalid(p6, List.of(new ProviderThinkingBlock("think")));
 
     // 7. text part 中 thoughtSignature 不是 string 或为空白字符串
     ObjectNode p7 = MAPPER.createObjectNode();
@@ -2740,7 +2507,7 @@ class GeminiRequestEncoderTest {
     item7.put("text", "think");
     item7.put("thought", true);
     item7.put("thoughtSignature", 999);
-    assertReplayInvalid(p7, List.of(new ProviderThinkingBlock("think")), dummyHash);
+    assertReplayInvalid(p7, List.of(new ProviderThinkingBlock("think")));
 
     ObjectNode p7b = MAPPER.createObjectNode();
     p7b.put("role", "model");
@@ -2748,14 +2515,14 @@ class GeminiRequestEncoderTest {
     item7b.put("text", "think");
     item7b.put("thought", true);
     item7b.put("thoughtSignature", "   ");
-    assertReplayInvalid(p7b, List.of(new ProviderThinkingBlock("think")), dummyHash);
+    assertReplayInvalid(p7b, List.of(new ProviderThinkingBlock("think")));
 
     // 8. functionCall part 中 functionCall 不是 object
     ObjectNode p8 = MAPPER.createObjectNode();
     p8.put("role", "model");
     p8.putArray("parts").addObject().put("functionCall", "not_an_object");
     assertReplayInvalid(
-        p8, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p8, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     // 9. functionCall part 顶级混入未授权字段
     ObjectNode p9 = MAPPER.createObjectNode();
@@ -2764,7 +2531,7 @@ class GeminiRequestEncoderTest {
     item9.putObject("functionCall").put("name", "fn");
     item9.put("extraField", "bad");
     assertReplayInvalid(
-        p9, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p9, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     // 10. functionCall part 带有非 textual 或 blank 的 thoughtSignature
     ObjectNode p10 = MAPPER.createObjectNode();
@@ -2773,7 +2540,7 @@ class GeminiRequestEncoderTest {
     item10.putObject("functionCall").put("name", "fn");
     item10.put("thoughtSignature", 12345);
     assertReplayInvalid(
-        p10, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p10, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     ObjectNode p10b = MAPPER.createObjectNode();
     p10b.put("role", "model");
@@ -2781,9 +2548,7 @@ class GeminiRequestEncoderTest {
     item10b.putObject("functionCall").put("name", "fn");
     item10b.put("thoughtSignature", "");
     assertReplayInvalid(
-        p10b,
-        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
-        dummyHash);
+        p10b, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     // 11. functionCall 缺少 name 或 name 不是 textual
     ObjectNode p11 = MAPPER.createObjectNode();
@@ -2791,7 +2556,7 @@ class GeminiRequestEncoderTest {
     ObjectNode item11 = p11.putArray("parts").addObject().putObject("functionCall");
     item11.put("name", 123);
     assertReplayInvalid(
-        p11, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p11, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     // 12. functionCall 的 id 不是 textual
     ObjectNode p12 = MAPPER.createObjectNode();
@@ -2800,9 +2565,7 @@ class GeminiRequestEncoderTest {
     item12.put("name", "fn");
     item12.put("id", 123);
     assertReplayInvalid(
-        p12,
-        List.of(new ProviderToolCallBlock(new ProviderToolCall("123", "fn", "{}"))),
-        dummyHash);
+        p12, List.of(new ProviderToolCallBlock(new ProviderToolCall("123", "fn", "{}"))));
 
     // 13. functionCall 的 args 不是 object
     ObjectNode p13 = MAPPER.createObjectNode();
@@ -2811,7 +2574,7 @@ class GeminiRequestEncoderTest {
     item13.put("name", "fn");
     item13.put("args", "[1, 2]");
     assertReplayInvalid(
-        p13, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p13, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
 
     // 14. functionCall 内部混入未知字段
     ObjectNode p14 = MAPPER.createObjectNode();
@@ -2820,52 +2583,72 @@ class GeminiRequestEncoderTest {
     item14.put("name", "fn");
     item14.put("unknownField", "bad");
     assertReplayInvalid(
-        p14, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))), dummyHash);
+        p14, List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))));
   }
 
-  /** 验证 Replay Payload 与 durable 内容比较时的分支覆盖（thinking 不一致、call 数量不一致、durable 非法 block）。 */
+  /**
+   * 意图：payload 与 durable 语义一致性判定：text/thinking/tool 语义被改写时退回 durable 语义编码；payload 结构损坏或 durable
+   * 含不支持 block 时明确拒绝。
+   */
   @Test
-  void replay_validatesDurableEquivalenceBranches() {
-    String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    // 1. Thinking 不一致
+  void replay_durableEquivalenceBranches() throws Exception {
+    // 1. Thinking 不一致 -> 退回 durable 语义
     ObjectNode p1 = MAPPER.createObjectNode();
     p1.put("role", "model");
     ObjectNode item1 = p1.putArray("parts").addObject();
     item1.put("text", "payload_thinking");
     item1.put("thought", true);
-    assertReplayInvalid(
-        p1, List.of(new ProviderThinkingBlock("durable_different_thinking")), dummyHash);
+    ArrayNode thinkingParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    new ProviderReplayState(
+                        ProviderReplayFormat.GEMINI_CONTENT,
+                        descriptor().affinity("gemini-2.5-flash"),
+                        p1),
+                    List.of(new ProviderThinkingBlock("durable_different_thinking")))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(1, thinkingParts.size());
+    assertEquals("durable_different_thinking", thinkingParts.get(0).path("text").asText());
+    assertTrue(thinkingParts.get(0).path("thought").asBoolean());
 
-    // 2. Tool Calls 数量不一致
+    // 2. Tool Calls 数量不一致 -> 退回 durable 语义
     ObjectNode p2 = MAPPER.createObjectNode();
     p2.put("role", "model");
     ObjectNode item2 = p2.putArray("parts").addObject().putObject("functionCall");
     item2.put("name", "fn1");
-    assertReplayInvalid(
-        p2,
-        List.of(
-            new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")),
-            new ProviderToolCallBlock(new ProviderToolCall("c2", "fn2", "{}"))),
-        dummyHash);
+    item2.putObject("args");
+    ArrayNode durableCallParts =
+        (ArrayNode)
+            encodeWithReplay(
+                    new ProviderReplayState(
+                        ProviderReplayFormat.GEMINI_CONTENT,
+                        descriptor().affinity("gemini-2.5-flash"),
+                        p2),
+                    List.of(
+                        new ProviderToolCallBlock(new ProviderToolCall("c1", "fn1", "{}")),
+                        new ProviderToolCallBlock(new ProviderToolCall("c2", "fn2", "{}"))))
+                .get("contents")
+                .get(1)
+                .get("parts");
+    assertEquals(2, durableCallParts.size());
+    assertEquals("c1", durableCallParts.get(0).path("functionCall").path("id").asText());
+    assertEquals("c2", durableCallParts.get(1).path("functionCall").path("id").asText());
 
-    // 3. Durable 内容中包含不支持的 block (例如 ProviderDocumentBlock)
+    // 3. Durable 内容中包含不支持的 block (例如 ProviderDocumentBlock) -> 拒绝
     ObjectNode p3 = MAPPER.createObjectNode();
     p3.put("role", "model");
     p3.putArray("parts").addObject().put("text", "txt");
     assertReplayInvalid(
-        p3,
-        List.of(new ProviderDocumentBlock("application/pdf", "https://example.com/doc.pdf")),
-        dummyHash);
+        p3, List.of(new ProviderDocumentBlock("application/pdf", "https://example.com/doc.pdf")));
   }
 
-  private void assertReplayInvalid(
-      ObjectNode payload, List<ProviderContentBlock> durable, String hash) {
+  private void assertReplayInvalid(ObjectNode payload, List<ProviderContentBlock> durable) {
     ProviderReplayState replayState =
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("gemini-2.5-flash"),
-            hash,
             payload);
     ProviderRequest request =
         new ProviderRequest(
@@ -2928,7 +2711,6 @@ class GeminiRequestEncoderTest {
           new ProviderReplayState(
               ProviderReplayFormat.GEMINI_CONTENT,
               descriptor().affinity("gemini-2.5-flash"),
-              "0000000000000000000000000000000000000000000000000000000000000000",
               validPayload);
       ProviderRequest reqDurableBad =
           new ProviderRequest(
@@ -2965,7 +2747,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("mismatched-model"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             payloadMissingArgs);
     ProviderRequest reqMissingArgs =
         new ProviderRequest(
@@ -2998,7 +2779,6 @@ class GeminiRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor().affinity("mismatched-model"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             payloadArrayArgs);
     ProviderRequest reqArrayArgs =
         new ProviderRequest(
