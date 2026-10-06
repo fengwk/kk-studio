@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
@@ -13,6 +13,7 @@ import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLa
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { environmentService } from '@/shared/api/environment-service'
+import { useApplicationEvents } from '@/shared/app-events'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -20,6 +21,33 @@ import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+
+/**
+ * 状态截止点回读的容差：越过截止点一个很小的余量再回读，避免与服务端时钟在边界上竞争。
+ *
+ * 它是「一次回读」的容差而非轮询周期：每个截止点只排一次，截止点变化才会重排。
+ */
+const STATUS_EXPIRY_RECHECK_SLACK_MS = 250
+
+/** 权威列表里最早的状态截止时间（毫秒）；没有任何可解析的截止时间时为 null。 */
+function earliestStatusExpiresAt(cards: EnvironmentCardDTO[]): number | null {
+  let earliest: number | null = null
+  for (const card of cards) {
+    if (card.statusExpiresAt == null) {
+      continue
+    }
+    const at = typeof card.statusExpiresAt === 'number'
+      ? card.statusExpiresAt
+      : Date.parse(card.statusExpiresAt)
+    if (!Number.isFinite(at)) {
+      continue
+    }
+    if (earliest == null || at < earliest) {
+      earliest = at
+    }
+  }
+  return earliest
+}
 
 function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; limit?: number }) {
   const clean = names.map((name) => name.trim()).filter(Boolean)
@@ -48,6 +76,7 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
 export function EnvironmentsPage() {
   const { t, locale } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
 
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -63,16 +92,57 @@ export function EnvironmentsPage() {
   const [manageTarget, setManageTarget] = useState<EnvironmentCardDTO | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
+  const invalidateEnvironments = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
+  }, [queryClient])
+
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
-    refetchInterval: 10_000,
   })
+
+  // 环境事实（注册表与连接租约，含心跳续租、断线与注销）由服务端在提交后推送 changed：
+  // 只提示回读权威列表，因此不再用固定轮询掩盖状态变化；subscribed（首订与重连重订阅）
+  // 与 resync 同样回读，关闭断线窗口。
+  useEffect(
+    () =>
+      applicationEvents.subscribe(
+        { kind: 'environments' },
+        {
+          onSubscribed: invalidateEnvironments,
+          onEvent: (name) => {
+            if (name === 'changed') {
+              invalidateEnvironments()
+            }
+          },
+          onResync: invalidateEnvironments,
+        },
+      ),
+    [applicationEvents, invalidateEnvironments],
+  )
 
   const environments = useMemo(
     () => filterEnvironments(environmentsQuery.data ?? [], ''),
     [environmentsQuery.data],
   )
+
+  // 连接失效是时间事实，不是写入事实：服务端已给出每个有效状态的截止时间，这里只按最早的截止点排一次回读，
+  // 不轮询、也不维护客户端过期集合。心跳续租或任何 changed 推送更新权威数据后，这个定时器会被取消并按新截止点重排；
+  // 回读得到 OFFLINE（statusExpiresAt 为 null）后自然停止。
+  const statusExpiresAt = useMemo(
+    () => earliestStatusExpiresAt(environmentsQuery.data ?? []),
+    [environmentsQuery.data],
+  )
+
+  useEffect(() => {
+    if (statusExpiresAt == null) {
+      return
+    }
+    // 截止点只是状态成立的上界：稍微越过它再回读，避免与服务端时钟在边界上竞争。
+    const delay = Math.max(statusExpiresAt - Date.now(), 0) + STATUS_EXPIRY_RECHECK_SLACK_MS
+    const timer = setTimeout(invalidateEnvironments, delay)
+    return () => clearTimeout(timer)
+  }, [statusExpiresAt, invalidateEnvironments])
 
   const createMutation = useMutation({
     mutationFn: async (name: string) => {

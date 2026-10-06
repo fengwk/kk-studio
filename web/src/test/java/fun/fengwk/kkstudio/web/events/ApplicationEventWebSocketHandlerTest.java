@@ -82,7 +82,14 @@ class ApplicationEventWebSocketHandlerTest {
     when(projectInvalidationHub.subscribe(any(), any())).thenReturn(() -> {});
     hub =
         new ApplicationEventHub(
-            threadVersionSource, realtimeSource, canvasVersionSource, projectInvalidationHub, 512);
+            threadVersionSource,
+            realtimeSource,
+            canvasVersionSource,
+            projectInvalidationHub,
+            new ExecutionTreeChangeHub(),
+            new InteractionChangeHub(),
+            new EnvironmentChangeHub(),
+            512);
     rebuildHandler(DEFAULT_SENDER_CAPACITY);
   }
 

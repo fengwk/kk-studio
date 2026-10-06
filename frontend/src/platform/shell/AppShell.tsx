@@ -1,23 +1,51 @@
 import { Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { PageContribution } from '@/platform/extensions/types'
 import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
 import { interactionService } from '@/shared/api/interaction-service'
+import { useApplicationEvents } from '@/shared/app-events'
 import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+const PENDING_INTERACTIONS_LIMIT = 50
+
+/**
+ * 全局待处理角标：读服务端给出的真实 total，绝不用首页长度或本地累加假装全局计数。
+ *
+ * 待处理事实变化只由服务端事件提示（含真实执行根），因此这里没有轮询：changed 只回读角标查询，
+ * resync/subscribed（首订与每次重连重订阅）同样回读，关闭断线期间的状态窗口。
+ */
 function usePendingInteractionsCount(): number {
+  const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const { data } = useQuery({
-    queryKey: queryKeys.interactions.list(null, null, 50),
-    queryFn: () => interactionService.listInteractions(null, null, 50),
+    queryKey: queryKeys.interactions.list(null, null, PENDING_INTERACTIONS_LIMIT),
+    queryFn: () => interactionService.listInteractions(null, null, PENDING_INTERACTIONS_LIMIT),
     staleTime: 5000,
   })
-  return data?.items?.length ?? 0
+  useEffect(() => {
+    const invalidate = () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all })
+    }
+    return applicationEvents.subscribe(
+      { kind: 'interactions' },
+      {
+        onSubscribed: invalidate,
+        onEvent: (name) => {
+          if (name === 'changed') {
+            invalidate()
+          }
+        },
+        onResync: invalidate,
+      },
+    )
+  }, [applicationEvents, queryClient])
+  return data?.total ?? 0
 }
 
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */

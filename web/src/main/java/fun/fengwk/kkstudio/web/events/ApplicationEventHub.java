@@ -17,9 +17,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游：Thread 使用 version + realtime source，Canvas 使用 version source，Projects 使用全局失效
+ * <p>每个资源只有一组共享上游：Thread 使用 version + realtime source，Canvas 使用 version
+ * source，Projects、Interactions、 Environments 使用全局失效 source，Tree 使用按执行根的失效
  * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
- * 游标（全局失效资源固定为 0）。
+ * 游标（全局提示型资源固定为 0，无持久游标的 Tree 资源同样为 0）。
  *
  * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
  * #lifecycleFence} 只把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的
@@ -34,24 +35,39 @@ final class ApplicationEventHub implements AutoCloseable {
   enum ResourceKind {
     THREAD,
     CANVAS,
-    PROJECTS
+    PROJECTS,
+    TREE,
+    INTERACTIONS,
+    ENVIRONMENTS
   }
 
   record ResourceKey(ResourceKind kind, UUID id) {
     public ResourceKey {
       kind = Objects.requireNonNull(kind, "kind");
-      if ((kind == ResourceKind.THREAD || kind == ResourceKind.CANVAS) && id == null) {
+      if (requiresId(kind) && id == null) {
         throw new NullPointerException("id");
       }
-      if (kind == ResourceKind.PROJECTS && id != null) {
+      if (!requiresId(kind) && id != null) {
         throw new IllegalArgumentException("global resource must not have an id");
       }
+    }
+
+    private static boolean requiresId(ResourceKind kind) {
+      return kind == ResourceKind.THREAD
+          || kind == ResourceKind.CANVAS
+          || kind == ResourceKind.TREE;
     }
   }
 
   /** 投递给传输层的资源信号。 */
   sealed interface Signal
-      permits Signal.Version, Signal.Realtime, Signal.ProjectChanged, Signal.Resync {
+      permits Signal.Version,
+          Signal.Realtime,
+          Signal.ProjectChanged,
+          Signal.TreeChanged,
+          Signal.InteractionsChanged,
+          Signal.EnvironmentChanged,
+          Signal.Resync {
     record Version(String version) implements Signal {}
 
     record Realtime(RealtimeEvent event) implements Signal {}
@@ -61,6 +77,19 @@ final class ApplicationEventHub implements AutoCloseable {
         projectId = Objects.requireNonNull(projectId, "projectId");
       }
     }
+
+    /** 该根的执行树需要回读；资源本身已带根 id。 */
+    record TreeChanged() implements Signal {}
+
+    /** 执行根的待处理交互需要回读（全局资源，data 携带真实执行根）。 */
+    record InteractionsChanged(UUID rootThreadId) implements Signal {
+      public InteractionsChanged {
+        rootThreadId = Objects.requireNonNull(rootThreadId, "rootThreadId");
+      }
+    }
+
+    /** Environment 连接状态需要回读（全局资源）。 */
+    record EnvironmentChanged() implements Signal {}
 
     record Resync() implements Signal {}
   }
@@ -88,6 +117,9 @@ final class ApplicationEventHub implements AutoCloseable {
   private final RealtimeEventSource realtimeSource;
   private final CanvasVersionEventSource canvasVersionSource;
   private final ProjectInvalidationHub projectInvalidationHub;
+  private final InvalidationEventSource executionTreeChangeSource;
+  private final InvalidationEventSource interactionChangeSource;
+  private final InvalidationEventSource environmentChangeSource;
   private final int maxBufferedSignals;
   private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
 
@@ -109,12 +141,21 @@ final class ApplicationEventHub implements AutoCloseable {
       RealtimeEventSource realtimeSource,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
+      InvalidationEventSource executionTreeChangeSource,
+      InvalidationEventSource interactionChangeSource,
+      InvalidationEventSource environmentChangeSource,
       int maxBufferedSignals) {
     this.threadVersionSource = Objects.requireNonNull(threadVersionSource, "threadVersionSource");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
     this.projectInvalidationHub =
         Objects.requireNonNull(projectInvalidationHub, "projectInvalidationHub");
+    this.executionTreeChangeSource =
+        Objects.requireNonNull(executionTreeChangeSource, "executionTreeChangeSource");
+    this.interactionChangeSource =
+        Objects.requireNonNull(interactionChangeSource, "interactionChangeSource");
+    this.environmentChangeSource =
+        Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     if (maxBufferedSignals <= 0) {
       throw new IllegalArgumentException("maxBufferedSignals must be positive");
     }
@@ -226,6 +267,39 @@ final class ApplicationEventHub implements AutoCloseable {
           projectInvalidationHub.subscribe(
               projectId -> fanout(state, new Signal.ProjectChanged(projectId)),
               () -> fanout(state, new Signal.Resync()));
+      case TREE -> {
+        SourceSubscribed subscribed =
+            executionTreeChangeSource.subscribe(
+                state.key.id(), event -> fanoutInvalidation(state, event));
+        state.invalidationHandle = subscribed.handle();
+        state.cursor = subscribed.cursor();
+      }
+      case INTERACTIONS -> {
+        SourceSubscribed subscribed =
+            interactionChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
+        state.invalidationHandle = subscribed.handle();
+        state.cursor = subscribed.cursor();
+      }
+      case ENVIRONMENTS -> {
+        SourceSubscribed subscribed =
+            environmentChangeSource.subscribe(null, event -> fanoutInvalidation(state, event));
+        state.invalidationHandle = subscribed.handle();
+        state.cursor = subscribed.cursor();
+      }
+    }
+  }
+
+  /** 提示型资源的信号只做「按资源种类回读」：resync 一律整体替换，其余按资源坐标系落成最小失效信号。 */
+  private void fanoutInvalidation(ResourceState state, InvalidationEventSource.Event event) {
+    if (event.resync()) {
+      fanout(state, new Signal.Resync());
+      return;
+    }
+    switch (state.key.kind()) {
+      case TREE -> fanout(state, new Signal.TreeChanged());
+      case INTERACTIONS -> fanout(state, new Signal.InteractionsChanged(event.key()));
+      case ENVIRONMENTS -> fanout(state, new Signal.EnvironmentChanged());
+      default -> throw new IllegalStateException("unexpected invalidation resource: " + state.key);
     }
   }
 

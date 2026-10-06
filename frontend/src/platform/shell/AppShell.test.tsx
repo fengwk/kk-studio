@@ -1,16 +1,18 @@
 import userEvent from '@testing-library/user-event'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Bot, FolderKanban, Grid2X2, Inbox, Settings } from 'lucide-react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApplicationExtensionHost } from '@/app/extension-host'
 import { AppShell } from '@/platform/shell/AppShell'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { interactionService } from '@/shared/api/interaction-service'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 
 const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
@@ -75,17 +77,21 @@ function renderShell(
     defaultOptions: { queries: { retry: false } },
   })
   const navItems = options?.navItems ?? FIXTURE_NAV_ITEMS
-  return render(
+  const sockets = new FakeWebSocketHarness()
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ExtensionHostProvider host={host}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <AppShell navItems={navItems} pages={options?.pages}>
-            {children}
-          </AppShell>
-        </MemoryRouter>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <AppShell navItems={navItems} pages={options?.pages}>
+              {children}
+            </AppShell>
+          </MemoryRouter>
+        </ApplicationEventProvider>
       </ExtensionHostProvider>
     </QueryClientProvider>,
   )
+  return { ...view, sockets }
 }
 
 describe('AppShell chat immersive routes', () => {
@@ -378,39 +384,67 @@ describe('AppShell locale selector', () => {
 })
 
 describe('AppShell interactions pending badge and navigation behaviors', () => {
-  it('renders pending count badge when interaction items exist in QueryClient', async () => {
+  // 每个用例前还原 spy：spyOn 会复用同一 mock 实例，若不还原，上一个用例的调用次数与一次性返回值
+  // 会污染下一个用例的精确调用次数断言（这里不放松断言，只隔离用例状态）。
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('renders the server-provided true pending total instead of the page length', async () => {
+    // 测试意图：全局角标必须读服务端给出的真实待处理总数，不能用首页长度假装全局计数。
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValueOnce({
       items: [
         {
-          id: 'int-1',
+          interactionId: 'int-1',
+          status: 'WAITING_INPUT',
           threadId: 'th-1',
-          type: 'CONFIRMATION',
-          status: 'PENDING',
-          title: 'Confirm',
-          prompt: 'Please confirm',
-          owner: { type: 'CHAT', chatId: 'c-1' },
-          createdAt: '2026-01-01T00:00:00Z',
+          rootThreadId: 'th-1',
+          sessionId: 'sess-1',
+          owner: { type: 'CHAT', chatId: 'c-1', issueId: null, agentName: null },
+          toolCallId: 'call-1',
+          toolName: 'ask_user',
+          argumentsJson: '{}',
+          approvalJson: null,
+          createTime: '2026-01-01T00:00:00Z',
         },
-        {
-          id: 'int-2',
-          threadId: 'th-1',
-          type: 'CONFIRMATION',
-          status: 'PENDING',
-          title: 'Confirm 2',
-          prompt: 'Please confirm 2',
-          owner: { type: 'CHAT', chatId: 'c-1' },
-          createdAt: '2026-01-01T00:00:00Z',
-        },
-      ] as never,
+      ],
       nextCursor: null,
+      total: 7,
     })
 
     renderShell('/chats')
     await waitFor(() => {
-      const badge = screen.getByLabelText('2 pending')
+      const badge = screen.getByLabelText('7 pending')
       expect(badge).toBeInTheDocument()
-      expect(badge).toHaveTextContent('2')
+      expect(badge).toHaveTextContent('7')
     })
+  })
+
+  it('refetches the pending badge on a committed pending change event', async () => {
+    // 测试意图：pending 变化只由服务端事件提示回读，因此角标不需要轮询也能及时更新。
+    const listSpy = vi
+      .spyOn(interactionService, 'listInteractions')
+      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 0 })
+      .mockResolvedValueOnce({ items: [], nextCursor: null, total: 3 })
+
+    const { sockets } = renderShell('/chats')
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(1))
+    expect(screen.queryByLabelText('3 pending')).not.toBeInTheDocument()
+    const socket = sockets.openLatest()
+
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: { kind: 'interactions' },
+        name: 'changed',
+        data: { rootThreadId: '11111111-2222-4333-8444-555555555555' },
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('3 pending')).toBeInTheDocument()
+    })
+    expect(listSpy).toHaveBeenCalledTimes(2)
   })
 
   it('closes navigation drawer on brand link click and nav item click', async () => {

@@ -1,6 +1,3 @@
-/** 活跃树轮询间隔。根面板挂载即查询，与根本地是否空闲无关。 */
-export const ACTIVE_THREAD_TREE_REFETCH_INTERVAL_MS = 5_000
-
 /** 仅 IDLE 且回合已结束时由后端给出的终态；未知字符串不视为成功。 */
 const THREAD_OUTCOMES = ['COMPLETED', 'FAILED', 'STOPPED', 'CANCELLED'] as const
 

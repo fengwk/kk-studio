@@ -27,6 +27,11 @@ class EventFrameCodecTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
   private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
+  private static final ResourceKey TREE_KEY = new ResourceKey(ResourceKind.TREE, THREAD);
+  private static final ResourceKey INTERACTIONS_KEY =
+      new ResourceKey(ResourceKind.INTERACTIONS, null);
+  private static final ResourceKey ENVIRONMENTS_KEY =
+      new ResourceKey(ResourceKind.ENVIRONMENTS, null);
   private static final EventFrameCodec CODEC = new EventFrameCodec(new RealtimeEventJsonCodec());
 
   @Test
@@ -47,6 +52,23 @@ class EventFrameCodecTest {
         new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, PROJECTS_KEY),
         CODEC.decode(
             "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
+    // 执行树按真实根 id 订阅；交互与 Environment 是无 id 的全局资源。
+    assertEquals(
+        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, TREE_KEY),
+        CODEC.decode(
+            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    assertEquals(
+        new EventFrameCodec.ClientFrame(
+            EventFrameCodec.ClientFrame.Type.SUBSCRIBE, INTERACTIONS_KEY),
+        CODEC.decode(
+            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}"));
+    assertEquals(
+        new EventFrameCodec.ClientFrame(
+            EventFrameCodec.ClientFrame.Type.SUBSCRIBE, ENVIRONMENTS_KEY),
+        CODEC.decode(
+            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
   }
 
   @Test
@@ -143,6 +165,14 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () -> CODEC.decode(prefix + "{\"kind\":\"projects\",\"id\":\"" + THREAD + "\"}}"));
     assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(prefix + "{\"kind\":\"interactions\",\"id\":\"" + THREAD + "\"}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(prefix + "{\"kind\":\"environments\",\"id\":\"" + THREAD + "\"}}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"tree\"}}"));
+    assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(prefix + "{\"kind\":\"thread\"}}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(prefix + "\"nope\"}"));
   }
@@ -183,8 +213,22 @@ class EventFrameCodecTest {
     assertEquals(
         "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
         CODEC.subscribed(PROJECTS_KEY, 0L));
+    assertEquals(
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+            + THREAD
+            + "\"},\"cursor\":\"0\"}",
+        CODEC.subscribed(TREE_KEY, 0L));
+    assertEquals(
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"interactions\"},\"cursor\":\"0\"}",
+        CODEC.subscribed(INTERACTIONS_KEY, 0L));
+    assertEquals(
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"environments\"},\"cursor\":\"0\"}",
+        CODEC.subscribed(ENVIRONMENTS_KEY, 0L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_KEY, -1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(PROJECTS_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(TREE_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(INTERACTIONS_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(ENVIRONMENTS_KEY, 1L));
   }
 
   @Test
@@ -222,6 +266,36 @@ class EventFrameCodecTest {
             + projectId
             + "\"}}",
         CODEC.event(PROJECTS_KEY, new Signal.ProjectChanged(projectId)));
+
+    // 提示型资源：执行树/Environment 的 data 为空对象（标识只在 resource），交互携带真实执行根。
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+            + THREAD
+            + "\"},\"name\":\"changed\",\"data\":{}}",
+        CODEC.event(TREE_KEY, new Signal.TreeChanged()));
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"environments\"},\"name\":\"changed\",\"data\":{}}",
+        CODEC.event(ENVIRONMENTS_KEY, new Signal.EnvironmentChanged()));
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"interactions\"},\"name\":\"changed\",\"data\":{\"rootThreadId\":\""
+            + THREAD
+            + "\"}}",
+        CODEC.event(INTERACTIONS_KEY, new Signal.InteractionsChanged(THREAD)));
+  }
+
+  @Test
+  void hintSignalsRequireTheirOwnResourceKind() {
+    assertThrows(
+        IllegalArgumentException.class, () -> CODEC.event(PROJECTS_KEY, new Signal.TreeChanged()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.event(TREE_KEY, new Signal.EnvironmentChanged()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.event(TREE_KEY, new Signal.InteractionsChanged(THREAD)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.event(INTERACTIONS_KEY, new Signal.TreeChanged()));
   }
 
   @Test
