@@ -16,6 +16,7 @@ import { announceTranscriptReading } from '@/features/ai/runtime/transcript-read
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
+import './tool-card.css'
 
 /**
  * 统一工具卡片外壳：一张卡片只有 Header、必要的调用内容与结果内容。
@@ -72,7 +73,6 @@ export function ToolMessageBlock({
     ? (approval?.reason ? `${approvalState} — ${approval.reason}` : approvalState)
     : null
   const errorNotice = view.errorText
-    ?? (view.hasError ? t('ai.runtime.message.toolFailed') : undefined)
   const bodyTexts = view.contents.flatMap((content) =>
     content.type === 'text' ? [content.text] : []
   )
@@ -95,8 +95,8 @@ export function ToolMessageBlock({
             <span className="thread-tool-summary">
               <span className="thread-tool-name">{view.summary.name}</span>
               {view.summary.detail ? (
-                // 单行 compact：完整原文留在 DOM 中可选中复制，超宽部分横向滚动
-                // （tabIndex 让键盘也能滚动这段参数区）。
+                // 参数在可用宽度内折行：完整原文留在 DOM 中可选中复制，不横向滚动，
+                // 也不撑破 pane（tabIndex 让键盘可聚焦这段参数区）。
                 <span className="thread-tool-summary-detail" tabIndex={0}>
                   {view.summary.detail}
                 </span>

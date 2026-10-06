@@ -362,9 +362,9 @@ class ReadWriteEditCapabilitiesTest {
     assertTrue(fragment2.startsWith("🚀"), "续读必须从完整码点开始");
   }
 
-  /** 验证 column_offset 参数校验、与 limit>1 并存，以及对目录/图片的确定性拒绝。 */
+  /** 验证 column_offset 参数校验、与 limit>1 并存，以及对目录/图片忽略合法值。 */
   @Test
-  void readColumnOffsetValidationAndRejections() throws Exception {
+  void readColumnOffsetValidationAndNonTextTargets() throws Exception {
     Path file = workdir.resolve("valid.txt");
     Files.writeString(file, "content\nmore\n");
     Path dir = workdir.resolve("sub-dir");
@@ -395,25 +395,25 @@ class ReadWriteEditCapabilitiesTest {
     assertTrue(zeroOffset.error());
     assertTrue(text(zeroOffset).contains("column_offset must be a positive integer"));
 
-    // 3. 目录请求指定 column_offset 被拒绝
+    // 3. 目录请求指定合法 column_offset 被忽略：按目录语义正常返回
     EnvironmentCapabilityResult dirRes =
         invoke(
             read,
             "{\"path\":\"sub-dir\",\"column_offset\":1,\"workdir\":"
                 + json(workdir.toString())
                 + "}");
-    assertTrue(dirRes.error());
-    assertTrue(text(dirRes).contains("column_offset is only supported for text files"));
+    assertFalse(dirRes.error(), text(dirRes));
+    assertTrue(text(dirRes).contains("kind: directory"), text(dirRes));
 
-    // 4. 图片请求指定 column_offset 被拒绝
+    // 4. 图片请求指定合法 column_offset 被忽略：仍按二进制资源返回
     EnvironmentCapabilityResult imgRes =
         invoke(
             read,
             "{\"path\":\"sample.png\",\"column_offset\":1,\"workdir\":"
                 + json(workdir.toString())
                 + "}");
-    assertTrue(imgRes.error());
-    assertTrue(text(imgRes).contains("column_offset is only supported for text files"));
+    assertFalse(imgRes.error());
+    assertEquals("image/png", ((BinaryResultContent) imgRes.contents().getFirst()).mediaType());
 
     // 5. 显式 null limit 携带 column_offset 时被 InputNormalizer 静默归一化为缺省（limit 默认 2000），正常读取成功
     EnvironmentCapabilityResult nullLimit =

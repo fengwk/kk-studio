@@ -142,14 +142,24 @@ export function toolDefaultExpanded({
   mediaDefault?: boolean
 }): boolean {
   const normalizedName = toolName.trim().toLowerCase()
+  // 失败事实优先于 read 的媒体默认值：错误结果默认展开，不让 read 分支把错误藏起来；
+  // 但空白 Text 不构成可展开正文（避免只展开一个空框）。
+  if (hasError && hasMeaningfulContents(contents)) {
+    return true
+  }
   if (BODY_VISIBLE_BY_DEFAULT_TOOLS.has(normalizedName)) {
     return true
   }
   if (normalizedName === 'read') {
     return mediaDefault
   }
-  // 失败结果默认展开完整事实；未知/MCP 的成功结果仍默认折叠。
-  return hasError && contents.length > 0
+  // 未知/MCP 的成功结果默认折叠。
+  return false
+}
+
+/** 结果内容是否包含可展示的非空事实：空/空白 Text 不算有意义正文。 */
+function hasMeaningfulContents(contents: ToolContent[]): boolean {
+  return contents.some((content) => content.type !== 'text' || content.text.trim() !== '')
 }
 
 /**

@@ -469,6 +469,11 @@ class ReadCapabilityTest {
     assertTrue(nulResult.error());
     assertTrue(text(nulResult).contains("binary"), text(nulResult));
 
+    // 普通（非图片）二进制仍拒绝：column_offset 对文本窗口无影响，也不能把二进制洗成文本。
+    EnvironmentCapabilityResult nulWithColumn = read("nul.txt", ",\"column_offset\":2");
+    assertTrue(nulWithColumn.error());
+    assertTrue(text(nulWithColumn).contains("binary"), text(nulWithColumn));
+
     Files.write(workdir.resolve("control.bin"), new byte[] {'h', 'i', 1, 2, 3});
     EnvironmentCapabilityResult controlResult = read("control.bin", "");
     assertTrue(controlResult.error());
@@ -530,9 +535,9 @@ class ReadCapabilityTest {
         text(bridged));
   }
 
-  /** 目录保持独立语义：分页缺省与上限都是 2000，且拒绝 column_offset。 */
+  /** 目录保持独立语义：分页缺省与上限都是 2000，且忽略文本专用的 column_offset。 */
   @Test
-  void directoryPaginationDefaultsToTwoThousandAndRejectsColumnOffset() throws Exception {
+  void directoryPaginationDefaultsToTwoThousandAndIgnoresColumnOffset() throws Exception {
     assertEquals(2000, TextReadWindow.DEFAULT_LIMIT);
     assertEquals(2000, TextReadWindow.MAX_LIMIT);
     assertEquals(60000, TextReadWindow.MAX_BODY_CODE_POINTS);
@@ -554,11 +559,11 @@ class ReadCapabilityTest {
     assertTrue(
         text(overLimit).contains("limit must be a positive integer <= 2000"), text(overLimit));
 
-    EnvironmentCapabilityResult withColumn = read("listing", ",\"column_offset\":1");
-    assertTrue(withColumn.error());
-    assertTrue(
-        text(withColumn).contains("column_offset is only supported for text files"),
-        text(withColumn));
+    // 合法 column_offset 对目录无意义：忽略而不是报错，清单结果与不带该参数一致。
+    EnvironmentCapabilityResult withColumn = read("listing", ",\"column_offset\":1,\"limit\":2");
+    assertFalse(withColumn.error(), text(withColumn));
+    assertTrue(text(withColumn).contains("kind: directory"), text(withColumn));
+    assertTrue(text(withColumn).contains("Showing entries 1-2 of 3"), text(withColumn));
   }
 
   /**
@@ -596,9 +601,9 @@ class ReadCapabilityTest {
     assertFalse(secondOutput.contains("Showing entries"), secondOutput);
   }
 
-  /** 图片仍是二进制语义，并同样拒绝文本专用的 column_offset。 */
+  /** 图片仍是二进制语义，并忽略文本专用的 column_offset。 */
   @Test
-  void imageResultsStayBinaryAndRejectColumnOffset() throws Exception {
+  void imageResultsStayBinaryAndIgnoreColumnOffset() throws Exception {
     Files.write(
         workdir.resolve("pic.png"),
         new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3});
@@ -608,11 +613,11 @@ class ReadCapabilityTest {
     assertTrue(image.contents().getFirst() instanceof BinaryResultContent);
     assertEquals("image/png", ((BinaryResultContent) image.contents().getFirst()).mediaType());
 
+    // 合法 column_offset 对受支持图片无意义：忽略而不是报错，仍按二进制资源返回。
     EnvironmentCapabilityResult withColumn = read("pic.png", ",\"column_offset\":1");
-    assertTrue(withColumn.error());
-    assertTrue(
-        text(withColumn).contains("column_offset is only supported for text files"),
-        text(withColumn));
+    assertFalse(withColumn.error());
+    assertTrue(withColumn.contents().getFirst() instanceof BinaryResultContent);
+    assertEquals("image/png", ((BinaryResultContent) withColumn.contents().getFirst()).mediaType());
   }
 
   /** 窗口参数先于文件系统访问校验：参数错误不能被 ENOENT 掩盖。 */

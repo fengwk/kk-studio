@@ -430,6 +430,26 @@ describe('toolDefaultExpanded', () => {
       hasError: true,
     })).toBe(false)
   })
+
+  it('lets a meaningful error body win over the read media default', () => {
+    // 失败优先于 read 的媒体默认值：错误文本结果默认展开，不让 read 分支把错误藏起来。
+    expect(toolDefaultExpanded({
+      toolName: 'read',
+      contents: [{ type: 'text', text: 'file appears to be binary' }],
+      hasError: true,
+    })).toBe(true)
+    // 空白/空 Text 不构成可展开正文：只保留错误态，不展开空框。
+    expect(toolDefaultExpanded({
+      toolName: 'read',
+      contents: [{ type: 'text', text: '  \n ' }],
+      hasError: true,
+    })).toBe(false)
+    expect(toolDefaultExpanded({
+      toolName: 'mcp__server__tool',
+      contents: [{ type: 'text', text: '\n' }],
+      hasError: true,
+    })).toBe(false)
+  })
 })
 
 describe('shouldShowErrorNotice', () => {
