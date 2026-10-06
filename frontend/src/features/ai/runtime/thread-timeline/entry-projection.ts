@@ -368,10 +368,17 @@ export function projectToolResultContent(
   argumentsJson: string,
 ): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> {
   const error = content.error === true
+  const contents = toToolContents(getRecordList(content.contents))
+  // 错误直接使用工具结果原文：不再套用通用「工具执行失败」文案；没有可展示原文时
+  // 只有错误态（hasError 仍为 true），不伪造摘要。
+  const rawError = contents
+    .flatMap((item) => (item.type === 'text' ? [item.text] : []))
+    .join('\n')
+    .trim()
   return {
     arguments: argumentsJson,
-    contents: toToolContents(getRecordList(content.contents)),
-    errorMessage: error ? translate('ai.runtime.entry.toolFailed') : undefined,
+    contents,
+    errorMessage: error && rawError ? rawError : undefined,
     status: error ? 'error' : 'done',
   }
 }

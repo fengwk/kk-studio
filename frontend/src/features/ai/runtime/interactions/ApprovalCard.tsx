@@ -6,6 +6,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import './interaction-cards.css'
 
 export interface ApprovalCardProps {
   threadId: string

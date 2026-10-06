@@ -29,7 +29,8 @@ import java.util.concurrent.ExecutorService;
  * <p>图片仍是 Resource 语义：探测到受支持的图片签名时，整文件字节作为内联 {@link BinaryResultContent} 返回，由终态编码阶段直传全局对象
  * 存储。二进制判定同样来自流式解码：非法 UTF-8 序列、NUL 字符或非法代理项立即以明确的“看似二进制文件”失败。
  *
- * <p>目录保持独立的返回语义，同样使用 {@code offset}/{@code limit} 分页，{@code limit} 默认与上限都是 2000。
+ * <p>目录保持独立的返回语义，同样使用 {@code offset}/{@code limit} 分页，{@code limit} 默认与上限都是 2000。{@code
+ * column_offset} 只约束文本：目录与受支持图片会忽略合法值，非法值仍先于文件系统访问被拒绝。
  */
 public final class ReadCapability extends AbstractCodingCapability {
 
@@ -52,15 +53,13 @@ public final class ReadCapability extends AbstractCodingCapability {
     // 窗口参数先于任何文件系统访问校验，畸形窗口不会以 ENOENT 之类的 I/O 结论掩盖参数错误。
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
     int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
+    // 非法口径仍先于任何文件系统访问校验；合法值对非文本目标（目录/图片）只是被忽略。
     Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");
     Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
     Path path = EnvironmentPaths.existing(rawPath, workdir);
     String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
 
     if (Files.isDirectory(path)) {
-      if (columnOffset != null) {
-        throw new IllegalArgumentException("column_offset is only supported for text files");
-      }
       return directoryResponse(request, args, path, displayPath, offset, limit);
     }
 
@@ -73,9 +72,6 @@ public final class ReadCapability extends AbstractCodingCapability {
 
     String imageMime = detectImageMediaType(probe);
     if (imageMime != null) {
-      if (columnOffset != null) {
-        throw new IllegalArgumentException("column_offset is only supported for text files");
-      }
       byte[] bytes = Files.readAllBytes(path);
       // 图片字节不落本地：终态编码阶段直接上传全局对象存储，wire 上只出现上传引用。
       return EnvironmentCapabilityResult.binary(request.call().id(), bytes, imageMime);
