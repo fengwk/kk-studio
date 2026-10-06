@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -31,6 +32,8 @@ function DebugPreviewHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
+        {/* 根面板的活跃子代理树与交互来源使用 ThreadLink（react-router Link）。 */}
+        <BrowserRouter>
         <div className="preview-harness-frame" data-testid="preview-harness-frame">
           <AgentPane
             paneId={PREVIEW_HARNESS_THREAD_ID}
@@ -64,6 +67,7 @@ function DebugPreviewHarnessApp() {
             ]}
           />
         </div>
+        </BrowserRouter>
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -46,6 +47,64 @@ import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 
 const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+
+/**
+ * 根控制面与上传注册表的挂载探针：包装真实实现，只统计挂载/卸载次数，不改变行为。
+ * 用于实测「子代理目标 / 身份未确认时根控制 Hook 与上传注册表根本没有创建」，
+ * 以及「绑定新根时根控制面没有被卸载重挂」，而不是只看 DOM 上有没有被禁用的按钮。
+ */
+const { controlMounts, uploadMounts } = vi.hoisted(() => ({
+  controlMounts: { mount: vi.fn(), unmount: vi.fn() },
+  uploadMounts: { mount: vi.fn(), unmount: vi.fn() },
+}))
+
+interface MountProbe {
+  mount: () => void
+  unmount: () => void
+}
+
+const resetMountProbes = () => {
+  controlMounts.mount.mockClear()
+  controlMounts.unmount.mockClear()
+  uploadMounts.mount.mockClear()
+  uploadMounts.unmount.mockClear()
+}
+
+/** 包装 Hook 里记录这一层组件的挂载与卸载（命名成 Hook 以便被包装 Hook 调用）。 */
+function useMountProbe(probe: MountProbe) {
+  useEffect(() => {
+    probe.mount()
+    return () => {
+      probe.unmount()
+    }
+  }, [probe])
+}
+
+vi.mock('@/features/ai/runtime/useRootThreadControl', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('@/features/ai/runtime/useRootThreadControl')
+  >()
+  return {
+    ...actual,
+    useRootThreadControl: (options: Parameters<typeof actual.useRootThreadControl>[0]) => {
+      useMountProbe(controlMounts)
+      return actual.useRootThreadControl(options)
+    },
+  }
+})
+
+vi.mock('@/features/ai/composer/use-attachment-uploads', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('@/features/ai/composer/use-attachment-uploads')
+  >()
+  return {
+    ...actual,
+    useAttachmentUploads: (options: Parameters<typeof actual.useAttachmentUploads>[0]) => {
+      useMountProbe(uploadMounts)
+      return actual.useAttachmentUploads(options)
+    },
+  }
+})
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
   const manager = { subscribe: vi.fn(() => vi.fn()) }
@@ -283,6 +342,44 @@ afterEach(() => {
   // 内存 Worker 只服务附件用例，不污染同文件其它用例
   vi.unstubAllGlobals()
 })
+
+/** 活跃执行树节点 DTO：根与后代共用同一形状。 */
+function treeNode(
+  threadId: string,
+  parentThreadId: string | null,
+  name: string,
+  processing: boolean,
+) {
+  return {
+    threadId,
+    parentThreadId,
+    name,
+    agentName: parentThreadId == null ? 'assistant' : 'coder',
+    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    status: processing ? 'MODEL_STREAM' : 'IDLE',
+    processing,
+    turnCount: 1,
+    toolCallCount: 0,
+    outcome: null,
+  }
+}
+
+/** 根交互汇聚里的一个待决审批（来源 Thread 可指定）。 */
+function approvalInteraction(threadId: string) {
+  return {
+    interactionId: `inv-${threadId}`,
+    status: 'WAITING_APPROVAL',
+    threadId,
+    rootThreadId: THREAD_ID,
+    sessionId: 'session-1',
+    owner: { type: 'CHAT', chatId: CHAT_ID, issueId: null, agentName: null },
+    toolCallId: 'call-bash-1',
+    toolName: 'bash',
+    argumentsJson: '{"command":"ls"}',
+    approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+    createTime: '2026-07-28T10:00:01Z',
+  }
+}
 
 describe('AgentPane orchestration', () => {
   it('sends NEW_SESSION as one atomic command-batches request', async () => {
@@ -1281,8 +1378,11 @@ describe('AgentPane orchestration', () => {
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
     vi.mocked(harnessService.renameThread).mockRejectedValueOnce(new Error('rename rejected'))
+    // 绑定目标的执行根身份由快照确认后才会挂载根控制面（Rename 入口在其中）。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
-    await user.click(screen.getByRole('button', { name: '重命名' }))
+    // 控制面在快照确认执行根身份后挂载，Rename 入口随之出现。
+    await user.click(await screen.findByRole('button', { name: '重命名' }))
     const input = await screen.findByRole('textbox', { name: '名称' })
     await user.clear(input)
     await user.type(input, 'keep me')
@@ -3787,42 +3887,6 @@ describe('AgentPane root control and child observation', () => {
     )
   }
 
-  function treeNode(
-    threadId: string,
-    parentThreadId: string | null,
-    name: string,
-    processing: boolean,
-  ) {
-    return {
-      threadId,
-      parentThreadId,
-      name,
-      agentName: parentThreadId == null ? 'assistant' : 'coder',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      status: processing ? 'MODEL_STREAM' : 'IDLE',
-      processing,
-      turnCount: 1,
-      toolCallCount: 0,
-      outcome: null,
-    }
-  }
-
-  function approvalInteraction(threadId: string) {
-    return {
-      interactionId: 'inv-child-1',
-      status: 'WAITING_APPROVAL',
-      threadId,
-      rootThreadId: THREAD_ID,
-      sessionId: 'session-1',
-      owner: { type: 'CHAT', chatId: CHAT_ID, issueId: null, agentName: null },
-      toolCallId: 'call-bash-1',
-      toolName: 'bash',
-      argumentsJson: '{"command":"ls"}',
-      approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
-      createTime: '2026-07-28T10:00:01Z',
-    }
-  }
-
   function snapshotForThread(threadId: string) {
     const isRoot = threadId === THREAD_ID
     return snapshot(thread({
@@ -3856,6 +3920,10 @@ describe('AgentPane root control and child observation', () => {
     expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'root draft kept')
+    const unmountsBeforeObservation = controlMounts.unmount.mock.calls.length
+    const targetBeforeObservation = localStorage.getItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+    )
 
     await user.click(source)
 
@@ -3868,6 +3936,10 @@ describe('AgentPane root control and child observation', () => {
     expect(layers).toHaveLength(2)
     expect(layers[0]).toHaveAttribute('hidden')
     expect(layers[0]).toHaveAttribute('inert')
+    // 意图 B（只观察）：pane 绑定目标不变、根控制面不卸载，只是同一 pane 内多了一层。
+    expect(controlMounts.unmount).toHaveBeenCalledTimes(unmountsBeforeObservation)
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`))
+      .toBe(targetBeforeObservation)
     // 隐藏的根层仍是同一个挂载实例：草稿没有被重建或丢弃。
     expect(composer.isConnected).toBe(true)
     // 隐藏的根层不持有焦点（也不被其他层抢走）：停止加载后焦点不在隐藏子树内。
@@ -3951,6 +4023,7 @@ describe('AgentPane root control and child observation', () => {
 
   it('keeps the root interaction refresh failure visible while stale cards stay actionable', async () => {
     // 有旧数据时刷新失败不能被吞掉：错误与重试可见，已取回的卡片仍然可用。
+    const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
       async (threadId: string) => snapshotForThread(threadId),
     )
@@ -3974,5 +4047,442 @@ describe('AgentPane root control and child observation', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+
+    // 重试入口真的重新拉取，而不是只显示文案。
+    const callsBeforeRetry = vi.mocked(interactionService.listInteractions).mock.calls.length
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [approvalInteraction(CHILD_THREAD_ID)],
+      nextCursor: null,
+    })
+    await user.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(vi.mocked(interactionService.listInteractions).mock.calls.length)
+      .toBeGreaterThan(callsBeforeRetry))
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+})
+
+describe('AgentPane root control mounting', () => {
+  beforeEach(resetMountProbes)
+
+  const CHILD_THREAD_ID = '22222222-3333-4444-8555-666666666666'
+  const NEW_ROOT_ID = '33333333-4444-4555-8666-777777777777'
+  const PANE_TARGET_KEY = `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`
+
+  function bindPaneTarget(target: unknown) {
+    localStorage.setItem(PANE_TARGET_KEY, JSON.stringify(target))
+  }
+
+  function childSnapshot() {
+    return snapshot(threadFixture(CHILD_THREAD_ID, {
+      name: 'worker child',
+      parentThreadId: THREAD_ID,
+    }))
+  }
+
+  it('never mounts root control for an unconfirmed bound target', async () => {
+    // 绑定目标的身份还没确认时可能是子代理：不接受任何草稿、上传与人工执行 Hook。
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(new Promise(() => {}))
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await waitFor(() =>
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID))
+    expect(controlMounts.mount).not.toHaveBeenCalled()
+    expect(controlMounts.unmount).not.toHaveBeenCalled()
+    expect(uploadMounts.mount).not.toHaveBeenCalled()
+    expect(uploadMounts.unmount).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('给 AI 发送消息')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重命名' })).not.toBeInTheDocument()
+  })
+
+  it('stays read-only with no upload registry after a delayed child snapshot arrives', async () => {
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
+    let resolveSnapshot: ((value: HarnessThreadSnapshotDTO) => void) | null = null
+    vi.mocked(harnessService.getThreadSnapshot).mockReturnValue(
+      new Promise<HarnessThreadSnapshotDTO>((resolve) => {
+        resolveSnapshot = resolve
+      }),
+    )
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() =>
+      expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID))
+
+    await act(async () => {
+      resolveSnapshot?.(childSnapshot())
+    })
+
+    expect(await screen.findByText('只读查看')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'worker child' })).toBeInTheDocument()
+    expect(controlMounts.mount).not.toHaveBeenCalled()
+    expect(controlMounts.unmount).not.toHaveBeenCalled()
+    expect(uploadMounts.mount).not.toHaveBeenCalled()
+    expect(uploadMounts.unmount).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('给 AI 发送消息')).not.toBeInTheDocument()
+  })
+
+  it('mounts root control exactly once for a confirmed execution root', async () => {
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    expect(await screen.findByLabelText('给 AI 发送消息')).toBeInTheDocument()
+    expect(controlMounts.mount).toHaveBeenCalledTimes(1)
+    expect(controlMounts.unmount).not.toHaveBeenCalled()
+    expect(uploadMounts.mount).toHaveBeenCalledTimes(1)
+    expect(uploadMounts.unmount).not.toHaveBeenCalled()
+  })
+
+  it('binds an accepted new session as a known root without waiting for the snapshot', async () => {
+    // 验收成功后绑定新根：身份来自验收快照种子，因此目标切换与执行根确认落在同一次
+    // commit，根控制面不会因为身份未知而瞬间卸载重建（快照请求此时仍未返回）。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) => {
+      if (threadId === NEW_ROOT_ID) {
+        return new Promise<HarnessThreadSnapshotDTO>(() => {})
+      }
+      return snapshot()
+    })
+
+    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, '第一句')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    expect(await screen.findByRole('heading', { name: '新会话根' })).toBeInTheDocument()
+    // 种进缓存的是权威 Thread 的完整快照 DTO（含 yoloPolicy），不是裁剪过的 Thread：
+    // 服务端快照 schema 的每个字段都在，后续投影不会读到半个对象。
+    const seeded = view.client.getQueryData<HarnessThreadSnapshotDTO>(
+      queryKeys.threads.snapshot(NEW_ROOT_ID),
+    )
+    expect(Object.keys(seeded ?? {}).sort()).toEqual([
+      'entries',
+      'manualCompaction',
+      'modelAttemptFailures',
+      'modelInvocation',
+      'queuedCommands',
+      'stopReceipts',
+      'thread',
+      'toolInvocations',
+      'version',
+    ])
+    expect(seeded?.thread.threadId).toBe(NEW_ROOT_ID)
+    expect(seeded?.thread.yoloPolicy).toEqual({ mode: 'DISABLE', rootThreadId: null })
+    expect(seeded?.version).toBe(seeded?.thread.version)
+    expect(screen.getByLabelText('给 AI 发送消息')).toBeInTheDocument()
+    expect(screen.queryByText('只读查看')).not.toBeInTheDocument()
+    // 控制面只挂载一次且没有被卸载：绑定新根没有把 RootAgentPane 卸载重挂。
+    expect(controlMounts.mount).toHaveBeenCalledTimes(1)
+    expect(controlMounts.unmount).not.toHaveBeenCalled()
+  })
+
+  it('resolves timeline resources through the pane blob adapter and degrades safely', async () => {
+    // 资源消息的下载/预览 URL 由 pane 的适配层解析；服务端缺字段时不伪造可预览 URL。
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    const resourceEntry = (entryId: string, blobId: string) => ({
+      entryId,
+      sessionId: 'session-1',
+      parentEntryId: null,
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: {
+          role: 'USER',
+          contents: [
+            { type: 'text', text: '看这张图' },
+            { type: 'resource', blobId, name: `${blobId}.png`, mediaType: 'image/png' },
+          ],
+        },
+      }),
+      createTime: '2026-07-28T10:00:00Z',
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread(), {
+      entries: [resourceEntry('user-blob-1', 'blob-1'), resourceEntry('user-blob-2', 'blob-2')],
+    }))
+
+    const defaultDownload = async () => ({ url: 'https://storage.test/blob', expiresAt: null })
+    fakeStorage.getBlobDownloadUrl.mockImplementation(async (blobId: string) => {
+      if (blobId === 'blob-1') {
+        return { url: 'https://storage.test/blob-1', mediaType: 'image/png', sizeBytes: 128, expiresAt: null }
+      }
+      // 第二个资源解析直接失败：适配层必须吞掉失败并退化为无预览。
+      throw new Error('blob-2 unavailable')
+    })
+    fakeStorage.getBlobPreviewUrl.mockImplementation(async (blobId: string) => (
+      blobId === 'blob-1'
+        ? { url: 'https://storage.test/preview-1', mediaType: 'image/png', sizeBytes: 128, expiresAt: null }
+        : (() => { throw new Error('blob-2 unavailable') })()
+    ))
+
+    try {
+      renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+      // 完整资源解析成可预览图片；解析失败的资源退化为无预览，不冒泡错误。
+      expect(await screen.findByRole('img', { name: 'blob-1.png' })).toHaveAttribute(
+        'src',
+        'https://storage.test/preview-1',
+      )
+      expect(screen.getAllByRole('img')).toHaveLength(1)
+      expect(fakeStorage.getBlobDownloadUrl).toHaveBeenCalledWith('blob-1')
+      expect(fakeStorage.getBlobDownloadUrl).toHaveBeenCalledWith('blob-2')
+    } finally {
+      fakeStorage.getBlobDownloadUrl.mockReset()
+      fakeStorage.getBlobDownloadUrl.mockImplementation(defaultDownload)
+      fakeStorage.getBlobPreviewUrl.mockReset()
+      fakeStorage.getBlobPreviewUrl.mockImplementation(async () => null)
+    }
+  })
+
+  it('recalls a queued user message through the root composer history', async () => {
+    // 根面板把自己的排队输入也交给历史游标：↑ 能直接取回排队中的那一条。
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread(), {
+      queuedCommands: [{
+        threadId: THREAD_ID,
+        sequence: '1',
+        type: 'USER_MESSAGE',
+        state: 'QUEUED',
+        idempotencyKey: 'queued-1',
+        payloadJson: JSON.stringify({
+          message: { role: 'USER', contents: [{ type: 'text', text: '排队中的输入' }] },
+        }),
+        cancelledAt: null,
+        createTime: '2026-07-28T10:00:00Z',
+      }],
+    }))
+
+    const user = userEvent.setup()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('{ArrowUp}')
+
+    await waitFor(() => expect(composer).toHaveTextContent('排队中的输入'))
+  })
+
+  it('keeps the raw thread id as the interaction source when the tree has no entry for it', async () => {
+    // 来源标识来自执行树，但绝不因此丢掉来源身份：树里查不到就显式展示原始 Thread ID。
+    const unknownSourceId = '44444444-5555-4666-8777-888888888888'
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'thread-name', false),
+    ])
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [approvalInteraction(unknownSourceId)],
+      nextCursor: null,
+    })
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    const source = await screen.findByRole('link', { name: /44444444-5555-4666-8777-888888888888/ })
+    expect(source).toHaveAttribute('title', unknownSourceId)
+    expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
+  })
+
+  it('keeps the full root interaction pagination reachable through load more', async () => {
+    const secondSourceId = '55555555-6666-4777-8888-999999999999'
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'thread-name', false),
+      treeNode(secondSourceId, THREAD_ID, 'second worker', true),
+    ])
+    vi.mocked(interactionService.listInteractions)
+      .mockResolvedValueOnce({
+        items: [approvalInteraction(CHILD_THREAD_ID)],
+        nextCursor: 'cursor-2',
+      })
+      .mockResolvedValueOnce({
+        items: [approvalInteraction(secondSourceId)],
+        nextCursor: null,
+      })
+
+    const user = userEvent.setup()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await screen.findByRole('link', { name: /second worker/ })
+    await user.click(screen.getByRole('button', { name: '加载更多' }))
+
+    // 第二页追加而不是替换，翻页入口随之消失。
+    await waitFor(() => expect(screen.getAllByRole('button', { name: '允许' })).toHaveLength(2))
+    expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
+    expect(vi.mocked(interactionService.listInteractions).mock.calls[1]?.[1]).toBe('cursor-2')
+  })
+
+  it('captures a load more failure without dropping the already loaded cards', async () => {
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'thread-name', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker child', true),
+    ])
+    vi.mocked(interactionService.listInteractions)
+      .mockResolvedValueOnce({
+        items: [approvalInteraction(CHILD_THREAD_ID)],
+        nextCursor: 'cursor-2',
+      })
+      .mockRejectedValueOnce(new Error('page two down'))
+
+    const user = userEvent.setup()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await screen.findByRole('button', { name: '允许' })
+    await user.click(screen.getByRole('button', { name: '加载更多' }))
+
+    // 翻页失败必须被呈现（不是静默丢弃），已取回的卡片仍然可用，重试入口保留。
+    expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
+    expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
+  })
+
+  it('accepts a branch goal from a NEW_THREAD_DRAFT through the same atomic batch', async () => {
+    // 草稿目标上的 Goal 与首条消息共用同一验收通道（frozen request + 绑定新根）。
+    const user = userEvent.setup()
+    bindPaneTarget({ kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1' })
+    vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
+      entryId: 'entry-1',
+      sessionId: 'session-1',
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    }])
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新分支根' })),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
+      threadId === NEW_ROOT_ID
+        ? snapshot(threadFixture(NEW_ROOT_ID, { name: '新分支根' }))
+        : snapshot())
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/goal{Enter}')
+
+    const input = await screen.findByPlaceholderText('输入分支目标（最多 2000 字符）...')
+    await user.type(input, '先把契约梳理清楚')
+    await user.click(screen.getByRole('button', { name: '设置目标' }))
+
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    const [request] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
+    expect(request.target.type).toBe('NEW_THREAD')
+    expect(JSON.stringify(request.commands)).toContain('先把契约梳理清楚')
+    expect(await screen.findByRole('heading', { name: '新分支根' })).toBeInTheDocument()
+  })
+
+  it('keeps the tree-wide Stop available and on the root when the tree query fails', async () => {
+    // 执行树读取失败既不能禁用 Stop，也不能把它指向别处：本地状态与树加载无关。
+    const user = userEvent.setup()
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+    vi.mocked(harnessService.getThreadTree).mockRejectedValue(new Error('tree down'))
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      status: 'STOPPED',
+      thread: thread({ executionControl: 'STOPPED' }),
+      stoppedThreads: [],
+    })
+
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
+    await user.click(composer)
+    await user.keyboard('/stop{Enter}')
+
+    await waitFor(() => {
+      expect(harnessService.stopThread).toHaveBeenCalledWith(
+        THREAD_ID,
+        expect.objectContaining({
+          expectedVersion: expect.any(String),
+          stopRequestId: expect.any(String),
+        }),
+      )
+    })
+  })
+
+  it('keeps an already cached new-root snapshot instead of overwriting it with the seed', async () => {
+    // 重放/其它 pane 已加载过该 Thread 时，验收不得用空 entries 的种子覆盖已有快照。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新会话根' })),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) => {
+      if (threadId === NEW_ROOT_ID) {
+        return new Promise<HarnessThreadSnapshotDTO>(() => {})
+      }
+      return snapshot()
+    })
+
+    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const cached = snapshot(threadFixture(NEW_ROOT_ID, { name: '已缓存根' }), {
+      entries: [{
+        entryId: 'cached-entry-1',
+        sessionId: 'session-1',
+        parentEntryId: null,
+        entryType: 'MESSAGE',
+        payloadJson: JSON.stringify({
+          message: { role: 'USER', contents: [{ type: 'text', text: '已有历史' }] },
+        }),
+        createTime: '2026-07-28T09:00:00Z',
+      }],
+    })
+    view.client.setQueryData(queryKeys.threads.snapshot(NEW_ROOT_ID), cached)
+
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, '第一句')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // 已确认身份来自既存缓存：标题是缓存里的名字，entries 也没有被清空。
+    expect(await screen.findByRole('heading', { name: '已缓存根' })).toBeInTheDocument()
+    const afterAccept = view.client.getQueryData<HarnessThreadSnapshotDTO>(
+      queryKeys.threads.snapshot(NEW_ROOT_ID),
+    )
+    expect(afterAccept?.thread.name).toBe('已缓存根')
+    expect(afterAccept?.entries).toHaveLength(1)
+    expect(controlMounts.mount).toHaveBeenCalledTimes(1)
+  })
+
+  it('unmounts the previous root control when the pane target switches to an unconfirmed child', async () => {
+    // 意图 A（换目标）：绑定本身变成子代理目标，旧根控制面必须卸载，草稿靠既有持久记录保留。
+    const user = userEvent.setup()
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+
+    const first = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, 'root draft stays')
+    await waitFor(async () =>
+      expect((await loadThreadDraft(THREAD_ID))?.parts)
+        .toEqual([expect.objectContaining({ type: 'text', text: 'root draft stays' })]))
+    first.unmount()
+    // 换目标时旧根控制面（含上传注册表）确实卸载；草稿已经在持久记录里。
+    expect(controlMounts.mount).toHaveBeenCalledTimes(1)
+    expect(controlMounts.unmount).toHaveBeenCalledTimes(1)
+    resetMountProbes()
+
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: CHILD_THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(childSnapshot())
+    const second = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    expect(await screen.findByText('只读查看')).toBeInTheDocument()
+    expect(controlMounts.mount).not.toHaveBeenCalled()
+    expect(controlMounts.unmount).not.toHaveBeenCalled()
+    expect(uploadMounts.mount).not.toHaveBeenCalled()
+    expect(uploadMounts.unmount).not.toHaveBeenCalled()
+    // 子代理目标不会覆盖或清掉根自己的草稿记录。
+    expect((await loadThreadDraft(THREAD_ID))?.parts)
+      .toEqual([expect.objectContaining({ type: 'text', text: 'root draft stays' })])
+    second.unmount()
+
+    bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    const restored = await screen.findByLabelText('给 AI 发送消息')
+    // 回到根：草稿从既有持久记录恢复，不需要任何额外接线。
+    await waitFor(() => expect(restored).toHaveTextContent('root draft stays'))
   })
 })

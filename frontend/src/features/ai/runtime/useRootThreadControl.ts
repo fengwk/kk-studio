@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import {
   useBoundBranchPanel,
@@ -40,6 +40,7 @@ import {
 } from '@/shared/conflict/conflict-presenter'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
+  AgentCommandBatchResponseDTO,
   AgentRuntimeOwnerDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -791,6 +792,34 @@ export function useRootThreadControl({
     ])
   }
 
+  /**
+   * 验收成功后、切目标之前把权威 Thread 状态放进 snapshot 缓存。
+   *
+   * 新接受的 Thread 一定没有 Entry（命令刚进队列），因此空 entries 就是当前真相，
+   * 随后 invalidate 会拉到完整快照。已有缓存的 Thread（重放）保持原样，不用空数据
+   * 覆盖已加载的 Entry。
+   */
+  function seedAcceptedThreadSnapshot(
+    client: QueryClient,
+    response: AgentCommandBatchResponseDTO,
+  ): void {
+    const key = queryKeys.threads.snapshot(response.thread.threadId)
+    if (client.getQueryData<HarnessThreadSnapshotDTO>(key) != null) {
+      return
+    }
+    client.setQueryData<HarnessThreadSnapshotDTO>(key, {
+      version: response.thread.version,
+      thread: response.thread,
+      entries: [],
+      queuedCommands: response.acceptedCommands,
+      modelInvocation: null,
+      toolInvocations: [],
+      modelAttemptFailures: [],
+      manualCompaction: { available: false, disabledReason: null },
+      stopReceipts: [],
+    })
+  }
+
   async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
     try {
       const response = await harnessService.acceptCommandBatch(pending.request)
@@ -810,6 +839,9 @@ export function useRootThreadControl({
       }
       generationRef.current += 1
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
+      // 先种快照、再切目标：目标切换与执行根身份落在同一次 commit，根控制面（草稿与
+      // 上传注册表）不会因为身份未知而瞬间卸载重建。
+      seedAcceptedThreadSnapshot(queryClient, response)
       targetRef.current = bound
       setTarget(bound)
       if (partsRef.current.length === 0) {

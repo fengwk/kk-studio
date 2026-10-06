@@ -58,6 +58,11 @@ function renderTree(rootId: string, currentThreadId?: string) {
   }
 }
 
+/** 执行树读取失败/加载中都不许出现“没有活跃”这类断言式空态。 */
+function containerTextAbsent(): boolean {
+  return !document.body.textContent?.includes('没有活跃')
+}
+
 describe('ActiveThreadTree', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -139,6 +144,40 @@ describe('ActiveThreadTree', () => {
       expect(screen.getByRole('alert')).toHaveTextContent('Agent 关系刷新失败')
     })
     expect(screen.getByRole('link', { name: /worker/ })).toBeInTheDocument()
+  })
+
+  it('keeps known active descendants while a refetch is still in flight', async () => {
+    // 刷新在途（loading）不能把已知的活跃后代清空成“没有活跃”：Stop 可用性与
+    // 活跃判断都不允许把加载态当成空闲。
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
+    ])
+    const { queryClient } = renderTree(ROOT_ID)
+    await screen.findByRole('link', { name: /worker/ })
+
+    let resolveTree: ((value: ReturnType<typeof treeNode>[]) => void) | null = null
+    vi.mocked(harnessService.getThreadTree).mockReturnValue(
+      new Promise((resolve) => {
+        resolveTree = resolve
+      }),
+    )
+    await act(async () => {
+      void queryClient.invalidateQueries({ queryKey: ['threads', 'tree', ROOT_ID] })
+    })
+
+    // 请求未返回：仍是已知的活跃后代，没有错误提示，也没有“没有活跃”的假象。
+    expect(screen.getByRole('link', { name: /worker/ })).toBeInTheDocument()
+    expect(screen.getByText('1 个活跃')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(containerTextAbsent()).toBe(true)
+
+    await act(async () => {
+      resolveTree?.([treeNode(ROOT_ID, null, false, 'root')])
+    })
+    await waitFor(() => {
+      expect(screen.queryByRole('link', { name: /worker/ })).not.toBeInTheDocument()
+    })
   })
 
   it('shows an explicit error and retries when the first tree query fails', async () => {
