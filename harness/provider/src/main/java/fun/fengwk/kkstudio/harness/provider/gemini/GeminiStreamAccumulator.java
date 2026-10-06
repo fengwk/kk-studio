@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -87,7 +86,6 @@ final class GeminiStreamAccumulator {
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
-  private final String frozenSourcePrefixHash;
   private final ProviderStreamBridge bridge;
 
   private final List<TrackedPart> trackedParts = new ArrayList<>();
@@ -106,14 +104,9 @@ final class GeminiStreamAccumulator {
   private String serviceTier = null;
 
   GeminiStreamAccumulator(
-      ProviderRequest request,
-      ProviderDescriptor descriptor,
-      String frozenSourcePrefixHash,
-      ProviderStreamBridge bridge) {
+      ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.frozenSourcePrefixHash =
-        Objects.requireNonNull(frozenSourcePrefixHash, "frozenSourcePrefixHash");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
@@ -530,8 +523,6 @@ final class GeminiStreamAccumulator {
     ModelUsage usage =
         this.latestUsage != null ? this.latestUsage : new ModelUsage(0L, 0L, 0L, 0L, 0L, 0L, 0L);
 
-    ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
-
     ProviderResponse response =
         new ProviderResponse(
             fullText.toString(),
@@ -539,7 +530,6 @@ final class GeminiStreamAccumulator {
             effectiveToolCalls,
             this.stopReason,
             usage,
-            cost,
             null,
             this.serviceTier,
             this.rawUsageJson);
@@ -591,7 +581,6 @@ final class GeminiStreamAccumulator {
     return new ProviderReplayState(
         ProviderReplayFormat.GEMINI_CONTENT,
         descriptor.affinity(request.model().modelId()),
-        frozenSourcePrefixHash,
         payload);
   }
 
