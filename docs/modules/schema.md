@@ -52,7 +52,7 @@ INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待�
 Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
 Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
-Work lease 成对，required_environment_id 非空仅适用于 TOOL。
+Work lease 成对，required_environment_id 非空仅适用于 TOOL。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
 应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
 
@@ -62,7 +62,7 @@ PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外�
 存储写入本身的阻断仍属于对象存储能力边界。
 
 通知只作提交后回读/唤醒提示。Thread/Canvas 版本由应用推进，数据库 trigger 根据已变化事实发提示；
-Project 写库通知由 repository 发送。恢复依赖权威行、poll 和租约，而非通知保存。
+Project 写库通知由 repository 发送。执行树、工具交互与环境另有只定位真实根的失效提示 trigger（`harness_thread_tree`、`harness_tool_interaction`、`environment_changed`），它们不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
 
 ## 修改结构
 

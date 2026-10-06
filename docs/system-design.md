@@ -231,6 +231,9 @@ attempt 与 Work ownership，提交后发布 realtime。审批和 `ask_user` 是
 详细状态机见 [Harness Runtime](modules/harness-runtime.md)，协议适配见
 [Harness Provider](modules/harness-provider.md)。
 
+模型输出把真实 `usage`（连同 stop reason 与可选流式计时）作为 durable 事实随 assistant Entry 保存，
+金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价。
+
 ### Canvas Function 与 Project Run
 
 Canvas 编辑接受 typed commands、语义组前置条件与 idempotency key，在一个短事务内
@@ -291,14 +294,17 @@ Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provid
 subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> events
 ```
 
-Thread version 与 Canvas revision 事件带 cursor；Model delta、Tool partial 和进程输出
-用于临时 overlay。事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读。
-终态从数据库读取。Canvas 展示由确认快照、待确认操作和本地草稿组成，回读保留未保存
+Thread version 与 Canvas revision 事件带 durable cursor；Thread realtime 是唯一真负载，
+Model delta、Tool partial 用于临时 overlay；交互、执行树与环境只发失效提示，客户端回读权威事实。
+事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读；Environment 的
+`statusExpiresAt` 在读取时按租约与心跳窗口派生，不做固定 poll。终态从数据库读取。
+Canvas 展示由确认快照、待确认操作和本地草稿组成，回读保留未保存
 输入。合并与恢复见 [Frontend](modules/frontend.md)，通道见 [Web](modules/web.md)。
 
 Thread Debug 区分 `NEXT_REQUEST_PREVIEW` 与 `FROZEN_INVOCATION`：前者按当前
 Branch 重新规划，后者从冻结的 ModelRequestSpec 和 EntryPath 物化实际请求。
 Debug 展示工具声明、Skill 路径与执行事件，并对凭据和私有存储地址做保密处理。
+Provider 请求预览在同一规划/物化/编码路径上按点击瞬间（历史取该输出记录时间）只读重建请求体，不等于原始发送字节。
 
 Environment 按数据类型使用四条路径：
 

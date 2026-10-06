@@ -41,9 +41,9 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth |
 | Chat | `/api/ai/chats` | CRUD 与归属 Session |
 | Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
-| Session | `/api/harness/sessions/{sessionId}` | threads、entries、name |
+| Session | `/api/harness/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
-| Interaction | `/api/interactions` | 等待分页与 `/{interactionId}/input` 人工提交 |
+| Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Harness resource | `/api/harness/resources/{sha256}` | 内容寻址 Resource 下载 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
@@ -71,7 +71,7 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 
 Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread 的产品归属拒绝。
 `GET /api/harness/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
-派生的 `thread.status` / `processing`（只描述该 Thread 自身，不递归子树）与 `stopReceipts`；
+派生的 `thread.status` / `processing`（只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
 `POST /api/harness/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
@@ -82,11 +82,15 @@ Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread
 `GET /api/harness/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`providerName` / `modelName` / `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 GET model-request-debug 返回下一次结构化预览与可空的活动冻结请求，排除 credential 和 Base64。
-POST provider-request-preview 接受与 owner-free 续写面同形的请求（path `threadId` + 精确 head/sequence，
-body 不带 owner），只读检查 READY 附件后规划并编码当前请求体。它保留命令、游标和上传未消费状态，
-且不调用 transport；可能包含内联媒体的 JSON 仅代表点击时快照。
-PREVIEW_* reason 区分 stale cursor、queued、busy、compaction、attachment、planning、
-provider、unsupported 与 encoding 拒绝；客户端按 reason 恢复。
+
+请求预览有三个只读入口：`POST /api/harness/threads/{threadId}/provider-request-preview`（owner-free 续写面，
+带精确 head/sequence）、`POST /api/harness/sessions/{sessionId}/provider-request-preview`（本地分支草稿，
+`{startEntryId,commands}`）与 `GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview`
+（历史模型输出，按该输出记录时间重建）。它们只读检查 READY 附件、复用正式规划/物化/编码器，
+不消费上传、不推进游标、不调用 transport；历史入口接受普通 assistant 输出与带真实 metadata 的压缩结果。
+`kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
+不等于原始发送字节。`PREVIEW_*` reason 区分 stale cursor、queued、busy、compaction、attachment、
+planning、provider、unsupported（仅 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
 
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
@@ -114,15 +118,18 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 ## 通知与浏览器事件
 
 [`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java)
-共享一个 PostgreSQL LISTEN 连接，路由 Work、Thread/Canvas version、Project changed、
-Settings、realtime 与 Skill 通知。建立/重连后通知每个 handler resync；
-单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
+共享一个 PostgreSQL LISTEN 连接，路由调度器唤醒（Harness Work / Issue Work / Canvas Function）、
+Thread/Canvas version、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
+建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 
-`/api/events/v1` 采用严格 version 1 帧。
-资源为 `{kind:thread|canvas,id}` 或全局 `{kind:projects}`；
-version/revision 携 cursor，Thread realtime 和 Project changed 使用各自负载。
+`/api/events/v1` 是唯一的浏览器事件通道，采用严格 version 1 帧。
+资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
+Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
+`projects` / `tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
 订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，
 过滤陈旧版本；缓冲溢出折叠为 resync。
+Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 在读取时由
+`min(leaseUntil, lastSeen + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
 非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
 
 AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
