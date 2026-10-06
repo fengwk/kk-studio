@@ -628,7 +628,7 @@ describe('thread timeline', () => {
         toolName: 'bash',
         rendererKey: 'shell-command',
         arguments: '{"command":"ls"}',
-        text: '',
+        contents: [],
         status: 'done',
       },
       {
@@ -637,7 +637,11 @@ describe('thread timeline', () => {
         toolName: 'bash',
         rendererKey: 'shell-command',
         arguments: '{"command":"ls"}',
-        text: 'ok\n{"nested":true,"n":1}\n[1,2]',
+        contents: [
+          { type: 'text', text: 'ok' },
+          { type: 'json', value: '{"nested":true,"n":1}' },
+          { type: 'json', value: '[1,2]' },
+        ],
         status: 'done',
       },
     ])
@@ -703,7 +707,7 @@ describe('thread timeline', () => {
       phase: 'call',
       status: 'streaming',
       invocationId: 'inv-1',
-      partial: 'streaming partial output',
+      partialContents: [{ type: 'text', text: 'streaming partial output' }],
       approval: { required: true, decision: null, decisionId: null },
     })
   })
@@ -783,14 +787,14 @@ describe('thread timeline', () => {
       status: 'done',
     })
     expect(calls[0]).not.toHaveProperty('invocationId')
-    expect(calls[0]).not.toHaveProperty('partial')
+    expect(calls[0]).not.toHaveProperty('partialContents')
     expect(calls[0]).not.toHaveProperty('approval')
     expect(calls[1]).toMatchObject({
       subjectEntryId: '41',
       toolCallId: 'call-1',
       status: 'streaming',
       invocationId: 'inv-2',
-      partial: 'second-turn partial output',
+      partialContents: [{ type: 'text', text: 'second-turn partial output' }],
       approval: { required: true, decision: null, decisionId: null },
     })
   })
@@ -959,7 +963,7 @@ describe('thread timeline', () => {
     })
     // attempt 不一致的 overlay 不投影 partial / partialErrorText（builder 显式
     // 赋 undefined own property，因此用 toBeUndefined 断言）。
-    expect(call?.partial).toBeUndefined()
+    expect(call?.partialContents).toBeUndefined()
     expect(call?.partialErrorText).toBeUndefined()
   })
 
@@ -1012,9 +1016,9 @@ describe('thread timeline', () => {
       invocationId: 'inv-done',
     })
     // 终态 result 到达后，同 attempt 的旧 partial 不再覆盖最终正文。
-    expect(call?.partial).toBeUndefined()
+    expect(call?.partialContents).toBeUndefined()
     expect(timeline.messages.find((message) => message.role === 'tool' && message.phase === 'result'))
-      .toMatchObject({ text: 'ok', status: 'done' })
+      .toMatchObject({ contents: [{ type: 'text', text: 'ok' }], status: 'done' })
   })
 
   it('deduplicates tool invocations by assistantEntryId:callIndex identity', () => {
@@ -1057,7 +1061,7 @@ describe('thread timeline', () => {
       approval: { required: true, decision: null, decisionId: null },
     })
     // 第二条 invocation 未命中（byDurableIdentity 去重），overlay 无 partial。
-    expect(call?.partial).toBeUndefined()
+    expect(call?.partialContents).toBeUndefined()
   })
 
   it('skips overlay when invocation rendererKey disagrees with the durable call', () => {
@@ -1135,12 +1139,27 @@ describe('thread timeline', () => {
     const tools = timeline.messages.filter((message) => message.role === 'tool')
     expect(tools).toMatchObject([
       { phase: 'call', toolCallId: 'call-ok', status: 'done', threadId: 'thread-1' },
-      { phase: 'result', toolCallId: 'call-ok', text: 'listed files', status: 'done' },
+      {
+        phase: 'result',
+        toolCallId: 'call-ok',
+        contents: [
+          { type: 'text', text: 'listed files' },
+          expect.objectContaining({ type: 'resource' }),
+        ],
+        status: 'done',
+      },
       { phase: 'call', toolCallId: 'call-ask', status: 'streaming', threadId: 'thread-1' },
     ])
-    expect(tools[1]?.role === 'tool' ? tools[1].attachments : []).toHaveLength(1)
+    // 有序内容：文本在前、资源在后，不被压平成「全部文本 + 全部附件」。
+    expect(tools[1]?.role === 'tool' ? tools[1].contents : []).toEqual([
+      { type: 'text', text: 'listed files' },
+      expect.objectContaining({
+        type: 'resource',
+        attachment: expect.objectContaining({ name: 'out.txt', mime: 'text/plain' }),
+      }),
+    ])
     const waiting = tools.find((message) => message.toolCallId === 'call-ask')
-    expect(waiting?.role === 'tool' ? waiting.partial : 'present').toBeUndefined()
+    expect(waiting?.role === 'tool' ? waiting.partialContents : ['present']).toBeUndefined()
     expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
   })
 
@@ -1181,7 +1200,12 @@ describe('thread timeline', () => {
     )
     expect(failed.messages.filter((message) => message.role === 'tool')).toMatchObject([
       { toolCallId: 'call-error', phase: 'call', status: 'error' },
-      { toolCallId: 'call-error', phase: 'result', status: 'error', text: 'rejected' },
+      {
+        toolCallId: 'call-error',
+        phase: 'result',
+        status: 'error',
+        contents: [{ type: 'text', text: 'rejected' }],
+      },
       { toolCallId: 'call-failed', phase: 'call', status: 'error' },
       { toolCallId: 'call-failed', phase: 'result', status: 'error' },
       { toolCallId: 'call-unknown', phase: 'call', status: 'error' },
@@ -1240,10 +1264,18 @@ describe('thread timeline', () => {
     )
     expect(current).toMatchObject([
       { phase: 'call', callIdentity: 'B:0', status: 'done' },
-      { phase: 'result', callIdentity: 'B:0', text: 'current output', status: 'done' },
+      {
+        phase: 'result',
+        callIdentity: 'B:0',
+        contents: [{ type: 'text', text: 'current output' }],
+        status: 'done',
+      },
     ])
     expect(timeline.messages.filter((message) => message.role === 'tool' && message.phase === 'result')
-      .map((message) => message.text)).toEqual(['old output', 'current output'])
+      .map((message) => message.contents)).toEqual([
+      [{ type: 'text', text: 'old output' }],
+      [{ type: 'text', text: 'current output' }],
+    ])
   })
 
   it('does not exchange results between reused ids or different call indexes', () => {
@@ -1289,17 +1321,25 @@ describe('thread timeline', () => {
     expect(timeline.messages.filter((message) => message.role === 'tool')).toMatchObject([
       { phase: 'call', callIdentity: 'A:0' },
       { phase: 'call', callIdentity: 'A:1' },
-      { phase: 'result', callIdentity: 'A:0', text: 'first output' },
-      { phase: 'result', callIdentity: 'A:1', text: 'second output' },
+      { phase: 'result', callIdentity: 'A:0', contents: [{ type: 'text', text: 'first output' }] },
+      { phase: 'result', callIdentity: 'A:1', contents: [{ type: 'text', text: 'second output' }] },
       { phase: 'call', callIdentity: 'B:0' },
       { phase: 'call', callIdentity: 'B:1', status: 'error', errorMessage: 'disk full' },
-      { phase: 'result', callIdentity: 'B:1', text: 'current second', status: 'error', errorMessage: 'disk full' },
-      { phase: 'result', callIdentity: 'B:0', text: 'current first' },
+      {
+        phase: 'result',
+        callIdentity: 'B:1',
+        contents: [{ type: 'text', text: 'current second' }],
+        status: 'error',
+        errorMessage: 'disk full',
+      },
+      { phase: 'result', callIdentity: 'B:0', contents: [{ type: 'text', text: 'current first' }] },
     ])
     expect(timeline.messages.some((message) =>
       message.role === 'tool' && message.id.startsWith('transient:tool-result:inv-b0'))).toBe(false)
     expect(timeline.messages.filter((message) =>
-      message.role === 'tool' && message.text === 'first output')).toHaveLength(1)
+      message.role === 'tool'
+      && message.contents.some((content) => content.type === 'text' && content.text === 'first output'),
+    )).toHaveLength(1)
   })
 
   it('replaces a transient invocation result with the durable result and keeps a later success', () => {
@@ -1333,18 +1373,21 @@ describe('thread timeline', () => {
         text: 'stale partial',
         error: true,
         errorText: 'temporary',
-        attachments: [{ type: 'file', name: 'stale.txt', mime: 'text/plain', data: 'file:///tmp/stale.txt' }],
         createdAt: '2026-07-28T10:00:01Z',
       }]]),
     )
     const tools = timeline.messages.filter((message) => message.role === 'tool')
     expect(tools).toMatchObject([
       { phase: 'call', status: 'done', callIdentity: '40:0' },
-      { phase: 'result', text: 'durable final', status: 'done', callIdentity: '40:0' },
+      {
+        phase: 'result',
+        contents: [{ type: 'text', text: 'durable final' }],
+        status: 'done',
+        callIdentity: '40:0',
+      },
     ])
     expect(tools[0]?.role === 'tool' ? tools[0].partial : 'present').toBeUndefined()
     expect(tools[0]?.role === 'tool' ? tools[0].partialErrorText : 'present').toBeUndefined()
-    expect(tools[0]?.role === 'tool' ? tools[0].partialAttachments : ['present']).toBeUndefined()
     expect(tools.filter((message) => message.phase === 'result')).toHaveLength(1)
     expect(tools.some((message) => message.id.startsWith('transient:tool-result:'))).toBe(false)
   })

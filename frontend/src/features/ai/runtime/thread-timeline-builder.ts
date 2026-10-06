@@ -275,8 +275,7 @@ function projectStreamingToolCalls(messages: DialogueMessage[], stream: Realtime
       toolName,
       rendererKey: draft.name.trim(),
       arguments: draft.argumentsJson,
-      text: '',
-      attachments: [],
+      contents: [],
       createdAt: stream.createdAt,
       status: stream.status === 'streaming' ? 'streaming' : 'done',
     })
@@ -365,11 +364,10 @@ function projectInvocationOverlays(
       invocationId: invocation.id,
       // environmentId 是环境路由身份，绝不能当作审批目标 Thread。
       threadId: threadId || undefined,
-      // 终态结果已经可见时，旧 partial 不能再盖过正文、附件或错误。
-      partial: terminalResult == null && overlay?.text ? overlay.text : undefined,
-      partialAttachments:
-        terminalResult == null && overlay?.attachments && overlay.attachments.length > 0
-          ? overlay.attachments
+      // 终态结果已经可见时，旧 partial 不能再盖过正文和错误。
+      partialContents:
+        terminalResult == null && overlay?.text
+          ? [{ type: 'text', text: overlay.text }]
           : undefined,
       partialErrorText: terminalResult == null ? overlay?.errorText : undefined,
       approval: approval?.required ? approval : undefined,
@@ -408,15 +406,14 @@ function projectInvocationOverlays(
 function terminalInvocationResult(
   invocation: ToolInvocationDTO,
   call: ToolDialogueMessage,
-): Pick<ToolDialogueMessage, 'arguments' | 'text' | 'attachments' | 'errorMessage' | 'status'> | null {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> | null {
   if (invocation.resultJson != null) {
     return projectToolResultContent(parsePayload(invocation.resultJson), call.arguments)
   }
   if (invocation.errorJson != null || isFailedInvocationStatus(invocation.status)) {
     return {
       arguments: call.arguments,
-      text: '',
-      attachments: [],
+      contents: [],
       errorMessage: translate('ai.runtime.entry.toolFailed'),
       status: 'error',
     }

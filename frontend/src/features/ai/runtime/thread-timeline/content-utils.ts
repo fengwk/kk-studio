@@ -2,6 +2,7 @@ import { asRecord, getString } from '@/features/ai/runtime/payload-json'
 import type {
   ToolAttachment,
   ToolAttachmentType,
+  ToolContent,
   TurnUsage,
 } from '@/features/ai/runtime/thread-timeline-types'
 import { apiBaseUrl } from '@/shared/api/client'
@@ -18,6 +19,75 @@ export function contentText(content: Record<string, unknown>): string {
     return stringifyJsonContent(content.json)
   }
   return ''
+}
+
+/**
+ * 规范的 Tool content -> 有序展示内容。
+ *
+ * 只有非空 text、显式 json 字段与合法 resource 会保留；思考等其它类型不进入工具展示。
+ * resource 的 URI/名称/媒体类型原样保留，媒体 URL 只在渲染时解析或直接使用 data:。
+ */
+export function toToolContent(content: Record<string, unknown>): ToolContent | null {
+  const type = getString(content.type)
+  if (type === 'text') {
+    const text = getString(content.text)
+    return text ? { type: 'text', text } : null
+  }
+  if (type === 'json') {
+    return 'json' in content ? { type: 'json', value: content.json } : null
+  }
+  const attachment = toResourceAttachment(content)[0]
+  return attachment ? { type: 'resource', attachment } : null
+}
+
+/** 投影一组规范 Tool contents，保持顺序并丢弃空内容。 */
+export function toToolContents(contents: readonly Record<string, unknown>[]): ToolContent[] {
+  const projected: ToolContent[] = []
+  for (const content of contents) {
+    const item = toToolContent(content)
+    if (item != null) {
+      projected.push(item)
+    }
+  }
+  return projected
+}
+
+/**
+ * json 内容的紧凑文本：字符串值先按 JSON 解析（规范 codec 两种形态都会出现），
+ * 无法解析时按原字符串处理。用于把 JSON 结果交给只读解析器。
+ */
+export function jsonContentText(value: unknown): string {
+  const encoded = JSON.stringify(normalizeJsonValue(value))
+  return encoded === undefined ? String(normalizeJsonValue(value)) : encoded
+}
+
+/** json 内容的格式化正文：仅在结果声明为 json 时缩进展示，纯文本绝不猜测。 */
+export function formatJsonContent(value: unknown): string {
+  const normalized = normalizeJsonValue(value)
+  if (typeof normalized === 'string') {
+    return normalized
+  }
+  try {
+    const encoded = JSON.stringify(normalized, null, 2)
+    return encoded === undefined ? String(normalized) : encoded
+  } catch {
+    return String(normalized)
+  }
+}
+
+function normalizeJsonValue(value: unknown): unknown {
+  if (typeof value !== 'string') {
+    return value
+  }
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return value
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return value
+  }
 }
 
 /** 规范的 Tool delta：对 object/array 类型的 json 值进行序列化而非丢弃。 */
