@@ -53,20 +53,22 @@ export interface ToolRendererAttachment {
   downloadHref?: string
 }
 
-/** Tool renderer contribution 的只读展示模型；approval 与状态机操作仍由宿主块负责。 */
+/** 有序 Tool 结果内容：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染。 */
+export type ToolRendererContent =
+  | { type: 'text'; text: string }
+  | { type: 'json'; value: unknown }
+  | { type: 'resource'; attachment: ToolRendererAttachment }
+
+/** Tool renderer contribution 的只读展示模型；审批与状态机操作仍由宿主块负责。 */
 export interface ToolRendererMessage {
   rendererKey: string
   phase: ToolRendererPhase
-  text: string
+  contents: ToolRendererContent[]
   toolCallId: string
   toolName: string
   arguments: string
-  attachments: ToolRendererAttachment[]
   status?: ToolRendererStatus
   errorMessage?: string
-  partialAttachments?: ToolRendererAttachment[]
-  partialErrorText?: string
-  partial?: string
 }
 
 export interface ToolRendererProps {
@@ -75,18 +77,12 @@ export interface ToolRendererProps {
   expanded?: boolean
 }
 
-export type ToolRendererExpandabilityResolver = (
-  call: ToolRendererMessage | undefined,
-  result: ToolRendererMessage | undefined,
-) => boolean
-
 /**
  * id 必须与后端 ToolDescriptor 冻结的 rendererKey 精确相同；未注册时由宿主回退到默认 renderer。
+ * 展开/收起由宿主按有序内容统一裁决，contribution 不再声明可展开性。
  */
 export interface ToolRendererContribution extends Contribution {
   component: ComponentType<ToolRendererProps>
-  /** 专属 renderer 是否存在收起态未展示的内容；未提供时由宿主使用默认文本策略判断。 */
-  isExpandable?: ToolRendererExpandabilityResolver
 }
 
 /**

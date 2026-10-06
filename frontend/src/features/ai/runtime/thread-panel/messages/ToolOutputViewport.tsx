@@ -1,34 +1,56 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 /**
- * Tool 输出默认限制为五行；文本本身已由展示策略裁剪，因此不创建嵌套纵向滚动区，
- * 鼠标滚轮始终交给外层 transcript。
+ * 工具静态正文的唯一只读视口。
+ *
+ * - 有界高度 + 内部滚动：长内容不撑高外层 transcript；
+ * - `overscroll-behavior: contain` 让内部回看不把外层卡片滚走；
+ * - 持续日志默认跟随底部，用户上滚立即暂停，回到底部再恢复；
+ * - 键盘可聚焦，触屏原生滚动。
  */
 export function ToolOutputViewport({
-  text,
+  children,
+  followKey,
   className = '',
-  maxLines,
+  ariaLabel,
 }: {
-  text: string
+  children: ReactNode
+  /** 内容签名；变化时若仍在跟随则贴底。 */
+  followKey: string
   className?: string
-  maxLines?: number | null
+  ariaLabel?: string
 }) {
-  const resolvedMaxLines = maxLines === undefined ? 5 : maxLines
-  const style = resolvedMaxLines == null
-    ? undefined
-    : { '--thread-tool-output-lines': resolvedMaxLines } as CSSProperties
+  const elementRef = useRef<HTMLPreElement>(null)
+  const followRef = useRef(true)
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (!element) {
+      return
+    }
+    const onScroll = () => {
+      followRef.current =
+        element.scrollHeight - element.scrollTop - element.clientHeight <= 1
+    }
+    element.addEventListener('scroll', onScroll, { passive: true })
+    return () => element.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    const element = elementRef.current
+    if (element != null && followRef.current) {
+      element.scrollTop = element.scrollHeight
+    }
+  }, [followKey])
 
   return (
     <pre
-      className={[
-        'thread-tool-pre',
-        'thread-tool-output',
-        resolvedMaxLines == null ? 'is-expanded' : '',
-        className,
-      ].filter(Boolean).join(' ')}
-      style={style}
+      ref={elementRef}
+      className={['thread-tool-pre', 'thread-tool-output', className].filter(Boolean).join(' ')}
+      tabIndex={0}
+      aria-label={ariaLabel}
     >
-      {text}
+      {children}
     </pre>
   )
 }

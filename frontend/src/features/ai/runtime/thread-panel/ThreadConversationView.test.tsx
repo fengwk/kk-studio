@@ -29,6 +29,16 @@ function messages(count: number): DialogueMessage[] {
   )
 }
 
+/** 末尾仍未完成的 assistant 消息：唯一允许高度变化补贴底的流式状态。 */
+function streamingMessages(count: number): DialogueMessage[] {
+  const list = messages(count)
+  const tail = list[list.length - 1]
+  if (tail) {
+    list[list.length - 1] = { ...tail, status: 'streaming' }
+  }
+  return list
+}
+
 function dialogue() {
   return document.querySelector<HTMLElement>('.thread-dialogue')!
 }
@@ -37,10 +47,14 @@ function renderView(bodyRef: React.RefObject<HTMLDivElement | null>, props: {
   messageCount?: number
   initialScrollTop?: number | null
   resetKey?: string | null
+  streaming?: boolean
 } = {}) {
+  const buildMessages = () => props.streaming
+    ? streamingMessages(props.messageCount ?? 2)
+    : messages(props.messageCount ?? 2)
   const element = (
     <ThreadConversationView
-      messages={messages(props.messageCount ?? 2)}
+      messages={buildMessages()}
       loading={false}
       error={null}
       bodyRef={bodyRef}
@@ -50,10 +64,13 @@ function renderView(bodyRef: React.RefObject<HTMLDivElement | null>, props: {
   )
   const view = render(element)
   return {
-    rerender(props: { messageCount?: number; initialScrollTop?: number | null; resetKey?: string | null } = {}) {
+    rerender(props: { messageCount?: number; initialScrollTop?: number | null; resetKey?: string | null; streaming?: boolean } = {}) {
+      const nextMessages = props.streaming === true
+        ? streamingMessages(props.messageCount ?? 2)
+        : messages(props.messageCount ?? 2)
       view.rerender(
         <ThreadConversationView
-          messages={messages(props.messageCount ?? 2)}
+          messages={nextMessages}
           loading={false}
           error={null}
           bodyRef={bodyRef}
@@ -144,18 +161,18 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('does not let a resize callback override a small scroll toward history', () => {
+  it('does not let a resize callback override a small scroll toward history while streaming', () => {
     const originalResizeObserver = globalThis.ResizeObserver
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    let triggerResize: (target: Element) => void = () => {
+    let triggerResize: (target: Element, height?: number) => void = () => {
       throw new Error('ResizeObserver was not created')
     }
     class ControllableResizeObserver {
       constructor(callback: ResizeObserverCallback) {
-        triggerResize = (target) => {
+        triggerResize = (target, height = 700) => {
           callback(
-            [{ target } as ResizeObserverEntry],
+            [{ target, contentRect: { height } } as unknown as ResizeObserverEntry],
             this as unknown as ResizeObserver,
           )
         }
@@ -176,16 +193,103 @@ describe('ThreadConversationView', () => {
       scrollHeightSpy.mockReturnValue(600)
       clientHeightSpy.mockReturnValue(200)
       const bodyRef = createRef<HTMLDivElement>()
-      renderView(bodyRef)
+      renderView(bodyRef, { streaming: true })
 
       dialogue().scrollTop = 400
       fireEvent.scroll(dialogue())
       dialogue().scrollTop = 390
       fireEvent.scroll(dialogue())
 
-      // 模拟移动手势期间并发的容器尺寸回调，不能重新拉到底部。
+      // 流式期间并发的容器尺寸回调，也不能覆盖用户的历史回看手势。
       triggerResize(dialogue())
       expect(dialogue().scrollTop).toBe(390)
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('re-sticks when the container settles after the first resize report', () => {
+    // 懒渲染回合、字体与媒体落地会让高度在首个 ResizeObserver 回调之后才稳定。
+    // 与 observe 时基线不同的尺寸必须重新贴底，不能被当成「初始回调」丢弃。
+    const originalResizeObserver = globalThis.ResizeObserver
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    let triggerResize: (target: Element, height: number) => void = () => {
+      throw new Error('ResizeObserver was not created')
+    }
+    class ControllableResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        triggerResize = (target, height) => {
+          callback(
+            [{ target, contentRect: { height } } as unknown as ResizeObserverEntry],
+            this as unknown as ResizeObserver,
+          )
+        }
+      }
+
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    try {
+      globalThis.ResizeObserver = ControllableResizeObserver as unknown as typeof ResizeObserver
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      renderView(bodyRef, { messageCount: 3, streaming: true })
+
+      // 首个回调报告与基线相同的尺寸：位置不变。
+      triggerResize(dialogue(), 0)
+      expect(dialogue().scrollTop).toBe(600)
+
+      // 布局稳定后容器变高：仍在贴底，必须重新贴到新的底部。
+      scrollHeightSpy.mockReturnValue(900)
+      triggerResize(dialogue(), 900)
+      expect(dialogue().scrollTop).toBe(900)
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('stops following height changes once the stream reaches a terminal state', () => {
+    // 手动展开卡片、图片加载完成都属于空闲高度变化：终态后不得再补贴底，
+    // 否则用户正在看的卡片会被挤出视口。
+    const originalResizeObserver = globalThis.ResizeObserver
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    const observed: Element[] = []
+    class RecordingResizeObserver {
+      observe(target: Element) {
+        observed.push(target)
+      }
+
+      unobserve() {}
+      disconnect() {}
+    }
+
+    try {
+      globalThis.ResizeObserver = RecordingResizeObserver as unknown as typeof ResizeObserver
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 3, streaming: true })
+      expect(observed.length).toBeGreaterThan(0)
+
+      // 流式转终态：观察器解绑，之后的高度变化不再触发贴底。
+      view.rerender({ messageCount: 3, streaming: false })
+      const observedAfterTerminal = observed.length
+
+      dialogue().scrollTop = 200
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 4, streaming: false })
+
+      expect(dialogue().scrollTop).toBe(200)
+      expect(observed.length).toBe(observedAfterTerminal)
     } finally {
       globalThis.ResizeObserver = originalResizeObserver
       scrollHeightSpy.mockRestore()

@@ -61,6 +61,17 @@ export interface ToolApprovalState {
   reason: string | null
 }
 
+/**
+ * 工具结果的有序内容。
+ *
+ * 保持模型产出的类型与顺序：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染；
+ * 展示层不得把它们压平成「全部文本 + 全部附件」。空文本与非法资源在投影时丢弃。
+ */
+export type ToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'json'; value: unknown }
+  | { type: 'resource'; attachment: ToolAttachment }
+
 interface BaseDialogueMessage {
   id: string
   role: DialogueRole
@@ -117,19 +128,19 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   role: 'tool'
   rendererKey: string
   phase: 'call' | 'result'
-  text: string
   toolCallId: string
   toolName: string
   arguments: string
-  attachments: ToolAttachment[]
+  /** result 阶段的有序结果内容；call 阶段为空数组。 */
+  contents: ToolContent[]
   status?: DialogueStatus
   errorMessage?: string
-  partialAttachments?: ToolAttachment[]
+  /** 持久结果到达之前的瞬态有序内容；只有 text/json（runtime 禁止 partial 携带 Resource）。 */
+  partialContents?: ToolContent[]
   partialErrorText?: string
-  partial?: string
   /** 持有此次调用持久状态（approval/partial）的 ToolInvocation id。 */
   invocationId?: string
-  /** 该 Tool 归属的 Thread id（用于提交问卷回答与审批决策）。 */
+  /** 该 Tool 归属的 Thread id（用于归属解析）。 */
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState

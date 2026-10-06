@@ -16,13 +16,14 @@ const message: ToolDialogueMessage = {
   createdAt: null,
   status: 'done',
   phase: 'result',
-  text: 'full result',
+  contents: [{ type: 'text', text: 'full result' }],
   toolCallId: 'call-1',
   toolName: 'read',
   rendererKey: 'read',
   arguments: '{"path":"README.md"}',
-  attachments: [],
 }
+
+const expandButton = () => screen.queryByRole('button', { name: '展开工具预览' })
 
 describe('MessageList tool renderer dispatch', () => {
   it('renders an empty list without crashing and without any tool surface', () => {
@@ -37,7 +38,6 @@ describe('MessageList tool renderer dispatch', () => {
       ...message,
       id: 'call-no-id',
       phase: 'call',
-      text: '',
       toolCallId: '',
       arguments: '{"path":"README.md"}',
     }
@@ -45,7 +45,7 @@ describe('MessageList tool renderer dispatch', () => {
       ...message,
       id: 'result-no-id',
       phase: 'result',
-      text: 'fallback pair ok',
+      contents: [{ type: 'text', text: 'fallback pair ok' }],
       toolCallId: '',
     }
     const { container } = render(<MessageList messages={[call, result]} />)
@@ -58,21 +58,21 @@ describe('MessageList tool renderer dispatch', () => {
       ...message,
       id: 'call-no-id',
       phase: 'call',
-      text: '',
       toolCallId: 'portable-call',
+      contents: [],
       arguments: '{"path":"README.md"}',
     }
     const result: ToolDialogueMessage = {
       ...message,
       id: 'result-no-id',
       phase: 'result',
-      text: 'fallback pair ok',
+      contents: [{ type: 'text', text: 'fallback pair ok' }],
       toolCallId: 'portable-call',
     }
     render(<MessageList messages={[call, result]} />)
     expect(screen.getAllByText('read')).toHaveLength(1)
     expect(screen.queryByText('fallback pair ok')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    await user.click(expandButton()!)
     expect(screen.getByText('fallback pair ok')).toBeInTheDocument()
   })
 
@@ -80,8 +80,16 @@ describe('MessageList tool renderer dispatch', () => {
     const { container } = render(
       <MessageList
         messages={[
-          { ...message, id: 'c1', phase: 'call', text: '', toolCallId: 'x-1', toolName: 'read' },
-          { ...message, id: 'r1', phase: 'result', text: 'orphan result', toolCallId: 'x-1', toolName: 'read', rendererKey: 'write' },
+          { ...message, id: 'c1', phase: 'call', contents: [], toolCallId: 'x-1', toolName: 'read' },
+          {
+            ...message,
+            id: 'r1',
+            phase: 'result',
+            contents: [{ type: 'text', text: 'orphan result' }],
+            toolCallId: 'x-1',
+            toolName: 'read',
+            rendererKey: 'write',
+          },
         ]}
       />,
     )
@@ -90,37 +98,38 @@ describe('MessageList tool renderer dispatch', () => {
     expect(screen.queryByText('orphan result')).not.toBeInTheDocument()
   })
 
-  it('passes approvalPending down so undecided approval buttons are disabled', () => {
-    const onDecideApproval = vi.fn()
-    render(
+  it('renders an approval request as a read-only record with no decision buttons', () => {
+    const { container } = render(
       <MessageList
         messages={[
           {
             ...message,
             id: 'c-approval',
             phase: 'call',
-            text: '',
+            contents: [],
             toolCallId: 'a-1',
             status: 'streaming',
             approval: { required: true, decision: null, decisionId: null, reason: null },
           },
         ]}
-        onDecideApproval={onDecideApproval}
-        approvalPending
       />,
     )
-    expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+
+    // 时间线只读：人工决策在根交互区完成，卡片不提供 ALLOW/DENY 写入路径。
+    expect(screen.getByText(/此工具调用需要审批/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
+    expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)
   })
 
   it('renders an unknown tool role message as a tool card without pairing (default branch)', () => {
     const { container } = render(
       <MessageList messages={[{ ...message, id: 'unknown-role' } as unknown as DialogueMessage]} />,
     )
-    // 未知 role 走 tool single 分支；单卡渲染、结果文本不展示（收起态压缩）。
+    // 未知 role 走 tool single 分支；单卡渲染、结果文本默认收起。
     expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
     expect(screen.queryByText('full result')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '展开工具预览' })).toBeInTheDocument()
+    expect(expandButton()).toBeInTheDocument()
   })
 
   it('dispatches by the frozen rendererKey and falls back when no contribution exists', async () => {
@@ -142,8 +151,9 @@ describe('MessageList tool renderer dispatch', () => {
         <MessageList messages={[message]} />
       </ExtensionHostProvider>,
     )
+    // read 的文本结果默认收起；展开后交给扩展 renderer，不叠加默认输出。
     expect(screen.queryByText('read renderer: {"path":"README.md"}')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    await user.click(expandButton()!)
     expect(screen.getByText('read renderer: {"path":"README.md"}')).toBeInTheDocument()
     expect(screen.queryByText('full result')).not.toBeInTheDocument()
 
@@ -152,7 +162,10 @@ describe('MessageList tool renderer dispatch', () => {
         <MessageList messages={[{ ...message, rendererKey: 'unknown' }]} />
       </ExtensionHostProvider>,
     )
+    // 无贡献时回退到有序内容视图，不叠加扩展输出（同一卡片身份，展开选择保留）。
+    expect(screen.queryByText('read renderer: {"path":"README.md"}')).not.toBeInTheDocument()
     expect(screen.getByText('full result')).toBeInTheDocument()
+    expect(expandButton()).not.toBeInTheDocument()
   })
 
   it('pairs a durable tool call and result into one card', async () => {
@@ -161,43 +174,41 @@ describe('MessageList tool renderer dispatch', () => {
       ...message,
       id: 'tool-call',
       phase: 'call',
-      text: '',
+      contents: [],
       arguments: '{"path":"README.md"}',
     }
     const result: ToolDialogueMessage = {
       ...message,
       id: 'tool-result',
       phase: 'result',
-      text: 'ok',
+      contents: [{ type: 'text', text: 'ok' }],
     }
     render(<MessageList messages={[call, result]} />)
     expect(screen.getAllByText('read')).toHaveLength(1)
     expect(screen.queryByText('ok')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '展开工具预览' }))
+    await user.click(expandButton()!)
     expect(screen.getByText('ok')).toBeInTheDocument()
     expect(screen.queryByText('工具调用 ·')).not.toBeInTheDocument()
     expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
   })
 
   it('renders a bare tool result as a single message when no call precedes it', () => {
-    render(
-      <MessageList
-        messages={[
-          { ...message, id: 'standalone-result', phase: 'result', text: 'standalone output' },
-        ]}
-      />,
-    )
-    // 收起态默认结果被压缩，直接断言文本不在；展开后可读（且无重复卡片）。
-    expect(screen.queryByText('standalone output')).not.toBeInTheDocument()
-    expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
     const { container } = render(
       <MessageList
         messages={[
-          { ...message, id: 'standalone-result', phase: 'result', text: 'standalone output' },
+          {
+            ...message,
+            id: 'standalone-result',
+            phase: 'result',
+            contents: [{ type: 'text', text: 'standalone output' }],
+          },
         ]}
       />,
     )
+    // 单张卡片；read 文本默认收起。
     expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(screen.queryByText('standalone output')).not.toBeInTheDocument()
+    expect(screen.queryByText('工具结果 ·')).not.toBeInTheDocument()
   })
 
   it('renders call without paired result as pending and paired call+result as success', () => {
@@ -206,7 +217,7 @@ describe('MessageList tool renderer dispatch', () => {
       id: 'tool-call-1',
       phase: 'call',
       status: 'done',
-      text: '',
+      contents: [],
       arguments: '{"path":"README.md"}',
     }
     const { container, rerender } = render(<MessageList messages={[call]} />)
@@ -217,7 +228,7 @@ describe('MessageList tool renderer dispatch', () => {
       id: 'tool-result-1',
       phase: 'result',
       status: 'done',
-      text: 'ok',
+      contents: [{ type: 'text', text: 'ok' }],
     }
     rerender(<MessageList messages={[call, result]} />)
     expect(container.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
@@ -234,7 +245,7 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: '',
+      contents: [],
     }
     const succeededResult: ToolDialogueMessage = {
       ...message,
@@ -245,7 +256,7 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: 'listed files',
+      contents: [{ type: 'text', text: 'listed files' }],
     }
     const failedCall: ToolDialogueMessage = {
       ...message,
@@ -253,7 +264,7 @@ describe('MessageList tool renderer dispatch', () => {
       phase: 'call',
       status: 'error',
       toolCallId: 'call-bad',
-      text: '',
+      contents: [],
     }
     const failedResult: ToolDialogueMessage = {
       ...message,
@@ -261,7 +272,7 @@ describe('MessageList tool renderer dispatch', () => {
       phase: 'result',
       status: 'error',
       toolCallId: 'call-bad',
-      text: 'listed files failed',
+      contents: [{ type: 'text', text: 'listed files failed' }],
       errorMessage: 'listed files failed',
     }
     const waitingCall: ToolDialogueMessage = {
@@ -270,7 +281,7 @@ describe('MessageList tool renderer dispatch', () => {
       phase: 'call',
       status: 'streaming',
       toolCallId: 'call-ask',
-      text: '',
+      contents: [],
       approval: { required: true, decision: null, decisionId: null, reason: null },
     }
     const { container } = render(
@@ -282,7 +293,6 @@ describe('MessageList tool renderer dispatch', () => {
           failedResult,
           waitingCall,
         ]}
-        onDecideApproval={vi.fn()}
       />,
     )
     const cards = container.querySelectorAll('.thread-turn-tool')
@@ -293,7 +303,8 @@ describe('MessageList tool renderer dispatch', () => {
     expect(screen.getByText('listed files failed')).toBeInTheDocument()
     expect(screen.getByText('listed files')).toBeInTheDocument()
     expect(screen.getAllByText('listed files')).toHaveLength(1)
-    expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+    expect(screen.getByText(/此工具调用需要审批/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
   it('pairs reused toolCallIds by callIdentity at both history and current calls', () => {
@@ -308,7 +319,7 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: '',
+      contents: [],
     }
     const historyResult: ToolDialogueMessage = {
       ...message,
@@ -320,7 +331,7 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: 'old output',
+      contents: [{ type: 'text', text: 'old output' }],
     }
     const currentCall: ToolDialogueMessage = {
       ...message,
@@ -332,7 +343,7 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: '',
+      contents: [],
     }
     const currentResult: ToolDialogueMessage = {
       ...message,
@@ -344,16 +355,77 @@ describe('MessageList tool renderer dispatch', () => {
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
-      text: 'current output',
+      contents: [{ type: 'text', text: 'current output' }],
     }
     const { container } = render(
       <MessageList messages={[historyCall, historyResult, currentCall, currentResult]} />,
     )
     const cards = container.querySelectorAll('.thread-turn-tool')
+    // 两张卡片（不是四张）且 key 不冲突：复用同一 toolCallId 时按 callIdentity 区分。
     expect(cards).toHaveLength(2)
     expect(cards[0]).toHaveClass('tool-state-success')
     expect(cards[1]).toHaveClass('tool-state-success')
     expect(screen.getAllByText('old output')).toHaveLength(1)
     expect(screen.getAllByText('current output')).toHaveLength(1)
+  })
+
+  it('keeps the same DOM node identity when a streaming call becomes durable', () => {
+    // 实时草稿与持久 call 使用同一个 toolCallId 作为 key：流式转终态不重挂载，
+    // 展开、内部滚动和选择因此不会被重置。
+    const streaming: ToolDialogueMessage = {
+      ...message,
+      id: 'transient:tool-call:x:0',
+      phase: 'call',
+      status: 'streaming',
+      toolCallId: 'x',
+      toolName: 'bash',
+      rendererKey: 'bash',
+      arguments: '{"command":"ls"}',
+      contents: [],
+      partialContents: [{ type: 'text', text: 'streaming output' }],
+    }
+    const { container, rerender } = render(<MessageList messages={[streaming]} />)
+    const streamingNode = container.querySelector('.thread-turn-tool')
+    expect(streamingNode).not.toBeNull()
+
+    const durable: ToolDialogueMessage = {
+      ...streaming,
+      id: '40:tool-call:x:0',
+      subjectEntryId: 'entry-40',
+      status: 'done',
+    }
+    rerender(<MessageList messages={[durable]} />)
+
+    expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)
+    expect(container.querySelector('.thread-turn-tool')).toBe(streamingNode)
+  })
+
+  it('never renders a stale approval decision as a write path', () => {
+    const onDecideApproval = vi.fn()
+    const { container } = render(
+      <MessageList
+        messages={[
+          {
+            ...message,
+            id: 'c-decided',
+            phase: 'call',
+            contents: [],
+            toolCallId: 'a-2',
+            status: 'done',
+            approval: {
+              required: true,
+              decision: 'ALLOWED',
+              decisionId: 'd-1',
+              reason: 'looks safe',
+            },
+          } as ToolDialogueMessage,
+        ]}
+      />,
+    )
+
+    expect(screen.getByText(/已允许/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
+    expect(onDecideApproval).not.toHaveBeenCalled()
+    expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)
   })
 })

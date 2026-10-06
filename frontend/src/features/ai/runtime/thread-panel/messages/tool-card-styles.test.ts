@@ -27,16 +27,16 @@ describe('tool card style contracts', () => {
     expect(toggle).not.toContain('margin-left: auto')
   })
 
-  it('keeps preview/output regions out of the nested vertical scroll chain', () => {
-    const preview = rule(/\.thread-tool-preview-body\s*\{[^}]*\}/)
+  it('uses exactly one bounded readonly viewport that contains inner scrollback', () => {
     const output = rule(/\.thread-tool-output\s*\{[^}]*\}/)
-    const expandedOutput = rule(/\.thread-tool-output\.is-expanded\s*\{[^}]*\}/)
 
-    // 文本由 formatter 按行裁剪，内部只做 clip，滚轮应始终由 transcript 接管。
-    expect(preview).toContain('overflow: hidden')
-    expect(output).toContain('overflow: hidden')
-    expect(output).not.toContain('overscroll-behavior')
-    expect(expandedOutput).toContain('overflow: visible')
+    // 唯一只读视口：有界高度 + 内部滚动，且内部回看不把外层卡片滚走。
+    expect(output).toContain('max-height')
+    expect(output).toContain('overflow: auto')
+    expect(output).toContain('overscroll-behavior: contain')
+    // 不再有旧的展开态/行预算契约。
+    expect(css).not.toContain('.thread-tool-output.is-expanded')
+    expect(css).not.toMatch(/--thread-tool-output-lines/)
   })
 
   it('uses the danger token for approval rejection borders', () => {

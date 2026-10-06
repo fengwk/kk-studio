@@ -13,55 +13,31 @@ import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/Extensio
 import type { ReactNode } from 'react'
 
 /** 将每条对话消息分派给对应的块组件（pi 风格按消息类型分发）。 */
-export function MessageList({
-  messages,
-  onDecideApproval,
-  approvalPending = false,
-}: {
-  messages: DialogueMessage[]
-  onDecideApproval?: (
-    message: ToolDialogueMessage,
-    decision: 'ALLOW' | 'DENY',
-  ) => void | Promise<void>
-  /** 进行中的全局审批请求：所有未决的审批条都会禁用其按钮。 */
-  approvalPending?: boolean
-}) {
+export function MessageList({ messages }: { messages: DialogueMessage[] }) {
   const extensionHost = useOptionalExtensionHostSnapshot()
-  return (
-    <>
-      {groupDialogueMessages(messages).map((item) => {
-        if (item.kind === 'single') {
-          return renderSingleMessage(
-            item.message,
-            extensionHost,
-            onDecideApproval,
-            approvalPending,
-          )
-        }
-        const renderer = extensionHost?.toolRenderers.get(item.call.rendererKey)
-        return (
-          <ToolMessageBlock
-            key={item.call.id}
-            message={item.call}
-            result={item.result}
-            renderer={renderer?.component}
-            isRendererExpandable={renderer?.isExpandable}
-            onDecideApproval={onDecideApproval}
-            approvalPending={approvalPending}
-          />
-        )
-      })}
-    </>
-  )
+  const usedKeys = new Set<string>()
+  const rendered: ReactNode[] = []
+  for (const item of groupDialogueMessages(messages)) {
+    if (item.kind === 'single') {
+      rendered.push(renderSingleMessage(item.message, extensionHost))
+      continue
+    }
+    const renderer = extensionHost?.toolRenderers.get(item.call.rendererKey)
+    rendered.push(
+      <ToolMessageBlock
+        key={toolCardKey(item.call, usedKeys)}
+        message={item.call}
+        result={item.result}
+        renderer={renderer?.component}
+      />,
+    )
+  }
+  return <>{rendered}</>
 }
 
 function renderSingleMessage(
   message: DialogueMessage,
   extensionHost: ReturnType<typeof useOptionalExtensionHostSnapshot>,
-  onDecideApproval:
-    | ((message: ToolDialogueMessage, decision: 'ALLOW' | 'DENY') => void | Promise<void>)
-    | undefined,
-  approvalPending: boolean,
 ): ReactNode {
   switch (message.role) {
     case 'user':
@@ -74,12 +50,9 @@ function renderSingleMessage(
       const renderer = extensionHost?.toolRenderers.get(message.rendererKey)
       return (
         <ToolMessageBlock
-          key={message.id}
+          key={message.toolCallId || message.id}
           message={message}
           renderer={renderer?.component}
-          isRendererExpandable={renderer?.isExpandable}
-          onDecideApproval={onDecideApproval}
-          approvalPending={approvalPending}
         />
       )
     }
@@ -90,6 +63,20 @@ function renderSingleMessage(
     default:
       return null
   }
+}
+
+/**
+ * 工具卡片 key：优先使用 toolCallId，使实时草稿与持久 call 在流式转终态时保持同一
+ * React 身份（展开、滚动与选择不重置）。真正复用同一 toolCallId 的调用才追加
+ * callIdentity 区分，避免 key 冲突。
+ */
+function toolCardKey(call: ToolDialogueMessage, usedKeys: Set<string>): string {
+  const base = call.toolCallId || call.id
+  const key = usedKeys.has(base)
+    ? `${base}:${call.callIdentity ?? usedKeys.size}`
+    : base
+  usedKeys.add(key)
+  return key
 }
 
 function groupDialogueMessages(messages: DialogueMessage[]): Array<
@@ -136,13 +123,9 @@ function findPairedResult(
     if (candidate.phase !== 'result') {
       continue
     }
-    if (sameToolIdentity(call, candidate)) {
+    if (sameToolCall(call, candidate)) {
       return candidate
     }
   }
   return null
-}
-
-function sameToolIdentity(left: ToolDialogueMessage, right: ToolDialogueMessage): boolean {
-  return sameToolCall(left, right)
 }

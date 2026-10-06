@@ -266,9 +266,6 @@ describe('thread realtime state', () => {
       '7',
     )
     expect(result).toMatchObject({ text: 'answer', error: false })
-    expect(result?.attachments).toEqual([
-      expect.objectContaining({ data: 's3://bucket/a.png', mime: 'image/png', name: 'a.png' }),
-    ])
 
     // ToolResult.error=true 必须投影（终止态的 error 结果不等于 "done"）。
     const failedResult = snapshotToolStream(
@@ -340,14 +337,6 @@ describe('thread realtime state', () => {
       '7',
     )
     expect(managed).toMatchObject({ text: 'ok', error: false })
-    expect(managed?.attachments).toEqual([
-      expect.objectContaining({
-        data: 'file:///tmp/a.png',
-        mime: 'image/png',
-        name: 'a.png',
-        downloadHref: expect.stringContaining('/harness/resources/'),
-      }),
-    ])
 
     // 非法 result JSON 回退为空文本的活跃 base（仍标记为当前 invocation）。
     expect(snapshotToolStream({ ...base, resultJson: 'not-json' }, '7')).toMatchObject({
@@ -384,9 +373,8 @@ describe('thread realtime state', () => {
       createdAt: '2026-07-28T10:00:00Z',
     }
     const stream = reduceRealtimeToolStream(null, partial)
-    // text/json 分片会被聚合；resource 分片不会被从 partial 中投影出来。
+    // text/json 分片会被聚合；resource 分片不会从 partial 中投影出来。
     expect(stream.text).toBe('one')
-    expect(stream.attachments).toBeUndefined()
   })
 
   it('restores the stream from the single snapshot ModelInvocation checkpoint', () => {

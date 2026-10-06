@@ -26,7 +26,6 @@ import type {
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 
 export interface HarnessThreadRealtimeState {
   /** 当前 ModelInvocation attempt 的瞬态 model overlay（无则 null）。 */
@@ -427,7 +426,6 @@ function sameToolStream(left: RealtimeToolStream, right: RealtimeToolStream): bo
     && left.text === right.text
     && left.error === right.error
     && left.errorText === right.errorText
-    && sameAttachments(left.attachments, right.attachments)
     && sameProcessOutput(left.processOutput, right.processOutput)
 }
 
@@ -447,25 +445,6 @@ function sameProcessOutput(
     && left.observedBytes === right.observedBytes
     && left.hasOmittedPrefix === right.hasOmittedPrefix
     && left.gapPending === right.gapPending
-}
-
-function sameAttachments(
-  left: ToolAttachment[] | undefined,
-  right: ToolAttachment[] | undefined,
-): boolean {
-  if (left == null && right == null) {
-    return true
-  }
-  if (left == null || right == null || left.length !== right.length) {
-    return false
-  }
-  return left.every(
-    (item, index) =>
-      item.data === right[index]?.data
-      && item.mime === right[index]?.mime
-      && item.name === right[index]?.name
-      && item.type === right[index]?.type,
-  )
 }
 
 function mergeSnapshotToolCalls(

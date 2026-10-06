@@ -19,6 +19,17 @@ function scrollToBottom(element: HTMLElement) {
   element.scrollTop = element.scrollHeight
 }
 
+function entryHeight(entry: ResizeObserverEntry): number {
+  const borderBox = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : undefined
+  if (borderBox != null && typeof borderBox.blockSize === 'number') {
+    return borderBox.blockSize
+  }
+  if (typeof entry.contentRect?.height === 'number') {
+    return entry.contentRect.height
+  }
+  return entry.target.getBoundingClientRect().height
+}
+
 function growthSignature(messageCount: number, eventCount?: number): string {
   return `${eventCount ?? 0}:${messageCount}`
 }
@@ -34,6 +45,11 @@ function growthSignature(messageCount: number, eventCount?: number): string {
  *
  * `resetKey`：变化时重新贴底并重置 stick（Thread 重绑后新线程首次进入必须贴底，
  * 不能沿用旧线程恢复位置时留下的 stick=false）。
+ *
+ * `streaming`：当前时间线是否仍在流式增长。只有流式增长才用 ResizeObserver 补贴底；
+ * 空闲时的高度变化（手动展开工具卡、图片加载完成、思考区展开）不是新内容，绝不能
+ * 抢走外层 scrollTop——用户正在看的卡片必须停在原位。流式转终态时本观察器直接解绑，
+ * 终态本身不触发任何滚动。
  */
 export function useChatTranscriptAutoScroll(
   bodyRef: RefObject<HTMLDivElement | null>,
@@ -41,6 +57,7 @@ export function useChatTranscriptAutoScroll(
   eventCount?: number,
   initialScrollTop?: number | null,
   resetKey?: string | number | null,
+  streaming = false,
 ) {
   const stickToBottomRef = useRef(true)
   const lastScrollTopRef = useRef(0)
@@ -105,24 +122,30 @@ export function useChatTranscriptAutoScroll(
   }, [bodyRef, eventCount, messageCount])
 
   // 流式内容高度变化时，若仍 stick 则继续贴底（不依赖 message/event 计数）。
-  // 每个目标首次 observe 时的初始回调只报告当前尺寸（并非变化），跳过它，
-  // 避免把挂载时恢复的历史位置拉回底部。
+  // 非流式（空闲）时不观察：此时的高度变化只可能来自用户交互（展开工具卡）或
+  // 媒体加载完成，继续贴底会把用户正在看的卡片挤出视口。
+  //
+  // 尺寸基线在 observe 时记录：ResizeObserver 的首个回调只报告当时的尺寸，与基线
+  // 比较才能识别「贴底之后布局才真正稳定」的变化（懒渲染回合、字体与媒体落地），
+  // 同时不会把挂载时恢复的历史位置或用户回看位置拉回底部。
   useEffect(() => {
     const chatBody = bodyRef.current
-    if (!chatBody || typeof ResizeObserver === 'undefined') {
+    if (!chatBody || !streaming || typeof ResizeObserver === 'undefined') {
       return
     }
-    const initialCallbacks = new Set<Element>()
+    const sizes = new Map<Element, number>()
+    const record = (element: Element) => {
+      sizes.set(element, element.getBoundingClientRect().height)
+    }
     const observer = new ResizeObserver((entries) => {
       if (!stickToBottomRef.current) {
         return
       }
       const changed = entries.some((entry) => {
-        if (initialCallbacks.has(entry.target)) {
-          return true
-        }
-        initialCallbacks.add(entry.target)
-        return false
+        const height = entryHeight(entry)
+        const previous = sizes.get(entry.target)
+        sizes.set(entry.target, height)
+        return previous !== undefined && Math.abs(previous - height) > 0.5
       })
       if (changed) {
         scrollToBottom(chatBody)
@@ -130,9 +153,11 @@ export function useChatTranscriptAutoScroll(
       }
     })
     observer.observe(chatBody)
+    record(chatBody)
     for (const child of Array.from(chatBody.children)) {
       observer.observe(child)
+      record(child)
     }
     return () => observer.disconnect()
-  }, [bodyRef, messageCount])
+  }, [bodyRef, messageCount, streaming])
 }
