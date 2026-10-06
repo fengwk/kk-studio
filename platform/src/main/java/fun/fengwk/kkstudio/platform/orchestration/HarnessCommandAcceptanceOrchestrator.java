@@ -129,12 +129,12 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * owner-aware 入口只负责创建（NEW_ROOT_SESSION / NEW_CHILD_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link
-   * #acceptOnThread}，不保留以 THREAD target 借 owner 路由发送的兼容分支。
+   * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link
+   * #acceptOnThread}，子代理 NEW_CHILD_SESSION 只由 internal task 经 {@code
+   * HarnessRuntime.acceptCommandsAndJoin} 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
    */
   private static void requireCreationTarget(AcceptCommandsTarget target) {
     if (!(target instanceof AcceptCommandsTarget.NewRootSession)
-        && !(target instanceof AcceptCommandsTarget.NewChildSession)
         && !(target instanceof AcceptCommandsTarget.NewThread)) {
       throw new IllegalArgumentException(
           "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD creation");
@@ -163,7 +163,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
-   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}），因此这里不再有 THREAD 分支。
+   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；NEW_CHILD_SESSION 与 THREAD 都不属于
+   * owner-aware 产品入口，即使上层形状校验被绕过也必须 fail closed。
    */
   private void requireTargetOwnership(OwnerRef owner, AcceptCommandsTarget target) {
     switch (target) {
@@ -172,15 +173,12 @@ public class HarnessCommandAcceptanceOrchestrator {
           requireOwnedSession(owner, newRootSession.sessionId());
         }
       }
-      case AcceptCommandsTarget.NewChildSession newChildSession -> {
-        if (sessionExists(newChildSession.sessionId())) {
-          requireOwnedSession(owner, newChildSession.sessionId());
-        }
-      }
       case AcceptCommandsTarget.NewThread newThread -> requireOwnedSession(
           owner, newThread.sessionId());
-      case AcceptCommandsTarget.Thread ignored -> throw new IllegalStateException(
-          "owner-aware authorization requires a creation target");
+      case AcceptCommandsTarget.NewChildSession ignored -> throw new IllegalStateException(
+          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
+      case AcceptCommandsTarget.Thread ignoredThread -> throw new IllegalStateException(
+          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
     }
   }
 
