@@ -2,12 +2,11 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import java.util.Objects;
 
-/** 编码完成的 Gemini 请求体及其冻结的 sourcePrefixHash。 */
-record GeminiEncodedRequest(byte[] bodyUtf8Bytes, String sourcePrefixHash) {
+/** 编码完成的 Gemini 请求体。 */
+record GeminiEncodedRequest(byte[] bodyUtf8Bytes) {
 
   GeminiEncodedRequest {
     Objects.requireNonNull(bodyUtf8Bytes, "bodyUtf8Bytes");
-    Objects.requireNonNull(sourcePrefixHash, "sourcePrefixHash");
     bodyUtf8Bytes = bodyUtf8Bytes.clone();
   }
 

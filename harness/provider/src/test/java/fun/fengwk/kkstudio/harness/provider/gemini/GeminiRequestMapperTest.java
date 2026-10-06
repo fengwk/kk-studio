@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -54,27 +52,13 @@ class GeminiRequestMapperTest {
   }
 
   private static ModelDescriptor model() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     return new ModelDescriptor(
         "google-test",
         "gemini-2.5-flash",
         "gemini-2.5-flash",
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        pricing);
+        false);
   }
 
   /** 验证上游 PartsAndContentsMapper 的 user content 与 parts 映射规范。 */
@@ -221,11 +205,7 @@ class GeminiRequestMapperTest {
 
     // STOP -> COMPLETE
     GeminiStreamAccumulator accStop =
-        new GeminiStreamAccumulator(
-            req,
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accStop.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}]}");
@@ -233,11 +213,7 @@ class GeminiRequestMapperTest {
 
     // MAX_TOKENS -> LENGTH
     GeminiStreamAccumulator accLength =
-        new GeminiStreamAccumulator(
-            req,
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accLength.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"MAX_TOKENS\"}]}");
@@ -245,11 +221,7 @@ class GeminiRequestMapperTest {
 
     // SAFETY -> FILTERED
     GeminiStreamAccumulator accSafety =
-        new GeminiStreamAccumulator(
-            req,
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accSafety.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"SAFETY\"}]}");
@@ -257,11 +229,7 @@ class GeminiRequestMapperTest {
 
     // RECITATION -> FILTERED
     GeminiStreamAccumulator accRecitation =
-        new GeminiStreamAccumulator(
-            req,
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accRecitation.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"RECITATION\"}]}");
@@ -269,11 +237,7 @@ class GeminiRequestMapperTest {
 
     // IMAGE_RECITATION -> FILTERED
     GeminiStreamAccumulator accImageRecitation =
-        new GeminiStreamAccumulator(
-            req,
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accImageRecitation.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"IMAGE_RECITATION\"}]}");

@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -35,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,20 +74,6 @@ class GeminiThinkingTest {
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
             new UUID(1L, 2L));
 
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
-
     ModelDescriptor model =
         new ModelDescriptor(
             "google-test",
@@ -97,8 +81,7 @@ class GeminiThinkingTest {
             "gemini-2.5-pro",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
 
     ModelVariant variant = new ModelVariant("default");
     request =
@@ -118,12 +101,7 @@ class GeminiThinkingTest {
   /** 验证空文本 thought 但带有 thoughtSignature 时，签名能正确记录在 ReplayState 中。 */
   @Test
   void handlesEmptyThoughtWithSignature() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -157,12 +135,7 @@ class GeminiThinkingTest {
   /** 验证多个连续 reasoning parts 被累加，并保留签名。 */
   @Test
   void handlesMultipleReasoningParts() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk1 =
         """
@@ -204,12 +177,7 @@ class GeminiThinkingTest {
   @Test
   void handlesGemini3ParallelToolCalls_preservesFirstSignatureWithoutFabrication()
       throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     // Gemini 3 协议中，模型决定调用两个工具时，首个 part 可能携带 thoughtSignature，而第二个没有
     String chunk =
@@ -256,12 +224,7 @@ class GeminiThinkingTest {
   /** 意图：空文本签名 part 是合法的原生事实（思考结束标记），必须在原位置原样保留，既不被相邻 part 吸收也不重复保留。 */
   @Test
   void retainsEmptyTextSignedPartInPlaceWithoutMerging() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -317,12 +280,7 @@ class GeminiThinkingTest {
    */
   @Test
   void keepsDistinctSignedPartsAsSeparateVerbatimReplayParts() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -369,12 +327,7 @@ class GeminiThinkingTest {
   /** 意图：两个带不同签名的累积形态无法证明是同一 part，绝不合并、绝不覆盖签名；两份原生事实按原顺序各自保留。 */
   @Test
   void neverOverwritesSignatureAcrossDistinctCumulativeSignedParts() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -417,21 +370,8 @@ class GeminiThinkingTest {
   void replaysAccumulatorFrozenSignedAndUnknownPartsOnNextTurn() throws Exception {
     GeminiRequestEncoder encoder = new GeminiRequestEncoder();
     ModelVariant variant = new ModelVariant("default");
-    ProviderRequest firstTurn =
-        new ProviderRequest(
-            request.model(),
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1")))),
-            List.of(),
-            ProviderCacheControl.none());
-    String prefixHash = encoder.encode(firstTurn, descriptor).sourcePrefixHash();
 
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, prefixHash, bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
         """
@@ -489,20 +429,6 @@ class GeminiThinkingTest {
     GeminiRequestEncoder encoder = new GeminiRequestEncoder();
 
     ModelVariant variant = new ModelVariant("default");
-    ProviderRequest req1 =
-        new ProviderRequest(
-            request.model(),
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest enc1 = encoder.encode(req1, descriptor);
-    String prefixHash = enc1.sourcePrefixHash();
 
     // 构造第一轮返回的 replayState
     var replayPayload = MAPPER.createObjectNode();
@@ -519,7 +445,6 @@ class GeminiThinkingTest {
         new ProviderReplayState(
             ProviderReplayFormat.GEMINI_CONTENT,
             descriptor.affinity("gemini-2.5-pro"),
-            prefixHash,
             replayPayload);
 
     // 第二轮请求
