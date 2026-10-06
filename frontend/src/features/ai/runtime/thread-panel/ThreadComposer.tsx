@@ -6,9 +6,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type ClipboardEvent,
-  type DragEvent,
-  type FormEvent,
   type KeyboardEvent,
   type Ref,
 } from 'react'
@@ -16,6 +13,10 @@ import { ArrowUp, Plus, X } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
+import {
+  ComposerEditor,
+  type ComposerEditorHandle,
+} from '@/features/ai/runtime/thread-panel/ComposerEditor'
 import {
   ThreadComposerControls,
   type ThreadComposerControlMenu,
@@ -29,20 +30,8 @@ import {
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import { AttachmentStrip } from '@/features/ai/composer/attachment-strip'
 import {
-  extractPartsFromEditor,
-  extractPartsKeyFromEditor,
-  findAdjacentPill,
-  insertPillsAtCaret,
-  insertTextAtCaret,
-  normalizeEditorDom,
-  placeCaretAtEnd,
-  renderPartsToEditor,
-} from '@/features/ai/composer/composer-dom'
-import {
   hasMessageContent,
-  mergeTextParts,
   partsKey,
-  removePartsByIds,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
@@ -167,9 +156,8 @@ export function ThreadComposer({
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const editorApiRef = useRef<ComposerEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const isComposingRef = useRef(false)
-  const pendingFailedUploadIdsRef = useRef<Set<string>>(new Set())
 
   const [toast, setToast] = useState<string | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -214,24 +202,11 @@ export function ThreadComposer({
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
   const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
 
-  /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
-  const syncFromDom = useCallback((force = false) => {
-    const el = editorRef.current
-    if (!el) {
-      return
-    }
-    if (plusMenuOpen) {
-      setPlusMenuOpen(false)
-    }
-    if (controlMenu != null) {
-      setControlMenu(null)
-    }
-    normalizeEditorDom(el)
-    const next = mergeTextParts(extractPartsFromEditor(el))
-    if (force || partsKey(next) !== partsKey(parts)) {
-      changeDraft(next)
-    }
-  }, [changeDraft, controlMenu, parts, plusMenuOpen])
+  /** 编辑器编辑交互：关闭命令表与底栏设置菜单。 */
+  const dismissOverlays = useCallback(() => {
+    setPlusMenuOpen(false)
+    setControlMenu(null)
+  }, [])
 
   const handleUploadError = useCallback((err: AttachmentUploadError) => {
     const reasonText = err.reason?.trim()
@@ -244,24 +219,9 @@ export function ThreadComposer({
     })
     showToast(message)
 
-    if (isComposingRef.current) {
-      pendingFailedUploadIdsRef.current.add(err.localId)
-      return
-    }
-
-    const el = editorRef.current
-    if (el) {
-      const pills = el.querySelectorAll<HTMLElement>(
-        `span[data-part-type="attachment"][data-upload-id="${err.localId}"]`,
-      )
-      if (pills.length > 0) {
-        pills.forEach((pill) => pill.remove())
-        // 上传可能在最新 parts effect 生效前失败；以当前 DOM 强制覆盖受控草稿，
-        // 避免旧闭包误判相等后把失败 pill 重新插回。
-        syncFromDom(true)
-      }
-    }
-  }, [showToast, syncFromDom, t])
+    // 失败 pill 的 DOM 回滚由编辑器执行；组合期间由编辑器延后到 compositionend。
+    editorApiRef.current?.removeAttachmentPills([err.localId])
+  }, [showToast, t])
 
   const {
     uploads,
@@ -284,23 +244,11 @@ export function ThreadComposer({
         }
         return part
       })
-      const el = editorRef.current
-      if (el) {
-        const pills = el.querySelectorAll<HTMLElement>(
-          `span[data-part-type="attachment"][data-upload-id="${upload.localId}"]`,
-        )
-        pills.forEach((p) => {
-          p.dataset.imageTier = tier
-        })
-        if (upload.uploadId) {
-          const serverPills = el.querySelectorAll<HTMLElement>(
-            `span[data-part-type="attachment"][data-upload-id="${upload.uploadId}"]`,
-          )
-          serverPills.forEach((p) => {
-            p.dataset.imageTier = tier
-          })
-        }
-      }
+      // 先就地更新已渲染 pill 的档位属性，再做受控回流；否则整树重建会丢光标。
+      editorApiRef.current?.updateAttachmentImageTier(
+        upload.uploadId ? [upload.localId, upload.uploadId] : [upload.localId],
+        tier,
+      )
       changeDraft(next)
     },
     [changeDraft, parts, updateImageTier],
@@ -313,9 +261,6 @@ export function ThreadComposer({
   const slashMode = slashQuery != null
 
   const [activeIndex, setActiveIndex] = useState(0)
-  const draftIsEmpty = parts.every(
-    (part) => part.type === 'text' && part.text.trim() === '',
-  )
 
   // 关闭覆盖层只改变显隐；若 control menu 优先处理则返回 true 避免外部继续 blur。
   const closeOverlay = useCallback((): boolean => {
@@ -395,14 +340,13 @@ export function ThreadComposer({
 
   useImperativeHandle(ref, () => ({
     preparePreview: () => {
-      syncFromDom(false)
+      const domParts = editorApiRef.current?.syncDraft() ?? null
       if (!previewReadiness.canPreview) {
         return null
       }
       const localDraft = localDraftSnapshot()
       // DOM 同步会异步更新受控 parts；尚未对齐时不拼接旧 payload 与新草稿。
-      const domParts = editorRef.current ? trimMessageParts(extractPartsFromEditor(editorRef.current)) : null
-      if (domParts == null || partsKey(domParts) !== partsKey(trimMessageParts(parts))) {
+      if (domParts == null || partsKey(trimMessageParts(domParts)) !== partsKey(trimMessageParts(parts))) {
         return null
       }
       return {
@@ -461,61 +405,6 @@ export function ThreadComposer({
     setActiveIndex(firstEnabledCommandIndex(filteredCommands))
   }, [paletteOpen, query, filteredCommands])
 
-  /** DOM 与 props 对齐（外部同步或初始渲染）；重建时保留焦点与光标。 */
-  useEffect(() => {
-    if (isComposingRef.current) {
-      return
-    }
-    const el = editorRef.current
-    if (!el) {
-      return
-    }
-    // parts 状态保持相邻 text 已合并的规范形态；比较/渲染前先规范化，
-    // 避免「重建 -> 提取合并 -> 键不一致」的循环。
-    // partsKey 含 attachment 的客户端 uploadId：同名但不同上传会触发重建，
-    // 确保 DOM pill 的 partId 永远来自当前 parts（不留过期 partId）。
-    const expectedParts = mergeTextParts(parts)
-    const expected = partsKey(expectedParts)
-    if (extractPartsKeyFromEditor(el) !== expected) {
-      const hadFocus = document.activeElement === el
-      renderPartsToEditor(el, expectedParts)
-      if (hadFocus) {
-        placeCaretAtEnd(el)
-      }
-    }
-  }, [parts])
-
-  function handleCompositionStart() {
-    isComposingRef.current = true
-  }
-
-  function handleCompositionEnd() {
-    isComposingRef.current = false
-    const el = editorRef.current
-    const hadFailedUploads = pendingFailedUploadIdsRef.current.size > 0
-    if (hadFailedUploads && el) {
-      for (const localId of pendingFailedUploadIdsRef.current) {
-        const pills = el.querySelectorAll<HTMLElement>(
-          `span[data-part-type="attachment"][data-upload-id="${localId}"]`,
-        )
-        pills.forEach((pill) => pill.remove())
-      }
-    }
-    pendingFailedUploadIdsRef.current.clear()
-    syncFromDom(hadFailedUploads)
-  }
-
-  function handleInput(event: FormEvent<HTMLDivElement>) {
-    if (isComposingRef.current) {
-      return
-    }
-    const native = event.nativeEvent as InputEvent
-    if (native?.isComposing) {
-      return
-    }
-    syncFromDom()
-  }
-
   function addFilesToDraft(files: File[]) {
     if (disabled || files.length === 0) {
       return
@@ -525,15 +414,12 @@ export function ThreadComposer({
     if (pillParts.length === 0) {
       return
     }
-    const el = editorRef.current
-    if (!el) {
+    const editor = editorApiRef.current
+    if (!editor) {
       changeDraft([...parts, ...pillParts])
       return
     }
-    // 文件插入发生在当前光标处（粘贴/拖放/选择），而不是追加到末尾；
-    // 插入后重新提取回流 parts，保持 DOM 与状态同构。
-    insertPillsAtCaret(el, pillParts)
-    syncFromDom()
+    editor.insertParts(pillParts)
   }
 
   /** 提交时把 attachment parts 的客户端 localId 解析为服务端 upload 句柄。 */
@@ -655,56 +541,14 @@ export function ThreadComposer({
     onCommand(command)
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.nativeEvent.isComposing || event.keyCode === 229 || isComposingRef.current) {
-      return
-    }
-    if (event.key === 'Backspace' || event.key === 'Delete') {
-      const el = editorRef.current
-      const pill = el ? findAdjacentPill(el, event.key === 'Backspace' ? 'before' : 'after') : null
-      if (pill) {
-        // 整颗 pill 删除：直接移除 DOM 节点并回流 parts（保持光标稳定）。
-        event.preventDefault()
-        event.stopPropagation()
-        const partId = pill.getAttribute('data-part-id')
-        pill.remove()
-        if (partId) {
-          const next = mergeTextParts(removePartsByIds(parts, new Set([partId])))
-          if (partsKey(next) !== partsKey(parts)) {
-            changeDraft(next)
-            return
-          }
-        }
-        syncFromDom()
-        return
-      }
-    }
+  /** 编辑器未消费的按键：命令表导航优先，其次 Enter 提交。返回是否已消费。 */
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLDivElement>): boolean {
     if (paletteOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
       event.stopPropagation()
       const delta = event.key === 'ArrowDown' ? 1 : -1
       setActiveIndex((current) => stepEnabledCommandIndex(filteredCommands, current, delta))
-      return
-    }
-    if (
-      !paletteOpen
-      && (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-      && !event.shiftKey
-      && !event.ctrlKey
-      && !event.metaKey
-      && !event.altKey
-    ) {
-      const el = editorRef.current
-      const direction = event.key === 'ArrowUp' ? 'previous' : 'next'
-      if (
-        el
-        && canNavigateMessageHistoryFromCaret(el, direction)
-        && navigateMessageHistory(direction)
-      ) {
-        event.preventDefault()
-        event.stopPropagation()
-        return
-      }
+      return true
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       if (paletteOpen) {
@@ -718,69 +562,14 @@ export function ThreadComposer({
             handleSelect(fallback)
           }
         }
-        return
+        return true
       }
       event.preventDefault()
       handleSubmit()
       focusComposer()
+      return true
     }
-  }
-
-  /** Enter 归一化为纯文本 '\n'；IME 组合期间的插入不拦截。 */
-  function handleBeforeInput(event: FormEvent<HTMLDivElement>) {
-    const native = event.nativeEvent as InputEvent
-    if (native?.isComposing || isComposingRef.current) {
-      return
-    }
-    const inputType = native.inputType
-    if (inputType === 'insertParagraph' || inputType === 'insertLineBreak') {
-      event.preventDefault()
-      const el = editorRef.current
-      if (el) {
-        insertTextAtCaret(el, '\n')
-        syncFromDom()
-      }
-    }
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
-    const files = clipboardFiles(event.clipboardData)
-    if (files.length > 0) {
-      event.preventDefault()
-      addFilesToDraft(files)
-      return
-    }
-    const clipboard = event.clipboardData
-    if (clipboard) {
-      event.preventDefault()
-      const rawText = clipboard.getData('text/plain')
-      if (rawText) {
-        const normalized = rawText.replace(/\r\n|\r/g, '\n')
-        const el = editorRef.current
-        if (el) {
-          insertTextAtCaret(el, normalized)
-          syncFromDom()
-        }
-      }
-    }
-  }
-
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    const files = Array.from(event.dataTransfer?.files ?? [])
-    if (files.length > 0) {
-      event.preventDefault()
-      addFilesToDraft(files)
-      return
-    }
-    const text = event.dataTransfer?.getData('text/plain') ?? ''
-    if (text) {
-      event.preventDefault()
-      const el = editorRef.current
-      if (el) {
-        insertTextAtCaret(el, text.replace(/\r\n|\r/g, '\n'))
-        syncFromDom()
-      }
-    }
+    return false
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -845,28 +634,17 @@ export function ThreadComposer({
           onRetry={retryComplete}
           onTierChange={handleTierChange}
         />
-        <div
-          ref={editorRef}
-          className="composer-editor"
-          contentEditable={!disabled}
-          role="textbox"
-          aria-multiline="true"
-          aria-label={t('ai.runtime.composer.ariaLabel')}
-          aria-disabled={disabled}
-          data-placeholder={t('ai.runtime.composer.placeholder')}
-          data-placeholder-visible={draftIsEmpty}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          onBeforeInput={handleBeforeInput}
-          onPaste={handlePaste}
-          onDrop={handleDrop}
-          onMouseDown={() => {
-            if (controlMenu != null) {
-              setControlMenu(null)
-            }
-          }}
+        <ComposerEditor
+          ref={editorApiRef}
+          editorRef={editorRef}
+          parts={parts}
+          disabled={disabled}
+          onPartsChange={changeDraft}
+          onEditStart={dismissOverlays}
+          onEditorMouseDown={() => setControlMenu(null)}
+          onKeyDown={handleEditorKeyDown}
+          onNavigateHistory={navigateMessageHistory}
+          onFiles={addFilesToDraft}
         />
         <div className="thread-dock-controls">
           <button
@@ -929,43 +707,4 @@ export function ThreadComposer({
       />
     </div>
   )
-}
-
-function clipboardFiles(clipboard: DataTransfer | null): File[] {
-  if (!clipboard) {
-    return []
-  }
-  const direct = Array.from(clipboard.files ?? [])
-  if (direct.length > 0) {
-    return direct
-  }
-  return Array.from(clipboard.items ?? [])
-    .filter((item) => item.kind === 'file')
-    .map((item) => item.getAsFile())
-    .filter((file): file is File => file != null)
-}
-
-function canNavigateMessageHistoryFromCaret(
-  root: HTMLElement,
-  direction: 'previous' | 'next',
-): boolean {
-  const selection = root.ownerDocument.getSelection()
-  if (!selection || selection.rangeCount === 0) {
-    return false
-  }
-  const caret = selection.getRangeAt(0)
-  if (
-    !caret.collapsed
-    || !root.contains(caret.commonAncestorContainer)
-  ) {
-    return false
-  }
-  const range = root.ownerDocument.createRange()
-  range.selectNodeContents(root)
-  if (direction === 'previous') {
-    range.setEnd(caret.startContainer, caret.startOffset)
-  } else {
-    range.setStart(caret.endContainer, caret.endOffset)
-  }
-  return !range.toString().includes('\n')
 }

@@ -1,0 +1,51 @@
+/* Contenteditable 编辑区与 pill：只影响 ComposerEditor 自身，不改动全局 styles.css。 */
+.composer-editor {
+  position: relative;
+  min-width: 0;
+  min-height: 36px; /* one 20px text line centered by symmetric padding */
+  max-height: 190px; /* ~10 lines at 18px line-height */
+  overflow-y: auto;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+}
+
+.composer-editor[data-placeholder-visible='true']::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  left: 7px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.composer-editor[aria-disabled='true'] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer-pill {
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: bottom;
+  margin: 0 3px;
+  padding: 0 2px;
+  border-radius: 3px;
+  color: var(--info);
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 20px;
+  user-select: none;
+}
