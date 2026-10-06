@@ -2,127 +2,91 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 
-/** 验证 OpenAI Responses 配置解析与 PromptCacheCapability 映射规则。 */
+/** 验证 OpenAI Responses 配置解析与提示缓存留存档位映射规则。 */
 class OpenAiResponsesConfigTest {
 
-  /** 验证缺省或空白配置解析为 AUTOMATIC 模式，且能力映射为 automatic（无缓存提示）。 */
+  /** 验证缺省、null、空白与空对象配置都解析为 NONE（不下发任何 cache hint）。 */
   @Test
   void test_defaultAndBlankConfig() {
-    OpenAiResponsesConfig defaultConfig = OpenAiResponsesConfig.defaultConfig();
-    assertEquals(OpenAiPromptCacheMode.AUTOMATIC, defaultConfig.openAiPromptCacheMode());
-
-    // 默认 AUTOMATIC 模式：Provider 自治管理缓存，不发送任何 cache hint
-    PromptCacheCapability defaultCap = defaultConfig.promptCacheCapability();
-    assertEquals(PromptCacheMode.AUTOMATIC, defaultCap.mode());
-    assertEquals(PromptCacheCapability.automatic(), defaultCap);
-    assertTrue(defaultCap.supports(PromptCacheRetention.NONE));
-    assertFalse(defaultCap.supports(PromptCacheRetention.SHORT));
-    assertFalse(defaultCap.supports(PromptCacheRetention.LONG));
-    assertTrue(defaultCap.supportedBreakpoints().isEmpty());
-
-    OpenAiResponsesConfig nullConfig = OpenAiResponsesConfig.parse(null);
-    assertEquals(OpenAiPromptCacheMode.AUTOMATIC, nullConfig.openAiPromptCacheMode());
-
-    OpenAiResponsesConfig blankConfig = OpenAiResponsesConfig.parse("   \n\t");
-    assertEquals(OpenAiPromptCacheMode.AUTOMATIC, blankConfig.openAiPromptCacheMode());
-
-    OpenAiResponsesConfig emptyObjConfig = OpenAiResponsesConfig.parse("{}");
-    assertEquals(OpenAiPromptCacheMode.AUTOMATIC, emptyObjConfig.openAiPromptCacheMode());
+    assertEquals(
+        PromptCacheRetention.NONE, OpenAiResponsesConfig.defaultConfig().promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.NONE, OpenAiResponsesConfig.parse(null).promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.NONE, OpenAiResponsesConfig.parse("   \n\t").promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.NONE, OpenAiResponsesConfig.parse("{}").promptCacheRetention());
   }
 
-  /** 验证显式 LEGACY 模式配置解析及其 affinity 能力映射。 */
+  /** 验证显式 SHORT / LONG / NONE 留存档位解析。 */
   @Test
-  void test_legacyModeConfig() {
-    String json = "{\"openAiPromptCacheMode\": \"LEGACY\"}";
-    OpenAiResponsesConfig config = OpenAiResponsesConfig.parse(json);
-    assertEquals(OpenAiPromptCacheMode.LEGACY, config.openAiPromptCacheMode());
-
-    PromptCacheCapability cap = config.promptCacheCapability();
-    assertEquals(PromptCacheMode.AFFINITY, cap.mode());
-    assertTrue(cap.supports(PromptCacheRetention.SHORT));
-    assertTrue(cap.supports(PromptCacheRetention.LONG));
-    assertTrue(cap.supports(PromptCacheRetention.NONE));
-    assertTrue(cap.supportedBreakpoints().isEmpty());
+  void test_explicitRetentionConfig() {
+    assertEquals(
+        PromptCacheRetention.SHORT,
+        OpenAiResponsesConfig.parse("{\"promptCacheRetention\": \"SHORT\"}")
+            .promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.LONG,
+        OpenAiResponsesConfig.parse("{\"promptCacheRetention\": \"LONG\"}").promptCacheRetention());
+    assertEquals(
+        PromptCacheRetention.NONE,
+        OpenAiResponsesConfig.parse("{\"promptCacheRetention\": \"NONE\"}").promptCacheRetention());
   }
 
-  /** 验证显式 GPT_5_6_EXPLICIT 模式配置解析及其 breakpoints 能力映射。 */
-  @Test
-  void test_explicitModeConfig() {
-    String json = "{\"openAiPromptCacheMode\": \"GPT_5_6_EXPLICIT\"}";
-    OpenAiResponsesConfig config = OpenAiResponsesConfig.parse(json);
-    assertEquals(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT, config.openAiPromptCacheMode());
-
-    PromptCacheCapability cap = config.promptCacheCapability();
-    assertEquals(PromptCacheMode.BREAKPOINTS, cap.mode());
-    assertTrue(cap.supports(PromptCacheRetention.SHORT));
-    assertFalse(cap.supports(PromptCacheRetention.LONG));
-    assertFalse(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.SYSTEM));
-    assertTrue(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.CONVERSATION));
-    assertFalse(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.TOOLS));
-  }
-
-  /** 验证 configJson 中包含未知其他字段时被安全忽略，但已知语法与模式严格生效。 */
+  /** 验证 configJson 中包含未知其他字段时被安全忽略，但已知语法与档位严格生效。 */
   @Test
   void test_ignoreUnknownFields() {
-    String json =
-        "{\"openAiPromptCacheMode\": \"LEGACY\", \"futureField\": 123, \"extraObject\": {\"k\": \"v\"}}";
-    OpenAiResponsesConfig config = OpenAiResponsesConfig.parse(json);
-    assertEquals(OpenAiPromptCacheMode.LEGACY, config.openAiPromptCacheMode());
+    OpenAiResponsesConfig config =
+        OpenAiResponsesConfig.parse(
+            "{\"promptCacheRetention\": \"LONG\", \"futureField\": 123, \"extraObject\": {\"k\": \"v\"}}");
+    assertEquals(PromptCacheRetention.LONG, config.promptCacheRetention());
   }
 
-  /** 验证非法 JSON 语法、非对象 JSON、非法模式值被严格拒绝，且异常消息绝不泄漏 config。 */
+  /** 验证非法 JSON 语法、非对象 JSON、非法档位值被严格拒绝，且异常消息绝不泄漏 config。 */
   @Test
   void test_invalidConfigGuards() {
-    // 语法错误
     IllegalArgumentException ex1 =
         assertThrows(
             IllegalArgumentException.class, () -> OpenAiResponsesConfig.parse("{invalid json"));
     assertEquals("invalid provider config JSON", ex1.getMessage());
 
-    // 非对象（数组或原始值）
     IllegalArgumentException ex2 =
         assertThrows(
             IllegalArgumentException.class, () -> OpenAiResponsesConfig.parse("[\"abc\"]"));
     assertEquals("provider config must be a JSON object", ex2.getMessage());
 
-    // 未知模式枚举值（不回显输入值且不保留 cause）
+    // 未知档位枚举值（不回显输入值且不保留 cause）
     IllegalArgumentException ex3 =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                OpenAiResponsesConfig.parse(
-                    "{\"openAiPromptCacheMode\": \"UNKNOWN_SECRET_MODE\"}"));
-    assertEquals("unsupported openAiPromptCacheMode", ex3.getMessage());
+                OpenAiResponsesConfig.parse("{\"promptCacheRetention\": \"UNKNOWN_SECRET_MODE\"}"));
+    assertEquals("unsupported promptCacheRetention", ex3.getMessage());
     assertFalse(ex3.getMessage().contains("UNKNOWN_SECRET_MODE"));
     assertNull(ex3.getCause());
 
-    // 非文本模式字段
     IllegalArgumentException ex4 =
         assertThrows(
             IllegalArgumentException.class,
-            () -> OpenAiResponsesConfig.parse("{\"openAiPromptCacheMode\": 123}"));
-    assertTrue(ex4.getMessage().contains("openAiPromptCacheMode must be a string"));
+            () -> OpenAiResponsesConfig.parse("{\"promptCacheRetention\": 123}"));
+    assertTrue(ex4.getMessage().contains("promptCacheRetention must be a string"));
   }
 
-  /** 验证静态门禁 resolvePromptCacheCapability 与实例方法的一致性。 */
+  /** 验证静态门禁 resolvePromptCacheRetention 与实例方法的一致性。 */
   @Test
-  void test_resolvePromptCacheCapability() {
-    PromptCacheCapability cap =
-        OpenAiResponsesConfig.resolvePromptCacheCapability(
-            "{\"openAiPromptCacheMode\": \"GPT_5_6_EXPLICIT\"}");
-    assertNotNull(cap);
-    assertEquals(PromptCacheMode.BREAKPOINTS, cap.mode());
+  void test_resolvePromptCacheRetention() {
+    assertEquals(
+        PromptCacheRetention.LONG,
+        OpenAiResponsesConfig.resolvePromptCacheRetention("{\"promptCacheRetention\": \"LONG\"}"));
+    assertEquals(
+        PromptCacheRetention.NONE, OpenAiResponsesConfig.resolvePromptCacheRetention("{}"));
   }
 }

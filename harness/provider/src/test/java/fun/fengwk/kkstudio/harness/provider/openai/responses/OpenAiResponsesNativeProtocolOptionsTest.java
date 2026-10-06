@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -29,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -59,28 +56,7 @@ class OpenAiResponsesNativeProtocolOptionsTest {
 
   private ModelDescriptor createModel() {
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-5.4-mini",
-        "gpt-5.4-mini",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        pricing());
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ONE,
-        BigDecimal.ONE,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ONE);
+        "openai_test", "gpt-5.4-mini", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private static ModelVariant variant(String id, String effort, String protocolOptionsJson) {
@@ -100,10 +76,7 @@ class OpenAiResponsesNativeProtocolOptionsTest {
   }
 
   private JsonNode encode(ProviderRequest request) throws Exception {
-    return MAPPER.readTree(
-        encoder
-            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-            .bodyUtf8Bytes());
+    return MAPPER.readTree(encoder.encode(request, createDescriptor()).bodyUtf8Bytes());
   }
 
   private static List<ProviderMessage> userMessage() {
@@ -118,7 +91,7 @@ class OpenAiResponsesNativeProtocolOptionsTest {
 
   /**
    * 测试意图：非 runtime 所有权官方字段（text/truncation/background/conversation 之外的请求事实、metadata、prompt 等）原样上
-   * wire， 既不丢字段也不改语义，并且不参与冻结前缀哈希。
+   * wire， 既不丢字段也不改语义，也不参与 replay 亲和性或 runtime 所有权字段决定。
    */
   @Test
   void test_nonOwnedOfficialFieldsPassedThroughLosslessly() throws Exception {
@@ -156,22 +129,12 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     assertFalse(root.has("temperature"));
     assertFalse(root.has("top_p"));
 
-    // 非所有权字段不进入冻结前缀哈希：同一变体声明与否前缀哈希一致，replay 不受影响
+    // 非所有权字段仅透传，不改变 runtime 所有权决定的接线内容
     JsonNode withoutOptions =
         encode(request(new ModelVariant("plain", "low"), userMessage(), List.of()));
-    assertEquals(
-        encoder
-            .encode(
-                request(new ModelVariant("plain", "low"), userMessage(), List.of()),
-                createDescriptor(),
-                OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash(),
-        encoder
-            .encode(
-                request(withOptions, userMessage(), List.of()),
-                createDescriptor(),
-                OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash());
+    assertEquals(root.path("model"), withoutOptions.path("model"));
+    assertEquals(root.path("instructions"), withoutOptions.path("instructions"));
+    assertEquals(root.path("input"), withoutOptions.path("input"));
     assertFalse(withoutOptions.has("metadata"));
   }
 
@@ -220,10 +183,7 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     assertEquals(0, root.path("input").size());
   }
 
-  /**
-   * 测试意图：prompt cache 控制字段完全由 runtime 拥有 —— 即使当前模式不会下发任何 cache hint，原生声明也必须被明确拒绝，
-   * 绝不静默丢弃或让缓存键与冻结前缀哈希脱钩。
-   */
+  /** 测试意图：prompt cache 控制字段完全由 runtime 拥有 —— 原生声明必须被明确拒绝，绝不静默丢弃或覆盖 runtime 冻结的缓存控制。 */
   @Test
   void test_runtimeOwnedPromptCacheFieldsAreRejected() {
     for (String options :
@@ -292,24 +252,6 @@ class OpenAiResponsesNativeProtocolOptionsTest {
                 userMessage(),
                 List.of()));
     assertEquals(expectedNative, nativeOnly.get("tools"));
-
-    // 原生工具参与冻结前缀哈希：声明与否必须产生不同哈希
-    assertNotEquals(
-        encoder
-            .encode(
-                request(
-                    variant("native", null, "{\"tools\":" + nativeTools + "}"),
-                    userMessage(),
-                    List.of()),
-                createDescriptor(),
-                OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash(),
-        encoder
-            .encode(
-                request(new ModelVariant("plain"), userMessage(), List.of()),
-                createDescriptor(),
-                OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash());
   }
 
   /** 测试意图：tools 声明为非数组时本地明确失败，绝不把非法容器透传到上游。 */
@@ -510,7 +452,7 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     assertEquals(List.of("web_search_call.action.sources"), textValues(untouched.get("include")));
   }
 
-  /** 测试意图：原生 tools 与 runtime function 工具并存时，二者都在 wire 上且 replay 前缀哈希覆盖合并结果。 */
+  /** 测试意图：原生 tools 与 runtime function 工具并存时，二者都在 wire 上且合并结果保持 replay 亲和性一致。 */
   @Test
   void test_mergedToolsRemainReplayCompatible() throws Exception {
     ProviderToolDefinition tool = functionTool("lookup");
@@ -530,14 +472,8 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     assertEquals("function", nativeRoot.get("tools").get(1).path("type").asText());
     assertEquals(1, plainRoot.get("tools").size());
 
-    // 同一 native 工具声明重复编码稳定（前缀哈希可冻结、可比较）
-    assertEquals(
-        encoder
-            .encode(withNative, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash(),
-        encoder
-            .encode(withNative, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash());
+    // 同一 native 工具声明重复编码稳定：同一请求两次编码产生完全相同的接线体
+    assertEquals(encode(withNative), encode(withNative));
   }
 
   /** 测试意图：空 protocolOptions 与显式空 object 等价，行为与完全不声明原生选项一致。 */

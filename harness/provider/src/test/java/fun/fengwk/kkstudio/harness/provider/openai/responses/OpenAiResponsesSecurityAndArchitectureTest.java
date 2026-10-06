@@ -53,13 +53,11 @@ class OpenAiResponsesSecurityAndArchitectureTest {
   @Test
   void test_springFreeArchitecture() {
     Class<?>[] classes = {
-      OpenAiPromptCacheMode.class,
       OpenAiResponsesConfig.class,
       OpenAiResponsesEndpoints.class,
       OpenAiResponsesEncodedRequest.class,
       OpenAiResponsesErrorMapper.class,
       OpenAiResponsesModelProvider.class,
-      OpenAiResponsesPrefixHasher.class,
       OpenAiResponsesProviderAdapter.class,
       OpenAiResponsesRequestEncoder.class,
       OpenAiResponsesStreamAccumulator.class

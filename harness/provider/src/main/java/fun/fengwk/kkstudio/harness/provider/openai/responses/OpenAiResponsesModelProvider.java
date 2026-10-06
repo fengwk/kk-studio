@@ -29,20 +29,17 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
   private final ProviderDescriptor descriptor;
   private final String apiKey;
   private final URI responsesUri;
-  private final OpenAiResponsesConfig config;
   private final OpenAiResponsesRequestEncoder encoder;
 
   OpenAiResponsesModelProvider(
       JdkHttpSseTransport transport,
       ProviderDescriptor descriptor,
       String apiKey,
-      URI responsesUri,
-      OpenAiResponsesConfig config) {
+      URI responsesUri) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.apiKey = apiKey;
     this.responsesUri = Objects.requireNonNull(responsesUri, "responsesUri");
-    this.config = Objects.requireNonNull(config, "config");
     this.encoder = new OpenAiResponsesRequestEncoder();
   }
 
@@ -59,7 +56,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
 
     OpenAiResponsesEncodedRequest encoded;
     try {
-      encoded = encoder.encode(request, descriptor, config);
+      encoded = encoder.encode(request, descriptor);
     } catch (ProviderException exception) {
       bridge.emitError(exception);
       return bridge;
@@ -83,8 +80,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
     }
 
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            request, descriptor, encoded.sourcePrefixHash(), bridge);
+        new OpenAiResponsesStreamAccumulator(request, descriptor, bridge);
 
     HttpSseCallback callback =
         new HttpSseCallback() {

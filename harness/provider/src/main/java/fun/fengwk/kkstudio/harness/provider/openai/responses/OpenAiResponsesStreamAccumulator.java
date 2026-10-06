@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -78,7 +77,6 @@ final class OpenAiResponsesStreamAccumulator {
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
-  private final String frozenSourcePrefixHash;
   private final ProviderStreamBridge bridge;
 
   private boolean terminalReceived = false;
@@ -136,23 +134,17 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   OpenAiResponsesStreamAccumulator(
-      ProviderRequest request,
-      ProviderDescriptor descriptor,
-      String frozenSourcePrefixHash,
-      ProviderStreamBridge bridge) {
+      ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.frozenSourcePrefixHash =
-        Objects.requireNonNull(frozenSourcePrefixHash, "frozenSourcePrefixHash");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
   OpenAiResponsesStreamAccumulator(
       ProviderRequest request,
       ProviderDescriptor descriptor,
-      String frozenSourcePrefixHash,
       Consumer<ProviderStreamEvent> eventConsumer) {
-    this(request, descriptor, frozenSourcePrefixHash, createBridge(eventConsumer));
+    this(request, descriptor, createBridge(eventConsumer));
   }
 
   private static ProviderStreamBridge createBridge(Consumer<ProviderStreamEvent> eventConsumer) {
@@ -817,7 +809,6 @@ final class OpenAiResponsesStreamAccumulator {
             0L,
             reasoningTokens,
             providerTotalTokens);
-    ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
 
     // rawUsageJson 高保真：直接保留上游原生 usage 结构，缺失时不伪造字段；无 usage 时产出 {}
     String rawUsageJson;
@@ -839,7 +830,6 @@ final class OpenAiResponsesStreamAccumulator {
             Collections.unmodifiableList(toolCalls),
             stopReason,
             usage,
-            cost,
             requestId,
             serviceTier,
             rawUsageJson,
@@ -856,7 +846,6 @@ final class OpenAiResponsesStreamAccumulator {
             new ProviderReplayState(
                 ProviderReplayFormat.OPENAI_RESPONSES,
                 descriptor.affinity(request.model().modelId()),
-                frozenSourcePrefixHash,
                 payload);
       }
     }
