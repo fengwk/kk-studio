@@ -1,0 +1,28 @@
+/* 压缩摘要卡片：正文只有一个有界纵向滚动区，静态内容从顶部阅读。 */
+.thread-compaction-toggle {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.thread-compaction-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-compaction-toggle:hover {
+  color: var(--fg);
+}
+
+/* 唯一的有界滚动区：不截断首 N 行，整份摘要在这里滚动。 */
+.thread-compaction-body {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}

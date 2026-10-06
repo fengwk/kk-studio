@@ -16,6 +16,7 @@ export type EntryEventKind =
   | 'settings_change'
   | 'invalid_settings'
   | 'notification'
+  | 'compaction'
   | 'empty_message'
   | 'unsupported_message'
   | 'unknown_entry'

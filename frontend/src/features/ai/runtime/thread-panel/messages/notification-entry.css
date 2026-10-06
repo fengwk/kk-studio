@@ -1,19 +1,4 @@
-/* NOTIFICATION 系统结果卡：全宽淡色，无图标列与左缩进。 */
-.thread-notification {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--scrim);
-}
-
-.thread-notification-title {
-  color: var(--fg-muted);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
+/* NOTIFICATION 专属正文细节；外壳与标题由 system-message.css 的 SystemMessageCard 提供。 */
 .thread-notification-body {
   min-width: 0;
   margin-top: 4px;

@@ -187,3 +187,92 @@ describe('MarkdownRenderer', () => {
     expect(screen.queryByRole('img', { name: 'Mermaid 图表' })).not.toBeInTheDocument()
   })
 })
+
+/**
+ * preserveRawText：只把 raw 节点转成安全 span.md-raw-text（保留原始换行），
+ * 不解析/执行 HTML，也不改变普通 Markdown 文本与块间分隔的渲染。
+ */
+describe('MarkdownRenderer preserveRawText', () => {
+  const RAW_BLOCK = '<read-files>\nsrc/a.ts\nsrc/b.ts\n</read-files>'
+
+  it('keeps raw HTML as escaped text without a raw span by default', () => {
+    const view = render(<MarkdownRenderer content={RAW_BLOCK} />)
+    expect(view.container.querySelector('.md-raw-text')).toBeNull()
+    expect(view.container.textContent).toContain('<read-files>')
+    expect(view.container.querySelector('read-files')).toBeNull()
+  })
+
+  it('renders a root raw block as one safe pre-wrap span preserving newlines', () => {
+    const view = render(<MarkdownRenderer content={RAW_BLOCK} preserveRawText />)
+    const spans = view.container.querySelectorAll('.md-raw-text')
+    expect(spans).toHaveLength(1)
+    expect(spans[0].tagName).toBe('SPAN')
+    // 子节点是原始字符串，标签、内容与换行都不丢失。
+    expect(spans[0].textContent).toBe(RAW_BLOCK)
+    expect(view.container.querySelector('read-files')).toBeNull()
+    expect(view.container.querySelector('script')).toBeNull()
+  })
+
+  it('keeps normal Markdown while rendering adjacent raw XML blocks separately', () => {
+    const view = render(
+      <MarkdownRenderer
+        preserveRawText
+        content={[
+          '# 摘要',
+          '',
+          '- 一项',
+          '',
+          '```ts',
+          'const ok = true',
+          '```',
+          '',
+          RAW_BLOCK,
+          '',
+          '<modified-files>\nsrc/c.ts\n</modified-files>',
+        ].join('\n')}
+      />,
+    )
+    expect(view.container.querySelector('.md-root h1')?.textContent).toBe('摘要')
+    expect(view.container.querySelectorAll('.md-root li')).toHaveLength(1)
+    expect(view.container.querySelector('.md-code-block')?.textContent).toContain('const ok = true')
+
+    const spans = view.container.querySelectorAll('.md-raw-text')
+    expect(spans).toHaveLength(2)
+    expect(spans[0].textContent).toBe(RAW_BLOCK)
+    expect(spans[1].textContent).toBe('<modified-files>\nsrc/c.ts\n</modified-files>')
+    // 块间换行分隔节点保持普通 text，不被当成 raw。
+    expect(view.container.textContent).not.toContain('md-raw-text')
+  })
+
+  it('keeps an inline unknown tag inside the paragraph instead of parsing it', () => {
+    const view = render(
+      <MarkdownRenderer preserveRawText content={'before <custom-tag data-x="1">x</custom-tag> after'} />,
+    )
+    const paragraph = view.container.querySelector('p')
+    expect(paragraph).not.toBeNull()
+    const span = paragraph?.querySelector('.md-raw-text')
+    expect(span?.textContent).toBe('<custom-tag data-x="1">')
+    expect(view.container.querySelector('custom-tag')).toBeNull()
+  })
+
+  it('never executes raw script or image HTML', () => {
+    const view = render(
+      <MarkdownRenderer
+        preserveRawText
+        content={'<script>window.__raw = true</script>\n\n<img src="https://example.invalid/x.png" onerror="window.__raw = true" />'}
+      />,
+    )
+    expect(view.container.querySelector('script')).toBeNull()
+    expect(view.container.querySelector('img')).toBeNull()
+    expect(view.container.textContent).toContain('<script>')
+  })
+
+  it('isolates preserveRawText between rerenders of the same content', () => {
+    const view = render(<MarkdownRenderer content={RAW_BLOCK} preserveRawText />)
+    expect(view.container.querySelector('.md-raw-text')).not.toBeNull()
+
+    view.rerender(<MarkdownRenderer content={RAW_BLOCK} />)
+    expect(view.container.querySelector('.md-raw-text')).toBeNull()
+    expect(view.container.textContent).toContain('<read-files>')
+  })
+})
