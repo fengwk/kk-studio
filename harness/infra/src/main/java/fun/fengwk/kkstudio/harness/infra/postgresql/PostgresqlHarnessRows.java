@@ -35,6 +35,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloMode;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -104,7 +106,9 @@ final class PostgresqlHarnessRows {
               uuid(resultSet, "head_entry_id"),
               resultSet.getString("creation_request_hash"),
               resultSet.getString("name"),
-              resultSet.getBoolean("yolo_enabled"),
+              new ThreadYoloPolicy(
+                  ThreadYoloMode.valueOf(resultSet.getString("yolo_mode")),
+                  nullableUuid(resultSet, "yolo_root_thread_id")),
               ThreadExecutionControl.valueOf(resultSet.getString("execution_control")),
               resultSet.getLong("input_through_sequence"),
               resultSet.getLong("next_command_sequence"),

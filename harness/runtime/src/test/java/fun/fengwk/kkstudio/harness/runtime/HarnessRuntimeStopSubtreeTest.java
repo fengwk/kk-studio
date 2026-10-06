@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -74,8 +75,10 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stopSetsEverySubtreeNodeStoppedAndPersistsReceipts() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
-    UUID grandChild = createChildThread(child, root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID grandChild =
+        createChildThread(child, root.threadId(), root.sessionId(), root.rootEntryId());
 
     StopResult result = runtime.stop(new StopCommand(root.threadId(), TestIds.id(11), 0L));
 
@@ -118,8 +121,10 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stoppingIntermediateChildLeavesRootUntouched() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
-    UUID grandChild = createChildThread(child, root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID grandChild =
+        createChildThread(child, root.threadId(), root.sessionId(), root.rootEntryId());
 
     StopResult result = runtime.stop(new StopCommand(child, TestIds.id(12), 0L));
 
@@ -135,7 +140,8 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void replayReturnsPersistedReceiptSetWithoutStoppingNewWork() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
 
     StopResult first = runtime.stop(new StopCommand(child, TestIds.id(13), 0L));
     long childVersionAfterStop = version(child);
@@ -152,7 +158,7 @@ class HarnessRuntimeStopSubtreeTest {
     assertEquals(childVersionAfterStop, version(child));
 
     // 旧请求重放不得停止其后新建的后代。
-    UUID newChild = createChildThread(child, root.sessionId(), root.rootEntryId());
+    UUID newChild = createChildThread(child, root.threadId(), root.sessionId(), root.rootEntryId());
     StopResult replayAgain =
         runtime.stop(new StopCommand(child, TestIds.id(13), childVersionAfterStop));
     assertTrue(replayAgain.replayed());
@@ -164,7 +170,8 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stopFreezesChildJoinAndNotifiesRunnableParent() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("delegated-task"), TestIds.id(20));
     insertJoin(joinId, root.threadId(), child);
@@ -187,7 +194,8 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stopWhenParentAlsoStoppedMaterializesNotificationToHistory() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("delegated-task"), TestIds.id(21));
     insertJoin(joinId, root.threadId(), child);
@@ -214,7 +222,8 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stopBeforeSourceExecutedProjectsCancelledJoin() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("unexecuted-task"), TestIds.id(22));
     insertJoin(joinId, root.threadId(), child);
@@ -291,7 +300,8 @@ class HarnessRuntimeStopSubtreeTest {
   @Test
   void stopDeliversCommittedChildFinalToStoppedParentWithoutQueuedOrWorkLeftover() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     UUID modelId = seedCommittedChildFinal(root, child, joinId);
 
@@ -400,7 +410,8 @@ class HarnessRuntimeStopSubtreeTest {
         });
   }
 
-  private UUID createChildThread(UUID parentThreadId, UUID sessionId, UUID headEntryId) {
+  private UUID createChildThread(
+      UUID parentThreadId, UUID rootThreadId, UUID sessionId, UUID headEntryId) {
     UUID childId = UUID.randomUUID();
     store.transaction(
         tx -> {
@@ -412,7 +423,7 @@ class HarnessRuntimeStopSubtreeTest {
                   headEntryId,
                   CREATION_REQUEST_HASH,
                   "child-branch",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

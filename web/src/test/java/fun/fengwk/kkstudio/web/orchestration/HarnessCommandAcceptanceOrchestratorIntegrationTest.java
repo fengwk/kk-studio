@@ -109,7 +109,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         acceptanceService.accept(
             owner,
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+                new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
                 List.of(
                     new NewThreadCommand(
                         new UserMessageCommandPayload(
@@ -151,7 +151,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     UUID threadId = UUID.randomUUID();
     AcceptCommandsCommand setGoal =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(
                 new NewThreadCommand(
                     new GoalCommandPayload("ship the release"), UUID.randomUUID())));
@@ -221,7 +221,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         acceptanceService.accept(
             owner,
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+                new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
                 List.of(
                     new NewThreadCommand(
                         new UserMessageCommandPayload(
@@ -268,8 +268,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
             acceptanceService.accept(
                 owner,
                 new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewSession(
-                        foreignSessionId, foreignThreadId, settings(), null, false),
+                    new AcceptCommandsTarget.NewRootSession(
+                        foreignSessionId, foreignThreadId, settings(), false),
                     List.of(
                         new NewThreadCommand(
                             new UserMessageCommandPayload(
@@ -316,7 +316,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     UUID threadId = UUID.randomUUID();
     AcceptCommandsCommand command =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(
                 new NewThreadCommand(
                     new UserMessageCommandPayload(
@@ -355,7 +355,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(new NewThreadCommand(payload, idempotencyKey))));
   }
 

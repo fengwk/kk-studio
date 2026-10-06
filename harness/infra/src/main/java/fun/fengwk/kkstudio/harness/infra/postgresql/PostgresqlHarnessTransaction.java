@@ -685,10 +685,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     update(
         """
         insert into harness_thread (
-            id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled,
-            execution_control, input_through_sequence, next_command_sequence, version, created_at,
-            updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode,
+            yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence,
+            version, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
         thread.sessionId(),
@@ -696,7 +696,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.headEntryId(),
         thread.creationRequestHash(),
         thread.name(),
-        thread.yoloEnabled(),
+        thread.yoloPolicy().mode().name(),
+        thread.yoloPolicy().rootThreadId(),
         thread.executionControl().name(),
         thread.inputThroughSequence(),
         thread.nextCommandSequence(),
@@ -811,7 +812,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             update harness_thread
             set head_entry_id = ?,
                 name = ?,
-                yolo_enabled = ?,
+                yolo_mode = ?,
+                yolo_root_thread_id = ?,
                 execution_control = ?,
                 input_through_sequence = ?,
                 next_command_sequence = ?,
@@ -821,7 +823,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             """,
             thread.headEntryId(),
             thread.name(),
-            thread.yoloEnabled(),
+            thread.yoloPolicy().mode().name(),
+            thread.yoloPolicy().rootThreadId(),
             thread.executionControl().name(),
             thread.inputThroughSequence(),
             thread.nextCommandSequence(),

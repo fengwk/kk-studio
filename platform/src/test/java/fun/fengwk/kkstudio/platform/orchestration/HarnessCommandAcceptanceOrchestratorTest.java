@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -715,7 +716,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   private static AcceptCommandsCommand newSession(UUID threadId, NewThreadCommand... commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(SESSION_ID, threadId, SETTINGS, null, false),
+        new AcceptCommandsTarget.NewRootSession(SESSION_ID, threadId, SETTINGS, false),
         List.of(commands));
   }
 
@@ -755,7 +756,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         ENTRY_ID,
         "0".repeat(64),
         "thread",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,

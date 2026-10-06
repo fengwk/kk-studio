@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -268,6 +269,11 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
+          // 根线程使用独立开关；子线程恒 FOLLOW 传入的执行根（fixture 的 parent 即执行根）。
+          ThreadYoloPolicy yoloPolicy =
+              parentThreadId == null
+                  ? ThreadYoloPolicy.root(false)
+                  : ThreadYoloPolicy.follow(parentThreadId);
           tx.insertThread(
               new ThreadState(
                   threadId,
@@ -276,7 +282,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
                   headEntryId,
                   HASH,
                   "thread-" + threadId,
-                  false,
+                  yoloPolicy,
                   status,
                   0L,
                   1L,

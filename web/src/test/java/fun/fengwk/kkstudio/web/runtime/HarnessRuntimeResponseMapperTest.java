@@ -186,7 +186,9 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(idText(1), dto.getHeadEntryId());
     assertEquals("4", dto.getNextCommandSequence());
     assertEquals("3", dto.getVersion());
-    assertTrue(dto.getYoloEnabled());
+    // 根 Thread 的策略投影为 ENABLE 且不携带 Follow 目标（不再暴露独立 boolean）。
+    assertEquals("ENABLE", dto.getYoloPolicy().getMode());
+    assertNull(dto.getYoloPolicy().getRootThreadId());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
     assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
@@ -766,7 +768,7 @@ class HarnessRuntimeResponseMapperTest {
             thread.headEntryId(),
             thread.creationRequestHash(),
             thread.name(),
-            thread.yoloEnabled(),
+            thread.yoloPolicy(),
             thread.executionControl(),
             thread.inputThroughSequence(),
             thread.nextCommandSequence(),

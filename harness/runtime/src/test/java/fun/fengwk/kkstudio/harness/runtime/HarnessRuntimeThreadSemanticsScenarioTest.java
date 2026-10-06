@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -55,9 +56,11 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   @Test
   void stopCoversRunningSubtreeWithCompletedJoinWithoutTouchingAncestorOrSibling() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID middle = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
-    UUID deep = createChildThread(middle, root.sessionId(), root.rootEntryId());
-    UUID sibling = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID middle =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID deep = createChildThread(middle, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID sibling =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
 
     // deep 的 Join 已冻结结果（matched），Stop 不得改写它。
     seedQueuedCommand(store, deep, 1L, userMessagePayload("deep-task"), TestIds.id(30));
@@ -84,7 +87,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   @Test
   void frozenJoinResultIsNotRewrittenByLaterChildActivityOrFork() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("task"), TestIds.id(21));
     insertJoin(joinId, root.threadId(), child, 1L);
@@ -98,7 +102,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
         store.transaction(tx -> tx.loadCommandsByThread(root.threadId())).size();
 
     // 之后的 fork（新子线程）与重放旧 Stop 都不改写冻结结果，也不产生第二条通知。
-    UUID forked = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID forked =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     assertNotNull(forked);
     StopResult replay = runtime.stop(new StopCommand(child, TestIds.id(12), 0L));
     assertReplayed(replay);
@@ -113,7 +118,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   @Test
   void childResultMaterializedIntoStoppedParentSurvivesRestartWithoutDuplicate() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("task"), TestIds.id(22));
     insertJoin(joinId, root.threadId(), child, 1L);
@@ -142,7 +148,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   @Test
   void materializedNotificationStaysConsistentWithInputThroughSequenceAcrossResume() {
     HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
-    UUID child = createChildThread(root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
     UUID joinId = UUID.randomUUID();
     seedQueuedCommand(store, child, 1L, userMessagePayload("task"), TestIds.id(23));
     insertJoin(joinId, root.threadId(), child, 1L);
@@ -220,7 +227,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
         });
   }
 
-  private UUID createChildThread(UUID parentThreadId, UUID sessionId, UUID headEntryId) {
+  private UUID createChildThread(
+      UUID parentThreadId, UUID rootThreadId, UUID sessionId, UUID headEntryId) {
     UUID childId = UUID.randomUUID();
     store.transaction(
         tx -> {
@@ -232,7 +240,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   headEntryId,
                   CREATION_REQUEST_HASH,
                   "child-branch",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

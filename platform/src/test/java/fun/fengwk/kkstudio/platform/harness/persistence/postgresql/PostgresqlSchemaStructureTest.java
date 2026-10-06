@@ -441,7 +441,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "head_entry_id",
         "creation_request_hash",
         "name",
-        "yolo_enabled",
+        "yolo_mode",
+        "yolo_root_thread_id",
         "execution_control",
         "input_through_sequence",
         "next_command_sequence",
@@ -714,11 +715,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
     }
     assertEquals(
-        Set.of(
-            "chat.yolo_enabled",
-            "harness_thread.yolo_enabled",
-            "mcp_server.enabled",
-            "project.yolo_enabled"),
+        Set.of("chat.yolo_enabled", "mcp_server.enabled", "project.yolo_enabled"),
         booleanColumns,
         "exact set of native boolean columns");
   }
@@ -1278,7 +1275,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version must stay exactly what the application wrote");
     try (Connection conn = newConnection();
         PreparedStatement ps =
-            conn.prepareStatement("update harness_thread set yolo_enabled = true where id = ?")) {
+            conn.prepareStatement("update harness_thread set yolo_mode = 'ENABLE' where id = ?")) {
       ps.setObject(1, threadId);
       assertEquals(1, ps.executeUpdate());
     }
@@ -1301,11 +1298,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         PreparedStatement thread =
             conn.prepareStatement(
                 "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                    + " name, yolo_enabled, execution_control, input_through_sequence,"
+                    + " name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence,"
                     + " next_command_sequence, version, created_at, updated_at)"
                     + " values (?, ?, ?, '"
                     + "0".repeat(64)
-                    + "', 'schema-structure-test-thread', false, 'RUNNABLE', 0, 1, 0,"
+                    + "', 'schema-structure-test-thread', 'DISABLE', null, 'RUNNABLE', 0, 1, 0,"
                     + " current_timestamp, current_timestamp)")) {
       session.setObject(1, sessionId);
       session.setObject(2, "schema-structure-test-session");

@@ -93,7 +93,8 @@ column	harness_thread	parent_thread_id	type=uuid notnull=f default=<null> genera
 column	harness_thread	session_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_thread	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread	version	type=bigint notnull=t default=<null> generated= collation=-
-column	harness_thread	yolo_enabled	type=boolean notnull=t default=<null> generated= collation=-
+column	harness_thread	yolo_mode	type=character varying(16) notnull=t default=<null> generated= collation="default"
+column	harness_thread	yolo_root_thread_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_command	applied_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_thread_command	cancelled_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	harness_thread_command	command_type	type=character varying(32) notnull=t default=<null> generated= collation="default"
@@ -282,10 +283,15 @@ constraint	harness_thread	ck_harness_thread_execution_control	CHECK (((execution
 constraint	harness_thread	ck_harness_thread_input_through	CHECK ((input_through_sequence < next_command_sequence))
 constraint	harness_thread	ck_harness_thread_name	CHECK ((btrim((name)::text) <> ''::text))
 constraint	harness_thread	ck_harness_thread_parent_not_self	CHECK (((parent_thread_id IS NULL) OR (parent_thread_id <> id)))
+constraint	harness_thread	ck_harness_thread_parent_yolo	CHECK (((parent_thread_id IS NULL) = ((yolo_mode)::text <> 'FOLLOW'::text)))
 constraint	harness_thread	ck_harness_thread_time_order	CHECK ((updated_at >= created_at))
+constraint	harness_thread	ck_harness_thread_yolo_mode	CHECK (((yolo_mode)::text = ANY ((ARRAY['ENABLE'::character varying, 'DISABLE'::character varying, 'FOLLOW'::character varying])::text[])))
+constraint	harness_thread	ck_harness_thread_yolo_root	CHECK ((((yolo_mode)::text = 'FOLLOW'::text) = (yolo_root_thread_id IS NOT NULL)))
+constraint	harness_thread	ck_harness_thread_yolo_root_not_self	CHECK (((yolo_root_thread_id IS NULL) OR (yolo_root_thread_id <> id)))
 constraint	harness_thread	fk_harness_thread_head	FOREIGN KEY (session_id, head_entry_id) REFERENCES harness_entry(session_id, id)
 constraint	harness_thread	fk_harness_thread_parent	FOREIGN KEY (parent_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread	fk_harness_thread_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
+constraint	harness_thread	fk_harness_thread_yolo_root	FOREIGN KEY (yolo_root_thread_id) REFERENCES harness_thread(id)
 constraint	harness_thread	harness_thread_input_through_sequence_check	CHECK ((input_through_sequence >= 0))
 constraint	harness_thread	harness_thread_next_command_sequence_check	CHECK ((next_command_sequence >= 1))
 constraint	harness_thread	harness_thread_pkey	PRIMARY KEY (id)

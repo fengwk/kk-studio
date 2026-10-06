@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -224,12 +225,30 @@ final class ToolProcessorTestSupport {
         boolean yoloEnabled,
         ScheduledExecutorService scheduler,
         Scenario scenario) {
+      this(retryPolicy, yoloEnabled, 0, scheduler, scenario);
+    }
+
+    /**
+     * {@code followDepth>0} 时把完整 Tool 链种到 root session 内逐层 FOLLOW 的线程上：depth=1 为合法 FOLLOW(root)
+     * 子代理，depth=2 为跟随中间节点的非法链（用于验证 fail closed）。
+     */
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        boolean yoloEnabled,
+        int followDepth,
+        ScheduledExecutorService scheduler,
+        Scenario scenario) {
       this.scheduler = scheduler;
       this.request =
           new ToolInvocationRequest(
               new ToolCall("call-1", scenario.toolName(), scenario.argumentsJson()),
               scenario.binding());
-      this.baseline = seedToolBaseline(store, NOW, yoloEnabled, scenario);
+      Baseline root = seedToolBaseline(store, NOW, yoloEnabled, scenario);
+      Baseline current = root;
+      for (int i = 0; i < followDepth; i++) {
+        current = seedFollowChild(store, current, scenario);
+      }
+      this.baseline = current;
       Seeded seeded = seedTool(store, baseline, request, NOW, scenario);
       this.modelInvocationId = seeded.modelInvocationId();
       this.toolInvocationId = seeded.toolInvocationId();
@@ -243,6 +262,68 @@ final class ToolProcessorTestSupport {
               clock,
               scheduler,
               Runnable::run);
+    }
+
+    /**
+     * 在独立 Session 内新增一个 {@code FOLLOW(root.threadId)} 子线程（parent = root.threadId），并为该子线程种出与 {@code
+     * scenario} 严格一致的最小链（ROOT/TURN_START/USER/ASSISTANT），返回指向子线程链的 Baseline。子代理线程与父线程分属不同
+     * Session，与运行期跨 Session 的父子结构一致。
+     */
+    static Baseline seedFollowChild(InMemoryHarnessStore store, Baseline root, Scenario scenario) {
+      return store.transaction(
+          tx -> {
+            UUID sessionId = tx.nextId();
+            UUID rootEntryId = tx.nextId();
+            UUID turnStartEntryId = tx.nextId();
+            UUID userEntryId = tx.nextId();
+            UUID assistantEntryId = tx.nextId();
+            UUID threadId = tx.nextId();
+            ModelRequestSpec modelRequest = modelRequest(scenario);
+            ProviderResponse response = successResponse(scenario, "call-1");
+            tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+            tx.insertEntry(
+                new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+            tx.insertEntry(
+                new Entry(
+                    turnStartEntryId,
+                    sessionId,
+                    rootEntryId,
+                    new TurnStartPayload(
+                        TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
+                    NOW.plusMillis(1)));
+            tx.insertEntry(
+                new Entry(
+                    userEntryId,
+                    sessionId,
+                    turnStartEntryId,
+                    userMessagePayload(),
+                    NOW.plusMillis(2)));
+            tx.insertEntry(
+                new Entry(
+                    assistantEntryId,
+                    sessionId,
+                    userEntryId,
+                    new HistoryPayloadMapper()
+                        .assistantPayload(response, modelRequest.toolBindings()),
+                    NOW.plusMillis(3)));
+            tx.insertThread(
+                new ThreadState(
+                    threadId,
+                    sessionId,
+                    root.threadId(),
+                    turnStartEntryId,
+                    ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                    "child",
+                    ThreadYoloPolicy.follow(root.threadId()),
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    1L,
+                    0L,
+                    NOW,
+                    NOW));
+            return new Baseline(
+                sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
+          });
     }
 
     /** 额外种子第二条完整 Tool 链（复用同一 request 的 call-1）。 */
@@ -275,6 +356,18 @@ final class ToolProcessorTestSupport {
       boolean yoloEnabled,
       ScheduledExecutorService scheduler) {
     return new Fixture(retryPolicy, sideEffect, yoloEnabled, scheduler);
+  }
+
+  /**
+   * FOLLOW 子代理 fixture：root policy = root(rootYoloEnabled)，Tool 链种在逐层 FOLLOW 的线程上（depth 见 Fixture）。
+   */
+  static Fixture followChildFixture(boolean rootYoloEnabled, int followDepth) {
+    return new Fixture(
+        NO_RETRY,
+        rootYoloEnabled,
+        followDepth,
+        newScheduler(),
+        bashScenario(ToolSideEffect.READ_ONLY));
   }
 
   /** {@code ask_user} fixture：READY 调用携带给定问卷，binding 来自内置 contributor。 */
@@ -340,7 +433,7 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                   "main",
-                  yoloEnabled,
+                  ThreadYoloPolicy.root(yoloEnabled),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

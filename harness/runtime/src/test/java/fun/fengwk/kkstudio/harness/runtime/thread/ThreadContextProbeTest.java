@@ -37,7 +37,7 @@ class ThreadContextProbeTest {
             ROOT_ID,
             CREATION_REQUEST_HASH,
             "main",
-            false,
+            ThreadYoloPolicy.root(false),
             ThreadExecutionControl.RUNNABLE,
             0L,
             1,

@@ -58,15 +58,15 @@ class HarnessRuntimeRequestMapperTest {
     target.getRootSettings().setEnvironmentName("local");
     AcceptCommandsCommand withEnvironment =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(target, userCommand("env")));
-    AcceptCommandsTarget.NewSession newSession =
-        assertInstanceOf(AcceptCommandsTarget.NewSession.class, withEnvironment.target());
+    AcceptCommandsTarget.NewRootSession newSession =
+        assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, withEnvironment.target());
     assertEquals("local", newSession.rootSettings().environmentName());
 
     AcceptCommandsCommand withoutEnvironment =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newSessionTarget(), userCommand("no-env")));
-    AcceptCommandsTarget.NewSession cleared =
-        assertInstanceOf(AcceptCommandsTarget.NewSession.class, withoutEnvironment.target());
+    AcceptCommandsTarget.NewRootSession cleared =
+        assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, withoutEnvironment.target());
     assertNull(cleared.rootSettings().environmentName());
 
     HarnessCommandTargetDTO missing = newSessionTarget();
@@ -117,7 +117,7 @@ class HarnessRuntimeRequestMapperTest {
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newThreadTarget(), userCommand("entry")));
 
-    assertInstanceOf(AcceptCommandsTarget.NewSession.class, newSession.target());
+    assertInstanceOf(AcceptCommandsTarget.NewRootSession.class, newSession.target());
     assertInstanceOf(AcceptCommandsTarget.NewThread.class, newThread.target());
 
     // 既有 Thread 不再经由 target union 承载：type "THREAD" 现在按未知 target 类型拒绝。

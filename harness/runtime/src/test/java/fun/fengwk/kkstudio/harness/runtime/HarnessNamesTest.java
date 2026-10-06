@@ -41,8 +41,8 @@ class HarnessNamesTest {
   private static AcceptCommandsCommand newSession(
       UUID sessionId, UUID threadId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            sessionId, threadId, HarnessRuntimeTestSupport.settings(), null, false),
+        new AcceptCommandsTarget.NewRootSession(
+            sessionId, threadId, HarnessRuntimeTestSupport.settings(), false),
         commands);
   }
 

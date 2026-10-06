@@ -674,7 +674,7 @@ class ThreadContextClassifierTest {
         headEntryId,
         CREATION_REQUEST_HASH,
         "main",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -97,8 +98,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   private static AcceptCommandsCommand newSessionChild(
       UUID sessionId, UUID childThreadId, UUID parentThreadId, String prompt) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            sessionId, childThreadId, branchSettings(), parentThreadId, false),
+        new AcceptCommandsTarget.NewChildSession(
+            sessionId, childThreadId, branchSettings(), parentThreadId),
         List.of(
             new NewThreadCommand(
                 new UserMessageCommandPayload(AgentMessage.user(prompt)), UUID.randomUUID())));
@@ -415,7 +416,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   parentRootEntryId,
                   HASH,
                   "parent",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -536,9 +537,13 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
   private static AcceptCommandsCommand newSession(
       UUID sessionId, UUID threadId, UUID parentThreadId, UUID commandKey, String prompt) {
+    AcceptCommandsTarget target =
+        parentThreadId == null
+            ? new AcceptCommandsTarget.NewRootSession(sessionId, threadId, branchSettings(), false)
+            : new AcceptCommandsTarget.NewChildSession(
+                sessionId, threadId, branchSettings(), parentThreadId);
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewSession(
-            sessionId, threadId, branchSettings(), parentThreadId, false),
+        target,
         List.of(
             new NewThreadCommand(
                 new UserMessageCommandPayload(AgentMessage.user(prompt)), commandKey)));
@@ -833,7 +838,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   rootEntryId,
                   HASH,
                   "root",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
