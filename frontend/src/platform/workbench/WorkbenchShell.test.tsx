@@ -8,6 +8,8 @@ import { ExtensionHostProvider, useExtensionHostSnapshot } from '@/platform/exte
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
   {
@@ -114,15 +116,18 @@ describe('WorkbenchShell', () => {
     })
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ExtensionHostProvider host={host}>
-          <MemoryRouter initialEntries={['/interactions']}>
-            <WorkbenchShell navItems={FIXTURE_NAV_ITEMS}>
-              <div data-testid="explicit-children">Explicit Interactions Page</div>
-            </WorkbenchShell>
-          </MemoryRouter>
-        </ExtensionHostProvider>
+        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+          <ExtensionHostProvider host={host}>
+            <MemoryRouter initialEntries={['/interactions']}>
+              <WorkbenchShell navItems={FIXTURE_NAV_ITEMS}>
+                <div data-testid="explicit-children">Explicit Interactions Page</div>
+              </WorkbenchShell>
+            </MemoryRouter>
+          </ExtensionHostProvider>
+        </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 
@@ -178,13 +183,17 @@ function extension(id: string, label: string, priority: number) {
 
 function renderWorkbench(host: ExtensionHost, entry: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // Shell 依赖唯一应用事件连接读取全局 pending：测试注入替身 WebSocket，保持与生产同一 Provider 契约。
+  const sockets = new FakeWebSocketHarness()
   return render(
     <QueryClientProvider client={queryClient}>
-      <ExtensionHostProvider host={host}>
-        <MemoryRouter initialEntries={[entry]}>
-          <Routes><Route path="/*" element={<WorkbenchShell navItems={FIXTURE_NAV_ITEMS} />} /></Routes>
-        </MemoryRouter>
-      </ExtensionHostProvider>
+      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ExtensionHostProvider host={host}>
+          <MemoryRouter initialEntries={[entry]}>
+            <Routes><Route path="/*" element={<WorkbenchShell navItems={FIXTURE_NAV_ITEMS} />} /></Routes>
+          </MemoryRouter>
+        </ExtensionHostProvider>
+      </ApplicationEventProvider>
     </QueryClientProvider>,
   )
 }

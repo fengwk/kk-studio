@@ -1,22 +1,26 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
+import { useApplicationEvents } from '@/shared/app-events'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
-  ACTIVE_THREAD_TREE_REFETCH_INTERVAL_MS,
   projectActiveThreadTree,
   type ActiveThreadTreeNode,
   type ActiveThreadTreeRow,
 } from '@/features/ai/runtime/thread-panel/active-thread-tree'
 
 /**
- * 执行树查询的唯一定义：根面板（活跃树与根 Stop 可用性）共用同一个 key 与轮询，
- * 因此不会出现第二个观察者各自轮询。
+ * 执行树查询的唯一定义：根面板（活跃树与根 Stop 可用性）共用同一个 key，因此不会出现第二个观察者各自回读。
  *
  * 根本地空闲也继续查询（后代可能在处理）；非法树不写入缓存，查询失败不伪装成
  * 最新数据：无数据时给出错误与重试，有旧数据时保留并标记刷新失败。
+ *
+ * 执行树变化由服务端按真实执行根聚合后推送（子代理写入也会聚合到 root），因此这里没有固定轮询：
+ * subscribed（首订与每次重连重订阅）与 resync 都回读，changed 只回读本根。
  */
 export function useActiveThreadTree(rootThreadId: string | null) {
+  const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const treeQuery = useQuery({
     queryKey: queryKeys.threads.tree(rootThreadId ?? ''),
     queryFn: async () => {
@@ -26,8 +30,30 @@ export function useActiveThreadTree(rootThreadId: string | null) {
       return nodes
     },
     enabled: Boolean(rootThreadId),
-    refetchInterval: ACTIVE_THREAD_TREE_REFETCH_INTERVAL_MS,
   })
+  const invalidateTree = useCallback(() => {
+    if (rootThreadId == null) {
+      return
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(rootThreadId) })
+  }, [queryClient, rootThreadId])
+  useEffect(() => {
+    if (rootThreadId == null) {
+      return
+    }
+    return applicationEvents.subscribe(
+      { kind: 'tree', id: rootThreadId },
+      {
+        onSubscribed: invalidateTree,
+        onEvent: (name) => {
+          if (name === 'changed') {
+            invalidateTree()
+          }
+        },
+        onResync: invalidateTree,
+      },
+    )
+  }, [applicationEvents, invalidateTree, rootThreadId])
   const rows: ActiveThreadTreeRow[] = useMemo(
     () => (treeQuery.data == null ? [] : projectActiveThreadTree(treeQuery.data)),
     [treeQuery.data],

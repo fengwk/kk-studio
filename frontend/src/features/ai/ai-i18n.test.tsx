@@ -16,6 +16,8 @@ import { emptyProviderDraft } from '@/features/ai/catalog/ai-provider-draft-code
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { setLocale, translate } from '@/shared/i18n'
+import { ApplicationEventProvider } from '@/shared/app-events'
+import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -94,10 +96,14 @@ function createHost() {
 }
 
 function renderWithWorkbench(ui: ReactNode, path: string) {
+  // 部分受测页面（如 EnvironmentsPage）依赖唯一应用事件连接：统一注入替身 WebSocket 并保持同一 Provider 契约。
+  const sockets = new FakeWebSocketHarness()
   return render(
-    <ExtensionHostProvider host={createHost()}>
-      <MemoryRouter initialEntries={[`/${path}`]}>{ui}</MemoryRouter>
-    </ExtensionHostProvider>,
+    <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+      <ExtensionHostProvider host={createHost()}>
+        <MemoryRouter initialEntries={[`/${path}`]}>{ui}</MemoryRouter>
+      </ExtensionHostProvider>
+    </ApplicationEventProvider>,
   )
 }
 

@@ -18,6 +18,7 @@ export {
 export {
   decodeServerMessage,
   encodeClientMessage,
+  readInteractionsChangedRoot,
   type ApplicationEventClientMessage,
   type ApplicationEventCursor,
   type ApplicationEventName,
