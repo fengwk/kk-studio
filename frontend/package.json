@@ -13,6 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:layout": "npm run build:layout && playwright test --config playwright.layout.config.ts",
+    "build:pane": "vite build --config vite.pane.config.ts",
+    "test:pane": "npm run build:pane && playwright test --config playwright.pane.config.ts",
     "coverage": "vitest run --coverage",
     "test:install": "vitest run --config vite.install.config.ts --coverage",
     "test:install:windows": "vitest run --config vite.install.config.ts src/features/ai/environment/install-command.windows.test.ts",

@@ -1,15 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  extractContextWindow,
-  type AgentModelView,
-} from '@/features/ai/catalog'
-import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
-import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
-import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 import type { ThreadCommand } from '@/features/ai/runtime'
-import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
-import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
+import {
+  useThreadProjection,
+  type ThreadProjection,
+} from '@/features/ai/runtime/useThreadProjection'
 import {
   applyStopReceipt,
   loadThreadDraft,
@@ -160,6 +155,7 @@ export function useAgentThreadController(
   initialParts: ComposerPart[] = [],
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
   buildGoalBatch: ((goalText: string | null) => CommandBatchPlan | null) | null = null,
+  injectedProjection?: ThreadProjection,
 ) {
   const { t } = useI18n()
   const boundThreadIdRef = useRef(threadId)
@@ -221,57 +217,15 @@ export function useAgentThreadController(
   // 绝不能悄悄丢弃这次精确重试。
   const [stopReplayPending, setStopReplayPending] = useState(false)
   const decisionIdByInvocation = useRef(new Map<string, string>())
-  const bodyRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
-  const {
-    agents,
-    models,
-    thread,
-    sessionId,
-    entries,
-    queuedCommands,
-    modelInvocation,
-    toolInvocations,
-    modelAttemptFailures,
-    stopReceipts,
-    manualCompaction,
-    snapshotQuery,
-  } = useAgentThreadQueries(threadId)
-  const bound = Boolean(thread)
-  const realtime = useHarnessThreadRealtime(
-    threadId,
-    Boolean(threadId) && snapshotQuery.isSuccess,
-    thread?.version,
-    modelInvocation,
-    toolInvocations,
-    modelAttemptFailures,
-  )
-  const timeline = buildThreadTimeline(
-    entries,
-    queuedCommands,
-    toolInvocations,
-    realtime.modelStream,
-    realtime.toolStreams,
-    modelAttemptFailures,
-    modelInvocation,
-  )
-  const branchUsage = aggregateBranchUsage(timeline.messages)
-  // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
-  // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
-  const events = useMemo(
-    () => buildThreadEventTimeline({
-      entries,
-      modelInvocation,
-      toolInvocations,
-      modelAttemptFailures,
-      modelStream: realtime.modelStream,
-      toolStreams: realtime.toolStreams,
-    }),
-    [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
-  )
-  const working = isThreadWorking(thread, timeline)
-  const runtimeLabels = resolveRuntimeLabels(thread, models)
+  // 只读投影是唯一所有者：控制面只叠加编辑草稿、待决提交与人工执行 mutation。
+  // 根面板已经把该 Thread 的投影（快照、实时流、timeline、usage）交给调用方时直接复用，
+  // 不再自建第二个订阅；未注入时（例如草稿面板）才自建。
+  const ownProjection = useThreadProjection(injectedProjection ? '' : threadId)
+  const projection = injectedProjection ?? ownProjection
+  const { thread, queuedCommands, stopReceipts, manualCompaction, snapshotQuery } = projection
+  const bound = projection.bound
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {
@@ -1195,21 +1149,9 @@ export function useAgentThreadController(
   }, [stopReceiptSignature, threadId])
 
   return {
-    sessionId,
-    agents,
-    models,
-    thread,
-    bound,
-    title: thread?.threadId || t('ai.chat.chatLabel'),
-    timeline,
-    events,
-    runtimeLabels,
-    branchUsage,
-    working,
-    entries,
+    ...projection,
     messagesLoading: snapshotQuery.isLoading,
     messagesError: snapshotQuery.error,
-    bodyRef,
     draft,
     goalDraft,
     draftRestoreError,
@@ -1241,23 +1183,5 @@ export function useAgentThreadController(
     pendingMessage,
     retryPendingMessage,
     abandonPendingMessage,
-  }
-}
-
-function resolveRuntimeLabels(
-  thread: ReturnType<typeof useAgentThreadQueries>['thread'],
-  models: AgentModelView[],
-) {
-  const settings = thread?.branchSettings
-  const model = models.find(
-    (item) =>
-      item.providerName === settings?.model.providerName
-      && item.name === settings?.model.modelName,
-  )
-  const contextWindow = extractContextWindow(model)
-  const environmentName = settings?.environmentName ?? null
-  return {
-    environmentName,
-    contextWindow,
   }
 }

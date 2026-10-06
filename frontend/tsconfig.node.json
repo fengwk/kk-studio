@@ -17,5 +17,11 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.ts", "vite.layout.config.ts", "playwright.layout.config.ts"]
+  "include": [
+    "vite.config.ts",
+    "vite.layout.config.ts",
+    "playwright.layout.config.ts",
+    "vite.pane.config.ts",
+    "playwright.pane.config.ts"
+  ]
 }

@@ -10,6 +10,7 @@ import type {
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { useAgentThreadController } from '@/features/ai/runtime/useAgentThreadController'
 import {
@@ -123,14 +124,17 @@ const assistantAgentEntry = {
   updateTime: null,
 }
 
-function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
+function threadFixture(
+  overrides: Partial<HarnessThreadDTO> & { yoloEnabled?: boolean } = {},
+): HarnessThreadDTO {
+  const { yoloEnabled = false, ...rest } = overrides
   return {
     name: 'thread-name',
     threadId: THREAD_ID,
     sessionId: 's1',
     headEntryId: 'h1',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: rootYoloPolicy(yoloEnabled),
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -147,7 +151,7 @@ function threadFixture(overrides: Partial<HarnessThreadDTO> = {}): HarnessThread
     },
     createTime: null,
     updateTime: null,
-    ...overrides,
+    ...rest,
   }
 }
 

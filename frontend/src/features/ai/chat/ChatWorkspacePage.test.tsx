@@ -100,7 +100,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 'session-1',
     headEntryId: 'head-1',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -176,7 +176,12 @@ beforeEach(() => {
     results: [model],
   })
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
+  // 根控制区以已加载的 Thread 身份为准：快照必须回显请求的 threadId，
+  // 否则面板会一直停留“身份未加载”而不暴露控制区。
+  vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => ({
+    ...snapshot(),
+    thread: { ...snapshot().thread, threadId },
+  }))
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(acceptedResponse())
@@ -307,8 +312,11 @@ describe('ChatWorkspacePage', () => {
     )
 
     await screen.findByRole('heading', { name: 'Workspace' })
-    const composers = await screen.findAllByLabelText('给 AI 发送消息')
-    expect(composers).toHaveLength(2)
+    // 根控制区在各自 Thread 身份加载完成后才出现，因此等待两个 pane 都就绪。
+    await waitFor(() => {
+      expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2)
+    })
+    const composers = screen.getAllByLabelText('给 AI 发送消息')
 
     // 聚焦 pane-2
     await user.click(composers[1]!)

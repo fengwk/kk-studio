@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import {
   useBoundBranchPanel,
 } from '@/features/ai/runtime/useBoundBranchPanel'
-import {
-  useBoundThreadPanelLabels,
-  useBoundThreadPanelViews,
-  buildBoundThreadTranscript,
-} from '@/features/ai/runtime/useBoundThreadPanelViews'
-import type { ChatPanelComposerInput } from '@/features/ai/runtime/ChatPanel'
+import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPanelViews'
+import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-panel/ThreadPanel'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   branchDraftFromThread,
@@ -43,6 +40,7 @@ import {
 } from '@/shared/conflict/conflict-presenter'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
+  AgentCommandBatchResponseDTO,
   AgentRuntimeOwnerDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
@@ -69,10 +67,8 @@ import {
   clearPendingAcceptance,
   isBoundTarget,
   isNewThreadTarget,
-  loadPaneTarget,
   loadPendingAcceptance,
   ownerIdentity,
-  savePaneTarget,
   savePendingAcceptance,
   samePaneTarget,
   type PaneTarget,
@@ -124,7 +120,7 @@ export interface AgentPaneDefaults {
   yoloEnabled?: boolean
 }
 
-export interface UseAgentPaneControllerOptions {
+export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
@@ -135,11 +131,19 @@ export interface UseAgentPaneControllerOptions {
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
+  /** 由父面板持有的 Pane 绑定目标；本 Hook 只读取并请求切换。 */
+  target: PaneTarget
+  setTarget: (next: PaneTarget) => void
+  /** 父面板已持有的该目标 Thread 只读投影；不重复查询与订阅。 */
+  projection: ThreadProjection
 }
 
-export function useAgentPaneController({
+export function useRootThreadControl({
   owner,
   paneId,
+  target,
+  setTarget,
+  projection,
   agents,
   environments,
   defaults,
@@ -148,7 +152,7 @@ export function useAgentPaneController({
   initialTarget,
   onTargetConsumed,
   capabilities,
-}: UseAgentPaneControllerOptions) {
+}: UseRootThreadControlOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
@@ -156,12 +160,6 @@ export function useAgentPaneController({
   const composerScope = ownerKey
     ? `agent-pane:${ownerKey}:${paneId}`
     : `agent-pane:thread:${paneId}`
-  const [target, setTargetState] = useState<PaneTarget>(
-    () => initialTarget ?? (owner
-      ? (owner.type === 'CHAT' ? loadPaneTarget(owner, paneId) : { kind: 'NEW_SESSION_DRAFT' })
-      : { kind: 'BOUND_THREAD', threadId: paneId }),
-  )
-
   const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
@@ -182,7 +180,12 @@ export function useAgentPaneController({
   const [threadNavigationSessionId, setThreadNavigationSessionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
+  // target 由父面板持有；此处保留同步镜像，使 changeTarget/验收完成等路径在 state
+  // commit 之前也能看到刚请求的绑定（与既有同步栅栏语义一致）。
   const targetRef = useRef(target)
+  useEffect(() => {
+    targetRef.current = target
+  }, [target])
   const partsRef = useRef(parts)
   const localDraftRef = useRef<BranchDraft | null>(localDraft)
   const initializedEntryDraftRef = useRef<string | null>(null)
@@ -227,6 +230,7 @@ export function useAgentPaneController({
   }, [boundThreadId])
   const branchPanel = useBoundBranchPanel({
     threadId: boundThreadId,
+    projection,
   })
   const controller = branchPanel.controller
   const controllerRef = useRef(controller)
@@ -237,13 +241,6 @@ export function useAgentPaneController({
   })
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const models = controller.models
-
-  useEffect(() => {
-    targetRef.current = target
-    if (owner?.type === 'CHAT') {
-      savePaneTarget(owner, paneId, target)
-    }
-  }, [owner, paneId, target])
 
   useEffect(() => {
     partsRef.current = parts
@@ -655,21 +652,21 @@ export function useAgentPaneController({
       }
       generationRef.current += 1
       targetRef.current = next
-      setTargetState(next)
+      setTarget(next)
       setLocalDraft(draft == null ? null : cloneDraft(draft))
       setInteraction(null)
       setActionError(null)
       setConflict(null)
       return true
     },
-    [activeDraft, hasPendingOperation, owner, t],
+    [activeDraft, hasPendingOperation, owner, setTarget, t],
   )
 
   useEffect(() => {
     if (!initialTarget) {
       return
     }
-    if (samePaneTarget(targetRef.current, initialTarget)) {
+    if (samePaneTarget(target, initialTarget)) {
       onTargetConsumed?.(initialTarget)
       return
     }
@@ -680,7 +677,7 @@ export function useAgentPaneController({
     if (changeTarget(initialTarget)) {
       onTargetConsumed?.(initialTarget)
     }
-  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t])
+  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t, target])
 
   function abandonPendingAcceptance(): void {
     const pending = pendingAcceptanceRef.current
@@ -795,6 +792,34 @@ export function useAgentPaneController({
     ])
   }
 
+  /**
+   * 验收成功后、切目标之前把权威 Thread 状态放进 snapshot 缓存。
+   *
+   * 新接受的 Thread 一定没有 Entry（命令刚进队列），因此空 entries 就是当前真相，
+   * 随后 invalidate 会拉到完整快照。已有缓存的 Thread（重放）保持原样，不用空数据
+   * 覆盖已加载的 Entry。
+   */
+  function seedAcceptedThreadSnapshot(
+    client: QueryClient,
+    response: AgentCommandBatchResponseDTO,
+  ): void {
+    const key = queryKeys.threads.snapshot(response.thread.threadId)
+    if (client.getQueryData<HarnessThreadSnapshotDTO>(key) != null) {
+      return
+    }
+    client.setQueryData<HarnessThreadSnapshotDTO>(key, {
+      version: response.thread.version,
+      thread: response.thread,
+      entries: [],
+      queuedCommands: response.acceptedCommands,
+      modelInvocation: null,
+      toolInvocations: [],
+      modelAttemptFailures: [],
+      manualCompaction: { available: false, disabledReason: null },
+      stopReceipts: [],
+    })
+  }
+
   async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
     try {
       const response = await harnessService.acceptCommandBatch(pending.request)
@@ -814,8 +839,11 @@ export function useAgentPaneController({
       }
       generationRef.current += 1
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
+      // 先种快照、再切目标：目标切换与执行根身份落在同一次 commit，根控制面（草稿与
+      // 上传注册表）不会因为身份未知而瞬间卸载重建。
+      seedAcceptedThreadSnapshot(queryClient, response)
       targetRef.current = bound
-      setTargetState(bound)
+      setTarget(bound)
       if (partsRef.current.length === 0) {
         clearStoredComposerDraft(composerScope)
         setPartsState([])
@@ -1309,7 +1337,6 @@ export function useAgentPaneController({
   useEffect(() => {
     boundViewsRef.current = boundViews
   })
-  const boundLabels = useBoundThreadPanelLabels(environments, controller)
   const rootEntryId = controller.entries?.find((e) => e.parentEntryId == null)?.entryId
     ?? treeEntriesQuery.data?.find((e) => e.parentEntryId == null)?.entryId
     ?? null
@@ -1341,7 +1368,7 @@ export function useAgentPaneController({
 
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
-  const composer: ChatPanelComposerInput = {
+  const composer: ThreadPanelComposerInput = {
     scope: composerScope,
     parts: composerDraft,
     pending,
@@ -1364,7 +1391,6 @@ export function useAgentPaneController({
     focusOnEscape: focused,
     composerRef,
     onPreviewReadinessChange: setComposerReadiness,
-    displayOnly: Boolean(capabilities?.readOnly),
     settings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,
@@ -1451,7 +1477,6 @@ export function useAgentPaneController({
     controller,
     branchPanel,
     boundViews,
-    boundLabels,
     boundGoal,
     boundGoalProgress,
     goalDraft,
@@ -1499,7 +1524,6 @@ export function useAgentPaneController({
     selectThread,
     sessionSelectionItem,
     threadSelectionItem,
-    buildBoundThreadTranscript,
     boundEnvironment,
     environmentReady,
   }

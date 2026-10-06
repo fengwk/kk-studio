@@ -1,0 +1,37 @@
+/* 根控制区与根交互卡片：只影响 pane 输入区，不改动全局 styles.css。 */
+.thread-control-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.thread-root-interactions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.25));
+  border-radius: 10px;
+  background: var(--surface-raised, rgba(128, 128, 128, 0.06));
+}
+
+.thread-root-interactions-state.is-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.thread-root-interactions.is-error {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.thread-root-interactions-more {
+  align-self: center;
+}
