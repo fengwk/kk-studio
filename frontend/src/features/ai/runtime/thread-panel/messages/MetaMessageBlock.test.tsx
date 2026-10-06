@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
 import { EntryBranchContext } from '@/features/ai/runtime/thread-panel/entry-branch-context'
 import type { MetaDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
-import { translate } from '@/shared/i18n'
 
 describe('MetaMessageBlock', () => {
   // 意图：回合 footer 的 hover 明细必须由真实 turnUsage 事实生成完整数字与全称字段，

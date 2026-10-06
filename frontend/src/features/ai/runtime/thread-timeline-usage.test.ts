@@ -311,7 +311,7 @@ describe('Turn usage after TURN_END', () => {
       [],
     )
     expect(timeline.messages.some((message) =>
-      message.role === 'meta' && message.kind === 'turn_usage')).toBe(false)
+      message.role === 'meta' && message.turnUsage != null)).toBe(false)
     expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
       .toEqual(['meta-turn-end-end-1'])
   })
