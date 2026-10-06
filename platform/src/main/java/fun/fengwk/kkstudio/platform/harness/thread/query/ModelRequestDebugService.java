@@ -39,6 +39,9 @@ import java.util.UUID;
  * ModelRequestSpec} 物化到该 invocation 的 request head 前缀上，再以 canonical {@link
  * ProviderRequestJsonCodec} 编码。request head 是当时 Basis 的精确边界，绝不使用会包含 Tool context 后续 Entry 的当前 head。
  *
+ * <p>冻结请求视图只读取已经存在的活动 Invocation：它不新建、不复制也不延长任何持久事实的寿命（已结束的 Invocation 行由 attach-then-delete
+ * 在自己事务内删除，这里读不到就如实缺席），{@code frozenInvocation} 与顶层现算预览相互独立——预览被拒绝时冻结事实 仍然成立。
+ *
  * <p>Platform 不是 Harness 组合根，本服务由 Web 组合根在 {@link HarnessRuntime} 完整装配后显式创建。
  */
 public final class ModelRequestDebugService {
@@ -149,8 +152,7 @@ public final class ModelRequestDebugService {
     HarnessModelRequestDebugDTO.CacheControlDTO dto =
         new HarnessModelRequestDebugDTO.CacheControlDTO();
     dto.setRetention(cacheControl.retention().name());
-    dto.setAffinityKey(cacheControl.affinityKey());
-    dto.setBreakpoints(cacheControl.breakpoints().stream().map(Enum::name).sorted().toList());
+    dto.setKey(cacheControl.key());
     return dto;
   }
 

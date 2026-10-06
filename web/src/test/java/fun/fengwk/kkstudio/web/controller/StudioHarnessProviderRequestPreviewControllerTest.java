@@ -84,14 +84,14 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   void previewReturnsEncodedBodyWithoutAnyCredentialOrEndpoint() throws Exception {
     String body = "{\"model\":\"acceptance-stub\",\"messages\":[{\"role\":\"user\"}]}";
     HarnessProviderRequestPreviewDTO dto = new HarnessProviderRequestPreviewDTO();
-    dto.setKind(HarnessProviderRequestPreviewDTO.KIND);
+    dto.setKind(HarnessProviderRequestPreviewDTO.DRAFT_REQUEST_PREVIEW);
     dto.setGeneratedAt(Instant.parse("2026-01-01T00:00:00Z"));
     dto.setProviderType("OPENAI");
     dto.setModelName("acceptance-stub");
     dto.setBodyByteSize(body.getBytes(StandardCharsets.UTF_8).length);
     dto.setBodyJson(body);
     dto.setSourceHeadEntryId(HEAD_ENTRY_ID);
-    dto.setSnapshotNotice(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE);
+    dto.setNotice(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE);
     when(previewService.preview(any(UUID.class), any())).thenReturn(dto);
 
     String response =
@@ -109,8 +109,8 @@ class StudioHarnessProviderRequestPreviewControllerTest {
             .andExpect(jsonPath("$.data.sourceHeadEntryId").value(HEAD_ENTRY_ID))
             .andExpect(jsonPath("$.data.generatedAt").value("2026-01-01T00:00:00Z"))
             .andExpect(
-                jsonPath("$.data.snapshotNotice")
-                    .value(HarnessProviderRequestPreviewDTO.SNAPSHOT_NOTICE))
+                jsonPath("$.data.notice").value(HarnessProviderRequestPreviewDTO.DRAFT_NOTICE))
+            .andExpect(jsonPath("$.data.snapshotNotice").doesNotExist())
             .andReturn()
             .getResponse()
             .getContentAsString();

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -38,12 +39,14 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -65,16 +68,20 @@ public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
   private final ModelRequestDebugService modelRequestDebugService;
   private final InteractionService interactionService;
+  private final UsageCostProjectionService usageCostProjectionService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
       ModelRequestDebugService modelRequestDebugService,
-      InteractionService interactionService) {
+      InteractionService interactionService,
+      UsageCostProjectionService usageCostProjectionService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
     this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
+    this.usageCostProjectionService =
+        Objects.requireNonNull(usageCostProjectionService, "usageCostProjectionService");
   }
 
   /**
@@ -92,7 +99,7 @@ public class StudioHarnessThreadController {
                         HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId")))));
   }
 
-  /** 查询一个一致性的 Thread 快照（单事务）。 */
+  /** 查询一个一致性的 Thread 快照（单事务）；entryPath 的每个 Entry 都带上读取时费用投影。 */
   @GetMapping("/{threadId}")
   public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
     return Results.ok(
@@ -101,7 +108,9 @@ public class StudioHarnessThreadController {
               UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
               ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
               ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
-              return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
+              Map<UUID, HarnessUsageCostDTO> usageCosts =
+                  usageCostProjectionService.project(snapshot.entryPath().entries());
+              return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
             }));
   }
 

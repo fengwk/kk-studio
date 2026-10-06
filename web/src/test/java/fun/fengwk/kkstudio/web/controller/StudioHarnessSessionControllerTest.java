@@ -26,16 +26,23 @@ import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** Runtime Session 的 HTTP 契约：rename、Thread 摘要列表与 parent-linked Entry tree。 */
@@ -45,15 +52,18 @@ class StudioHarnessSessionControllerTest {
 
   private HarnessOwnerQueryService harnessQueryService;
   private HarnessRuntime runtime;
+  private UsageCostProjectionService usageCostProjectionService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     harnessQueryService = mock(HarnessOwnerQueryService.class);
     runtime = mock(HarnessRuntime.class);
+    usageCostProjectionService = mock(UsageCostProjectionService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(
-                new StudioHarnessSessionController(harnessQueryService, runtime))
+                new StudioHarnessSessionController(
+                    harnessQueryService, runtime, usageCostProjectionService))
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ResultResponseBodyAdvice())
@@ -190,7 +200,23 @@ class StudioHarnessSessionControllerTest {
                 new BranchSettings(
                     "assistant", new ModelSelection("openai", "gpt-5", "default"), null)),
             Instant.parse("2026-08-10T00:00:00Z"));
-    when(harnessQueryService.listSessionEntries(SESSION_ID)).thenReturn(List.of(root));
+    Entry user =
+        new Entry(
+            new UUID(0L, 4L),
+            SESSION_ID,
+            root.id(),
+            new MessagePayload(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                null,
+                null),
+            Instant.parse("2026-08-10T00:00:01Z"));
+    List<Entry> entries = List.of(root, user);
+    HarnessUsageCostDTO cost = new HarnessUsageCostDTO();
+    cost.setCurrency("USD");
+    cost.setAmount("0.010000000000");
+    when(harnessQueryService.listSessionEntries(SESSION_ID)).thenReturn(entries);
+    // 费用由读取时投影一次性给出：控制器只按 entry id 落位，未投影的 Entry 显式为 null。
+    when(usageCostProjectionService.project(entries)).thenReturn(Map.of(user.id(), cost));
 
     mockMvc
         .perform(get("/api/harness/sessions/" + SESSION_ID + "/entries"))
@@ -198,8 +224,14 @@ class StudioHarnessSessionControllerTest {
         .andExpect(jsonPath("$.data[0].entryId").value(root.id().toString()))
         .andExpect(jsonPath("$.data[0].sessionId").value(SESSION_ID.toString()))
         .andExpect(jsonPath("$.data[0].parentEntryId").value((Object) null))
-        .andExpect(jsonPath("$.data[0].entryType").value("ROOT"));
+        .andExpect(jsonPath("$.data[0].entryType").value("ROOT"))
+        .andExpect(jsonPath("$.data[0].usageCost").value((Object) null))
+        .andExpect(jsonPath("$.data[1].entryId").value(user.id().toString()))
+        .andExpect(jsonPath("$.data[1].entryType").value("MESSAGE"))
+        .andExpect(jsonPath("$.data[1].usageCost.currency").value("USD"))
+        .andExpect(jsonPath("$.data[1].usageCost.amount").value("0.010000000000"));
     verify(harnessQueryService).listSessionEntries(SESSION_ID);
+    verify(usageCostProjectionService).project(entries);
   }
 
   @Test

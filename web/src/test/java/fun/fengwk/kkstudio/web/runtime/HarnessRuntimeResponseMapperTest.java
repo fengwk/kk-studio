@@ -70,6 +70,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
@@ -205,13 +206,21 @@ class HarnessRuntimeResponseMapperTest {
   void projectsEntriesAndEveryCommandState() {
     // Entry parent 与 Command terminal marker 的 nullable 投影必须保持 domain 事实。
     HarnessSessionEntryDTO root =
-        HarnessRuntimeResponseMapper.toEntryDto(HarnessRuntimeTestFixtures.rootEntry());
+        HarnessRuntimeResponseMapper.toEntryDto(HarnessRuntimeTestFixtures.rootEntry(), null);
+    // 读取时费用是入口参数而不是 payload：没有投影时显式为 null，绝不会从 payloadJson 里被「解析」出来。
+    HarnessUsageCostDTO usageCost = new HarnessUsageCostDTO();
+    usageCost.setCurrency("USD");
+    usageCost.setAmount("0.010000000000");
     HarnessSessionEntryDTO user =
-        HarnessRuntimeResponseMapper.toEntryDto(HarnessRuntimeTestFixtures.userMessageEntry());
+        HarnessRuntimeResponseMapper.toEntryDto(
+            HarnessRuntimeTestFixtures.userMessageEntry(), usageCost);
     assertNull(root.getParentEntryId());
     assertEquals("ROOT", root.getEntryType());
+    assertNull(root.getUsageCost());
     assertEquals(idText(2), user.getParentEntryId());
     assertEquals("MESSAGE", user.getEntryType());
+    assertEquals("USD", user.getUsageCost().getCurrency());
+    assertEquals("0.010000000000", user.getUsageCost().getAmount());
 
     ThreadCommand queued = HarnessRuntimeTestFixtures.queuedUserMessageCommand();
     ThreadCommand applied = queued.markApplied(id(2));
@@ -346,17 +355,23 @@ class HarnessRuntimeResponseMapperTest {
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
             List.of(failure));
 
+    Map<UUID, HarnessUsageCostDTO> usageCosts = Map.of(id(3), usageCost);
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
             snapshot,
             ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.THREAD_BUSY));
+                ManualCompactionAvailability.DisabledReason.THREAD_BUSY),
+            usageCosts);
 
     assertEquals("3", dto.getVersion());
     assertEquals(3, dto.getEntries().size());
     assertEquals(
         List.of("ROOT", "TURN_START", "MESSAGE"),
         dto.getEntries().stream().map(HarnessSessionEntryDTO::getEntryType).toList());
+    // 读取时费用按 entry id 精确落位：只有被投影的 Entry 有值，其余显式缺席。
+    assertEquals("0.010000000000", dto.getEntries().get(2).getUsageCost().getAmount());
+    assertNull(dto.getEntries().get(0).getUsageCost());
+    assertNull(dto.getEntries().get(1).getUsageCost());
     assertEquals(1, dto.getQueuedCommands().size());
     assertEquals("RUNNING", dto.getModelInvocation().getStatus());
     assertTrue(dto.getToolInvocations().isEmpty());
@@ -377,7 +392,7 @@ class HarnessRuntimeResponseMapperTest {
 
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot, ManualCompactionAvailability.enabled());
+            snapshot, ManualCompactionAvailability.enabled(), Map.of());
 
     assertEquals(4, dto.getEntries().size());
     assertEquals("SUCCEEDED", dto.getModelInvocation().getStatus());
@@ -513,7 +528,7 @@ class HarnessRuntimeResponseMapperTest {
 
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot, ManualCompactionAvailability.enabled());
+            snapshot, ManualCompactionAvailability.enabled(), Map.of());
 
     assertEquals(1, dto.getStopReceipts().size());
     HarnessStoppedThreadReceiptDTO receiptDto = dto.getStopReceipts().getFirst();
@@ -686,7 +701,6 @@ class HarnessRuntimeResponseMapperTest {
         List.of(new ProviderToolCall("call-1", "bash", "{\"x\":1}")),
         GenerationStopReason.COMPLETE,
         HarnessRuntimeTestFixtures.usage(),
-        HarnessRuntimeTestFixtures.cost(),
         "request-1",
         "priority",
         "{\"inputTokens\":11}");

@@ -141,12 +141,9 @@ public class HarnessModelRequestDebugDTO {
     /** 留存档位，取 {@code NONE / SHORT / LONG}。 */
     private String retention;
 
-    /** 稳定前缀标识；{@code retention = NONE} 时为 null（required-nullable）。 */
+    /** 稳定缓存前缀标识（session UUID 文本）；{@code retention = NONE} 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String affinityKey;
-
-    /** 显式 cache 断点，取 {@code SYSTEM} / {@code TOOLS} 的非空子集；{@code retention = NONE} 时为空。 */
-    private List<String> breakpoints;
+    private String key;
   }
 
   /** 活动 ModelInvocation 的冻结请求。 */
