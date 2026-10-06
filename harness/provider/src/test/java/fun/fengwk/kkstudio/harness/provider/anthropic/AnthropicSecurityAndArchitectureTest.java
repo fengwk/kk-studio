@@ -73,7 +73,6 @@ class AnthropicSecurityAndArchitectureTest {
     AnthropicEncodedRequest encoded =
         new AnthropicEncodedRequest(
             "{\"secret\":\"payload_content\"}".getBytes(StandardCharsets.UTF_8),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             List.of("interleaved-thinking-2025-05-14"));
     assertFalse(encoded.toString().contains("secret"));
     assertFalse(encoded.toString().contains("payload_content"));

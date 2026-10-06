@@ -155,7 +155,7 @@ final class AnthropicModelProvider implements ModelProvider {
     }
 
     AnthropicStreamAccumulator accumulator =
-        new AnthropicStreamAccumulator(request, descriptor, encoded.sourcePrefixHash(), bridge);
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     HttpSseCallback callback =
         new HttpSseCallback() {

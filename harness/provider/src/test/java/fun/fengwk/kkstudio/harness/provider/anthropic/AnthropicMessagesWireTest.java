@@ -20,9 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -48,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -73,7 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Anthropic Messages 协议与流式传输线缆级（wire）行为综合验证套件。
  *
  * <p>本测试覆盖上游 LangChain4j 1.20.0 规范中针对 Anthropic Messages HTTP/SSE 线缆契约、
- * 消息结构编排、模型标识与输出预算透传、推理参数、多模态媒体、工具往返交互、提示缓存断点、 流式生命周期状态机与回调异常防护等所有可表达的原生协议行为。
+ * 消息结构编排、模型标识与输出预算透传、推理参数、多模态媒体、工具往返交互、固定提示缓存标记、流式生命周期状态机与回调异常防护等所有可表达的原生协议行为。
  */
 class AnthropicMessagesWireTest {
 
@@ -716,8 +713,7 @@ class AnthropicMessagesWireTest {
             "claude-3-7-sonnet",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            defaultPricing());
+            true);
     ModelVariant variant = new ModelVariant("reasoning-v", "low");
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1226,7 +1222,7 @@ class AnthropicMessagesWireTest {
   }
 
   // ==========================================
-  // Group 7: Prompt Caching Breakpoints & Retention
+  // Group 7: Fixed Prompt Cache Markers & Retention
   // ==========================================
 
   /** 验证当缓存保留策略为 NONE 时线缆所有字段均不包含 cache_control 标记。 */
@@ -1250,12 +1246,11 @@ class AnthropicMessagesWireTest {
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
   }
 
-  /** 验证 SYSTEM 缓存断点与 SHORT 保留策略在唯一的顶层 system 块上放置 ephemeral 标记且不带 ttl。 */
+  /** 验证 retention 非 NONE 时唯一的顶层 system 块固定携带 ephemeral 标记，SHORT 不带 ttl。 */
   @Test
   void should_cache_system_message() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT, "test-aff", Set.of(PromptCacheBreakpoint.SYSTEM));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1270,7 +1265,7 @@ class AnthropicMessagesWireTest {
     assertFalse(sysBlock.path("cache_control").has("ttl"), "SHORT retention must not have ttl");
   }
 
-  /** 验证 TOOLS 缓存断点在线缆 tools 数组的最后一个工具定义上放置 cache_control 标记。 */
+  /** 验证最后一个工具定义固定携带 cache_control 标记，前面的工具不带标记。 */
   @Test
   void should_cache_tools() throws Exception {
     ProviderToolDefinition tool1 =
@@ -1278,8 +1273,7 @@ class AnthropicMessagesWireTest {
     ProviderToolDefinition tool2 =
         new ProviderToolDefinition("t2", "desc2", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT, "test-aff", Set.of(PromptCacheBreakpoint.TOOLS));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1300,15 +1294,12 @@ class AnthropicMessagesWireTest {
     assertEquals("ephemeral", tools.get(1).path("cache_control").path("type").asText());
   }
 
-  /** 验证 SYSTEM 与 TOOLS 同时设置缓存断点时各自的末尾项均正确放置 cache_control。 */
+  /** 验证 system 与 tools 两个固定边界同时被标记，互不排斥。 */
   @Test
   void should_cache_system_message_and_tools() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT,
-            "test-aff",
-            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1325,8 +1316,7 @@ class AnthropicMessagesWireTest {
   @Test
   void should_cache_system_message_with_long_retention_and_1h_ttl() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(
-            PromptCacheRetention.LONG, "test-aff", Set.of(PromptCacheBreakpoint.SYSTEM));
+        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1340,7 +1330,7 @@ class AnthropicMessagesWireTest {
     assertEquals("1h", marker.path("ttl").asText(), "LONG retention must specify 1h ttl");
   }
 
-  /** 验证 CONVERSATION 缓存断点在最新的对话内容块上放置标记，并严格遵守 SHORT（无 ttl）与 LONG（1h ttl）区分。 */
+  /** 验证最近历史端点固定携带标记，并严格遵守 SHORT（无 ttl）与 LONG（1h ttl）区分。 */
   @Test
   void should_cache_conversation_block_with_short_and_long_ttl() throws Exception {
     ProviderMessage u1 = userTextMsg("Turn 1");
@@ -1353,8 +1343,7 @@ class AnthropicMessagesWireTest {
 
     // 1. SHORT retention
     ProviderCacheControl shortCache =
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT, "test-aff", Set.of(PromptCacheBreakpoint.CONVERSATION));
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
     ProviderRequest reqShort =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, shortCache);
     AnthropicEncodedRequest encShort = encoder.encode(reqShort, descriptor);
@@ -1366,8 +1355,7 @@ class AnthropicMessagesWireTest {
 
     // 2. LONG retention
     ProviderCacheControl longCache =
-        new ProviderCacheControl(
-            PromptCacheRetention.LONG, "test-aff", Set.of(PromptCacheBreakpoint.CONVERSATION));
+        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
     ProviderRequest reqLong =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, longCache);
     AnthropicEncodedRequest encLong = encoder.encode(reqLong, descriptor);
@@ -1377,24 +1365,43 @@ class AnthropicMessagesWireTest {
     assertEquals("1h", lastBlockLong.path("cache_control").path("ttl").asText());
   }
 
-  /** 验证当提示缓存保留策略不为 NONE 但断点集合为空时，请求编码器校验失败并抛出 INVALID_REQUEST。 */
+  /** 验证固定标记总量上限为 4 且按“最近优先”分配：tools、system 优先占位，剩余预算分配给最靠后的历史端点，更早的端点不标记； assistant 消息自身内容不是端点。 */
   @Test
-  void should_reject_cache_retention_without_breakpoints() {
-    ProviderCacheControl emptyBreakpointsWithRetention =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff", Set.of());
+  void should_place_fixed_cache_markers_newest_first_up_to_budget() throws Exception {
+    ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
+    ProviderCacheControl cacheControl =
+        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+
+    ProviderMessage u1 = userTextMsg("Turn 1");
+    ProviderMessage a1 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("Reply 1")));
+    ProviderMessage u2 = userTextMsg("Turn 2");
+    ProviderMessage a2 =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("Reply 2")));
+    ProviderMessage u3 = userTextMsg("Turn 3");
+
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
         createRequest(
-            "claude-3-5-sonnet",
-            null,
-            List.of(userTextMsg("hi")),
-            null,
-            emptyBreakpointsWithRetention);
+            "claude-3-5-sonnet", null, List.of(u1, a1, u2, a2, u3), List.of(tool), cacheControl);
 
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertTrue(ex.getMessage().contains("requires at least one breakpoint"));
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
+
+    // tools 与 system 是最高优先级的固定边界
+    assertTrue(root.path("tools").get(0).has("cache_control"));
+    assertTrue(root.path("system").get(0).has("cache_control"));
+
+    // 剩余两个预算按最近优先分配给尾端 "Turn 3" 与更早端点 "Turn 2"，最早端点 "Turn 1" 不标记
+    assertTrue(root.path("messages").get(4).path("content").get(0).has("cache_control"));
+    assertTrue(root.path("messages").get(2).path("content").get(0).has("cache_control"));
+    assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
+
+    // assistant 消息自身内容不是历史端点
+    assertFalse(root.path("messages").get(1).path("content").get(0).has("cache_control"));
+    assertFalse(root.path("messages").get(3).path("content").get(0).has("cache_control"));
   }
 
   // ==========================================
@@ -1853,21 +1860,6 @@ class AnthropicMessagesWireTest {
         UUID.randomUUID());
   }
 
-  private ModelPricing defaultPricing() {
-    return new ModelPricing(
-        "USD",
-        "standard",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
-  }
-
   private ModelDescriptor createModelDescriptor(String modelName) {
     return new ModelDescriptor(
         "anthropic-wire-test",
@@ -1875,8 +1867,7 @@ class AnthropicMessagesWireTest {
         modelName,
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         true,
-        false,
-        defaultPricing());
+        false);
   }
 
   private ModelDescriptor createReasoningModelDescriptor(String modelName) {
@@ -1886,8 +1877,7 @@ class AnthropicMessagesWireTest {
         modelName,
         Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
         true,
-        true,
-        defaultPricing());
+        true);
   }
 
   private ProviderRequest createRequest(

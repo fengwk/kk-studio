@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -77,7 +76,6 @@ final class AnthropicStreamAccumulator {
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
-  private final String frozenSourcePrefixHash;
   private final ProviderStreamBridge bridge;
 
   private boolean started = false;
@@ -107,14 +105,9 @@ final class AnthropicStreamAccumulator {
   private GenerationStopReason stopReason = null;
 
   AnthropicStreamAccumulator(
-      ProviderRequest request,
-      ProviderDescriptor descriptor,
-      String frozenSourcePrefixHash,
-      ProviderStreamBridge bridge) {
+      ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
     this.request = Objects.requireNonNull(request, "request");
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.frozenSourcePrefixHash =
-        Objects.requireNonNull(frozenSourcePrefixHash, "frozenSourcePrefixHash");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
@@ -366,7 +359,6 @@ final class AnthropicStreamAccumulator {
             cacheCreation1h,
             0L,
             providerTotalTokens);
-    ModelCost cost = ModelCost.calculate(request.model().pricing(), usage);
 
     ProviderResponse response =
         new ProviderResponse(
@@ -375,7 +367,6 @@ final class AnthropicStreamAccumulator {
             Collections.unmodifiableList(toolCalls),
             stopReason,
             usage,
-            cost,
             messageId,
             serviceTier,
             rawUsageJson,
@@ -390,7 +381,6 @@ final class AnthropicStreamAccumulator {
           new ProviderReplayState(
               ProviderReplayFormat.ANTHROPIC_MESSAGES,
               descriptor.affinity(request.model().modelId()),
-              frozenSourcePrefixHash,
               payload);
     }
 
