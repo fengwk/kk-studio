@@ -60,7 +60,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 157;
+  private static final int PROBE_ASSERTION_COUNT = 167;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -168,10 +168,17 @@ class FreshInstallSchemaContractTest {
           "harness_thread.parent_thread_id",
           "harness_thread.execution_control",
           "harness_thread.input_through_sequence",
+          "harness_thread.yolo_mode",
+          "harness_thread.yolo_root_thread_id",
           "harness_thread.ck_harness_thread_parent_not_self",
           "harness_thread.ck_harness_thread_execution_control",
           "harness_thread.ck_harness_thread_input_through",
+          "harness_thread.ck_harness_thread_yolo_mode",
+          "harness_thread.ck_harness_thread_yolo_root",
+          "harness_thread.ck_harness_thread_parent_yolo",
+          "harness_thread.ck_harness_thread_yolo_root_not_self",
           "harness_thread.fk_harness_thread_parent",
+          "harness_thread.fk_harness_thread_yolo_root",
           "harness_thread.idx_harness_thread_parent",
           "harness_thread.uk_harness_thread_session",
           "harness_thread_command.applied_entry_id",

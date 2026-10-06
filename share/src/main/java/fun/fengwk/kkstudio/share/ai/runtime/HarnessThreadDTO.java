@@ -36,8 +36,8 @@ public class HarnessThreadDTO {
   /** 当前 head Entry：canonical UUID string。 */
   private String headEntryId;
 
-  /** 当前 frozen YOLO runtime policy。 */
-  private Boolean yoloEnabled;
+  /** 当前 frozen YOLO runtime policy：根为自身开关，子代理为不可变 Follow 执行根。 */
+  private HarnessThreadYoloPolicyDTO yoloPolicy;
 
   /** 已分配的 command sequence 高水位 +1（strict positive decimal string）。 */
   private String nextCommandSequence;

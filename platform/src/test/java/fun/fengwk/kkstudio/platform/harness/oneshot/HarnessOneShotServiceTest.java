@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
@@ -105,10 +106,10 @@ class HarnessOneShotServiceTest {
     verify(runtime)
         .acceptCommandsAndJoin(command.capture(), join.capture(), eq(AcceptancePreflight.IDENTITY));
 
-    AcceptCommandsTarget.NewSession target =
-        (AcceptCommandsTarget.NewSession) command.getValue().target();
+    // root completion ticket：NewRootSession 类型本身即保证 parent 为空（不再携带 parentThreadId 分量）。
+    AcceptCommandsTarget.NewRootSession target =
+        (AcceptCommandsTarget.NewRootSession) command.getValue().target();
     assertEquals(ticket.threadId(), target.threadId());
-    assertEquals(null, target.parentThreadId());
     assertEquals(null, join.getValue().parentThreadId());
     assertEquals(null, join.getValue().expectedParentHeadEntryId());
     assertEquals(ticket.invocationId(), join.getValue().invocationId());
@@ -393,7 +394,7 @@ class HarnessOneShotServiceTest {
             UUID.randomUUID(),
             "0".repeat(64),
             "oneshot",
-            false,
+            ThreadYoloPolicy.root(false),
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,

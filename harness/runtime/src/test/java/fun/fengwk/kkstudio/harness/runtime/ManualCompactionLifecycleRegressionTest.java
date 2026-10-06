@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -179,7 +180,7 @@ class ManualCompactionLifecycleRegressionTest {
                   rootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "root",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -199,7 +200,7 @@ class ManualCompactionLifecycleRegressionTest {
                   headEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "child",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -237,7 +238,7 @@ class ManualCompactionLifecycleRegressionTest {
                   rootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "root",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -253,7 +254,7 @@ class ManualCompactionLifecycleRegressionTest {
                   rootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "middle",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -271,7 +272,7 @@ class ManualCompactionLifecycleRegressionTest {
                   leafHeadEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "leaf",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,

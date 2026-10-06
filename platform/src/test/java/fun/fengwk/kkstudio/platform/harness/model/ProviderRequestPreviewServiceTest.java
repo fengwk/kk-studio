@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -206,8 +207,7 @@ class ProviderRequestPreviewServiceTest {
             service.preview(
                 THREAD_ID,
                 new AcceptCommandsCommand(
-                    new AcceptCommandsTarget.NewSession(
-                        SESSION_ID, THREAD_ID, SETTINGS, null, false),
+                    new AcceptCommandsTarget.NewRootSession(SESSION_ID, THREAD_ID, SETTINGS, false),
                     List.of(userMessage("hi")))));
     // target threadId 与 path 不一致。
     assertThrows(
@@ -637,7 +637,7 @@ class ProviderRequestPreviewServiceTest {
         headEntryId,
         REQUEST_HASH,
         "thread",
-        false,
+        ThreadYoloPolicy.root(false),
         ThreadExecutionControl.RUNNABLE,
         0L,
         nextCommandSequence,

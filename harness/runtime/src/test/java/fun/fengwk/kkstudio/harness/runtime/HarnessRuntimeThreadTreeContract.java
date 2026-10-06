@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
@@ -257,7 +258,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       rootEntry,
                       "root",
                       T0,
-                      ThreadExecutionControl.RUNNABLE));
+                      ThreadExecutionControl.RUNNABLE,
+                      null));
               tx.insertThread(
                   thread(
                       unrelatedId,
@@ -266,7 +268,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       rootEntry,
                       "other",
                       T0,
-                      ThreadExecutionControl.RUNNABLE));
+                      ThreadExecutionControl.RUNNABLE,
+                      null));
               return rootEntry;
             });
     UUID earlyEndId =
@@ -281,12 +284,14 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       end,
                       "early",
                       T2,
-                      ThreadExecutionControl.RUNNABLE));
+                      ThreadExecutionControl.RUNNABLE,
+                      rootId));
               return end;
             });
     // 每次种子事务只写一个后代，避免 Thread/Model/Tool 锁序跨节点倒退。
-    store.transaction(tx -> insertRunningModel(tx, childSession, childId, rootId));
-    store.transaction(tx -> insertWaitingApproval(tx, grandchildSession, grandchildId, childId));
+    store.transaction(tx -> insertRunningModel(tx, childSession, childId, rootId, rootId));
+    store.transaction(
+        tx -> insertWaitingApproval(tx, grandchildSession, grandchildId, childId, rootId));
     return new TreeFixture(rootId, childId, grandchildId, earlySiblingId, unrelatedId, earlyEndId);
   }
 
@@ -321,13 +326,24 @@ public abstract class HarnessRuntimeThreadTreeContract {
   }
 
   private static UUID insertRunningModel(
-      HarnessStore.Transaction tx, UUID sessionId, UUID threadId, UUID parentId) {
+      HarnessStore.Transaction tx,
+      UUID sessionId,
+      UUID threadId,
+      UUID parentId,
+      UUID rootThreadId) {
     UUID rootId = insertRoot(tx, sessionId);
     UUID startId = tx.nextId();
     tx.insertEntry(turnStartEntry(startId, sessionId, rootId, T1, threadId));
     tx.insertThread(
         thread(
-            threadId, sessionId, parentId, startId, "child", T1, ThreadExecutionControl.RUNNABLE));
+            threadId,
+            sessionId,
+            parentId,
+            startId,
+            "child",
+            T1,
+            ThreadExecutionControl.RUNNABLE,
+            rootThreadId));
     UUID modelId = tx.nextId();
     ModelInvocation model = modelInvocation(modelId, threadId, startId, startId, T1);
     tx.insertModelInvocation(model);
@@ -337,7 +353,11 @@ public abstract class HarnessRuntimeThreadTreeContract {
   }
 
   private static UUID insertWaitingApproval(
-      HarnessStore.Transaction tx, UUID sessionId, UUID threadId, UUID parentId) {
+      HarnessStore.Transaction tx,
+      UUID sessionId,
+      UUID threadId,
+      UUID parentId,
+      UUID rootThreadId) {
     UUID rootId = insertRoot(tx, sessionId);
     UUID startId = tx.nextId();
     UUID userId = tx.nextId();
@@ -349,7 +369,14 @@ public abstract class HarnessRuntimeThreadTreeContract {
     tx.insertEntry(mappedAssistantEntry(assistantId, sessionId, userId, T1, request, response));
     ThreadState thread =
         thread(
-            threadId, sessionId, parentId, startId, "grand", T1, ThreadExecutionControl.RUNNABLE);
+            threadId,
+            sessionId,
+            parentId,
+            startId,
+            "grand",
+            T1,
+            ThreadExecutionControl.RUNNABLE,
+            rootThreadId);
     tx.insertThread(thread);
     UUID modelId = tx.nextId();
     ModelInvocation model =
@@ -597,7 +624,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
   private static ThreadState idle(
       UUID id, UUID sessionId, UUID parentId, UUID headId, String name, Instant createdAt) {
     return thread(
-        id, sessionId, parentId, headId, name, createdAt, ThreadExecutionControl.RUNNABLE);
+        id, sessionId, parentId, headId, name, createdAt, ThreadExecutionControl.RUNNABLE, null);
   }
 
   private static ThreadState thread(
@@ -607,7 +634,10 @@ public abstract class HarnessRuntimeThreadTreeContract {
       UUID headId,
       String name,
       Instant createdAt,
-      ThreadExecutionControl executionControl) {
+      ThreadExecutionControl executionControl,
+      UUID rootThreadId) {
+    ThreadYoloPolicy yoloPolicy =
+        parentId == null ? ThreadYoloPolicy.root(false) : ThreadYoloPolicy.follow(rootThreadId);
     return new ThreadState(
         id,
         sessionId,
@@ -615,7 +645,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
         headId,
         CREATION_REQUEST_HASH,
         name,
-        false,
+        yoloPolicy,
         executionControl,
         0L,
         1,

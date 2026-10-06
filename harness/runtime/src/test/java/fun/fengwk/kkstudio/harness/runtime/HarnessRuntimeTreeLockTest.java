@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
@@ -94,9 +95,15 @@ class HarnessRuntimeTreeLockTest {
     // 测试意图：验证 ThreadTreeLocks.lockForThread 在子线程和孙子线程上加锁时，正确追溯 ancestor chain 并锁定执行树的根线程 ID。
     Baseline baseline = seedBaseline(store);
     UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
     UUID grandChildId =
-        createChildThread(store, childId, baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store, childId, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId());
 
     List<String> childLocks = new ArrayList<>();
     HarnessStore childRecording = recordingStore(store, childLocks);
@@ -138,7 +145,12 @@ class HarnessRuntimeTreeLockTest {
     // 测试意图：验证加锁后二次读取 ancestor chain 不一致时抛出 IllegalStateException，防止执行树漂移。
     Baseline baseline = seedBaseline(store);
     UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
 
     AtomicInteger chainCallCount = new AtomicInteger();
     HarnessStore sabotagedStore =
@@ -172,7 +184,12 @@ class HarnessRuntimeTreeLockTest {
     // 测试意图：验证 renameThread 严格先获取 root 的 tree lock，再获取目标 thread 的行锁。
     Baseline baseline = seedBaseline(store);
     UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
 
     List<String> locks = new ArrayList<>();
     HarnessRuntime recordingRuntime =
@@ -187,17 +204,18 @@ class HarnessRuntimeTreeLockTest {
   @Test
   void setThreadYoloAcquiresTreeLockBeforeThreadLock() {
     // 测试意图：验证 setThreadYolo 严格先获取 root 的 tree lock，再获取目标 thread 的行锁。
+    // 只有执行根拥有独立 YOLO 开关（子代理恒 Follow 执行根），因此目标必须是根线程本身。
     Baseline baseline = seedBaseline(store);
-    UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
 
     List<String> locks = new ArrayList<>();
     HarnessRuntime recordingRuntime =
         HarnessRuntimeTestSupport.runtime(recordingStore(store, locks), clock);
 
-    ThreadState updated = recordingRuntime.setThreadYolo(new SetThreadYoloCommand(childId, true));
-    assertTrue(updated.yoloEnabled());
-    assertEquals(List.of("lockTree:" + baseline.threadId(), "lockThread:" + childId), locks);
+    ThreadState updated =
+        recordingRuntime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
+    assertTrue(updated.yoloPolicy().isEnabled());
+    assertEquals(
+        List.of("lockTree:" + baseline.threadId(), "lockThread:" + baseline.threadId()), locks);
   }
 
   @Test
@@ -234,7 +252,12 @@ class HarnessRuntimeTreeLockTest {
     // 测试意图：验证 getThreadSnapshot 严格先获取 root 的 tree lock，再获取 thread 行锁及后续 invocation 锁。
     Baseline baseline = seedBaseline(store);
     UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
 
     List<String> locks = new ArrayList<>();
     HarnessRuntime recordingRuntime =
@@ -250,7 +273,12 @@ class HarnessRuntimeTreeLockTest {
     // 测试意图：验证 manualCompactionAvailability 严格先获取 tree lock，再获取 Session KEY SHARE 和 Thread 行锁。
     Baseline baseline = seedBaseline(store);
     UUID childId =
-        createChildThread(store, baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+        createChildThread(
+            store,
+            baseline.threadId(),
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            baseline.threadId());
 
     List<String> locks = new ArrayList<>();
     HarnessRuntime recordingRuntime =
@@ -323,7 +351,11 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private static UUID createChildThread(
-      InMemoryHarnessStore store, UUID parentThreadId, UUID sessionId, UUID headEntryId) {
+      InMemoryHarnessStore store,
+      UUID parentThreadId,
+      UUID sessionId,
+      UUID headEntryId,
+      UUID rootThreadId) {
     UUID childId = UUID.randomUUID();
     Instant now = T0;
     store.transaction(
@@ -336,7 +368,7 @@ class HarnessRuntimeTreeLockTest {
                   headEntryId,
                   CREATION_REQUEST_HASH,
                   "child-branch",
-                  false,
+                  ThreadYoloPolicy.follow(rootThreadId),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -572,7 +604,7 @@ class HarnessRuntimeTreeLockTest {
                   secondEndId,
                   CREATION_REQUEST_HASH,
                   "main",
-                  false,
+                  ThreadYoloPolicy.root(false),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

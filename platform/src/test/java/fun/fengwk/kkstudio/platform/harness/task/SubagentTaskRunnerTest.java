@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -95,7 +96,7 @@ class SubagentTaskRunnerTest {
                 parentHeadEntryId,
                 "0".repeat(64),
                 "main",
-                true,
+                ThreadYoloPolicy.root(true),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 5L,
@@ -152,8 +153,8 @@ class SubagentTaskRunnerTest {
     verify(runtime)
         .acceptCommandsAndJoin(command.capture(), join.capture(), any(AcceptancePreflight.class));
 
-    AcceptCommandsTarget.NewSession acceptedTarget =
-        (AcceptCommandsTarget.NewSession) command.getValue().target();
+    AcceptCommandsTarget.NewChildSession acceptedTarget =
+        (AcceptCommandsTarget.NewChildSession) command.getValue().target();
     assertEquals(childThreadId, acceptedTarget.threadId());
     assertEquals(
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/session/"),
@@ -161,7 +162,7 @@ class SubagentTaskRunnerTest {
     // 执行父关系由 Runtime 建立：target 携带父 Thread，ROOT settings 只由本次物化结果决定。
     assertEquals(parentThreadId, acceptedTarget.parentThreadId());
     assertEquals(target, acceptedTarget.rootSettings());
-    assertEquals(true, acceptedTarget.yoloEnabled());
+    // 子代理 target 不再携带独立开关：Runtime 在树锁内从真实父链派生 FOLLOW(执行根)。
     // 源 prompt 与 join 同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
     assertEquals(1, command.getValue().commands().size());
     assertTrue(
@@ -214,7 +215,7 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                false,
+                ThreadYoloPolicy.follow(parentThreadId),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -300,7 +301,7 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                false,
+                ThreadYoloPolicy.follow(parentThreadId),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -402,7 +403,7 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                false,
+                ThreadYoloPolicy.follow(parentThreadId),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -623,7 +624,7 @@ class SubagentTaskRunnerTest {
                 headEntryId,
                 "0".repeat(64),
                 "child",
-                false,
+                ThreadYoloPolicy.follow(parentThreadId),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 nextSequence,

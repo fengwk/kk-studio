@@ -72,7 +72,7 @@ class HarnessRuntimeStopContinuationTest {
     assertStopped(result);
     assertEquals(1, targetReceipt(result).cancelledCommandCount());
     assertEquals(3L, result.thread().version());
-    assertTrue(result.thread().yoloEnabled());
+    assertTrue(result.thread().yoloPolicy().isEnabled());
 
     ThreadState stored = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
     EntryPath path = store.transaction(tx -> tx.loadEntryPath(stored.headEntryId()));

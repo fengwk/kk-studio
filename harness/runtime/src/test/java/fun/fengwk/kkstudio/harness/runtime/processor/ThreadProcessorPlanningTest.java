@@ -404,7 +404,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
   /**
    * Resolver 两阶段提交的 YOLO 以第二事务锁到的 Thread 当前值为准：plan 在 yolo=false 时构造，resolve 期间并发 {@code
-   * setThreadYolo(true)}（version 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code yoloEnabled=true} 推进
+   * setThreadYolo(true)}（version 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code ENABLE} 根策略推进
    * head（version 再 +1），绝不回写 plan 冻结值。
    */
   @Test
@@ -435,14 +435,14 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 version 推进到 1，CAS 精确匹配）。
     ThreadState yoloUpdate =
         fixture.runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
-    assertTrue(yoloUpdate.yoloEnabled());
+    assertTrue(yoloUpdate.yoloPolicy().isEnabled());
     assertEquals(2L, yoloUpdate.version());
     releaseResolver.countDown();
     processing.join(5000);
     assertFalse(processing.isAlive());
 
     ThreadState finalThread = thread(fixture.store, baseline.threadId());
-    assertTrue(finalThread.yoloEnabled());
+    assertTrue(finalThread.yoloPolicy().isEnabled());
     // seedCommand +1，setThreadYolo +1，commit advanceHead 再 +1。
     assertEquals(3L, finalThread.version());
     assertEquals(

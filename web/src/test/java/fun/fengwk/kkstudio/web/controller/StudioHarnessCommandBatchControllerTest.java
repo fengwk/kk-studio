@@ -107,7 +107,7 @@ class StudioHarnessCommandBatchControllerTest {
     verify(acceptanceService, times(2)).accept(any(OwnerRef.class), commandCaptor.capture());
     assertEquals(2, commandCaptor.getAllValues().size());
     assertEquals(
-        AcceptCommandsTarget.NewSession.class,
+        AcceptCommandsTarget.NewRootSession.class,
         commandCaptor.getAllValues().get(0).target().getClass());
     assertEquals(
         AcceptCommandsTarget.NewThread.class,

@@ -149,7 +149,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(
                 new NewThreadCommand(
                     new UserMessageCommandPayload(
@@ -162,7 +162,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     acceptanceService.accept(
         owner,
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewSession(sessionId, threadId, settings(), null, false),
+            new AcceptCommandsTarget.NewRootSession(sessionId, threadId, settings(), false),
             List.of(
                 new NewThreadCommand(
                     new UserMessageCommandPayload(

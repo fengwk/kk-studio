@@ -110,9 +110,9 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
     UUID threadId = uuid();
     jdbc.update(
         "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
-            + " yolo_enabled, execution_control, input_through_sequence, next_command_sequence,"
-            + " version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, 'thread', true, 'RUNNABLE', 0, 1, 0, current_timestamp,"
+            + " yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence,"
+            + " next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, 'thread', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, current_timestamp,"
             + " current_timestamp)",
         threadId,
         sessionId,

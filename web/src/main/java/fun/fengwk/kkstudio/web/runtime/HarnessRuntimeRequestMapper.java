@@ -223,11 +223,10 @@ public final class HarnessRuntimeRequestMapper {
     return switch (type) {
       case "NEW_SESSION" -> {
         requireForbidden(dto.hasStartEntryIdField(), "target.startEntryId", "target type " + type);
-        yield new AcceptCommandsTarget.NewSession(
+        yield new AcceptCommandsTarget.NewRootSession(
             parseUuid(dto.getSessionId(), "target.sessionId"),
             parseUuid(dto.getThreadId(), "target.threadId"),
             toBranchSettings(requireNonNull(dto.getRootSettings(), "target.rootSettings")),
-            null,
             requireBoolean(dto.getYoloEnabled(), "target.yoloEnabled"));
       }
       case "NEW_THREAD" -> {

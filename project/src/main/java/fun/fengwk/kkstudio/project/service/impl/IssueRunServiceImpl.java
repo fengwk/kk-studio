@@ -205,8 +205,8 @@ public class IssueRunServiceImpl implements IssueRunService {
       sessionId = UUID.randomUUID();
       threadId = UUID.randomUUID();
       target =
-          new AcceptCommandsTarget.NewSession(
-              sessionId, threadId, settings, null, project.isYoloEnabled());
+          new AcceptCommandsTarget.NewRootSession(
+              sessionId, threadId, settings, project.isYoloEnabled());
     } else {
       threadId = binding.threadId();
       ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(threadId);

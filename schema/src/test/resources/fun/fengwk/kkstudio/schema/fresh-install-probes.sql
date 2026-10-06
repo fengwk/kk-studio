@@ -100,13 +100,13 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
         '{"message":{"role":"ASSISTANT"}}', now()),
     (pg_temp.uid(206), pg_temp.uid(100), pg_temp.uid(205), 'TURN_END', '{}', now());
 insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
-    yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
-    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', true, 'RUNNABLE', 0, 1, 0, now(), now()),
-    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', true, 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', true, 'RUNNABLE', 0, 1, 0, now(), now()),
-    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', true, 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', true, 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', true, 'RUNNABLE', 0, 1, 0, now(), now());
+    yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
+    (pg_temp.uid(300), pg_temp.uid(100), pg_temp.uid(200), repeat('a', 64), 'work', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(301), pg_temp.uid(101), pg_temp.uid(201), repeat('b', 64), 'review', 'ENABLE', null, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', 'ENABLE', null, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', 'ENABLE', null, 'STOPPED', 0, 1, 0, now(), now()),
+    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', 'ENABLE', null, 'RUNNABLE', 0, 1, 0, now(), now());
 
 insert into project_issue_agent_thread (issue_id, agent_name, thread_id) values
     (pg_temp.uid(10), 'designer', pg_temp.uid(300)),
@@ -756,12 +756,43 @@ select pg_temp.rejects('a Chat Session blocks deleting its Chat',
 -- Execution tree and Thread Join: recursive lifecycle status, permanent parent
 -- edge, atomic source-prompt receipt and delivery shape.
 -- ---------------------------------------------------------------------------
-insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,
-    yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
-    (pg_temp.uid(310), pg_temp.uid(102), pg_temp.uid(202), repeat('1', 64), 'join-child', true,
+insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
+    yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at) values
+    (pg_temp.uid(310), pg_temp.uid(102), null, pg_temp.uid(202), repeat('1', 64), 'join-child', 'ENABLE', null,
         'RUNNABLE', 0, 2, 0, now(), now()),
-    (pg_temp.uid(311), pg_temp.uid(102), pg_temp.uid(202), repeat('2', 64), 'join-parent', true,
-        'STOPPED', 0, 2, 0, now(), now());
+    (pg_temp.uid(311), pg_temp.uid(102), null, pg_temp.uid(202), repeat('2', 64), 'join-parent', 'ENABLE', null,
+        'STOPPED', 0, 2, 0, now(), now()),
+    (pg_temp.uid(312), pg_temp.uid(102), pg_temp.uid(311), pg_temp.uid(202), repeat('0', 64), 'follow-child', 'FOLLOW', pg_temp.uid(311),
+        'RUNNABLE', 0, 1, 0, now(), now());
+select pg_temp.assert_true('a child Thread follows its real execution root',
+    (select yolo_mode = 'FOLLOW' and yolo_root_thread_id = pg_temp.uid(311)
+        from harness_thread where id = pg_temp.uid(312)));
+select pg_temp.assert_true('yolo_mode is required and has no default',
+    (select is_nullable = 'NO' and column_default is null from information_schema.columns
+        where table_name = 'harness_thread' and column_name = 'yolo_mode'));
+select pg_temp.assert_true('yolo_root_thread_id is nullable',
+    (select is_nullable = 'YES' from information_schema.columns
+        where table_name = 'harness_thread' and column_name = 'yolo_root_thread_id'));
+select pg_temp.rejects('Thread yolo_mode cannot be null',
+    $$update harness_thread set yolo_mode = null where id = pg_temp.uid(310)$$, '23502');
+select pg_temp.rejects('an unknown YOLO mode is rejected',
+    $$update harness_thread set yolo_mode = 'MAYBE' where id = pg_temp.uid(310)$$, '23514',
+    'ck_harness_thread_yolo_mode');
+select pg_temp.rejects('an execution root cannot follow another Thread',
+    $$update harness_thread set yolo_mode = 'FOLLOW', yolo_root_thread_id = pg_temp.uid(305)
+        where id = pg_temp.uid(310)$$, '23514', 'ck_harness_thread_parent_yolo');
+select pg_temp.rejects('a child Thread cannot keep an independent switch',
+    $$update harness_thread set yolo_mode = 'DISABLE', yolo_root_thread_id = null
+        where id = pg_temp.uid(312)$$, '23514', 'ck_harness_thread_parent_yolo');
+select pg_temp.rejects('FOLLOW must carry a concrete execution root',
+    $$update harness_thread set yolo_root_thread_id = null where id = pg_temp.uid(312)$$,
+    '23514', 'ck_harness_thread_yolo_root');
+select pg_temp.rejects('a Thread cannot follow itself',
+    $$update harness_thread set yolo_root_thread_id = pg_temp.uid(312) where id = pg_temp.uid(312)$$,
+    '23514', 'ck_harness_thread_yolo_root_not_self');
+select pg_temp.rejects('the Follow execution root must be a real Thread',
+    $$update harness_thread set yolo_root_thread_id = pg_temp.uid(399) where id = pg_temp.uid(312)$$,
+    '23503', 'fk_harness_thread_yolo_root');
 insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key,
     request_hash, created_at) values
     (pg_temp.uid(310), 1, 'USER_MESSAGE', '{"text":"go"}', pg_temp.uid(1310), repeat('3', 64), now()),
@@ -792,10 +823,12 @@ select pg_temp.rejects('unknown execution control is rejected',
     $$update harness_thread set execution_control = 'RUNNING' where id = pg_temp.uid(310)$$, '23514',
     'ck_harness_thread_execution_control');
 select pg_temp.rejects('a Thread cannot be its own execution parent',
-    $$update harness_thread set parent_thread_id = id where id = pg_temp.uid(310)$$, '23514',
+    $$update harness_thread set parent_thread_id = id, yolo_mode = 'FOLLOW',
+        yolo_root_thread_id = pg_temp.uid(311) where id = pg_temp.uid(310)$$, '23514',
     'ck_harness_thread_parent_not_self');
 select pg_temp.rejects('the execution parent must be a real Thread',
-    $$update harness_thread set parent_thread_id = pg_temp.uid(399) where id = pg_temp.uid(311)$$,
+    $$update harness_thread set parent_thread_id = pg_temp.uid(399), yolo_mode = 'FOLLOW',
+        yolo_root_thread_id = pg_temp.uid(300) where id = pg_temp.uid(311)$$,
     '23503', 'fk_harness_thread_parent');
 -- An unknown child Thread breaks both its Thread edge and its source command edge,
 -- so no single constraint is claimed here.

@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Instant;
@@ -57,6 +58,14 @@ public abstract class HarnessStoreJoinContract {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
+          // 子代理恒 FOLLOW 真实执行根：从不可变 parent 链取最顶层线程（parent 为 null），而非中间父节点。
+          ThreadYoloPolicy yoloPolicy;
+          if (parentThreadId == null) {
+            yoloPolicy = ThreadYoloPolicy.root(false);
+          } else {
+            List<UUID> chain = tx.findAncestorChain(parentThreadId);
+            yoloPolicy = ThreadYoloPolicy.follow(chain.get(chain.size() - 1));
+          }
           tx.insertThread(
               new ThreadState(
                   childId,
@@ -65,7 +74,7 @@ public abstract class HarnessStoreJoinContract {
                   rootEntryId,
                   CREATION_REQUEST_HASH,
                   "child-thread",
-                  false,
+                  yoloPolicy,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

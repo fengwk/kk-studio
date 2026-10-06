@@ -32,7 +32,7 @@ class ThreadStateTest {
     assertEquals(id(42), rootState.headEntryId());
     assertEquals(CREATION_REQUEST_HASH, rootState.creationRequestHash());
     assertEquals("main", rootState.name());
-    assertTrue(rootState.yoloEnabled());
+    assertTrue(rootState.yoloPolicy().isEnabled());
     assertEquals(ThreadExecutionControl.RUNNABLE, rootState.executionControl());
     assertEquals(3L, rootState.nextCommandSequence());
     assertEquals(5L, rootState.version());
@@ -54,7 +54,8 @@ class ThreadStateTest {
             0L,
             CREATED.plusSeconds(2));
     assertEquals(id(7), childState.parentThreadId());
-    assertFalse(childState.yoloEnabled());
+    // 子线程恒为 FOLLOW 执行根，没有独立开关，因此 isEnabled 为 false。
+    assertFalse(childState.yoloPolicy().isEnabled());
     assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
     assertTrue(childState.executionControl().isRunnable());
   }
@@ -77,7 +78,7 @@ class ThreadStateTest {
                 id(42),
                 CREATION_REQUEST_HASH,
                 "main",
-                false,
+                ThreadYoloPolicy.root(false),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 1L,
@@ -96,7 +97,7 @@ class ThreadStateTest {
                 id(42),
                 CREATION_REQUEST_HASH,
                 "main",
-                false,
+                ThreadYoloPolicy.follow(id(7)),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 1L,
@@ -114,7 +115,7 @@ class ThreadStateTest {
                 id(42),
                 CREATION_REQUEST_HASH,
                 "main",
-                false,
+                ThreadYoloPolicy.root(false),
                 null,
                 0L,
                 1L,
@@ -132,7 +133,7 @@ class ThreadStateTest {
                 id(42),
                 null,
                 "main",
-                false,
+                ThreadYoloPolicy.root(false),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 1L,
@@ -149,7 +150,7 @@ class ThreadStateTest {
                 id(42),
                 "invalid-hash",
                 "main",
-                false,
+                ThreadYoloPolicy.root(false),
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 1L,
@@ -180,7 +181,7 @@ class ThreadStateTest {
             id(42),
             CREATION_REQUEST_HASH,
             "child-branch",
-            true,
+            ThreadYoloPolicy.follow(id(7)),
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,
@@ -194,7 +195,7 @@ class ThreadStateTest {
     assertEquals(id(42), initialViaConstructor.headEntryId());
     assertEquals(CREATION_REQUEST_HASH, initialViaConstructor.creationRequestHash());
     assertEquals("child-branch", initialViaConstructor.name());
-    assertTrue(initialViaConstructor.yoloEnabled());
+    assertEquals(ThreadYoloPolicy.follow(id(7)), initialViaConstructor.yoloPolicy());
     assertEquals(ThreadExecutionControl.RUNNABLE, initialViaConstructor.executionControl());
     assertEquals(1L, initialViaConstructor.nextCommandSequence());
     assertEquals(0L, initialViaConstructor.version());
@@ -209,7 +210,7 @@ class ThreadStateTest {
             id(43),
             CREATION_REQUEST_HASH,
             "root-thread",
-            false,
+            ThreadYoloPolicy.root(false),
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,
@@ -242,7 +243,7 @@ class ThreadStateTest {
     assertEquals(stored.headEntryId(), idle.headEntryId());
     assertEquals(stored.creationRequestHash(), idle.creationRequestHash());
     assertEquals(stored.name(), idle.name());
-    assertEquals(stored.yoloEnabled(), idle.yoloEnabled());
+    assertEquals(stored.yoloPolicy(), idle.yoloPolicy());
     assertEquals(stored.nextCommandSequence(), idle.nextCommandSequence());
     assertEquals(stored.createdAt(), idle.createdAt());
     assertEquals(CREATED.plusSeconds(1), idle.updatedAt());
@@ -268,7 +269,7 @@ class ThreadStateTest {
     assertEquals(6L, next.version());
     assertEquals(CREATED.plusSeconds(1), next.updatedAt());
     assertEquals(stored.headEntryId(), next.headEntryId());
-    assertEquals(stored.yoloEnabled(), next.yoloEnabled());
+    assertEquals(stored.yoloPolicy(), next.yoloPolicy());
     assertEquals(stored.parentThreadId(), next.parentThreadId());
     assertEquals(stored.executionControl(), next.executionControl());
     // 单个 sequence 等价于 count=1
@@ -298,14 +299,15 @@ class ThreadStateTest {
     // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
     ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
     assertEquals(id(99), head.headEntryId());
-    assertTrue(head.yoloEnabled());
+    // 子线程跟随执行根：推进 head 必须完整保留 FOLLOW policy。
+    assertEquals(stored.yoloPolicy(), head.yoloPolicy());
     assertEquals(6L, head.version());
     assertEquals(3L, head.nextCommandSequence());
     assertEquals(stored.parentThreadId(), head.parentThreadId());
     assertEquals(stored.executionControl(), head.executionControl());
     // 再次推进同样保留 policy，不因显式传入而改写。
     ThreadState advanced = head.advanceHead(id(99), CREATED.plusSeconds(3));
-    assertTrue(advanced.yoloEnabled());
+    assertEquals(head.yoloPolicy(), advanced.yoloPolicy());
     assertEquals(7L, advanced.version());
     assertEquals(id(99), advanced.headEntryId());
     assertEquals(3L, advanced.nextCommandSequence());
@@ -314,7 +316,7 @@ class ThreadStateTest {
     // false 值同样被保留。
     ThreadState storedDisabled = state(id(7), id(42), false, 3L, 5L, CREATED);
     ThreadState advancedDisabled = storedDisabled.advanceHead(id(99), CREATED.plusSeconds(2));
-    assertFalse(advancedDisabled.yoloEnabled());
+    assertFalse(advancedDisabled.yoloPolicy().isEnabled());
     assertEquals(6L, advancedDisabled.version());
     assertEquals(id(99), advancedDisabled.headEntryId());
     assertEquals(storedDisabled.parentThreadId(), advancedDisabled.parentThreadId());
@@ -322,19 +324,20 @@ class ThreadStateTest {
   }
 
   @Test
-  void setYoloEnabledBumpsVersionExactlyOnceAndPreservesCursor() {
+  void setRootYoloBumpsVersionExactlyOnceAndPreservesCursor() {
+    // setRootYolo 只作用于执行根（parentThreadId 为 null），因此 fixture 使用根线程。
     ThreadState stored =
-        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
-    ThreadState enabled = stored.setYoloEnabled(true, CREATED.plusSeconds(2));
-    assertTrue(enabled.yoloEnabled());
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState enabled = stored.setRootYolo(true, CREATED.plusSeconds(2));
+    assertTrue(enabled.yoloPolicy().isEnabled());
     assertEquals(6L, enabled.version());
     assertEquals(id(42), enabled.headEntryId());
     assertEquals(3L, enabled.nextCommandSequence());
     assertEquals(stored.parentThreadId(), enabled.parentThreadId());
     assertEquals(stored.executionControl(), enabled.executionControl());
     // 再次切换同样精确 +1；时间钳制与其它转换一致。
-    ThreadState disabled = enabled.setYoloEnabled(false, CREATED.plusSeconds(2));
-    assertFalse(disabled.yoloEnabled());
+    ThreadState disabled = enabled.setRootYolo(false, CREATED.plusSeconds(2));
+    assertFalse(disabled.yoloPolicy().isEnabled());
     assertEquals(7L, disabled.version());
     assertEquals(CREATED.plusSeconds(2), enabled.updatedAt());
     assertEquals(CREATED.plusSeconds(2), disabled.updatedAt());
@@ -351,7 +354,7 @@ class ThreadStateTest {
     assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
     assertEquals(durableNow, stored.advanceHead(id(99), CREATED).updatedAt());
     assertEquals(durableNow, stored.touchVersion(CREATED).updatedAt());
-    assertEquals(durableNow, stored.setYoloEnabled(true, CREATED).updatedAt());
+    assertEquals(durableNow, stored.setRootYolo(true, CREATED).updatedAt());
     assertEquals(durableNow, stored.renameThread("new name", CREATED).updatedAt());
     assertEquals(
         durableNow,
@@ -368,7 +371,7 @@ class ThreadStateTest {
     assertEquals(6L, renamed.version());
     assertEquals(stored.headEntryId(), renamed.headEntryId());
     assertEquals(stored.nextCommandSequence(), renamed.nextCommandSequence());
-    assertEquals(stored.yoloEnabled(), renamed.yoloEnabled());
+    assertEquals(stored.yoloPolicy(), renamed.yoloPolicy());
     assertEquals(stored.parentThreadId(), renamed.parentThreadId());
     assertEquals(stored.executionControl(), renamed.executionControl());
     assertEquals(stored.createdAt(), renamed.createdAt());
@@ -440,7 +443,7 @@ class ThreadStateTest {
                     id(42),
                     CREATION_REQUEST_HASH,
                     "main",
-                    false,
+                    ThreadYoloPolicy.follow(id(100)),
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     3L,
@@ -505,7 +508,7 @@ class ThreadStateTest {
                     id(42),
                     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                     "main",
-                    false,
+                    ThreadYoloPolicy.follow(id(100)),
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     3L,
@@ -525,7 +528,7 @@ class ThreadStateTest {
                     id(42),
                     CREATION_REQUEST_HASH,
                     "main",
-                    false,
+                    ThreadYoloPolicy.follow(id(100)),
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     3L,
@@ -672,6 +675,132 @@ class ThreadStateTest {
             CREATED.plusSeconds(1)));
   }
 
+  /** 根/子的 YOLO 策略 shape 在构造期强约束：根不可 FOLLOW；子必须 FOLLOW 执行根且不可 follow 自身。 */
+  @Test
+  void rejectsYoloPolicyShapeViolations() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                ThreadYoloPolicy.follow(id(9)),
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 子线程必须 FOLLOW，不能自带根开关
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(9),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                ThreadYoloPolicy.root(true),
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 子线程不可 follow 自身（与 parent-not-self 相互独立的第二道约束）
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(9),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                ThreadYoloPolicy.follow(id(7)),
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 非 FOLLOW 模式不得携带目标，FOLLOW 必须有目标
+    assertThrows(
+        IllegalArgumentException.class, () -> new ThreadYoloPolicy(ThreadYoloMode.ENABLE, id(9)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ThreadYoloPolicy(ThreadYoloMode.DISABLE, id(9)));
+    assertThrows(NullPointerException.class, () -> ThreadYoloPolicy.follow(null));
+  }
+
+  /** 子代理的 FOLLOW 目标创建后不可变：validateTransition 拒绝换根，即使 version 严格 +1；同目标推进仍允许。 */
+  @Test
+  void validateTransitionRejectsMutatingChildFollowPolicy() {
+    ThreadState stored =
+        state(id(8), id(7), id(43), false, ThreadExecutionControl.RUNNABLE, 1L, 5L, CREATED);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(8),
+                    SESSION_ID,
+                    id(7),
+                    id(43),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    ThreadYoloPolicy.follow(id(100)),
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    1L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+
+    ThreadState.validateTransition(
+        stored,
+        new ThreadState(
+            id(8),
+            SESSION_ID,
+            id(7),
+            id(43),
+            CREATION_REQUEST_HASH,
+            "main",
+            ThreadYoloPolicy.follow(id(7)),
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            6L,
+            CREATED,
+            CREATED.plusSeconds(1)));
+  }
+
+  /** 只有执行根拥有 YOLO 开关：子线程调用 setRootYolo 必须拒绝，根调用仅切换自身 ENABLE/DISABLE 且 version +1。 */
+  @Test
+  void childThreadCannotOwnYoloSwitch() {
+    ThreadState child =
+        state(id(8), id(7), id(43), false, ThreadExecutionControl.RUNNABLE, 1L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class, () -> child.setRootYolo(true, CREATED.plusSeconds(1)));
+
+    ThreadState root =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState enabled = root.setRootYolo(true, CREATED.plusSeconds(1));
+    assertTrue(enabled.yoloPolicy().isEnabled());
+    assertFalse(enabled.yoloPolicy().isFollow());
+    assertEquals(6L, enabled.version());
+    assertEquals(root.headEntryId(), enabled.headEntryId());
+    assertEquals(root.nextCommandSequence(), enabled.nextCommandSequence());
+  }
+
   private static ThreadState state(
       UUID id,
       UUID headEntryId,
@@ -699,6 +828,11 @@ class ThreadStateTest {
       long nextCommandSequence,
       long version,
       Instant updatedAt) {
+    // 根线程使用独立开关，子线程恒 FOLLOW 传入的执行根（fixture 的 parent 即执行根）。
+    ThreadYoloPolicy yoloPolicy =
+        parentThreadId == null
+            ? ThreadYoloPolicy.root(yoloEnabled)
+            : ThreadYoloPolicy.follow(parentThreadId);
     return new ThreadState(
         id,
         SESSION_ID,
@@ -706,7 +840,7 @@ class ThreadStateTest {
         headEntryId,
         CREATION_REQUEST_HASH,
         "main",
-        yoloEnabled,
+        yoloPolicy,
         executionControl,
         0L,
         nextCommandSequence,

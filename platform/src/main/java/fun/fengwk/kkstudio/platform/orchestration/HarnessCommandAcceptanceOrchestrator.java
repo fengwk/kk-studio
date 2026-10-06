@@ -129,11 +129,12 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * owner-aware 入口只负责创建（NEW_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link #acceptOnThread}，不保留以
-   * THREAD target 借 owner 路由发送的兼容分支。
+   * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD）：既有 Thread 的继续写入走 {@link
+   * #acceptOnThread}，子代理 NEW_CHILD_SESSION 只由 internal task 经 {@code
+   * HarnessRuntime.acceptCommandsAndJoin} 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
    */
   private static void requireCreationTarget(AcceptCommandsTarget target) {
-    if (!(target instanceof AcceptCommandsTarget.NewSession)
+    if (!(target instanceof AcceptCommandsTarget.NewRootSession)
         && !(target instanceof AcceptCommandsTarget.NewThread)) {
       throw new IllegalArgumentException(
           "owner-aware command acceptance is limited to NEW_SESSION / NEW_THREAD creation");
@@ -152,8 +153,8 @@ public class HarnessCommandAcceptanceOrchestrator {
       }
       case OwnerRef.IssueAgent issueAgent -> {
         IssueAgentThread binding = lockIssueAndReadBinding(issueAgent);
-        if (target instanceof AcceptCommandsTarget.NewSession newSession) {
-          requireBindingAllowsNewSession(binding, newSession);
+        if (target instanceof AcceptCommandsTarget.NewRootSession newRootSession) {
+          requireBindingAllowsNewSession(binding, newRootSession);
         }
         requireTargetOwnership(owner, target);
       }
@@ -162,28 +163,32 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
-   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}），因此这里不再有 THREAD 分支。
+   * sessionId。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；NEW_CHILD_SESSION 与 THREAD 都不属于
+   * owner-aware 产品入口，即使上层形状校验被绕过也必须 fail closed。
    */
   private void requireTargetOwnership(OwnerRef owner, AcceptCommandsTarget target) {
     switch (target) {
-      case AcceptCommandsTarget.NewSession newSession -> {
-        if (sessionExists(newSession.sessionId())) {
-          requireOwnedSession(owner, newSession.sessionId());
+      case AcceptCommandsTarget.NewRootSession newRootSession -> {
+        if (sessionExists(newRootSession.sessionId())) {
+          requireOwnedSession(owner, newRootSession.sessionId());
         }
       }
       case AcceptCommandsTarget.NewThread newThread -> requireOwnedSession(
           owner, newThread.sessionId());
-      case AcceptCommandsTarget.Thread ignored -> throw new IllegalStateException(
-          "owner-aware authorization requires a creation target");
+      case AcceptCommandsTarget.NewChildSession ignored -> throw new IllegalStateException(
+          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
+      case AcceptCommandsTarget.Thread ignoredThread -> throw new IllegalStateException(
+          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
     }
   }
 
   /**
-   * NEW_SESSION 对 Issue+Agent owner 的额外约束：已有绑定只能精确指向 target Thread；同一 Agent 不允许改绑到新 Thread（绑定不可重绑）。
+   * NEW_ROOT_SESSION 对 Issue+Agent owner 的额外约束：已有绑定只能精确指向 target Thread；同一 Agent 不允许改绑到新
+   * Thread（绑定不可重绑）。
    */
   private static void requireBindingAllowsNewSession(
-      IssueAgentThread binding, AcceptCommandsTarget.NewSession newSession) {
-    if (binding != null && !binding.threadId().equals(newSession.threadId())) {
+      IssueAgentThread binding, AcceptCommandsTarget.NewRootSession newRootSession) {
+    if (binding != null && !binding.threadId().equals(newRootSession.threadId())) {
       throw new IllegalArgumentException("Issue agent is already bound to a different thread");
     }
   }
@@ -271,7 +276,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private AcceptancePreflight preflight(OwnerRef owner, AcceptCommandsTarget target) {
     return (tx, session, commands) -> {
       if (owner instanceof OwnerRef.Chat chat
-          && target instanceof AcceptCommandsTarget.NewSession) {
+          && target instanceof AcceptCommandsTarget.NewRootSession) {
         createChatSessionOwnership(session.id(), chat.chatId());
       }
       return prepareUserContents(session.id(), commands);

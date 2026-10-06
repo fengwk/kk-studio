@@ -893,7 +893,8 @@ create table harness_thread (
     head_entry_id uuid not null,
     creation_request_hash char(64) not null,
     name varchar(256) not null,
-    yolo_enabled boolean not null,
+    yolo_mode varchar(16) not null,
+    yolo_root_thread_id uuid,
     execution_control varchar(16) not null,
     input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
     next_command_sequence bigint not null check (next_command_sequence >= 1),
@@ -904,6 +905,8 @@ create table harness_thread (
         references harness_session (id),
     constraint fk_harness_thread_parent foreign key (parent_thread_id)
         references harness_thread (id),
+    constraint fk_harness_thread_yolo_root foreign key (yolo_root_thread_id)
+        references harness_thread (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
     -- 同 Session 复合引用目标：产品表（如 Issue Run）用 (session_id, id) 把
@@ -911,6 +914,19 @@ create table harness_thread (
     constraint uk_harness_thread_session unique (session_id, id),
     constraint ck_harness_thread_parent_not_self check (
         parent_thread_id is null or parent_thread_id <> id
+    ),
+    -- FOLLOW 只能用于子代理，且必须携带真实执行根；执行根不能 Follow，也不能跟其他执行树。
+    constraint ck_harness_thread_yolo_mode check (
+        yolo_mode in ('ENABLE', 'DISABLE', 'FOLLOW')
+    ),
+    constraint ck_harness_thread_yolo_root check (
+        (yolo_mode = 'FOLLOW') = (yolo_root_thread_id is not null)
+    ),
+    constraint ck_harness_thread_parent_yolo check (
+        (parent_thread_id is null) = (yolo_mode <> 'FOLLOW')
+    ),
+    constraint ck_harness_thread_yolo_root_not_self check (
+        yolo_root_thread_id is null or yolo_root_thread_id <> id
     ),
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
@@ -927,14 +943,15 @@ create table harness_thread (
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，yolo_mode/yolo_root_thread_id 记录根开关或子代理不可变 Follow 目标，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
 comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
-comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
+comment on column harness_thread.yolo_mode is 'YOLO 策略模式：根为 ENABLE/DISABLE，子代理恒为 FOLLOW 且必须携带 yolo_root_thread_id';
+comment on column harness_thread.yolo_root_thread_id is 'FOLLOW 的真实执行根 UUID（子代理创建后不可变）；根 Thread 为 null';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
