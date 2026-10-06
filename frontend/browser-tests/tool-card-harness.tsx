@@ -17,9 +17,12 @@ import type {
 type HarnessState = {
   messages: DialogueMessage[]
   streaming: boolean
+  /** 恢复的阅读位置：与产品里「重新进入 Thread 恢复上次位置」同一条路径。 */
+  initialScrollTop?: number | null
 }
 
 let publish: (state: HarnessState) => void = () => {}
+let currentState: HarnessState = { messages: [], streaming: false }
 
 function assistant(id: string, text: string): DialogueMessage {
   return {
@@ -91,6 +94,32 @@ function bashResult(id: string, lines: number): ToolDialogueMessage {
   }
 }
 
+/**
+ * 未知/MCP 工具：Header 只做紧凑 JSON，没有二次正文可展开。
+ * `rawArguments` 为不完整（流式）参数时原样呈现，换行不会被吞掉。
+ */
+function unknownTool(
+  id: string,
+  rawArguments: string,
+  status: 'done' | 'streaming',
+  withBody = false,
+): ToolDialogueMessage {
+  const streaming = status === 'streaming'
+  return {
+    id: streaming ? `transient:tool-call:${id}` : `40:tool-result:${id}`,
+    role: 'tool',
+    subjectEntryId: streaming ? null : 'entry-60',
+    createdAt: '2026-10-06T10:00:05Z',
+    status,
+    phase: streaming ? 'call' : 'result',
+    contents: withBody ? [{ type: 'text', text: 'no matches' }] : [],
+    ...(streaming ? { partialContents: [] } : {}),
+    toolCallId: id,
+    toolName: 'mcp__filesystem__search_files',
+    arguments: rawArguments,
+  }
+}
+
 const IMAGE_BLOB_ID = 'blob-image'
 const UNKNOWN_BLOB_ID = 'blob-unknown'
 
@@ -133,6 +162,41 @@ function readTool(id: string, blobId: string, name: string): {
       toolName: 'read',
       rendererKey: 'read',
       arguments: JSON.stringify({ path: `/tmp/${name}` }),
+    },
+  }
+}
+
+/** read 文本卡片：默认收起（Header only），点开箭头就是「流式期间手动展开」。 */
+function readTextTool(id: string): { call: ToolDialogueMessage; result: ToolDialogueMessage } {
+  return {
+    call: {
+      id: `40:tool-call:${id}`,
+      role: 'tool',
+      subjectEntryId: 'entry-52',
+      createdAt: '2026-10-06T10:00:06Z',
+      status: 'done',
+      phase: 'call',
+      contents: [],
+      toolCallId: id,
+      toolName: 'read',
+      rendererKey: 'read',
+      arguments: JSON.stringify({ path: '/tmp/notes.md' }),
+    },
+    result: {
+      id: `40:tool-result:${id}`,
+      role: 'tool',
+      subjectEntryId: 'entry-53',
+      createdAt: '2026-10-06T10:00:07Z',
+      status: 'done',
+      phase: 'result',
+      contents: [{
+        type: 'text',
+        text: Array.from({ length: 24 }, (_, index) => `note line ${index + 1}`).join('\n'),
+      }],
+      toolCallId: id,
+      toolName: 'read',
+      rendererKey: 'read',
+      arguments: JSON.stringify({ path: '/tmp/notes.md' }),
     },
   }
 }
@@ -190,6 +254,7 @@ export function ToolCardHarnessApp() {
   const resolveBlobUrls = useMemo(() => createBlobResolver(600, imageUrl), [imageUrl])
 
   const release = useCallback((next: HarnessState) => {
+    currentState = next
     setState(next)
   }, [])
 
@@ -215,6 +280,7 @@ export function ToolCardHarnessApp() {
           loading={false}
           error={null}
           bodyRef={bodyRef}
+          initialScrollTop={state.initialScrollTop ?? null}
         />
       </ResourceBlobUrlContext.Provider>
     </div>
@@ -222,6 +288,73 @@ export function ToolCardHarnessApp() {
 }
 
 const toolCardHarness = {
+  /**
+   * 流式且卡片在末尾：外部贴底时 bash 卡片与末尾 read 文本卡片都在可视区内。
+   * 末尾 read 文本卡片默认收起，点开箭头就是「流式期间手动展开」。
+   */
+  streamingTail(lines = 40) {
+    const read = readTextTool('call-read-text')
+    publish({
+      messages: [...filler(8), bashTool('call-bash', lines, true), read.call, read.result],
+      streaming: true,
+    })
+  },
+  /** 末尾流式卡片继续增长（外部内容并发增长），卡片构成不变。 */
+  growTail(lines: number) {
+    const read = readTextTool('call-read-text')
+    publish({
+      messages: [...filler(8), bashTool('call-bash', lines, true), read.call, read.result],
+      streaming: true,
+    })
+  },
+  /**
+   * 布局变矮：填充消息减少，容器高度确实变小，且流式 revision 同时变化。
+   * 用于验证「阅读意图 + 后续流式信号」也不会因为高度变矮而重开跟随。
+   */
+  shrinkTail(lines = 60) {
+    const read = readTextTool('call-read-text')
+    publish({
+      messages: [...filler(2), bashTool('call-bash', lines, true), read.call, read.result],
+      streaming: true,
+    })
+  },
+  /** 流式期间追加一张新的 read 图片卡片：解析完成后默认预览，布局确实增大。 */
+  addImageMid(lines: number) {
+    const read = readTextTool('call-read-text')
+    const image = readTool('call-read-late', IMAGE_BLOB_ID, 'late.png')
+    publish({
+      messages: [
+        ...filler(8),
+        bashTool('call-bash', lines, true),
+        read.call,
+        read.result,
+        image.call,
+        image.result,
+      ],
+      streaming: true,
+    })
+  },
+  /**
+   * 未知/MCP 工具：超长紧凑 JSON。第一张没有二次正文（不可展开），第二张有正文
+   * （可展开，箭头固定在右侧留白里），第三张是带真实换行的流式原始参数。
+   */
+  unknownLong(chars = 4000) {
+    const longValue = `start-${'x'.repeat(Math.max(0, chars - 40))}-tail-marker`
+    publish({
+      messages: [
+        ...filler(2),
+        unknownTool('call-mcp-long', JSON.stringify({ query: longValue, limit: chars }), 'done'),
+        unknownTool(
+          'call-mcp-body',
+          `{"patch":"line one\nline two\n${'y'.repeat(1200)}`,
+          'done',
+          true,
+        ),
+        ...filler(3),
+      ],
+      streaming: false,
+    })
+  },
   /** 空闲且卡片位于中间：下方仍有内容，「不贴底」才有区分度。 */
   idleMid(lines = 40) {
     publish({
@@ -262,11 +395,18 @@ const toolCardHarness = {
       streaming: false,
     })
   },
-  /** 空闲时追加一张 read 卡片：图片 blob（权威 MIME image/png，延迟 600ms 解析）。 */
+  /** 恢复阅读位置（与应用恢复保存位置同一路径，不经过用户滚动事件）。 */
+  restorePosition(offset: number) {
+    publish({ ...currentState, initialScrollTop: offset })
+  },
+  /**
+   * 空闲时追加一张 read 卡片：图片 blob（权威 MIME image/png，延迟 600ms 解析）。
+   * 卡片之后保留足量内容，让「恢复到中段阅读位置」真的远离底部。
+   */
   readImage() {
     const tool = readTool('call-read-image', IMAGE_BLOB_ID, 'shot.png')
     publish({
-      messages: [...filler(3), tool.call, tool.result, ...filler(6)],
+      messages: [...filler(3), tool.call, tool.result, ...filler(11)],
       streaming: false,
     })
   },
@@ -274,7 +414,7 @@ const toolCardHarness = {
   readUnknown() {
     const tool = readTool('call-read-unknown', UNKNOWN_BLOB_ID, 'result.bin')
     publish({
-      messages: [...filler(3), tool.call, tool.result, ...filler(6)],
+      messages: [...filler(3), tool.call, tool.result, ...filler(11)],
       streaming: false,
     })
   },
@@ -287,6 +427,7 @@ declare global {
 }
 
 window.toolCardHarness = toolCardHarness
+
 
 const rootElement = document.getElementById('root')
 if (rootElement) {

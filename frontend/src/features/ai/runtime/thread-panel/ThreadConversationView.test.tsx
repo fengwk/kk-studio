@@ -1,15 +1,21 @@
 import { createRef } from 'react'
-import { fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
 import type { DialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
  * Conversation 视图的自动贴底生命周期（挂载即生效，卸载即消失）：
  * 首次进入贴底；向历史方向滚动时立即脱离，滚回 210px 阈值内时恢复；重新进入
  * 恢复保存位置并按同一阈值决定 stick；Thread 重绑（resetKey 变化）重置 stick
- * 重新贴底。Event 视图的 stick 独立由 ThreadEventView.test 覆盖，互斥切换的
- * 集成行为由 ChatWorkspacePane.commands.test 覆盖。
+ * 重新贴底。
+ *
+ * 贴底只认显式信号：流式正文更新（stream revision）与消息数量增长。布局尺寸变化
+ * （展开卡片、图片加载、懒渲染）不产生信号，绝不移动外层滚动位置；内层只读区域
+ * 回看/交互冒泡阅读意图事件即暂停跟随，只有用户把外层滚回底部才恢复。
+ * Event 视图的 stick 独立由 ThreadEventView.test 覆盖，互斥切换的集成行为由
+ * ChatWorkspacePane.commands.test 覆盖。
  */
 
 function assistantMessage(id: string, text: string): DialogueMessage {
@@ -29,12 +35,12 @@ function messages(count: number): DialogueMessage[] {
   )
 }
 
-/** 末尾仍未完成的 assistant 消息：唯一允许高度变化补贴底的流式状态。 */
-function streamingMessages(count: number): DialogueMessage[] {
+/** 末尾仍未完成的 assistant 消息：唯一产生 stream revision 的流式状态。 */
+function streamingMessages(count: number, tailText = 'reply streaming'): DialogueMessage[] {
   const list = messages(count)
   const tail = list[list.length - 1]
   if (tail) {
-    list[list.length - 1] = { ...tail, status: 'streaming' }
+    list[list.length - 1] = { ...tail, text: tailText, status: 'streaming' }
   }
   return list
 }
@@ -43,14 +49,24 @@ function dialogue() {
   return document.querySelector<HTMLElement>('.thread-dialogue')!
 }
 
+/** 等一帧：流式贴底调度在布局完成的下一帧执行，必须真正跑到才断言。 */
+async function flushLayoutFrame() {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve())
+    })
+  })
+}
+
 function renderView(bodyRef: React.RefObject<HTMLDivElement | null>, props: {
   messageCount?: number
   initialScrollTop?: number | null
   resetKey?: string | null
   streaming?: boolean
+  streamText?: string
 } = {}) {
   const buildMessages = () => props.streaming
-    ? streamingMessages(props.messageCount ?? 2)
+    ? streamingMessages(props.messageCount ?? 2, props.streamText)
     : messages(props.messageCount ?? 2)
   const element = (
     <ThreadConversationView
@@ -64,9 +80,9 @@ function renderView(bodyRef: React.RefObject<HTMLDivElement | null>, props: {
   )
   const view = render(element)
   return {
-    rerender(props: { messageCount?: number; initialScrollTop?: number | null; resetKey?: string | null; streaming?: boolean } = {}) {
+    rerender(props: { messageCount?: number; initialScrollTop?: number | null; resetKey?: string | null; streaming?: boolean; streamText?: string } = {}) {
       const nextMessages = props.streaming === true
-        ? streamingMessages(props.messageCount ?? 2)
+        ? streamingMessages(props.messageCount ?? 2, props.streamText)
         : messages(props.messageCount ?? 2)
       view.rerender(
         <ThreadConversationView
@@ -84,7 +100,7 @@ function renderView(bodyRef: React.RefObject<HTMLDivElement | null>, props: {
 }
 
 describe('ThreadConversationView', () => {
-  it('sticks to the bottom on first entry and keeps sticking as content grows', () => {
+  it('sticks to the bottom on first entry and keeps sticking as content grows', async () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
     try {
@@ -93,8 +109,9 @@ describe('ThreadConversationView', () => {
       const bodyRef = createRef<HTMLDivElement>()
       const view = renderView(bodyRef, { messageCount: 2 })
       expect(dialogue().scrollTop).toBe(600)
-      // 内容增长：仍贴底。
+      // 内容增长：仍贴底（写入调度到布局完成后的下一帧）。
       view.rerender({ messageCount: 4 })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(600)
     } finally {
       scrollHeightSpy.mockRestore()
@@ -102,7 +119,7 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('restores a saved position and derives initial stick state from the 210px threshold', () => {
+  it('restores a saved position and derives initial stick state from the 210px threshold', async () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
     try {
@@ -115,6 +132,7 @@ describe('ThreadConversationView', () => {
       expect(dialogue().scrollTop).toBe(400)
       // 内容增长：阈值内 → 继续贴底。
       first.rerender({ messageCount: 4, initialScrollTop: 400 })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(600)
       first.unmount()
 
@@ -123,6 +141,7 @@ describe('ThreadConversationView', () => {
       expect(dialogue().scrollTop).toBe(100)
       // 内容增长：超过阈值 → 绝不拉回底部。
       second.rerender({ messageCount: 6, initialScrollTop: 100 })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(100)
       second.unmount()
     } finally {
@@ -131,7 +150,7 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('detaches on the first scroll toward history even inside the restick threshold', () => {
+  it('detaches on the first scroll toward history even inside the restick threshold', async () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
     try {
@@ -148,12 +167,14 @@ describe('ThreadConversationView', () => {
       dialogue().scrollTop = 390
       fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 3 })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(390)
 
       // 用户主动向底部滚回阈值内后恢复跟随。
       dialogue().scrollTop = 395
       fireEvent.scroll(dialogue())
       view.rerender({ messageCount: 4 })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(600)
     } finally {
       scrollHeightSpy.mockRestore()
@@ -161,137 +182,187 @@ describe('ThreadConversationView', () => {
     }
   })
 
-  it('does not let a resize callback override a small scroll toward history while streaming', () => {
-    const originalResizeObserver = globalThis.ResizeObserver
+  it('re-sticks on stream revision updates while following', async () => {
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    let triggerResize: (target: Element, height?: number) => void = () => {
-      throw new Error('ResizeObserver was not created')
-    }
-    class ControllableResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        triggerResize = (target, height = 700) => {
-          callback(
-            [{ target, contentRect: { height } } as unknown as ResizeObserverEntry],
-            this as unknown as ResizeObserver,
-          )
-        }
-      }
-
-      observe(target: Element) {
-        // 浏览器首次 observe 会报告当前尺寸，hook 会把这一轮识别为初始回调。
-        triggerResize(target)
-      }
-
-      unobserve() {}
-      disconnect() {}
-    }
-
     try {
-      globalThis.ResizeObserver =
-        ControllableResizeObserver as unknown as typeof ResizeObserver
       scrollHeightSpy.mockReturnValue(600)
       clientHeightSpy.mockReturnValue(200)
       const bodyRef = createRef<HTMLDivElement>()
-      renderView(bodyRef, { streaming: true })
+      const view = renderView(bodyRef, { messageCount: 2, streaming: true })
 
+      // 用户把外层滚回底部 → stick 恢复。
       dialogue().scrollTop = 400
       fireEvent.scroll(dialogue())
-      dialogue().scrollTop = 390
-      fireEvent.scroll(dialogue())
 
-      // 流式期间并发的容器尺寸回调，也不能覆盖用户的历史回看手势。
-      triggerResize(dialogue())
-      expect(dialogue().scrollTop).toBe(390)
+      // 流式文本更新是显式信号：必须跟到新的底部。
+      view.rerender({ messageCount: 2, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(600)
+
+      // 同样的文本再次渲染不产生新信号，也不该移动位置。
+      dialogue().scrollTop = 300
+      view.rerender({ messageCount: 2, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(300)
     } finally {
-      globalThis.ResizeObserver = originalResizeObserver
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()
     }
   })
 
-  it('re-sticks when the container settles after the first resize report', () => {
-    // 懒渲染回合、字体与媒体落地会让高度在首个 ResizeObserver 回调之后才稳定。
-    // 与 observe 时基线不同的尺寸必须重新贴底，不能被当成「初始回调」丢弃。
-    const originalResizeObserver = globalThis.ResizeObserver
+  it('never re-sticks on layout-only growth (media load, image decode, expansion)', async () => {
+    // 媒体解码、图片落地、卡片展开都只是高度变化：没有 stream revision，也没有消息
+    // 数量增长，外层 scrollTop 必须原地不动。
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    let triggerResize: (target: Element, height: number) => void = () => {
-      throw new Error('ResizeObserver was not created')
-    }
-    class ControllableResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        triggerResize = (target, height) => {
-          callback(
-            [{ target, contentRect: { height } } as unknown as ResizeObserverEntry],
-            this as unknown as ResizeObserver,
-          )
-        }
-      }
-
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    }
-
     try {
-      globalThis.ResizeObserver = ControllableResizeObserver as unknown as typeof ResizeObserver
       scrollHeightSpy.mockReturnValue(600)
       clientHeightSpy.mockReturnValue(200)
       const bodyRef = createRef<HTMLDivElement>()
-      renderView(bodyRef, { messageCount: 3, streaming: true })
+      const view = renderView(bodyRef, { messageCount: 2, streaming: true })
+      // 用户回到历史回看。
+      dialogue().scrollTop = 300
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 2, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(300)
 
-      // 首个回调报告与基线相同的尺寸：位置不变。
-      triggerResize(dialogue(), 0)
-      expect(dialogue().scrollTop).toBe(600)
-
-      // 布局稳定后容器变高：仍在贴底，必须重新贴到新的底部。
-      scrollHeightSpy.mockReturnValue(900)
-      triggerResize(dialogue(), 900)
-      expect(dialogue().scrollTop).toBe(900)
+      // 高度长大（图片解码完成）同样不移动位置。
+      scrollHeightSpy.mockReturnValue(1400)
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(300)
     } finally {
-      globalThis.ResizeObserver = originalResizeObserver
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()
     }
   })
 
-  it('stops following height changes once the stream reaches a terminal state', () => {
-    // 手动展开卡片、图片加载完成都属于空闲高度变化：终态后不得再补贴底，
-    // 否则用户正在看的卡片会被挤出视口。
-    const originalResizeObserver = globalThis.ResizeObserver
+  it('does not reopen following after a reading intent even when the layout shrinks', async () => {
+    // 子只读区域回看后：布局变矮（浏览器会把 scrollTop 钳制到新的底部附近）、
+    // 后续流式文本更新都不得重开 stick，位置只能由用户自己滚回底部恢复。
     const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
     const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
-    const observed: Element[] = []
-    class RecordingResizeObserver {
-      observe(target: Element) {
-        observed.push(target)
-      }
-
-      unobserve() {}
-      disconnect() {}
-    }
-
     try {
-      globalThis.ResizeObserver = RecordingResizeObserver as unknown as typeof ResizeObserver
+      scrollHeightSpy.mockReturnValue(900)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 3, streaming: true })
+      dialogue().scrollTop = 700
+      fireEvent.scroll(dialogue())
+
+      dialogue().dispatchEvent(new CustomEvent(TRANSCRIPT_READING_INTENT_EVENT, {
+        bubbles: true,
+        detail: { source: 'tool-output' },
+      }))
+
+      // 布局变矮：即使位置被钳制到新的底部，也不得重开跟随。
+      scrollHeightSpy.mockReturnValue(600)
+      dialogue().scrollTop = 400
+      view.rerender({ messageCount: 3, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(400)
+
+      // 后续流式文本继续更新：仍在暂停状态，位置不动。
+      scrollHeightSpy.mockReturnValue(900)
+      view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(400)
+
+      // 用户自己滚回底部阈值内：恢复跟随。
+      dialogue().scrollTop = 700
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 5, streaming: true, streamText: 'reply streaming + more + more + end' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(900)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('cancels a pending bottom scroll when a reading intent arrives in the same frame', async () => {
+    // 阅读意图必须直接取消待执行的贴底帧，绝不留到下一帧再贴底。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 2, streaming: true })
+      dialogue().scrollTop = 400
+      fireEvent.scroll(dialogue())
+
+      // 内容增长调度贴底帧，同一帧内到达阅读意图。
+      view.rerender({ messageCount: 3, streaming: true, streamText: 'reply streaming + more' })
+      dialogue().dispatchEvent(new CustomEvent(TRANSCRIPT_READING_INTENT_EVENT, {
+        bubbles: true,
+        detail: { source: 'thinking' },
+      }))
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(400)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+
+  it('pauses following when a nested readonly view announces reading intent', async () => {
+    // 工具输出视口/思考正文回看时冒泡阅读意图：即使外层此刻贴底，后续流式增长
+    // 也不能把用户正在看的卡片拉走；只有外层自己滚回底部才恢复。
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
+      scrollHeightSpy.mockReturnValue(600)
+      clientHeightSpy.mockReturnValue(200)
+      const bodyRef = createRef<HTMLDivElement>()
+      const view = renderView(bodyRef, { messageCount: 2, streaming: true })
+      expect(dialogue().scrollTop).toBe(600)
+
+      dialogue().dispatchEvent(new CustomEvent(TRANSCRIPT_READING_INTENT_EVENT, {
+        bubbles: true,
+        detail: { source: 'tool-output' },
+      }))
+
+      // 外层贴底但用户正在读内层：流式增长不得移动位置。
+      dialogue().scrollTop = 500
+      view.rerender({ messageCount: 3, streaming: true, streamText: 'reply streaming + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(500)
+
+      // 用户主动把外层滚回底部阈值内 → 恢复跟随。
+      dialogue().scrollTop = 595
+      fireEvent.scroll(dialogue())
+      view.rerender({ messageCount: 4, streaming: true, streamText: 'reply streaming + more + more' })
+      await flushLayoutFrame()
+      expect(dialogue().scrollTop).toBe(600)
+    } finally {
+      scrollHeightSpy.mockRestore()
+      clientHeightSpy.mockRestore()
+    }
+  })
+
+  it('stops following once the stream reaches a terminal state', async () => {
+    const scrollHeightSpy = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+    const clientHeightSpy = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+    try {
       scrollHeightSpy.mockReturnValue(600)
       clientHeightSpy.mockReturnValue(200)
       const bodyRef = createRef<HTMLDivElement>()
       const view = renderView(bodyRef, { messageCount: 3, streaming: true })
-      expect(observed.length).toBeGreaterThan(0)
+      expect(dialogue().scrollTop).toBe(600)
 
-      // 流式转终态：观察器解绑，之后的高度变化不再触发贴底。
+      // 流式转终态：没有 stream revision，高度变化（展开/媒体）不再贴底。
       view.rerender({ messageCount: 3, streaming: false })
-      const observedAfterTerminal = observed.length
-
+      await flushLayoutFrame()
       dialogue().scrollTop = 200
       fireEvent.scroll(dialogue())
-      view.rerender({ messageCount: 4, streaming: false })
-
+      scrollHeightSpy.mockReturnValue(900)
+      view.rerender({ messageCount: 3, streaming: false })
+      await flushLayoutFrame()
       expect(dialogue().scrollTop).toBe(200)
-      expect(observed.length).toBe(observedAfterTerminal)
     } finally {
-      globalThis.ResizeObserver = originalResizeObserver
       scrollHeightSpy.mockRestore()
       clientHeightSpy.mockRestore()
     }

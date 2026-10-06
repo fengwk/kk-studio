@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/ai/runtime/transcript-reading'
 import type {
   ToolAttachment,
   ToolContent,
@@ -30,6 +31,10 @@ function text(value: string): ToolContent {
   return { type: 'text', text: value }
 }
 
+function json(value: unknown): ToolContent {
+  return { type: 'json', value }
+}
+
 function resource(attachment: Partial<ToolAttachment> & { name: string }): ToolContent {
   return {
     type: 'resource',
@@ -55,6 +60,56 @@ const expandButton = () => screen.queryByRole('button', { name: '展开工具预
 const collapseButton = () => screen.queryByRole('button', { name: '收起工具预览' })
 
 describe('ToolMessageBlock shell', () => {
+  it('announces reading intent when the user toggles a card (streaming growth must not steal it)', async () => {
+    const onReadingIntent = vi.fn()
+    document.addEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
+    try {
+      render(
+        <ToolMessageBlock
+          message={message({
+            phase: 'result',
+            status: 'streaming',
+            toolName: 'bash',
+            rendererKey: 'bash',
+            arguments: '{"command":"npm test"}',
+            contents: [text('running')],
+          })}
+        />,
+      )
+
+      await userEvent.click(collapseButton()!)
+
+      // 展开/收起是用户对只读卡片的交互意图：外层据此暂停贴底。
+      expect(onReadingIntent).toHaveBeenCalledTimes(1)
+      expect(onReadingIntent.mock.calls[0]?.[0]).toMatchObject({ bubbles: true })
+    } finally {
+      document.removeEventListener(TRANSCRIPT_READING_INTENT_EVENT, onReadingIntent)
+    }
+  })
+
+  it('keeps the whole header parameter text in one addressable single-line region', () => {
+    const longValue = 'x'.repeat(4000)
+    render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'result',
+          status: 'done',
+          toolName: 'mcp__filesystem__search',
+          rendererKey: undefined,
+          arguments: `{"query":"${longValue}"}`,
+          contents: [text('no matches')],
+        })}
+      />,
+    )
+
+    const detail = card().querySelector<HTMLElement>('.thread-tool-summary-detail')
+    expect(detail).not.toBeNull()
+    // 单行 compact：完整原文留在 DOM 中（可选中复制/横向滚动），不做省略或截断。
+    expect(detail!.textContent).toBe(`{"query":"${longValue}"}`)
+    expect(detail).toHaveAttribute('tabindex', '0')
+    expect(detail!.getAttribute('title')).toBeNull()
+  })
+
   it('renders one full-width card with no copy action and no nested surface', () => {
     const { container } = render(
       <ToolMessageBlock
@@ -575,6 +630,86 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.queryByRole('button', { name: /提交|继续|confirm|submit/i })).not.toBeInTheDocument()
     // 有正文时仍可收起。
     expect(collapseButton()).toBeInTheDocument()
+  })
+
+  it('reads canonical answers from json results and marks declined questionnaires', () => {
+    const questions = JSON.stringify({
+      questions: [
+        { question: 'Pick two', options: ['a', 'b', 'c'], multiple: true },
+        { question: 'Pick one', options: ['x', 'y'], multiple: false },
+      ],
+    })
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          arguments: questions,
+          contents: [],
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          contents: [json({ answers: [['a', 'b'], ['y']], declined: false })],
+        })}
+      />,
+    )
+
+    // json 结果里的规范答案按序物化，且没有任何提交入口。
+    const answerTags = Array.from(container.querySelectorAll('.interaction-answer-tag'))
+      .map((element) => element.textContent)
+    expect(answerTags).toEqual(['a', 'b', 'y'])
+    expect(container.querySelector('.interaction-questionnaire-badge')).toBeNull()
+    expect(screen.queryByRole('button', { name: /提交|继续|confirm|submit/i })).not.toBeInTheDocument()
+  })
+
+  it('marks a declined questionnaire without fabricating answers', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          arguments: JSON.stringify({
+            questions: [{ question: 'Which environment?', options: ['dev', 'prod'] }],
+          }),
+          contents: [],
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          contents: [text(JSON.stringify({ declined: true }))],
+        })}
+      />,
+    )
+
+    expect(container.querySelector('.interaction-questionnaire-badge.declined')).not.toBeNull()
+    expect(container.querySelectorAll('.interaction-answer-tag')).toHaveLength(0)
+  })
+
+  it('skips ask_user records whose frozen arguments are not a questionnaire', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          arguments: 'not-json',
+          contents: [],
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'ask_user',
+          rendererKey: 'ask_user',
+          contents: [text('no canonical payload')],
+        })}
+      />,
+    )
+
+    expect(container.querySelector('.ask-user-record')).toBeNull()
   })
 })
 

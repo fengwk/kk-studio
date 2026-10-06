@@ -1941,10 +1941,17 @@ div.is-error {
   flex-direction: column;
 }
 
+/*
+ * Transcript 是自动贴底与阅读锚点的唯一 owner：滚动位置只由 useChatTranscriptAutoScroll
+ * 与用户手势决定。浏览器原生滚动锚定会为「保持某个节点不动」而自行改写 scrollTop
+ * （懒渲染落地、媒体长高时都会发生），这类改写既不是用户手势也无法被可靠识别，
+ * 会与贴底/回看状态机相互拉扯，因此在此关闭。
+ */
 .thread-dialogue {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   padding: 16px 16px 8px;
 }
 
@@ -2752,11 +2759,10 @@ div.is-error {
   white-space: pre-wrap;
 }
 
-/* 长会话离屏消息降耗：不裁切布局，浏览器可跳过绘制 */
-.thread-turn {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
-}
+/*
+ * 不使用 content-visibility：占位高度会在懒渲染落地时跳变成真实高度，使
+ * 「容器高度变化」与「内容变化」脱钩，自动贴底与阅读锚点都失去确定布局。
+ */
 
 .thread-block-thinking {
   padding: 8px 12px;
@@ -3160,13 +3166,14 @@ div.is-error {
     var(--surface);
 }
 
+/* Header 恒为单行：切换箭头固定在右侧留出的空白里，参数区自己横向滚动。 */
 .thread-tool-header {
   position: relative;
   width: 100%;
   min-width: 0;
   display: flex;
-  align-items: flex-start;
-  padding: 0;
+  align-items: center;
+  padding: 0 22px 0 0;
   border: 0;
   background: transparent;
   color: var(--fg-muted);
@@ -3180,9 +3187,8 @@ div.is-error {
   flex: 1 1 auto;
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap;
-  gap: 2px 8px;
-  overflow: visible;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .thread-tool-name {
@@ -3191,25 +3197,38 @@ div.is-error {
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
+/*
+ * 单行 compact：任意长度的参数（未知/MCP 的数千字 JSON 也不例外）都保持一行，
+ * 完整原文留在 DOM 中可选中复制，超宽部分通过横向滚动查看；绝不换行撑高卡片。
+ */
 .thread-tool-summary-detail {
   min-width: 0;
-  flex: 1 1 240px;
-  overflow: visible;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   color: var(--fg-dim);
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.45;
   text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  scrollbar-width: thin;
+}
+
+.thread-tool-summary-detail:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .thread-tool-toggle {
   position: absolute;
-  top: -2px;
-  right: -2px;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   z-index: 1;
   display: grid;
   width: 20px;
@@ -3246,10 +3265,6 @@ div.is-error {
 }
 
 @media (hover: none) {
-  .thread-tool-header.has-toggle .thread-tool-summary {
-    padding-right: 26px;
-  }
-
   .thread-tool-toggle {
     opacity: 1;
   }
@@ -3267,6 +3282,15 @@ div.is-error {
   color: var(--danger);
 }
 
+/*
+ * 工具卡片的高度变化不参与外层 transcript 的滚动锚定：卡片自身长高（媒体解码、
+ * 展开、懒渲染落地）时，浏览器不会为了「保持卡片下方内容不动」而移动外层
+ * scrollTop——卡片顶边与用户正在读的位置都停在原处。正文区同样排除，理由相同。
+ */
+.thread-turn-tool {
+  overflow-anchor: none;
+}
+
 /* 卡片正文：调用正文与结果内容共用一层分隔与间距，展开/收起只切换这一层。 */
 .thread-tool-body {
   display: flex;
@@ -3275,6 +3299,7 @@ div.is-error {
   margin-top: 9px;
   padding-top: 9px;
   border-top: 1px solid var(--border);
+  overflow-anchor: none;
 }
 
 .thread-tool-body:empty {
