@@ -13,6 +13,7 @@ import type {
   HarnessBranchSettingsDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts/ai-runtime'
+import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
@@ -31,7 +32,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 's1',
     headEntryId: 'root',
     parentThreadId: null,
-    yoloEnabled: false,
+    yoloPolicy: rootYoloPolicy(false),
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',

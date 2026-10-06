@@ -80,8 +80,8 @@ export const queryKeys = {
   },
   interactions: {
     all: ['interactions'] as const,
-    list: (cursor?: string | null, limit?: number) =>
-      ['interactions', 'list', cursor ?? null, limit ?? 50] as const,
+    list: (rootThreadId?: string | null, cursor?: string | null, limit?: number) =>
+      ['interactions', 'list', rootThreadId ?? null, cursor ?? null, limit ?? 50] as const,
     count: ['interactions', 'count'] as const,
   },
 }

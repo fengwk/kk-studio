@@ -1415,21 +1415,25 @@ export const aiCatalog = {
     'en-US': 'Rename',
     'zh-CN': '重命名',
   },
-  'ai.runtime.agentTree.toggle': {
-    'en-US': 'Agent relationships',
-    'zh-CN': 'Agent 关系',
+  'ai.runtime.childThread.readOnly': {
+    'en-US': 'Read-only view',
+    'zh-CN': '只读查看',
+  },
+  'ai.runtime.childThread.back': {
+    'en-US': 'Back to previous agent',
+    'zh-CN': '返回上一层',
+  },
+  'ai.runtime.childThread.backToRoot': {
+    'en-US': 'Back to execution root',
+    'zh-CN': '返回执行根',
   },
   'ai.runtime.agentTree.panel': {
-    'en-US': 'Agent relationships',
-    'zh-CN': 'Agent 关系',
+    'en-US': 'Active subagents',
+    'zh-CN': '活跃子代理',
   },
-  'ai.runtime.agentTree.refresh': {
-    'en-US': 'Refresh',
-    'zh-CN': '刷新',
-  },
-  'ai.runtime.agentTree.loading': {
-    'en-US': 'Loading agent relationships…',
-    'zh-CN': '正在加载 Agent 关系…',
+  'ai.runtime.agentTree.activeCount': {
+    'en-US': '{{count}} active',
+    'zh-CN': '{{count}} 个活跃',
   },
   'ai.runtime.agentTree.error': {
     'en-US': 'Agent relationships failed to load',
@@ -1442,26 +1446,6 @@ export const aiCatalog = {
   'ai.runtime.agentTree.retry': {
     'en-US': 'Retry',
     'zh-CN': '重试',
-  },
-  'ai.runtime.agentTree.empty': {
-    'en-US': 'No agent relationships',
-    'zh-CN': '没有 Agent 关系',
-  },
-  'ai.runtime.agentTree.root': {
-    'en-US': 'Main agent',
-    'zh-CN': '主 Agent',
-  },
-  'ai.runtime.agentTree.current': {
-    'en-US': 'Current',
-    'zh-CN': '当前',
-  },
-  'ai.runtime.agentTree.turns': {
-    'en-US': '{{count}} turns',
-    'zh-CN': '{{count}} 回合',
-  },
-  'ai.runtime.agentTree.toolCalls': {
-    'en-US': '{{count}} tool calls',
-    'zh-CN': '{{count}} 次工具调用',
   },
   'ai.runtime.agentTree.outcome.COMPLETED': {
     'en-US': 'Completed',
@@ -3174,6 +3158,10 @@ export const aiCatalog = {
   'ai.interaction.refresh': {
     'en-US': 'Refresh',
     'zh-CN': '刷新',
+  },
+  'ai.interaction.loadFailed': {
+    'en-US': 'Failed to load pending interactions',
+    'zh-CN': '待处理交互加载失败',
   },
   'ai.interaction.loadMore': {
     'en-US': 'Load More',

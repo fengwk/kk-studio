@@ -17,7 +17,10 @@ export interface UseInteractionsControllerResult {
   removeItem: (interactionId: string) => void
 }
 
-export function useInteractionsController(limit = 20): UseInteractionsControllerResult {
+export function useInteractionsController(
+  rootThreadId: string | null = null,
+  limit = 20,
+): UseInteractionsControllerResult {
   const queryClient = useQueryClient()
   const [accumulatedItems, setAccumulatedItems] = useState<InteractionDTO[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -27,8 +30,11 @@ export function useInteractionsController(limit = 20): UseInteractionsController
   const generationRef = useRef(0)
   const lastAppliedInitialPageRef = useRef<unknown>(null)
   const lastDataUpdatedAtRef = useRef(0)
+  // 当前累积列表/游标所属的过滤范围（root）。
+  const [accumulatedScope, setAccumulatedScope] = useState(rootThreadId)
+  const previousRootThreadIdRef = useRef(rootThreadId)
 
-  // 初始第一页查询
+  // 初始第一页查询；rootThreadId 变化即视为新的过滤代际。
   const {
     data: initialPage,
     dataUpdatedAt,
@@ -37,9 +43,28 @@ export function useInteractionsController(limit = 20): UseInteractionsController
     error: initialError,
     refetch,
   } = useQuery({
-    queryKey: queryKeys.interactions.list(null, limit),
-    queryFn: () => interactionService.listInteractions(null, limit),
+    queryKey: queryKeys.interactions.list(rootThreadId, null, limit),
+    queryFn: () => interactionService.listInteractions(rootThreadId, null, limit),
   })
+
+  // 过滤范围（root）变化：旧根的累积状态与分页代际在本次 commit 后作废——迟到的旧根
+  // loadMore 被 generation 栅栏拦住，游标清空后也不会再被带进新根。旧根的 items 与
+  // cursor 由渲染期的 scope 派生立即停止外泄（见 scopedItems/scopedCursor），所以这里
+  // 只需要清理状态，不影响新根首帧的展示。
+  useEffect(() => {
+    if (previousRootThreadIdRef.current === rootThreadId) {
+      return
+    }
+    previousRootThreadIdRef.current = rootThreadId
+    generationRef.current += 1
+    isFetchingMoreRef.current = false
+    lastAppliedInitialPageRef.current = null
+    lastDataUpdatedAtRef.current = 0
+    setAccumulatedItems([])
+    setNextCursor(null)
+    setIsFetchingMore(false)
+    setLoadMoreError(null)
+  }, [rootThreadId])
 
   // 当第一页数据更新时（包括外部 invalidate 后重新拉取到新数据），重置累加列表、游标与分页代际
   useEffect(() => {
@@ -52,6 +77,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
       lastAppliedInitialPageRef.current = initialPage
       lastDataUpdatedAtRef.current = dataUpdatedAt
       generationRef.current += 1
+      setAccumulatedScope(rootThreadId)
       setAccumulatedItems(initialPage.items || [])
       setNextCursor(initialPage.nextCursor || null)
       isFetchingMoreRef.current = false
@@ -66,7 +92,15 @@ export function useInteractionsController(limit = 20): UseInteractionsController
       setIsFetchingMore(false)
       setLoadMoreError(null)
     }
-  }, [initialPage, dataUpdatedAt])
+  }, [initialPage, dataUpdatedAt, rootThreadId])
+
+  // 过滤范围派生：累积状态属于旧根时一律不外泄——首帧直接暴露新根自己的第一页
+  // （缓存命中时不会出现空帧），分页游标与加载状态同样只反映新根。
+  const inScope = accumulatedScope === rootThreadId
+  const scopedItems = inScope ? accumulatedItems : initialPage?.items ?? []
+  const scopedCursor = inScope ? nextCursor : initialPage?.nextCursor ?? null
+  const scopedFetchingMore = inScope && isFetchingMore
+  const scopedLoadMoreError = inScope ? loadMoreError : null
 
   // 恢复刷新：清空下游游标并重新拉取第一页，开启新世代
   const refresh = useCallback(async () => {
@@ -83,17 +117,17 @@ export function useInteractionsController(limit = 20): UseInteractionsController
     }
   }, [queryClient, refetch])
 
-  // 加载更多（游标翻页）：绑定 generation 与当前游标，旧代迟到响应与 finally 均做栅栏拦截
+  // 加载更多（游标翻页）：绑定 generation 与当前根的游标，旧代迟到响应与 finally 均做栅栏拦截
   const loadMore = useCallback(async () => {
     const generation = generationRef.current
-    const cursor = nextCursor
+    const cursor = scopedCursor
     if (!cursor || isFetchingMoreRef.current) {
       return
     }
     isFetchingMoreRef.current = true
     setIsFetchingMore(true)
     try {
-      const nextPage = await interactionService.listInteractions(cursor, limit)
+      const nextPage = await interactionService.listInteractions(rootThreadId, cursor, limit)
       if (generation !== generationRef.current) {
         return
       }
@@ -118,7 +152,7 @@ export function useInteractionsController(limit = 20): UseInteractionsController
         setIsFetchingMore(false)
       }
     }
-  }, [nextCursor, limit])
+  }, [scopedCursor, limit, rootThreadId])
 
   // 某项交互完成后的乐观移除
   const removeItem = useCallback((interactionId: string) => {
@@ -126,13 +160,13 @@ export function useInteractionsController(limit = 20): UseInteractionsController
   }, [])
 
   return {
-    items: accumulatedItems,
+    items: scopedItems,
     isLoading,
-    isFetchingMore,
-    isError: isInitialError || Boolean(loadMoreError),
-    error: (initialError instanceof Error ? initialError : null) ?? loadMoreError,
-    nextCursor,
-    hasMore: Boolean(nextCursor),
+    isFetchingMore: scopedFetchingMore,
+    isError: isInitialError || Boolean(scopedLoadMoreError),
+    error: (initialError instanceof Error ? initialError : null) ?? scopedLoadMoreError,
+    nextCursor: scopedCursor,
+    hasMore: Boolean(scopedCursor),
     refresh,
     loadMore,
     removeItem,

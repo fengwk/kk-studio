@@ -13,8 +13,8 @@ import { queryKeys } from '@/shared/lib/query-keys'
 
 function usePendingInteractionsCount(): number {
   const { data } = useQuery({
-    queryKey: queryKeys.interactions.list(null, 50),
-    queryFn: () => interactionService.listInteractions(null, 50),
+    queryKey: queryKeys.interactions.list(null, null, 50),
+    queryFn: () => interactionService.listInteractions(null, null, 50),
     staleTime: 5000,
   })
   return data?.items?.length ?? 0
