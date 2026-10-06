@@ -742,7 +742,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             runtime.acceptCommands(
                 new AcceptCommandsCommand(
                     new AcceptCommandsTarget.NewThread(
-                        sessionId, TestIds.id(999), TestIds.id(132), false),
+                        sessionId, TestIds.id(999), TestIds.id(132), "fork", false),
                     List.of(userMessageCommand(TestIds.id(133), "fork"))),
                 AcceptancePreflight.IDENTITY));
 

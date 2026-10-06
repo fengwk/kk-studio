@@ -243,7 +243,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
             owner,
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.NewThread(
-                    sessionId, initial.rootEntry().id(), entryThreadId, false),
+                    sessionId, initial.rootEntry().id(), entryThreadId, "branch", false),
                 List.of(
                     new NewThreadCommand(
                         new UserMessageCommandPayload(

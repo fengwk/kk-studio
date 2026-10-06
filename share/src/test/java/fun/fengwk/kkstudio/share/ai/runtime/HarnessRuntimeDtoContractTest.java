@@ -53,12 +53,15 @@ class HarnessRuntimeDtoContractTest {
     target.setSessionId(null);
     target.setStartEntryId("00000000-0000-0000-0000-000000000002");
     target.setThreadId("00000000-0000-0000-0000-000000000001");
+    target.setThreadName("branch");
     target.setYoloEnabled(false);
 
     assertTrue(target.hasSessionIdField());
+    assertTrue(target.hasThreadNameField());
     assertNull(target.getSessionId());
     assertEquals("NEW_THREAD", target.getType());
     assertEquals("00000000-0000-0000-0000-000000000001", target.getThreadId());
+    assertEquals("branch", target.getThreadName());
   }
 
   @Test

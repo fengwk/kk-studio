@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  * <p>所有手工名称与构造器入参统一经 {@link #normalize}：先把任意 Unicode 空白折叠为单个空格、再去掉首尾空格；结果必须非空且至多 {@value
  * #MAX_CODE_POINTS} 个 Unicode 码点，超长直接抛 {@link IllegalArgumentException}（不截断，长度非法是调用方错误）。 {@link
  * #sessionNameFromUserText} 是自动默认名路径，允许任意长文本并截前 {@value #SESSION_NAME_TEXT_CODE_POINTS} 个码点（无省略号）。
- * {@link #defaultSessionName} / {@link #defaultThreadName} 派生「无文本时的回退名」。
+ * {@link #defaultSessionName} 派生「无文本时的回退名」。
  */
 public final class Names {
 
@@ -57,11 +57,6 @@ public final class Names {
   /** 派生新 Session 的默认回退名：{@code session-} + canonical session UUID 前 8 位（无文本内容时使用）。 */
   public static String defaultSessionName(UUID sessionId) {
     return "session-" + uuidPrefix(sessionId);
-  }
-
-  /** 派生新 Thread 的默认回退名：{@code branch-} + canonical thread UUID 前 8 位（无文本内容时使用）。 */
-  public static String defaultThreadName(UUID threadId) {
-    return "branch-" + uuidPrefix(threadId);
   }
 
   /** 新创建 Thread 的 ROOT Thread 固定名称。 */

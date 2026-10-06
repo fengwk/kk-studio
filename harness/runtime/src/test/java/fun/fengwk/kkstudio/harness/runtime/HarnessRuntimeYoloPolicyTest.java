@@ -245,7 +245,8 @@ class HarnessRuntimeYoloPolicyTest {
   private static AcceptCommandsCommand fork(
       UUID sessionId, UUID startEntryId, UUID threadId, boolean yoloEnabled) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, threadId, yoloEnabled),
+        new AcceptCommandsTarget.NewThread(
+            sessionId, startEntryId, threadId, "fork-branch", yoloEnabled),
         List.of(userMessageCommand(TestIds.id(threadId.hashCode()), "fork work")));
   }
 

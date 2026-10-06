@@ -231,7 +231,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand entry =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(
+                SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
             List.of(user(new TextMessageContent("entry"))));
     assertSame(accepted, service.accept(CHAT_OWNER, entry));
 
@@ -239,7 +240,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
     AcceptCommandsCommand siblingThread =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(
+                SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
             List.of(user(new TextMessageContent("sibling"))));
     assertSame(accepted, service.accept(ISSUE_AGENT_OWNER, siblingThread));
 
@@ -390,7 +392,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand onSession =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, false),
+            new AcceptCommandsTarget.NewThread(
+                SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
             List.of(user(new TextMessageContent("steal session"))));
     assertThrows(
         IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, onSession));
@@ -474,7 +477,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
         service.accept(
             ISSUE_AGENT_OWNER,
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, false),
+                new AcceptCommandsTarget.NewThread(
+                    SESSION_ID, ENTRY_ID, OTHER_THREAD_ID, "branch", false),
                 List.of(goal))));
 
     verify(runtime).acceptCommands(any(), any());

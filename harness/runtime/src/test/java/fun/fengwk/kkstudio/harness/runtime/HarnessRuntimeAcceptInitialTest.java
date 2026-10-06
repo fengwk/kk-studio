@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
@@ -20,12 +22,20 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -42,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -75,8 +86,13 @@ class HarnessRuntimeAcceptInitialTest {
 
   private static AcceptCommandsCommand entry(
       UUID sessionId, UUID startEntryId, List<NewThreadCommand> commands) {
+    return entry(sessionId, startEntryId, TestIds.id(203), commands);
+  }
+
+  private static AcceptCommandsCommand entry(
+      UUID sessionId, UUID startEntryId, UUID threadId, List<NewThreadCommand> commands) {
     return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, TestIds.id(203), false),
+        new AcceptCommandsTarget.NewThread(sessionId, startEntryId, threadId, "branch", false),
         commands);
   }
 
@@ -547,12 +563,21 @@ class HarnessRuntimeAcceptInitialTest {
   }
 
   /**
-   * 未闭合 STOP Turn 是原子控制屏障：fork（NEW_THREAD）到它内部的任何 prefix 都必须原子拒绝，且不留 Thread / Command / Work 残留。
+   * active / 半轮前缀不是合法 fork 边界：USER、ASSISTANT、TOOL 结果、仍在进行的 TURN_START，以及未闭合 STOP Turn 内部的任何
+   * prefix，都必须原子拒绝且零写入（不留 Thread / Command / Work）。
    */
   @Test
-  void entryRejectsStartEntryInsideAnUnclosedStopTurnWithoutCreatingThread() {
+  void entryRejectsActiveMidTurnAndUnclosedStopPrefixesWithoutCreatingThread() {
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
-    for (UUID startEntryId : seedStopTurn(baseline, false)) {
+    SeededTurn turn = seedCompletedTurnWithToolResults(baseline, 2);
+    List<UUID> illegalPrefixes = new ArrayList<>();
+    illegalPrefixes.add(turn.turnStartId());
+    illegalPrefixes.add(turn.userEntryId());
+    illegalPrefixes.add(turn.assistantId());
+    illegalPrefixes.addAll(turn.toolResultIds());
+    illegalPrefixes.addAll(seedStopTurn(baseline, false));
+
+    for (UUID startEntryId : illegalPrefixes) {
       IllegalArgumentException error =
           assertThrows(
               IllegalArgumentException.class,
@@ -564,14 +589,61 @@ class HarnessRuntimeAcceptInitialTest {
                           List.of(userMessageCommand(TestIds.id(1), "hello"))),
                       AcceptancePreflight.IDENTITY));
       assertEquals(
-          "start entry " + startEntryId + " is inside an unclosed STOP turn", error.getMessage());
-      assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
-      assertTrue(
-          store.<Boolean>transaction(tx -> tx.loadCommandsByThread(TestIds.id(203)).isEmpty()));
-      assertTrue(
-          store.<Boolean>transaction(
-              tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(203))).isEmpty()));
+          "start entry "
+              + startEntryId
+              + " is not a legal NEW_THREAD fork boundary (ROOT or a closed TURN_END)",
+          error.getMessage());
+      assertNoNewThreadFacts(TestIds.id(203));
     }
+
+    // 源 Thread 的 head / version / commands / Work 完全不变。
+    ThreadState source = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals(baseline.rootEntryId(), source.headEntryId());
+    assertEquals(0L, source.version());
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).isEmpty()));
+    assertTrue(
+        store.<Boolean>transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())).isEmpty()));
+  }
+
+  /**
+   * 合法 fork 边界只有 ROOT 与已闭合 TURN_END：ROOT、多工具结果后的 COMPLETED TURN_END（即最新边界）、FAILED 与 STOPPED
+   * TURN_END 都可 fork；新 Thread head 直接指向边界，不复制 Entry。
+   */
+  @Test
+  void entryForksAtRootAndClosedTurnEndBoundariesWithoutCopyingEntries() {
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    SeededTurn completed = seedCompletedTurnWithToolResults(baseline, 2);
+    UUID failedBoundary = seedFailedTurn(baseline);
+    UUID stoppedBoundary = seedStopTurn(baseline, true).getLast();
+    long entriesBefore =
+        store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size();
+
+    List<UUID> boundaries =
+        List.of(baseline.rootEntryId(), completed.turnEndId(), failedBoundary, stoppedBoundary);
+    for (UUID boundary : boundaries) {
+      UUID threadId = UUID.randomUUID();
+      AcceptedCommands result =
+          runtime.acceptCommands(
+              entry(
+                  baseline.sessionId(),
+                  boundary,
+                  threadId,
+                  List.of(userMessageCommand(TestIds.id(1), "hello"))),
+              AcceptancePreflight.IDENTITY);
+      assertFalse(result.replayed());
+      ThreadState thread = store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+      assertEquals(boundary, thread.headEntryId());
+      assertEquals(1L, thread.version());
+      assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(threadId)).size());
+    }
+
+    // fork 不复制任何 Entry。
+    assertEquals(
+        entriesBefore,
+        store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size());
   }
 
   /** 正常关闭的 STOPPED 边界不是未闭合屏障：fork 到该边界照常成立，新 Thread head 直接指向它。 */
@@ -633,6 +705,152 @@ class HarnessRuntimeAcceptInitialTest {
                   T0));
           return List.of(turnStartId, barrierId, turnEndId);
         });
+  }
+
+  private void assertNoNewThreadFacts(UUID threadId) {
+    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.loadCommandsByThread(threadId).isEmpty()));
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty()));
+  }
+
+  private record SeededTurn(
+      UUID turnStartId,
+      UUID userEntryId,
+      UUID assistantId,
+      List<UUID> toolResultIds,
+      UUID turnEndId) {}
+
+  /**
+   * 追加一个完整闭合 Turn：TURN_START(INPUT) → USER → ASSISTANT(toolCalls) → 各 TOOL 结果 →
+   * TURN_END(COMPLETED)。
+   */
+  private SeededTurn seedCompletedTurnWithToolResults(
+      HarnessRuntimeTestSupport.Baseline baseline, int toolCallCount) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  baseline.sessionId(),
+                  baseline.rootEntryId(),
+                  new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
+                  T1));
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  turnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                      null,
+                      null),
+                  T1));
+          List<String> toolCallIds = new ArrayList<>();
+          for (int i = 0; i < toolCallCount; i++) {
+            toolCallIds.add("call-" + i);
+          }
+          Entry assistant =
+              HarnessRuntimeTestSupport.assistantEntry(
+                  tx.nextId(),
+                  baseline.sessionId(),
+                  userEntryId,
+                  T1,
+                  toolCallIds.toArray(String[]::new));
+          tx.insertEntry(assistant);
+          UUID parentId = assistant.id();
+          List<UUID> toolResultIds = new ArrayList<>();
+          for (int i = 0; i < toolCallCount; i++) {
+            UUID toolResultId = tx.nextId();
+            tx.insertEntry(
+                new Entry(
+                    toolResultId,
+                    baseline.sessionId(),
+                    parentId,
+                    toolResultPayload(tx.nextId(), assistant.id(), i, "call-" + i),
+                    T1));
+            toolResultIds.add(toolResultId);
+            parentId = toolResultId;
+          }
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  baseline.sessionId(),
+                  parentId,
+                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          return new SeededTurn(turnStartId, userEntryId, assistant.id(), toolResultIds, turnEndId);
+        });
+  }
+
+  /** 追加一个 FAILED 闭合 Turn：TURN_START(INPUT) → USER → ASSISTANT_ERROR → TURN_END(FAILED)。 */
+  private UUID seedFailedTurn(HarnessRuntimeTestSupport.Baseline baseline) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  baseline.sessionId(),
+                  baseline.rootEntryId(),
+                  new TurnStartPayload(TurnStartReason.INPUT, settings(), baseline.threadId()),
+                  T2));
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  turnStartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+                      null,
+                      null),
+                  T2));
+          UUID errorId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  errorId,
+                  baseline.sessionId(),
+                  userEntryId,
+                  new AssistantErrorPayload(
+                      new AssistantError("MODEL_ERROR", "model failed"), null),
+                  T2));
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  baseline.sessionId(),
+                  errorId,
+                  new TurnEndPayload(
+                      turnStartId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  T2));
+          return turnEndId;
+        });
+  }
+
+  private static EntryPayload toolResultPayload(
+      UUID toolInvocationId, UUID assistantEntryId, int callIndex, String toolCallId) {
+    ToolResultMessageContent content =
+        new ToolResultMessageContent(
+            toolCallId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
+    ToolResultMetadata metadata =
+        new ToolResultMetadata(
+            toolInvocationId,
+            assistantEntryId,
+            toolCallId,
+            callIndex,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null);
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
   private void assertPreflightContractViolation(
