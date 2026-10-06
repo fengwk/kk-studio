@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -28,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,27 +51,8 @@ class OpenAiResponsesThinkingTest {
   }
 
   private ModelDescriptor createModel() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-5.4-mini",
-        "gpt-5.4-mini",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        pricing);
+        "openai_test", "gpt-5.4-mini", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {
@@ -93,8 +72,7 @@ class OpenAiResponsesThinkingTest {
     List<ProviderStreamEvent> events = new ArrayList<>();
     ProviderRequest req = request(List.of());
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(
-            req, createDescriptor(), VALID_PREFIX_HASH, events::add);
+        new OpenAiResponsesStreamAccumulator(req, createDescriptor(), events::add);
 
     acc.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_th\"}}"));
@@ -128,7 +106,7 @@ class OpenAiResponsesThinkingTest {
   void should_not_return_reasoning_summary_when_not_requested() throws Exception {
     ProviderRequest req = request(List.of());
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(req, createDescriptor(), VALID_PREFIX_HASH, e -> {});
+        new OpenAiResponsesStreamAccumulator(req, createDescriptor(), e -> {});
 
     acc.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_no_th\"}}"));
@@ -159,11 +137,10 @@ class OpenAiResponsesThinkingTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call tool")))));
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesEncodedRequest encReq1 =
-        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq1 = encoder.encode(req1, desc);
 
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(req1, desc, encReq1.sourcePrefixHash(), e -> {});
+        new OpenAiResponsesStreamAccumulator(req1, desc, e -> {});
 
     acc.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_enc\"}}"));
@@ -228,8 +205,7 @@ class OpenAiResponsesThinkingTest {
                 assistantMsg,
                 toolResultMsg));
 
-    OpenAiResponsesEncodedRequest encReq2 =
-        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(encReq2.bodyUtf8Bytes());
 
     JsonNode input2 = root2.get("input");
@@ -256,11 +232,10 @@ class OpenAiResponsesThinkingTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("parallel calls")))));
-    OpenAiResponsesEncodedRequest encReq1 =
-        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq1 = encoder.encode(req1, desc);
 
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(req1, desc, encReq1.sourcePrefixHash(), e -> {});
+        new OpenAiResponsesStreamAccumulator(req1, desc, e -> {});
 
     acc.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_2tools\"}}"));
@@ -300,8 +275,7 @@ class OpenAiResponsesThinkingTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("parallel calls"))),
                 assistantMsg));
 
-    OpenAiResponsesEncodedRequest encReq2 =
-        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq2 = encoder.encode(req2, desc);
     JsonNode root = MAPPER.readTree(encReq2.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(4, input.size());
@@ -325,11 +299,10 @@ class OpenAiResponsesThinkingTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("asymmetric test")))));
-    OpenAiResponsesEncodedRequest encReq1 =
-        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq1 = encoder.encode(req1, desc);
 
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(req1, desc, encReq1.sourcePrefixHash(), e -> {});
+        new OpenAiResponsesStreamAccumulator(req1, desc, e -> {});
 
     // 1. 流式阶段：created -> reasoning added -> summary delta -> reasoning output_item.done (带
     // encrypted_content)
@@ -416,8 +389,7 @@ class OpenAiResponsesThinkingTest {
                 assistantMsg,
                 toolResultMsg));
 
-    OpenAiResponsesEncodedRequest encReq2 =
-        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encReq2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(encReq2.bodyUtf8Bytes());
 
     JsonNode input2 = root2.get("input");

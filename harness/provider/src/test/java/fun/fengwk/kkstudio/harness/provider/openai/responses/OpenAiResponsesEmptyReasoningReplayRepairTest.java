@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -43,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -81,19 +79,6 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
             "minimax_test",
@@ -101,8 +86,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             "MiniMax-M2",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     return new ProviderRequest(
         model,
         DEFAULT_VARIANT,
@@ -115,9 +99,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
   /** 按 SSE fixture 逐行喂入事件，复现真实网关的 `reasoning.summary: []` 终态。 */
   private static OpenAiResponsesStreamAccumulator accumulateFixture(
-      ProviderRequest request, ProviderDescriptor descriptor, String prefixHash) throws Exception {
+      ProviderRequest request, ProviderDescriptor descriptor) throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(request, descriptor, prefixHash, e -> {});
+        new OpenAiResponsesStreamAccumulator(request, descriptor, e -> {});
     try (InputStream in =
         OpenAiResponsesEmptyReasoningReplayRepairTest.class.getResourceAsStream(FIXTURE)) {
       assertNotNull(in, "fixture must exist");
@@ -157,11 +141,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
-    OpenAiResponsesEncodedRequest first =
-        encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
-
-    OpenAiResponsesStreamAccumulator accumulator =
-        accumulateFixture(firstRequest, descriptor, first.sourcePrefixHash());
+    OpenAiResponsesStreamAccumulator accumulator = accumulateFixture(firstRequest, descriptor);
 
     ProviderResponse response = accumulator.response();
     assertEquals(
@@ -190,7 +170,6 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             descriptor.affinity("MiniMax-M2"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             emptyPlaceholderPayload(durableText));
 
     // durable 持久化：严格 codec 往返必须无损保留该（不完整）payload 结构。
@@ -215,8 +194,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                         durableReplay)));
 
     // 下一轮请求必须成功（语义回退），不得因空占位符而失败。
-    OpenAiResponsesEncodedRequest second =
-        encoder.encode(request(projected), descriptor, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest second = encoder.encode(request(projected), descriptor);
     JsonNode root = MAPPER.readTree(second.bodyUtf8Bytes());
     JsonNode input = root.get("input");
 
@@ -231,7 +209,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals(durableText, input.get(2).path("content").get(0).path("text").asText());
   }
 
-  /** 意图：即使 affinity 与前缀哈希都失配，损坏的 replay 仍必须先被强校验拒绝——不因“可回退”而放弃结构/一致性检查。 */
+  /** 意图：即使 affinity 失配，损坏的 replay 仍必须先被强校验拒绝——不因“可回退”而放弃结构/一致性检查。 */
   @Test
   void malformedEmptyPlaceholderAdjacentReplayStillRejectedBeforeFallback() {
     ProviderDescriptor descriptor = createDescriptor();
@@ -295,10 +273,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     ProviderReplayState replay =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            descriptor.affinity("MiniMax-M2"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, descriptor.affinity("MiniMax-M2"), payload);
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -310,12 +285,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     ProviderException ex =
         assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(assistant)),
-                    descriptor,
-                    OpenAiResponsesConfig.defaultConfig()));
+            ProviderException.class, () -> encoder.encode(request(List.of(assistant)), descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
   }
@@ -335,10 +305,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     ProviderReplayState replay =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            descriptor.affinity("MiniMax-M2"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, descriptor.affinity("MiniMax-M2"), payload);
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -347,12 +314,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     ProviderException ex =
         assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(assistant)),
-                    descriptor,
-                    OpenAiResponsesConfig.defaultConfig()));
+            ProviderException.class, () -> encoder.encode(request(List.of(assistant)), descriptor));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
@@ -367,12 +329,8 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
-    OpenAiResponsesEncodedRequest first =
-        encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
-
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            firstRequest, descriptor, first.sourcePrefixHash(), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             """
@@ -402,8 +360,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("propose a fix"))),
                                 assistant)),
-                        descriptor,
-                        OpenAiResponsesConfig.defaultConfig())
+                        descriptor)
                     .bodyUtf8Bytes())
             .get("input");
 
@@ -424,14 +381,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
-    OpenAiResponsesEncodedRequest first =
-        encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
-
     ProviderReplayState replay =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             descriptor.affinity("MiniMax-M2"),
-            first.sourcePrefixHash(),
             emptyPlaceholderPayload("answer"));
 
     ProviderMessage assistant =
@@ -448,8 +401,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("propose a fix"))),
                                 assistant)),
-                        descriptor,
-                        OpenAiResponsesConfig.defaultConfig())
+                        descriptor)
                     .bodyUtf8Bytes())
             .get("input");
 
@@ -470,7 +422,6 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             descriptor.affinity("MiniMax-M2"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             emptyPlaceholderPayload("answer"));
     ProviderMessage assistant =
         new ProviderMessage(
@@ -488,13 +439,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     JsonNode input =
         MAPPER
-            .readTree(
-                encoder
-                    .encode(
-                        request(List.of(assistant)),
-                        otherGeneration,
-                        OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+            .readTree(encoder.encode(request(List.of(assistant)), otherGeneration).bodyUtf8Bytes())
             .get("input");
 
     assertEquals(2, input.size());
@@ -520,10 +465,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
         .put("arguments", "{\"q\":\"Paris\"}");
     ProviderReplayState replay =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            descriptor.affinity("MiniMax-M2"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, descriptor.affinity("MiniMax-M2"), payload);
 
     ProviderMessage assistant =
         new ProviderMessage(
@@ -543,12 +485,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     JsonNode input =
         MAPPER
             .readTree(
-                encoder
-                    .encode(
-                        request(List.of(assistant, toolResult)),
-                        descriptor,
-                        OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+                encoder.encode(request(List.of(assistant, toolResult)), descriptor).bodyUtf8Bytes())
             .get("input");
 
     assertEquals(3, input.size());
@@ -572,15 +509,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             new ProviderReplayState(
                 ProviderReplayFormat.OPENAI_RESPONSES,
                 descriptor.affinity("MiniMax-M2"),
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 emptyOutputPayload));
     assertThrows(
         ProviderException.class,
-        () ->
-            encoder.encode(
-                request(List.of(contradictoryAssistant, toolResult)),
-                descriptor,
-                OpenAiResponsesConfig.defaultConfig()),
+        () -> encoder.encode(request(List.of(contradictoryAssistant, toolResult)), descriptor),
         "an empty output contradicting durable tool calls must still be rejected");
   }
 
@@ -612,7 +544,6 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             new ProviderReplayState(
                 ProviderReplayFormat.OPENAI_RESPONSES,
                 responsesDescriptor.affinity("MiniMax-M2"),
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 emptyPlaceholderPayload(durableText)));
 
     // 连接 A 自身消费：识别为不完整 replay → 语义回退，绝不伪造密文。
@@ -627,8 +558,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("propose a fix"))),
                                 assistantFromConnectionA)),
-                        responsesDescriptor,
-                        OpenAiResponsesConfig.defaultConfig())
+                        responsesDescriptor)
                     .bodyUtf8Bytes())
             .get("input");
     assertEquals(3, sameConnectionInput.size());
@@ -649,8 +579,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("propose a fix"))),
                                 assistantFromConnectionA)),
-                        otherConnection,
-                        OpenAiResponsesConfig.defaultConfig())
+                        otherConnection)
                     .bodyUtf8Bytes())
             .get("input");
     assertEquals(3, otherConnectionInput.size());
@@ -675,12 +604,8 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
-    OpenAiResponsesEncodedRequest first =
-        encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
-
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            firstRequest, descriptor, first.sourcePrefixHash(), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"opaque reasoning\"}"));
@@ -717,7 +642,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"draft thinking\"}"));
@@ -743,7 +668,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"draft thinking\"}"));
@@ -776,7 +701,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"streamed thinking\"}"));
@@ -806,7 +731,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             """
@@ -834,7 +759,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"exact streamed thinking\"}"));
@@ -879,20 +804,11 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             ProviderMessageRole.ASSISTANT,
             List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
             new ProviderReplayState(
-                ProviderReplayFormat.OPENAI_RESPONSES,
-                descriptor.affinity("MiniMax-M2"),
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                payload));
+                ProviderReplayFormat.OPENAI_RESPONSES, descriptor.affinity("MiniMax-M2"), payload));
 
     JsonNode input =
         MAPPER
-            .readTree(
-                encoder
-                    .encode(
-                        request(List.of(assistant)),
-                        descriptor,
-                        OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+            .readTree(encoder.encode(request(List.of(assistant)), descriptor).bodyUtf8Bytes())
             .get("input");
 
     assertEquals(2, input.size());
@@ -908,10 +824,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
       String scenario) {
     ProviderReplayState replay =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            descriptor.affinity("MiniMax-M2"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, descriptor.affinity("MiniMax-M2"), payload);
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -922,9 +835,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     ProviderException ex =
         assertThrows(
             ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(assistant)), descriptor, OpenAiResponsesConfig.defaultConfig()),
+            () -> encoder.encode(request(List.of(assistant)), descriptor),
             scenario);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind(), scenario);
   }

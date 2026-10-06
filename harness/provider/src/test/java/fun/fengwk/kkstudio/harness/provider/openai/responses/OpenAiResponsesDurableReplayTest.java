@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -67,19 +65,6 @@ class OpenAiResponsesDurableReplayTest {
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
             "openai_test",
@@ -87,8 +72,7 @@ class OpenAiResponsesDurableReplayTest {
             "gpt-5.4-mini",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     return new ProviderRequest(
         model,
         DEFAULT_VARIANT,
@@ -112,12 +96,10 @@ class OpenAiResponsesDurableReplayTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call the tool")))));
-    OpenAiResponsesEncodedRequest first =
-        encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest first = encoder.encode(firstRequest, descriptor);
 
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            firstRequest, descriptor, first.sourcePrefixHash(), event -> {});
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, event -> {});
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_durable\"}}"));
     // 私有推理文本草稿：只用于流式草稿，绝不允许进入 durable thinking 或 replay summary。
@@ -151,7 +133,7 @@ class OpenAiResponsesDurableReplayTest {
     ProviderReplayState replayState = accumulator.replayState();
     assertNotNull(replayState);
     assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, replayState.format());
-    assertEquals(first.sourcePrefixHash(), replayState.sourcePrefixHash());
+    assertEquals(descriptor.affinity(firstRequest.model().modelId()), replayState.affinity());
     JsonNode replayOutput = replayState.payload().get("output");
     assertEquals("enc_blob_durable", replayOutput.get(0).path("encrypted_content").asText());
     assertEquals(
@@ -192,8 +174,7 @@ class OpenAiResponsesDurableReplayTest {
                     ProviderMessageProjector.ProjectedMessage.of(durableAssistant, durableReplay),
                     ProviderMessageProjector.ProjectedMessage.of(durableToolResult)));
 
-    OpenAiResponsesEncodedRequest second =
-        encoder.encode(request(projected), descriptor, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest second = encoder.encode(request(projected), descriptor);
     JsonNode input = MAPPER.readTree(second.bodyUtf8Bytes()).get("input");
 
     // input 移位：user(0) → reasoning(1) → function_call(2) → function_call_output(3)
@@ -247,10 +228,7 @@ class OpenAiResponsesDurableReplayTest {
 
     JsonNode input =
         MAPPER
-            .readTree(
-                encoder
-                    .encode(request(projected), descriptor, OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+            .readTree(encoder.encode(request(projected), descriptor).bodyUtf8Bytes())
             .get("input");
 
     assertEquals(4, input.size());
