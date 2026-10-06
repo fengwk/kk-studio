@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
+import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -31,39 +32,41 @@ function DebugPreviewHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <div className="preview-harness-frame" data-testid="preview-harness-frame">
-          <AgentPane
-            paneId={PREVIEW_HARNESS_THREAD_ID}
-            focused
-            initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
-            agents={[
-              {
-                name: 'assistant',
-                description: '通用助手',
-                systemPrompt: 'You are a precise coding assistant.',
-                model: 'minimax-m2.7',
-                variant: 'default',
-                config: {
-                  inheritParentEnvironment: true,
-                  tools: ['read', 'bash'],
-                  skills: [],
-                  subagents: [],
+        <MemoryRouter>
+          <div className="preview-harness-frame" data-testid="preview-harness-frame">
+            <AgentPane
+              paneId={PREVIEW_HARNESS_THREAD_ID}
+              focused
+              initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
+              agents={[
+                {
+                  name: 'assistant',
+                  description: '通用助手',
+                  systemPrompt: 'You are a precise coding assistant.',
+                  model: 'minimax-m2.7',
+                  variant: 'default',
+                  config: {
+                    inheritParentEnvironment: true,
+                    tools: ['read', 'bash'],
+                    skills: [],
+                    subagents: [],
+                  },
+                  version: '1',
+                  createTime: '2026-10-01T00:00:00Z',
+                  updateTime: '2026-10-01T00:00:00Z',
                 },
-                version: '1',
-                createTime: '2026-10-01T00:00:00Z',
-                updateTime: '2026-10-01T00:00:00Z',
-              },
-              ...['coder', 'broken-agent'].map((name) => ({
-                name,
-                description: name,
-                model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
-                variant: 'fast',
-                config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
-                version: '1',
-              })),
-            ]}
-          />
-        </div>
+                ...['coder', 'broken-agent'].map((name) => ({
+                  name,
+                  description: name,
+                  model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+                  variant: 'fast',
+                  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+                  version: '1',
+                })),
+              ]}
+            />
+          </div>
+        </MemoryRouter>
       </ApplicationEventProvider>
     </QueryClientProvider>
   )
