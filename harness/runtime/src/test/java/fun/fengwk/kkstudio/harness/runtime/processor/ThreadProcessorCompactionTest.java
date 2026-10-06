@@ -45,6 +45,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
@@ -247,6 +249,14 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionPhase.FULL, compactionStart.compaction().phase());
     assertEquals(CompactionTrigger.THRESHOLD, compactionStart.compaction().trigger());
     assertTrue(payload.summaryText().contains("response text"));
+    // 正式模型输出的原始 usage/stopReason 随结果 durable；metadata 经 canonical codec 无损往返，且不含 cost/pricing。
+    assertNotNull(payload.assistantMetadata());
+    assertEquals(GenerationStopReason.COMPLETE, payload.assistantMetadata().stopReason());
+    assertEquals(new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L), payload.assistantMetadata().usage());
+    HistoryEntryPayloadJsonCodec codec = new HistoryEntryPayloadJsonCodec();
+    String durableJson = codec.encode(payload);
+    assertEquals(payload, codec.decode(EntryType.COMPACTION, durableJson));
+    assertFalse(durableJson.contains("cost"), durableJson);
     // COMPLETED 无 tool 的压缩 turn 已关闭：Model 行被物理删除（closed turn 不保留 Invocation）。
     assertNull(
         fixture.store.transaction(tx -> tx.findModelInvocation(invocation.id())).orElse(null));

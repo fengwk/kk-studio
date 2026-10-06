@@ -317,6 +317,40 @@ describe('buildThreadEventTimeline', () => {
     expect(turnEnd.details.find((row) => row.label === '费用')?.value).toBe('$0.00125')
   })
 
+  it('attributes a compaction result usage to its turn and flags its historical preview eligibility', () => {
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('compact-1', 'COMPACTION', {
+        summaryText: 'summarized',
+        assistantMetadata: {
+          stopReason: 'COMPLETE',
+          usage: { inputTokens: 1000, outputTokens: 100, providerTotalTokens: 1100 },
+        },
+      }),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+      entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('compact-2', 'COMPACTION', { summaryText: 'pure summary', assistantMetadata: null }),
+      entry('end-2', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const events = build(entries)
+
+    // 压缩结果是真实模型输出：带 canonical metadata 时可读取历史预览。
+    const compaction = events.find((event) => event.id === 'entry:compact-1')!
+    expect(compaction.kind).toBe('COMPACTION')
+    expect(compaction.historicalPreviewEligible).toBe(true)
+
+    // 压缩回合真实发生的用量必须归入该 turn 的 TURN_END，绝不因内容被隐藏而漏计。
+    const firstEnd = events.find((event) => event.id === 'entry:end-1')!
+    expect(firstEnd.details.find((row) => row.label === '输入 tokens')?.value).toBe('1000')
+    expect(firstEnd.details.find((row) => row.label === '输出 tokens')?.value).toBe('100')
+
+    // 纯摘要（无 metadata）没有可重建的请求：不提供预览入口，也不贡献任何用量。
+    const pureCompaction = events.find((event) => event.id === 'entry:compact-2')!
+    expect(pureCompaction.historicalPreviewEligible).toBe(false)
+    const secondEnd = events.find((event) => event.id === 'entry:end-2')!
+    expect(secondEnd.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
+  })
+
   it('omits zero cache segments from the TURN_END summary but keeps input/output', () => {
     const usage = {
       usage: { inputTokens: 100, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWriteLongTokens: 0, reasoningTokens: 0, providerTotalTokens: 300 },

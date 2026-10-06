@@ -350,9 +350,22 @@ class HistoryEntryPayloadJsonCodecTest {
   @Test
   void roundTripsMinimalCompactionPayload() {
     // Durable result 只保存 summaryText；phase/trigger/cut 位于 enclosing TURN_START。
-    CompactionPayload payload = new CompactionPayload("structured summary");
+    // 纯摘要组装没有真实模型用量，metadata 必须显式为 null 而不是被伪造。
+    CompactionPayload payload = new CompactionPayload("structured summary", null);
 
-    assertEquals("{\"summaryText\":\"structured summary\"}", CODEC.encode(payload));
+    assertEquals(
+        "{\"summaryText\":\"structured summary\",\"assistantMetadata\":null}",
+        CODEC.encode(payload));
+    assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
+    assertEquals(payload, CODEC.decodeNode(EntryType.COMPACTION, CODEC.encodeNode(payload)));
+  }
+
+  @Test
+  void roundTripsCompactionPayloadWithOriginalProviderMetadata() {
+    // 正式模型输出的压缩结果把原始 stopReason/usage/decodeDuration metadata 一起 durable。
+    CompactionPayload payload =
+        new CompactionPayload("structured summary", metadata(GenerationStopReason.COMPLETE, 42L));
+
     assertEquals(payload, CODEC.decode(EntryType.COMPACTION, CODEC.encode(payload)));
     assertEquals(payload, CODEC.decodeNode(EntryType.COMPACTION, CODEC.encodeNode(payload)));
   }
@@ -378,22 +391,38 @@ class HistoryEntryPayloadJsonCodecTest {
 
   @Test
   void compactionCodecRejectsUnknownAndWrongTypedFields() {
-    String canonical = "{\"summaryText\":\"summary\"}";
-    assertEquals(new CompactionPayload("summary"), CODEC.decode(EntryType.COMPACTION, canonical));
+    String canonical = "{\"summaryText\":\"summary\",\"assistantMetadata\":null}";
+    assertEquals(
+        new CompactionPayload("summary", null), CODEC.decode(EntryType.COMPACTION, canonical));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                EntryType.COMPACTION, "{\"summaryText\":\"summary\",\"tokensBefore\":500}"));
+                EntryType.COMPACTION,
+                "{\"summaryText\":\"summary\",\"assistantMetadata\":null,\"tokensBefore\":500}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":5}"));
+        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":5,\"assistantMetadata\":null}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\" \"}"));
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, "{\"summaryText\":\" \",\"assistantMetadata\":null}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\"a\",\"summaryText\":\"b\"}"));
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION,
+                "{\"summaryText\":\"a\",\"summaryText\":\"b\",\"assistantMetadata\":null}"));
+    // 最终 shape 必须显式声明 assistantMetadata：缺失即旧/损坏数据，确定性拒绝而不是猜测。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.COMPACTION, "{\"summaryText\":\"summary\"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.COMPACTION, "{\"summaryText\":\"summary\",\"assistantMetadata\":\"x\"}"));
   }
 
   @Test

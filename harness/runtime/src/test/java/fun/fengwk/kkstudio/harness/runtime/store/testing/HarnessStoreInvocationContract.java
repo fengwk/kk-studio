@@ -75,6 +75,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -2470,18 +2471,25 @@ public abstract class HarnessStoreInvocationContract {
       UUID cutEntryId) {
     UUID turnStart = openCompactionTurn(phase, cutEntryId);
     UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
+    ProviderResponse response = successResponse();
+    // 与生产 apply 同源：durable 结果 = 摘要文本 + 该次真实模型调用的 provider 元数据（stopReason / usage /
+    // decodeDuration），materialization evaluator 用同一事实机械重放。
+    CompactionPayload durable =
+        new CompactionPayload(
+            resultPayload.summaryText(),
+            new AssistantMessageMetadata(
+                response.stopReason(), response.usage(), response.decodeDurationMillis()));
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
           UUID resultEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(resultEntryId, baseline.sessionId(), turnStart, resultPayload, T2));
+          tx.insertEntry(new Entry(resultEntryId, baseline.sessionId(), turnStart, durable, T2));
           ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.beginDispatch(T2));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse(), T3));
+          tx.updateModelInvocation(current.succeed(response, T3));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(resultEntryId, T3));
           return modelId;
@@ -2528,14 +2536,14 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 baseline.sessionId(),
                 baseline.turnStartEntryId(),
-                new CompactionPayload("summary")));
+                new CompactionPayload("summary", null)));
   }
 
   @Test
   void compactionInvocationAcceptsExactSucceededSummary() {
     // compactionRequest() 是不含压缩字段的普通 ModelRequestSpec；用途只由 TURN_START.compaction() 决定。
     ModelRequestSpec requestSpec = compactionRequest();
-    CompactionPayload result = new CompactionPayload("summary");
+    CompactionPayload result = new CompactionPayload("summary", null);
 
     UUID modelId = seedCompletedCompactionTurn(requestSpec, result);
 
@@ -2547,7 +2555,7 @@ public abstract class HarnessStoreInvocationContract {
   @Test
   void compactionResultRejectsNonSucceededStatusAndSummaryDrift() {
     ModelRequestSpec requestSpec = compactionRequest();
-    CompactionPayload result = new CompactionPayload("summary");
+    CompactionPayload result = new CompactionPayload("summary", null);
 
     // FAILED invocation 携带 COMPACTION result -> 拒绝。
     UUID turnStart = openCompactionTurn();
@@ -2571,7 +2579,7 @@ public abstract class HarnessStoreInvocationContract {
                 }));
 
     // SUCCEEDED 但 summaryText 与 Provider terminal 不一致 -> 由共享 materialization evaluator 拒绝。
-    CompactionPayload drifted = new CompactionPayload("drifted summary");
+    CompactionPayload drifted = new CompactionPayload("drifted summary", null);
     assertThrows(
         IllegalArgumentException.class, () -> seedCompletedCompactionTurn(requestSpec, drifted));
   }
@@ -2586,7 +2594,7 @@ public abstract class HarnessStoreInvocationContract {
         () ->
             seedCompletedCompactionTurn(
                 requestSpec,
-                new CompactionPayload("assistant reply"),
+                new CompactionPayload("assistant reply", null),
                 CompactionPhase.FULL,
                 TestIds.id(999L)));
   }

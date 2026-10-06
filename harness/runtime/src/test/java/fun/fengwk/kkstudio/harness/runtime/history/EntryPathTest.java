@@ -1494,7 +1494,7 @@ class EntryPathTest {
   }
 
   private static Entry compactionResult(UUID id, UUID parentId) {
-    return new Entry(id, SESSION_ID, parentId, new CompactionPayload("summary"), time(id));
+    return new Entry(id, SESSION_ID, parentId, new CompactionPayload("summary", null), time(id));
   }
 
   private static Entry assistantError(UUID id, UUID parentId) {

@@ -63,7 +63,7 @@ class CompactionTurnsTest {
         IllegalArgumentException.class,
         () ->
             new CompactionTurns.CompactionTurn(
-                compaction, new CompactionPayload("summary"), null, 1, 2, -1));
+                compaction, new CompactionPayload("summary", null), null, 1, 2, -1));
   }
 
   private static EntryPath completedPath(CompactionPhase phase, boolean continueModel) {
@@ -85,7 +85,7 @@ class CompactionTurnsTest {
                 new TurnStartPayload(
                     TurnStartReason.COMPACTION, SETTINGS, id(10L), 100_000, 16_384, start),
                 NOW),
-            new Entry(id(3L), id(100L), id(2L), new CompactionPayload("summary"), NOW),
+            new Entry(id(3L), id(100L), id(2L), new CompactionPayload("summary", null), NOW),
             new Entry(
                 id(4L),
                 id(100L),

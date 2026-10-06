@@ -58,7 +58,8 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> ATTEMPT_SNAPSHOT_FIELDS =
       orderedSet("attempt", "sequence", "text", "thinking");
   private static final Set<String> ASSISTANT_ABORTED_FIELDS = orderedSet("message");
-  private static final Set<String> COMPACTION_FIELDS = orderedSet("summaryText");
+  private static final Set<String> COMPACTION_FIELDS =
+      orderedSet("summaryText", "assistantMetadata");
   private static final Set<String> NOTIFICATION_FIELDS =
       orderedSet("notificationId", "kind", "sourceThreadId", "message");
   private static final Set<String> TURN_END_FIELDS =
@@ -256,6 +257,13 @@ public final class HistoryEntryPayloadJsonCodec {
   private static ObjectNode encodeCompaction(CompactionPayload value) {
     ObjectNode node = NODES.objectNode();
     node.put("summaryText", value.summaryText());
+    if (value.assistantMetadata() == null) {
+      node.putNull("assistantMetadata");
+    } else {
+      node.set(
+          "assistantMetadata",
+          HistoryValueCodecs.encodeAssistantMetadata(value.assistantMetadata()));
+    }
     return node;
   }
 
@@ -439,7 +447,12 @@ public final class HistoryEntryPayloadJsonCodec {
   private static CompactionPayload decodeCompaction(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "COMPACTION");
     HistoryValueCodecs.requireExactFields(node, COMPACTION_FIELDS, "COMPACTION");
-    return new CompactionPayload(HistoryValueCodecs.text(node, "summaryText"));
+    JsonNode assistantMetadata = node.get("assistantMetadata");
+    AssistantMessageMetadata metadata =
+        assistantMetadata.isNull()
+            ? null
+            : HistoryValueCodecs.decodeAssistantMetadata(assistantMetadata);
+    return new CompactionPayload(HistoryValueCodecs.text(node, "summaryText"), metadata);
   }
 
   private static final Set<String> COMPACTION_START_FIELDS =
