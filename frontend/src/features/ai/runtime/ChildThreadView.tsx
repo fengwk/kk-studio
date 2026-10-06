@@ -2,28 +2,37 @@ import { ArrowLeft } from 'lucide-react'
 import { Link } from 'react-router'
 import type { ReactNode } from 'react'
 import { ThreadPane } from '@/features/ai/runtime/ThreadPane'
-import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
+import {
+  useThreadProjection,
+  type ThreadProjection,
+} from '@/features/ai/runtime/useThreadProjection'
 import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPanelViews'
 import { useI18n } from '@/shared/i18n'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import '@/features/ai/runtime/child-thread-view.css'
 
 /**
- * 只读子代理视图：只挂载 Thread 投影与视图状态，不挂载草稿、上传或人工执行
- * Hook，因此不存在任何写入口。查看入口（逐层返回 / 返回执行根）由调用方以
- * `controls` 提供，视图本身不猜测导航上下文。
+ * 已绑定 Thread 的视图外壳：只消费投影与视图状态，不挂载草稿、上传或人工执行
+ * Hook，因此不存在任何写入口。调用方可以提供已持有的投影（父面板已订阅同一
+ * Thread 时不重复查询与订阅），以及输入与导航入口 `controls`。
  */
-export function ChildThreadView({
+export function BoundThreadView({
   threadId,
+  projection: injectedProjection,
   environments,
   controls,
+  readOnly = false,
 }: {
   threadId: string
+  projection?: ThreadProjection
   environments: EnvironmentCardDTO[]
-  controls: ReactNode
+  controls?: ReactNode
+  /** 只读查看（子代理）：标题带只读标识。 */
+  readOnly?: boolean
 }) {
   const { t } = useI18n()
-  const projection = useThreadProjection(threadId)
+  const ownProjection = useThreadProjection(injectedProjection ? '' : threadId)
+  const projection = injectedProjection ?? ownProjection
   // 只读视图自持视图状态（Conversation/Debug 与滚动恢复），不进入根控制面。
   const views = useBoundThreadPanelViews(threadId, projection)
   const name = projection.thread?.name ?? t('ai.runtime.rename.loadingName')
@@ -34,7 +43,9 @@ export function ChildThreadView({
       heading={(
         <header className="agent-pane-thread-heading">
           <h2 className="agent-pane-thread-title" title={name}>{name}</h2>
-          <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
+          {readOnly ? (
+            <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span>
+          ) : null}
         </header>
       )}
       controls={controls}
@@ -45,6 +56,16 @@ export function ChildThreadView({
       }}
     />
   )
+}
+
+/** 只读子代理视图：投影 + 只读标识，写入口只可能来自调用方（返回导航）。 */
+export function ChildThreadView(props: {
+  threadId: string
+  projection?: ThreadProjection
+  environments: EnvironmentCardDTO[]
+  controls?: ReactNode
+}) {
+  return <BoundThreadView {...props} readOnly />
 }
 
 /** 同 pane 层内返回：回到上一层查看路径。 */

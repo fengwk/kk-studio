@@ -1,5 +1,8 @@
 import { useMemo } from 'react'
+import { GitBranch } from 'lucide-react'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
+import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
+import type { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
 import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-panel/ThreadPanel'
 import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
 import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
@@ -23,12 +26,15 @@ export function RootThreadControlArea({
   composer,
   messages,
   queuedMessages,
+  tree,
 }: {
   /** 执行根；null 表示尚未绑定根面板（新建草稿），不查询也不渲染交互卡片。 */
   rootThreadId: string | null
   composer: ThreadPanelComposerInput
   messages: DialogueMessage[]
   queuedMessages: QueuedThreadMessage[]
+  /** 执行树（同一份查询）：交互来源的 Thread 名称与代理身份从这里解析。 */
+  tree?: ReturnType<typeof useActiveThreadTree>
 }) {
   const {
     composerRef,
@@ -42,6 +48,7 @@ export function RootThreadControlArea({
     onCommand,
     commands,
     focusOnEscape,
+    suspended,
     settings,
     scope,
     onPreviewReadinessChange,
@@ -62,7 +69,9 @@ export function RootThreadControlArea({
   )
   return (
     <div className="thread-control-area">
-      {rootThreadId == null ? null : <RootInteractionList rootThreadId={rootThreadId} />}
+      {rootThreadId == null
+        ? null
+        : <RootInteractionList rootThreadId={rootThreadId} tree={tree} />}
       <ThreadComposer
         ref={composerRef}
         parts={parts}
@@ -75,7 +84,7 @@ export function RootThreadControlArea({
         onCommand={onCommand}
         commands={commands}
         focusOnEscape={focusOnEscape && !interactionOpen}
-        active={!interactionOpen}
+        active={!interactionOpen && !suspended}
         historicalUserMessages={historicalUserMessages}
         queuedUserMessages={queuedUserMessages}
         settings={settings}
@@ -87,8 +96,18 @@ export function RootThreadControlArea({
   )
 }
 
-/** 根交互列表：完整分页，失败可见可重试，不伪装成已无待决交互。 */
-function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
+/**
+ * 根交互列表：来源标识来自执行树（Thread 名称 + 代理），写回始终使用原始
+ * `threadId`/`interactionId`；完整分页保留，刷新失败即使已有旧数据也照常显示，
+ * 不把失败伪装成“已无待决交互”。
+ */
+function RootInteractionList({
+  rootThreadId,
+  tree,
+}: {
+  rootThreadId: string
+  tree?: ReturnType<typeof useActiveThreadTree>
+}) {
   const { t } = useI18n()
   const {
     items,
@@ -101,43 +120,59 @@ function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
     removeItem,
   } = useInteractionsController(rootThreadId)
 
-  if (isError && items.length === 0) {
-    return (
-      <div className="thread-root-interactions is-error" role="alert">
-        <span>{t('ai.interaction.loadFailed')}</span>
-        <button type="button" className="ghost-btn" onClick={() => void refresh()}>
-          {t('ai.interaction.retry')}
-        </button>
-      </div>
-    )
-  }
-  if ((isLoading && items.length === 0) || items.length === 0) {
+  if (items.length === 0 && !isError) {
     return null
   }
   return (
     <section className="thread-root-interactions" aria-label={t('ai.interaction.pendingTitle')}>
-      {items.map((item) => (
-        <div key={item.interactionId} className="interaction-feed-item">
-          <header className="interaction-item-header">
-            <div className="interaction-item-meta">
-              <span className={`interaction-status-tag ${item.status.toLowerCase()}`}>
-                {item.status === 'WAITING_INPUT'
-                  ? t('ai.interaction.waitingInput')
-                  : item.status === 'WAITING_APPROVAL'
-                    ? t('ai.interaction.waitingApproval')
-                    : item.status}
-              </span>
-              <span className="interaction-agent-badge">{item.toolName}</span>
-            </div>
-          </header>
-          <div className="interaction-item-body">
-            <InteractionCardBody
-              item={item}
-              onSuccess={() => removeItem(item.interactionId)}
-            />
-          </div>
+      {isError ? (
+        <div className="thread-root-interactions-state is-error" role="alert">
+          <span>{t('ai.interaction.loadFailed')}</span>
+          <button
+            type="button"
+            className="ghost-btn"
+            disabled={isLoading}
+            onClick={() => void refresh()}
+          >
+            {t('ai.interaction.retry')}
+          </button>
         </div>
-      ))}
+      ) : null}
+      {items.map((item) => {
+        const source = tree?.nodesById.get(item.threadId) ?? null
+        return (
+          <div key={item.interactionId} className="interaction-feed-item">
+            <header className="interaction-item-header">
+              <div className="interaction-item-meta">
+                <span className={`interaction-status-tag ${item.status.toLowerCase()}`}>
+                  {item.status === 'WAITING_INPUT'
+                    ? t('ai.interaction.waitingInput')
+                    : item.status === 'WAITING_APPROVAL'
+                      ? t('ai.interaction.waitingApproval')
+                      : item.status}
+                </span>
+                <ThreadLink
+                  threadId={item.threadId}
+                  className="interaction-source-link"
+                  title={item.threadId}
+                >
+                  <GitBranch size={14} aria-hidden="true" />
+                  <span className="interaction-source-name">{source?.name ?? item.threadId}</span>
+                </ThreadLink>
+                {source ? (
+                  <span className="interaction-agent-badge">{source.agentName}</span>
+                ) : null}
+              </div>
+            </header>
+            <div className="interaction-item-body">
+              <InteractionCardBody
+                item={item}
+                onSuccess={() => removeItem(item.interactionId)}
+              />
+            </div>
+          </div>
+        )
+      })}
       {hasMore ? (
         <button
           type="button"

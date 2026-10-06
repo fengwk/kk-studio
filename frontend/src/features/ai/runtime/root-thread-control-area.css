@@ -18,6 +18,13 @@
   background: var(--surface-raised, rgba(128, 128, 128, 0.06));
 }
 
+.thread-root-interactions-state.is-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .thread-root-interactions.is-error {
   flex-direction: row;
   align-items: center;

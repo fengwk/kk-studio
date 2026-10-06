@@ -9,8 +9,12 @@ import {
   branchDraftFromEntryPath,
   sessionSelectionItem,
   threadSelectionItem,
-  useAgentPaneController,
-} from '@/features/ai/runtime/useAgentPaneController'
+  useRootThreadControl,
+  type UseRootThreadControlOptions,
+} from '@/features/ai/runtime/useRootThreadControl'
+import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
+import { isBoundTarget } from '@/features/ai/runtime/agent-pane'
+import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
@@ -1839,6 +1843,28 @@ function renderPane(
   return { ...result, client }
 }
 
+/**
+ * 控制面探针：按父面板的结构提供绑定目标与唯一投影（控制 Hook 不再自建目标与订阅）。
+ */
+function useRootControlProbe(
+  options: Omit<UseRootThreadControlOptions, 'target' | 'setTarget' | 'projection'>,
+) {
+  const paneTarget = usePaneTarget({
+    owner: options.owner,
+    paneId: options.paneId,
+    initialTarget: options.initialTarget,
+  })
+  const projection = useThreadProjection(
+    isBoundTarget(paneTarget.target) ? paneTarget.target.threadId : '',
+  )
+  return useRootThreadControl({
+    ...options,
+    target: paneTarget.target,
+    setTarget: paneTarget.setTarget,
+    projection,
+  })
+}
+
 function renderController({
   agents: controllerAgents = agents,
   owner = { type: 'CHAT' as const, chatId: CHAT_ID },
@@ -1849,7 +1875,7 @@ function renderController({
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return renderHook(() => useAgentPaneController({
+  return renderHook(() => useRootControlProbe({
     owner,
     paneId: 'probe',
     agents: controllerAgents,
@@ -1981,7 +2007,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     })
     const { result: unboundResult } = renderHook(
       () =>
-        useAgentPaneController({
+        useRootControlProbe({
           owner: { type: 'CHAT', chatId: CHAT_ID },
           paneId: 'p1',
           target: { kind: 'NEW_SESSION_DRAFT' },
@@ -2026,7 +2052,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result } = renderHook(
       () =>
-        useAgentPaneController({
+        useRootControlProbe({
           paneId: THREAD_ID,
           agents,
           environments: [],
@@ -2064,7 +2090,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     // 测试意图：绕开按钮直接调用回调时，Issue 容器面板也不能创建 Session 或预览未就绪草稿；
     // 容器创建仍属于 owner 范围，既有 Thread 的写入完全由通用交互承担。
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result } = renderHook(() => useAgentPaneController({
+    const { result } = renderHook(() => useRootControlProbe({
       paneId: THREAD_ID,
       agents,
       environments: [],
@@ -2860,7 +2886,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       })
       return renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             paneId: THREAD_ID,
             agents,
             environments: [],
@@ -3069,7 +3095,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       // 1. CHAT owner
       const { result: chatResult } = renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             owner: { type: 'CHAT', chatId: CHAT_ID },
             paneId: 'p-chat',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
@@ -3087,7 +3113,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       // 2. ISSUE_AGENT owner：与 CHAT 完全相同的既有 Thread 行为
       const { result: issueResult } = renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             owner: { type: 'ISSUE_AGENT', issueId: 'issue-99', agentName: 'coder' },
             paneId: 'p-issue',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
@@ -3105,7 +3131,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       // 3. 无 owner：同样开放预览与 settings，只有容器导航仍被拒绝
       const { result: nullResult } = renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             paneId: 'p-null',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
             agents,
@@ -3369,7 +3395,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       })
       const { result } = renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             owner: { type: 'CHAT', chatId: CHAT_ID },
             paneId: 'pane-draft',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
@@ -3431,7 +3457,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       })
       const { result: controller2 } = renderHook(
         () =>
-          useAgentPaneController({
+          useRootControlProbe({
             owner: { type: 'CHAT', chatId: CHAT_ID },
             paneId: 'pane-2',
             initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
@@ -3748,5 +3774,205 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
         model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
       })
     })
+  })
+})
+
+describe('AgentPane root control and child observation', () => {
+  const CHILD_THREAD_ID = '00000000-0000-4000-8000-0000000000c1'
+
+  function bindPaneToRoot() {
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+  }
+
+  function treeNode(
+    threadId: string,
+    parentThreadId: string | null,
+    name: string,
+    processing: boolean,
+  ) {
+    return {
+      threadId,
+      parentThreadId,
+      name,
+      agentName: parentThreadId == null ? 'assistant' : 'coder',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      status: processing ? 'MODEL_STREAM' : 'IDLE',
+      processing,
+      turnCount: 1,
+      toolCallCount: 0,
+      outcome: null,
+    }
+  }
+
+  function approvalInteraction(threadId: string) {
+    return {
+      interactionId: 'inv-child-1',
+      status: 'WAITING_APPROVAL',
+      threadId,
+      rootThreadId: THREAD_ID,
+      sessionId: 'session-1',
+      owner: { type: 'CHAT', chatId: CHAT_ID, issueId: null, agentName: null },
+      toolCallId: 'call-bash-1',
+      toolName: 'bash',
+      argumentsJson: '{"command":"ls"}',
+      approvalJson: JSON.stringify({ reason: '需要确认', decision: null }),
+      createTime: '2026-07-28T10:00:01Z',
+    }
+  }
+
+  function snapshotForThread(threadId: string) {
+    const isRoot = threadId === THREAD_ID
+    return snapshot(thread({
+      threadId,
+      name: isRoot ? 'root thread' : 'worker',
+      parentThreadId: isRoot ? null : THREAD_ID,
+      status: 'IDLE',
+      processing: false,
+    }))
+  }
+
+  it('navigates to the interaction source in the same pane and keeps the hidden root mounted', async () => {
+    // 根面板聚合后代审批：来源标识与代理名来自执行树；点击来源在当前 pane 查看子代理，
+    // 根层隐藏为 inert 但保持挂载，草稿随返回原地保留。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', false),
+    ])
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
+      async (threadId: string) => snapshotForThread(threadId),
+    )
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [approvalInteraction(CHILD_THREAD_ID)],
+      nextCursor: null,
+    })
+    bindPaneToRoot()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    const source = await screen.findByRole('link', { name: /worker/ })
+    expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, 'root draft kept')
+
+    await user.click(source)
+
+    expect(await screen.findByRole('button', { name: '返回上一层' })).toBeInTheDocument()
+    expect(screen.getByText('只读查看')).toBeInTheDocument()
+    expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
+    expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(CHILD_THREAD_ID)
+
+    const layers = document.querySelectorAll('.chat-pane-layer')
+    expect(layers).toHaveLength(2)
+    expect(layers[0]).toHaveAttribute('hidden')
+    expect(layers[0]).toHaveAttribute('inert')
+    // 隐藏的根层仍是同一个挂载实例：草稿没有被重建或丢弃。
+    expect(composer.isConnected).toBe(true)
+    // 隐藏的根层不持有焦点（也不被其他层抢走）：停止加载后焦点不在隐藏子树内。
+    expect(document.activeElement).toBe(document.body)
+
+    await user.click(screen.getByRole('button', { name: '返回上一层' }))
+
+    expect(layers[0]).not.toHaveAttribute('hidden')
+    expect(composer).toHaveTextContent('root draft kept')
+    // 返回后焦点落在重新激活的根层内（根 Composer 激活时会主动恢复自身焦点，
+    // 优先级高于触发点恢复），不停留在隐藏层，也不丢到 body。
+    expect(layers[0].contains(document.activeElement)).toBe(true)
+    expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('keeps the covered root composer inert, unfocusable and out of global shortcuts', async () => {
+    // 根面板查看期间：隐藏层的 Composer 不激活（hidden/aria-hidden），全局 Escape
+    // 不会再聚焦它，也不会有输入被送往隐藏的根。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', false),
+    ])
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
+      async (threadId: string) => snapshotForThread(threadId),
+    )
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [approvalInteraction(CHILD_THREAD_ID)],
+      nextCursor: null,
+    })
+    bindPaneToRoot()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    const source = await screen.findByRole('link', { name: /worker/ })
+    await screen.findByLabelText('给 AI 发送消息')
+    await user.click(source)
+
+    const composerRegion = document.querySelector('.thread-composer')
+    expect(composerRegion).toHaveAttribute('hidden')
+    expect(composerRegion).toHaveAttribute('aria-hidden', 'true')
+
+    // 隐藏的根 Composer 不再持有焦点，全局 Escape 也不会把焦点带回隐藏层。
+    expect(composerRegion?.contains(document.activeElement)).toBe(false)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(composerRegion?.contains(document.activeElement)).toBe(false)
+  })
+
+  it('submits the runtime root Stop command with the root id while only descendants process', async () => {
+    // 根本地空闲但后代仍在处理：Stop 仍然可用，并且请求必须落在执行根（runtime root）。
+    const user = userEvent.setup()
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(thread({ threadId: THREAD_ID, status: 'IDLE', processing: false })),
+    )
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
+    ])
+    vi.mocked(harnessService.stopThread).mockResolvedValue({
+      status: 'STOPPED',
+      thread: thread({ executionControl: 'STOPPED' }),
+      stoppedThreads: [],
+    })
+    bindPaneToRoot()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
+    await user.click(composer)
+    await user.keyboard('/stop{Enter}')
+
+    await waitFor(() => {
+      expect(harnessService.stopThread).toHaveBeenCalledWith(
+        THREAD_ID,
+        expect.objectContaining({
+          expectedVersion: expect.any(String),
+          stopRequestId: expect.any(String),
+        }),
+      )
+    })
+  })
+
+  it('keeps the root interaction refresh failure visible while stale cards stay actionable', async () => {
+    // 有旧数据时刷新失败不能被吞掉：错误与重试可见，已取回的卡片仍然可用。
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation(
+      async (threadId: string) => snapshotForThread(threadId),
+    )
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+      treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', true),
+    ])
+    vi.mocked(interactionService.listInteractions).mockResolvedValue({
+      items: [approvalInteraction(CHILD_THREAD_ID)],
+      nextCursor: null,
+    })
+    bindPaneToRoot()
+    const view = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await screen.findByRole('button', { name: '允许' })
+
+    vi.mocked(interactionService.listInteractions).mockRejectedValue(new Error('interactions down'))
+    await act(async () => {
+      await view.client.invalidateQueries({ queryKey: queryKeys.interactions.all })
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
+    expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
   })
 })

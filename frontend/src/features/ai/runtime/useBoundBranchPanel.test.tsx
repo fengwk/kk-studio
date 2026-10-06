@@ -10,7 +10,6 @@ import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
-  HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,

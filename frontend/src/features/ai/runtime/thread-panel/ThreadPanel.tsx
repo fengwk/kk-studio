@@ -60,6 +60,11 @@ export interface ThreadPanelComposerInput {
   commands?: ThreadCommand[]
   /** 当前交互作用域是否允许 Escape 把焦点恢复到此 Composer。 */
   focusOnEscape?: boolean
+  /**
+   * 被覆盖（例如根面板正在被查看层覆盖）时挂起：不激活编辑器、不响应快捷键，
+   * 也不抢焦点；草稿、上传与展开状态原地保留。
+   */
+  suspended?: boolean
   /** 与 Composer 互斥的轻量选择/操作面板；Composer 保持挂载以保留草稿上传状态。 */
   interactionPanel?: ReactNode
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */

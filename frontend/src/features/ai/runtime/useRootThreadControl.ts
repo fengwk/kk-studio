@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import {
   useBoundBranchPanel,
 } from '@/features/ai/runtime/useBoundBranchPanel'
@@ -65,10 +66,8 @@ import {
   clearPendingAcceptance,
   isBoundTarget,
   isNewThreadTarget,
-  loadPaneTarget,
   loadPendingAcceptance,
   ownerIdentity,
-  savePaneTarget,
   savePendingAcceptance,
   samePaneTarget,
   type PaneTarget,
@@ -120,7 +119,7 @@ export interface AgentPaneDefaults {
   yoloEnabled?: boolean
 }
 
-export interface UseAgentPaneControllerOptions {
+export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
@@ -131,11 +130,19 @@ export interface UseAgentPaneControllerOptions {
   initialTarget?: PaneTarget
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
+  /** 由父面板持有的 Pane 绑定目标；本 Hook 只读取并请求切换。 */
+  target: PaneTarget
+  setTarget: (next: PaneTarget) => void
+  /** 父面板已持有的该目标 Thread 只读投影；不重复查询与订阅。 */
+  projection: ThreadProjection
 }
 
-export function useAgentPaneController({
+export function useRootThreadControl({
   owner,
   paneId,
+  target,
+  setTarget,
+  projection,
   agents,
   environments,
   defaults,
@@ -144,7 +151,7 @@ export function useAgentPaneController({
   initialTarget,
   onTargetConsumed,
   capabilities,
-}: UseAgentPaneControllerOptions) {
+}: UseRootThreadControlOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
@@ -152,12 +159,6 @@ export function useAgentPaneController({
   const composerScope = ownerKey
     ? `agent-pane:${ownerKey}:${paneId}`
     : `agent-pane:thread:${paneId}`
-  const [target, setTargetState] = useState<PaneTarget>(
-    () => initialTarget ?? (owner
-      ? (owner.type === 'CHAT' ? loadPaneTarget(owner, paneId) : { kind: 'NEW_SESSION_DRAFT' })
-      : { kind: 'BOUND_THREAD', threadId: paneId }),
-  )
-
   const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
@@ -178,7 +179,12 @@ export function useAgentPaneController({
   const [threadNavigationSessionId, setThreadNavigationSessionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
+  // target 由父面板持有；此处保留同步镜像，使 changeTarget/验收完成等路径在 state
+  // commit 之前也能看到刚请求的绑定（与既有同步栅栏语义一致）。
   const targetRef = useRef(target)
+  useEffect(() => {
+    targetRef.current = target
+  }, [target])
   const partsRef = useRef(parts)
   const localDraftRef = useRef<BranchDraft | null>(localDraft)
   const initializedEntryDraftRef = useRef<string | null>(null)
@@ -223,6 +229,7 @@ export function useAgentPaneController({
   }, [boundThreadId])
   const branchPanel = useBoundBranchPanel({
     threadId: boundThreadId,
+    projection,
   })
   const controller = branchPanel.controller
   const controllerRef = useRef(controller)
@@ -233,13 +240,6 @@ export function useAgentPaneController({
   })
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const models = controller.models
-
-  useEffect(() => {
-    targetRef.current = target
-    if (owner?.type === 'CHAT') {
-      savePaneTarget(owner, paneId, target)
-    }
-  }, [owner, paneId, target])
 
   useEffect(() => {
     partsRef.current = parts
@@ -651,21 +651,21 @@ export function useAgentPaneController({
       }
       generationRef.current += 1
       targetRef.current = next
-      setTargetState(next)
+      setTarget(next)
       setLocalDraft(draft == null ? null : cloneDraft(draft))
       setInteraction(null)
       setActionError(null)
       setConflict(null)
       return true
     },
-    [activeDraft, hasPendingOperation, owner, t],
+    [activeDraft, hasPendingOperation, owner, setTarget, t],
   )
 
   useEffect(() => {
     if (!initialTarget) {
       return
     }
-    if (samePaneTarget(targetRef.current, initialTarget)) {
+    if (samePaneTarget(target, initialTarget)) {
       onTargetConsumed?.(initialTarget)
       return
     }
@@ -676,7 +676,7 @@ export function useAgentPaneController({
     if (changeTarget(initialTarget)) {
       onTargetConsumed?.(initialTarget)
     }
-  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t])
+  }, [changeTarget, hasPendingOperation, initialTarget, onTargetConsumed, t, target])
 
   function abandonPendingAcceptance(): void {
     const pending = pendingAcceptanceRef.current
@@ -811,7 +811,7 @@ export function useAgentPaneController({
       generationRef.current += 1
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
       targetRef.current = bound
-      setTargetState(bound)
+      setTarget(bound)
       if (partsRef.current.length === 0) {
         clearStoredComposerDraft(composerScope)
         setPartsState([])
