@@ -5,10 +5,14 @@ import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { NumberInput } from '@/shared/ui/controls/NumberInput'
+import { Button } from '@/shared/ui/controls/Button'
+import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
@@ -508,20 +512,13 @@ export function McpServersPage() {
       </div>
 
       {createModal && (
-        <ModalBackdrop onClose={handleRequestCloseCreate}>
-          <div
-            className="modal-card mcp-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('ai.mcp.create')}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <ModalHeader
-              title={t('ai.mcp.create')}
-              onClose={handleRequestCloseCreate}
-              closeDisabled={createMutation.isPending}
-            />
-            <form onSubmit={handleCreateSubmit}>
+        <Dialog
+          className="mcp-modal-card"
+          title={t('ai.mcp.create')}
+          pending={createMutation.isPending}
+          onClose={handleRequestCloseCreate}
+        >
+            <form className="modal-card-form" onSubmit={handleCreateSubmit}>
               <div className="modal-body">
                 <label className="form-group">
                   <FieldLabel required>{t('ai.mcp.name')}</FieldLabel>
@@ -575,30 +572,23 @@ export function McpServersPage() {
 
                 <label className="form-group">
                   <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
-                  <input
-                    type="number"
+                  <NumberInput
+                    value={String(createModal.timeoutMillis)}
                     min={1}
-                    step={1}
-                    value={createModal.timeoutMillis}
-                    onChange={(e) =>
-                      setCreateModal({ ...createModal, timeoutMillis: e.target.value, error: null })
+                    onChange={(timeoutMillis) =>
+                      setCreateModal({ ...createModal, timeoutMillis, error: null })
                     }
-                    placeholder="60000"
+                    aria-label={t('ai.catalog.card.timeout')}
                     disabled={createMutation.isPending}
                   />
                 </label>
 
-                <label className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={createModal.enabled}
-                    onChange={(e) =>
-                      setCreateModal({ ...createModal, enabled: e.target.checked, error: null })
-                    }
-                    disabled={createMutation.isPending}
-                  />
-                  <span>{t('ai.mcp.enabled')}</span>
-                </label>
+                <Checkbox
+                  checked={createModal.enabled}
+                  onChange={(enabled) => setCreateModal({ ...createModal, enabled, error: null })}
+                  disabled={createMutation.isPending}
+                  label={t('ai.mcp.enabled')}
+                />
 
                 {createModal.error && (
                   <p className="field-error" role="alert">
@@ -608,41 +598,28 @@ export function McpServersPage() {
               </div>
 
               <div className="modal-footer">
-                <button
-                  type="button"
-                  className="ghost-btn"
+                <Button
+                  variant="ghost"
                   onClick={handleRequestCloseCreate}
                   disabled={createMutation.isPending}
                 >
                   {t('shared.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={createMutation.isPending}
-                >
+                </Button>
+                <Button type="submit" disabled={createMutation.isPending}>
                   {t('shared.confirm')}
-                </button>
+                </Button>
               </div>
             </form>
-          </div>
-        </ModalBackdrop>
+        </Dialog>
       )}
 
       {editModal && (
-        <ModalBackdrop onClose={handleRequestCloseEdit}>
-          <div
-            className="modal-card mcp-modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <ModalHeader
-              title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
-              onClose={handleRequestCloseEdit}
-              closeDisabled={updateMutation.isPending || editModal.discoverPending}
-            />
+        <Dialog
+          className="mcp-modal-card"
+          title={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
+          pending={updateMutation.isPending || editModal.discoverPending}
+          onClose={handleRequestCloseEdit}
+        >
             {editModal.loading ? (
               <div className="modal-body">
                 <StateBlock title={t('ai.mcp.loadingConfig')} />
@@ -654,17 +631,13 @@ export function McpServersPage() {
                   tone="danger"
                 />
                 <div style={{ marginTop: 12, textAlign: 'center' }}>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => handleOpenEdit(editModal.server)}
-                  >
+                  <Button variant="ghost" onClick={() => handleOpenEdit(editModal.server)}>
                     {t('shared.retry')}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
-              <form onSubmit={handleUpdateSubmit}>
+              <form className="modal-card-form" onSubmit={handleUpdateSubmit}>
                 <div className="modal-body">
                   <label className="form-group">
                     <FieldLabel>{t('ai.mcp.name')}</FieldLabel>
@@ -706,29 +679,23 @@ export function McpServersPage() {
 
                   <label className="form-group">
                     <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
-                    <input
-                      type="number"
+                    <NumberInput
+                      value={String(editModal.timeoutMillis)}
                       min={1}
-                      step={1}
-                      value={editModal.timeoutMillis}
-                      onChange={(e) =>
-                        setEditModal({ ...editModal, timeoutMillis: e.target.value, error: null })
+                      onChange={(timeoutMillis) =>
+                        setEditModal({ ...editModal, timeoutMillis, error: null })
                       }
+                      aria-label={t('ai.catalog.card.timeout')}
                       disabled={updateMutation.isPending || editModal.discoverPending}
                     />
                   </label>
 
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      checked={editModal.enabled}
-                      onChange={(e) =>
-                        setEditModal({ ...editModal, enabled: e.target.checked, error: null })
-                      }
-                      disabled={updateMutation.isPending || editModal.discoverPending}
-                    />
-                    <span>{t('ai.mcp.enabled')}</span>
-                  </label>
+                  <Checkbox
+                    checked={editModal.enabled}
+                    onChange={(enabled) => setEditModal({ ...editModal, enabled, error: null })}
+                    disabled={updateMutation.isPending || editModal.discoverPending}
+                    label={t('ai.mcp.enabled')}
+                  />
 
                   {editModal.error && (
                     <p className="field-error" role="alert">
@@ -738,9 +705,9 @@ export function McpServersPage() {
                 </div>
 
                 <div className="modal-footer modal-footer-with-leading-action">
-                  <button
-                    type="button"
-                    className="ghost-btn modal-footer-leading-action"
+                  <Button
+                    variant="ghost"
+                    className="modal-footer-leading-action"
                     onClick={handleDiscover}
                     disabled={editModal.discoverPending || updateMutation.isPending}
                   >
@@ -749,27 +716,24 @@ export function McpServersPage() {
                       aria-hidden="true"
                     />
                     {t('ai.mcp.discover')}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
+                  </Button>
+                  <Button
+                    variant="ghost"
                     onClick={handleRequestCloseEdit}
                     disabled={updateMutation.isPending || editModal.discoverPending}
                   >
                     {t('shared.cancel')}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="submit"
-                    className="btn-primary"
                     disabled={updateMutation.isPending || editModal.discoverPending}
                   >
                     {t('shared.confirm')}
-                  </button>
+                  </Button>
                 </div>
               </form>
             )}
-          </div>
-        </ModalBackdrop>
+        </Dialog>
       )}
 
       {deleteTarget && (

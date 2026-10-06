@@ -623,6 +623,10 @@
 }
 
 /* Issue Detail Modal Card */
+.modal-card.edit-project-modal-card {
+  max-width: 640px;
+}
+
 .modal-card.issue-detail-modal-card {
   width: 90vw;
   max-width: 960px;
@@ -943,10 +947,6 @@
 }
 
 /* Sub Modals */
-.modal-backdrop.sub-modal {
-  z-index: 1100;
-}
-
 .modal-card.sub-card {
   max-width: 440px;
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Plus, Search } from 'lucide-react'
-import { Checkbox } from '@/shared/ui/console/Checkbox'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '../types'
 import { IssueCard } from './IssueCard'
 

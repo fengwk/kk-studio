@@ -11,8 +11,8 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
-import { Checkbox } from '@/shared/ui/console/Checkbox'
+import { CreateCard } from '@/shared/ui/feedback/CreateCard'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { CreateProjectModal } from './components/CreateProjectModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'

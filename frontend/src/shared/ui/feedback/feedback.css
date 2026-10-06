@@ -1,0 +1,97 @@
+/* 共享反馈样式：Toast portal 到 body，滚动容器与 overlay 都无法裁剪它。
+   设计 token 仍由 src/styles.css 的 :root 唯一定义。 */
+
+.ui-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--overlay-surface-strong);
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-md);
+  animation: ui-toast-in 0.18s ease-out;
+}
+
+.ui-toast-success {
+  border-color: var(--green-border);
+}
+
+.ui-toast-success .ui-toast-icon {
+  color: var(--green-primary);
+}
+
+.ui-toast-error {
+  border-color: var(--danger-border);
+}
+
+.ui-toast-error .ui-toast-icon {
+  color: var(--danger);
+}
+
+.ui-toast-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.ui-toast-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ui-toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ui-toast-dismiss:hover {
+  color: var(--fg);
+  background: var(--stage-dot);
+}
+
+.ui-toast-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast {
+    animation: none;
+  }
+}

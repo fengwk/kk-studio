@@ -23,12 +23,20 @@ import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/Canva
 import type { CanvasFunctionConfig, StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { inspectLocalPendingRun } from '@/features/canvas/function-run'
+import { NumberInput } from '@/shared/ui/controls/NumberInput'
+import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
+
+const UNKNOWN_RESOLUTION_OPTIONS: SelectOption[] = [
+  { value: 'RESUME', label: 'RESUME (继续运行)' },
+  { value: 'FAILED', label: 'FAILED (标记失败)' },
+  { value: 'CANCELLED', label: 'CANCELLED (取消运行)' },
+]
 
 export interface CanvasGenerationPanelAnchor {
   node: CanvasTransformDTO
@@ -249,6 +257,16 @@ export function CanvasGenerationPanel({
   const modelOptions = runtime.models.filter((item) =>
     item.outputs?.[0]?.kind === outputKind
   )
+  const modelSelectOptions: SelectOption[] = modelOptions.map((item) => ({
+    value: item.name,
+    label: item.available === false
+      ? t('canvas.generation.modelUnavailableOption', {
+        label: item.description || item.name,
+        reason: item.unavailableReason ?? t('canvas.generation.modelUnavailable'),
+      })
+      : (item.description || item.name),
+    disabled: item.available === false,
+  }))
   const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
 
   function updateConfig(next: CanvasFunctionConfig, nextModelKey = modelKey) {
@@ -265,6 +283,45 @@ export function CanvasGenerationPanel({
       setJsonError(null)
     }
     runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
+  }
+
+  /** 数值参数（整数走共享 NumberInput，小数保留原生 step=any 输入）共用同一校验。 */
+  function applyNumberParameter(
+    parameter: ReturnType<typeof extractParametersFromDefinition>[number],
+    raw: string,
+  ) {
+    const value = raw.trim() === '' ? Number.NaN : Number(raw)
+    if (
+      !Number.isFinite(value)
+      || (parameter.isInteger && !Number.isInteger(value))
+      || (parameter.min !== null && value < parameter.min)
+      || (parameter.max !== null && value > parameter.max)
+    ) {
+      return
+    }
+    updateConfig({
+      ...config,
+      parameters: {
+        ...config.parameters,
+        [parameter.key]: value,
+      },
+    })
+  }
+
+  function changeModel(nextName: string) {
+    const nextModel = runtime.models.find((item) => item.name === nextName)
+    if (!nextModel) {
+      return
+    }
+    const defaults = createDefaultFunctionConfig(nextModel)
+    const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
+    const nextConfig = filterConfigReferences({
+      prompt: config.prompt,
+      references: config.references,
+      parameters: defaults.parameters,
+    }, nextCandidates, nextModel)
+    setModelKey(nextModel.name)
+    updateConfig(nextConfig, nextModel.name)
   }
 
   function updatePrompt(promptText: string) {
@@ -452,51 +509,31 @@ export function CanvasGenerationPanel({
           </div>
         ) : null}
         <div className="generation-controls">
-          <label>
+          <div className="generation-control">
             <span className="sr-only">{t('canvas.generation.modelLabel')}</span>
-            <select
+            <Select
               aria-label={t('canvas.generation.modelLabel')}
               value={modelKey}
               disabled={active}
-              onChange={(event) => {
-                const nextModel = runtime.models.find((item) => item.name === event.target.value)
-                if (!nextModel) {
-                  return
-                }
-                const defaults = createDefaultFunctionConfig(nextModel)
-                const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
-                const nextConfig = filterConfigReferences({
-                  prompt: config.prompt,
-                  references: config.references,
-                  parameters: defaults.parameters,
-                }, nextCandidates, nextModel)
-                setModelKey(nextModel.name)
-                updateConfig(nextConfig, nextModel.name)
-              }}
-            >
-              {modelOptions.map((item) => (
-                <option key={item.name} value={item.name} disabled={item.available === false}>
-                {item.available !== false
-                  ? (item.description || item.name)
-                  : t('canvas.generation.modelUnavailableOption', {
-                    label: item.description || item.name,
-                    reason: item.unavailableReason ?? t('canvas.generation.modelUnavailable'),
-                  })}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={modelSelectOptions}
+              onChange={changeModel}
+            />
+          </div>
         {!config.rawArgs ? extractParametersFromDefinition(activeModel).map((parameter) => (
-          <label key={parameter.key}>
+          <div className="generation-control" key={parameter.key}>
             <span>{parameter.label}</span>
             {parameter.type === 'ENUM' ? (
-              <select
+              <Select
                 aria-label={parameter.label}
                 value={String(config.parameters[parameter.key] ?? parameter.defaultValue ?? '')}
                 disabled={active}
-                onChange={(event) => {
-                  const matched = parameter.options.find((opt) => String(opt) === event.target.value)
-                  const nextVal = matched !== undefined ? matched : event.target.value
+                options={parameter.options.map((option) => ({
+                  value: String(option),
+                  label: String(option),
+                }))}
+                onChange={(next) => {
+                  const matched = parameter.options.find((opt) => String(opt) === next)
+                  const nextVal = matched !== undefined ? matched : next
                   updateConfig({
                     ...config,
                     parameters: {
@@ -505,41 +542,31 @@ export function CanvasGenerationPanel({
                     },
                   })
                 }}
-              >
-                {parameter.options.map((option) => (
-                  <option key={String(option)} value={String(option)}>{String(option)}</option>
-                ))}
-              </select>
+              />
+            ) : parameter.isInteger ? (
+              <NumberInput
+                aria-label={parameter.label}
+                min={parameter.min ?? undefined}
+                max={parameter.max ?? undefined}
+                value={String(
+                  config.parameters[parameter.key] ?? parameter.defaultValue ?? parameter.min ?? 0,
+                )}
+                disabled={active}
+                onChange={(next) => applyNumberParameter(parameter, next)}
+              />
             ) : (
               <input
                 type="number"
                 aria-label={parameter.label}
                 min={parameter.min ?? undefined}
                 max={parameter.max ?? undefined}
-                step={parameter.isInteger ? 1 : 'any'}
+                step="any"
                 value={Number(config.parameters[parameter.key] ?? parameter.defaultValue ?? parameter.min ?? 0)}
                 disabled={active}
-                onChange={(event) => {
-                  const value = Number(event.target.value)
-                  if (
-                    Number.isNaN(value)
-                    || (parameter.isInteger && !Number.isInteger(value))
-                    || (parameter.min !== null && value < parameter.min)
-                    || (parameter.max !== null && value > parameter.max)
-                  ) {
-                    return
-                  }
-                  updateConfig({
-                    ...config,
-                    parameters: {
-                      ...config.parameters,
-                      [parameter.key]: value,
-                    },
-                  })
-                }}
+                onChange={(event) => applyNumberParameter(parameter, event.target.value)}
               />
             )}
-          </label>
+          </div>
         )) : null}
         {!config.rawArgs ? (
           <div className="generation-json-toggle" style={{ marginTop: 8 }}>
@@ -606,15 +633,12 @@ export function CanvasGenerationPanel({
               待人工核查确认 (UNKNOWN)
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select
+              <Select
                 aria-label="核查决定"
                 value={unknownResolution}
-                onChange={(e) => setUnknownResolution(e.target.value as 'RESUME' | 'FAILED' | 'CANCELLED')}
-              >
-                <option value="RESUME">RESUME (继续运行)</option>
-                <option value="FAILED">FAILED (标记失败)</option>
-                <option value="CANCELLED">CANCELLED (取消运行)</option>
-              </select>
+                options={UNKNOWN_RESOLUTION_OPTIONS}
+                onChange={(next) => setUnknownResolution(next as 'RESUME' | 'FAILED' | 'CANCELLED')}
+              />
               <input
                 type="text"
                 aria-label="核查说明"

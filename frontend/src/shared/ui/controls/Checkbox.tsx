@@ -1,11 +1,14 @@
-import { Check } from 'lucide-react'
+import { Check, Minus } from 'lucide-react'
 import type { ReactNode } from 'react'
+import './controls.css'
 
 export interface CheckboxProps {
   id?: string
   checked: boolean
   onChange: (checked: boolean) => void
   disabled?: boolean
+  /** 部分选中（例如“种类全选”下的部分条目已勾选）。 */
+  indeterminate?: boolean
   label?: ReactNode
   children?: ReactNode
   className?: string
@@ -23,6 +26,7 @@ export function Checkbox({
   checked,
   onChange,
   disabled = false,
+  indeterminate = false,
   label,
   children,
   className,
@@ -36,6 +40,7 @@ export function Checkbox({
       className={[
         'ui-checkbox',
         checked ? 'is-checked' : '',
+        !checked && indeterminate ? 'is-indeterminate' : '',
         disabled ? 'is-disabled' : '',
         className,
       ]
@@ -44,16 +49,24 @@ export function Checkbox({
     >
       <input
         id={id}
+        ref={(element) => {
+          // 原生 indeterminate 只能通过 DOM 属性表达。
+          if (element) {
+            element.indeterminate = indeterminate && !checked
+          }
+        }}
         type="checkbox"
         className="ui-checkbox-input"
         checked={checked}
+        aria-checked={indeterminate && !checked ? 'mixed' : checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
       />
       <span className="ui-checkbox-box" aria-hidden="true">
-        {checked && <Check className="ui-checkbox-check" />}
+        {checked ? <Check className="ui-checkbox-check" /> : null}
+        {!checked && indeterminate ? <Minus className="ui-checkbox-check" /> : null}
       </span>
       {content ? <span className="ui-checkbox-label">{content}</span> : null}
     </label>

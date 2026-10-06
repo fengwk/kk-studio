@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test'
 import { test, expect } from './fixture'
 
 const HARNESS = '/browser-tests/settings-sync-harness.html'
@@ -40,6 +41,11 @@ test('export modal groups agents/models/providers together and defaults to the f
   await expect(dialog.getByText('共 7 类 · 10 项（含依赖）')).toBeVisible()
 })
 
+/** 共享 Checkbox 的 input 视觉隐藏；真实用户点击目标是与它同属一个 label 的方框与文案。 */
+function checkableTarget(checkbox: Locator) {
+  return checkbox.locator('..')
+}
+
 test('dependencies follow the selected source and cannot be removed on their own', async ({ page }) => {
   await page.goto(HARNESS)
   await page.getByRole('button', { name: '导出' }).click()
@@ -47,14 +53,14 @@ test('dependencies follow the selected source and cannot be removed on their own
   const model = dialog.getByRole('checkbox', { name: '模型: openai/gpt-4o', exact: true })
 
   // 取消勾选 Model，但它仍被选中的 Agent 依赖，必须保持勾选且锁定。
-  await model.click()
+  await checkableTarget(model).click()
   await expect(model).toBeChecked()
   await expect(model).toBeDisabled()
   await expect(dialog.getByText('依赖').first()).toBeVisible()
 
   // 取消唯一来源后，依赖随之释放。
-  await dialog.getByRole('checkbox', { name: 'Agent: reviewer', exact: true }).click()
-  await dialog.getByRole('checkbox', { name: 'Agent: planner', exact: true }).click()
+  await checkableTarget(dialog.getByRole('checkbox', { name: 'Agent: reviewer', exact: true })).click()
+  await checkableTarget(dialog.getByRole('checkbox', { name: 'Agent: planner', exact: true })).click()
   await expect(model).not.toBeChecked()
 })
 
@@ -78,9 +84,9 @@ test('export sends only directly selected roots while the UI shows the full scop
   const dialog = page.getByRole('dialog', { name: '导出配置' })
 
   for (const kind of ['Agent', '模型', '提供商', '技能包', '环境', 'MCP 服务', '设置']) {
-    await dialog.getByRole('checkbox', { name: kind, exact: true }).click()
+    await checkableTarget(dialog.getByRole('checkbox', { name: kind, exact: true })).click()
   }
-  await dialog.getByRole('checkbox', { name: 'Agent: reviewer', exact: true }).click()
+  await checkableTarget(dialog.getByRole('checkbox', { name: 'Agent: reviewer', exact: true })).click()
   // UI 展示完整闭包（reviewer + 4 个依赖，覆盖 5 个种类）。
   await expect(dialog.getByText('共 5 类 · 5 项（含依赖）')).toBeVisible()
 

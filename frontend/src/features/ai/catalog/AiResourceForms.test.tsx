@@ -359,12 +359,12 @@ describe('AiResourceForms', () => {
     const contextInput = screen.getByPlaceholderText('128000')
     await user.clear(contextInput)
     await user.type(contextInput, '12a3')
-    expect(contextInput).toHaveValue(123)
+    expect(contextInput).toHaveValue('123')
 
     const maxOutputInput = screen.getByPlaceholderText('8192')
     await user.clear(maxOutputInput)
     await user.type(maxOutputInput, '7.5')
-    expect(maxOutputInput).toHaveValue(75)
+    expect(maxOutputInput).toHaveValue('75')
 
     const inputPrice = screen.getByLabelText('Input USD per million tokens')
     await user.clear(inputPrice)

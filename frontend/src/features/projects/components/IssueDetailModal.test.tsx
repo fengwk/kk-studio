@@ -460,7 +460,7 @@ describe('IssueDetailModal', () => {
     })
     const storageService = createMockStorageService()
 
-    const { container } = renderModal(
+    renderModal(
       <IssueDetailModal
         isOpen={true}
         issueId={issueId}
@@ -476,7 +476,8 @@ describe('IssueDetailModal', () => {
     fireEvent.click(evidenceTab)
 
     // 通过隐藏的文件 input 模拟上传交付物
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    // Dialog 通过 portal 挂到 body，不受 render 容器范围限制。
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
     const file = new File(['mock content'], 'delivered-spec.pdf', { type: 'application/pdf' })
     fireEvent.change(fileInput, { target: { files: [file] } })
 

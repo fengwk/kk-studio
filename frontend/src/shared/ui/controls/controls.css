@@ -1,0 +1,416 @@
+/* 共享控件样式：图标按钮、搜索框、Select、NumberInput、Checkbox。
+   设计 token 仍由 src/styles.css 的 :root 唯一定义。 */
+
+.icon-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--stage-dot);
+  color: var(--fg);
+}
+
+.icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.searchbox {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 260px;
+  max-width: 100%;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-dim);
+}
+
+.searchbox:focus-within {
+  border-color: var(--green-border);
+}
+
+.searchbox svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.searchbox input {
+  min-width: 0;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.searchbox input::placeholder {
+  color: var(--fg-dim);
+}
+
+@media (max-width: 860px) {
+  .searchbox {
+    order: 1;
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    height: 36px;
+  }
+}
+
+.ui-select {
+  position: relative;
+  width: 100%;
+}
+
+.ui-select.is-open {
+  z-index: 80;
+}
+
+.ui-select.is-compact {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+}
+
+.ui-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  background: var(--bg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  text-align: left;
+}
+
+.ui-select.is-compact .ui-select-trigger {
+  display: inline-flex;
+  width: auto;
+  min-height: 30px;
+  padding: 0 9px;
+  background: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ui-select-trigger:hover,
+.ui-select-trigger[aria-expanded='true'] {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.ui-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.ui-select-trigger[data-invalid='true'],
+.ui-select-trigger[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.ui-select.is-placeholder .ui-select-value {
+  color: var(--fg-muted);
+}
+
+.ui-select.is-disabled .ui-select-trigger {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.ui-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-select-chevron {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--fg-dim);
+  transition: transform 0.16s ease;
+}
+
+.ui-select-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.ui-select-menu {
+  /* portal 到 body，用视口坐标固定定位，避免被滚动/裁剪容器截断。 */
+  position: fixed;
+  z-index: 130;
+  display: grid;
+  gap: 2px;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(280px, calc(100dvh - 48px), var(--ui-select-available-height, 280px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--overlay-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.ui-select-menu.is-compact {
+  min-width: max(var(--ui-select-trigger-width), 148px);
+}
+
+.ui-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ui-select-option-label {
+  white-space: nowrap;
+}
+
+.ui-select-menu.is-compact .ui-select-option {
+  font-size: 12px;
+}
+
+.ui-select-option:hover,
+.ui-select-option.is-active {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.ui-select-option[aria-selected='true'] {
+  color: var(--green-primary);
+  font-weight: 600;
+}
+
+.ui-select-option:disabled,
+.ui-select-option[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-select-option-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+}
+
+.ui-select-option-indicator svg {
+  width: 14px;
+  height: 14px;
+}
+
+.number-input {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+}
+
+.number-input-field {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  outline: 0;
+}
+
+.number-input-field:focus {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.number-input-steppers {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  width: 26px;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.number-input-step {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.number-input-step + .number-input-step {
+  border-top: 1px solid var(--border);
+}
+
+.number-input-step:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.number-input-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.number-input-step svg {
+  width: 12px;
+  height: 12px;
+}
+
+.number-input.is-disabled .number-input-field {
+  color: var(--fg-dim);
+  cursor: not-allowed;
+}
+
+/* Accessible themed checkbox */
+.ui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  line-height: 1.4;
+}
+
+.ui-checkbox.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-checkbox-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.ui-checkbox-box {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-box {
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
+.ui-checkbox-input:focus-visible + .ui-checkbox-box {
+  border-color: var(--green-primary);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.ui-checkbox.is-indeterminate .ui-checkbox-box {
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+}
+
+.ui-checkbox.is-checked .ui-checkbox-box {
+  background: var(--green-primary);
+  border-color: var(--green-primary);
+}
+
+.ui-checkbox.is-checked:hover:not(.is-disabled) .ui-checkbox-box {
+  background: var(--green-gradient);
+  border-color: var(--green-border);
+}
+
+.ui-checkbox-check {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+  color: var(--green-on);
+}
+
+.ui-checkbox-label {
+  min-width: 0;
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+}
+
+.ui-checkbox:hover:not(.is-disabled) .ui-checkbox-label {
+  color: var(--fg);
+}

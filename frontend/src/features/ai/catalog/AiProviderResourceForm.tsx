@@ -1,5 +1,5 @@
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { Select } from '@/shared/ui/console/Select'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { Select } from '@/shared/ui/controls/Select'
 import { providerTypes } from '@/features/ai/catalog/ai-console-types'
 import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'

@@ -1,0 +1,180 @@
+/* 共享弹窗外壳样式：backdrop / card / header / body / footer / 确认弹窗。
+   设计 token 仍由 src/styles.css 的 :root 唯一定义。 */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+
+.modal-card {
+  width: min(440px, 100%);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 80px var(--scrim);
+  overflow: hidden;
+}
+
+.create-chat-modal-card {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.create-chat-modal-card .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.resource-modal-card {
+  width: min(680px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+.resource-modal-card .modal-header,
+.resource-modal-card .modal-footer {
+  flex: 0 0 auto;
+}
+
+.resource-modal-card .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.confirm-modal-card {
+  width: min(480px, 100%);
+}
+
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+
+.confirm-modal-body {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.confirm-modal-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-active);
+  color: var(--fg-muted);
+}
+
+.confirm-modal-icon.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-modal-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.confirm-modal-card .modal-header {
+  padding: 14px 16px;
+}
+
+.confirm-modal-card .modal-header h2 {
+  font-size: 14px;
+}
+
+.confirm-modal-card .modal-body {
+  padding: 18px 16px;
+}
+
+.confirm-modal-card .modal-footer {
+  padding: 12px 16px;
+}
+
+.confirm-modal-description {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+
+.modal-footer-with-leading-action {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modal-footer-leading-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.modal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.modal-header-title h2 {
+  overflow-wrap: anywhere;
+}
+
+/* Dialog 内的表单：作为纵向弹性/滚动的中间层，保持卡片自身的滚动链。 */
+.modal-card-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+@media (max-width: 860px) {
+  .modal-footer-with-leading-action .modal-footer-leading-action {
+    width: 100%;
+    margin-right: 0;
+    justify-content: center;
+  }
+
+  .resource-modal-card {
+    width: min(100%, 760px);
+  }
+}
