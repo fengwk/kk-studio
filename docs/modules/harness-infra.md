@@ -23,7 +23,7 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 
 执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内收集全部后代，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
 
-`lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countActiveSubagentThreads` 跨所有根统计 `parent_thread_id` 非空且非 `IDLE` 的 Thread，原子执行全局并发准入；已活跃子线程追加输入不重复占额度。普通执行推进和无父 one-shot 不取全局准入锁。
+`lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countIncompleteChildJoins` 统计指定父 Thread 的未完成 Join，`countIncompleteSubagentJoins` 跨所有根统计 `parent_thread_id` 非空且 `terminal_entry_id` 为空的 Join，原子执行父级与全局并发准入。每次接受新的子任务 Join 占用一个额度，Join 结算后释放；子 Thread 后续普通交互不重新占用额度。普通执行推进和无父 one-shot 不取全局准入锁。
 
 命令写入、ThreadProcessor Entry 物化、手工压缩与会话创建只取 Session `FOR KEY SHARE`，让同 Session 的兄弟 Thread 并发推进；会话删除与 `renameSession` 才升级为 `FOR UPDATE`。Runtime 的约定是：任何要在 Thread 行锁之后插入 `harness_entry` 的事务先持有父 Session 的 `KEY SHARE`，否则外键会在插入时隐式补取 Session 锁，与深删除形成 `Thread -> Session` 逆序。实现层在显式请求新锁时按已达成阶梯检测逆序并立即抛 `IllegalStateException`（`insertEntry` 自身不做该判定）；句柄严格绑定创建它的线程。
 
