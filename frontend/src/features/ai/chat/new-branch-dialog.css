@@ -1,0 +1,30 @@
+/*
+ * 新建分支对话框（/tree 与回合 footer 共用）的补充样式。
+ * 复用既有 .form-group / .field-error / .form-error-banner 全局基础类与 Dialog 外壳。
+ */
+.new-branch-dialog {
+  width: min(460px, 100%);
+}
+
+.new-branch-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px;
+}
+
+.new-branch-overwrite {
+  padding: 8px 10px;
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.new-branch-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}

@@ -134,6 +134,43 @@ export function visibleChatPanes(state: ChatPaneState): ChatPane[] {
   return state.panes.slice(0, CHAT_LAYOUT_CAPACITY[state.layout])
 }
 
+/** 面板序号（1 起）。id 不是 `pane-N` 时返回 null（未知位置）。 */
+export function chatPanePosition(paneId: string): number | null {
+  const matched = /^pane-(\d+)$/.exec(paneId)
+  if (matched == null) {
+    return null
+  }
+  const position = Number(matched[1])
+  return Number.isInteger(position) && position >= 1 ? position : null
+}
+
+/** 容纳 `count` 个面板的最小布局；count 超出 9 时取 grid-9。 */
+export function chatLayoutForPaneCount(count: number): ChatLayout {
+  const clamped = Math.min(Math.max(Math.trunc(count), 1), CHAT_PANE_COUNT)
+  if (clamped === 1) {
+    return 'single'
+  }
+  if (clamped === 2) {
+    return 'split-2'
+  }
+  if (clamped === 3) {
+    return 'split-3'
+  }
+  return `grid-${clamped}` as ChatLayout
+}
+
+/**
+ * 让目标面板可见：目标落在当前布局容量之外时把布局扩展到刚好容纳它，
+ * 否则保持既有布局（隐藏布局的显露是目标路由的前置条件）。
+ */
+export function revealChatPane(state: ChatPaneState, paneId: string): ChatPaneState {
+  const position = chatPanePosition(paneId)
+  if (position == null || position <= CHAT_LAYOUT_CAPACITY[state.layout]) {
+    return state
+  }
+  return applyChatLayout(state, chatLayoutForPaneCount(position))
+}
+
 function resolveStorage(storage?: Storage): Storage | null {
   if (storage !== undefined) {
     return storage

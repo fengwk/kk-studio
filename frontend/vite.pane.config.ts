@@ -20,6 +20,7 @@ const config: UserConfig = {
     rollupOptions: {
       input: {
         'pane-control-harness': path.resolve(__dirname, 'browser-tests/pane-control-harness.html'),
+        'chat-branch-harness': path.resolve(__dirname, 'browser-tests/chat-branch-harness.html'),
       },
     },
   },

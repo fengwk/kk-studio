@@ -261,7 +261,8 @@ async function openRootPane(page: Page, recorded: Recorded) {
   await page.goto(HARNESS_URL)
   const composer = page.locator('.thread-composer')
   await expect(composer).toBeVisible()
-  await expect(page.getByRole('heading', { name: '根 Thread' })).toBeVisible()
+  // 面板不再自渲染执行根身份（其上移到 Chat workspace 顶栏）；根控制面挂载才是就绪判据。
+  await expect(page.locator('.thread-control-area')).toBeVisible()
   return { composer, recorded }
 }
 
