@@ -2,9 +2,13 @@ import {
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
   formatTurnUsageText,
+  formatUsageCost,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
+
+/** 注入式翻译函数：默认使用全局 catalog，便于对格式化本身做确定性验证。 */
+export type TranslateFn = (key: string, values?: Record<string, string | number>) => string
 
 /** Footer 唯一一行的分组分隔符（U+2223）；组内统计项由 formatTurnUsageText 使用 U+00B7。 */
 export const FOOTER_SEGMENT_SEPARATOR = ' ∣ '
@@ -47,7 +51,10 @@ function clean(value?: string | null): string {
 }
 
 /** 由真实存在的 facts 构建稳定只读状态模型；缺失事实整段省略。 */
-export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadStatusModel {
+export function buildThreadStatusModel(
+  input: ThreadStatusModelInput,
+  t: TranslateFn = translate,
+): ThreadStatusModel {
   const segments: ThreadStatusSegment[] = []
   const binding = input.environment
   const environmentName = binding ? clean(binding.environmentName || binding.environmentId) : ''
@@ -56,14 +63,14 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     segments.push({
       key: 'environment',
       text: unavailable
-        ? translate('ai.runtime.status.environmentUnavailableText', { name: environmentName })
-        : translate('ai.runtime.status.environmentText', { name: environmentName }),
+        ? t('ai.runtime.status.environmentUnavailableText', { name: environmentName })
+        : t('ai.runtime.status.environmentText', { name: environmentName }),
       title: unavailable
-        ? translate('ai.runtime.status.environmentUnavailableTitle', { name: environmentName })
-        : translate('ai.runtime.status.environmentTitle', { name: environmentName }),
+        ? t('ai.runtime.status.environmentUnavailableTitle', { name: environmentName })
+        : t('ai.runtime.status.environmentTitle', { name: environmentName }),
     })
   } else {
-    const noneText = translate('ai.runtime.status.environmentNoneText')
+    const noneText = t('ai.runtime.status.environmentNoneText')
     segments.push({
       key: 'environment',
       text: noneText,
@@ -80,45 +87,56 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   if (contextWindow != null) {
     segments.push({
       key: 'context',
-      text: translate('ai.runtime.status.contextText', {
+      text: t('ai.runtime.status.contextText', {
         used: hasContext ? formatCompactNumber(usedContext) : '—',
         total: formatCompactNumber(contextWindow),
       }),
       title: hasContext
-        ? translate('ai.runtime.status.contextTitleKnown', {
+        ? t('ai.runtime.status.contextUsageTitleKnown', {
           used: String(usedContext),
           total: String(contextWindow),
         })
-        : translate('ai.runtime.status.contextTitleUnknown', {
+        : t('ai.runtime.status.contextUsageTitleUnknown', {
           total: String(contextWindow),
         }),
     })
   }
 
-  // 累计用量与回合摘要共用 U+00B7 统计项分隔；hover 用同一份事实给出简明读数。
+  // 累计用量与回合摘要共用 U+00B7 统计项分隔；主行保持紧凑，hover 给完整数字与全称明细。
   segments.push({
     key: 'usage',
     text: formatTurnUsageText(usage),
-    title: buildBranchUsageTitle(usage),
+    title: buildBranchUsageTitle(usage, t),
   })
 
   return { segments }
 }
 
-/** 累计用量 hover 读数：完整数字 + 与可见摘要同源的 cache/速率，未知即如实标注无数据。 */
-function buildBranchUsageTitle(usage: TurnUsage): string {
+/**
+ * 累计用量 hover 读数：完整数字 + 全称字段（含推理），不带冗余的累计标题；
+ * 无可用定价/无测速样本时如实标注暂无数据，绝不伪造成 $0。
+ */
+function buildBranchUsageTitle(usage: TurnUsage, t: TranslateFn): string {
   const cacheHitRate = calculateCacheHitRate(usage)
   const speed = calculateDecodeTokensPerSecond(usage)
-  const noData = translate('ai.runtime.status.noData')
-  return translate('ai.runtime.status.branchUsageTitle', {
-    input: String(usage.input),
-    output: String(usage.output),
-    cacheRead: String(usage.cacheRead),
-    cacheWrite: String(usage.cacheWrite),
-    cost: usage.cost.toFixed(3),
-    cache: cacheHitRate != null ? `${cacheHitRate}%` : noData,
-    speed: speed != null ? `${speed} tok/s` : noData,
-  })
+  const noData = t('ai.runtime.status.noData')
+  const cost = formatUsageCost(usage.cost)
+  return [
+    t('ai.runtime.status.usageTokensDetail', {
+      input: String(usage.input),
+      output: String(usage.output),
+      reasoning: String(usage.reasoning),
+    }),
+    t('ai.runtime.status.usageCacheDetail', {
+      cacheRead: String(usage.cacheRead),
+      cacheWrite: String(usage.cacheWrite),
+    }),
+    t('ai.runtime.status.usageCostDetail', {
+      cost: cost ?? noData,
+      cache: cacheHitRate != null ? `${cacheHitRate}%` : noData,
+      speed: speed != null ? `${speed} tok/s` : noData,
+    }),
+  ].join('\n')
 }
 
 const EMPTY_USAGE: TurnUsage = {
@@ -128,7 +146,7 @@ const EMPTY_USAGE: TurnUsage = {
   cacheWrite: 0,
   reasoning: 0,
   providerTotal: 0,
-  cost: 0,
+  cost: null,
 }
 
 function formatCompactNumber(value: number): string {

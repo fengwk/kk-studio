@@ -55,8 +55,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
     subagents: [{ name: 'helper', description: 'Isolated helper' }],
     cacheControl: {
       retention: 'SHORT',
-      affinityKey: 'prefix-key-1',
-      breakpoints: ['SYSTEM', 'TOOLS'],
+      key: 'prefix-key-1',
     },
     planningError: null,
     frozenInvocation: {
@@ -259,8 +258,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           subagents: [],
           cacheControl: {
             retention: 'NONE',
-            affinityKey: null,
-            breakpoints: [],
+            key: null,
           },
         })}
       />,
@@ -318,8 +316,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           debug={sampleDebug({
             cacheControl: {
               retention: 'SHORT',
-              affinityKey: 'aff-key-42',
-              breakpoints: ['SYSTEM', 'TOOLS'],
+              key: 'aff-key-42',
             },
           })}
         />,
@@ -337,8 +334,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('SHORT')).toBeInTheDocument()
       expect(screen.getByText('前缀标识 (Affinity Key)')).toBeInTheDocument()
       expect(screen.getByText('aff-key-42')).toBeInTheDocument()
-      expect(screen.getByText('Cache 断点')).toBeInTheDocument()
-      expect(screen.getByText('SYSTEM, TOOLS')).toBeInTheDocument()
+      // 断点字段已从契约移除：不再出现任何断点行
+      expect(screen.queryByText('Cache 断点')).not.toBeInTheDocument()
 
       await user.keyboard('{Escape}')
       expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
@@ -351,8 +348,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
           debug={sampleDebug({
             cacheControl: {
               retention: 'NONE',
-              affinityKey: null,
-              breakpoints: [],
+              key: null,
             },
           })}
         />,
@@ -367,9 +363,9 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(inspector).toHaveAttribute('aria-label', '缓存策略')
       expect(screen.getByText('NONE')).toBeInTheDocument()
       expect(screen.getByText('(不保证 Provider 自动缓存)')).toBeInTheDocument()
-      // affinityKey 和 breakpoints 为空时如实显示 '—'
+      // key 为空时如实显示 '—'（断点字段已移除）
       const dashes = screen.getAllByText('—')
-      expect(dashes.length).toBeGreaterThanOrEqual(2)
+      expect(dashes.length).toBeGreaterThanOrEqual(1)
     })
 
     it('verifies subagent and cache inspector localization in en-US', async () => {
@@ -381,8 +377,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
             subagents: [{ name: 'Explorer', description: 'Exploring code' }],
             cacheControl: {
               retention: 'NONE',
-              affinityKey: null,
-              breakpoints: [],
+              key: null,
             },
           })}
         />,
@@ -408,7 +403,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.getByText('NONE')).toBeInTheDocument()
       expect(screen.getByText('(Provider automatic caching is not guaranteed)')).toBeInTheDocument()
       expect(screen.getByText('Affinity Key')).toBeInTheDocument()
-      expect(screen.getByText('Breakpoints')).toBeInTheDocument()
+      // 断点字段已从 DTO 移除
+      expect(screen.queryByText('Breakpoints')).not.toBeInTheDocument()
     })
   })
 
@@ -764,8 +760,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
             ],
             cacheControl: {
               retention: 'LONG',
-              affinityKey: null,
-              breakpoints: [],
+              key: null,
             },
           })}
         />,
@@ -907,8 +902,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     })
 
     it('renders provider request preview with metadata, preformatted payload and no authentication credentials', () => {
-      // 测试意图：验证 selection.type === 'preview' 时展示请求预览标题、点击快照标识、Provider/Model/ByteSize/Timestamp 元数据，
-      // 并以可选择预格式化代码块渲染 bodyJson，且绝不暴露任何 Authorization 头或凭据信息。
+      // 测试意图：验证 selection.type === 'preview' 时展示请求预览标题、Provider/Model/ByteSize/Timestamp 元数据，
+      // 并以可选择预格式化代码块渲染 bodyJson（只读，无点击快照承诺），且绝不暴露任何 Authorization 头或凭据信息。
       const mockPreview = {
         kind: 'DRAFT_REQUEST_PREVIEW' as const,
         providerType: 'OPENAI',
@@ -920,7 +915,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         }),
         sourceHeadEntryId: 'entry-head-123',
         generatedAt: '2026-09-27T05:00:00Z',
-        snapshotNotice: 'Snapshot for draft preview',
+        notice: 'Snapshot for draft preview',
       }
 
       render(
@@ -935,7 +930,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
 
       expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
       expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
-      expect(screen.getByText('点击快照')).toBeInTheDocument()
+      // 不再有「点击快照」承诺标识：这是只读回放视图
+      expect(screen.queryByText('点击快照')).not.toBeInTheDocument()
       expect(screen.getByText('OPENAI')).toBeInTheDocument()
       expect(screen.getByText('gpt-4o')).toBeInTheDocument()
       expect(screen.getByText(/1.3 KB/)).toBeInTheDocument()
@@ -951,6 +947,41 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       expect(screen.queryByText(/Authorization/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/Bearer/i)).not.toBeInTheDocument()
       expect(screen.queryByText(/api-key/i)).not.toBeInTheDocument()
+    })
+
+    // 意图：历史条目重放与草稿预览语义不同，检查器标题必须按 kind 区分，不能复用草稿标题。
+    it('does not reuse the draft preview title for a historical request preview', () => {
+      const sharedPreview = {
+        providerType: 'OPENAI',
+        modelName: 'gpt-4o',
+        bodyByteSize: 12,
+        bodyJson: '{"model":"gpt-4o"}',
+        sourceHeadEntryId: 'entry-head-1',
+        generatedAt: '2026-09-27T05:00:00Z',
+        notice: null,
+      }
+
+      const draft = render(
+        <ThreadDebugInspector
+          selection={{ type: 'preview', preview: { ...sharedPreview, kind: 'DRAFT_REQUEST_PREVIEW' } }}
+          onClose={() => {}}
+        />,
+      )
+      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      draft.unmount()
+
+      render(
+        <ThreadDebugInspector
+          selection={{
+            type: 'preview',
+            preview: { ...sharedPreview, kind: 'HISTORICAL_REQUEST_PREVIEW' },
+          }}
+          onClose={() => {}}
+        />,
+      )
+      expect(screen.getByText('HISTORICAL_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { level: 3 }).textContent).not.toBe('请求预览')
     })
   })
 

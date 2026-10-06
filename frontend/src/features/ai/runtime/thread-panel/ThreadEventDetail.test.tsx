@@ -129,4 +129,47 @@ describe('ThreadEventDetail', () => {
     const payloadPre = container.querySelector('.thread-event-detail-payload')
     expect(payloadPre?.textContent).toBe(record.rawJson)
   })
+
+  // 意图：选中历史 ASSISTANT 模型调用 Entry 时,详情提供按需读取调用前请求的只读入口。
+  it('offers an on-demand historical request preview for a durable assistant entry', () => {
+    const onRequestHistoricalPreview = vi.fn()
+    const record = createRecord({
+      source: 'entry',
+      entryId: 'assistant-entry-1',
+      kind: 'ASSISTANT_MESSAGE',
+      title: 'ASSISTANT_MESSAGE',
+    })
+
+    render(
+      <ThreadEventDetail
+        record={record}
+        onClose={vi.fn()}
+        onRequestHistoricalPreview={onRequestHistoricalPreview}
+      />,
+    )
+
+    const button = screen.getByTestId('historical-request-preview')
+    fireEvent.click(button)
+    expect(onRequestHistoricalPreview).toHaveBeenCalledWith('assistant-entry-1')
+  })
+
+  // 意图：非模型调用 Entry（无 entryId 或非 ASSISTANT）不应提供该入口。
+  it('does not offer the historical request preview when it is not an assistant entry', () => {
+    render(
+      <ThreadEventDetail
+        record={createRecord({ source: 'entry', entryId: 'tool-entry-1', kind: 'TOOL_RESULT' })}
+        onClose={vi.fn()}
+        onRequestHistoricalPreview={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+
+    render(
+      <ThreadEventDetail
+        record={createRecord({ source: 'entry', entryId: 'assistant-entry-2', kind: 'ASSISTANT_MESSAGE' })}
+        onClose={vi.fn()}
+      />,
+    )
+    expect(screen.queryByTestId('historical-request-preview')).toBeNull()
+  })
 })

@@ -2482,7 +2482,7 @@ describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
       vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce(previewResponse({
         bodyJson: '{"messages":[{"role":"user","content":"preview test message"}]}',
         sourceHeadEntryId: 'head-2',
-        snapshotNotice: 'Draft preview snapshot',
+        notice: 'Draft preview snapshot',
       }))
 
       renderPane({ type: 'CHAT', chatId: CHAT_ID })

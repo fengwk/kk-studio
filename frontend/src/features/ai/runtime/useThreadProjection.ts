@@ -5,7 +5,7 @@ import {
 } from '@/features/ai/catalog'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
-import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
+import { aggregateEntryUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 import { useAgentThreadQueries } from '@/features/ai/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import { translate } from '@/shared/i18n'
@@ -53,7 +53,9 @@ export function useThreadProjection(threadId: string) {
     modelAttemptFailures,
     modelInvocation,
   )
-  const branchUsage = aggregateBranchUsage(timeline.messages)
+  // Footer 累计用量直接由全部 Entry 事实派生：不依赖对话消息、卡片 visible 或 TURN_END 投影，
+  // compaction 等隐藏内容里真实发生的 usage 也一并进入累计。
+  const branchUsage = aggregateEntryUsage(entries)
   // Event 投影独立于 DialogueMessage：durable Entry 全类型 + 活跃 model/tool overlay。
   // useMemo 保证快照未变化时 events 引用稳定（Pane 的 selected/active 跟随 effect 依赖它）。
   const events = useMemo(

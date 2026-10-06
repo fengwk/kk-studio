@@ -49,6 +49,12 @@ export const queryKeys = {
     entries: (threadId: string) => ['threads', 'entries', threadId] as const,
     modelRequestDebug: (threadId: string) => ['threads', 'model-request-debug', threadId] as const,
   },
+  sessions: {
+    all: ['sessions'] as const,
+    /** 选中历史 AssistantEntry 时按需拉取的 provider request 重放预览。 */
+    historicalRequestPreview: (sessionId: string, entryId: string) =>
+      ['sessions', 'historical-request-preview', sessionId, entryId] as const,
+  },
   systemSettings: {
     all: ['system-settings', 'aggregate'] as const,
     schema: ['system-settings', 'schema'] as const,

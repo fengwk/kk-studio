@@ -4,12 +4,13 @@ import {
   useThreadPanelViewState,
   type ThreadPanelMainView,
 } from '@/features/ai/runtime/thread-panel'
-import { useModelRequestDebug } from '@/features/ai/runtime/useModelRequestDebug'
+import { useModelRequestDebug, useHistoricalRequestPreview } from '@/features/ai/runtime/useModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type { ThreadPaneLabels } from '@/features/ai/runtime/ThreadPane'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { translate } from '@/shared/i18n'
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
 export interface BoundThreadPreviewOptions {
@@ -26,6 +27,8 @@ export function useBoundThreadPanelViews(
     bodyRef: RefObject<HTMLDivElement | null>
     events: ThreadEventRecord[]
     working: boolean
+    /** 当前 Session，用于按需读取历史 Entry 的调用前请求预览（只读）。 */
+    sessionId: string | null
   },
   previewOptions?: BoundThreadPreviewOptions,
 ) {
@@ -39,6 +42,7 @@ export function useBoundThreadPanelViews(
     initialEventsScrollTop,
   } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
   const { debug } = useModelRequestDebug(threadId, mode === 'debug', controller.working)
+  const historicalPreview = useHistoricalRequestPreview(controller.sessionId)
   const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
 
   const switchMode = (nextMode: 'conversation' | 'debug') => {
@@ -85,6 +89,13 @@ export function useBoundThreadPanelViews(
           previewDisabled={previewOptions?.previewDisabled}
           previewDisabledReason={previewOptions?.previewDisabledReason}
           previewError={previewOptions?.previewError}
+          historicalPreview={historicalPreview.preview}
+          historicalPreviewLoading={historicalPreview.loading}
+          historicalPreviewError={
+            historicalPreview.error ? translate('ai.runtime.debug.previewFailed') : null
+          }
+          onRequestHistoricalPreview={historicalPreview.request}
+          onDismissHistoricalPreview={historicalPreview.dismiss}
         />
       ) : undefined,
   }

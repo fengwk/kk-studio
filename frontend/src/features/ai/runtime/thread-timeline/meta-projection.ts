@@ -1,52 +1,44 @@
 import type { MetaDialogueMessage, TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
-import {
-  formatTurnUsageText,
-  parseAssistantUsage,
-} from '@/features/ai/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
 
 /**
- * 根据已完成或聚合的 TurnUsage 生成标准 meta turn_usage 消息。
+ * 生成一次已关闭回合的 turn footer meta 消息。
+ *
+ * usage 为 null（该回合没有可用 usage 事实）时依然产出一条 footer：文本为空，
+ * 但带上真正关闭它的 TURN_END `endEntryId`，由 MetaMessageBlock 渲染结束信息与分支入口。
+ * 字段名与数值都保持精确：cost 是读取投影，函数本身不做任何定价。
  */
 export function createTurnUsageMetaMessage(
   entryId: string,
-  usage: TurnUsage,
+  usage: TurnUsage | null,
   createdAt: MetaDialogueMessage['createdAt'],
+  endEntryId: string | null = null,
 ): MetaDialogueMessage {
   return {
     id: `meta-usage-entry-${entryId}`,
     role: 'meta',
     kind: 'turn_usage',
     subjectEntryId: entryId,
-    text: formatTurnUsageText(usage),
-    turnUsage: usage,
-    details: {
-      input: usage.input,
-      output: usage.output,
-      cacheRead: usage.cacheRead,
-      cacheWrite: usage.cacheWrite,
-      reasoning: usage.reasoning,
-      providerTotal: usage.providerTotal,
-      cost: usage.cost,
-      decodeTokens: usage.decodeTokens ?? null,
-      decodeDurationMillis: usage.decodeDurationMillis ?? null,
-      contextInputTokens: usage.contextInputTokens ?? null,
-    },
+    text: usage == null ? '' : formatTurnUsageText(usage),
+    ...(usage == null ? {} : { turnUsage: usage }),
+    endEntryId,
+    ...(usage == null
+      ? {}
+      : {
+          details: {
+            input: usage.input,
+            output: usage.output,
+            cacheRead: usage.cacheRead,
+            cacheWrite: usage.cacheWrite,
+            reasoning: usage.reasoning,
+            providerTotal: usage.providerTotal,
+            cost: usage.cost,
+            decodeTokens: usage.decodeTokens ?? null,
+            decodeDurationMillis: usage.decodeDurationMillis ?? null,
+            contextInputTokens: usage.contextInputTokens ?? null,
+          },
+        }),
     createdAt,
     status: 'done',
   }
-}
-
-/**
- * 从持久 ASSISTANT Entry 的 assistantMetadata 投影用量。
- */
-export function projectTurnUsageFromAssistantMetadata(
-  entryId: string,
-  metadata: Record<string, unknown>,
-  createdAt: MetaDialogueMessage['createdAt'],
-): MetaDialogueMessage | null {
-  const usage = parseAssistantUsage(metadata)
-  if (usage == null) {
-    return null
-  }
-  return createTurnUsageMetaMessage(entryId, usage, createdAt)
 }

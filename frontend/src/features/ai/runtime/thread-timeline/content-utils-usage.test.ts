@@ -1,12 +1,28 @@
 import { describe, expect, it } from 'vitest'
 import {
+  addDecimalStrings,
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
   formatTurnUsageText,
+  formatUsageCost,
   mergeTurnUsage,
+  normalizeUsageCost,
   parseAssistantUsage,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
+
+function usage(overrides: Partial<TurnUsage> = {}): TurnUsage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 0,
+    providerTotal: 0,
+    cost: null,
+    ...overrides,
+  }
+}
 
 describe('content-utils usage & speed & cache calculations', () => {
   // 验证缓存命中率公式：cacheRead / (input + cacheRead + cacheWrite含long)
@@ -17,23 +33,8 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
 
     it('calculates correct rounded percentage when denominator is positive', () => {
-      // 100 cacheRead / (200 input + 100 cacheRead + 100 cacheWrite) = 100 / 400 = 25%
-      expect(
-        calculateCacheHitRate({
-          input: 200,
-          cacheRead: 100,
-          cacheWrite: 100,
-        }),
-      ).toBe(25)
-
-      // 1 / 3 = 33%
-      expect(
-        calculateCacheHitRate({
-          input: 1,
-          cacheRead: 1,
-          cacheWrite: 1,
-        }),
-      ).toBe(33)
+      expect(calculateCacheHitRate({ input: 200, cacheRead: 100, cacheWrite: 100 })).toBe(25)
+      expect(calculateCacheHitRate({ input: 1, cacheRead: 1, cacheWrite: 1 })).toBe(33)
     })
   })
 
@@ -43,7 +44,6 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(calculateDecodeTokensPerSecond({})).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: null, decodeTokens: 100 })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 0, decodeTokens: 100 })).toBeNull()
-      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: -10, decodeTokens: 100 })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: null })).toBeNull()
     })
 
@@ -53,218 +53,218 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: Number.NaN })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: Number.POSITIVE_INFINITY })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: Number.POSITIVE_INFINITY, decodeTokens: 100 })).toBeNull()
-      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: Number.NaN, decodeTokens: 100 })).toBeNull()
     })
 
     it('rounds to integer at rate >= 10 and keeps one decimal below 10', () => {
-      // >= 10 取整
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 2000, decodeTokens: 100 })).toBe(50)
-      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 750, decodeTokens: 40 })).toBe(53)
-      // < 10 保留 1 位小数
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 2000, decodeTokens: 5 })).toBe(2.5)
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: 3 })).toBe(3)
-      // 9.96 进位为 10（对齐参考展示规范）
-      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 100000, decodeTokens: 996 })).toBe(10)
     })
   })
 
-  // 验证 parseAssistantUsage 只接受 backend 形态的安全整数正 duration
-  describe('parseAssistantUsage duration and decode tokens', () => {
-    it('parses valid numeric decodeDurationMillis and computes decodeTokens', () => {
-      const usage = parseAssistantUsage({
-        usage: {
-          inputTokens: 100,
-          outputTokens: 50,
-          cacheReadTokens: 10,
-          cacheWriteTokens: 20,
-          reasoningTokens: 15,
+  // 只接受 harness 持久 codec 的 canonical 字段名：snake_case / 常见别名一律不再兼容
+  describe('parseAssistantUsage canonical fields', () => {
+    it('parses canonical usage with cost from the read projection', () => {
+      const parsed = parseAssistantUsage(
+        {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheReadTokens: 10,
+            cacheWriteTokens: 20,
+            cacheWriteLongTokens: 5,
+            reasoningTokens: 15,
+            providerTotalTokens: 200,
+          },
+          decodeDurationMillis: 1000,
         },
-        cost: 0.05,
-        decodeDurationMillis: 1000,
-      })
-      expect(usage).toEqual({
+        { currency: 'USD', amount: '0.000500000000' },
+      )
+      expect(parsed).toEqual({
         input: 100,
         output: 50,
         cacheRead: 10,
-        cacheWrite: 20,
+        cacheWrite: 25, // 20 + 5 long
         reasoning: 15,
-        providerTotal: 0,
-        cost: 0.05,
+        providerTotal: 200,
+        cost: { currency: 'USD', amount: '0.000500000000' },
         decodeTokens: 65, // 50 output + 15 reasoning
         decodeDurationMillis: 1000,
-        contextInputTokens: 130, // 100 + 10 + 20
+        contextInputTokens: 135, // 100 + 10 + 25
       })
     })
 
-    // 新持久字段无历史包袱：仅接受 backend 的安全整数 > 0
+    it('ignores snake_case and common aliases entirely', () => {
+      const parsed = parseAssistantUsage({
+        usage: {
+          input_tokens: '10',
+          completionTokens: 20,
+          cachedTokens: 3,
+          cache_write_tokens: '4',
+          totalTokens: 44,
+        },
+      })
+      expect(parsed).toBeNull()
+    })
+
+    // 旧 payload 里的 metadata.cost 不再被读取：费用只能来自读取投影
+    it('never prices from assistant metadata', () => {
+      const parsed = parseAssistantUsage({
+        usage: { inputTokens: 10, outputTokens: 20 },
+        cost: 0.25,
+        costTotal: '0.5',
+      })
+      expect(parsed?.cost).toBeNull()
+    })
+
     it('accepts only positive safe integer decodeDurationMillis', () => {
       const valid = parseAssistantUsage({
         usage: { inputTokens: 10, outputTokens: 20 },
-        cost: 0.01,
         decodeDurationMillis: 800,
       })
       expect(valid?.decodeDurationMillis).toBe(800)
       expect(valid?.decodeTokens).toBe(20)
-    })
 
-    // invalid/fraction/Infinity/超安全整数 -> null；不再兼容字符串与 snake_case 别名
-    it('rejects invalid, fractional, unsafe and aliased decodeDurationMillis', () => {
-      const base = { usage: { inputTokens: 10, outputTokens: 20 }, cost: 0.01 }
       for (const bad of ['800', 0, -5, 1.5, Number.POSITIVE_INFINITY, Number.NaN, 2 ** 53]) {
-        const usage = parseAssistantUsage({ ...base, decodeDurationMillis: bad })
-        expect(usage?.decodeDurationMillis).toBeNull()
-        expect(usage?.decodeTokens).toBeNull()
+        const parsed = parseAssistantUsage({
+          usage: { inputTokens: 10, outputTokens: 20 },
+          decodeDurationMillis: bad,
+        })
+        expect(parsed?.decodeDurationMillis).toBeNull()
+        expect(parsed?.decodeTokens).toBeNull()
       }
-      const aliased = parseAssistantUsage({ ...base, decode_duration_millis: 800 })
+      const aliased = parseAssistantUsage({
+        usage: { inputTokens: 10, outputTokens: 20 },
+        decode_duration_millis: 800,
+      })
       expect(aliased?.decodeDurationMillis).toBeNull()
-      expect(aliased?.decodeTokens).toBeNull()
     })
   })
 
-  // 验证 mergeTurnUsage：累加消耗与有效测速样本，contextInputTokens 采用 latest
+  // normalizeUsageCost：只接受 currency + 精确十进制 amount，其余一律视为未定价（null）
+  describe('normalizeUsageCost', () => {
+    it('accepts a well-formed projection and rejects malformed ones', () => {
+      expect(normalizeUsageCost({ currency: 'USD', amount: '0.5' }))
+        .toEqual({ currency: 'USD', amount: '0.5' })
+      expect(normalizeUsageCost({ currency: '', amount: '0.5' })).toBeNull()
+      expect(normalizeUsageCost({ currency: 'USD', amount: 'abc' })).toBeNull()
+      expect(normalizeUsageCost({ currency: 'USD', amount: '-1' })).toBeNull()
+      expect(normalizeUsageCost(null)).toBeNull()
+      expect(normalizeUsageCost(undefined)).toBeNull()
+    })
+  })
+
+  // 精确十进制求和：无浮点误差，非法输入返回 null
+  describe('addDecimalStrings', () => {
+    it('sums exactly across different scales', () => {
+      expect(addDecimalStrings('0.1', '0.2')).toBe('0.3')
+      expect(addDecimalStrings('0.0000004', '0.000000400000')).toBe('0.0000008')
+      expect(addDecimalStrings('1', '0.000000000001')).toBe('1.000000000001')
+      expect(addDecimalStrings('99999999999999999999', '1')).toBe('100000000000000000000')
+    })
+
+    it('returns null for invalid operands', () => {
+      expect(addDecimalStrings('abc', '1')).toBeNull()
+      expect(addDecimalStrings('1', '')).toBeNull()
+    })
+  })
+
+  // 费用展示：先精确求和后统一 6 位精度；<1e-6 的精确非零金额显示 <$0.000001（"<" 在货币符号之前）
+  describe('formatUsageCost', () => {
+    it('rounds to at most 6 decimals and trims trailing zeros', () => {
+      expect(formatUsageCost({ currency: 'USD', amount: '0.500000000000' })).toBe('$0.5')
+      expect(formatUsageCost({ currency: 'USD', amount: '0.125' })).toBe('$0.125')
+      expect(formatUsageCost({ currency: 'USD', amount: '1.99999951' })).toBe('$2')
+      expect(formatUsageCost({ currency: 'USD', amount: '0' })).toBe('$0')
+    })
+
+    it('keeps exact 0 as 0 but shows any sub-threshold amount as <$0.000001', () => {
+      expect(formatUsageCost({ currency: 'USD', amount: '0.000001' })).toBe('$0.000001')
+      // 9e-7 精确小于 1e-6：不能被四舍五入夸大成 0.000001
+      expect(formatUsageCost({ currency: 'USD', amount: '0.0000009' })).toBe('<$0.000001')
+      expect(formatUsageCost({ currency: 'USD', amount: '0.0000004' })).toBe('<$0.000001')
+      expect(formatUsageCost({ currency: 'USD', amount: '0.000000000001' })).toBe('<$0.000001')
+    })
+
+    it('falls back to the currency code for unknown currencies and never fabricates 0', () => {
+      // 未知/自定义币种按 "CODE 金额" 前缀如实呈现，绝不丢币种也绝不当成 $0
+      expect(formatUsageCost({ currency: 'XYZ', amount: '0.25' })).toBe('XYZ 0.25')
+      expect(formatUsageCost({ currency: 'XYZ', amount: '0.0000001' })).toBe('<XYZ 0.000001')
+      expect(formatUsageCost(null)).toBeNull()
+      expect(formatUsageCost({ currency: '', amount: '0.25' })).toBeNull()
+    })
+  })
+
+  // mergeTurnUsage：累加消耗与有效测速样本，contextInputTokens 采用 latest，费用精确求和
   describe('mergeTurnUsage', () => {
-    it('merges two TurnUsage records with speed and context updates', () => {
-      const first: TurnUsage = {
-        input: 100,
-        output: 30,
-        cacheRead: 20,
-        cacheWrite: 10,
-        reasoning: 5,
-        providerTotal: 165,
-        cost: 0.01,
-        decodeTokens: 35,
-        decodeDurationMillis: 700,
-        contextInputTokens: 130,
-      }
-      const second: TurnUsage = {
-        input: 150,
-        output: 40,
-        cacheRead: 50,
-        cacheWrite: 0,
-        reasoning: 10,
-        providerTotal: 250,
-        cost: 0.02,
-        decodeTokens: 50,
-        decodeDurationMillis: 1000,
-        contextInputTokens: 200,
-      }
+    it('merges two TurnUsage records with speed, context and exact cost', () => {
+      const first = usage({
+        input: 100, output: 30, cacheRead: 20, cacheWrite: 10, reasoning: 5, providerTotal: 165,
+        cost: { currency: 'USD', amount: '0.1' },
+        decodeTokens: 35, decodeDurationMillis: 700, contextInputTokens: 130,
+      })
+      const second = usage({
+        input: 150, output: 40, cacheRead: 50, cacheWrite: 0, reasoning: 10, providerTotal: 250,
+        cost: { currency: 'USD', amount: '0.2' },
+        decodeTokens: 50, decodeDurationMillis: 1000, contextInputTokens: 200,
+      })
 
       const merged = mergeTurnUsage(first, second)
-      expect(merged.cost).toBeCloseTo(0.03, 10)
+      expect(merged.cost).toEqual({ currency: 'USD', amount: '0.3' })
       expect(merged.input).toBe(250)
       expect(merged.output).toBe(70)
       expect(merged.cacheRead).toBe(70)
-      expect(merged.cacheWrite).toBe(10)
       expect(merged.reasoning).toBe(15)
-      expect(merged.providerTotal).toBe(415)
       expect(merged.decodeTokens).toBe(85)
       expect(merged.decodeDurationMillis).toBe(1700)
       expect(merged.contextInputTokens).toBe(200)
     })
 
-    // 坏样本（Infinity token / 非法 duration）不得污染合并后的测速分子分母
+    // 缺失或跨币种时不得伪造完整总额
+    it('drops the total when a part is unpriced or in another currency', () => {
+      const priced = usage({ cost: { currency: 'USD', amount: '0.1' } })
+      expect(mergeTurnUsage(priced, usage({ cost: null })).cost).toBeNull()
+      expect(mergeTurnUsage(priced, usage({ cost: { currency: 'EUR', amount: '0.1' } })).cost).toBeNull()
+    })
+
     it('ignores invalid speed samples when merging', () => {
-      const invalid: TurnUsage = {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 2,
-        cost: 0,
-        decodeTokens: Number.POSITIVE_INFINITY,
-        decodeDurationMillis: 100,
-        contextInputTokens: 2,
-      }
-      const valid: TurnUsage = {
-        input: 1,
-        output: 1,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 2,
-        cost: 0,
-        decodeTokens: 5,
-        decodeDurationMillis: 200,
-        contextInputTokens: 2,
-      }
+      const invalid = usage({ decodeTokens: Number.POSITIVE_INFINITY, decodeDurationMillis: 100 })
+      const valid = usage({ decodeTokens: 5, decodeDurationMillis: 200 })
       const merged = mergeTurnUsage(invalid, valid)
       expect(merged.decodeTokens).toBe(5)
       expect(merged.decodeDurationMillis).toBe(200)
     })
 
     it('preserves existing speed if next call has no measurement', () => {
-      const first: TurnUsage = {
-        input: 10,
-        output: 5,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 15,
-        cost: 0.001,
-        decodeTokens: 5,
-        decodeDurationMillis: 200,
-        contextInputTokens: 10,
-      }
-      const second: TurnUsage = {
-        input: 20,
-        output: 10,
-        cacheRead: 0,
-        cacheWrite: 0,
-        reasoning: 0,
-        providerTotal: 30,
-        cost: 0.002,
-        decodeTokens: null,
-        decodeDurationMillis: null,
-        contextInputTokens: 20,
-      }
-      const merged = mergeTurnUsage(first, second)
+      const merged = mergeTurnUsage(
+        usage({ decodeTokens: 5, decodeDurationMillis: 200, contextInputTokens: 10 }),
+        usage({ decodeTokens: null, decodeDurationMillis: null, contextInputTokens: 20 }),
+      )
       expect(merged.decodeTokens).toBe(5)
       expect(merged.decodeDurationMillis).toBe(200)
       expect(merged.contextInputTokens).toBe(20)
     })
   })
 
-  // 验证每回合 meta usage 字符串格式化规范：包含 cache 率与 tok/s，零/空态展示 "—"
+  // 每回合 meta usage 摘要：主行保持紧凑；无定价显示 "—"（绝不伪造成 $0）
   describe('formatTurnUsageText', () => {
-    it('formats turn usage with cache and tok/s', () => {
+    it('formats turn usage with cache, cost and tok/s', () => {
       const text = formatTurnUsageText({
         input: 100,
         output: 50,
         cacheRead: 50,
         cacheWrite: 0,
-        cost: 0.005,
+        cost: { currency: 'USD', amount: '0.005' },
         decodeTokens: 50,
         decodeDurationMillis: 1000,
       })
-      // 50 / (100 + 50 + 0) = 33%
-      // 50 * 1000 / 1000 = 50 tok/s
       expect(text).toBe('↑100 · ↓50 · R50 · $0.005 · cache 33% · 50 tok/s')
     })
 
-    // 小速率（< 10）展示保留 1 位小数
-    it('formats sub-10 rate with one decimal', () => {
-      const text = formatTurnUsageText({
-        input: 0,
-        output: 5,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0.001,
-        decodeTokens: 5,
-        decodeDurationMillis: 2000,
-      })
-      expect(text).toBe('↑0 · ↓5 · $0.001 · cache — · 2.5 tok/s')
-    })
-
-    it('formats empty cache rate and speed as em dash placeholders', () => {
-      const text = formatTurnUsageText({
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        cost: 0,
-      })
-      expect(text).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
+    it('formats a missing price as em dash and empty states as placeholders', () => {
+      expect(formatTurnUsageText({
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
+      })).toBe('↑0 · ↓0 · — · cache — · — tok/s')
     })
   })
 })

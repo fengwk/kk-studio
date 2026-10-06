@@ -21,7 +21,19 @@ export type EntryEventKind =
   | 'unsupported_message'
   | 'unknown_entry'
 
-/** 已关闭 Turn 的完整 provider usage；各 token 字段互斥，cost 为冻结的 total。 */
+/**
+ * 读取投影的估算费用：currency 与后端按当前目录价格计算的精确十进制文本 amount。
+ * 它不是历史 payload 事实，前端只做精确求和与格式化，绝不自行定价。
+ */
+export interface UsageCost {
+  currency: string
+  amount: string
+}
+
+/**
+ * 已关闭 Turn 的完整 provider usage；各 token 字段互斥。
+ * cost 是读取投影（null 表示未定价/不适用），同一 branch 内跨币种或含缺失项时不得伪造成完整总额。
+ */
 export interface TurnUsage {
   input: number
   output: number
@@ -29,7 +41,7 @@ export interface TurnUsage {
   cacheWrite: number
   reasoning: number
   providerTotal: number
-  cost: number
+  cost: UsageCost | null
   /** 解码输出 token 数（outputTokens + reasoningTokens），用于与 decodeDurationMillis 配对计算 tok/s */
   decodeTokens?: number | null
   /** 解码耗时（毫秒），严格有限正值，来自 assistantMetadata.decodeDurationMillis */
@@ -156,8 +168,13 @@ export interface MetaDialogueMessage extends BaseDialogueMessage {
   role: 'meta'
   kind: MetaMessageKind
   text: string
-  /** TURN_END 后发射的类型化 usage；Branch Usage 只聚合该字段。 */
+  /** TURN_END 后发射的类型化 usage；Branch Usage 只聚合该字段。无 usage 的纯回合结束 footer 不带该字段。 */
   turnUsage?: TurnUsage
+  /**
+   * 该回合真正关闭它的 TURN_END Entry id；由 TURN_END 绑定方填写。
+   * 存在即表示为一次已关闭回合的 footer：无 usage 也必须展示结束信息与分支入口。
+   */
+  endEntryId?: string | null
   /** 可选结构化字段（token/费用等），便于以后扩展 */
   details?: Record<string, unknown>
 }
@@ -281,8 +298,7 @@ export interface ThreadModelRequestDebugSubagent {
 
 export interface ThreadModelRequestDebugCacheControl {
   retention: 'NONE' | 'SHORT' | 'LONG'
-  affinityKey: string | null
-  breakpoints: string[]
+  key: string | null
 }
 
 export interface ThreadModelRequestDebugFrozenInvocation {
@@ -290,14 +306,17 @@ export interface ThreadModelRequestDebugFrozenInvocation {
   requestJson: string
 }
 
-/** Portable Thread Panel 消费的草稿请求预览投影；不依赖 API DTO。 */
+/**
+ * Portable Thread Panel 消费的请求预览投影；不依赖 API DTO。
+ * kind 区分草稿（绑定或本地分支）与历史条目重放，notice 是服务端的如实说明。
+ */
 export interface ThreadProviderRequestPreviewData {
-  kind: 'DRAFT_REQUEST_PREVIEW'
+  kind: 'DRAFT_REQUEST_PREVIEW' | 'HISTORICAL_REQUEST_PREVIEW'
   providerType: string
   modelName: string
   bodyByteSize: number
   bodyJson: string
   sourceHeadEntryId: string | null
   generatedAt: string
-  snapshotNotice?: string | null
+  notice?: string | null
 }

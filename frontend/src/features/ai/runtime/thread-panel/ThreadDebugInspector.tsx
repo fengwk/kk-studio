@@ -111,7 +111,10 @@ export function ThreadDebugInspector({
   } else if (selection.type === 'request') {
     title = t('ai.runtime.debug.requestLabel')
   } else if (selection.type === 'preview') {
-    title = t('ai.runtime.debug.inspector.draftPreviewTitle')
+    // 历史条目重放与草稿预览是两件事：标题必须按 kind 区分，不能把历史预览也标成草稿预览。
+    title = selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
+      ? t('ai.runtime.debug.inspector.historicalPreviewTitle')
+      : t('ai.runtime.debug.inspector.draftPreviewTitle')
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -282,18 +285,8 @@ export function ThreadDebugInspector({
             <div className="thread-event-detail-row">
               <dt>{t('ai.runtime.debug.inspector.cacheAffinityKey')}</dt>
               <dd>
-                {debug?.cacheControl?.affinityKey ? (
-                  <code>{debug.cacheControl.affinityKey}</code>
-                ) : (
-                  '—'
-                )}
-              </dd>
-            </div>
-            <div className="thread-event-detail-row">
-              <dt>{t('ai.runtime.debug.inspector.cacheBreakpoints')}</dt>
-              <dd>
-                {debug?.cacheControl?.breakpoints && debug.cacheControl.breakpoints.length > 0 ? (
-                  <code>{debug.cacheControl.breakpoints.join(', ')}</code>
+                {debug?.cacheControl?.key ? (
+                  <code>{debug.cacheControl.key}</code>
                 ) : (
                   '—'
                 )}
@@ -334,9 +327,6 @@ export function ThreadDebugInspector({
             <span className="status-pill is-ready">
               {selection.preview.kind}
             </span>
-            <span className="status-pill is-neutral">
-              {t('ai.runtime.debug.inspector.clickTimeSnapshot')}
-            </span>
           </div>
           <dl className="thread-event-detail-rows">
             <div className="thread-event-detail-row">
@@ -359,10 +349,10 @@ export function ThreadDebugInspector({
               <dt>{t('ai.runtime.debug.inspector.sourceHeadEntryId')}</dt>
               <dd><code>{selection.preview.sourceHeadEntryId || '—'}</code></dd>
             </div>
-            {selection.preview.snapshotNotice ? (
+            {selection.preview.notice ? (
               <div className="thread-event-detail-row">
-                <dt>{t('ai.runtime.debug.inspector.snapshotNotice')}</dt>
-                <dd>{selection.preview.snapshotNotice}</dd>
+                <dt>{t('ai.runtime.debug.inspector.previewNotice')}</dt>
+                <dd>{selection.preview.notice}</dd>
               </div>
             ) : null}
           </dl>
