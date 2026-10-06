@@ -437,7 +437,7 @@ function projectInvocationOverlays(
         threadId: projected.threadId,
         status: failed ? 'error' : terminalResult.status,
         errorMessage: failed
-          ? terminalResult.errorMessage ?? failureText ?? translate('ai.runtime.entry.toolFailed')
+          ? terminalResult.errorMessage ?? failureText ?? undefined
           : undefined,
       })
       index += 1
@@ -461,7 +461,8 @@ function terminalInvocationResult(
     return {
       arguments: call.arguments,
       contents: [],
-      errorMessage: translate('ai.runtime.entry.toolFailed'),
+      // 错误原文来自 errorJson；没有可解析原文时只有错误态，不补通用失败文案。
+      errorMessage: parseToolErrorText(invocation.errorJson) ?? undefined,
       status: 'error',
     }
   }

@@ -1,0 +1,10 @@
+/*
+ * 审批/问卷卡片的操作区布局：只负责按钮右对齐。
+ *
+ * 仅布局调整——按钮外观（含拒绝的红色语义）、提交、幂等与实时订阅仍由卡片自身及
+ * 其既有服务负责；未来 Button 组件的迁移与最终位置由 UI 侧统一。
+ */
+.interaction-approval-card > .interaction-actions-bar,
+.interaction-questionnaire-card > .interaction-actions-bar {
+  justify-content: flex-end;
+}

@@ -310,15 +310,47 @@ describe('ToolMessageBlock failures', () => {
     expect(container.querySelector('.thread-tool-error')).toHaveTextContent('exit code 1')
   })
 
-  it('shows the generic failure label for an empty error result', () => {
+  it('shows only the error state for a bodiless error result without raw text', () => {
     const { container } = render(
       <ToolMessageBlock
         message={message({ status: 'error', toolName: 'mcp__server__tool', rendererKey: 'x' })}
       />,
     )
 
-    expect(screen.getByText('工具执行失败。')).toBeInTheDocument()
+    // 无原文错误不补通用「工具执行失败」文案，也不展开空框，只保留错误态。
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
     expect(container.querySelector('.thread-tool-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByText('工具执行失败。')).not.toBeInTheDocument()
+  })
+
+  it('auto-expands a read error and never repeats its raw text', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'result',
+          toolName: 'read',
+          rendererKey: 'read',
+          arguments: '{"path":"/tmp/bin.dat"}',
+          status: 'error',
+          errorMessage: 'file appears to be binary',
+          contents: [text('file appears to be binary')],
+        })}
+      />,
+    )
+
+    // read 默认收起，但失败事实优先：错误正文默认展开，原文只出现一次（正文即摘要）。
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-error')
+    expect(container.querySelector('.thread-tool-body')).toBeInTheDocument()
+    expect(screen.getAllByText('file appears to be binary')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-error')).not.toBeInTheDocument()
+
+    // 收起后正文消失，但失败原文仍由摘要承载，不能被折叠完全隐藏。
+    await user.click(collapseButton()!)
+    expect(container.querySelector('.thread-tool-body')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-error'))
+      .toHaveTextContent('file appears to be binary')
   })
 
   it('keeps a streaming partial error visible before the durable result arrives', () => {

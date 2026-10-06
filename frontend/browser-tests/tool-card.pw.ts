@@ -204,13 +204,17 @@ test('keeps identity, expanded state and inner scroll position across streaming 
   await expect(viewport).toContainText('build step 60')
 })
 
-test('contains inner log scrollback without moving the card', async ({ page }) => {
-  await harness(page, 'idle', 80)
+test('scrolls the inner log and chains naturally to the transcript at its boundary', async ({ page }) => {
+  await harness(page, 'idleMid', 80)
   const body = dialogue(page)
   const viewport = bashViewport(page)
 
   // 终态 bash 结果是静态正文：挂载即从顶部读，不自动贴到底部。
   expect(await scrollTop(viewport)).toBe(0)
+
+  // 输出视口使用等宽字体（--mono）。
+  const fontFamily = await viewport.evaluate((element) => getComputedStyle(element).fontFamily)
+  expect(fontFamily.toLowerCase()).toContain('monospace')
 
   // 先把内部视口滚到中间，再让它在视口内就位；之后所有测量都不再触发自动定位。
   await viewport.scrollIntoViewIfNeeded()
@@ -219,22 +223,42 @@ test('contains inner log scrollback without moving the card', async ({ page }) =
   })
   const innerBefore = await scrollTop(viewport)
   expect(innerBefore).toBeGreaterThan(0)
-  const anchor = await scrollTop(body)
 
   const box = await viewport.boundingBox()
   expect(box).not.toBeNull()
+  const centerX = (box?.x ?? 0) + (box?.width ?? 0) / 2
+  const centerY = (box?.y ?? 0) + (box?.height ?? 0) / 2
+
+  // 1) 内部仍有可滚空间：滚轮只滚内层，外层 transcript 不动。
+  const outerAnchor = await scrollTop(body)
+  await page.mouse.move(centerX, centerY)
+  await page.mouse.wheel(0, -120)
+  await page.waitForTimeout(150)
+  expect(await scrollTop(viewport)).toBeLessThan(innerBefore)
+  expect(await scrollTop(body)).toBe(outerAnchor)
+
+  // 2) 外层先移动到有上滚空间的位置，再把内层置顶。
+  await body.evaluate((element) => {
+    element.scrollTop = 140
+  })
+  const outerBefore = await scrollTop(body)
+  expect(outerBefore).toBeGreaterThan(0)
+  await viewport.evaluate((element) => {
+    element.scrollTop = 0
+  })
+  // 外层移动后重新定位指针，确保滚轮仍落在内层视口上。
+  const movedBox = await viewport.boundingBox()
+  expect(movedBox?.y ?? -1).toBeGreaterThanOrEqual(0)
   await page.mouse.move(
-    (box?.x ?? 0) + (box?.width ?? 0) / 2,
-    (box?.y ?? 0) + (box?.height ?? 0) / 2,
+    (movedBox?.x ?? 0) + (movedBox?.width ?? 0) / 2,
+    (movedBox?.y ?? 0) + (movedBox?.height ?? 0) / 2,
   )
-  await page.mouse.wheel(0, -4_000)
+  await page.mouse.wheel(0, -400)
   await page.waitForTimeout(200)
 
-  // 内部日志确实滚到了顶部附近，但 overscroll-behavior: contain 不让滚动链传到外层。
-  expect(await scrollTop(viewport)).toBeLessThan(innerBefore)
-  expect(await scrollTop(body)).toBe(anchor)
-  const cardBox = await bashCard(page).boundingBox()
-  expect(cardBox?.y).toBeGreaterThanOrEqual(0)
+  // 内层已在边界无法再消费：overscroll-behavior auto 让滚轮自然链到外层。
+  expect(await scrollTop(viewport)).toBe(0)
+  expect(await scrollTop(body)).toBeLessThan(outerBefore)
 })
 
 test('keeps read text collapsed, previews read images, and keeps unknown attachments collapsed', async ({ page }) => {
@@ -387,36 +411,41 @@ test('does not reopen following when a shrink clamps the outer position to the b
 test.describe('narrow pane header', () => {
   test.use({ viewport: { width: 420, height: 640 } })
 
-  test('keeps unknown/MCP parameters on one line with the full text addressable', async ({ page }) => {
+  test('wraps unknown/MCP parameters with the toggle pinned to the first row', async ({ page }) => {
     await harness(page, 'unknownLong', 4000)
     const body = dialogue(page)
     const plainCard = page.locator('.thread-turn-tool').nth(0)
     const bodyCard = page.locator('.thread-turn-tool').nth(1)
     const detail = plainCard.locator('.thread-tool-summary-detail')
+    const header = plainCard.locator('.thread-tool-header')
+    const toggle = plainCard.locator('.thread-tool-toggle')
 
     await plainCard.scrollIntoViewIfNeeded()
     await expect(detail).toBeVisible()
 
-    // 单行 compact：数千字参数也只占一行，绝不换行撑高卡片。
-    const headerBox = await plainCard.locator('.thread-tool-header').boundingBox()
-    const detailBox = await detail.boundingBox()
-    expect(headerBox?.height ?? 0).toBeLessThanOrEqual(26)
-    expect(detailBox?.height ?? 0).toBeLessThanOrEqual(24)
-
-    // 完整原文仍在 DOM 中（可选中复制），没有被省略或截断到 title。
+    // 数千字参数在可用宽度内折行（不再单行横向滚动），完整原文仍在 DOM 中可选中复制。
     const text = await detail.textContent()
     expect(text?.length ?? 0).toBeGreaterThan(4_000)
     expect(text).toContain('tail-marker')
     expect(await detail.getAttribute('title')).toBeNull()
 
-    // 超宽部分可横向滚动访问（真实滚动容器，不是靠裁切隐藏）。
-    const scrollable = await detail.evaluate((element) => {
-      const before = { scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }
-      element.scrollLeft = 400
-      return { ...before, afterScroll: element.scrollLeft }
-    })
-    expect(scrollable.scrollWidth).toBeGreaterThan(scrollable.clientWidth)
-    expect(scrollable.afterScroll).toBeGreaterThan(0)
+    const headerBox = await header.boundingBox()
+    const detailBox = await detail.boundingBox()
+    // 折行：header 与详情都远超一行高度。
+    expect(headerBox?.height ?? 0).toBeGreaterThan(40)
+    expect(detailBox?.height ?? 0).toBeGreaterThan(40)
+
+    // 无横向溢出：详情自身与整个对话流都不产生水平滚动。
+    const detailOverflow = await detail.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }))
+    expect(detailOverflow.scrollWidth).toBeLessThanOrEqual(detailOverflow.clientWidth + 1)
+    const overflow = await body.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }))
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
 
     // 选中复制能拿到全部原文。
     const copied = await detail.evaluate((element) => {
@@ -429,36 +458,33 @@ test.describe('narrow pane header', () => {
     })
     expect(copied).toBe(text)
 
-    // 参数再长也不让对话流出现横向溢出（窄 pane 不撑破整页）。
-    const overflow = await body.evaluate((element) => ({
-      scrollWidth: element.scrollWidth,
-      clientWidth: element.clientWidth,
-    }))
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
+    // 无正文的未知卡片没有可展开箭头。
+    await expect(toggle).toHaveCount(0)
 
-    // 带真实换行的未知 JSON（无二次正文展示）同样保持一行，也没有可展开箭头。
-    await plainCard.scrollIntoViewIfNeeded()
-    await expect(plainCard.locator('.thread-tool-toggle')).toHaveCount(0)
-
-    // 有正文的未知卡片：箭头固定在右侧留白里，不覆盖参数文本，横向滚动也不移动它。
+    // 有正文的未知卡片：箭头固定在首行右上角，不覆盖参数文本，也没有横向滚动可推动它。
     await bodyCard.scrollIntoViewIfNeeded()
     const bodyDetail = bodyCard.locator('.thread-tool-summary-detail')
+    const bodyToggle = bodyCard.locator('.thread-tool-toggle')
+    const bodyHeader = bodyCard.locator('.thread-tool-header')
     await expect(bodyDetail).toContainText('line one')
     const bodyText = await bodyDetail.textContent()
     expect(bodyText).toContain('\n')
-    const bodyHeaderBox = await bodyCard.locator('.thread-tool-header').boundingBox()
-    expect(bodyHeaderBox?.height ?? 0).toBeLessThanOrEqual(26)
     await expect(bodyCard.locator('.thread-tool-body')).toHaveCount(0)
 
-    const toggleBox = bodyCard.locator('.thread-tool-toggle')
-    const toggleBefore = await toggleBox.boundingBox()
-    await bodyDetail.evaluate((element) => {
-      element.scrollLeft = element.scrollWidth
-    })
-    expect(await toggleBox.boundingBox()).toEqual(toggleBefore)
-    const scrolledDetailBox = await bodyDetail.boundingBox()
-    expect(toggleBefore?.x ?? 0).toBeGreaterThanOrEqual(
-      (scrolledDetailBox?.x ?? 0) + (scrolledDetailBox?.width ?? 0) - 1,
+    const bodyHeaderBox = await bodyHeader.boundingBox()
+    const bodyDetailBox = await bodyDetail.boundingBox()
+    const toggleBox = await bodyToggle.boundingBox()
+    expect(bodyHeaderBox?.height ?? 0).toBeGreaterThan(40)
+    // 箭头位于首行（顶部）与参数区右侧的留白里，不覆盖参数文本。
+    expect((toggleBox?.y ?? 0) - (bodyHeaderBox?.y ?? 0)).toBeLessThan(24)
+    expect(toggleBox?.x ?? 0).toBeGreaterThanOrEqual(
+      (bodyDetailBox?.x ?? 0) + (bodyDetailBox?.width ?? 0) - 1,
     )
+    const detailScroll = await bodyDetail.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }))
+    expect(detailScroll.scrollWidth).toBeLessThanOrEqual(detailScroll.clientWidth + 1)
   })
 })
+
