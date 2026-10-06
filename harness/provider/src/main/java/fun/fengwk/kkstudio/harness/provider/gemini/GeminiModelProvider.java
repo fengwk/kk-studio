@@ -93,8 +93,7 @@ final class GeminiModelProvider implements ModelProvider {
       return bridge;
     }
 
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, encoded.sourcePrefixHash(), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     HttpSseCallback callback =
         new HttpSseCallback() {

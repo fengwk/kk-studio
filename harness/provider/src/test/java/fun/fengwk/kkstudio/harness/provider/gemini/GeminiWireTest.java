@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -26,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,19 +45,6 @@ class GeminiWireTest {
   }
 
   private static ProviderRequest request() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
         new ModelDescriptor(
@@ -68,8 +53,7 @@ class GeminiWireTest {
             "gemini-2.5-flash",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing),
+            true),
         variant,
         1024,
         "Test system instruction.",
@@ -116,11 +100,7 @@ class GeminiWireTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -150,11 +130,7 @@ class GeminiWireTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -183,11 +159,7 @@ class GeminiWireTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
@@ -218,11 +190,7 @@ class GeminiWireTest {
         };
 
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request(),
-            descriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(handler));
+        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
     feedSse(accumulator, sse);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();

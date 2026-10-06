@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
@@ -73,11 +72,6 @@ public final class GeminiProviderAdapter implements ProviderAdapter {
   @Override
   public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
     return encoder.encode(request, descriptor).bodyUtf8Bytes();
-  }
-
-  /** Gemini 仅支持隐式 Prompt Cache（服务端自动评估并报告 cachedContentTokenCount，不发 cache hint）。 */
-  public PromptCacheCapability promptCacheCapability() {
-    return PromptCacheCapability.automatic();
   }
 
   @Override

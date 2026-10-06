@@ -17,7 +17,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -36,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -77,20 +75,6 @@ class GeminiStreamAccumulatorTest {
             new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
             new UUID(1L, 2L));
 
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
-
     ModelDescriptor model =
         new ModelDescriptor(
             "google-test",
@@ -98,8 +82,7 @@ class GeminiStreamAccumulatorTest {
             "gemini-2.5-flash",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
 
     ModelVariant variant = new ModelVariant("default");
     request =
@@ -119,12 +102,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证纯增量流中多次分片 text 正确合并，不丢失、不双计。 */
   @Test
   void handlesPureIncrementalTextStream() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk1 =
         """
@@ -174,8 +152,7 @@ class GeminiStreamAccumulatorTest {
   /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
   @Test
   void multiPartFramesKeepIndependentSlots() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
         """
@@ -196,8 +173,7 @@ class GeminiStreamAccumulatorTest {
   /** 测试意图：终态后禁止新 content 和第二个 finishReason，usage-only 空 candidates 仍可更新用量。 */
   @Test
   void terminalAllowsUsageOnlyAndRejectsLaterContent() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
         """
@@ -223,12 +199,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证全量快照重复流中，文本增量被正确提取去重，绝不重复拼接。 */
   @Test
   void handlesSnapshotRepetitiveTextStream_deduplicatesAccumulatedPrefix() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     // 服务端发出的每个 chunk 携带迄今为止的全部文本
     String chunk1 =
@@ -275,12 +246,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证带有 thought=true 的 part 正确发射 ThinkingDelta，并与后续正常文本分流。 */
   @Test
   void handlesThinkingParts_emitsThinkingDeltasSeparately() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk1 =
         """
@@ -325,12 +291,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证单次与并行工具调用被正确累加，生成稳定的 toolCall id 并发射 ToolCallDelta。 */
   @Test
   void handlesFunctionCallParts_singleAndParallel() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -384,12 +345,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证 MAX_TOKENS 导致 LENGTH 截断终态，且不生成 replayState（未闭合或截断无 replay）。 */
   @Test
   void handlesFinishReasonMaxTokens_resultsInLengthStopReasonWithoutReplay() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -411,12 +367,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证 SAFETY/RECITATION 等过滤原因映射为 FILTERED 终态，无 replayState。 */
   @Test
   void handlesSafetyFilterFinishReason_resultsInFilteredStopReasonWithoutReplay() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -442,12 +393,7 @@ class GeminiStreamAccumulatorTest {
   @Test
   void handlesEscalationFinishReason_resultsInFilteredStopReasonWithoutToolsOrReplay()
       throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -473,12 +419,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证 promptFeedback blockReason（输入提示词被拒绝且无 candidate）映射为 FILTERED。 */
   @Test
   void handlesPromptFeedbackBlockReason_resultsInFilteredStopReason() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -500,12 +441,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证 MALFORMED_FUNCTION_CALL 异常终态被转换为 ProviderException(INVALID_RESPONSE)。 */
   @Test
   void handlesMalformedFunctionCall_throwsInvalidResponse() {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -526,12 +462,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证流结束时没有合法 finishReason 或 promptFeedback 时，明确抛出 INVALID_RESPONSE（不以 HTTP 200/EOF 单独当成功）。 */
   @Test
   void rejectsStreamEndingWithoutTerminalFinishReason() {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -551,8 +482,7 @@ class GeminiStreamAccumulatorTest {
   @ParameterizedTest
   @ValueSource(strings = {"FINISH_REASON_UNSPECIFIED", "finish_reason_unspecified"})
   void unspecifiedFinishReasonPreservesTextUntilStop(String finishReason) throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
         """
@@ -587,8 +517,7 @@ class GeminiStreamAccumulatorTest {
   @ParameterizedTest
   @ValueSource(strings = {"FINISH_REASON_UNSPECIFIED", "finish_reason_unspecified"})
   void unspecifiedFinishReasonAtEofFailsWithoutAdditionalEvents(String finishReason) {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
         """
@@ -606,12 +535,7 @@ class GeminiStreamAccumulatorTest {
   /** 验证 usageMetadata 规范化映射到 ModelUsage，互斥非负，rawUsageJson 无损保留全部字段。 */
   @Test
   void normalizesUsageMetadata_promptOrdinaryAndCached_mutuallyExclusive() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -655,8 +579,7 @@ class GeminiStreamAccumulatorTest {
   /** 测试意图：全部已知计数均使用 long，且仅最新 usage 快照决定 normalized/raw/serviceTier。 */
   @Test
   void retainsLatestLargeUsageSnapshot() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message", "{\"usageMetadata\":{\"promptTokenCount\":1,\"serviceTier\":\"old\"}}");
     String latest =
@@ -685,7 +608,7 @@ class GeminiStreamAccumulatorTest {
   void rejectsMalformedKnownUsageValues() {
     for (String value : List.of("null", "\"bad\"", "[]")) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
       ProviderException error =
           assertThrows(
               ProviderException.class,
@@ -701,7 +624,7 @@ class GeminiStreamAccumulatorTest {
             "totalTokenCount")) {
       for (String value : List.of("null", "\"1\"", "1.5", "true", "-1", "9223372036854775808")) {
         GeminiStreamAccumulator accumulator =
-            new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+            new GeminiStreamAccumulator(request, descriptor, bridge);
         ProviderException error =
             assertThrows(
                 ProviderException.class,
@@ -713,7 +636,7 @@ class GeminiStreamAccumulatorTest {
     }
     for (String value : List.of("null", "\"  \"", "7", "false", "{}")) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
       ProviderException error =
           assertThrows(
               ProviderException.class,
@@ -727,8 +650,7 @@ class GeminiStreamAccumulatorTest {
   /** 测试意图：usageMetadata 缺失计数时归零，cached 超过 prompt 时普通输入归零，未出现 tier 不继承旧值。 */
   @Test
   void defaultsMissingUsageFieldsAndClampsCachedInput() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message", "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10}}");
     accumulator.handleEvent(
@@ -750,12 +672,7 @@ class GeminiStreamAccumulatorTest {
   /** 意图：验证显式合法的空对象参数 {} 正确保留在 toolCalls 与 replayState 中，不发生异常。 */
   @Test
   void test_validExplicitEmptyObjectFunctionCallArgs() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -799,12 +716,7 @@ class GeminiStreamAccumulatorTest {
   /** 意图：验证缺失 args 字段的 functionCall 严格抛出 INVALID_RESPONSE，绝不隐式合成 {}。 */
   @Test
   void test_missingFunctionCallArgsThrowsInvalidResponse() {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String chunk =
         """
@@ -836,11 +748,7 @@ class GeminiStreamAccumulatorTest {
 
     for (String invalidArgs : invalidArgsList) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(
-              request,
-              descriptor,
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
 
       String chunk =
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {\"name\": \"query\", \"args\": "
@@ -871,11 +779,7 @@ class GeminiStreamAccumulatorTest {
 
     for (String snippet : invalidNameSnippets) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(
-              request,
-              descriptor,
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
 
       String chunk =
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {"
@@ -900,11 +804,7 @@ class GeminiStreamAccumulatorTest {
 
     for (String snippet : invalidIdSnippets) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(
-              request,
-              descriptor,
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
 
       String chunk =
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": {"
@@ -918,11 +818,7 @@ class GeminiStreamAccumulatorTest {
 
     // 验证 id 为 null 时成功接收并合成 call_0
     GeminiStreamAccumulator validNullIdAcc =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+        new GeminiStreamAccumulator(request, descriptor, bridge);
     String validNullIdChunk =
         """
         {
@@ -954,11 +850,7 @@ class GeminiStreamAccumulatorTest {
 
     for (String nonObjectFc : nonObjectFcList) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(
-              request,
-              descriptor,
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
 
       String chunk =
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [{\"functionCall\": "
@@ -978,12 +870,7 @@ class GeminiStreamAccumulatorTest {
   /** 意图：未知官方 Part（inlineData/executableCode 等）整体保留进 replay payload，不再被静默丢弃或补成空 text。 */
   @Test
   void preservesUnknownPartsVerbatimInReplayState() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -1024,12 +911,7 @@ class GeminiStreamAccumulatorTest {
    */
   @Test
   void preservesUnknownPartFieldsVerbatimWithoutSpeculativeMerging() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -1100,12 +982,7 @@ class GeminiStreamAccumulatorTest {
    */
   @Test
   void keepsUnknownUnionPartsAsVerbatimBoundaries() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     String textAndUnknown =
         """
@@ -1149,12 +1026,7 @@ class GeminiStreamAccumulatorTest {
    */
   @Test
   void skipsReplayFreezingWhenTextAndFunctionCallConflictInOnePart() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -1185,11 +1057,7 @@ class GeminiStreamAccumulatorTest {
             "{ \"text\": \"think\", \"thoughtSignature\": 999 }");
     for (String part : malformedParts) {
       GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(
-              request,
-              descriptor,
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              bridge);
+          new GeminiStreamAccumulator(request, descriptor, bridge);
       String chunk =
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [" + part + "]}}]}";
 
@@ -1200,11 +1068,7 @@ class GeminiStreamAccumulatorTest {
     }
 
     GeminiStreamAccumulator valuelessKnownFieldAccumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+        new GeminiStreamAccumulator(request, descriptor, bridge);
     String valuelessFieldParts =
         """
         {"candidates": [{"content": {"role": "model", "parts": [
@@ -1238,12 +1102,7 @@ class GeminiStreamAccumulatorTest {
   /** 意图：同一 slot 的文本 part 在形状为超集且文本严格扩展时按完整累积形态整体替换（未知字段整体替换而非逐字段合并）， 形状不同的新 part 依旧按原顺序原样追加。 */
   @Test
   void replacesUnknownPartFieldsOnCumulativeSnapshot() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",
@@ -1291,12 +1150,7 @@ class GeminiStreamAccumulatorTest {
   /** 意图：已知 functionCall 以规范化累积结果写回 replay，同时保留 part 级未知字段。 */
   @Test
   void normalizesFunctionCallAndPreservesUnknownPartFields() throws Exception {
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            request,
-            descriptor,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            bridge);
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
         "message",

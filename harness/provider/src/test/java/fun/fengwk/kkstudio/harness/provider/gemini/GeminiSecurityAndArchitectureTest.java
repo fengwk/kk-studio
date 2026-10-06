@@ -12,9 +12,7 @@ import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -29,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -86,8 +83,7 @@ class GeminiSecurityAndArchitectureTest {
 
     GeminiEncodedRequest encoded =
         new GeminiEncodedRequest(
-            "{\"secret\":\"super_confidential\"}".getBytes(StandardCharsets.UTF_8),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+            "{\"secret\":\"super_confidential\"}".getBytes(StandardCharsets.UTF_8));
     assertFalse(encoded.toString().contains("secret"));
     assertFalse(encoded.toString().contains("super_confidential"));
   }
@@ -146,14 +142,13 @@ class GeminiSecurityAndArchitectureTest {
   }
 
   @Test
-  void reportsPromptCacheAutomaticCapability() {
+  void reportsProviderTypeAndStableToString() {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
     JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
-    assertEquals(PromptCacheCapability.automatic(), adapter.promptCacheCapability());
     assertEquals(ProviderType.GOOGLE, adapter.providerType());
     assertEquals("GeminiProviderAdapter[providerType=GOOGLE]", adapter.toString());
 
@@ -170,7 +165,6 @@ class GeminiSecurityAndArchitectureTest {
           GeminiModelProvider.class,
           GeminiRequestEncoder.class,
           GeminiStreamAccumulator.class,
-          GeminiPrefixHasher.class,
           GeminiEncodedRequest.class,
           GeminiErrorMapper.class
         };
@@ -185,27 +179,13 @@ class GeminiSecurityAndArchitectureTest {
   }
 
   private static ModelDescriptor dummyModel() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO);
     return new ModelDescriptor(
         "gemini-2.5-flash",
         "gemini-2.5-flash",
         "gemini-2.5-flash",
         Set.of(ModelInputModality.TEXT),
         true,
-        false,
-        pricing);
+        false);
   }
 
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
@@ -252,11 +232,7 @@ class GeminiSecurityAndArchitectureTest {
             new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)),
             UUID.randomUUID());
     GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(
-            req,
-            desc,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            new ProviderStreamBridge(noop));
+        new GeminiStreamAccumulator(req, desc, new ProviderStreamBridge(noop));
 
     ProviderException sseEx =
         assertThrows(
