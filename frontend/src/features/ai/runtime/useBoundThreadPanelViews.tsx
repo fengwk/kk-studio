@@ -1,4 +1,4 @@
-import { useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useI18n } from '@/shared/i18n'
 import '@/features/ai/runtime/thread-panel/debug-view-toolbar.css'
 import {
@@ -15,6 +15,12 @@ import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
 export interface BoundThreadPreviewOptions {
+  /**
+   * 本地视图身份：本地分支/新建草稿没有 API threadId（都传 ""），Debug 模式、滚动位置
+   * 与检查器选中必须按目标稳定字段区分，否则换绑到另一份草稿会复用上一份的 Debug 视图
+   * 与预览结果。缺省时回退到真实 threadId（已绑定 Thread 与只读查看的唯一身份）。
+   */
+  viewKey?: string
   onPreview?: () => void
   previewLoading?: boolean
   previewDisabled?: boolean
@@ -34,6 +40,8 @@ export function useBoundThreadPanelViews(
   previewOptions?: BoundThreadPreviewOptions,
 ) {
   const { t } = useI18n()
+  // 视图身份只用于本地视图状态（模式/滚动/选中）；API 调用仍只用真实 threadId。
+  const viewKey = previewOptions?.viewKey ?? threadId
   const {
     mode,
     switchMode: internalSwitchMode,
@@ -42,10 +50,20 @@ export function useBoundThreadPanelViews(
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
-  } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
+  } = useThreadPanelViewState(viewKey, controller.bodyRef, controller.events)
   const { debug } = useModelRequestDebug(threadId, mode === 'debug', controller.working)
   const historicalPreview = useHistoricalRequestPreview(controller.sessionId)
   const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
+
+  // 检查器选中与视图状态同属一个身份：身份变化时必须一起清空，否则会残留旧目标的预览。
+  const lastViewKeyRef = useRef(viewKey)
+  useEffect(() => {
+    if (lastViewKeyRef.current === viewKey) {
+      return
+    }
+    lastViewKeyRef.current = viewKey
+    setDebugSelection(null)
+  }, [viewKey])
 
   const switchMode = (nextMode: 'conversation' | 'debug') => {
     setDebugSelection(null)
