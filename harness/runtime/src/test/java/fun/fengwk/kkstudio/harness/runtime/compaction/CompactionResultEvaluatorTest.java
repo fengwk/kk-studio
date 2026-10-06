@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.time.Instant;
 import java.util.List;
@@ -71,12 +72,17 @@ class CompactionResultEvaluatorTest {
   void historySuccessProducesMinimalPayload() {
     EntryPath path = historyPath();
     CompactionStart start = ((TurnStartPayload) path.head().payload()).compaction();
+    ProviderResponse response = response("summary", GenerationStopReason.COMPLETE, List.of());
 
-    EntryPayload result =
-        CompactionResultEvaluator.evaluate(
-            path, start, response("summary", GenerationStopReason.COMPLETE, List.of()));
+    EntryPayload result = CompactionResultEvaluator.evaluate(path, start, response);
 
-    assertEquals(new CompactionPayload("summary"), result);
+    // 成功结果只存最小事实：摘要文本 + 该次真实模型调用的 provider 元数据（stopReason / usage / decodeDuration）。
+    CompactionPayload payload = assertInstanceOf(CompactionPayload.class, result);
+    assertEquals("summary", payload.summaryText());
+    assertEquals(
+        new AssistantMessageMetadata(
+            response.stopReason(), response.usage(), response.decodeDurationMillis()),
+        payload.assistantMetadata());
   }
 
   private static EntryPath historyPath() {

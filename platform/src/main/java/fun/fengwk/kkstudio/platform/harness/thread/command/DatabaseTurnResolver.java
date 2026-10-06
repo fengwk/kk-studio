@@ -17,10 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -69,6 +72,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.ToIntFunction;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
@@ -158,7 +162,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(path, compactionPreparation);
+        return resolveCompaction(compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       return resolved(plan(path, clock.instant()));
@@ -188,6 +192,33 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(now, "now");
     try {
       return plan(path, now);
+    } catch (Rejection rejection) {
+      return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
+    }
+  }
+
+  /**
+   * 历史模型输出的只读规划：请求前缀是 ROOT 到该输出的 parent。
+   *
+   * <p>非压缩输出与 live 共用同一 planner（环境宿主事实用显式 {@code now}）；压缩输出的请求头是 durable COMPACTION
+   * TURN_START，它不属于普通 live 路径，因此只按其冻结的 {@code executionModel} 解析 catalog，并直接使用该 TURN_START 冻结的实际
+   * {@code maxOutputTokens} 作为输出预算——绝不按当前 config 重算或猜测。缺少冻结预算时返回 typed 拒绝（稳定 {@value
+   * #REJECTION_CODE}），绝不拿默认值冒充历史事实。
+   */
+  public LiveTurnPlan planHistorical(UUID threadId, EntryPath path, Instant now) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(now, "now");
+    CompactionStart start = ModelRequestMaterializer.compactionStartAtHead(path);
+    if (start == null) {
+      return planLive(threadId, path, now);
+    }
+    try {
+      Integer maxOutputTokens = ((TurnStartPayload) path.head().payload()).maxOutputTokens();
+      if (maxOutputTokens == null) {
+        throw rejection("durable compaction turn start is missing the frozen maxOutputTokens");
+      }
+      return compactionPlan(start.executionModel(), parsedModel -> maxOutputTokens);
     } catch (Rejection rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
@@ -333,10 +364,38 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * 压缩 resolver 路径：只按 preparation 的 executionModel 查找 provider/model/variant 构造请求——不查 Agent system
    * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不启用 cache（{@code
-   * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec。
+   * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
+   * config 与 removedPrefixTokens 现算。
    */
-  private Result resolveCompaction(EntryPath path, CompactionPreparation preparation) {
-    ModelSelection selection = preparation.executionModel();
+  private Result resolveCompaction(CompactionPreparation preparation) {
+    LiveTurnPlan.Planned plan =
+        compactionPlan(
+            preparation.executionModel(),
+            parsedModel -> {
+              long budget =
+                  compactionConfigProvider
+                      .compactionConfig()
+                      .outputBudget(
+                          preparation.phase(),
+                          outputTokens(parsedModel),
+                          preparation.removedPrefixTokens());
+              if (budget <= 0 || budget > Integer.MAX_VALUE) {
+                throw rejection("compaction output budget must be a positive int, got " + budget);
+              }
+              return (int) budget;
+            });
+    return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
+  }
+
+  /**
+   * 压缩请求的共享模型 spec 组装：只按 {@code executionModel} 解析 provider/model/variant 与 contextWindow，工具与
+   * skills 为空、cache NONE、摘要 system prompt。切分事实不进入 spec。
+   *
+   * <p>输出预算由调用方按各自事实提供：正式执行按当前 config 与 removedPrefixTokens 现算，历史预览直接使用 durable TURN_START
+   * 冻结的实际预算，绝不猜测。
+   */
+  private LiveTurnPlan.Planned compactionPlan(
+      ModelSelection selection, ToIntFunction<ParsedAgentModelConfig> outputBudget) {
     AgentProvider provider =
         require(
             providerRepository.getByName(selection.providerName()),
@@ -372,16 +431,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
               + "/"
               + selection.modelName());
     }
-    long budget =
-        compactionConfigProvider
-            .compactionConfig()
-            .outputBudget(
-                preparation.phase(), outputTokens(parsedModel), preparation.removedPrefixTokens());
-    if (budget <= 0 || budget > Integer.MAX_VALUE) {
-      throw rejection("compaction output budget must be a positive int, got " + budget);
-    }
-    int maxOutput = (int) budget;
-    return new TurnResolver.Resolved(
+    return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             providerType,
             providerConnectionGenerationId,
@@ -393,13 +443,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 parsedModel.tools(),
                 parsedModel.reasoning()),
             variant,
-            maxOutput,
+            outputBudget.applyAsInt(parsedModel),
             CompactionPrompts.summarizationSystemPrompt(),
             List.of(),
             List.of(),
             ProviderCacheControl.none()),
         contextWindow(parsedModel),
-        maxOutput);
+        List.of(),
+        List.of());
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */

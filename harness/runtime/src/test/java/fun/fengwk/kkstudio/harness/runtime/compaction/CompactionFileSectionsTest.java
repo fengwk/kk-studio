@@ -362,7 +362,8 @@ class CompactionFileSectionsTest {
                       null)),
               BASE));
       entries.add(
-          new Entry(id(nextId++), SESSION_ID, parentId(), new CompactionPayload("summary"), BASE));
+          new Entry(
+              id(nextId++), SESSION_ID, parentId(), new CompactionPayload("summary", null), BASE));
       long endId = nextId++;
       entries.add(
           new Entry(

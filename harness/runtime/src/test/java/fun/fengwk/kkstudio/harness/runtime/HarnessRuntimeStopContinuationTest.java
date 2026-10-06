@@ -180,7 +180,7 @@ class HarnessRuntimeStopContinuationTest {
                       historyResultId,
                       sessionId,
                       historyStartId,
-                      new CompactionPayload("history summary"),
+                      new CompactionPayload("history summary", null),
                       T5));
               tx.insertEntry(
                   new Entry(

@@ -43,7 +43,8 @@ public record ModelCost(
    * 纯计算：每个分项独立计算 {@code price * tokens * serviceTierMultiplier / 1_000_000}，全链路使用精确 {@link
    * BigDecimal} 除法（除数是 10 的幂，商必然终止），不做任何分项舍入；{@code total} 是六个精确分项之和。
    *
-   * <p>先求和后舍入由调用方（读取投影）负责，微费用不会在分项被截断为 0；构造时 {@code total == sum(categories)} 始终成立。
+   * <p>本方法只做精确计算，不做任何定标或舍入：微费用不会在分项被截断为 0；构造时 {@code total == sum(categories)} 始终成立。最终展示 格式（例如最多保留
+   * 6 位小数）由展示层在完成累加后统一决定，计算与读取投影都不引入定标。
    */
   public static ModelCost calculate(ModelPricing pricing, ModelUsage usage) {
     Objects.requireNonNull(pricing, "pricing");

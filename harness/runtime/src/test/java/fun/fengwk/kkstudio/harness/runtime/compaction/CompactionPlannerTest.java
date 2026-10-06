@@ -850,7 +850,8 @@ class CompactionPlannerTest {
                   TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, start),
               BASE));
       entries.add(
-          new Entry(id(nextId++), id(100L), parentId(), new CompactionPayload(summary), BASE));
+          new Entry(
+              id(nextId++), id(100L), parentId(), new CompactionPayload(summary, null), BASE));
       long endId = nextId++;
       boolean continueModel =
           start.phase() == CompactionPhase.HISTORY || start.trigger() == CompactionTrigger.OVERFLOW;

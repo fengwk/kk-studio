@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -50,8 +51,8 @@ import java.util.UUID;
 /**
  * 读取时费用投影契约：按每个 ASSISTANT 结果<b>祖先</b>记录的真实型号取<b>当前</b> catalog 价格并现算，且整次投影只读。
  *
- * <p>测试固定三件容易被后续实现悄悄弄错的事实：模型中途切换时逐条按各自当时的型号计价；无法定价（模型已删除或定义损坏）绝不伪装成 0
- * 费用；每个出现过的模型在一次投影里至多查一次 catalog。
+ * <p>测试固定三件容易被后续实现悄悄弄错的事实：模型中途切换时逐条按各自当时的型号计价；无法定价（模型已删除或定义损坏）绝不伪装成 0 费用；每个出现过的模型在一次投影里至多查一次
+ * catalog。
  */
 class UsageCostProjectionServiceTest {
 
@@ -74,8 +75,8 @@ class UsageCostProjectionServiceTest {
       new UsageCostProjectionService(modelRepository, configParser);
 
   /**
-   * 测试意图：同一 Session 内模型切换时，每条 Assistant 结果都按自己所在 Turn 记录的型号与当前价格计价——证明解析来自祖先快照而不是
-   * 「当前 branch settings」或最后一条消息。
+   * 测试意图：同一 Session 内模型切换时，每条 Assistant 结果都按自己所在 Turn 记录的型号与当前价格计价——证明解析来自祖先快照而不是 「当前 branch
+   * settings」或最后一条消息。
    */
   @Test
   void projectsEachAssistantAgainstItsOwnTurnModelWithCurrentPrices() {
@@ -94,17 +95,23 @@ class UsageCostProjectionServiceTest {
                 root(settings("provider-a", "model-a")),
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
-                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 1_000_000, 1_000_000, 0, 0, 0, 3_000_000)),
+                assistant(
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    new ModelUsage(1_000_000, 1_000_000, 1_000_000, 0, 0, 0, 3_000_000)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
-                assistant(ASSISTANT_B_ID, USER_B_ID, new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
+                assistant(
+                    ASSISTANT_B_ID,
+                    USER_B_ID,
+                    new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
 
     HarnessUsageCostDTO costA = costs.get(ASSISTANT_A_ID);
     assertEquals("USD", costA.getCurrency());
-    assertEquals("18.300000000000", costA.getAmount());
+    assertEquals("18.3", costA.getAmount());
     HarnessUsageCostDTO costB = costs.get(ASSISTANT_B_ID);
     assertEquals("USD", costB.getCurrency());
-    assertEquals("2.000000000000", costB.getAmount());
+    assertEquals("2", costB.getAmount());
 
     // 只有记录了模型用量的 ASSISTANT 结果才有投影；控制 Entry 与用户消息一律缺席。
     assertEquals(2, costs.size());
@@ -131,12 +138,16 @@ class UsageCostProjectionServiceTest {
                 root(settings("provider-a", "model-a")),
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
-                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                assistant(
+                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
-                assistant(ASSISTANT_B_ID, USER_B_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                assistant(
+                    ASSISTANT_B_ID,
+                    USER_B_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
 
-    assertEquals("1.000000000000", costs.get(ASSISTANT_A_ID).getAmount());
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     assertNull(costs.get(ASSISTANT_B_ID));
     assertEquals(1, costs.size());
   }
@@ -148,7 +159,8 @@ class UsageCostProjectionServiceTest {
   @Test
   void pricesCompactionCallsWithTheRecordedExecutionModel() {
     // 用户所选 model-a 与压缩实际所用的 model-b 价格明显不同，任何误用 settings.model 都会立刻改变金额。
-    stubModel("provider-a", "model-a", pricing(new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO));
+    stubModel(
+        "provider-a", "model-a", pricing(new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO));
     stubModel("provider-b", "model-b", pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO));
 
     Map<UUID, HarnessUsageCostDTO> costs =
@@ -156,9 +168,38 @@ class UsageCostProjectionServiceTest {
             List.of(
                 root(settings("provider-a", "model-a")),
                 compactionTurnStart(TURN_A_ID, ROOT_ID),
-                assistant(ASSISTANT_A_ID, TURN_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                assistant(
+                    ASSISTANT_A_ID,
+                    TURN_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
 
-    assertEquals("1.000000000000", costs.get(ASSISTANT_A_ID).getAmount());
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
+    verifyNoMoreInteractions(modelRepository);
+  }
+
+  /**
+   * 测试意图：压缩结果本身是真实模型输出，其 canonical metadata 的用量同样按 executionModel 计价；纯摘要（无 metadata）绝不 伪装成 0
+   * 用量而进入投影。
+   */
+  @Test
+  void pricesCompactionResultMetadataWithTheRecordedExecutionModel() {
+    stubModel(
+        "provider-a", "model-a", pricing(new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO));
+    stubModel("provider-b", "model-b", pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO));
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("provider-a", "model-a")),
+                compactionTurnStart(TURN_A_ID, ROOT_ID),
+                compactionResult(
+                    ASSISTANT_A_ID, TURN_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                compactionResult(ASSISTANT_B_ID, ASSISTANT_A_ID, null)));
+
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    assertNull(costs.get(ASSISTANT_B_ID));
+    assertEquals(1, costs.size());
     verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
     verifyNoMoreInteractions(modelRepository);
   }
@@ -174,14 +215,15 @@ class UsageCostProjectionServiceTest {
             List.of(
                 root(settings("provider-a", "model-a")),
                 user(USER_A_ID, ROOT_ID),
-                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                assistant(
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
 
-    assertEquals("1.000000000000", costs.get(ASSISTANT_A_ID).getAmount());
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
   }
 
-  /**
-   * 测试意图：同一模型的多条结果共用一次 catalog 读取——整棵 Entry tree 的投影成本与消息数无关，绝不能逐消息请求。
-   */
+  /** 测试意图：同一模型的多条结果共用一次 catalog 读取——整棵 Entry tree 的投影成本与消息数无关，绝不能逐消息请求。 */
   @Test
   void readsEachModelAtMostOncePerProjection() {
     stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
@@ -192,14 +234,43 @@ class UsageCostProjectionServiceTest {
                 root(settings("provider-a", "model-a")),
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
-                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                assistant(
+                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
                 user(USER_B_ID, ASSISTANT_A_ID),
-                assistant(ASSISTANT_B_ID, USER_B_ID, new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
+                assistant(
+                    ASSISTANT_B_ID,
+                    USER_B_ID,
+                    new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
 
-    assertEquals("1.000000000000", costs.get(ASSISTANT_A_ID).getAmount());
-    assertEquals("2.000000000000", costs.get(ASSISTANT_B_ID).getAmount());
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    assertEquals("2", costs.get(ASSISTANT_B_ID).getAmount());
     verify(modelRepository, times(1)).getByProviderNameAndName("provider-a", "model-a");
     verifyNoMoreInteractions(modelRepository);
+  }
+
+  /**
+   * 测试意图：投影只做精确十进制求和，绝不在读取侧定标或舍入；远小于 {@code 1e-12} 的微成本必须原样保留，不能被截断成 0 或补零成固定 小数位。展示层的最终定标（如最多 6
+   * 位小数）由调用方在累加后决定。
+   */
+  @Test
+  void preservesSubPicocentAmountsWithoutReadTimeRounding() {
+    stubModel(
+        "provider-a",
+        "model-a",
+        pricing(new BigDecimal("0.0000001"), BigDecimal.ZERO, BigDecimal.ZERO));
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("provider-a", "model-a")),
+                turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
+                user(USER_A_ID, TURN_A_ID),
+                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, 0, 0, 1))));
+
+    String amount = costs.get(ASSISTANT_A_ID).getAmount();
+    // 单价 1e-7 × 1 token ÷ 1e6 = 1e-13，精确文本必须保留全部有效位。
+    assertEquals("0.0000000000001", amount);
+    assertTrue(new BigDecimal(amount).signum() > 0, amount);
   }
 
   /** 测试意图：祖先链不在入参里说明 durable 树已损坏，必须失败而不是拿错误的型号计价。 */
@@ -208,7 +279,9 @@ class UsageCostProjectionServiceTest {
     stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
 
     List<Entry> orphaned =
-        List.of(user(USER_A_ID, ROOT_ID), assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, 0, 0, 1)));
+        List.of(
+            user(USER_A_ID, ROOT_ID),
+            assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, 0, 0, 1)));
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> service.project(orphaned));
@@ -229,7 +302,8 @@ class UsageCostProjectionServiceTest {
             root(settings("provider-a", "model-a")),
             turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
             user(USER_A_ID, TURN_A_ID),
-            assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)));
+            assistant(
+                ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)));
 
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> service.project(entries));
@@ -290,7 +364,7 @@ class UsageCostProjectionServiceTest {
   }
 
   private static Entry root(BranchSettings settings) {
-    return new Entry(SESSION_ID, ROOT_ID, null, new RootPayload(settings), NOW);
+    return new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(settings), NOW);
   }
 
   /** COMPACTION Turn：settings 仍是用户所选 model，实际调用型号冻结在 compaction.executionModel。 */
@@ -345,6 +419,20 @@ class UsageCostProjectionServiceTest {
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
             new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null),
             null),
+        NOW);
+  }
+
+  /** COMPACTION 结果 Entry：真实模型输出携带 canonical metadata；纯摘要 usage 为 null。 */
+  private static Entry compactionResult(UUID id, UUID parentEntryId, ModelUsage usage) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentEntryId,
+        new CompactionPayload(
+            "compacted summary",
+            usage == null
+                ? null
+                : new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null)),
         NOW);
   }
 }
