@@ -1024,7 +1024,9 @@ export function useRootThreadControl({
     const isCurrentDraftPreview = () => isMountedRef.current
       && previewRequestIdRef.current === requestId
       && samePaneTarget(targetRef.current, frozenTarget)
-      && partsKey(trimMessageParts(controllerRef.current.draft)) === requestPartsKey
+      && partsKey(trimMessageParts(partsRef.current)) === requestPartsKey
+      && localDraftRef.current != null
+      && branchDraftsEqual(localDraftRef.current, frozenBranchDraft)
     try {
       const frozen = buildAcceptanceRequest({
         owner,
@@ -1263,7 +1265,9 @@ export function useRootThreadControl({
         }
         return
       case 'debug':
-        if (isBoundTarget(target)) {
+        // 已绑定 Thread 与本地分支草稿都从各自的 Debug 视图退出/进入：草稿没有绑定
+        // Thread，但 Debug 预览走会话级 branch preview（绝不为此创建 Thread）。
+        if (isBoundTarget(target) || isNewThreadTarget(target)) {
           boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug')
         }
         return

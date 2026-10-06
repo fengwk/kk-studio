@@ -105,7 +105,9 @@ export function RootAgentPane({
   const boundThreadName = pane.boundBranchName
 
   // Debug 主视图接管主滚动区时，输入/审批/分支控制面整体隐藏（保持挂载以保留草稿与绑定）。
-  const debugActive = pane.target.kind === 'BOUND_THREAD' && pane.boundViews.mode === 'debug'
+  // 已绑定 Thread 与本地分支草稿共用同一份视图状态：草稿没有绑定 Thread，但 Debug
+  // 预览走会话级 branch preview，因此同样以整 pane 覆盖的方式展示。
+  const debugActive = pane.boundViews.mode === 'debug'
 
   const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
   const boundWorkingLabel = boundStatus === 'QUEUED'
@@ -166,13 +168,16 @@ export function RootAgentPane({
           bodyRef: pane.controller.bodyRef,
           loading: false,
           error: null,
+          initialScrollTop: pane.boundViews.initialConversationScrollTop,
         }}
+        mainView={pane.boundViews.mainView}
         controls={(
           <RootThreadControlArea
             rootThreadId={null}
             composer={composer}
             messages={[]}
             queuedMessages={[]}
+            hidden={debugActive}
           />
         )}
         activity={{

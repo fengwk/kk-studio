@@ -1,6 +1,7 @@
 import { Coins, GitBranch } from 'lucide-react'
 import type { MetaDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { useEntryBranchRequest } from '@/features/ai/runtime/thread-panel/entry-branch-context'
+import { formatUsageDetails } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import { useI18n } from '@/shared/i18n'
 
 /**
@@ -10,12 +11,16 @@ import { useI18n } from '@/shared/i18n'
  * 即使没有 usage 文本，也必须展示结束信息与「从此处分支」入口。入口走会话里唯一的
  * 分支 Context（由根控制面注入，与 `/tree` 共用同一条命名/目标流程）；
  * 无该能力时（只读子代理视图、非 Chat 宿主、分支禁用）不渲染按钮，绝不在此自造流程。
+ *
+ * 截断的可见摘要由 `message.text` 承载；hover 明细直接由该回合的真实 `turnUsage`
+ * 事实生成完整数字与全称字段（与 Footer 共用同一格式化），不再复述紧凑缩写图例；
+ * 没有 usage 事实时不生成任何读数。
  */
 export function MetaMessageBlock({ message }: { message: MetaDialogueMessage }) {
   const { t } = useI18n()
   const requestBranch = useEntryBranchRequest()
-  const title = message.kind === 'turn_usage' && message.text
-    ? `${message.text}\n${t('ai.runtime.usage.metaTooltip')}`
+  const title = message.turnUsage != null
+    ? formatUsageDetails(message.turnUsage, t)
     : undefined
   const endEntryId = message.endEntryId ?? null
   const canBranch = endEntryId != null && requestBranch != null

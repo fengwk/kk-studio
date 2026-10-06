@@ -79,6 +79,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'tree',
     'new',
     'upload',
+    'debug',
     'shortcuts',
     'rename-session',
     'goal',

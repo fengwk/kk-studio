@@ -26,7 +26,44 @@ function chat() {
   }
 }
 
-function entries() {
+function entries(options: { usage?: boolean } = {}) {
+  if (options.usage) {
+    // 已关闭回合的真实 usage 事实：ASSISTANT 的 assistantMetadata + 读取投影 usageCost，
+    // 后面紧跟 TURN_END，使 conversation 渲染出带 turnUsage 的回合 footer。
+    return [
+      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: '2026-10-01T00:00:00Z' },
+      {
+        entryId: 'entry-assistant',
+        sessionId: SESSION_ID,
+        parentEntryId: 'entry-1',
+        entryType: 'MESSAGE',
+        payloadJson: JSON.stringify({
+          message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
+          assistantMetadata: {
+            usage: {
+              inputTokens: 1200,
+              outputTokens: 340,
+              reasoningTokens: 7,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              providerTotalTokens: 1547,
+            },
+            decodeDurationMillis: 1000,
+          },
+        }),
+        usageCost: { currency: 'USD', amount: '0.0012' },
+        createTime: '2026-10-01T00:01:00Z',
+      },
+      {
+        entryId: 'entry-turn',
+        sessionId: SESSION_ID,
+        parentEntryId: 'entry-assistant',
+        entryType: 'TURN_END',
+        payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
+        createTime: '2026-10-01T00:02:00Z',
+      },
+    ]
+  }
   return [
     { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: '{}', createTime: '2026-10-01T00:00:00Z' },
     { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: '2026-10-01T00:01:00Z' },
@@ -41,12 +78,12 @@ function entries() {
   ]
 }
 
-function thread() {
+function thread(headEntryId = 'entry-3') {
   return {
     name: 'thread-name',
     threadId: THREAD_ID,
     sessionId: SESSION_ID,
-    headEntryId: 'entry-3',
+    headEntryId,
     parentThreadId: null,
     yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
     nextCommandSequence: '1',
@@ -64,8 +101,18 @@ function thread() {
   }
 }
 
-async function installChatApi(page: Page): Promise<{ commandBatches: unknown[] }> {
-  const recorded = { commandBatches: [] as unknown[] }
+interface Recorded {
+  commandBatches: unknown[]
+  branchPreviews: Array<{ startEntryId: string; commands: Array<Record<string, unknown>> }>
+}
+
+async function installChatApi(
+  page: Page,
+  options: { usageEntries?: boolean } = {},
+): Promise<Recorded> {
+  const entryList = entries({ usage: options.usageEntries })
+  const boundThread = thread(options.usageEntries ? 'entry-turn' : 'entry-3')
+  const recorded: Recorded = { commandBatches: [], branchPreviews: [] }
   await page.routeWebSocket(/\/api\/.*events/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request()
@@ -148,7 +195,30 @@ async function installChatApi(page: Page): Promise<{ commandBatches: unknown[] }
       return
     }
     if (path === `/api/harness/sessions/${SESSION_ID}/entries`) {
-      await route.fulfill({ json: { status: 200, data: entries() } })
+      await route.fulfill({ json: { status: 200, data: entryList } })
+      return
+    }
+    if (path === `/api/harness/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
+      // 本地分支草稿预检：只读会话前缀 + 命令，回包是最终请求体预览。
+      const body = request.postDataJSON() as {
+        startEntryId: string
+        commands: Array<Record<string, unknown>>
+      }
+      recorded.branchPreviews.push(body)
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            kind: 'DRAFT_REQUEST_PREVIEW',
+            providerType: 'openai-compatible',
+            modelName: 'MiniMax',
+            bodyByteSize: 128,
+            bodyJson: JSON.stringify({ model: 'MiniMax', draft: 'branch draft preview' }, null, 2),
+            sourceHeadEntryId: body.startEntryId,
+            generatedAt: '2026-10-01T00:03:00Z',
+          },
+        },
+      })
       return
     }
     if (path === `/api/harness/threads/${THREAD_ID}`) {
@@ -157,8 +227,8 @@ async function installChatApi(page: Page): Promise<{ commandBatches: unknown[] }
           status: 200,
           data: {
             version: '0',
-            thread: thread(),
-            entries: entries(),
+            thread: boundThread,
+            entries: entryList,
             queuedCommands: [],
             modelInvocation: null,
             toolInvocations: [],
@@ -176,7 +246,7 @@ async function installChatApi(page: Page): Promise<{ commandBatches: unknown[] }
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
       recorded.commandBatches.push(request.postDataJSON())
-      await route.fulfill({ json: { status: 200, data: { accepted: true, thread: thread() } } })
+      await route.fulfill({ json: { status: 200, data: { accepted: true, thread: boundThread } } })
       return
     }
     if (path === '/api/interactions') {
@@ -222,6 +292,101 @@ async function bindFirstPaneToThread(page: Page) {
     }))
   }, { chatId: CHAT_ID, threadId: THREAD_ID })
 }
+
+/** 单 pane 的本地分支草稿目标：会话与分叉点已定，Thread 尚未创建。 */
+async function bindFirstPaneToBranchDraft(page: Page, startEntryId: string) {
+  await page.addInitScript(({ chatId, sessionId, startEntry }) => {
+    window.localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`,
+      JSON.stringify({
+        kind: 'NEW_THREAD_DRAFT',
+        sessionId,
+        startEntryId: startEntry,
+        threadName: 'browser-draft',
+      }),
+    )
+    window.localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
+      layout: 'single',
+      focusedPaneId: 'pane-1',
+      panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
+    }))
+  }, { chatId: CHAT_ID, sessionId: SESSION_ID, startEntry: startEntryId })
+}
+
+/**
+ * 本地分支草稿的 Debug 预检：整 pane 只读覆盖 + 会话级 preview + 可见退出，
+ * 且绝不为了预览创建 Thread。这里验证 jsdom 无法证明的真实布局与真实 display:none。
+ */
+test('the local branch draft Debug previews through the session endpoint without creating a Thread', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 820 })
+  const recorded = await installChatApi(page)
+  await bindFirstPaneToBranchDraft(page, 'entry-2')
+  await page.goto(HARNESS_URL)
+
+  // 真实用户路径：斜杠命令只在空草稿生效，所以先写草稿、再从命令表进入 Debug。
+  const composer = page.getByLabel('给 AI 发送消息').first()
+  await composer.click()
+  await composer.pressSequentially('branch draft preview')
+  await page.getByRole('button', { name: '打开命令表' }).click()
+  const palette = page.locator('.thread-command-palette')
+  await expect(palette).toBeVisible()
+  await palette.getByRole('option', { name: /debug/ }).click()
+  await expect(page.getByRole('listbox', { name: '事件' })).toBeVisible()
+
+  // 整 pane 只读覆盖：控制区保持挂载但真实 display:none，退出入口可见，草稿原样保留。
+  const controlArea = page.locator('.thread-control-area').first()
+  await expect(controlArea).toBeHidden()
+  expect(await controlArea.evaluate((el) => window.getComputedStyle(el).display)).toBe('none')
+  const back = page.locator('.thread-debug-back')
+  await expect(back).toBeVisible()
+  await expect(composer).toContainText('branch draft preview')
+
+  await page.locator('.thread-debug-preview').click()
+  await expect.poll(() => recorded.branchPreviews.length).toBe(1)
+  expect(recorded.branchPreviews[0]?.startEntryId).toBe('entry-2')
+  expect(recorded.branchPreviews[0]?.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+  // 预览是纯读取：没有创建 Thread、没有提交任何批次。
+  expect(recorded.commandBatches).toEqual([])
+
+  // 窄 pane 下详情页签自动接管并渲染最终请求体。
+  await expect(page.getByTestId('preview-request-body')).toBeVisible()
+  await expect(page.getByText('DRAFT_REQUEST_PREVIEW')).toBeVisible()
+  await page.screenshot({ path: '../reports/pane-shots/branch-draft-debug-narrow.png' })
+
+  await back.click()
+  await expect(page.getByRole('listbox', { name: '事件' })).toHaveCount(0)
+  await expect(controlArea).toBeVisible()
+  await expect(page.getByLabel('给 AI 发送消息').first()).toContainText('branch draft preview')
+  const target = await page.evaluate(({ chatId }) =>
+    window.localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`), { chatId: CHAT_ID })
+  expect(target).toContain('NEW_THREAD_DRAFT')
+  expect(recorded.commandBatches).toEqual([])
+})
+
+/**
+ * per-turn hover 真实读数：由该回合的真实 usage 事实生成完整数字与全称字段，
+ * 不再复述可见的紧凑缩写图例（真实浏览器里读取 title 属性）。
+ */
+test('the turn footer hover readout uses full usage facts instead of the compact legend', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 720, height: 820 })
+  await installChatApi(page, { usageEntries: true })
+  await bindFirstPaneToThread(page)
+  await page.goto(HARNESS_URL)
+
+  const metaText = page.locator('.thread-meta-text').first()
+  await expect(metaText).toBeVisible()
+  const title = (await metaText.getAttribute('title')) ?? ''
+  expect(title).toContain('1200 tokens')
+  expect(title).toContain('340 tokens')
+  expect(title).toContain('7 tokens')
+  expect(title).not.toContain('↑')
+  expect(title.split('\n')).toHaveLength(3)
+  await page.screenshot({ path: '../reports/pane-shots/turn-footer-hover-narrow.png' })
+})
 
 test.describe('新建分支命名与目标路由（真实浏览器）', () => {
   test('routes the /tree fork into a hidden pane, reveals it in the real grid and never pre-creates a Thread', async ({

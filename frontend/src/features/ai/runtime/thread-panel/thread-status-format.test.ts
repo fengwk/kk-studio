@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildThreadStatusModel,
   formatThreadStatusLabel,
+  formatUsageDetails,
   type TranslateFn,
 } from '@/features/ai/runtime/thread-panel/thread-status-format'
 import type { UsageCost } from '@/features/ai/runtime/thread-timeline-types'
@@ -130,5 +131,42 @@ describe('thread status formatting', () => {
 
     expect(usage?.text).toBe('↑0 · ↓0 · — · cache — · — tok/s')
     expect(usage?.title).toContain('估算费用：暂无数据；缓存命中率：暂无数据；生成速度：暂无数据')
+  })
+})
+
+/** 单回合 hover 与 Footer 累计共用同一份详情格式化，必须逐字一致。 */
+describe('turn usage details', () => {
+  const usage = {
+    input: 1200,
+    output: 340,
+    cacheRead: 0,
+    cacheWrite: 0,
+    reasoning: 7,
+    providerTotal: 1547,
+    cost: { currency: 'USD', amount: '0.001200000000' } as UsageCost,
+    decodeTokens: 347,
+    decodeDurationMillis: 1000,
+  }
+
+  it('reads out full numbers and long field names without the compact legend', () => {
+    const title = formatUsageDetails(usage, t)
+
+    expect(title.split('\n')).toEqual([
+      '无缓存输入：1200 tokens；输出：340 tokens；推理：7 tokens',
+      '缓存读取：0 tokens；缓存写入：0 tokens',
+      '估算费用：$0.0012；缓存命中率：0%；生成速度：347 tok/s',
+    ])
+    // 紧凑图例（↑↓R W $ cache tok/s）不参与 hover 读数。
+    expect(title).not.toContain('↑')
+  })
+
+  it('marks absent cost and speed samples as no-data instead of zero', () => {
+    const title = formatUsageDetails(
+      { ...usage, cost: null, decodeTokens: 0, decodeDurationMillis: 0 },
+      t,
+    )
+
+    expect(title).toContain('估算费用：暂无数据；缓存命中率：0%；生成速度：暂无数据')
+    expect(title).not.toContain('$0')
   })
 })

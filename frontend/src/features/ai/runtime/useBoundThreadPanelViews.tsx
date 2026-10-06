@@ -64,6 +64,18 @@ export function useBoundThreadPanelViews(
     selectedEventId == null
       ? null
       : (controller.events.find((event) => event.id === selectedEventId) ?? null)
+  // 本地分支草稿没有可读取的 per-thread Debug 投影，预览入口因此不在请求预览面板里；
+  // 由 Debug 工具条提供与绑定 Thread 同名的「下一次请求预览」触发点，走同一份
+  // previewOptions（会话级 branch preview，不创建 Thread）。绑定 Thread 仍只由面板内的
+  // 标题按钮触发，避免出现两个入口。
+  const draftPreviewTrigger = threadId === '' && previewOptions?.onPreview != null
+  const previewTitle = t('ai.runtime.debug.previewTitle')
+  const previewDisabledReason = previewOptions?.previewDisabledReason ?? null
+  const previewTriggerLabel = previewOptions?.previewLoading
+    ? t('ai.runtime.composer.previewLoading')
+    : previewDisabledReason
+      ? `${previewTitle} (${previewDisabledReason})`
+      : previewTitle
   const mainView: ThreadPanelMainView = {
     debug:
       mode === 'debug' ? (
@@ -77,6 +89,22 @@ export function useBoundThreadPanelViews(
             >
               {t('ai.runtime.debug.backToConversation')}
             </button>
+            {draftPreviewTrigger ? (
+              <button
+                type="button"
+                className="ghost-btn thread-debug-preview"
+                disabled={
+                  previewOptions?.previewDisabled
+                  || previewOptions?.previewLoading
+                  || previewOptions?.onPreview == null
+                }
+                aria-label={previewTriggerLabel}
+                title={previewTriggerLabel}
+                onClick={() => previewOptions?.onPreview?.()}
+              >
+                <span>{previewTitle}</span>
+              </button>
+            ) : null}
           </div>
           <ThreadEventView
             events={controller.events}
