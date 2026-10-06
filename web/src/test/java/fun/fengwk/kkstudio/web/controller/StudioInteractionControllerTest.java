@@ -78,6 +78,7 @@ class StudioInteractionControllerTest {
     item.setStatus("WAITING_INPUT");
     item.setThreadId(idText(2));
     item.setSessionId(idText(3));
+    item.setRootThreadId(idText(5));
     InteractionOwnerDTO owner = new InteractionOwnerDTO();
     owner.setType("CHAT");
     owner.setChatId(idText(4));
@@ -88,7 +89,7 @@ class StudioInteractionControllerTest {
     item.setCreateTime(Instant.parse("2026-03-01T10:00:00Z"));
     page.setItems(List.of(item));
 
-    when(interactionQueryService.listInteractions(null, 50)).thenReturn(page);
+    when(interactionQueryService.listInteractions(null, null, 50)).thenReturn(page);
 
     mockMvc
         .perform(get("/api/interactions"))
@@ -97,6 +98,7 @@ class StudioInteractionControllerTest {
         .andExpect(jsonPath("$.data.items[0].status").value("WAITING_INPUT"))
         .andExpect(jsonPath("$.data.items[0].threadId").value(idText(2)))
         .andExpect(jsonPath("$.data.items[0].sessionId").value(idText(3)))
+        .andExpect(jsonPath("$.data.items[0].rootThreadId").value(idText(5)))
         .andExpect(jsonPath("$.data.items[0].owner.type").value("CHAT"))
         .andExpect(jsonPath("$.data.items[0].owner.chatId").value(idText(4)))
         .andExpect(jsonPath("$.data.items[0].toolCallId").value("call-1"))
@@ -104,7 +106,7 @@ class StudioInteractionControllerTest {
         .andExpect(jsonPath("$.data.items[0].argumentsJson").value("{\"questions\":[]}"))
         .andExpect(jsonPath("$.data.nextCursor").value("1000:" + idText(1)));
 
-    verify(interactionQueryService).listInteractions(null, 50);
+    verify(interactionQueryService).listInteractions(null, null, 50);
   }
 
   /** 测试意图：验证 GET /api/interactions 显式传递有效 cursor 与 limit 时，参数正确透传给查询服务。 */
@@ -115,27 +117,53 @@ class StudioInteractionControllerTest {
     page.setNextCursor(null);
     page.setItems(List.of());
 
-    when(interactionQueryService.listInteractions(cursor, 20)).thenReturn(page);
+    when(interactionQueryService.listInteractions(null, cursor, 20)).thenReturn(page);
 
     mockMvc
         .perform(get("/api/interactions").param("cursor", cursor).param("limit", "20"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.items").isEmpty());
 
-    verify(interactionQueryService).listInteractions(cursor, 20);
+    verify(interactionQueryService).listInteractions(null, cursor, 20);
+  }
+
+  /** 测试意图：验证显式 rootThreadId 以 canonical UUID 传给查询服务，服务端据此按执行根过滤。 */
+  @Test
+  void listInteractionsPassesCanonicalRootThreadIdToQueryService() throws Exception {
+    String rootThreadId = idText(7);
+    when(interactionQueryService.listInteractions(id(7), null, 50))
+        .thenReturn(new InteractionPageDTO());
+
+    mockMvc
+        .perform(get("/api/interactions").param("rootThreadId", rootThreadId))
+        .andExpect(status().isOk());
+
+    verify(interactionQueryService).listInteractions(id(7), null, 50);
+  }
+
+  /** 测试意图：非 canonical 的 rootThreadId 在触达查询服务前以 400 拒绝。 */
+  @Test
+  void listInteractionsRejectsNonCanonicalRootThreadId() throws Exception {
+    mockMvc
+        .perform(get("/api/interactions").param("rootThreadId", "not-a-uuid"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(interactionQueryService);
   }
 
   /** 测试意图：验证 limit 的合法边界值 1 与 100 均能正常被接收与解析。 */
   @Test
   void listInteractionsAcceptsBoundaryLimits() throws Exception {
-    when(interactionQueryService.listInteractions(null, 1)).thenReturn(new InteractionPageDTO());
-    when(interactionQueryService.listInteractions(null, 100)).thenReturn(new InteractionPageDTO());
+    when(interactionQueryService.listInteractions(null, null, 1))
+        .thenReturn(new InteractionPageDTO());
+    when(interactionQueryService.listInteractions(null, null, 100))
+        .thenReturn(new InteractionPageDTO());
 
     mockMvc.perform(get("/api/interactions").param("limit", "1")).andExpect(status().isOk());
-    verify(interactionQueryService).listInteractions(null, 1);
+    verify(interactionQueryService).listInteractions(null, null, 1);
 
     mockMvc.perform(get("/api/interactions").param("limit", "100")).andExpect(status().isOk());
-    verify(interactionQueryService).listInteractions(null, 100);
+    verify(interactionQueryService).listInteractions(null, null, 100);
   }
 
   /** 测试意图：验证 limit 超出 [1, 100] 范围或非十进制整数时返回 400，且不调用查询服务。 */
@@ -155,7 +183,7 @@ class StudioInteractionControllerTest {
   /** 测试意图：验证非法形状的 cursor 导致 InteractionQueryService 抛出 IllegalArgumentException 时被翻译为 400。 */
   @Test
   void listInteractionsTranslatesMalformedCursorToBadRequest() throws Exception {
-    when(interactionQueryService.listInteractions("bad-cursor", 50))
+    when(interactionQueryService.listInteractions(null, "bad-cursor", 50))
         .thenThrow(new IllegalArgumentException("cursor must be <epochMilli>:<uuid>"));
 
     mockMvc
