@@ -1,14 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { useModelRequestDebug } from '@/features/ai/runtime/useModelRequestDebug'
+import { useModelRequestDebug, useHistoricalRequestPreview } from '@/features/ai/runtime/useModelRequestDebug'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessModelRequestDebugDTO,
+  ProviderRequestPreviewDTO,
+} from '@/shared/api/contracts/ai-runtime'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
     getModelRequestDebug: vi.fn(),
+    previewHistoricalRequest: vi.fn(),
   },
 }))
 
@@ -81,5 +85,67 @@ describe('useModelRequestDebug', () => {
     await waitFor(() => {
       expect(harnessService.getModelRequestDebug).toHaveBeenCalledTimes(3)
     })
+  })
+})
+
+describe('useHistoricalRequestPreview', () => {
+  let queryClient: QueryClient
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    vi.mocked(harnessService.previewHistoricalRequest).mockResolvedValue(samplePreview())
+  })
+
+  function wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  }
+
+  function samplePreview(): ProviderRequestPreviewDTO {
+    return {
+      kind: 'HISTORICAL_REQUEST_PREVIEW',
+      providerType: 'openai',
+      modelName: 'm',
+      bodyByteSize: 12,
+      bodyJson: '{}',
+      sourceHeadEntryId: 'head-1',
+      generatedAt: '2026-09-21T00:00:00.000Z',
+      notice: 'reconstructed under current definitions',
+    }
+  }
+
+  // 意图：只有显式 request(entryId) 才发 GET；未选中时保持静默（不查询、不写入）。
+  it('fetches on demand only and stays silent before any selection', async () => {
+    const { result } = renderHook(() => useHistoricalRequestPreview('session-1'), { wrapper })
+
+    expect(harnessService.previewHistoricalRequest).not.toHaveBeenCalled()
+    expect(result.current.preview).toBeNull()
+
+    act(() => result.current.request('assistant-1'))
+    await waitFor(() => {
+      expect(result.current.preview?.kind).toBe('HISTORICAL_REQUEST_PREVIEW')
+    })
+    expect(harnessService.previewHistoricalRequest).toHaveBeenCalledTimes(1)
+    expect(harnessService.previewHistoricalRequest).toHaveBeenCalledWith('session-1', 'assistant-1')
+
+    // 切换到另一条历史 Entry 会发起一次新的只读 GET
+    act(() => result.current.request('assistant-2'))
+    await waitFor(() => {
+      expect(harnessService.previewHistoricalRequest).toHaveBeenCalledTimes(2)
+    })
+
+    act(() => result.current.dismiss())
+    expect(result.current.preview).toBeNull()
+    expect(result.current.entryId).toBeNull()
+  })
+
+  // 意图：没有 session 时即使请求也不发 GET（不伪造结果）。
+  it('does not fetch without a session id', () => {
+    const { result } = renderHook(() => useHistoricalRequestPreview(null), { wrapper })
+    act(() => result.current.request('assistant-1'))
+    expect(harnessService.previewHistoricalRequest).not.toHaveBeenCalled()
+    expect(result.current.preview).toBeNull()
   })
 })

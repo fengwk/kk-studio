@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
-import { aggregateBranchUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
+import { aggregateEntryUsage } from '@/features/ai/runtime/thread-timeline/turn-usage'
 
 /**
  * Turn usage 矩阵：usage 绝不紧跟 Assistant，必须在相应 TURN_END 之后投影为
- * TurnSummary；compaction / aborted / error / 未关闭 turn 不产生残留 summary。
+ * TurnSummary；compaction / aborted / error / 未关闭 turn 不产生对话残留 summary。
  * TURN_END 本身不投影消息，因此「仅在 turn 关闭后出现且位于该 turn 全部消息之后」
  * 就是 TURN_END 后投影的可观察语义。
+ *
+ * 费用是读取投影：ASSISTANT metadata 里的旧 cost（若存在）绝不被读取，前端也不定价。
+ * Entry.usageCost -> assistantMetadata 的接线由 branch owner 在 entry-projection 完成。
  */
 
 function entry(
@@ -63,10 +66,9 @@ function userMessage(text: string): HarnessSessionEntryDTO {
 function usageMetadata(
   input: number,
   output: number,
-  cost = 0.001,
   extras: Record<string, unknown> = {},
 ) {
-  return { usage: { inputTokens: input, outputTokens: output, ...extras }, cost }
+  return { usage: { inputTokens: input, outputTokens: output, ...extras } }
 }
 
 describe('Turn usage after TURN_END', () => {
@@ -75,7 +77,7 @@ describe('Turn usage after TURN_END', () => {
       [
         turnStart(),
         userMessage('问题'),
-        assistant('assistant-1', '回答', usageMetadata(10, 20, 0.001, {
+        assistant('assistant-1', '回答', usageMetadata(10, 20, {
           reasoningTokens: 3,
           providerTotalTokens: 33,
         })),
@@ -107,7 +109,8 @@ describe('Turn usage after TURN_END', () => {
         cacheWrite: 0,
         reasoning: 3,
         providerTotal: 33,
-        cost: 0.001,
+        // 旧 metadata.cost 不再被读取；费用只来自 Entry.usageCost 读取投影
+        cost: null,
       },
       details: {
         reasoning: 3,
@@ -267,12 +270,12 @@ describe('Turn usage after TURN_END', () => {
     expect(ids.indexOf('meta-usage-entry-assistant-2')).toBe(ids.length - 1)
   })
 
-  it('does not project a summary when usage/cost are all zero', () => {
+  it('does not project a summary when all usage facts are zero', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
         userMessage('a'),
-        assistant('assistant-1', '回答', usageMetadata(0, 0, 0)),
+        assistant('assistant-1', '回答', usageMetadata(0, 0)),
         turnEnd(),
       ],
       [],
@@ -284,9 +287,8 @@ describe('Turn usage after TURN_END', () => {
     expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
   })
 
-  it('projects usage from cost aliases, string numbers, and cache aliases', () => {
-    // parseAssistantUsage 的多形态防御：cost 可以是对象/字符串，token 字段支持
-    // camelCase/snake_case 别名与字符串数字；cacheWriteLong 归并进 cacheWrite。
+  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage
+  it('ignores snake_case aliases and legacy metadata.cost', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
@@ -297,7 +299,7 @@ describe('Turn usage after TURN_END', () => {
             completionTokens: 20,
             cachedTokens: 3,
             cache_write_tokens: '4',
-            cacheWriteLongTokens: 5,
+            cache_write_long_tokens: 5,
             reasoning_tokens: '6',
             totalTokens: 44,
           },
@@ -308,21 +310,7 @@ describe('Turn usage after TURN_END', () => {
       [],
       [],
     )
-    const usage = timeline.messages.find(
-      (message) => message.role === 'meta' && message.kind === 'turn_usage',
-    )
-    expect(usage).toMatchObject({
-      subjectEntryId: 'assistant-1',
-      turnUsage: {
-        input: 10,
-        output: 20,
-        cacheRead: 3,
-        cacheWrite: 9,
-        reasoning: 6,
-        providerTotal: 44,
-        cost: 0.002,
-      },
-    })
+    expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
   })
 
   it('still projects a summary when only reasoning/cache are nonzero', () => {
@@ -331,7 +319,7 @@ describe('Turn usage after TURN_END', () => {
       [
         turnStart(),
         userMessage('a'),
-        assistant('assistant-1', '回答', usageMetadata(0, 0, 0, {
+        assistant('assistant-1', '回答', usageMetadata(0, 0, {
           reasoningTokens: 2,
           cacheReadTokens: 1,
         })),
@@ -344,148 +332,47 @@ describe('Turn usage after TURN_END', () => {
       (message) => message.role === 'meta' && message.kind === 'turn_usage',
     )
     expect(usage).toMatchObject({
-      turnUsage: { input: 0, output: 0, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: 0 },
+      turnUsage: { input: 0, output: 0, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: null },
     })
   })
 
-  it('returns null from aggregateBranchUsage when no TURN_END summary exists', () => {
-    const timeline = buildThreadTimeline(
-      [turnStart(), userMessage('a'), assistant('assistant-1', '回答', usageMetadata(10, 20))],
-      [],
-      [],
-    )
-    // 未关闭 turn：usage 未发射，聚合必须返回 null（不输出全零占位）。
-    expect(aggregateBranchUsage(timeline.messages)).toBeNull()
+  it('counts facts from an unclosed turn for the footer while hiding its conversation summary', () => {
+    // 对话摘要只在 TURN_END 之后出现；而 footer 的累计用量是事实派生，不因回合未关闭而漏计。
+    const entries = [
+      turnStart('turn-1'),
+      userMessage('a'),
+      {
+        ...assistant('assistant-1', '回答', usageMetadata(10, 20)),
+        usageCost: { currency: 'USD', amount: '0.25' },
+      },
+    ]
+    const timeline = buildThreadTimeline(entries, [], [])
+    expect(timeline.messages.some((message) => message.role === 'meta')).toBe(false)
+
+    const aggregated = aggregateEntryUsage(entries)
+    expect(aggregated?.input).toBe(10)
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '0.25' })
   })
 
-  it('aggregates only TURN_END summaries, excluding compaction and an incomplete turn', () => {
-    const timeline = buildThreadTimeline(
-      [
-        turnStart('compact', 'COMPACTION'),
-        assistant('assistant-compact', 'summary', usageMetadata(100, 50, 1)),
-        turnEnd('compact-end'),
-        turnStart('turn-1'),
-        assistant('assistant-1', 'done', usageMetadata(10, 20, 0.125, {
-          cacheReadTokens: 5,
-          reasoningTokens: 2,
-          providerTotalTokens: 37,
-        })),
-        turnEnd('end-1'),
-        turnStart('turn-2'),
-        assistant('assistant-2', 'not closed', usageMetadata(30, 40, 0.5)),
-      ],
-      [],
-      [],
-    )
+  // compaction 回合里真实发生的 usage 也必须进入累计，不能因内容被隐藏而漏计
+  it('includes compaction turn facts in the footer aggregate', () => {
+    const entries = [
+      turnStart('compact', 'COMPACTION'),
+      {
+        ...assistant('assistant-compact', 'summary', usageMetadata(100, 50)),
+        usageCost: { currency: 'USD', amount: '1' },
+      },
+      turnEnd('compact-end'),
+      turnStart('turn-1'),
+      {
+        ...assistant('assistant-1', 'done', usageMetadata(10, 20)),
+        usageCost: { currency: 'USD', amount: '0.125' },
+      },
+      turnEnd('end-1'),
+    ]
 
-    expect(aggregateBranchUsage(timeline.messages)).toEqual({
-      input: 10,
-      output: 20,
-      cacheRead: 5,
-      cacheWrite: 0,
-      reasoning: 2,
-      providerTotal: 37,
-      cost: 0.125,
-      decodeTokens: null,
-      decodeDurationMillis: null,
-      contextInputTokens: 15,
-    })
-  })
-
-  // 验证同一 Turn 内多个 ASSISTANT 调用的 Usage 进行累加聚合，而非后者直接覆盖前者
-  it('aggregates multiple assistant usages within the same turn instead of overwriting', () => {
-    const timeline = buildThreadTimeline(
-      [
-        turnStart('turn-multi'),
-        userMessage('run multi step'),
-        // 第一次调用：调用工具
-        entry('assistant-call', 'MESSAGE', {
-          message: {
-            role: 'ASSISTANT',
-            contents: [
-              {
-                type: 'tool_call',
-                toolCallId: 'call-1',
-                toolName: 'bash',
-                rendererKey: 'bash',
-                argumentsJson: '{"command":"echo 1"}',
-              },
-            ],
-          },
-          assistantMetadata: {
-            usage: {
-              inputTokens: 100,
-              outputTokens: 20,
-              cacheReadTokens: 50,
-              cacheWriteTokens: 10,
-              reasoningTokens: 0,
-              providerTotalTokens: 180,
-            },
-            cost: 0.01,
-            decodeDurationMillis: 500, // 20 tokens in 500ms = 40 tok/s
-          },
-        }),
-        // 工具执行结果
-        entry('tool-result', 'MESSAGE', {
-          message: {
-            role: 'TOOL',
-            contents: [
-              {
-                type: 'tool_result',
-                toolCallId: 'call-1',
-                toolName: 'bash',
-                rendererKey: 'bash',
-                contents: [{ type: 'text', text: '1' }],
-              },
-            ],
-          },
-        }),
-        // 第二次调用：最终回答（contextInputTokens 更新为 200 + 80 + 0 = 280）
-        entry('assistant-answer', 'MESSAGE', {
-          message: {
-            role: 'ASSISTANT',
-            contents: [{ type: 'text', text: '完成' }],
-          },
-          assistantMetadata: {
-            usage: {
-              inputTokens: 200,
-              outputTokens: 40,
-              cacheReadTokens: 80,
-              cacheWriteTokens: 0,
-              reasoningTokens: 10,
-              providerTotalTokens: 330,
-            },
-            cost: 0.02,
-            decodeDurationMillis: 1000, // 50 decodeTokens (40 output + 10 reasoning) in 1000ms
-          },
-        }),
-        turnEnd('multi-end'),
-      ],
-      [],
-      [],
-    )
-
-    const metaUsage = timeline.messages.find(
-      (message) => message.role === 'meta' && message.kind === 'turn_usage',
-    )
-    expect(metaUsage).toBeDefined()
-    expect(metaUsage?.turnUsage?.cost).toBeCloseTo(0.03, 10)
-    expect(metaUsage?.turnUsage).toMatchObject({
-      input: 300, // 100 + 200
-      output: 60, // 20 + 40
-      cacheRead: 130, // 50 + 80
-      cacheWrite: 10, // 10 + 0
-      reasoning: 10, // 0 + 10
-      providerTotal: 510, // 180 + 330
-      decodeTokens: 70, // 20 + (40 + 10)
-      decodeDurationMillis: 1500, // 500 + 1000
-      contextInputTokens: 280, // 最新一次调用估算输入 (200 + 80 + 0)
-    })
-
-    // 格式化文本包含 cache 率和 tok/s
-    // 缓存率 = 130 / (300 + 130 + 10) = 130 / 440 = 30%
-    // 速率 = 70 * 1000 / 1500 = 47 tok/s
-    expect(metaUsage?.text).toContain('cache 30%')
-    expect(metaUsage?.text).toContain('47 tok/s')
+    const aggregated = aggregateEntryUsage(entries)
+    expect(aggregated).toMatchObject({ input: 110, output: 70 })
+    expect(aggregated?.cost).toEqual({ currency: 'USD', amount: '1.125' })
   })
 })

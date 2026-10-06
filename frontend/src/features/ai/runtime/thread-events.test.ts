@@ -284,7 +284,7 @@ describe('buildThreadEventTimeline', () => {
     ])
   })
 
-  it('projects TURN_END with the turn usage summary and full details from that turn Assistant metadata', () => {
+  it('projects TURN_END with the turn usage summary and the read-time cost projection', () => {
     const usage = {
       usage: {
         inputTokens: 10,
@@ -295,12 +295,16 @@ describe('buildThreadEventTimeline', () => {
         reasoningTokens: 7,
         providerTotalTokens: 44,
       },
+      // 旧的 metadata.cost 不再被读取：费用只能来自 Entry.usageCost 读取投影
       cost: 0.00125,
     }
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'a' }])),
-      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'r' }], usage)),
+      {
+        ...entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'r' }], usage)),
+        usageCost: { currency: 'USD', amount: '0.001250000000' },
+      },
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
     const events = build(entries)
@@ -309,12 +313,13 @@ describe('buildThreadEventTimeline', () => {
     expect(turnEnd.title).toBe('TURN_END')
     expect(turnEnd.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
     expect(JSON.parse(turnEnd.rawJson!)).toEqual({ outcome: 'COMPLETED' })
+    // 精确读取投影：不做 toFixed(3) 截断
+    expect(turnEnd.details.find((row) => row.label === '费用')?.value).toBe('$0.00125')
   })
 
   it('omits zero cache segments from the TURN_END summary but keeps input/output', () => {
     const usage = {
       usage: { inputTokens: 100, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWriteLongTokens: 0, reasoningTokens: 0, providerTotalTokens: 300 },
-      cost: { currency: 'USD', total: '0.005' },
     }
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
@@ -324,6 +329,8 @@ describe('buildThreadEventTimeline', () => {
     const events = build(entries)
     expect(events[2]!.title).toBe('TURN_END')
     expect(events[2]!.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
+    // 无定价事实：如实标注暂无数据，绝不伪装成 $0
+    expect(events[2]!.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
   })
 
   it('keeps TURN_END summary as the bare outcome when the turn has no usage', () => {

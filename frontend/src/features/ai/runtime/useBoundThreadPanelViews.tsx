@@ -6,7 +6,7 @@ import {
   useThreadPanelViewState,
   type ThreadPanelMainView,
 } from '@/features/ai/runtime/thread-panel'
-import { useModelRequestDebug } from '@/features/ai/runtime/useModelRequestDebug'
+import { useModelRequestDebug, useHistoricalRequestPreview } from '@/features/ai/runtime/useModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type { ThreadPaneLabels } from '@/features/ai/runtime/ThreadPane'
@@ -28,6 +28,8 @@ export function useBoundThreadPanelViews(
     bodyRef: RefObject<HTMLDivElement | null>
     events: ThreadEventRecord[]
     working: boolean
+    /** 当前 Session，用于按需读取历史 Entry 的调用前请求预览（只读）。 */
+    sessionId: string | null
   },
   previewOptions?: BoundThreadPreviewOptions,
 ) {
@@ -42,6 +44,7 @@ export function useBoundThreadPanelViews(
     initialEventsScrollTop,
   } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
   const { debug } = useModelRequestDebug(threadId, mode === 'debug', controller.working)
+  const historicalPreview = useHistoricalRequestPreview(controller.sessionId)
   const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
 
   const switchMode = (nextMode: 'conversation' | 'debug') => {
@@ -65,11 +68,7 @@ export function useBoundThreadPanelViews(
     debug:
       mode === 'debug' ? (
         <>
-          {/*
-            Debug 主视图下的唯一退出入口：只读工具条上的“返回会话”。Debug 覆盖整个 pane，
-            底部 Composer（含 /debug）按设计被隐藏，因此返回必须由 Debug 自身的 chrome 提供，
-            而不是依赖被隐藏的控制区。这里只切换视图，不触碰草稿、上传注册表与 pane 绑定。
-          */}
+          {/* 控制区保持挂载但隐藏；退出只切换视图，不修改草稿或 pane 绑定。 */}
           <div className="thread-debug-toolbar">
             <button
               type="button"
@@ -103,6 +102,13 @@ export function useBoundThreadPanelViews(
             previewDisabled={previewOptions?.previewDisabled}
             previewDisabledReason={previewOptions?.previewDisabledReason}
             previewError={previewOptions?.previewError}
+            historicalPreview={historicalPreview.preview}
+            historicalPreviewLoading={historicalPreview.loading}
+            historicalPreviewError={
+              historicalPreview.error ? t('ai.runtime.debug.previewFailed') : null
+            }
+            onRequestHistoricalPreview={historicalPreview.request}
+            onDismissHistoricalPreview={historicalPreview.dismiss}
           />
         </>
       ) : undefined,
