@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
@@ -30,25 +30,20 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
-  private final OpenAiResponsesConfig config;
 
   /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 encoder 的请求编码器，供无网络预览复用。 */
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
   public OpenAiResponsesProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
-    this(transport, apiKey, OpenAiResponsesConfig.defaultConfig());
-  }
-
-  public OpenAiResponsesProviderAdapter(
-      JdkHttpSseTransport transport, String apiKey, String configJson) {
-    this(transport, apiKey, OpenAiResponsesConfig.parse(configJson));
-  }
-
-  public OpenAiResponsesProviderAdapter(
-      JdkHttpSseTransport transport, String apiKey, OpenAiResponsesConfig config) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.apiKey = apiKey;
-    this.config = config != null ? config : OpenAiResponsesConfig.defaultConfig();
+  }
+
+  /** 以持久化配置 JSON 构造适配器；配置在构造期即严格校验，malformed 配置在此确定性失败，绝不推迟到请求执行。 */
+  public OpenAiResponsesProviderAdapter(
+      JdkHttpSseTransport transport, String apiKey, String configJson) {
+    this(transport, apiKey);
+    OpenAiResponsesConfig.parse(configJson);
   }
 
   @Override
@@ -69,22 +64,22 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
           "descriptor type mismatch: expected OPENAI_RESPONSES but was " + descriptor.type());
     }
     URI responsesUri = OpenAiResponsesEndpoints.resolveResponsesUri(descriptor.endpoint());
-    return new OpenAiResponsesModelProvider(transport, descriptor, apiKey, responsesUri, config);
+    return new OpenAiResponsesModelProvider(transport, descriptor, apiKey, responsesUri);
   }
 
   @Override
   public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
-    return encoder.encode(request, descriptor, config).bodyUtf8Bytes();
+    return encoder.encode(request, descriptor).bodyUtf8Bytes();
   }
 
   /**
-   * 基于持久化配置 JSON 得到对应的提示缓存能力。
+   * 基于持久化配置 JSON 解析提示缓存留存档位。
    *
    * @param configJson 配置 JSON 字符串
-   * @return 对应的 PromptCacheCapability
+   * @return 对应的 PromptCacheRetention
    */
-  public static PromptCacheCapability resolvePromptCacheCapability(String configJson) {
-    return OpenAiResponsesConfig.resolvePromptCacheCapability(configJson);
+  public static PromptCacheRetention resolvePromptCacheRetention(String configJson) {
+    return OpenAiResponsesConfig.resolvePromptCacheRetention(configJson);
   }
 
   /**
@@ -95,11 +90,6 @@ public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
    */
   public static OpenAiResponsesConfig parseConfig(String configJson) {
     return OpenAiResponsesConfig.parse(configJson);
-  }
-
-  /** 返回当前适配器实例生效的提示缓存能力。 */
-  public PromptCacheCapability promptCacheCapability() {
-    return config.promptCacheCapability();
   }
 
   @Override

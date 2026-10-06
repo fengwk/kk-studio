@@ -18,14 +18,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
-import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -51,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -78,40 +72,13 @@ class OpenAiResponsesRequestEncoderTest {
 
   private ModelDescriptor createModel() {
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-5.4-mini",
-        "gpt-5.4-mini",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        pricing());
+        "openai_test", "gpt-5.4-mini", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   /** 非推理模型：验证顶层 instructions 编码与推理能力无关。 */
   private ModelDescriptor nonReasoningModel() {
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-4.1",
-        "gpt-4.1",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        false,
-        pricing());
-  }
-
-  private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "tier-1",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ONE,
-        BigDecimal.ONE,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ONE);
+        "openai_test", "gpt-4.1", "gpt-4.1", Set.of(ModelInputModality.TEXT), true, false);
   }
 
   private ProviderRequest request(
@@ -178,8 +145,7 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    OpenAiResponsesEncodedRequest encoded =
-        encoder.encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, createDescriptor());
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals("gpt-5.4-mini", root.path("model").asText());
@@ -200,11 +166,7 @@ class OpenAiResponsesRequestEncoderTest {
   void test_reasoningEffortOffAndEnabledEncodings() throws Exception {
     // 1. effort = "none" -> emit reasoning:{effort:"none"} only; omit summary and omit include
     ProviderRequest reqOff = request(new ModelVariant("v1", "off"));
-    JsonNode rootOff =
-        MAPPER.readTree(
-            encoder
-                .encode(reqOff, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
+    JsonNode rootOff = MAPPER.readTree(encoder.encode(reqOff, createDescriptor()).bodyUtf8Bytes());
     assertEquals("none", rootOff.path("reasoning").path("effort").asText());
     assertFalse(rootOff.path("reasoning").has("summary"));
     assertFalse(rootOff.has("include"));
@@ -213,10 +175,7 @@ class OpenAiResponsesRequestEncoderTest {
     // include:["reasoning.encrypted_content"]
     ProviderRequest reqEnabled = request(new ModelVariant("v1", "xhigh"));
     JsonNode rootEnabled =
-        MAPPER.readTree(
-            encoder
-                .encode(reqEnabled, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqEnabled, createDescriptor()).bodyUtf8Bytes());
     assertEquals("xhigh", rootEnabled.path("reasoning").path("effort").asText());
     assertEquals("auto", rootEnabled.path("reasoning").path("summary").asText());
     assertEquals(1, rootEnabled.path("include").size());
@@ -225,10 +184,7 @@ class OpenAiResponsesRequestEncoderTest {
     // 3. effort = null -> omit reasoning and include
     ProviderRequest reqNull = request(new ModelVariant("v1"));
     JsonNode rootNull =
-        MAPPER.readTree(
-            encoder
-                .encode(reqNull, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(reqNull, createDescriptor()).bodyUtf8Bytes());
     assertFalse(rootNull.has("reasoning"));
     assertFalse(rootNull.has("include"));
   }
@@ -243,15 +199,10 @@ class OpenAiResponsesRequestEncoderTest {
             "wire-model-id",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing());
+            true);
     ProviderRequest request = request(logicalModel, DEFAULT_VARIANT, List.of(), List.of(), null);
 
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(request, createDescriptor()).bodyUtf8Bytes());
 
     assertEquals("wire-model-id", root.path("model").asText());
     assertFalse(root.toString().contains("logical-name"));
@@ -272,8 +223,7 @@ class OpenAiResponsesRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("weather?")))),
             List.of(tool));
 
-    OpenAiResponsesEncodedRequest encoded =
-        encoder.encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, createDescriptor());
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode tools = root.get("tools");
@@ -466,81 +416,42 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("string", properties.path("blocked").path("anyOf").get(0).path("type").asText());
   }
 
-  /** 验证 prompt_cache_key 直接取自 runtime 派生的 cache affinity identity：稳定、可复现、不同 session 不同。 */
+  /** 验证 prompt_cache_key 直接取 runtime 冻结的会话 key：稳定、可复现、不同 session 不同。 */
   @Test
-  void test_promptCacheKeyComesFromRuntimeAffinityIdentity() throws Exception {
-    UUID sessionId = UUID.fromString("33333333-3333-3333-3333-333333333333");
+  void test_promptCacheKeyComesFromRuntimeSessionIdentity() throws Exception {
     List<ProviderMessage> messages =
         List.of(
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
-    ProviderCacheControl cacheControl = runtimeAffinityCacheControl(sessionId, request(messages));
-    assertTrue(cacheControl.affinityKey().startsWith("pc2-"));
+    String sessionKey = "33333333-3333-3333-3333-333333333333";
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, sessionKey);
+    assertEquals(sessionKey, cacheControl.key());
 
-    ProviderRequest cachedRequest =
-        new ProviderRequest(
-            createModel(),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            messages,
-            List.of(),
-            cacheControl);
+    ProviderRequest cachedRequest = request(messages, cacheControl);
     JsonNode first =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    cachedRequest,
-                    createDescriptor(),
-                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(cachedRequest, createDescriptor()).bodyUtf8Bytes());
     JsonNode second =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    cachedRequest,
-                    createDescriptor(),
-                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(cachedRequest, createDescriptor()).bodyUtf8Bytes());
 
     // 编码器只透出 runtime identity，绝不自造 per-attempt key。
-    assertEquals(cacheControl.affinityKey(), first.path("prompt_cache_key").asText());
+    assertEquals(sessionKey, first.path("prompt_cache_key").asText());
     assertEquals(first.path("prompt_cache_key").asText(), second.path("prompt_cache_key").asText());
+    assertEquals("in_memory", first.path("prompt_cache_retention").asText());
 
     ProviderCacheControl otherSession =
-        runtimeAffinityCacheControl(
-            UUID.fromString("44444444-4444-4444-4444-444444444444"), request(messages));
-    assertNotEquals(otherSession.affinityKey(), first.path("prompt_cache_key").asText());
+        ProviderCacheControl.session(
+            PromptCacheRetention.SHORT, "44444444-4444-4444-4444-444444444444");
+    assertNotEquals(otherSession.key(), first.path("prompt_cache_key").asText());
 
     // runtime 未启用缓存时不得凭空发送 key。
     JsonNode none =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    request(messages),
-                    createDescriptor(),
-                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
-                .bodyUtf8Bytes());
+        MAPPER.readTree(encoder.encode(request(messages), createDescriptor()).bodyUtf8Bytes());
     assertFalse(none.has("prompt_cache_key"));
   }
 
-  /** 经 runtime 的 finalizer 派生 affinity cacheControl，模拟真实请求物化路径。 */
-  private static ProviderCacheControl runtimeAffinityCacheControl(
-      UUID sessionId, ProviderRequest base) {
-    PromptCacheCapability capability =
-        PromptCacheCapability.affinity(
-            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
-    return new PromptCacheRequestFinalizer(
-            sessionId, UUID.fromString("33333333-3333-3333-3333-333333333333"))
-        .apply(base, PromptCachePolicy.affinityShort(capability))
-        .cacheControl();
-  }
-
   private JsonNode encodedRoot(ProviderRequest request) throws Exception {
-    return MAPPER.readTree(
-        encoder
-            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-            .bodyUtf8Bytes());
+    return MAPPER.readTree(encoder.encode(request, createDescriptor()).bodyUtf8Bytes());
   }
 
   private int encodedMaxOutputTokens(int maxOutputTokens) throws Exception {
@@ -578,8 +489,7 @@ class OpenAiResponsesRequestEncoderTest {
                         new ProviderDocumentBlock("application/pdf", "https://example.com/doc.pdf"),
                         new ProviderDocumentBlock("application/pdf", dataPdf)))));
 
-    OpenAiResponsesEncodedRequest encoded =
-        encoder.encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, createDescriptor());
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode contents = root.get("input").get(0).get("content");
@@ -607,9 +517,7 @@ class OpenAiResponsesRequestEncoderTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(new ProviderAudioBlock("audio/mp3", "https://ex.com/a.mp3")))));
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqAudio, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqAudio, createDescriptor()));
 
     // 视频
     ProviderRequest reqVideo =
@@ -618,9 +526,7 @@ class OpenAiResponsesRequestEncoderTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(new ProviderVideoBlock("video/mp4", "https://ex.com/v.mp4")))));
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqVideo, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqVideo, createDescriptor()));
 
     // 不支持图片格式
     ProviderRequest reqTiff =
@@ -629,9 +535,7 @@ class OpenAiResponsesRequestEncoderTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(new ProviderImageBlock("image/tiff", "https://ex.com/i.tiff")))));
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqTiff, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqTiff, createDescriptor()));
 
     // 非法 URI scheme
     ProviderRequest reqFtp =
@@ -640,102 +544,57 @@ class OpenAiResponsesRequestEncoderTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(new ProviderImageBlock("image/png", "ftp://ex.com/i.png")))));
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqFtp, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqFtp, createDescriptor()));
   }
 
-  /** 验证 AUTOMATIC、LEGACY 与 GPT_5_6_EXPLICIT 三种缓存模式下的 wire 映射行为。 */
+  /** 验证 cacheControl 直接映射为顶层 prompt_cache_key 与 retention 档位，不引入任何断点、策略或模式。 */
   @Test
-  void test_promptCacheModesWireMapping() throws Exception {
+  void test_promptCacheRetentionWireMapping() throws Exception {
     ProviderDescriptor desc = createDescriptor();
-    ProviderCacheControl cacheControl =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT, "aff_key_999", Set.of(PromptCacheBreakpoint.CONVERSATION));
+    List<ProviderMessage> messages =
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
 
-    ProviderRequest request =
-        request(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt")))),
-            cacheControl);
-
-    // 1. AUTOMATIC: 不发送任何 cache hint，即使 cacheControl 含有 key/retention 也防御性忽略
-    OpenAiResponsesEncodedRequest encAuto =
-        encoder.encode(request, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.AUTOMATIC));
-    JsonNode rootAuto = MAPPER.readTree(encAuto.bodyUtf8Bytes());
-    assertFalse(rootAuto.has("prompt_cache_key"));
-    assertFalse(rootAuto.has("prompt_cache_retention"));
-    assertFalse(rootAuto.has("prompt_cache_options"));
-    assertFalse(rootAuto.get("input").get(0).get("content").get(0).has("prompt_cache_breakpoint"));
-
-    // 1b. AUTOMATIC + retention NONE: 完全不发 cache hint，明确表达禁用
-    ProviderRequest reqAutoNone =
-        request(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))));
-    JsonNode rootAutoNone =
+    // SHORT -> in_memory
+    JsonNode shortRoot =
         MAPPER.readTree(
             encoder
                 .encode(
-                    reqAutoNone, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.AUTOMATIC))
+                    request(
+                        messages,
+                        ProviderCacheControl.session(PromptCacheRetention.SHORT, "session-uuid")),
+                    desc)
                 .bodyUtf8Bytes());
-    assertFalse(rootAutoNone.has("prompt_cache_key"));
-    assertFalse(rootAutoNone.has("prompt_cache_retention"));
-    assertFalse(rootAutoNone.has("prompt_cache_options"));
+    assertEquals("session-uuid", shortRoot.path("prompt_cache_key").asText());
+    assertEquals("in_memory", shortRoot.path("prompt_cache_retention").asText());
+    assertFalse(shortRoot.has("prompt_cache_options"));
 
-    // 2. LEGACY: 发送 key 与 retention
-    OpenAiResponsesEncodedRequest encLegacy =
-        encoder.encode(request, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY));
-    JsonNode rootLegacy = MAPPER.readTree(encLegacy.bodyUtf8Bytes());
-    assertEquals("aff_key_999", rootLegacy.path("prompt_cache_key").asText());
-    assertEquals("in_memory", rootLegacy.path("prompt_cache_retention").asText());
-    assertFalse(rootLegacy.has("prompt_cache_options"));
+    // LONG -> 24h
+    JsonNode longRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        messages,
+                        ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
+                    desc)
+                .bodyUtf8Bytes());
+    assertEquals("session-uuid", longRoot.path("prompt_cache_key").asText());
+    assertEquals("24h", longRoot.path("prompt_cache_retention").asText());
+    assertFalse(longRoot.has("prompt_cache_options"));
 
-    // 3. GPT_5_6_EXPLICIT: 非 NONE 发送 options + key，并在会话内容块打 CONVERSATION breakpoint marker
-    OpenAiResponsesEncodedRequest encExplicit =
-        encoder.encode(
-            request, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT));
-    JsonNode rootExplicit = MAPPER.readTree(encExplicit.bodyUtf8Bytes());
-    assertEquals("aff_key_999", rootExplicit.path("prompt_cache_key").asText());
-    assertEquals("explicit", rootExplicit.path("prompt_cache_options").path("mode").asText());
-    assertEquals("30m", rootExplicit.path("prompt_cache_options").path("ttl").asText());
-
-    // 系统指令是顶层 instructions 字符串，input 中没有 SYSTEM 打标位置，因此只存在 CONVERSATION 断点
-    JsonNode convBlock = rootExplicit.get("input").get(0).get("content").get(0);
-    assertEquals("explicit", convBlock.path("prompt_cache_breakpoint").path("mode").asText());
-
-    // 4. GPT_5_6_EXPLICIT 下 retention 为 NONE: 发送 options 且无 key/breakpoint 明确表达禁用
-    ProviderRequest reqNone =
-        request(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))));
-    OpenAiResponsesEncodedRequest encExplicitNone =
-        encoder.encode(
-            reqNone, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT));
-    JsonNode rootExplicitNone = MAPPER.readTree(encExplicitNone.bodyUtf8Bytes());
-    assertFalse(rootExplicitNone.has("prompt_cache_key"));
-    assertEquals("explicit", rootExplicitNone.path("prompt_cache_options").path("mode").asText());
-    assertEquals("30m", rootExplicitNone.path("prompt_cache_options").path("ttl").asText());
-    assertFalse(
-        rootExplicitNone.get("input").get(0).get("content").get(0).has("prompt_cache_breakpoint"));
+    // NONE：完全不发 cache hint，明确表达禁用
+    JsonNode noneRoot = MAPPER.readTree(encoder.encode(request(messages), desc).bodyUtf8Bytes());
+    assertFalse(noneRoot.has("prompt_cache_key"));
+    assertFalse(noneRoot.has("prompt_cache_retention"));
+    assertFalse(noneRoot.has("prompt_cache_options"));
   }
 
   /** 验证合法 replayState 在原位回放有序 output 项并不重复语义内容。 */
   @Test
   void test_replayState_inPlaceReplaySuccess() throws Exception {
     ProviderDescriptor desc = createDescriptor();
-
-    // 先计算前缀哈希以构造匹配的 replayState
-    ArrayNode priorInput = MAPPER.createArrayNode();
-    ObjectNode userMsg = priorInput.addObject();
-    userMsg.put("type", "message").put("role", "user");
-    userMsg.putArray("content").addObject().put("type", "input_text").put("text", "question");
-    String validPrefixHash =
-        OpenAiResponsesPrefixHasher.calculateHash(
-            "Test system instruction.", MAPPER.createArrayNode(), priorInput);
 
     ObjectNode payload = MAPPER.createObjectNode();
     ArrayNode outputArr = payload.putArray("output");
@@ -747,10 +606,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     ProviderReplayState replayState =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            validPrefixHash,
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), payload);
 
     ProviderMessage assistantMsg =
         new ProviderMessage(
@@ -776,8 +632,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
 
-    OpenAiResponsesEncodedRequest encoded =
-        encoder.encode(request, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, desc);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode input = root.get("input");
@@ -788,22 +643,51 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("function_call_output", input.get(2).path("type").asText());
   }
 
+  /** 验证 native replay 的亲和性只由 wire 模型与 provider 代际决定：system instruction 变化、乃至其中的日期戳跨午夜，都不影响原位回放。 */
+  @Test
+  void test_replayState_inPlaceReplayIgnoresSystemInstructionAndDateDrift() throws Exception {
+    ProviderDescriptor desc = createDescriptor();
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload
+        .putArray("output")
+        .addObject()
+        .put("type", "message")
+        .put("role", "assistant")
+        .putArray("content")
+        .addObject()
+        .put("type", "output_text")
+        .put("text", "hello");
+
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity(createModel().modelId()), payload);
+    ProviderMessage assistantMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hello")), replayState);
+
+    for (String instruction :
+        List.of("You are helpful. Today is 2026-10-07.", "You are helpful. Today is 2026-10-08.")) {
+      ProviderRequest request =
+          new ProviderRequest(
+              createModel(),
+              DEFAULT_VARIANT,
+              1024,
+              instruction,
+              List.of(assistantMsg),
+              List.of(),
+              ProviderCacheControl.none());
+      JsonNode input = MAPPER.readTree(encoder.encode(request, desc).bodyUtf8Bytes()).get("input");
+      assertEquals(1, input.size());
+      assertEquals("message", input.get(0).path("type").asText());
+      assertEquals("hello", input.get(0).path("content").get(0).path("text").asText());
+    }
+  }
+
   /** 验证 refusal content block 可按原生形态回放，并与 durable 可见文本严格校验。 */
   @Test
   void test_refusalReplayPreservesNativeShape() throws Exception {
     ProviderDescriptor desc = createDescriptor();
-    ArrayNode priorInput = MAPPER.createArrayNode();
-    ObjectNode firstUserWire = priorInput.addObject();
-    firstUserWire.put("type", "message").put("role", "user");
-    firstUserWire
-        .putArray("content")
-        .addObject()
-        .put("type", "input_text")
-        .put("text", "unsafe request");
-    String prefixHash =
-        OpenAiResponsesPrefixHasher.calculateHash(
-            "Test system instruction.", MAPPER.createArrayNode(), priorInput);
-
     ObjectNode payload = MAPPER.createObjectNode();
     ObjectNode message = payload.putArray("output").addObject();
     message.put("type", "message");
@@ -813,10 +697,7 @@ class OpenAiResponsesRequestEncoderTest {
     refusalBlock.put("refusal", "I cannot help with that.");
     ProviderReplayState replayState =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            prefixHash,
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), payload);
 
     ProviderMessage firstUser =
         new ProviderMessage(
@@ -831,12 +712,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode root =
         MAPPER.readTree(
-            encoder
-                .encode(
-                    request(List.of(firstUser, refusal, nextUser)),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig())
-                .bodyUtf8Bytes());
+            encoder.encode(request(List.of(firstUser, refusal, nextUser)), desc).bodyUtf8Bytes());
     JsonNode replayedBlock = root.path("input").get(1).path("content").get(0);
     assertEquals("refusal", replayedBlock.path("type").asText());
     assertEquals("I cannot help with that.", replayedBlock.path("refusal").asText());
@@ -847,9 +723,7 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(new ProviderTextBlock("different text")),
             replayState);
     ProviderRequest invalidRequest = request(List.of(firstUser, mismatchedRefusal, nextUser));
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(invalidRequest, desc, OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(invalidRequest, desc));
   }
 
   /** 测试意图：非 OPENAI_RESPONSES format 必须回退到语义编码（semantic fallback），不抛出异常。 */
@@ -861,7 +735,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             desc.affinity("gpt-5.4-mini"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             MAPPER.createObjectNode().put("role", "assistant"));
     ProviderMessage msg =
         new ProviderMessage(
@@ -870,8 +743,7 @@ class OpenAiResponsesRequestEncoderTest {
             replayStateOtherFormat);
     ProviderRequest req = request(List.of(msg));
 
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, desc);
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
@@ -896,7 +768,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             malformedPayload1);
 
     ProviderMessage msg1 =
@@ -904,10 +775,7 @@ class OpenAiResponsesRequestEncoderTest {
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState1);
     ProviderRequest req1 = request(List.of(msg1));
 
-    ProviderException ex1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig()));
+    ProviderException ex1 = assertThrows(ProviderException.class, () -> encoder.encode(req1, desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. 根 payload 包含非白名单字段
@@ -918,17 +786,12 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             malformedPayload2);
     ProviderMessage msg2 =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState2);
     ProviderException ex2 =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msg2)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg2)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
     // 3. output 数组内的已知 item 允许携带官方额外字段（如 message 的 status，不再按白名单拒绝），
@@ -942,17 +805,12 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             malformedPayload3);
     ProviderMessage msg3 =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState3);
     ProviderException ex3 =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msg3)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg3)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
 
     // 4. output 数组内 message role 不是 assistant
@@ -965,17 +823,12 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             malformedPayload4);
     ProviderMessage msg4 =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("hi")), replayState4);
     ProviderException ex4 =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msg4)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg4)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex4.kind());
 
     // 5. function_call 缺少 call_id 和 id
@@ -987,7 +840,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             malformedPayload5);
     ProviderMessage msg5 =
         new ProviderMessage(
@@ -995,11 +847,7 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))),
             replayState5);
     ProviderException ex5 =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msg5)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg5)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex5.kind());
 
     // 6. 损坏 payload 即使 affinity/hash 失配，也先被抛出 INVALID_REQUEST 而不走 fallback
@@ -1007,7 +855,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("completely_different_model"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             malformedPayload1);
     ProviderMessage msg6 =
         new ProviderMessage(
@@ -1015,20 +862,16 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(new ProviderTextBlock("hi")),
             replayStateMismatchAndBroken);
     ProviderException ex6 =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msg6)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg6)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex6.kind());
   }
 
   /**
-   * 测试意图：验证回放 tool_call 的 arguments 与 durable 必须完全一致； 即使 affinity 或 prefixHash 故意失配，参数被篡改的 payload
-   * 也必须抛出 INVALID_REQUEST 而非回退。
+   * 测试意图：验证回放 tool_call 的 arguments 与 durable 必须完全一致； 即使 affinity 故意失配，参数被篡改的 payload 也必须抛出
+   * INVALID_REQUEST 而非回退。
    */
   @Test
-  void test_replayState_alteredToolArgumentsRejectedEvenWhenAffinityOrHashMismatch() {
+  void test_replayState_alteredToolArgumentsRejectedEvenWhenAffinityMismatch() {
     ProviderDescriptor desc = createDescriptor();
 
     ObjectNode alteredArgsPayload = MAPPER.createObjectNode();
@@ -1040,12 +883,11 @@ class OpenAiResponsesRequestEncoderTest {
         .put("name", "get_weather")
         .put("arguments", "{\"city\":\"Beijing\"}");
 
-    // 故意设置失配的 affinity 和 hash
+    // 故意设置失配的 affinity
     ProviderReplayState replayMismatchAffinityAndHash =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("completely_different_model"),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             alteredArgsPayload);
 
     ProviderMessage msg =
@@ -1057,10 +899,7 @@ class OpenAiResponsesRequestEncoderTest {
             replayMismatchAffinityAndHash);
 
     ProviderException ex =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(request(List.of(msg)), desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(request(List.of(msg)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
   }
@@ -1071,7 +910,6 @@ class OpenAiResponsesRequestEncoderTest {
   @Test
   void test_replayState_thinkingConsistencyValidation() throws Exception {
     ProviderDescriptor desc = createDescriptor();
-    String validHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     // 1. durable 包含 thinking，但 replay 只有 opaque reasoning（只有 encrypted_content，无 summary）：必须被拒绝
     ObjectNode opaquePayload = MAPPER.createObjectNode();
@@ -1084,10 +922,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     ProviderReplayState replayOpaqueOnly =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            validHash,
-            opaquePayload);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), opaquePayload);
     ProviderMessage msgWithDurableThinking =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
@@ -1097,11 +932,7 @@ class OpenAiResponsesRequestEncoderTest {
     ProviderException ex1 =
         assertThrows(
             ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msgWithDurableThinking)),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+            () -> encoder.encode(request(List.of(msgWithDurableThinking)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex1.kind());
 
     // 2. durable 包含 thinking，但 replay 的 summary 文本不一致：必须被拒绝
@@ -1118,7 +949,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             mismatchSummaryPayload);
     ProviderMessage msgMismatch =
         new ProviderMessage(
@@ -1128,10 +958,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     ProviderException ex2 =
         assertThrows(
-            ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msgMismatch)), desc, OpenAiResponsesConfig.defaultConfig()));
+            ProviderException.class, () -> encoder.encode(request(List.of(msgMismatch)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
     // 3. durable 没有 thinking，但 replay 带有 summary thinking：必须被拒绝
@@ -1143,11 +970,7 @@ class OpenAiResponsesRequestEncoderTest {
     ProviderException ex3 =
         assertThrows(
             ProviderException.class,
-            () ->
-                encoder.encode(
-                    request(List.of(msgNoDurableWithReplaySummary)),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+            () -> encoder.encode(request(List.of(msgNoDurableWithReplaySummary)), desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
 
     // 4. durable 包含 thinking，且 replay 包含完全匹配的 summary thinking：成功回放
@@ -1160,15 +983,11 @@ class OpenAiResponsesRequestEncoderTest {
     m4.put("type", "message").put("role", "assistant");
     m4.putArray("content").addObject().put("type", "output_text").put("text", "answer");
 
-    // 计算精确 prefixHash 以便匹配
-    String currentHash =
-        OpenAiResponsesPrefixHasher.calculateHash(
-            "Test system instruction.", MAPPER.createArrayNode(), MAPPER.createArrayNode());
+    // affinity 与请求 model 一致，直接原位回放
     ProviderReplayState replayMatched =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            currentHash,
             matchedSummaryPayload);
     ProviderMessage msgMatched =
         new ProviderMessage(
@@ -1176,15 +995,14 @@ class OpenAiResponsesRequestEncoderTest {
             List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
             replayMatched);
 
-    OpenAiResponsesEncodedRequest enc4 =
-        encoder.encode(request(List.of(msgMatched)), desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc4 = encoder.encode(request(List.of(msgMatched)), desc);
     JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
     assertEquals(2, root4.get("input").size());
     assertEquals("reasoning", root4.get("input").get(0).path("type").asText());
     assertEquals("message", root4.get("input").get(1).path("type").asText());
   }
 
-  /** 验证代际（affinity）或前缀哈希失配时回退到语义 assistant 编码，不抛出异常。 */
+  /** 验证代际（affinity）失配时回退到语义 assistant 编码，不抛出异常。 */
   @Test
   void test_replayState_mismatchFallbackToSemantic() throws Exception {
     ProviderDescriptor desc = createDescriptor();
@@ -1198,10 +1016,7 @@ class OpenAiResponsesRequestEncoderTest {
     // affinity 失配（不同 connectionGenerationId）
     ProviderReplayState replayStateMismatch =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("different_model"),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            payload);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("different_model"), payload);
 
     ProviderMessage assistantMsg =
         new ProviderMessage(
@@ -1211,8 +1026,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     ProviderRequest request = request(List.of(assistantMsg));
 
-    OpenAiResponsesEncodedRequest encoded =
-        encoder.encode(request, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encoded = encoder.encode(request, desc);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode input = root.get("input");
@@ -1241,8 +1055,7 @@ class OpenAiResponsesRequestEncoderTest {
                             true,
                             null)))));
 
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, desc);
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(1, input.size());
@@ -1265,8 +1078,7 @@ class OpenAiResponsesRequestEncoderTest {
                     List.of(
                         new ProviderThinkingBlock("my thoughts"),
                         new ProviderTextBlock("my answer")))));
-    OpenAiResponsesEncodedRequest enc1 =
-        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc1 = encoder.encode(req1, desc);
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode input1 = root1.get("input");
     assertEquals(2, input1.size());
@@ -1283,8 +1095,7 @@ class OpenAiResponsesRequestEncoderTest {
                     List.of(
                         new ProviderToolResultBlock(
                             "call_empty", "tool", List.of(), false, null)))));
-    OpenAiResponsesEncodedRequest enc2 =
-        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     assertEquals("", root2.get("input").get(0).path("output").asText());
 
@@ -1304,8 +1115,7 @@ class OpenAiResponsesRequestEncoderTest {
                                     "image/png", "data:image/png;base64,iVBORw0KGgo=")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest enc3 =
-        encoder.encode(req3, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc3 = encoder.encode(req3, desc);
     JsonNode root3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
     assertTrue(root3.get("input").get(0).path("output").isArray());
     assertEquals(2, root3.get("input").get(0).path("output").size());
@@ -1321,9 +1131,7 @@ class OpenAiResponsesRequestEncoderTest {
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
             List.of(badTool),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(req4, desc, OpenAiResponsesConfig.defaultConfig()));
+    assertThrows(ProviderException.class, () -> encoder.encode(req4, desc));
   }
 
   /**
@@ -1348,8 +1156,7 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(new ProviderJsonBlock("{\"temperature\":22,\"unit\":\"C\"}")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest enc1 =
-        encoder.encode(req1, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc1 = encoder.encode(req1, desc);
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     JsonNode output1 = root1.get("input").get(0).path("output");
     assertTrue(output1.isTextual());
@@ -1368,8 +1175,7 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(new ProviderTextBlock("plain text result")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest enc2 =
-        encoder.encode(req2, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc2 = encoder.encode(req2, desc);
     JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     JsonNode output2 = root2.get("input").get(0).path("output");
     assertTrue(output2.isTextual());
@@ -1390,8 +1196,7 @@ class OpenAiResponsesRequestEncoderTest {
                                     "image/png", "data:image/png;base64,iVBORw0KGgo=")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest enc3 =
-        encoder.encode(req3, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc3 = encoder.encode(req3, desc);
     JsonNode root3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
     JsonNode output3 = root3.get("input").get(0).path("output");
     assertTrue(output3.isArray());
@@ -1416,8 +1221,7 @@ class OpenAiResponsesRequestEncoderTest {
                                     "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest encPdf =
-        encoder.encode(reqPdf, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest encPdf = encoder.encode(reqPdf, desc);
     JsonNode outputPdf = MAPPER.readTree(encPdf.bodyUtf8Bytes()).get("input").get(0).path("output");
     assertTrue(outputPdf.isArray());
     assertEquals(1, outputPdf.size());
@@ -1443,8 +1247,7 @@ class OpenAiResponsesRequestEncoderTest {
                                     "image/jpeg", "https://api.openai.com/image.jpg")),
                             false,
                             null)))));
-    OpenAiResponsesEncodedRequest enc4 =
-        encoder.encode(req4, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc4 = encoder.encode(req4, desc);
     JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
     JsonNode output4 = root4.get("input").get(0).path("output");
     assertTrue(output4.isArray());
@@ -1470,9 +1273,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
     ProviderException exTh =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadThinking, desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadThinking, desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exTh.kind());
 
     ProviderRequest reqBadAudio =
@@ -1490,9 +1291,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
     ProviderException exAudio =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadAudio, desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadAudio, desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exAudio.kind());
 
     ProviderRequest reqBadVideo =
@@ -1510,9 +1309,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
     ProviderException exVideo =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadVideo, desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadVideo, desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exVideo.kind());
 
     // 6. 多块中混入不支持 block（例如 Text + ThinkingBlock 或 Text + AudioBlock）
@@ -1529,9 +1326,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
     ProviderException exM1 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadMulti1, desc, OpenAiResponsesConfig.defaultConfig()));
+        assertThrows(ProviderException.class, () -> encoder.encode(reqBadMulti1, desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exM1.kind());
 
     // 7. 多块混合（Json + PDF）：媒体与文本按原顺序进入同一个 output content array
@@ -1554,10 +1349,7 @@ class OpenAiResponsesRequestEncoderTest {
                             null)))));
     JsonNode outputMultiMedia =
         MAPPER
-            .readTree(
-                encoder
-                    .encode(reqMultiMedia, desc, OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+            .readTree(encoder.encode(reqMultiMedia, desc).bodyUtf8Bytes())
             .get("input")
             .get(0)
             .path("output");
@@ -1600,11 +1392,7 @@ class OpenAiResponsesRequestEncoderTest {
                             false,
                             null)))));
 
-    JsonNode input =
-        MAPPER
-            .readTree(
-                encoder.encode(req, desc, OpenAiResponsesConfig.defaultConfig()).bodyUtf8Bytes())
-            .get("input");
+    JsonNode input = MAPPER.readTree(encoder.encode(req, desc).bodyUtf8Bytes()).get("input");
     assertEquals(2, input.size());
     assertEquals("call_1", input.get(0).path("call_id").asText());
     assertEquals("call_2", input.get(1).path("call_id").asText());
@@ -1701,9 +1489,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     if (itemCase.expectedWireType() == null) {
       ProviderException ex =
-          assertThrows(
-              ProviderException.class,
-              () -> encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+          assertThrows(ProviderException.class, () -> encoder.encode(req, createDescriptor()));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
       assertNotNull(ex.getMessage());
       return;
@@ -1711,10 +1497,7 @@ class OpenAiResponsesRequestEncoderTest {
 
     JsonNode output =
         MAPPER
-            .readTree(
-                encoder
-                    .encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
-                    .bodyUtf8Bytes())
+            .readTree(encoder.encode(req, createDescriptor()).bodyUtf8Bytes())
             .get("input")
             .get(0)
             .path("output");
@@ -1742,7 +1525,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             missingOutputPayload);
     ProviderException exMissingOutput =
         assertThrows(
@@ -1755,8 +1537,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 ProviderMessageRole.ASSISTANT,
                                 List.of(new ProviderTextBlock("hi")),
                                 missingOutputReplay))),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+                    desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exMissingOutput.kind());
 
     // 2. output array 包含非 object 项
@@ -1766,7 +1547,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             nonObjItemPayload);
     ProviderException exNonObjItem =
         assertThrows(
@@ -1779,8 +1559,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 ProviderMessageRole.ASSISTANT,
                                 List.of(new ProviderTextBlock("hi")),
                                 nonObjItemReplay))),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+                    desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exNonObjItem.kind());
 
     // 3. output item 缺少 type 或为空白
@@ -1788,10 +1567,7 @@ class OpenAiResponsesRequestEncoderTest {
     emptyTypePayload.putArray("output").addObject().put("type", "  ");
     ProviderReplayState emptyTypeReplay =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            validHash,
-            emptyTypePayload);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), emptyTypePayload);
     ProviderException exEmptyType =
         assertThrows(
             ProviderException.class,
@@ -1803,8 +1579,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 ProviderMessageRole.ASSISTANT,
                                 List.of(new ProviderTextBlock("hi")),
                                 emptyTypeReplay))),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+                    desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exEmptyType.kind());
 
     // 4. output item 类型未知：未知 item 不承载 durable 语义，因此 durable 文本无从表达时仍然拒绝；
@@ -1815,7 +1590,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             unknownTypePayload);
     ProviderException exUnknownType =
         assertThrows(
@@ -1828,8 +1602,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 ProviderMessageRole.ASSISTANT,
                                 List.of(new ProviderTextBlock("hi")),
                                 unknownTypeReplay))),
-                    desc,
-                    OpenAiResponsesConfig.defaultConfig()));
+                    desc));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exUnknownType.kind());
 
     // 5. message 字段格式非法（id 为空白、phase 为空白、content 非 array、content block 非 object、content block type
@@ -1869,7 +1642,7 @@ class OpenAiResponsesRequestEncoderTest {
       p.putArray("output").add(invalidMsg);
       ProviderReplayState rs =
           new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), validHash, p);
+              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
       assertThrows(
           ProviderException.class,
           () ->
@@ -1880,8 +1653,7 @@ class OpenAiResponsesRequestEncoderTest {
                               ProviderMessageRole.ASSISTANT,
                               List.of(new ProviderTextBlock("hi")),
                               rs))),
-                  desc,
-                  OpenAiResponsesConfig.defaultConfig()));
+                  desc));
     }
 
     // 6. reasoning 字段格式非法（id blank、encrypted_content blank、summary 非 array、summary block 非
@@ -1923,7 +1695,7 @@ class OpenAiResponsesRequestEncoderTest {
       p.putArray("output").add(invalidR);
       ProviderReplayState rs =
           new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), validHash, p);
+              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
       assertThrows(
           ProviderException.class,
           () ->
@@ -1934,8 +1706,7 @@ class OpenAiResponsesRequestEncoderTest {
                               ProviderMessageRole.ASSISTANT,
                               List.of(new ProviderTextBlock("hi")),
                               rs))),
-                  desc,
-                  OpenAiResponsesConfig.defaultConfig()));
+                  desc));
     }
 
     // 7. function_call 字段格式非法（call_id blank、id blank、name missing/blank、arguments missing/非 string）
@@ -1969,7 +1740,7 @@ class OpenAiResponsesRequestEncoderTest {
       p.putArray("output").add(invalidFc);
       ProviderReplayState rs =
           new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), validHash, p);
+              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), p);
       assertThrows(
           ProviderException.class,
           () ->
@@ -1982,8 +1753,7 @@ class OpenAiResponsesRequestEncoderTest {
                                   new ProviderToolCallBlock(
                                       new ProviderToolCall("c1", "calc", "{}"))),
                               rs))),
-                  desc,
-                  OpenAiResponsesConfig.defaultConfig()));
+                  desc));
     }
 
     // 8. function_call 仅提供 id 而无 call_id：支持合法回退到 id
@@ -1995,15 +1765,9 @@ class OpenAiResponsesRequestEncoderTest {
         .put("arguments", "{}");
     ObjectNode pFallback = MAPPER.createObjectNode();
     pFallback.putArray("output").add(fcFallbackId);
-    String calcHash =
-        OpenAiResponsesPrefixHasher.calculateHash(
-            "Test system instruction.", MAPPER.createArrayNode(), MAPPER.createArrayNode());
     ProviderReplayState rsFallback =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            calcHash,
-            pFallback);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), pFallback);
     OpenAiResponsesEncodedRequest encFallback =
         encoder.encode(
             request(
@@ -2014,8 +1778,7 @@ class OpenAiResponsesRequestEncoderTest {
                             new ProviderToolCallBlock(
                                 new ProviderToolCall("call_from_id", "calc", "{}"))),
                         rsFallback))),
-            desc,
-            OpenAiResponsesConfig.defaultConfig());
+            desc);
     assertEquals(
         "call_from_id",
         MAPPER.readTree(encFallback.bodyUtf8Bytes()).get("input").get(0).path("id").asText());
@@ -2033,10 +1796,7 @@ class OpenAiResponsesRequestEncoderTest {
         .put("text", "text_A");
     ProviderReplayState rsTextMismatch =
         new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_RESPONSES,
-            desc.affinity("gpt-5.4-mini"),
-            validHash,
-            textMismatchP);
+            ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), textMismatchP);
     assertThrows(
         ProviderException.class,
         () ->
@@ -2047,8 +1807,7 @@ class OpenAiResponsesRequestEncoderTest {
                             ProviderMessageRole.ASSISTANT,
                             List.of(new ProviderTextBlock("text_B")),
                             rsTextMismatch))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     // 10. durable 工具调用不一致：数量不匹配或名称不匹配
     ObjectNode toolCountMismatchP = MAPPER.createObjectNode();
@@ -2063,7 +1822,6 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             desc.affinity("gpt-5.4-mini"),
-            validHash,
             toolCountMismatchP);
     assertThrows(
         ProviderException.class,
@@ -2078,8 +1836,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 new ProviderToolCallBlock(
                                     new ProviderToolCall("c2", "calc2", "{}"))),
                             rsToolMismatch))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     assertThrows(
         ProviderException.class,
@@ -2093,8 +1850,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 new ProviderToolCallBlock(
                                     new ProviderToolCall("c1", "different_tool", "{}"))),
                             rsToolMismatch))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     assertThrows(
         ProviderException.class,
@@ -2108,8 +1864,7 @@ class OpenAiResponsesRequestEncoderTest {
                                 new ProviderToolCallBlock(
                                     new ProviderToolCall("c1", "calc", "{\"diff\":true}"))),
                             rsToolMismatch))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     // 11. durable assistant 消息混入非法块（如 ProviderImageBlock）
     assertThrows(
@@ -2123,8 +1878,7 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(
                                 new ProviderImageBlock("image/png", "https://example.com/a.png")),
                             rsToolMismatch))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     // 12. USER 消息媒体 URI 边界拦截
     assertThrows(
@@ -2138,8 +1892,7 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(
                                 new ProviderImageBlock(
                                     "image/png", "data:image/png;base64_no_comma"))))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     assertThrows(
         ProviderException.class,
@@ -2151,8 +1904,7 @@ class OpenAiResponsesRequestEncoderTest {
                             ProviderMessageRole.USER,
                             List.of(
                                 new ProviderImageBlock("image/png", "ftp://example.com/a.png"))))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     assertThrows(
         ProviderException.class,
@@ -2163,8 +1915,7 @@ class OpenAiResponsesRequestEncoderTest {
                         new ProviderMessage(
                             ProviderMessageRole.USER,
                             List.of(new ProviderImageBlock("image/png", "http:///a.png"))))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
 
     // 13d. URI 包含非法字符（触发 URI.create 异常）
     assertThrows(
@@ -2178,8 +1929,7 @@ class OpenAiResponsesRequestEncoderTest {
                             List.of(
                                 new ProviderImageBlock(
                                     "image/png", "http://example.com/invalid path with spaces"))))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
+                desc));
   }
 
   /**
@@ -2204,10 +1954,7 @@ class OpenAiResponsesRequestEncoderTest {
               null);
       ProviderException exFallback =
           assertThrows(
-              ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(List.of(fallbackMsg)), desc, OpenAiResponsesConfig.defaultConfig()));
+              ProviderException.class, () -> encoder.encode(request(List.of(fallbackMsg)), desc));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exFallback.kind());
       assertNull(exFallback.getCause());
       assertFalse(exFallback.getMessage().contains(badArg));
@@ -2226,7 +1973,6 @@ class OpenAiResponsesRequestEncoderTest {
           new ProviderReplayState(
               ProviderReplayFormat.OPENAI_RESPONSES,
               desc.affinity("gpt-5.4-mini"),
-              mismatchedHash,
               badReplayPayload);
       ProviderMessage replayMsg =
           new ProviderMessage(
@@ -2235,10 +1981,7 @@ class OpenAiResponsesRequestEncoderTest {
               badReplayState);
       ProviderException exReplay =
           assertThrows(
-              ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(List.of(replayMsg)), desc, OpenAiResponsesConfig.defaultConfig()));
+              ProviderException.class, () -> encoder.encode(request(List.of(replayMsg)), desc));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exReplay.kind());
       assertNull(exReplay.getCause());
       assertFalse(exReplay.getMessage().contains(badArg));
@@ -2255,10 +1998,7 @@ class OpenAiResponsesRequestEncoderTest {
 
       ProviderReplayState replayStateWithBadDurable =
           new ProviderReplayState(
-              ProviderReplayFormat.OPENAI_RESPONSES,
-              desc.affinity("gpt-5.4-mini"),
-              validHash,
-              validPayload);
+              ProviderReplayFormat.OPENAI_RESPONSES, desc.affinity("gpt-5.4-mini"), validPayload);
       ProviderMessage msgWithBadDurable =
           new ProviderMessage(
               ProviderMessageRole.ASSISTANT,
@@ -2267,136 +2007,57 @@ class OpenAiResponsesRequestEncoderTest {
       ProviderException exDurable =
           assertThrows(
               ProviderException.class,
-              () ->
-                  encoder.encode(
-                      request(List.of(msgWithBadDurable)),
-                      desc,
-                      OpenAiResponsesConfig.defaultConfig()));
+              () -> encoder.encode(request(List.of(msgWithBadDurable)), desc));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, exDurable.kind());
       assertNull(exDurable.getCause());
       assertFalse(exDurable.getMessage().contains(badArg));
     }
   }
 
-  /** 三轮以上保留请求边界；相同文本的不同历史位置不去重，连续 assistant 不重复消耗断点。 */
+  /** cacheControl 只下发顶层 prompt_cache_key/retention，绝不改变 input item 形态，也不产生任何断点字段。 */
   @Test
-  void explicitCacheRetainsUserRequestEndpointsByIdentity() throws Exception {
-    List<ProviderMessage> history = new ArrayList<>();
-    for (int round = 0; round < 6; round++) {
-      history.add(user("same"));
-      JsonNode input = explicitRoot(history).path("input");
-      assertEquals(Math.min(4, round + 1), input.findValues("prompt_cache_breakpoint").size());
-      for (int prior = 0; prior <= round; prior++) {
-        assertEquals(
-            prior >= Math.max(0, round - 3),
-            input.get(prior * 3).path("content").get(0).has("prompt_cache_breakpoint"));
-      }
-      history.add(assistant("answer"));
-      history.add(assistant("another answer"));
-    }
-  }
-
-  /** 多 queued USER 只在 assistant 之前最后一项打标；多块输入只标末块，不标 output_text/summary。 */
-  @Test
-  void explicitCacheUsesLastQueuedInputAndSupportedMultimodalBlock() throws Exception {
+  void cacheControlDoesNotAlterInputItemShape() throws Exception {
     List<ProviderMessage> history =
         List.of(
-            user("queued"),
-            new ProviderMessage(
-                ProviderMessageRole.USER,
+            user("same"),
+            assistant("answer"),
+            tool("json", List.of(new ProviderJsonBlock("{\"x\":1}"))),
+            tool(
+                "media",
                 List.of(
-                    new ProviderTextBlock("last queued"),
-                    new ProviderImageBlock("image/png", "https://example.com/image.png"))),
-            new ProviderMessage(
-                ProviderMessageRole.ASSISTANT,
-                List.of(new ProviderThinkingBlock("thought"), new ProviderTextBlock("answer"))),
-            user("current"));
-    JsonNode input = explicitRoot(history).path("input");
-    assertEquals(2, input.findValues("prompt_cache_breakpoint").size());
-    assertFalse(input.get(0).path("content").get(0).has("prompt_cache_breakpoint"));
-    assertFalse(input.get(1).path("content").get(0).has("prompt_cache_breakpoint"));
-    assertTrue(input.get(1).path("content").get(1).has("prompt_cache_breakpoint"));
-    assertFalse(input.get(2).toString().contains("prompt_cache"));
-    assertFalse(input.get(3).toString().contains("prompt_cache"));
-    assertTrue(input.get(4).path("content").get(0).has("prompt_cache_breakpoint"));
-  }
+                    new ProviderTextBlock("image"),
+                    new ProviderImageBlock("image/png", "https://example.com/image.png"))));
 
-  /** 断点超过四个后滑动，但所有历史字符串 output 均转换，移除 cache 字段后历史 wire 前缀逐字稳定。 */
-  @Test
-  void explicitToolOutputShapeRemainsStableAfterBreakpointSlides() throws Exception {
-    List<ProviderMessage> history = new ArrayList<>(List.of(user("start")));
-    JsonNode previous = explicitRoot(history).path("input");
-    for (int round = 0; round < 6; round++) {
-      history.add(
-          new ProviderMessage(
-              ProviderMessageRole.ASSISTANT,
-              List.of(new ProviderToolCallBlock(new ProviderToolCall("c" + round, "tool", "{}")))));
-      history.add(tool("c" + round, List.of(new ProviderTextBlock(" whole\nresult " + round))));
-      JsonNode current = explicitRoot(history).path("input");
-      assertEquals(Math.min(4, round + 2), current.findValues("prompt_cache_breakpoint").size());
-      for (int i = 0; i < previous.size(); i++) {
-        assertEquals(
-            withoutCache(previous.get(i)).toString(), withoutCache(current.get(i)).toString());
-      }
-      for (int prior = 0; prior <= round; prior++) {
-        JsonNode output = current.get(2 + prior * 2).path("output");
-        assertTrue(output.isArray());
-        assertEquals(" whole\nresult " + prior, output.get(0).path("text").asText());
-        assertEquals(prior >= Math.max(0, round - 3), output.get(0).has("prompt_cache_breakpoint"));
-      }
-      OpenAiResponsesEncodedRequest automatic =
-          encoder.encode(
-              request(history), createDescriptor(), OpenAiResponsesConfig.defaultConfig());
-      assertEquals(
-          automatic.sourcePrefixHash(),
-          encoder
-              .encode(request(history, explicitCache()), createDescriptor(), explicitConfig())
-              .sourcePrefixHash());
-      previous = current;
-    }
-  }
+    JsonNode cached = explicitRoot(history);
+    JsonNode plain =
+        MAPPER.readTree(encoder.encode(request(history), createDescriptor()).bodyUtf8Bytes());
 
-  /** 已有多模态工具数组保留顺序与内容，只标末块；空工具字符串合法转换，空历史/空 assistant 文本不造输入块。 */
-  @Test
-  void explicitCacheHandlesMultimodalAndEmptyInputsWithoutInventingBlocks() throws Exception {
-    JsonNode output =
-        explicitRoot(
-                List.of(
-                    tool(
-                        "media",
-                        List.of(
-                            new ProviderTextBlock("image"),
-                            new ProviderImageBlock("image/png", "https://example.com/image.png"),
-                            new ProviderDocumentBlock(
-                                "application/pdf", "https://example.com/file.pdf")))))
-            .path("input")
-            .get(0)
-            .path("output");
-    assertEquals(3, output.size());
-    assertFalse(output.get(0).has("prompt_cache_breakpoint"));
-    assertFalse(output.get(1).has("prompt_cache_breakpoint"));
-    assertTrue(output.get(2).has("prompt_cache_breakpoint"));
-    assertEquals("input_file", output.get(2).path("type").asText());
-    JsonNode emptyTool = explicitRoot(List.of(tool("empty", List.of()))).path("input").get(0);
-    assertEquals("", emptyTool.path("output").get(0).path("text").asText());
-    assertEquals(1, emptyTool.path("output").size());
+    // 顶层只多出 cache key/retention，input 逐字一致
+    assertEquals("key", cached.path("prompt_cache_key").asText());
+    assertEquals("in_memory", cached.path("prompt_cache_retention").asText());
+    assertEquals(plain.path("input"), cached.path("input"));
+    assertEquals(0, cached.findValues("prompt_cache_breakpoint").size());
+
+    // 单文本/JSON 工具结果保持简洁 string 形态；含媒体时使用 output 数组
+    JsonNode input = cached.path("input");
+    assertTrue(input.get(2).path("output").isTextual());
+    assertEquals("{\"x\":1}", input.get(2).path("output").asText());
+    assertTrue(input.get(3).path("output").isArray());
+    assertEquals("input_image", input.get(3).path("output").get(1).path("type").asText());
+
+    // 空工具与空历史不凭空造输入块
+    JsonNode emptyTool =
+        explicitRoot(List.of(tool("empty", List.of()))).path("input").get(0).path("output");
+    assertTrue(emptyTool.isTextual());
+    assertEquals("", emptyTool.asText());
     assertTrue(explicitRoot(List.of()).path("input").isEmpty());
-    JsonNode empty = explicitRoot(List.of(assistant("")));
-    assertTrue(empty.path("input").isEmpty());
-    assertEquals(0, empty.findValues("prompt_cache_breakpoint").size());
+    assertTrue(explicitRoot(List.of(assistant(""))).path("input").isEmpty());
   }
 
-  /** 显式工具转换不放宽 native signed replay 的 affinity/hash 验证，也不改写 opaque native 输出。 */
+  /** cacheControl 不放宽 native replay：affinity 匹配即逐字回放，durable 矛盾仍拒绝，affinity 失配只回退语义。 */
   @Test
-  void explicitCacheKeepsStrictNativeReplayValidation() throws Exception {
+  void cacheControlKeepsNativeReplayExactAndStrict() throws Exception {
     ProviderMessage toolInput = tool("c", List.of(new ProviderTextBlock("original")));
-    String hash =
-        encoder
-            .encode(
-                request(List.of(toolInput)),
-                createDescriptor(),
-                OpenAiResponsesConfig.defaultConfig())
-            .sourcePrefixHash();
     ObjectNode payload = MAPPER.createObjectNode();
     ArrayNode output = payload.putArray("output");
     output.addObject().put("type", "reasoning").put("encrypted_content", "signed-test-value");
@@ -2410,82 +2071,55 @@ class OpenAiResponsesRequestEncoderTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             createDescriptor().affinity(createModel().modelId()),
-            hash,
             payload);
     ProviderMessage nativeAssistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
             List.of(new ProviderThinkingBlock(""), new ProviderTextBlock("answer")),
             replay);
-    JsonNode input = explicitRoot(List.of(toolInput, nativeAssistant)).path("input");
+
+    // affinity 匹配：opaque/native item 原样原位回放，顶层拼上 cache key
+    JsonNode root = explicitRoot(List.of(toolInput, nativeAssistant));
+    JsonNode input = root.path("input");
     assertEquals(output.get(0), input.get(1));
     assertEquals(output.get(1), input.get(2));
     assertEquals(output.get(2), input.get(3));
-    assertEquals(1, input.findValues("prompt_cache_breakpoint").size());
-    ProviderException changedPrefix =
+    assertEquals("key", root.path("prompt_cache_key").asText());
+    assertEquals(0, root.findValues("prompt_cache_breakpoint").size());
+
+    // durable 与 replay 语义矛盾：无论 affinity 都拒绝
+    ProviderException durableMismatch =
         assertThrows(
             ProviderException.class,
             () ->
                 explicitRoot(
                     List.of(
-                        tool("c", List.of(new ProviderTextBlock("changed"))), nativeAssistant)));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, changedPrefix.kind());
-    ProviderReplayState wrongAffinity =
-        new ProviderReplayState(
-            replay.format(), createDescriptor().affinity("other-model"), hash, payload);
-    ProviderException changedAffinity =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                explicitRoot(
-                    List.of(
-                        toolInput,
                         new ProviderMessage(
                             ProviderMessageRole.ASSISTANT,
-                            nativeAssistant.contents(),
-                            wrongAffinity))));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, changedAffinity.kind());
+                            List.of(new ProviderTextBlock("other")),
+                            replay))));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, durableMismatch.kind());
+
+    // affinity 失配：不拒绝，回退语义编码并丢弃 opaque native 事实
+    ProviderReplayState wrongAffinity =
+        new ProviderReplayState(
+            replay.format(), createDescriptor().affinity("other-model"), payload);
+    JsonNode fallback =
+        explicitRoot(
+                List.of(
+                    toolInput,
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT, nativeAssistant.contents(), wrongAffinity)))
+            .path("input");
+    assertEquals(2, fallback.size());
+    assertEquals("function_call_output", fallback.get(0).path("type").asText());
+    assertEquals("message", fallback.get(1).path("type").asText());
+    assertEquals("answer", fallback.get(1).path("content").get(0).path("text").asText());
+    assertFalse(fallback.toString().contains("future_native_item"));
+
+    // replay payload 不被改写，也不渗入 cache 字段
     assertEquals(frozenPayload, payload);
     assertFalse(payload.toString().contains("prompt_cache"));
-  }
-
-  /** NONE、automatic、legacy 不转换工具字符串；无 CONVERSATION 的显式启用仍统一转换但不打标。 */
-  @Test
-  void otherCacheModesPreserveToolStrings() throws Exception {
-    List<ProviderMessage> history =
-        List.of(tool("json", List.of(new ProviderJsonBlock("{\"x\":1}"))));
-    for (OpenAiPromptCacheMode mode : OpenAiPromptCacheMode.values()) {
-      JsonNode none =
-          MAPPER.readTree(
-              encoder
-                  .encode(request(history), createDescriptor(), new OpenAiResponsesConfig(mode))
-                  .bodyUtf8Bytes());
-      assertTrue(none.path("input").get(0).path("output").isTextual());
-      assertEquals(0, none.findValues("prompt_cache_breakpoint").size());
-      if (mode != OpenAiPromptCacheMode.GPT_5_6_EXPLICIT) {
-        JsonNode enabled =
-            MAPPER.readTree(
-                encoder
-                    .encode(
-                        request(history, explicitCache()),
-                        createDescriptor(),
-                        new OpenAiResponsesConfig(mode))
-                    .bodyUtf8Bytes());
-        assertTrue(enabled.path("input").get(0).path("output").isTextual());
-        assertEquals(0, enabled.findValues("prompt_cache_breakpoint").size());
-      }
-    }
-    JsonNode noConversation =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    request(
-                        history, ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "key")),
-                    createDescriptor(),
-                    explicitConfig())
-                .bodyUtf8Bytes());
-    assertTrue(noConversation.path("input").get(0).path("output").isArray());
-    assertEquals(0, noConversation.findValues("prompt_cache_breakpoint").size());
   }
 
   private static ProviderMessage user(String text) {
@@ -2502,35 +2136,14 @@ class OpenAiResponsesRequestEncoderTest {
         List.of(new ProviderToolResultBlock(id, "tool", contents, false, null)));
   }
 
+  /** 带会话 key 的 cacheControl，模拟真实缓存启用路径。 */
   private static ProviderCacheControl explicitCache() {
-    return ProviderCacheControl.breakpoints(
-        PromptCacheRetention.SHORT, "key", Set.of(PromptCacheBreakpoint.CONVERSATION));
-  }
-
-  private static OpenAiResponsesConfig explicitConfig() {
-    return new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT);
+    return ProviderCacheControl.session(PromptCacheRetention.SHORT, "key");
   }
 
   private JsonNode explicitRoot(List<ProviderMessage> messages) throws Exception {
     return MAPPER.readTree(
-        encoder
-            .encode(request(messages, explicitCache()), createDescriptor(), explicitConfig())
-            .bodyUtf8Bytes());
-  }
-
-  private static JsonNode withoutCache(JsonNode node) {
-    JsonNode copy = node.deepCopy();
-    removeCache(copy);
-    return copy;
-  }
-
-  private static void removeCache(JsonNode node) {
-    if (node instanceof ObjectNode object) {
-      object.remove("prompt_cache_breakpoint");
-    }
-    for (JsonNode child : node) {
-      removeCache(child);
-    }
+        encoder.encode(request(messages, explicitCache()), createDescriptor()).bodyUtf8Bytes());
   }
 
   @Test
@@ -2545,13 +2158,13 @@ class OpenAiResponsesRequestEncoderTest {
 
     int actualBytes =
         new OpenAiResponsesRequestEncoder()
-            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+            .encode(request, createDescriptor())
             .bodyUtf8Bytes()
             .length;
 
     OpenAiResponsesEncodedRequest atLimit =
         new OpenAiResponsesRequestEncoder(new RequestBodySizeGuard(actualBytes))
-            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+            .encode(request, createDescriptor());
     assertEquals(actualBytes, atLimit.bodyUtf8Bytes().length);
 
     ProviderException ex =
@@ -2559,7 +2172,7 @@ class OpenAiResponsesRequestEncoderTest {
             ProviderException.class,
             () ->
                 new OpenAiResponsesRequestEncoder(new RequestBodySizeGuard(actualBytes - 1))
-                    .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+                    .encode(request, createDescriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("request body exceeds"));
     assertFalse(ex.getMessage().contains("size guard"));

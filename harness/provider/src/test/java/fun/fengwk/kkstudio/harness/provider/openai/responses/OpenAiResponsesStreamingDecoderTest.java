@@ -16,9 +16,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -44,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -118,19 +115,6 @@ class OpenAiResponsesStreamingDecoderTest {
   }
 
   private ProviderRequest createRequest() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
             "openai_test",
@@ -138,8 +122,7 @@ class OpenAiResponsesStreamingDecoderTest {
             "gpt-5.4-mini",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     return new ProviderRequest(
         model,
         new ModelVariant("default"),
@@ -250,30 +233,22 @@ class OpenAiResponsesStreamingDecoderTest {
     return comp;
   }
 
-  private static void assertToolResultItem(
-      JsonNode item, String callId, String text, boolean hasBreakpoint) {
+  private static void assertToolResultItem(JsonNode item, String callId, String text) {
     assertEquals("function_call_output", item.path("type").asText());
     assertEquals(callId, item.path("call_id").asText());
-    assertTrue(item.path("output").isArray());
-    assertEquals(1, item.path("output").size());
-    JsonNode block = item.path("output").get(0);
-    assertEquals("input_text", block.path("type").asText());
-    assertEquals(text, block.path("text").asText());
-    assertEquals(hasBreakpoint, block.has("prompt_cache_breakpoint"));
-    if (hasBreakpoint) {
-      assertEquals("explicit", block.path("prompt_cache_breakpoint").path("mode").asText());
-    }
+    // 单文本工具结果保持简洁的 string 形态，且绝不携带任何 cache 控制字段
+    assertEquals(text, item.path("output").asText());
     assertFalse(item.has("prompt_cache_breakpoint"));
     assertFalse(item.has("prompt_cache_key"));
     assertFalse(item.has("prompt_cache_options"));
   }
 
   /**
-   * 验证 gpt-5.6 显式缓存的三轮离线 HTTP 交互：并行工具端点继承、输入块转换与 native signed replay 保真， 且缓存 key
-   * 稳定、sourcePrefixHash 与 automatic 编码一致。
+   * 验证 gpt-5.6 会话缓存的三轮离线 HTTP 交互：并行工具端点继承、native signed replay 保真，且 prompt_cache_key 稳定为会话
+   * UUID、留存档位映射为原支持值。
    */
   @Test
-  void test_multiTurnExplicitCache_withParallelToolsAndNativeReplay() throws Exception {
+  void test_multiTurnPromptCache_withParallelToolsAndNativeReplay() throws Exception {
     String userSchema =
         "{\"type\":\"object\",\"properties\":{\"user_id\":{\"type\":\"string\"}},\"required\":[\"user_id\"]}";
     String orderSchema =
@@ -324,25 +299,14 @@ class OpenAiResponsesStreamingDecoderTest {
 
     ProviderDescriptor descriptor = createDescriptor();
     ModelProvider provider =
-        new OpenAiResponsesProviderAdapter(
-                transport,
-                "sk-test",
-                new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT))
-            .create(descriptor);
+        new OpenAiResponsesProviderAdapter(transport, "sk-test").create(descriptor);
 
-    String affinityKey = "test_session_affinity_key";
+    String sessionKey = "33333333-3333-3333-3333-333333333333";
     ProviderCacheControl cacheControl =
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT, affinityKey, Set.of(PromptCacheBreakpoint.CONVERSATION));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, sessionKey);
     ModelDescriptor model =
         new ModelDescriptor(
-            "openai_test",
-            "gpt-5.6",
-            "gpt-5.6",
-            Set.of(ModelInputModality.TEXT),
-            true,
-            true,
-            createRequest().model().pricing());
+            "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
     ModelVariant variant = new ModelVariant("default", "medium");
     String sys = "Test system instruction.";
 
@@ -440,63 +404,42 @@ class OpenAiResponsesStreamingDecoderTest {
     assertEquals(3, capturedRequests.size());
     assertNull(serverError.get(), "local HTTP server must complete all fixture responses");
 
-    // 1. Root options 与 key 稳定
+    // 1. Root 映射稳定：会话 UUID 原样作为 prompt_cache_key，留存档位映射为原支持值
     for (JsonNode root : capturedRequests) {
-      assertEquals("explicit", root.path("prompt_cache_options").path("mode").asText());
-      assertEquals("30m", root.path("prompt_cache_options").path("ttl").asText());
-      assertEquals(affinityKey, root.path("prompt_cache_key").asText());
+      assertEquals(sessionKey, root.path("prompt_cache_key").asText());
+      assertEquals("in_memory", root.path("prompt_cache_retention").asText());
       assertEquals(sys, root.path("instructions").asText());
       assertEquals("gpt-5.6", root.path("model").asText());
       assertTrue(root.path("stream").asBoolean());
       assertFalse(root.path("store").asBoolean());
-      assertFalse(root.has("prompt_cache_retention"));
+      assertFalse(root.has("prompt_cache_options"));
     }
 
-    // 2. Request 1: USER 标
+    // 2. Request 1: USER 内容块为 input_text，无任何 cache 断点
     JsonNode input1 = capturedRequests.get(0).get("input");
     assertEquals(1, input1.size());
-    assertEquals(
-        "explicit",
-        input1.get(0).path("content").get(0).path("prompt_cache_breakpoint").path("mode").asText());
+    assertEquals("input_text", input1.get(0).path("content").get(0).path("type").asText());
+    assertFalse(input1.get(0).path("content").get(0).has("prompt_cache_breakpoint"));
 
-    // 3. Request 2: USER 和并行最后 tool 标且第一 tool 不标；native 原样全等
+    // 3. Request 2: native replay 原样全等，工具结果保持 string 形态
     JsonNode input2 = capturedRequests.get(1).get("input");
     assertEquals(6, input2.size());
-    assertEquals(
-        "explicit",
-        input2.get(0).path("content").get(0).path("prompt_cache_breakpoint").path("mode").asText());
     assertEquals(replay1.get(0), input2.get(1));
     assertEquals(replay1.get(1), input2.get(2));
     assertEquals(replay1.get(2), input2.get(3));
-    assertToolResultItem(input2.get(4), "call_round1_1", t1Text, false);
-    assertToolResultItem(input2.get(5), "call_round1_2", t2Text, true);
+    assertToolResultItem(input2.get(4), "call_round1_1", t1Text);
+    assertToolResultItem(input2.get(5), "call_round1_2", t2Text);
 
-    // 4. Request 3: 保留 USER/上一批最后 tool 并标当前 tool；native 原样全等
+    // 4. Request 3: native replay 原样全等，工具结果保持 string 形态
     JsonNode input3 = capturedRequests.get(2).get("input");
     assertEquals(9, input3.size());
-    assertEquals(
-        "explicit",
-        input3.get(0).path("content").get(0).path("prompt_cache_breakpoint").path("mode").asText());
     assertEquals(replay1.get(0), input3.get(1));
     assertEquals(replay1.get(1), input3.get(2));
     assertEquals(replay1.get(2), input3.get(3));
-    assertToolResultItem(input3.get(4), "call_round1_1", t1Text, false);
-    assertToolResultItem(input3.get(5), "call_round1_2", t2Text, true);
+    assertToolResultItem(input3.get(4), "call_round1_1", t1Text);
+    assertToolResultItem(input3.get(5), "call_round1_2", t2Text);
     assertEquals(replay2.get(0), input3.get(6));
     assertEquals(replay2.get(1), input3.get(7));
-    assertToolResultItem(input3.get(8), "call_round2_1", t3Text, true);
-
-    // 5. 各 completion.sourcePrefixHash 与 default automatic encoder 一致
-    OpenAiResponsesRequestEncoder autoEncoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesConfig autoConfig = OpenAiResponsesConfig.defaultConfig();
-    assertEquals(
-        autoEncoder.encode(req1, descriptor, autoConfig).sourcePrefixHash(),
-        comp1.replayState().sourcePrefixHash());
-    assertEquals(
-        autoEncoder.encode(req2, descriptor, autoConfig).sourcePrefixHash(),
-        comp2.replayState().sourcePrefixHash());
-    assertEquals(
-        autoEncoder.encode(req3, descriptor, autoConfig).sourcePrefixHash(),
-        comp3.replayState().sourcePrefixHash());
+    assertToolResultItem(input3.get(8), "call_round2_1", t3Text);
   }
 }

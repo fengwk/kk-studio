@@ -20,9 +20,7 @@ import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -43,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
@@ -166,27 +163,8 @@ class OpenAiResponsesModelProviderTest {
   }
 
   private ModelDescriptor createModel() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-5.4-mini",
-        "gpt-5.4-mini",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        pricing);
+        "openai_test", "gpt-5.4-mini", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private ProviderRequest createRequest() {
@@ -209,10 +187,6 @@ class OpenAiResponsesModelProviderTest {
         new OpenAiResponsesProviderAdapter(
             stubTransport((req, cb) -> capturedRequest.set(req)), "sk-valid-key");
     assertEquals(ProviderType.OPENAI_RESPONSES, adapter.providerType());
-    // 缺省即 AUTOMATIC：不发送任何 cache hint。
-    assertEquals(PromptCacheMode.AUTOMATIC, adapter.promptCacheCapability().mode());
-    assertFalse(adapter.promptCacheCapability().supports(PromptCacheRetention.SHORT));
-    assertTrue(adapter.promptCacheCapability().supports(PromptCacheRetention.NONE));
 
     ModelProvider provider = adapter.create(createDescriptor());
     ProviderStream stream = provider.stream(createRequest(), new RecordingHandler());
@@ -465,16 +439,15 @@ class OpenAiResponsesModelProviderTest {
     // 1. 构造器 transport 为空抛出 NullPointerException
     assertThrows(NullPointerException.class, () -> new OpenAiResponsesProviderAdapter(null, "key"));
 
-    // 2. 构造器支持 configJson 解析
+    // 2. 构造器支持并严格校验 configJson
     OpenAiResponsesProviderAdapter adapterWithJson =
-        new OpenAiResponsesProviderAdapter(
-            transport, "key", "{\"openAiPromptCacheMode\":\"LEGACY\"}");
-    assertEquals(PromptCacheMode.AFFINITY, adapterWithJson.promptCacheCapability().mode());
+        new OpenAiResponsesProviderAdapter(transport, "key", "{\"promptCacheRetention\":\"LONG\"}");
+    assertNotNull(adapterWithJson);
 
-    // 3. 构造器传入 null OpenAiResponsesConfig 自动回退为默认配置
-    OpenAiResponsesProviderAdapter adapterWithNullConfig =
-        new OpenAiResponsesProviderAdapter(transport, "key", (OpenAiResponsesConfig) null);
-    assertEquals(PromptCacheMode.AUTOMATIC, adapterWithNullConfig.promptCacheCapability().mode());
+    // 3. malformed configJson 在构造期确定性失败
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new OpenAiResponsesProviderAdapter(transport, "key", "{invalid json"));
 
     // 4. descriptor 为空或 ProviderType 不匹配时抛出异常
     assertThrows(NullPointerException.class, () -> adapterWithJson.create(null));
@@ -489,10 +462,9 @@ class OpenAiResponsesModelProviderTest {
 
     // 5. 静态 API 验证
     assertEquals(
-        PromptCacheMode.AFFINITY,
-        OpenAiResponsesProviderAdapter.resolvePromptCacheCapability(
-                "{\"openAiPromptCacheMode\":\"LEGACY\"}")
-            .mode());
+        PromptCacheRetention.LONG,
+        OpenAiResponsesProviderAdapter.resolvePromptCacheRetention(
+            "{\"promptCacheRetention\":\"LONG\"}"));
     assertNotNull(OpenAiResponsesProviderAdapter.parseConfig("{}"));
   }
 

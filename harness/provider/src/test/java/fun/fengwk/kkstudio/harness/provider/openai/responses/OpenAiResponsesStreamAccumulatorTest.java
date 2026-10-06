@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -35,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,19 +55,6 @@ class OpenAiResponsesStreamAccumulatorTest {
   }
 
   private ProviderRequest createRequest() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
             "openai_test",
@@ -77,8 +62,7 @@ class OpenAiResponsesStreamAccumulatorTest {
             "gpt-5.4-mini",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     return new ProviderRequest(
         model,
         new ModelVariant("default"),
@@ -95,10 +79,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -177,10 +158,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_refusal\"}}"));
@@ -247,8 +225,7 @@ class OpenAiResponsesStreamAccumulatorTest {
               public void onError(ProviderException error, ProviderStream stream) {}
             });
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(), createDescriptor(), "0".repeat(64), bridge);
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), bridge);
     accumulator.handleEvent(
         "response.completed",
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}");
@@ -273,8 +250,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void duplicateAddedKeepsArgumentsAndRejectsDifferentIdentity() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}"));
@@ -297,8 +273,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("{\"x\":1}", accumulator.response().toolCalls().get(0).argumentsJson());
 
     OpenAiResponsesStreamAccumulator conflicting =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
     conflicting.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"item_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"lookup\"}}"));
@@ -328,8 +303,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   private ProviderResponse completeWithUsage(
       long input, long cached, long cacheWrite, long reasoning, long output) throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(), createDescriptor(), "0".repeat(64), e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_usage\",\"status\":\"completed\",\"output\":[],\"usage\":{"
@@ -351,11 +325,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_prematureEofThrowsInvalidResponse() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_123\"}}"));
@@ -371,11 +341,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_incompleteLengthWithTruncatedToolCall() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}"));
@@ -403,11 +369,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_incompleteContentFilterYieldsFilteredStopReason() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}"));
@@ -433,11 +395,7 @@ class OpenAiResponsesStreamAccumulatorTest {
             "{\"type\":\"response.error\",\"error\":{\"code\":\"server_error\",\"message\":\"fail\"}}",
             "{\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"fail\",\"param\":null,\"sequence_number\":1}")) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
       ProviderException ex =
           assertThrows(
               ProviderException.class, () -> accumulator.processEvent(MAPPER.readTree(payload)));
@@ -450,11 +408,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_sseEdgeEventsAndInvalidJson() {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // ping / [DONE] / blank / null
     accumulator.handleEvent("ping", "");
@@ -475,11 +429,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_missingTotalTokensPreservesZeroAndOmitsFromRawUsageJson() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_no_tot\"}}"));
@@ -525,11 +475,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<String> invalidUsages = List.of("[1, 2, 3]", "\"not_an_object\"", "12345");
     for (String invalidUsage : invalidUsages) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
       String event =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":"
               + invalidUsage
@@ -545,11 +491,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_rejectsNonObjectUsageDetails() throws Exception {
     OpenAiResponsesStreamAccumulator acc1 =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
     String badInDetails =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":10,\"input_tokens_details\":[1,2]}}}";
     ProviderException ex1 =
@@ -558,11 +500,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex1.kind());
 
     OpenAiResponsesStreamAccumulator acc2 =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
     String badOutDetails =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":10,\"output_tokens_details\":\"bad\"}}}";
     ProviderException ex2 =
@@ -583,11 +521,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     for (String badUsage : badUsages) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
       String event =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":"
               + badUsage
@@ -611,11 +545,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     for (String badUsage : nonIntegralUsages) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
       String event =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":"
               + badUsage
@@ -639,11 +569,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     for (String badUsage : outOfRangeUsages) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
       String event =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":"
               + badUsage
@@ -659,11 +585,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_usageSnapshotOverwritesPreviousSnapshotCompletely() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 快照 1：包含所有字段
     String snapshot1 =
@@ -700,11 +622,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_preservesCustomVendorMetadataInRawUsageJson() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -728,11 +646,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_emitsEmptyObjectRawUsageWhenNoUsageProvided() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -750,11 +664,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeRejectsIncompleteToolCallMissingArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -781,11 +691,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         List.of("not_json", "[1, 2, 3]", "12345", "\"scalar_str\"", "{\"unclosed\":");
     for (String badArg : badArgs) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
       accumulator.processEvent(
           MAPPER.readTree(
@@ -810,11 +716,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_lengthDiagnosesMalformedToolCallArgumentsAndDisablesReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -847,11 +749,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_retainsValidExplicitEmptyObjectToolCallArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -882,11 +780,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeTerminalOnlyValidEmptyObjectArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_valid\",\"status\":\"completed\","
@@ -912,11 +806,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeTerminalOnlyRejectsMissingArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_arg\",\"status\":\"completed\","
@@ -933,11 +823,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<String> nonTextArgs = List.of("{}", "[1, 2]", "123");
     for (String arg : nonTextArgs) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
       String completedEvent =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_non_text\",\"status\":\"completed\","
@@ -960,11 +846,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<String> nonObjectArgs = List.of("\"[1, 2, 3]\"", "\"12345\"", "\"scalar_string\"");
     for (String arg : nonObjectArgs) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
       String completedEvent =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_non_obj\",\"status\":\"completed\","
@@ -982,11 +864,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeTerminalOnlyRejectsMalformedArguments() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_bad_json\",\"status\":\"completed\","
@@ -1001,11 +879,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeTerminalOnlyRejectsMissingId() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_id\",\"status\":\"completed\","
@@ -1020,11 +894,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_completeTerminalOnlyRejectsMissingName() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_name\",\"status\":\"completed\","
@@ -1039,11 +909,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_lengthTerminalOnlyIncompleteToolCallProducesDiagnosticAndNoReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // terminal output 中参数截断
     String incompleteEvent =
@@ -1069,11 +935,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_usageNullSnapshotOverwritesPreviousSnapshotAndClearsUsage() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 快照 1：包含用量对象
     String snapshot1 =
@@ -1104,11 +966,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalOutputAuthoritativeOverPreviousStreamToolsEmpty() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 前序流式事件包含有效工具调用
     accumulator.processEvent(
@@ -1148,11 +1006,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalOutputAuthoritativeOverPreviousStreamToolsReplaced() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 前序流式事件包含工具 call_1
     accumulator.processEvent(
@@ -1196,11 +1050,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         List.of("{\"not\":\"an_array\"}", "\"scalar_string\"", "123", "null");
     for (String invalidOutput : invalidOutputs) {
       OpenAiResponsesStreamAccumulator accumulator =
-          new OpenAiResponsesStreamAccumulator(
-              createRequest(),
-              createDescriptor(),
-              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-              e -> {});
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
       String completedEvent =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_bad_output\",\"status\":\"completed\",\"output\":"
@@ -1219,11 +1069,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   void test_completeRejectsTerminalOutputItemMissingArgumentsEvenIfStreamBufferHadValue()
       throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 前序流式事件包含有效参数增量
     accumulator.processEvent(
@@ -1261,10 +1107,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     // 1. 流式输出草稿文本与思考内容
     accumulator.processEvent(
@@ -1341,10 +1184,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     // 1. 流式输出草稿文本、思考内容与工具调用
     accumulator.processEvent(
@@ -1385,11 +1225,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalOutputReplacesStreamedContentAndOmitsThinking() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_omit_th\"}}"));
@@ -1445,10 +1281,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     // 1. response.created 携带初始空 output 数组
     accumulator.processEvent(
@@ -1509,10 +1342,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     // 1. response.created 携带初始空 output 数组
     accumulator.processEvent(
@@ -1559,11 +1389,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalTextualMessageAndReasoningContentPreservedInReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -1600,10 +1426,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_ordinal\"}}"));
@@ -1670,10 +1493,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            emittedEvents::add);
+            createRequest(), createDescriptor(), emittedEvents::add);
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -1746,11 +1566,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalReasoningEncryptedContentTakesPrecedenceOverStreamed() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_1\"}}"));
@@ -1776,11 +1592,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalReasoningSummaryTakesPrecedenceOverStreamed() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_2\"}}"));
@@ -1809,11 +1621,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalReasoningIdConflictPurgesStreamedAndDoesNotInherit() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_3\"}}"));
@@ -1841,11 +1649,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalMessageContentTakesPrecedenceOverStreamedTextDelta() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_prec_5\"}}"));
@@ -1868,11 +1672,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_terminalToolMissingCallIdOrNameRemainsRejectedEvenIfStreamHadValue() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator1 =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     // 流中给出完整的 tool 增量
     accumulator1.processEvent(
@@ -1897,11 +1697,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex1.kind());
 
     OpenAiResponsesStreamAccumulator accumulator2 =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator2.processEvent(
         MAPPER.readTree(
@@ -1928,11 +1724,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_unknownTerminalOutputItemsAreFrozenIntactForReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_opaque\"}}"));
@@ -1996,11 +1788,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_streamedUnknownItemsFrozenButTypeLessFragmentsAreNot() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -2034,11 +1822,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_unknownItemAddedSlotsAreOverriddenByDoneWithoutDuplication() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
@@ -2083,11 +1867,7 @@ class OpenAiResponsesStreamAccumulatorTest {
   @Test
   void test_knownMessageAddedWithoutDoneKeepsSynthesizedTextReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
     accumulator.processEvent(
         MAPPER.readTree(
