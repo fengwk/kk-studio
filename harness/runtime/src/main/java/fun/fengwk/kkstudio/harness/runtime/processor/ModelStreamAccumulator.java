@@ -153,7 +153,6 @@ final class ModelStreamAccumulator {
         response.toolCalls(),
         response.stopReason(),
         response.usage(),
-        response.cost(),
         response.requestId(),
         response.serviceTier(),
         response.rawUsageJson(),

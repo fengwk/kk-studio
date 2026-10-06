@@ -13,8 +13,6 @@ import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapte
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
@@ -27,8 +25,6 @@ import java.net.ProxySelector;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.EnumSet;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -123,7 +119,7 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.OPENAI,
-        OpenAiChatProviderAdapter::promptCacheCapability,
+        OpenAiChatProviderAdapter::promptCacheRetention,
         (credential, configJson) ->
             new OpenAiChatProviderAdapter(transport, credential, configJson));
   }
@@ -134,7 +130,7 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.OPENAI_RESPONSES,
-        OpenAiResponsesProviderAdapter::resolvePromptCacheCapability,
+        OpenAiResponsesProviderAdapter::resolvePromptCacheRetention,
         (credential, configJson) ->
             new OpenAiResponsesProviderAdapter(transport, credential, configJson));
   }
@@ -145,12 +141,7 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.ANTHROPIC,
-        PromptCacheCapability.breakpoints(
-            Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
-            EnumSet.of(
-                PromptCacheBreakpoint.SYSTEM,
-                PromptCacheBreakpoint.TOOLS,
-                PromptCacheBreakpoint.CONVERSATION)),
+        PromptCacheRetention.SHORT,
         (credential, configJson) ->
             new AnthropicProviderAdapter(transport, credential, configJson));
   }
@@ -161,7 +152,7 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionTransport") JdkHttpSseTransport transport) {
     return ProviderFactory.of(
         ProviderType.GOOGLE,
-        PromptCacheCapability.automatic(),
+        PromptCacheRetention.NONE,
         (credential, configJson) -> new GeminiProviderAdapter(transport, credential));
   }
 
