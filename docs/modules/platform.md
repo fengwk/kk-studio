@@ -98,7 +98,7 @@ Environment、工具、Skill 和 subagents 规划；它不判断 Thread 属于�
 Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
 显式提交或冻结到 branch state。缺失引用返回规划失败。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
-subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。
+subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
 
 网关先做资源解析与无等待 admission，再返回门控 `Started(handle)`。
 Runtime 持久化 RUNNING 后调用 activate；Busy/RetryLater 表示确定未启动，允许重排，
@@ -118,9 +118,13 @@ requirements 复验目录；有效超时仅经 `Tool.resolveTimeout` 解析一�
 本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
-与 Base64 正文。发送前协议预览则使用与正式发送相同的规划、物化和编码器，返回点击时
-完整请求体（可能含内联媒体），适用于已有空闲 Thread。它以只读方式检查附件，
-结果与随后发送之间仍可能发生历史或配置变化；入口和冲突契约见 [Web](web.md)。
+与 Base64 正文。请求预览有三个只读入口（既有 Thread 续写、本地分支草稿、历史模型输出），
+都在同一条正式规划、物化与编码路径上生成点击瞬间的请求体（可能含内联媒体），
+以只读方式检查附件，不写任何内部事实、不消费附件、不调用 transport；
+历史入口按该输出记录的显式时间与冻结的压缩执行模型重建，结果不等于原始发送字节。
+入口、`kind` 与冲突契约见 [Web](web.md)。
+
+用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason` / `usage` / 可选 `decodeDurationMillis`），绝不持久化金额。`UsageCostProjectionService` 沿 Entry 父链取最近一次调用的 `ModelSelection`（压缩用 `TURN_START.compaction().executionModel`，否则该 Turn 的 branch settings，未进入 Turn 回落 ROOT），按当前 catalog pricing 用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；模型已删除则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog。
 
 ## Storage、Blob 与 Resource
 
