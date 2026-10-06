@@ -613,6 +613,12 @@ test.describe('ThinkingBlock collapsed tail', () => {
     await expect(ellipsis).toBeVisible()
     await expect(tail).toContainText('第二项')
     await expect(tail).not.toContainText('前置排查记录')
+    // 收起箭头指向右（>），展开后向下（v）。
+    await expect(expand.locator('svg.lucide-chevron-right')).toHaveCount(1)
+    // 省略边界落在字素簇上：尾部不得残留孤立代理码元。
+    expect((await tail.textContent()) ?? '').not.toMatch(
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/,
+    )
 
     // 单行、无横滚/纵滚，且未使用 rtl 反向排列。
     const lineBox = await line.evaluate((el) => {
@@ -667,12 +673,12 @@ test.describe('ThinkingBlock collapsed tail', () => {
     await expect(expanded).toBeVisible()
     await expect(expanded.locator('h1')).toHaveText('结论')
     await expect(expanded.locator('strong')).toHaveText('未被反转')
-    await expect(expanded.locator('li')).toHaveCount(2)
+    await expect(expanded.locator('li')).toHaveCount(3)
     await expect(expanded).toContainText('/usr/local/lib/node_modules/kk-studio 保持原顺序')
-    await expect(block.getByRole('button', { name: '收起思考' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
+    await expect(expanded).toContainText('👨‍👩‍👧‍👦')
+    const collapse = block.getByRole('button', { name: '收起思考' })
+    await expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    await expect(collapse.locator('svg.lucide-chevron-down')).toHaveCount(1)
 
     await page.screenshot({
       path: path.join(REPORTS_DIR, 'chat-thinking-expanded-desktop.png'),
@@ -681,7 +687,7 @@ test.describe('ThinkingBlock collapsed tail', () => {
 
     // 收起后窄屏仍然单行、无横滚、按钮不覆盖文本。
     await page.setViewportSize({ width: 375, height: 812 })
-    await block.getByRole('button', { name: '收起思考' }).click()
+    await collapse.click()
     await expect(line).toBeVisible()
     const narrow = await line.evaluate((el) => ({
       scrollWidth: el.scrollWidth,
@@ -700,5 +706,30 @@ test.describe('ThinkingBlock collapsed tail', () => {
       path: path.join(REPORTS_DIR, 'chat-thinking-collapsed-mobile-375.png'),
       fullPage: false,
     })
+  })
+
+  test('registers width measurement after empty thinking becomes streaming content', async ({
+    page,
+  }) => {
+    // 空思考时收起态节点不存在；同一元素实例出现内容后必须重新注册测量并投影出尾部省略。
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('/browser-tests/chat-layout-harness.html')
+
+    const block = page.locator('[data-testid="pane-1-thinking-stream"]')
+    await expect(block.locator('.thread-block-thinking')).toHaveCount(0)
+    await block.locator('[data-testid="thinking-stream"]').click()
+
+    const line = block.locator('.thread-thinking-line')
+    await expect(line).toBeVisible()
+    await expect(block.locator('.thread-thinking-ellipsis')).toBeVisible()
+    await expect(block.locator('.thread-thinking-tail')).not.toContainText('前置排查记录')
+
+    const box = await line.evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      clientHeight: el.clientHeight,
+    }))
+    expect(box.scrollWidth).toBeLessThanOrEqual(box.clientWidth + 1)
+    expect(box.clientHeight).toBeLessThanOrEqual(24)
   })
 })

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
 
 // jsdom 的测量 stub 为 7px/字符、容器宽 1200px：213 字符必然超宽，触发左侧省略。
@@ -35,6 +35,25 @@ describe('ThinkingBlock', () => {
 
     const toggle = screen.getByRole('button', { name: '展开思考' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // 收起态箭头向右（>），展开后向下（v）。
+    expect(toggle.querySelector('svg.lucide-chevron-right')).not.toBeNull()
+    expect(toggle.querySelector('svg.lucide-chevron-down')).toBeNull()
+  })
+
+  it('registers measurement when empty thinking turns into streaming content', () => {
+    // 测试意图：空思考不结束测量生命周期；同一实例首次出现内容后必须重新注册宽度测量并投影尾部
+    const observe = vi.spyOn(globalThis.ResizeObserver.prototype, 'observe')
+    const { container, rerender } = render(<ThinkingBlock thinking="" />)
+    expect(container).toBeEmptyDOMElement()
+    expect(observe).not.toHaveBeenCalled()
+
+    rerender(<ThinkingBlock thinking={LONG_THINKING} />)
+    const line = container.querySelector('.thread-thinking-line')
+    expect(line).not.toBeNull()
+    expect(observe).toHaveBeenCalledWith(line)
+    expect(container.querySelector('.thread-thinking-ellipsis')).not.toBeNull()
+    expect(line?.textContent?.endsWith('-TAILEND')).toBe(true)
+    observe.mockRestore()
   })
 
   it('keeps the newest suffix with a leading ellipsis when the line overflows', () => {
@@ -61,7 +80,10 @@ describe('ThinkingBlock', () => {
     expect(paragraphs[0]?.textContent).toBe('先读取 /usr/local/lib/node_modules/kk-studio 的入口，')
     expect(container.querySelector('strong')?.textContent).toBe('结论')
     // 展开后仍是同一个框，收起按钮回到第一行末尾
-    expect(screen.getByRole('button', { name: '收起思考' })).toHaveAttribute('aria-expanded', 'true')
+    const collapse = screen.getByRole('button', { name: '收起思考' })
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    expect(collapse.querySelector('svg.lucide-chevron-down')).not.toBeNull()
+    expect(collapse.querySelector('svg.lucide-chevron-right')).toBeNull()
     expect(container.querySelector('.thread-thinking-line')).toBeNull()
   })
 

@@ -44,9 +44,49 @@ describe('projectThinkingLine', () => {
     expect(projection.text).toBe(flat.slice(flat.length - 11))
   })
 
+  // 省略边界必须落在字素簇上：emoji、组合字符与 ZWJ 序列不能被 UTF-16 切断。
+  it('cuts at grapheme boundaries instead of splitting a surrogate pair', () => {
+    // '🙂abc' 的第二个 UTF-16 码元是低代理；按码元切会得到残缺 emoji。
+    expect(projectThinkingLine('🙂abc', 4, measure)).toEqual({ text: 'abc', truncated: true })
+    expect(projectThinkingLine('x🙂', 2, measure)).toEqual({ text: '', truncated: true })
+  })
+
+  it('never returns a lone surrogate or a dangling combining mark at any width', () => {
+    const flat = 'e\u0301👨‍👩‍👧‍👦路径/usr/local abc'
+    const brokenBoundary = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|^[\p{M}\u200D]/u
+    for (let width = 1; width <= 24; width += 1) {
+      const projection = projectThinkingLine(flat, width, measure)
+      expect(flat.endsWith(projection.text)).toBe(true)
+      expect(projection.text).not.toMatch(brokenBoundary)
+      // 结果不得超出可用宽度；只剩省略标记时宽度为 1，同样不越界。
+      expect(measure(`…${projection.text}`)).toBeLessThanOrEqual(width)
+    }
+  })
+
   // 连省略标记都放不下时只保留省略标记，不渲染超出容器的假尾部。
   it('drops the tail entirely when only the ellipsis fits', () => {
     expect(projectThinkingLine('abcdef', 1, measure)).toEqual({ text: '', truncated: true })
+  })
+
+  // 无 Intl.Segmenter 的环境退化为码点切分，仍不得切断代理对。
+  it('falls back to code-point boundaries when Intl.Segmenter is unavailable', () => {
+    const intl = Intl as unknown as { Segmenter?: typeof Intl.Segmenter }
+    const original = intl.Segmenter
+    intl.Segmenter = undefined
+    try {
+      expect(projectThinkingLine('🙂abc', 4, measure)).toEqual({ text: 'abc', truncated: true })
+    } finally {
+      intl.Segmenter = original
+    }
+  })
+
+  // 非单调度量不会制造越界假尾部：按整行返回，交由 CSS 裁剪。
+  it('keeps the whole line when the measure is not monotone', () => {
+    const weirdMeasure = (text: string) => (text.includes('…') ? 1 : text.length)
+    expect(projectThinkingLine('abcdef', 3, weirdMeasure)).toEqual({
+      text: 'abcdef',
+      truncated: false,
+    })
   })
 
   it('treats an empty line and a non-positive width safely', () => {

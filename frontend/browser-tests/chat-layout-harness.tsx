@@ -84,6 +84,7 @@ const INITIAL_THINKING = [
   '',
   '- 第一项',
   '- 第二项',
+  '- 第三项 emoji 👨‍👩‍👧‍👦 与组合 e\u0301 字符',
 ].join('\n')
 
 const SAMPLE_BRANCH_USAGE: TurnUsage = {
@@ -115,6 +116,7 @@ const SAMPLE_LONG_BRANCH_USAGE: TurnUsage = {
 export function ChatLayoutHarnessApp() {
   const [paneState, setPaneState] = useState<ChatPaneState>(INITIAL_PANE_STATE)
   const [thinking, setThinking] = useState(INITIAL_THINKING)
+  const [streamedThinking, setStreamedThinking] = useState('')
   const visiblePanes = visibleChatPanes(paneState)
 
   return (
@@ -171,6 +173,17 @@ export function ChatLayoutHarnessApp() {
                         onClick={() => setThinking((current) => `${current}\n\n补充：尾部更新`)}
                       >
                         append thinking
+                      </button>
+                    </div>
+                    {/* 空 -> 流式非空：验证收起态节点出现后才注册宽度测量 */}
+                    <div data-testid="pane-1-thinking-stream">
+                      <ThinkingBlock thinking={streamedThinking} />
+                      <button
+                        type="button"
+                        data-testid="thinking-stream"
+                        onClick={() => setStreamedThinking(INITIAL_THINKING)}
+                      >
+                        stream thinking
                       </button>
                     </div>
                     {/* 隔离验证基础 meta 样式，不构造类型契约外的消息。 */}
