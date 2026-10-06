@@ -1720,7 +1720,7 @@ registerCase({
   level: 'L3',
   title: 'NEW_THREAD 同 Session 分支创建（真实分支 turn）',
   requires: ['real', 'branch'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：同一 Session 历史 assistant Entry 下 NEW_THREAD target 开新 Thread（不复制 Entry）：sessionId 不变、新 Thread 默认名 branch-<threadId 前 8 位>、root-to-head 路径包含 startEntry 与分支 USER、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变；同一 batch 精确重放返回原 branch Thread 且不产生第二个 branch',
+  docs: '使用 minimax-anthropic/MiniMax-M3：在已闭合 TURN_END 边界用 NEW_THREAD 开新 Thread（不复制 Entry，不允许从 turn 中途的 assistant 消息开分支）：sessionId 不变、分支名等于显式给出的 threadName、root-to-head 路径包含 startEntry（TURN_END）与其前的 assistant、分支 turn 继续产生独立 assistant；原 Thread head/version/nextCommandSequence 不变；同一 batch 精确重放返回原 branch Thread 且不产生第二个 branch',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
     const suffix = cid().slice(0, 8)
@@ -1770,19 +1770,30 @@ registerCase({
 
       const current = await getThread(ctx, mainTid)
       assert(String(current.sessionId) === String(sessionId), safeDiagnosticJson(current))
+      // fork 边界只能是 ROOT 或已闭合 TURN_END：quiescent head 必须是 TURN_END，assistant 消息本身不是边界。
+      const startEntryId = String(current.headEntryId)
+      const startEntry = (mainSnapshot.entries || []).find(
+        (entry) => String(entry.entryId) === startEntryId,
+      )
+      assert(
+        String(startEntry?.entryType || '').toUpperCase() === 'TURN_END',
+        `branch fork must start from a closed TURN_END: ${safeDiagnosticJson(mainSnapshot.entries)}`,
+      )
       const mainBefore = {
         headEntryId: current.headEntryId,
         version: current.version,
         nextCommandSequence: current.nextCommandSequence,
       }
       const branchThreadId = cid()
+      const branchThreadName = `branch ${suffix}`
       const branchUserText = '在分支上只回复单词 BRANCH，不要调用工具。'
       const branchCommand = userMessageCommand(branchUserText, cid())
       const branchTarget = {
         owner: chatOwner(chat.id),
         sessionId,
-        startEntryId: assistantEntryId,
+        startEntryId,
         threadId: branchThreadId,
+        threadName: branchThreadName,
         // NEW_THREAD 独立 fork 新执行根：根开关从原根 mode 派生，不读取已删除的 boolean 字段。
         yoloEnabled: current.yoloPolicy.mode === 'ENABLE',
         commands: [branchCommand],
@@ -1790,7 +1801,7 @@ registerCase({
       const branched = await createNewThread(ctx, branchTarget)
       assert(String(branched.thread.sessionId) === String(sessionId), safeDiagnosticJson(branched.thread))
       assert(
-        branched.thread.name === `branch-${String(branchThreadId).slice(0, 8)}`,
+        branched.thread.name === branchThreadName,
         safeDiagnosticJson(branched.thread),
       )
       assert(
