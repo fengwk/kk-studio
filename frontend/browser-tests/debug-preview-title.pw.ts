@@ -133,7 +133,7 @@ function modelRequestDebug() {
         },
       ],
       subagents: [],
-      cacheControl: { retention: 'SHORT', affinityKey: 'prefix-key-1', breakpoints: ['SYSTEM', 'TOOLS'] },
+      cacheControl: { retention: 'SHORT', key: '00000000-0000-0000-0000-000000000001' },
       planningError: null,
       frozenInvocation: {
         kind: 'FROZEN_INVOCATION',
@@ -164,7 +164,7 @@ function draftRequestPreview(target: Cursor, modelName = 'minimax-m2.7') {
       ),
       sourceHeadEntryId: target.headEntryId,
       generatedAt: '2026-10-02T00:01:00.000Z',
-      snapshotNotice: null,
+      notice: 'Preview is a click-time reconstruction. A later send may observe different facts.',
     },
   }
 }
