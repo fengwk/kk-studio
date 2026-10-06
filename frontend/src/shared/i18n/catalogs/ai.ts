@@ -1879,6 +1879,18 @@ export const aiCatalog = {
     'en-US': 'This entry type cannot be displayed.',
     'zh-CN': '无法显示此类型的记录。',
   },
+  'ai.runtime.entry.compactionTitle': {
+    'en-US': 'Context compacted',
+    'zh-CN': '上下文已压缩',
+  },
+  'ai.runtime.entry.compactionExpand': {
+    'en-US': 'Expand compaction summary',
+    'zh-CN': '展开压缩摘要',
+  },
+  'ai.runtime.entry.compactionCollapse': {
+    'en-US': 'Collapse compaction summary',
+    'zh-CN': '收起压缩摘要',
+  },
   'ai.runtime.event.list': {
     'en-US': 'Events',
     'zh-CN': '事件',

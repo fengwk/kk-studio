@@ -137,6 +137,19 @@ const NOTIFICATION_TITLE_KEYS: Record<string, string> = {
 }
 
 /**
+ * 完整成功压缩的摘要卡片（COMPACTION Entry）：text 是逐字保留的
+ * {@code COMPACTION.payload.summaryText}，subjectEntryId 是摘要 Entry 身份。
+ * 是否成功由 builder 依据 enclosing TURN_START.phase 与匹配 TURN_END.outcome 判定，
+ * 这里只负责最小投影，不引入新的 NOTIFICATION 或 role。
+ */
+export function projectCompactionEntry(
+  entry: HarnessSessionEntryDTO,
+  summaryText: string,
+): EntryEventDialogueMessage {
+  return event(entry, 'compaction', translate('ai.runtime.entry.compactionTitle'), summaryText)
+}
+
+/**
  * 系统结果通知（NOTIFICATION）：它是 runtime 的上下文事实，不是人类输入。
  * 使用独立系统样式渲染，既不进入 composer 草稿，也不进入队列与上下键消息历史。
  * kind 与来源以原文显式投影；未知 kind 不假定为子代理结果。

@@ -13,39 +13,90 @@ import 'highlight.js/styles/github-dark.min.css'
 export type MarkdownTone = 'default' | 'muted'
 
 type ReactMarkdownProps = ComponentProps<typeof ReactMarkdown>
+type RehypePlugins = NonNullable<ReactMarkdownProps['rehypePlugins']>
+
+/**
+ * 最小 hast 结构：只为把 raw 节点转成安全 span，不引入新依赖，
+ * 也不做任何 XML/HTML 解析。
+ */
+interface HastNode {
+  type: string
+  value?: string
+  tagName?: string
+  properties?: Record<string, unknown>
+  children?: HastNode[]
+}
+
+/** 只把 type=raw 节点替换为 span.md-raw-text（子文本节点保留原始字符串），其余节点原样递归。 */
+function convertRawTextNodes(node: HastNode): void {
+  if (!Array.isArray(node.children)) {
+    return
+  }
+  node.children = node.children.map((child) => {
+    if (child.type === 'raw' && typeof child.value === 'string') {
+      return {
+        type: 'element',
+        tagName: 'span',
+        properties: { className: ['md-raw-text'] },
+        children: [{ type: 'text', value: child.value }],
+      }
+    }
+    convertRawTextNodes(child)
+    return child
+  })
+}
+
+const REHYPE_RAW_TEXT_SPAN = (() => (tree: HastNode) => {
+  convertRawTextNodes(tree)
+}) as unknown as RehypePlugins[number]
 
 const REMARK_PLUGINS: NonNullable<ReactMarkdownProps['remarkPlugins']> = [remarkGfm, remarkMath]
-const REHYPE_PLUGINS: NonNullable<ReactMarkdownProps['rehypePlugins']> = [
+const REHYPE_PLUGINS: RehypePlugins = [
   [rehypeKatex, { throwOnError: false, strict: 'ignore', output: 'html' }],
   rehypeHighlight,
 ]
+const REHYPE_PLUGINS_PRESERVING_RAW_TEXT: RehypePlugins = [...REHYPE_PLUGINS, REHYPE_RAW_TEXT_SPAN]
 const MARKDOWN_COMPONENTS = createMarkdownComponents()
 
 /** 单段 markdown：content 不变则跳过 re-parse（流式时前缀段不再重复解析） */
 const MarkdownSegmentView = memo(
-  function MarkdownSegmentView({ content }: { content: string }) {
+  function MarkdownSegmentView({
+    content,
+    preserveRawText,
+  }: {
+    content: string
+    preserveRawText: boolean
+  }) {
     return (
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={preserveRawText ? REHYPE_PLUGINS_PRESERVING_RAW_TEXT : REHYPE_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
+      >
         {content}
       </ReactMarkdown>
     )
   },
-  (prev, next) => prev.content === next.content,
+  (prev, next) => prev.content === next.content && prev.preserveRawText === next.preserveRawText,
 )
 
 /**
  * 通用 Markdown 渲染器。
  * - 闭合 mermaid fence 拆成稳定兄弟节点
  * - md 段按 content memo，降低流式 token 全量 parse 成本
+ * - preserveRawText：把 raw 节点渲染为安全 span.md-raw-text（保留原始换行），
+ *   不解析/执行 HTML；默认 false，保持既有行为。
  */
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   className,
   tone = 'default',
+  preserveRawText = false,
 }: {
   content: string
   className?: string
   tone?: MarkdownTone
+  preserveRawText?: boolean
 }) {
   const text = content ?? ''
   if (!text.trim()) {
@@ -63,7 +114,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         if (!segment.content.trim()) {
           return null
         }
-        return <MarkdownSegmentView key={segment.key} content={segment.content} />
+        return (
+          <MarkdownSegmentView
+            key={segment.key}
+            content={segment.content}
+            preserveRawText={preserveRawText}
+          />
+        )
       })}
     </div>
   )
