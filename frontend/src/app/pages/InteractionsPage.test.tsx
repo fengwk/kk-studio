@@ -121,7 +121,7 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('写代码')).toBeInTheDocument()
 
     // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
-    const chatSourceBtn = screen.getByTitle('Chat: chat-abc')
+    const chatSourceBtn = screen.getByTitle('打开对话')
     fireEvent.click(chatSourceBtn)
     expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=th-1')
 
@@ -137,7 +137,7 @@ describe('InteractionsPage', () => {
       },
     } as unknown as IssueDetailDTO)
 
-    const issueSourceBtn = screen.getByTitle('Issue: issue-101 (architect)')
+    const issueSourceBtn = screen.getByTitle('打开任务对话')
     fireEvent.click(issueSourceBtn)
     await waitFor(() => {
       expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=th-2')
@@ -166,10 +166,10 @@ describe('InteractionsPage', () => {
 
     render(<InteractionsPage />, { wrapper })
     await waitFor(() => {
-      expect(screen.getByTitle('Issue: issue-missing (coder)')).toBeInTheDocument()
+      expect(screen.getByTitle('打开任务对话')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByTitle('Issue: issue-missing (coder)'))
+    fireEvent.click(screen.getByTitle('打开任务对话'))
     await waitFor(() => {
       expect(mockedNavigate).toHaveBeenCalledWith('/projects')
     })

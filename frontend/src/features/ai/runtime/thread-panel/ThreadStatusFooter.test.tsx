@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
+import { setLocale } from '@/shared/i18n'
 
 describe('ThreadStatusFooter', () => {
   // 缺失最新调用上下文时，累计输入不能伪装成单次上下文占用。
@@ -14,18 +15,46 @@ describe('ThreadStatusFooter', () => {
         contextWindow={128_000}
       />,
     )
-    expect(screen.getByLabelText('会话状态')).toHaveTextContent('ctx —/128k')
+    const footer = screen.getByLabelText('会话状态')
+    expect(footer).toHaveTextContent('ctx —/128k')
+    // 未知即如实说明无数据，绝不用分支累计输入填充该缺口。
+    expect(lineOf(footer).getAttribute('title')).toContain(
+      '上次请求上下文：暂无数据（上限 128000 tokens）',
+    )
   })
 
-  it('renders zero usage facts when no closed-turn usage exists', () => {
+  // 全部事实必须落在唯一一行，避免 Footer 因数据增多重新折行。
+  it('renders all facts on a single line without wrapping', () => {
     render(<ThreadStatusFooter />)
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
-    expect(lines).toHaveLength(2)
-    expect(lines[0].textContent).toBe('未选择环境')
-    expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].textContent).toBe('未选择环境 | ↑0 | ↓0 | $0.000 | cache — | — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
+  })
+
+  // 每段事实保留独立 span，保证精确文本定位不被分隔符或相邻字段干扰。
+  it('keeps every fact addressable inside its own span', () => {
+    render(
+      <ThreadStatusFooter
+        environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
+        environmentReady
+        contextWindow={128_000}
+        branchUsage={{
+          input: 30, output: 9, cacheRead: 14, cacheWrite: 17,
+          reasoning: 0, providerTotal: 70, cost: 0.5,
+          decodeTokens: 9, decodeDurationMillis: 500, contextInputTokens: 61,
+        }}
+      />,
+    )
+    const footer = screen.getByLabelText('会话状态')
+    const spans = [...footer.querySelectorAll('.thread-status-line span')]
+    expect(spans.map((span) => span.textContent)).toEqual([
+      'env:local',
+      'ctx 61/128k',
+      '↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s',
+    ])
   })
 
   it('renders Environment identity as readonly facts', () => {
@@ -39,6 +68,7 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     expect(footer).toHaveTextContent('env:local')
     expect(footer.querySelector('button')).toBeNull()
+    expect(lineOf(footer).getAttribute('title')).toContain('环境：local')
   })
 
   // 验证在缺失 environmentName 时，规范回退为显示 environmentId 作为身份标识。
@@ -63,11 +93,12 @@ describe('ThreadStatusFooter', () => {
     )
 
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('env:dev (unavailable)')
+    expect(footer).toHaveTextContent('env:dev（不可用）')
+    expect(lineOf(footer).getAttribute('title')).toContain('环境：dev（不可用）')
   })
 
-  // 验证闭合回合存在完整数据时，两行分别渲染环境/上下文与包含中点/cache/speed的统一用量摘要
-  it('renders environment and context on first line, and unified usage summary on second line', () => {
+  // 验证单行按 | 连接环境/上下文/用量，hover 用简明读数完整保留全部累计事实。
+  it('joins environment, context and usage with pipes and keeps a readable hover readout', () => {
     render(
       <ThreadStatusFooter
         environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
@@ -90,22 +121,30 @@ describe('ThreadStatusFooter', () => {
 
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
-    expect(lines).toHaveLength(2)
-    expect(lines[0].textContent).toBe('env:local · ctx 61/128k')
-    expect(lines[1].textContent).toBe('↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].textContent).toBe(
+      'env:local | ctx 61/128k | ↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s',
+    )
     expect(lines[0]).toHaveAttribute(
       'title',
-      'env:local · 最新模型调用已知上下文输入估计：61 / 128000 tokens（非待发请求精确值）',
+      [
+        '环境：local',
+        '上次请求上下文：约 61 / 128000 tokens',
+        '累计用量',
+        '未缓存输入：30 tokens；输出：9 tokens',
+        '缓存读取：14 tokens；写入：17 tokens',
+        '费用：$0.500；缓存命中：23%',
+        '平均生成速度：18 tok/s',
+      ].join('\n'),
     )
-    expect(lines[1]).toHaveAttribute(
-      'title',
-      '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：↑30 · ↓9 · R14 · W17 · $0.500 · cache 23% · 18 tok/s',
-    )
+    // 不照抄可见缩写，也不解释内部口径（分母、是否含首次请求）。
+    expect(lines[0].getAttribute('title')).not.toContain('含首次请求')
+    expect(lines[0].getAttribute('title')).not.toContain('非待发请求精确值')
     expect(footer.querySelector('button')).toBeNull()
   })
 
-  // 验证闭合回合为空时，零用量与无样本空态规范渲染（分母为0显示cache —，无样本显示— tok/s）
-  it('renders zero usage, context, cache placeholder, and speed placeholder when closed-turn totals are empty', () => {
+  // 零用量/无测速样本时，hover 仍给出完整数字并把缺失项标注为暂无数据。
+  it('renders zero usage, context and localized no-data placeholders on one line', () => {
     render(
       <ThreadStatusFooter
         branchUsage={{
@@ -123,17 +162,74 @@ describe('ThreadStatusFooter', () => {
         contextWindow={128_000}
       />,
     )
-    const lines = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-line')]
-    expect(lines).toHaveLength(2)
-    expect(lines[0].textContent).toBe('未选择环境 · ctx 0/128k')
-    expect(lines[1].textContent).toBe('↑0 · ↓0 · $0.000 · cache — · — tok/s')
+    const footer = screen.getByLabelText('会话状态')
+    const lines = [...footer.querySelectorAll('.thread-status-line')]
+    expect(lines).toHaveLength(1)
+    expect(lines[0].textContent).toBe(
+      '未选择环境 | ctx 0/128k | ↑0 | ↓0 | $0.000 | cache — | — tok/s',
+    )
     expect(lines[0]).toHaveAttribute(
       'title',
-      '未选择环境 · 最新模型调用已知上下文输入估计：0 / 128000 tokens（非待发请求精确值）',
-    )
-    expect(lines[1]).toHaveAttribute(
-      'title',
-      '分支累计用量（含首次请求，cache 为累计输入缓存命中率）：↑0 · ↓0 · $0.000 · cache — · — tok/s',
+      [
+        '未选择环境',
+        '上次请求上下文：约 0 / 128000 tokens',
+        '累计用量',
+        '未缓存输入：0 tokens；输出：0 tokens',
+        '缓存读取：0 tokens；写入：0 tokens',
+        '费用：$0.000；缓存命中：暂无数据',
+        '平均生成速度：暂无数据',
+      ].join('\n'),
     )
   })
+
+  it('updates visible status and hover readouts when switching to English', () => {
+    const { rerender } = render(
+      <ThreadStatusFooter
+        environment={{ environmentId: 'env-dev-id', environmentName: 'dev' }}
+        environmentReady={false}
+        contextWindow={128_000}
+      />,
+    )
+
+    act(() => setLocale('en-US'))
+    const line = lineOf(screen.getByLabelText('Thread status'))
+    expect(line.textContent).toBe(
+      'env:dev (unavailable) | ctx —/128k | ↑0 | ↓0 | $0.000 | cache — | — tok/s',
+    )
+    expect(line).toHaveAttribute('title', [
+      'Environment: dev (unavailable)',
+      'Last request context: no data (limit 128000 tokens)',
+      'Cumulative usage',
+      'Uncached input: 0 tokens; output: 0 tokens',
+      'Cache read: 0 tokens; write: 0 tokens',
+      'Cost: $0.000; cache hit: No data',
+      'Average generation speed: No data',
+    ].join('\n'))
+
+    rerender(
+      <ThreadStatusFooter
+        environment={{ environmentId: 'env-dev-id', environmentName: 'dev' }}
+        environmentReady
+        contextWindow={128_000}
+        branchUsage={{
+          input: 30, output: 9, cacheRead: 14, cacheWrite: 17,
+          reasoning: 0, providerTotal: 70, cost: 0.5,
+          decodeTokens: 9, decodeDurationMillis: 500, contextInputTokens: 61,
+        }}
+      />,
+    )
+    expect(line).toHaveAttribute('title', [
+      'Environment: dev',
+      'Last request context: ~61 / 128000 tokens',
+      'Cumulative usage',
+      'Uncached input: 30 tokens; output: 9 tokens',
+      'Cache read: 14 tokens; write: 17 tokens',
+      'Cost: $0.500; cache hit: 23%',
+      'Average generation speed: 18 tok/s',
+    ].join('\n'))
+  })
 })
+
+function lineOf(footer: HTMLElement): HTMLElement {
+  return footer.querySelector('.thread-status-line') as HTMLElement
+}

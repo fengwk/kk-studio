@@ -46,4 +46,61 @@ describe('thread status formatting', () => {
       .find((segment) => segment.key === 'context')
     expect(context?.text).toBe(`ctx —/${text}`)
   })
+
+  // 已知与未知上下文必须区分表述：不能把缺失值说成精确值，也不能伪造成有数据。
+  it('describes a known context estimate as approximate without leaking internal caveats', () => {
+    const context = buildThreadStatusModel({
+      contextWindow: 128_000,
+      branchUsage: { ...EMPTY_USAGE, contextInputTokens: 61 },
+    }).segments.find((segment) => segment.key === 'context')
+
+    expect(context?.title).toBe('上次请求上下文：约 61 / 128000 tokens')
+  })
+
+  it('marks an unknown context estimate as no data with the window upper bound', () => {
+    const context = buildThreadStatusModel({ contextWindow: 128_000 }).segments
+      .find((segment) => segment.key === 'context')
+
+    expect(context?.title).toBe('上次请求上下文：暂无数据（上限 128000 tokens）')
+  })
+
+  // 累计用量 hover 复用与可见摘要同源的 cache/速率，未知即标注暂无数据。
+  it('builds a concise cumulative readout from full numbers and shared calculations', () => {
+    const usage = buildThreadStatusModel({
+      contextWindow: 128_000,
+      branchUsage: {
+        input: 30,
+        output: 9,
+        cacheRead: 14,
+        cacheWrite: 17,
+        reasoning: 0,
+        providerTotal: 70,
+        cost: 0.5,
+        decodeTokens: 9,
+        decodeDurationMillis: 500,
+        contextInputTokens: 61,
+      },
+    }).segments.find((segment) => segment.key === 'usage')
+
+    expect(usage?.text).toBe('↑30 | ↓9 | R14 | W17 | $0.500 | cache 23% | 18 tok/s')
+    expect(usage?.title).toBe(
+      [
+        '累计用量',
+        '未缓存输入：30 tokens；输出：9 tokens',
+        '缓存读取：14 tokens；写入：17 tokens',
+        '费用：$0.500；缓存命中：23%',
+        '平均生成速度：18 tok/s',
+      ].join('\n'),
+    )
+  })
 })
+
+const EMPTY_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  reasoning: 0,
+  providerTotal: 0,
+  cost: 0,
+}
