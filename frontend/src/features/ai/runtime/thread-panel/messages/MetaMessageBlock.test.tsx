@@ -41,7 +41,7 @@ describe('MetaMessageBlock', () => {
     expect(title).toContain('4100 tokens')
     expect(title).toContain('$0.003')
     // 不再把紧凑缩写图例当作 hover 内容。
-    expect(title).not.toContain(translate('ai.runtime.usage.metaTooltip'))
+    expect(title).not.toContain('↑')
     expect(title.split('\n')).toHaveLength(3)
   })
 

@@ -8,6 +8,7 @@ import {
   assertThreadYoloPolicy,
   canonicalUuid,
   chatOwner,
+  listEnvironments,
   newSessionTarget,
   newThreadTarget,
   threadParentIdOf,
@@ -245,4 +246,18 @@ test('the Project session route and its helper are gone from the lib surface', a
   const source = await readFile(new URL('../lib/harness.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /listProjectSessions/)
   assert.doesNotMatch(source, /projects\/\$\{[^}]*\}\/sessions/)
+})
+test('environment status deadline is required and explicitly null while offline', async () => {
+  // 截止时间是唯一状态时间投影：无连接不能省略字段，也不能携带有效截止时间。
+  const environment = {
+    id: cid(), name: 'offline', version: '0', ready: false, status: 'OFFLINE', statusExpiresAt: null,
+  }
+  const ctx = (data) => ({ call: async () => ({ json: { data: [data] } }) })
+  assert.deepEqual(await listEnvironments(ctx(environment)), [environment])
+  const { statusExpiresAt: _deadline, ...missing } = environment
+  await assert.rejects(() => listEnvironments(ctx(missing)), /statusExpiresAt/)
+  await assert.rejects(
+    () => listEnvironments(ctx({ ...environment, statusExpiresAt: '2026-10-07T00:00:00Z' })),
+    /OFFLINE/,
+  )
 })

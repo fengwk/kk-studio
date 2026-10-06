@@ -1727,10 +1727,6 @@ export const aiCatalog = {
     'en-US': 'Estimated cost: {{cost}}; cache hit rate: {{cache}}; generation speed: {{speed}}',
     'zh-CN': '估算费用：{{cost}}；缓存命中率：{{cache}}；生成速度：{{speed}}',
   },
-  'ai.runtime.usage.metaTooltip': {
-    'en-US': '↑ Uncached input · ↓ Output · R Cache read · W Cache write · $ Cost · cache Cache hit rate · tok/s Generation speed',
-    'zh-CN': '↑ 未缓存输入 · ↓ 输出 · R 缓存读取 · W 缓存写入 · $ 费用 · cache 缓存命中率 · tok/s 生成速度',
-  },
   'ai.runtime.notification.permissionTitle': {
     'en-US': 'Approval requested',
     'zh-CN': '等待审批',

@@ -135,7 +135,7 @@ public class ApplicationEventConfiguration {
                 InteractionChangeHub.CHANNEL,
                 interactionChangeHub::onNotification,
                 interactionChangeHub::broadcastResync),
-            // 13. Environment 连接状态失效：连接状态/被接受 metadata/租约代币变化，以及租约到期扫描
+            // 13. Environment 连接行失效；租约到期由读取投影与浏览器单次回读处理
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
                 environmentChangeHub::onNotification,

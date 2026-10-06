@@ -2,9 +2,7 @@ package fun.fengwk.kkstudio.web.events;
 
 import org.springframework.stereotype.Component;
 
-/**
- * Environment 连接状态失效：{@code environment_connection} 的状态/被接受 metadata/租约代币变化，以及租约到期扫描，都投递同一 全局资源信号。
- */
+/** Environment 连接行的状态、被接受 metadata 与租约代币变化，投递同一全局失效信号；到期由读取投影判断。 */
 @Component
 final class EnvironmentChangeHub extends NotificationInvalidationHub {
 

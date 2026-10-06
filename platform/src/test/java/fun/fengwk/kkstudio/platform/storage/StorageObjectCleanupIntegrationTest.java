@@ -133,12 +133,15 @@ class StorageObjectCleanupIntegrationTest extends PostgresSpringTestSupport {
                   + " and pid <> pg_backend_pid()",
               (rs, row) -> rs.getLong(1));
       assertEquals(1, lockBackends.size(), "exactly the writer session holds the upload lock");
-      jdbc.queryForList(
-          "select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory'"
-              + " and granted and pid <> pg_backend_pid()",
-          Boolean.class);
+      // 非零 timeout 等待会话真正退出；仅成功发送终止信号不能证明 advisory lock 已释放。
       assertEquals(
-          0, advisoryLockCount(), "session termination releases the advisory lock immediately");
+          Boolean.TRUE,
+          jdbc.queryForObject(
+              "select pg_terminate_backend(?, 10000)",
+              Boolean.class,
+              lockBackends.getFirst().intValue()));
+      assertEquals(
+          0, advisoryLockCount(), "confirmed session termination releases the advisory lock");
 
       backdateUpload(uploadId);
       assertEquals(1, uploadService.expireOnce(), "the dead anchor row must be reclaimed");

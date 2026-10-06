@@ -762,8 +762,8 @@ export async function snapshotEntries(ctx, threadId) {
 /**
  * 只读 Environment 注册表；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记。
  *
- * <p>{@code statusExpiresAt} 是当前状态的只读时间投影（有效连接取 min(lease, lastSeen+heartbeat)）：offline/失效时由
- * NON_NULL 省略；它的存在只提示浏览器按权威数据回读一次，绝不能当成固定轮询依据。
+ * {@code statusExpiresAt} 是当前状态的只读时间投影（有效连接取 min(lease, lastSeen+heartbeat)）：
+ * 无连接或失效时显式为 null，只提示浏览器按权威数据回读一次，不是固定轮询。
  */
 export async function listEnvironments(ctx) {
   const { json } = await ctx.call('GET', '/api/harness/environments')
@@ -777,8 +777,9 @@ export async function listEnvironments(ctx) {
     )
     assert(typeof environment.ready === 'boolean', JSON.stringify(environment))
     assert(typeof environment.status === 'string', JSON.stringify(environment))
-    if (Object.hasOwn(environment, 'statusExpiresAt')) {
-      const expiresAt = environment.statusExpiresAt
+    assert(Object.hasOwn(environment, 'statusExpiresAt'), 'environment must expose statusExpiresAt')
+    const expiresAt = environment.statusExpiresAt
+    if (expiresAt != null) {
       assert(
         (typeof expiresAt === 'number' && Number.isFinite(expiresAt))
           || (typeof expiresAt === 'string' && Number.isFinite(Date.parse(expiresAt))),

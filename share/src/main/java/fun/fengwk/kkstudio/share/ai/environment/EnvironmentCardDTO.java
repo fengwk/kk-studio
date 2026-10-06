@@ -28,6 +28,7 @@ public class EnvironmentCardDTO {
    *
    * <p>它是同一连接行事实的只读时间投影（不是被持久化的过期状态）：服务端读取时用同一时钟派生，浏览器只按它安排一次回读。
    */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private Instant statusExpiresAt;
 
   /** 最近活跃时间。 */

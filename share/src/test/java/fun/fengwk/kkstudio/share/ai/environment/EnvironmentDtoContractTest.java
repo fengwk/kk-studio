@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.share.ai.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +17,17 @@ import java.util.List;
 class EnvironmentDtoContractTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
+
+  /** 无连接时仍显式给出 null 截止时间，客户端不以缺失字段猜测连接状态。 */
+  @Test
+  void offlineCardKeepsNullStatusDeadlineUnderNonNullWirePolicy() throws Exception {
+    EnvironmentCardDTO card = new EnvironmentCardDTO();
+    card.setStatus("OFFLINE");
+    ObjectMapper mapper = MAPPER.copy().setSerializationInclusion(JsonInclude.Include.NON_NULL);
+    JsonNode json = mapper.readTree(mapper.writeValueAsString(card));
+    assertTrue(json.has("statusExpiresAt"));
+    assertTrue(json.get("statusExpiresAt").isNull());
+  }
 
   /** 意图：验证 EnvironmentCardDTO 已彻底移除 flat skills 字段以及对应的 getter/setter 访问器契约。 */
   @Test
