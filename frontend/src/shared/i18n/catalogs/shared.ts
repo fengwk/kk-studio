@@ -45,6 +45,10 @@ export const sharedCatalog = {
     'en-US': 'Copied',
     'zh-CN': '已复制',
   },
+  'shared.completed': {
+    'en-US': 'Completed',
+    'zh-CN': '已完成',
+  },
   'shared.dismissNotification': {
     'en-US': 'Dismiss notification',
     'zh-CN': '关闭通知',

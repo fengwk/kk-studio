@@ -269,6 +269,10 @@ export const canvasCatalog = {
     'en-US': 'Cancelled',
     'zh-CN': '已取消',
   },
+  'canvas.generation.status.unknown': {
+    'en-US': 'Unknown',
+    'zh-CN': '未知',
+  },
   'canvas.generation.expand': {
     'en-US': 'Expand panel',
     'zh-CN': '展开面板',
