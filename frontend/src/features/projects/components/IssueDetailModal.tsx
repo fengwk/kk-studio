@@ -25,6 +25,10 @@ import {
   X,
 } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
+import { Button } from '@/shared/ui/controls/Button'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { NumberInput } from '@/shared/ui/controls/NumberInput'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   storageService as defaultStorageService,
   type StorageService,
@@ -430,21 +434,6 @@ export function IssueDetailModal({
       budgetPayloadRef.current = null
     }
   }
-
-  // ESC 键关闭
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
 
   if (!isOpen || !issueId) {
     return null
@@ -947,22 +936,11 @@ export function IssueDetailModal({
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
-    >
-      <div
-        className="modal-card issue-detail-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Issue #${issue?.number || ''} 详情`}
-      >
-        {/* 弹窗头部 */}
+    <Dialog
+      className="issue-detail-modal-card"
+      ariaLabel={`Issue #${issue?.number || ''} 详情`}
+      onClose={onClose}
+      header={
         <div className="modal-header">
           <div className="issue-detail-header-left">
             <span className="issue-number" style={{ fontSize: '1.1rem' }}>
@@ -991,35 +969,31 @@ export function IssueDetailModal({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              type="button"
-              className="ghost-btn"
+            <Button
+              variant="ghost"
               onClick={() => void handleReloadFreshData()}
               disabled={isLoading || isActionPending}
               title="刷新数据"
             >
               <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="ghost-btn danger"
+            </Button>
+            <Button
+              variant="ghost"
+              danger
               onClick={() => setIsDeleteModalOpen(true)}
               disabled={isWriteBlocked}
               title="删除 Issue"
               aria-label="删除 Issue"
             >
               <Trash2 size={14} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="modal-close-button"
-              onClick={onClose}
-              aria-label="关闭"
-            >
+            </Button>
+            <IconButton label="关闭" onClick={onClose}>
               <X size={16} aria-hidden="true" />
-            </button>
+            </IconButton>
           </div>
         </div>
+      }
+    >
 
         {/* 顶部操作动作条 */}
         <div className="issue-actions-bar">
@@ -1151,15 +1125,14 @@ export function IssueDetailModal({
               解析错误: {corruptActionInfo.error}。为避免覆盖外部在途操作，写操作已锁定。
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
-              <button
-                type="button"
-                className="btn-primary danger"
+              <Button
+                danger
                 onClick={handleDiscardCorruptAction}
                 disabled={isActionPending}
                 style={{ fontSize: '12px', padding: '4px 12px' }}
               >
                 放弃损坏记录并解锁
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1187,47 +1160,43 @@ export function IssueDetailModal({
               操作类型: <code>{pendingUnknownAction.kind}</code> | 请求标识: <code>{pendingUnknownAction.requestKey}</code> | 基准版本: <code>{pendingUnknownAction.expectedVersion}</code>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px' }}>
-              <button
-                type="button"
-                className="btn-primary"
+              <Button
                 onClick={() => void handleRetryPendingAction()}
                 disabled={isActionPending}
                 style={{ fontSize: '12px', padding: '4px 12px' }}
               >
                 {isActionPending ? '重试中...' : '重试原操作'}
-              </button>
+              </Button>
               {!isDiscardConfirmOpen ? (
-                <button
-                  type="button"
-                  className="ghost-btn danger"
+                <Button
+                  variant="ghost"
+                  danger
                   onClick={() => setIsDiscardConfirmOpen(true)}
                   disabled={isActionPending}
                   style={{ fontSize: '12px', padding: '4px 12px' }}
                 >
                   放弃未决操作
-                </button>
+                </Button>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '12px', color: 'var(--danger)' }}>
                     【警告】此操作可能已在服务端执行。放弃后将不再跟踪原请求，确定放弃吗？
                   </span>
-                  <button
-                    type="button"
-                    className="btn-primary danger"
+                  <Button
+                    danger
                     onClick={handleDiscardPendingAction}
                     disabled={isActionPending}
                     style={{ fontSize: '12px', padding: '2px 8px' }}
                   >
                     确认放弃
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
+                  </Button>
+                  <Button
+                    variant="ghost"
                     onClick={() => setIsDiscardConfirmOpen(false)}
                     style={{ fontSize: '12px', padding: '2px 8px' }}
                   >
                     取消
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -1247,9 +1216,7 @@ export function IssueDetailModal({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {isEditingSpec && detail?.issue && detail.issue.version !== specVersion && (
-                <button
-                  type="button"
-                  className="btn-primary"
+                <Button
                   onClick={() => {
                     if (detail?.issue) {
                       setSpecVersion(detail.issue.version)
@@ -1261,17 +1228,16 @@ export function IssueDetailModal({
                   title="确认风险：可能覆盖远端最新修改，确认用最新版本重试保留的草稿"
                 >
                   可能覆盖远端最新修改，确认用最新版本重试保留的草稿
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
-                className="ghost-btn"
+              <Button
+                variant="ghost"
                 onClick={() => void handleReloadFreshData()}
                 style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
               >
                 <RefreshCw size={12} aria-hidden="true" />
                 <span>刷新并保留草稿</span>
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -1374,9 +1340,8 @@ export function IssueDetailModal({
                         />
                       </div>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          className="ghost-btn"
+                        <Button
+                          variant="ghost"
                           onClick={() => {
                             setIsEditingSpec(false)
                             setDraftTitle(issue.title)
@@ -1387,30 +1352,28 @@ export function IssueDetailModal({
                           disabled={isActionPending}
                         >
                           取消
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="submit"
-                          className="btn-primary"
                           disabled={isWriteBlocked}
                         >
                           {isActionPending ? '保存中...' : '保存更改'}
-                        </button>
+                        </Button>
                       </div>
                     </form>
                   ) : (
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <h2 className="spec-title">{issue.title}</h2>
-                        <button
-                          type="button"
-                          className="ghost-btn"
+                        <Button
+                          variant="ghost"
                           onClick={() => setIsEditingSpec(true)}
                           disabled={isWriteBlocked}
                           title="编辑需求标题与描述"
                         >
                           <Pencil size={14} aria-hidden="true" />
                           <span>编辑需求</span>
-                        </button>
+                        </Button>
                       </div>
 
                       <div className="spec-desc-block">
@@ -1494,15 +1457,14 @@ export function IssueDetailModal({
                     />
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-                      <button
+                      <Button
                         type="submit"
-                        className="btn-primary"
                         disabled={isWriteBlocked || !activityBody.trim()}
                         style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                       >
                         <Send size={12} aria-hidden="true" />
                         <span>{activityKind === 'INSTRUCTION' ? '派发指令' : '发表评论'}</span>
-                      </button>
+                      </Button>
                     </div>
                   </form>
 
@@ -1607,9 +1569,7 @@ export function IssueDetailModal({
               {activeTab === 'stageBudgets' && (
                 <div className="tab-pane">
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
-                    <button
-                      type="button"
-                      className="btn-primary"
+                    <Button
                       onClick={() => {
                         setIsResetBudgetOpen(true)
                         if (!resetBudgetState && detail.stageBudgets[0]) {
@@ -1620,7 +1580,7 @@ export function IssueDetailModal({
                     >
                       <Coins size={14} aria-hidden="true" />
                       <span>重置阶段预算</span>
-                    </button>
+                    </Button>
                   </div>
 
                   {(detail.stageBudgets ?? []).length === 0 ? (
@@ -1672,15 +1632,14 @@ export function IssueDetailModal({
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <code>{t.threadId}</code>
                             {onOpenThread && (
-                              <button
-                                type="button"
-                                className="ghost-btn"
+                              <Button
+                                variant="ghost"
                                 onClick={() => onOpenThread(t.threadId)}
                                 title="打开此 Agent 线程视图"
                               >
                                 <Eye size={14} aria-hidden="true" />
                                 <span>打开</span>
-                              </button>
+                              </Button>
                             )}
                           </div>
                         </div>
@@ -1701,16 +1660,14 @@ export function IssueDetailModal({
                       onChange={handleFileSelected}
                       disabled={isUploadingEvidence || isWriteBlocked}
                     />
-                    <button
-                      type="button"
-                      className="btn-primary"
+                    <Button
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingEvidence || isWriteBlocked}
                       style={{ fontSize: '13px' }}
                     >
                       <Upload size={14} aria-hidden="true" />
                       <span>{isUploadingEvidence ? '正在上传...' : '上传证据文件'}</span>
-                    </button>
+                    </Button>
                   </div>
 
                   {allEvidences.length === 0 ? (
@@ -1734,24 +1691,22 @@ export function IssueDetailModal({
 
         {/* 弹窗底部 */}
         <div className="modal-footer">
-          <button type="button" className="ghost-btn" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
 
         {/* --- 子对话框区 --- */}
 
         {/* 1. 业务阻塞弹窗 */}
         {isBlockModalOpen && (
-          <div className="modal-backdrop sub-modal" role="dialog" aria-label="标记业务阻塞">
-            <div className="modal-card sub-card">
-              <div className="modal-header">
-                <h3>标记业务阻塞 (BLOCKED)</h3>
-                <button type="button" className="modal-close-button" onClick={() => setIsBlockModalOpen(false)}>
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </div>
-              <form onSubmit={handleBlockSubmit}>
+          <Dialog
+            className="sub-card"
+            title="标记业务阻塞 (BLOCKED)"
+            pending={isWriteBlocked}
+            onClose={() => setIsBlockModalOpen(false)}
+          >
+              <form className="modal-card-form" onSubmit={handleBlockSubmit}>
                 <div className="modal-body">
                   <div className="form-group">
                     <label className="form-label required">阻塞原因</label>
@@ -1766,36 +1721,31 @@ export function IssueDetailModal({
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="ghost-btn" onClick={() => setIsBlockModalOpen(false)}>
+                  <Button variant="ghost" onClick={() => setIsBlockModalOpen(false)}>
                     取消
-                  </button>
-                  <button
+                    </Button>
+                  <Button
                     type="submit"
-                    className="btn-primary danger"
+                    danger
                     disabled={isWriteBlocked}
-                  >
+                    >
                     {isActionPending ? '提交中...' : '确认阻塞'}
-                  </button>
+                  </Button>
                 </div>
               </form>
-            </div>
-          </div>
+              </Dialog>
         )}
 
         {/* 2. UNKNOWN 人工核查弹窗 */}
         {isResolveUnknownOpen && (
-          <div className="modal-backdrop sub-modal" role="dialog" aria-label="人工核查 UNKNOWN">
-            <div className="modal-card sub-card">
-              <div className="modal-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldAlert size={16} className="text-danger" aria-hidden="true" />
-                  <h3>解除 UNKNOWN（人工核查）</h3>
-                </div>
-                <button type="button" className="modal-close-button" onClick={() => setIsResolveUnknownOpen(false)}>
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </div>
-              <form onSubmit={handleResolveUnknownSubmit}>
+          <Dialog
+            className="sub-card"
+            title="解除 UNKNOWN（人工核查）"
+            headerIcon={<ShieldAlert size={16} className="text-danger" aria-hidden="true" />}
+            pending={isWriteBlocked}
+            onClose={() => setIsResolveUnknownOpen(false)}
+          >
+              <form className="modal-card-form" onSubmit={handleResolveUnknownSubmit}>
                 <div className="modal-body">
                   <p style={{ fontSize: '13px', color: 'var(--fg-dim)', margin: '0 0 12px 0' }}>
                     * 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除 UNKNOWN 暂停。
@@ -1813,33 +1763,29 @@ export function IssueDetailModal({
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="ghost-btn" onClick={() => setIsResolveUnknownOpen(false)}>
+                  <Button variant="ghost" onClick={() => setIsResolveUnknownOpen(false)}>
                     取消
-                  </button>
-                  <button
+                    </Button>
+                  <Button
                     type="submit"
-                    className="btn-primary"
                     disabled={isWriteBlocked}
-                  >
+                    >
                     {isActionPending ? '解除中...' : '确认解除 UNKNOWN'}
-                  </button>
+                  </Button>
                 </div>
               </form>
-            </div>
-          </div>
+              </Dialog>
         )}
 
         {/* 3. Stop 终止弹窗 */}
         {isStopModalOpen && (
-          <div className="modal-backdrop sub-modal" role="dialog" aria-label="终止运行">
-            <div className="modal-card sub-card">
-              <div className="modal-header">
-                <h3>终止当前运行 (Stop)</h3>
-                <button type="button" className="modal-close-button" onClick={() => setIsStopModalOpen(false)}>
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </div>
-              <form onSubmit={handleStopSubmit}>
+          <Dialog
+            className="sub-card"
+            title="终止当前运行 (Stop)"
+            pending={isWriteBlocked}
+            onClose={() => setIsStopModalOpen(false)}
+          >
+              <form className="modal-card-form" onSubmit={handleStopSubmit}>
                 <div className="modal-body">
                   <div className="form-group">
                     <label className="form-label">终止原因 (可选)</label>
@@ -1854,33 +1800,30 @@ export function IssueDetailModal({
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="ghost-btn" onClick={() => setIsStopModalOpen(false)}>
+                  <Button variant="ghost" onClick={() => setIsStopModalOpen(false)}>
                     取消
-                  </button>
-                  <button
+                    </Button>
+                  <Button
                     type="submit"
-                    className="btn-primary danger"
+                    danger
                     disabled={isWriteBlocked}
-                  >
+                    >
                     {isActionPending ? '终止中...' : '确认终止'}
-                  </button>
+                  </Button>
                 </div>
               </form>
-            </div>
-          </div>
+              </Dialog>
         )}
 
         {/* 4. 阶段预算重置弹窗 */}
         {isResetBudgetOpen && (
-          <div className="modal-backdrop sub-modal" role="dialog" aria-label="重置阶段预算">
-            <div className="modal-card sub-card">
-              <div className="modal-header">
-                <h3>重置阶段预算</h3>
-                <button type="button" className="modal-close-button" onClick={() => setIsResetBudgetOpen(false)}>
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </div>
-              <form onSubmit={handleResetBudgetSubmit}>
+          <Dialog
+            className="sub-card"
+            title="重置阶段预算"
+            pending={isWriteBlocked}
+            onClose={() => setIsResetBudgetOpen(false)}
+          >
+              <form className="modal-card-form" onSubmit={handleResetBudgetSubmit}>
                 <div className="modal-body">
                   <div className="form-group">
                     <label htmlFor="reset-budget-state" className="form-label required">工作阶段</label>
@@ -1895,65 +1838,56 @@ export function IssueDetailModal({
                   </div>
                   <div className="form-group">
                     <label htmlFor="reset-budget-max-runs" className="form-label required">最大 Run 额度</label>
-                    <input
+                    <NumberInput
                       id="reset-budget-max-runs"
-                      type="number"
                       min={1}
-                      className="form-input"
-                      value={resetBudgetMaxRuns}
-                      onChange={(e) => handleBudgetMaxRunsChange(Number(e.target.value))}
+                      value={String(resetBudgetMaxRuns)}
+                      onChange={(next) => handleBudgetMaxRunsChange(next === '' ? 0 : Number(next))}
                     />
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="ghost-btn" onClick={() => setIsResetBudgetOpen(false)}>
+                  <Button variant="ghost" onClick={() => setIsResetBudgetOpen(false)}>
                     取消
-                  </button>
-                  <button
+                    </Button>
+                  <Button
                     type="submit"
-                    className="btn-primary"
                     disabled={isWriteBlocked}
-                  >
+                    >
                     {isActionPending ? '重置中...' : '确认重置'}
-                  </button>
+                  </Button>
                 </div>
               </form>
-            </div>
-          </div>
+              </Dialog>
         )}
 
         {/* 5. 删除 Issue 确认弹窗 */}
         {isDeleteModalOpen && (
-          <div className="modal-backdrop sub-modal" role="dialog" aria-label="删除 Issue 确认">
-            <div className="modal-card sub-card">
-              <div className="modal-header">
-                <h3>删除 Issue #{issue?.number}</h3>
-                <button type="button" className="modal-close-button" onClick={() => setIsDeleteModalOpen(false)}>
-                  <X size={16} aria-hidden="true" />
-                </button>
-              </div>
+          <Dialog
+            className="sub-card"
+            title={`删除 Issue #${issue?.number}`}
+            pending={isWriteBlocked}
+            onClose={() => setIsDeleteModalOpen(false)}
+          >
               <div className="modal-body">
                 <p style={{ margin: 0, color: 'var(--fg)' }}>
                   确定要彻底删除该 Issue 吗？此操作将清理该 Issue 的执行记录、活动、证据和关联会话，无法恢复。
                 </p>
               </div>
               <div className="modal-footer">
-                <button type="button" className="ghost-btn" onClick={() => setIsDeleteModalOpen(false)}>
+                <Button variant="ghost" onClick={() => setIsDeleteModalOpen(false)}>
                   取消
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary danger"
+                  </Button>
+                <Button
+                  danger
                   disabled={isWriteBlocked}
                   onClick={handleDeleteIssue}
-                >
+                  >
                   {isActionPending ? '删除中...' : '确认删除'}
-                </button>
+                </Button>
               </div>
-            </div>
-          </div>
+            </Dialog>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }

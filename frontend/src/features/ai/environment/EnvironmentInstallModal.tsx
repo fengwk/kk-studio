@@ -9,10 +9,11 @@ import { environmentService } from '@/shared/api/environment-service'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
-import { Select } from '@/shared/ui/console/Select'
-import { Checkbox } from '@/shared/ui/console/Checkbox'
-import { Toast } from '@/shared/ui/console/Toast'
+import { Button } from '@/shared/ui/controls/Button'
+import { Select } from '@/shared/ui/controls/Select'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { Toast } from '@/shared/ui/feedback/Toast'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n, type InterpolationValues } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { copyTextToClipboard } from './clipboard'
@@ -257,18 +258,12 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
   }
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <div
-        className="modal-card environment-install-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
-        onMouseDown={event => event.stopPropagation()}
-      >
-        <ModalHeader
-          title={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
-          onClose={onClose}
-        />
+    <Dialog
+      className="environment-install-modal"
+      title={t(uninstall ? 'ai.environment.install.uninstallTitle' : 'ai.environment.install.title')}
+      pending={pending}
+      onClose={onClose}
+    >
         <form onSubmit={event => void submit(event)}>
           <div className="modal-body">
             <p className="confirm-modal-description">
@@ -288,17 +283,13 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
                       })}
                 </p>
                 <div className="install-load-actions">
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => setLoadKey(key => key + 1)}
-                  >
+                  <Button variant="ghost" onClick={() => setLoadKey(key => key + 1)}>
                     {t('ai.environment.install.reload')}
-                  </button>
+                  </Button>
                   {loadError.kind === 'invalid' && (
-                    <button type="button" className="ghost-btn" onClick={useDefaultSettings}>
+                    <Button variant="ghost" onClick={useDefaultSettings}>
                       {t('ai.environment.install.useDefaults')}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -400,12 +391,12 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             )}
           </div>
           <div className="modal-footer">
-            <button type="button" className="ghost-btn" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose}>
               {t('ai.environment.close')}
-            </button>
-            <button type="submit" className="btn-primary" disabled={disabled}>
+            </Button>
+            <Button type="submit" disabled={disabled}>
               {t(uninstall ? 'ai.environment.install.copyUninstall' : 'ai.environment.install.saveCopy')}
-            </button>
+            </Button>
           </div>
         </form>
         {feedback && <Toast message={feedback} onDismiss={() => setFeedback(null)} />}
@@ -418,7 +409,6 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
             void rebaseVersion()
           }}
         />
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }

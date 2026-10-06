@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Pencil, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Pencil, RefreshCw } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { isConflictError } from '@/shared/api/client'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
@@ -37,20 +39,6 @@ export function EditIssueModal({
       setConflictDetail(null)
     }
   }, [isOpen, issue])
-
-  useEffect(() => {
-    if (!isOpen) {
-      return
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
 
   if (!isOpen || !issue) {
     return null
@@ -103,37 +91,14 @@ export function EditIssueModal({
   }
 
   return (
-    <div
-      className="modal-backdrop"
-      role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) {
-          onClose()
-        }
-      }}
+    <Dialog
+      className="resource-modal-card"
+      title={`编辑 Issue #${issue.number ?? issue.id}`}
+      headerIcon={<Pencil size={18} aria-hidden="true" />}
+      pending={isSubmitting}
+      onClose={onClose}
     >
-      <div
-        className="modal-card resource-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label="编辑 Issue"
-      >
-        <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Pencil size={18} aria-hidden="true" />
-            <h3>编辑 Issue #{issue.number ?? issue.id}</h3>
-          </div>
-          <button
-            type="button"
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="关闭"
-          >
-            <X size={16} aria-hidden="true" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
+        <form className="modal-card-form" onSubmit={handleSubmit}>
           <div className="modal-body">
             {conflictDetail && (
               <div
@@ -150,9 +115,8 @@ export function EditIssueModal({
                   <AlertTriangle size={16} aria-hidden="true" />
                   <span>{conflictDetail}</span>
                 </div>
-                <button
-                  type="button"
-                  className="ghost-btn"
+                <Button
+                  variant="ghost"
                   onClick={() => void handleReloadVersionKeepDraft()}
                   disabled={isReloading}
                   style={{ whiteSpace: 'nowrap' }}
@@ -163,7 +127,7 @@ export function EditIssueModal({
                     aria-hidden="true"
                   />
                   <span>刷新版本</span>
-                </button>
+                </Button>
               </div>
             )}
 
@@ -209,24 +173,14 @@ export function EditIssueModal({
           </div>
 
           <div className="modal-footer">
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={onClose}
-              disabled={isSubmitting}
-            >
+            <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
               取消
-            </button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={isSubmitting}
-            >
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? '保存中...' : '保存修改'}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }

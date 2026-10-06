@@ -3,11 +3,13 @@ import type {
 } from '@/shared/api/contracts/ai-catalog'
 import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normalizers'
-import { sanitizeDecimalInput, sanitizeIntegerInput } from '@/shared/lib/numeric-input'
+import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
-import { FieldLabel } from '@/shared/ui/console/FieldLabel'
-import { Select } from '@/shared/ui/console/Select'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { NumberInput } from '@/shared/ui/controls/NumberInput'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { Select } from '@/shared/ui/controls/Select'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 
@@ -163,17 +165,12 @@ export function ModelForm({
         <div className="form-grid-2">
           <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
             <FieldLabel required>{t('ai.catalog.form.contextWindow')}</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
+            <NumberInput
               value={draft.contextWindow}
-              onChange={(event) =>
-                onChange({ ...draft, contextWindow: sanitizeIntegerInput(event.target.value) })
-              }
+              min={1}
               placeholder="128000"
-              required
+              onChange={(contextWindow) => onChange({ ...draft, contextWindow })}
+              aria-label={t('ai.catalog.form.contextWindow')}
             />
             {fieldErrors.contextWindow ? (
               <span className="field-error">{fieldErrors.contextWindow}</span>
@@ -181,17 +178,12 @@ export function ModelForm({
           </label>
           <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
             <FieldLabel required>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
+            <NumberInput
               value={draft.maxOutputTokens}
-              onChange={(event) =>
-                onChange({ ...draft, maxOutputTokens: sanitizeIntegerInput(event.target.value) })
-              }
+              min={1}
               placeholder="8192"
-              required
+              onChange={(maxOutputTokens) => onChange({ ...draft, maxOutputTokens })}
+              aria-label={t('ai.catalog.form.maxOutputTokens')}
             />
             <span className="inline-hint">{t('ai.catalog.form.maxOutputLimitHint')}</span>
             {fieldErrors.maxOutputTokens ? (
@@ -206,22 +198,16 @@ export function ModelForm({
           <h3 id="model-abilities-heading">{t('ai.catalog.form.abilities')}</h3>
         </div>
         <div className="ability-toggle-row">
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={draft.tools}
-              onChange={(event) => onChange({ ...draft, tools: event.target.checked })}
-            />
-            <span>{t('ai.catalog.form.tools')}</span>
-          </label>
-          <label className="checkbox-field">
-            <input
-              type="checkbox"
-              checked={draft.reasoning}
-              onChange={(event) => setReasoning(event.target.checked)}
-            />
-            <span>{t('ai.catalog.form.reasoning')}</span>
-          </label>
+          <Checkbox
+            checked={draft.tools}
+            onChange={(tools) => onChange({ ...draft, tools })}
+            label={t('ai.catalog.form.tools')}
+          />
+          <Checkbox
+            checked={draft.reasoning}
+            onChange={setReasoning}
+            label={t('ai.catalog.form.reasoning')}
+          />
         </div>
       </section>
 
@@ -234,14 +220,14 @@ export function ModelForm({
           {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
             const checked = draft.inputModalities.includes(item)
             return (
-              <label key={item} className={`capability-option${checked ? ' is-selected' : ''}`}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleInputModality(item)}
-                />
+              <Checkbox
+                key={item}
+                className={`capability-option${checked ? ' is-selected' : ''}`}
+                checked={checked}
+                onChange={() => toggleInputModality(item)}
+              >
                 <span>{item}</span>
-              </label>
+              </Checkbox>
             )
           })}
         </div>

@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { useState } from 'react'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/shared/api/config-sync-service'
 import type {
@@ -13,7 +14,6 @@ import {
   configSyncImportMode,
   configSyncKindLabelKey,
 } from '@/features/settings/sync/config-sync-utils'
-import { useModalDismiss } from '@/features/settings/sync/use-modal-dismiss'
 
 interface SyncImportModalProps {
   fileName: string
@@ -40,12 +40,9 @@ export function SyncImportModal({
   onReloadSettings,
 }: SyncImportModalProps) {
   const { t } = useI18n()
-  const cardRef = useRef<HTMLDivElement>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ConfigSyncImportResponseDTO | null>(null)
-
-  useModalDismiss(cardRef, pending, onClose)
 
   const mode = configSyncImportMode(preview)
   const kindLabel = (kind: string): string =>
@@ -79,35 +76,24 @@ export function SyncImportModal({
       ? 'settings.sync.import.confirmPartial'
       : 'settings.sync.import.confirm'
     return (
-      <button
-        type="button"
-        className="btn-primary"
+      <Button
         onClick={() => {
           void handleImport(partial)
         }}
         disabled={pending}
       >
         {pending ? t('settings.sync.import.importing') : t(labelKey)}
-      </button>
+      </Button>
     )
   }
 
   return (
-    <ModalBackdrop onClose={pending ? () => undefined : onClose}>
-      <div
-        ref={cardRef}
-        className="modal-card settings-sync-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('settings.sync.import.title')}
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <ModalHeader
-          title={t('settings.sync.import.title')}
-          onClose={onClose}
-          closeDisabled={pending}
-        />
+    <Dialog
+      className="settings-sync-modal"
+      title={t('settings.sync.import.title')}
+      pending={pending}
+      onClose={onClose}
+    >
         <div className="modal-body settings-sync-modal-body">
           {result ? (
             <ImportResult
@@ -133,20 +119,17 @@ export function SyncImportModal({
         </div>
         <div className="modal-footer">
           {result ? (
-            <button type="button" className="btn-primary" onClick={onClose}>
-              {t('shared.close')}
-            </button>
+            <Button onClick={onClose}>{t('shared.close')}</Button>
           ) : (
             <>
-              <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
+              <Button variant="ghost" onClick={onClose} disabled={pending}>
                 {t('shared.cancel')}
-              </button>
+              </Button>
               {executeButton()}
             </>
           )}
         </div>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }
 

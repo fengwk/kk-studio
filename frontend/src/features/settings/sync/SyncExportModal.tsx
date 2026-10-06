@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { useMemo, useState } from 'react'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { Button } from '@/shared/ui/controls/Button'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/shared/api/config-sync-service'
 import type { ConfigSyncItem, ConfigSyncKind } from '@/shared/api/contracts/config-sync'
@@ -16,7 +18,6 @@ import {
   CONFIG_SYNC_EXPORT_FILENAME,
   downloadConfigYaml,
 } from '@/features/settings/sync/download-config-yaml'
-import { useModalDismiss } from '@/features/settings/sync/use-modal-dismiss'
 
 interface SyncExportModalProps {
   items: ConfigSyncItem[]
@@ -27,14 +28,11 @@ interface SyncExportModalProps {
 /** 导出弹窗：按库存勾选直接导出项，依赖仅用于展示闭包，由后端按权威配置补齐。 */
 export function SyncExportModal({ items, onClose, onExported }: SyncExportModalProps) {
   const { t } = useI18n()
-  const cardRef = useRef<HTMLDivElement>(null)
   const [directKeys, setDirectKeys] = useState<Set<string>>(
     () => new Set(items.map(configSyncRefKey)),
   )
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useModalDismiss(cardRef, pending, onClose)
 
   const scope = useMemo(() => computeExportScope(items, directKeys), [directKeys, items])
   const scopeRefs = useMemo(() => configSyncScopeRefs(items, scope), [items, scope])
@@ -88,21 +86,12 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
   }
 
   return (
-    <ModalBackdrop onClose={pending ? () => undefined : onClose}>
-      <div
-        ref={cardRef}
-        className="modal-card settings-sync-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('settings.sync.export.title')}
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <ModalHeader
-          title={t('settings.sync.export.title')}
-          onClose={onClose}
-          closeDisabled={pending}
-        />
+    <Dialog
+      className="settings-sync-modal"
+      title={t('settings.sync.export.title')}
+      pending={pending}
+      onClose={onClose}
+    >
         <div className="modal-body settings-sync-modal-body">
           <p className="settings-hint">{t('settings.sync.export.description')}</p>
           <p className="settings-hint">{t('settings.sync.credentialsNotice')}</p>
@@ -162,21 +151,20 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
                             const kindLabel = t(configSyncKindLabelKey(kind))
                             return (
                               <li className="settings-sync-item" key={key}>
-                                <label className="settings-sync-item-label">
-                                  <input
-                                    type="checkbox"
-                                    checked={inScope}
-                                    disabled={inScope && !direct}
-                                    onChange={() => toggleItem(item)}
-                                    aria-label={`${kindLabel}: ${item.name}`}
-                                  />
+                                <Checkbox
+                                  className="settings-sync-item-label"
+                                  checked={inScope}
+                                  disabled={inScope && !direct}
+                                  onChange={() => toggleItem(item)}
+                                  aria-label={`${kindLabel}: ${item.name}`}
+                                >
                                   <span className="settings-sync-item-name">{item.name}</span>
                                   {inScope && !direct ? (
                                     <span className="settings-sync-dependency">
                                       {t('settings.sync.export.dependency')}
                                     </span>
                                   ) : null}
-                                </label>
+                                </Checkbox>
                               </li>
                             )
                           })}
@@ -213,22 +201,19 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
           </div>
         </div>
         <div className="modal-footer">
-          <button type="button" className="ghost-btn" onClick={onClose} disabled={pending}>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
             {t('shared.cancel')}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
+          </Button>
+          <Button
             onClick={() => {
               void handleExport()
             }}
             disabled={pending || empty}
           >
             {pending ? t('settings.sync.export.exporting') : t('settings.sync.export.confirm')}
-          </button>
+          </Button>
         </div>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }
 
@@ -246,27 +231,19 @@ function KindToggle({
   directKeys: ReadonlySet<string>
   onToggle: (kind: ConfigSyncKind) => void
 }) {
-  const inputRef = useRef<HTMLInputElement>(null)
   const kindItems = items.filter((item) => item.kind === kind)
   const directCount = kindItems.filter((item) => directKeys.has(configSyncRefKey(item))).length
   const allDirect = kindItems.length > 0 && directCount === kindItems.length
 
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.indeterminate = directCount > 0 && !allDirect
-    }
-  }, [allDirect, directCount])
-
   return (
-    <label className="settings-sync-kind-toggle">
-      <input
-        ref={inputRef}
-        type="checkbox"
-        checked={allDirect}
-        onChange={() => onToggle(kind)}
-        aria-label={label}
-      />
+    <Checkbox
+      className="settings-sync-kind-toggle"
+      checked={allDirect}
+      indeterminate={directCount > 0 && !allDirect}
+      onChange={() => onToggle(kind)}
+      aria-label={label}
+    >
       <span>{label}</span>
-    </label>
+    </Checkbox>
   )
 }

@@ -861,19 +861,19 @@ describe('ThreadComposer attachment pills', () => {
     await pasteFiles(editor, fileOf('shot.png', 'image/png'), fileOf('doc.pdf', 'application/pdf'))
     await waitForIdleUploads()
 
-    const selectElements = screen.getAllByRole('combobox')
     // 只有图片有档位选择下拉框（doc.pdf 没有）
-    expect(selectElements).toHaveLength(1)
-    const tierSelect = selectElements[0] as HTMLSelectElement
-    expect(tierSelect.value).toBe('720P')
+    const tierTriggers = screen.getAllByRole('button', { name: /图片清晰度/ })
+    expect(tierTriggers).toHaveLength(1)
+    expect(tierTriggers[0]).toHaveAttribute('data-value', '720P')
 
     // 默认 pill 与 parts 均为 720P
     const imgPill = document.querySelector('.composer-pill[data-filename="shot.png"]')
     expect(imgPill?.getAttribute('data-image-tier')).toBe('720P')
 
     // 用户切换档位至 1080P
-    await user.selectOptions(tierSelect, '1080P')
-    expect(tierSelect.value).toBe('1080P')
+    await user.click(tierTriggers[0]!)
+    await user.click(screen.getByRole('option', { name: '1080P' }))
+    expect(screen.getByRole('button', { name: /图片清晰度/ })).toHaveAttribute('data-value', '1080P')
     expect(imgPill?.getAttribute('data-image-tier')).toBe('1080P')
 
     // 提交消息（聚焦 editor 并按回车）

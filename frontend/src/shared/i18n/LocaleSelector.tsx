@@ -1,4 +1,4 @@
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 
 const localeOptions: Array<{ value: AppLocale; label: string }> = [

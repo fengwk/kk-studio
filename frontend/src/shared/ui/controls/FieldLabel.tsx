@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import './controls.css'
 
 /** 表单标签；`required` 时追加红色 *（aria-hidden，语义仍靠控件 required）。 */
 export function FieldLabel({

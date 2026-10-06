@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
+import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'

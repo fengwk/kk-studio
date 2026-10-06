@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react'
-import {
-  SearchField,
-  StateBlock,
-} from '@/shared/ui/console/AiConsoleCommonCards'
+import { SearchField } from '@/shared/ui/controls/SearchField'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { useI18n } from '@/shared/i18n'
 

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { environmentService } from '@/shared/api/environment-service'
@@ -34,19 +34,11 @@ export function EnvironmentManagementModal({
   }, [eventsQuery.data])
 
   return (
-    <ModalBackdrop onClose={onClose}>
-      <div
-        className="modal-card env-management-modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${t('ai.environment.managementTitle')} - ${environment.name}`}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <ModalHeader
-          title={`${t('ai.environment.managementTitle')} - ${environment.name}`}
-          onClose={onClose}
-        />
-
+    <Dialog
+      className="env-management-modal-card"
+      title={`${t('ai.environment.managementTitle')} - ${environment.name}`}
+      onClose={onClose}
+    >
         <div className="modal-body env-mgmt-body">
           <EnvironmentHostSection environment={environment} />
 
@@ -87,7 +79,6 @@ export function EnvironmentManagementModal({
             )}
           </section>
         </div>
-      </div>
-    </ModalBackdrop>
+    </Dialog>
   )
 }

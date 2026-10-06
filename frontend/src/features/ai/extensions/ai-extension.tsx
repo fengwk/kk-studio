@@ -36,7 +36,7 @@ const ResourceEditorModal = lazy(async () => {
   return { default: module.ResourceEditorModal }
 })
 const ConfirmActionModal = lazy(async () => {
-  const module = await import('@/shared/ui/console/ConfirmActionModal')
+  const module = await import('@/shared/ui/overlays/ConfirmActionModal')
   return { default: module.ConfirmActionModal }
 })
 

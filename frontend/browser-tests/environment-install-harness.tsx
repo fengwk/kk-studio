@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import { Select } from '@/shared/ui/console/Select'
+import { Select } from '@/shared/ui/controls/Select'
 import { BrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'

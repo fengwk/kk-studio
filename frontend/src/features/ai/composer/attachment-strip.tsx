@@ -23,7 +23,13 @@ import type {
   ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 import { useI18n } from '@/shared/i18n'
+import { Select } from '@/shared/ui/controls/Select'
 import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
+
+const IMAGE_TIER_OPTIONS = [
+  { value: '720P', label: '720P' },
+  { value: '1080P', label: '1080P' },
+]
 
 /** 附件注册表：图片/视频展示本地缩略图，其它文件按类型展示通用图标。 */
 export function AttachmentStrip({
@@ -42,6 +48,10 @@ export function AttachmentStrip({
   onTierChange?: (upload: AttachmentUpload, tier: ImageInputTier) => void
 }) {
   const { t } = useI18n()
+  const tierOptions = [
+    ...IMAGE_TIER_OPTIONS,
+    { value: 'ORIGINAL', label: t('ai.runtime.composer.tierOriginal') },
+  ]
   const visible = uploads.filter((upload) => !upload.detached)
   // 同名文件按顺序派生展示后缀：身份始终由 uploadId 决定。
   const nameCounts = new Map<string, number>()
@@ -104,17 +114,15 @@ export function AttachmentStrip({
                   </button>
                 ) : null}
                 {isImage && (
-                  <select
+                  <Select
+                    compact
                     className="attachment-reference-tier-select"
                     aria-label={t('ai.runtime.composer.imageTier', { name: displayName })}
                     value={upload.imageTier ?? '720P'}
                     disabled={disabled}
-                    onChange={(e) => onTierChange?.(upload, e.target.value as ImageInputTier)}
-                  >
-                    <option value="720P">720P</option>
-                    <option value="1080P">1080P</option>
-                    <option value="ORIGINAL">{t('ai.runtime.composer.tierOriginal')}</option>
-                  </select>
+                    options={tierOptions}
+                    onChange={(tier) => onTierChange?.(upload, tier as ImageInputTier)}
+                  />
                 )}
               </span>
             </span>
