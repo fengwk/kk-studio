@@ -1,6 +1,7 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
 import { baseModelConfig, providerCreateBody } from '../lib/fixtures.mjs'
 import {
+  assertRootYoloPolicy,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -563,7 +564,7 @@ registerCase({
         commands: [userMessageCommand(`settings independent ${suffix}`, cid())],
       })
       const thread = accepted.thread
-      assert(thread.yoloEnabled === false, JSON.stringify(thread))
+      assertRootYoloPolicy(thread, false)
       assert(
         JSON.stringify(thread.branchSettings) === JSON.stringify(expectedSettings),
         JSON.stringify({ expected: expectedSettings, actual: thread.branchSettings }),
@@ -591,7 +592,7 @@ registerCase({
         JSON.stringify(reread.thread.branchSettings) === JSON.stringify(expectedSettings),
         JSON.stringify({ expected: expectedSettings, actual: reread.thread.branchSettings }),
       )
-      assert(reread.thread.yoloEnabled === false, JSON.stringify(reread.thread))
+      assertRootYoloPolicy(reread.thread, false)
       // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。
       await expectHttpError(
         () =>

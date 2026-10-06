@@ -62,7 +62,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
           assert.equal(body.target.type, 'NEW_SESSION')
           thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
             name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false,
-            executionControl: 'RUNNABLE' }
+            executionControl: 'RUNNABLE', yoloPolicy: { mode: 'DISABLE', rootThreadId: null } }
         } else {
           // 既有 Thread 续写面 owner-free：body 只带 cursor 与 commands。
           assert.equal(body.expectedHeadEntryId, thread.headEntryId)

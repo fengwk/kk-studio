@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { baseModelConfig } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
+  assertRootYoloPolicy,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -155,10 +156,7 @@ export async function runWorkspaceContractMatrix(ui) {
           // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot version 的 CAS），
           // 绝不进入 command batch；Thread 快照反映权威值。
           const fresh = await getThreadSnapshot(apiCtx, fixture.threadId)
-          assert(
-            fresh.thread.yoloEnabled === true,
-            `direct yolo update was not reflected in the Thread snapshot: ${JSON.stringify(fresh.thread)}`,
-          )
+          assertRootYoloPolicy(fresh.thread, true)
 
           await shot(caseArt, 'composer-settings-controls-batch')
           expectNoFatal(pageErrors, consoleErrors)
@@ -237,33 +235,26 @@ export async function runWorkspaceContractMatrix(ui) {
           await bindThreadComposer(page, goto, fixture)
           const footer = page.getByLabel('会话状态')
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
-          const metadata = footer.locator('.thread-status-line-meta')
-          const usage = footer.locator('.thread-status-line-usage')
-          const environmentText = `env:${fixture.otherEnvironment.name} (unavailable)`
+          // 只读单行 Footer：组分隔符固定为 U+2223（∣），组内统计项固定为 U+00B7（·），
+          // Environment 不再带 env: 前缀；不再有独立的 meta/usage 行或 Git 事实。
+          const line = footer.locator('.thread-status-line')
+          assert(await line.count() === 1, `Footer must render exactly one status line: ${await footer.innerText()}`)
+          const environmentText = `${fixture.otherEnvironment.name}（不可用）`
           // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
           // Footer 必须投影该 Environment（无 daemon 连接 => unavailable），
           // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
+          const lineText = (await line.innerText()).replace(/\s+/g, ' ').trim()
           assert(
-            await metadata.innerText() === `${environmentText} · ctx 30/4.1k`,
-            `Footer environment/context facts are incorrect: ${await metadata.innerText()}`,
+            lineText === `${environmentText} ∣ ctx 30/4.1k ∣ ↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s`,
+            `Footer facts are incorrect: ${lineText}`,
           )
+          const footerTitle = await line.getAttribute('title')
           assert(
-            (await metadata.getAttribute('title'))?.startsWith(`${environmentText} · `),
-            `Footer metadata title is missing its environment identity: ${await metadata.getAttribute('title')}`,
+            footerTitle?.startsWith(`环境：${fixture.otherEnvironment.name}`)
+              && footerTitle.includes('30 / 4096 tokens')
+              && footerTitle.includes('47%'),
+            `Footer hover readout is incomplete: ${footerTitle}`,
           )
-          assert(
-            await usage.innerText() === '↑16 · ↓9 · R14 · $0.000 · cache 47% · — tok/s',
-            `Footer usage facts are incomplete: ${await footer.innerText()}`,
-          )
-          assert(
-            (await metadata.getAttribute('title'))?.includes('30 / 4096 tokens'),
-            `Footer context title is incorrect: ${await metadata.getAttribute('title')}`,
-          )
-          assert(
-            (await usage.getAttribute('title'))?.includes('cache 47%'),
-            `Footer usage title is missing its cache hit fact: ${await usage.getAttribute('title')}`,
-          )
-          assert(await footer.locator('.thread-status-git').count() === 0, 'missing Git fact was fabricated')
           assert(await footer.getByRole('button').count() === 0, 'readonly Footer rendered a button')
           const footerText = await footer.innerText()
           for (const forbidden of [
@@ -510,7 +501,7 @@ export async function runWorkspaceContractMatrix(ui) {
               contentType: 'application/json',
               body: JSON.stringify({
                 status: 200,
-                data: childSnapshotWithPendingTool(childThreadId),
+                data: childSnapshotWithPendingTool(childThreadId, fixture.threadId),
               }),
             })
           }
@@ -928,7 +919,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
 }
 
-function childSnapshotWithPendingTool(targetThreadId) {
+function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
   const toolEntry = {
     entryId: 'entry-tool-1',
     sessionId: 'session-child',
@@ -957,7 +948,9 @@ function childSnapshotWithPendingTool(targetThreadId) {
       name: 'Child Worker Thread',
       sessionId: 'session-child',
       headEntryId: 'entry-tool-1',
-      yoloEnabled: false,
+      // task 委派产生的是真实子代理：执行父关系指向父 Thread，YOLO policy 恒为 FOLLOW 真实执行根。
+      parentThreadId: rootThreadId,
+      yoloPolicy: { mode: 'FOLLOW', rootThreadId },
       nextCommandSequence: '1',
       version: '1',
       status: 'TOOL_WAITING_APPROVAL',
