@@ -462,5 +462,3 @@ test.describe('narrow pane header', () => {
     )
   })
 })
-
-
