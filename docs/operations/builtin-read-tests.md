@@ -71,12 +71,14 @@ Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模�
   受管文本按严格 UTF-8；NUL、非法字节与无 BOM 的旧编码不做字符集猜测（`binaryContentIsRejected`、
   受管 `binaryAndMalformedUtf8AreRejected`），有效的替换字符不能误判成二进制。
 - 目录有独立 `kind: directory` 语义，默认 2000 项、48 KiB 展示预算；续读用报告中的 offset，
-  拒绝 column offset（`directoryPaginationDefaultsToTwoThousandAndRejectsColumnOffset`、
+  合法 column offset 被忽略（`directoryPaginationDefaultsToTwoThousandAndIgnoresColumnOffset`、
   `directoryListingKeepsByteCeilingAndContinuesFromReportedOffset`）。48 KiB 不是文本窗口的上限。
 - png/jpeg/gif/webp 按签名返回二进制结果，不通过文本窗口；bmp 不在支持集合。
-  `imageResultsStayBinaryAndRejectColumnOffset` 固定图片结果及列偏移拒绝。
+  合法 column offset 同样被忽略（`imageResultsStayBinaryAndIgnoreColumnOffset`）。
 - 特殊节点在读取前拒绝。`nonRegularFileNodesAreRejectedBeforeIo` 用 `/dev/null` 验证这条边界，
   该证据是 POSIX 限定，不能宣称所有宿主文件类型都已原生验收。
+- 参数校验先于文件访问：非正 `column_offset` 在目录与图片上同样被拒绝，只有合法值才被忽略
+  （`readColumnOffsetValidationAndNonTextTargets`）。
 
 read 不等待进程内文件变更队列，也没有成功 observer 回调；原子替换避免半文件提交，但不提供跨调用
 陈旧读取保护。LSP 可用性由服务层或调用方提供，read 适配器不自行启动或猜测服务器。
