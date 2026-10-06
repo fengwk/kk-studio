@@ -1,5 +1,7 @@
 import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
 import { parseSubagentReceipt } from '@/features/ai/runtime/thread-panel/messages/notification-receipt'
+import { SystemMessageBody } from '@/features/ai/runtime/thread-panel/messages/SystemMessageBody'
+import { SystemMessageCard } from '@/features/ai/runtime/thread-panel/messages/SystemMessageCard'
 import type {
   EntryEventDialogueMessage,
   EntryNotification,
@@ -9,7 +11,7 @@ import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import './notification-entry.css'
 
 /**
- * 系统通知卡片：全宽淡色，无图标列与左缩进。
+ * 系统通知卡片：全宽淡色，无图标列与左缩进，与压缩摘要共用系统消息外壳。
  *
  * <p>SUBAGENT_RESULT 解析固定 XML 信封，展示来源、Thread 链接与 result/error/partial；
  * TASK_BUDGET 直接按安全 Markdown 展示；未知 kind 只作为普通系统文本，不假定为子代理结果。
@@ -22,22 +24,20 @@ export function NotificationEntryBlock({
   notification: EntryNotification
 }) {
   return (
-    <section
-      className="thread-block thread-notification"
+    <SystemMessageCard
+      className="thread-notification"
       data-entry-kind="notification"
       data-notification-kind={notification.kind}
+      title={message.title}
     >
-      <div className="thread-notification-title">{message.title}</div>
       {notification.kind === 'TASK_BUDGET' ? (
-        <div className="thread-notification-body">
-          <MarkdownRenderer content={message.text} />
-        </div>
+        <SystemMessageBody className="thread-notification-body" content={message.text} />
       ) : notification.kind === 'SUBAGENT_RESULT' ? (
         <SubagentResultBody notification={notification} xml={message.text} />
       ) : (
         <UnknownNotificationBody text={message.text} />
       )}
-    </section>
+    </SystemMessageCard>
   )
 }
 

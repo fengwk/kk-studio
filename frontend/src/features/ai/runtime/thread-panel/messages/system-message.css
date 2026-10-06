@@ -1,0 +1,54 @@
+/* 系统消息外壳：全宽淡色，无图标列与左缩进；通知与压缩摘要共用。 */
+.thread-system-message {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--scrim);
+}
+
+.thread-system-message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.thread-system-message-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.thread-system-message-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.thread-system-message-body {
+  min-width: 0;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+/*
+ * raw 节点（例如 <read-files> 段）由 MarkdownRenderer(preserveRawText) 渲染为安全
+ * span.md-raw-text，子文本节点保留原始字符串与换行。这里只让该 span 维持 pre-wrap，
+ * 普通 Markdown 文本与块间分隔仍按默认 normal 折叠，不产生整份 pre 或多余块空隙。
+ */
+.md-raw-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 顶层 raw 块（Runtime 追加的 <read-files>/<modified-files>）独占行，避免相邻块
+ * 的标签被折到同一行；段落内的 inline raw 仍保持行内。
+ */
+.thread-system-message-body .md-root > .md-raw-text {
+  display: block;
+}
