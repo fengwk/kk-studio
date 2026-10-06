@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -81,19 +79,6 @@ class OpenAiResponsesLosslessItemReplayTest {
   }
 
   private static ProviderRequest request(List<ProviderMessage> messages) {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     ModelDescriptor model =
         new ModelDescriptor(
             "openai_test",
@@ -101,8 +86,7 @@ class OpenAiResponsesLosslessItemReplayTest {
             "gpt-5.4-mini",
             Set.of(ModelInputModality.TEXT),
             true,
-            true,
-            pricing);
+            true);
     return new ProviderRequest(
         model,
         DEFAULT_VARIANT,
@@ -118,12 +102,12 @@ class OpenAiResponsesLosslessItemReplayTest {
         ProviderMessageRole.USER, List.of(new ProviderTextBlock("weather?")));
   }
 
-  /** 用第一条请求冻结的前缀哈希喂入「created + 终态 output」两帧，复现真实 stateless replay 的捕获阶段。 */
-  private ProviderReplayState accumulateTerminalItems(
-      String prefixHash, String... terminalItemJsons) throws Exception {
+  /** 喂入「created + 终态 output」两帧，复现真实 stateless replay 的捕获阶段。 */
+  private ProviderReplayState accumulateTerminalItems(String... terminalItemJsons)
+      throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            request(List.of(userMessage())), createDescriptor(), prefixHash, e -> {});
+            request(List.of(userMessage())), createDescriptor(), e -> {});
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_lossless\"}}"));
     StringBuilder output = new StringBuilder("[");
@@ -140,7 +124,9 @@ class OpenAiResponsesLosslessItemReplayTest {
     return accumulator.replayState();
   }
 
-  /** 复用第一条请求冻结的前缀哈希编码下一轮请求；replay 位置固定在 input[1]（user → assistant replay → user）。 */
+  /**
+   * 编码下一轮请求（replay 与请求 model 的 affinity 一致）；replay 位置固定在 input[1]（user → assistant replay → user）。
+   */
   private ArrayNode encodeNextRequest(
       ProviderReplayState replayState, List<ProviderContentBlock> durableContents)
       throws Exception {
@@ -157,19 +143,9 @@ class OpenAiResponsesLosslessItemReplayTest {
                                 new ProviderMessage(
                                     ProviderMessageRole.USER,
                                     List.of(new ProviderTextBlock("thanks"))))),
-                        createDescriptor(),
-                        OpenAiResponsesConfig.defaultConfig())
+                        createDescriptor())
                     .bodyUtf8Bytes())
             .get("input");
-  }
-
-  private String freezePrefixHash() {
-    return encoder
-        .encode(
-            request(List.of(userMessage())),
-            createDescriptor(),
-            OpenAiResponsesConfig.defaultConfig())
-        .sourcePrefixHash();
   }
 
   /**
@@ -178,7 +154,7 @@ class OpenAiResponsesLosslessItemReplayTest {
    */
   @Test
   void terminalMessageItemReplaysLosslesslyAndKeepsDurableText() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(freezePrefixHash(), MESSAGE_ITEM);
+    ProviderReplayState replayState = accumulateTerminalItems(MESSAGE_ITEM);
     assertNotNull(replayState);
     JsonNode expectedItem = MAPPER.readTree(MESSAGE_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
@@ -199,7 +175,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   /** 测试意图：终态 reasoning 的 id/status/密文/摘要/未来成员整体保留，且 durable 思考仍与摘要严格一致。 */
   @Test
   void terminalReasoningItemReplaysLosslesslyAndKeepsDurableThinking() throws Exception {
-    ProviderReplayState replayState = accumulateTerminalItems(freezePrefixHash(), REASONING_ITEM);
+    ProviderReplayState replayState = accumulateTerminalItems(REASONING_ITEM);
     assertNotNull(replayState);
     JsonNode expectedItem = MAPPER.readTree(REASONING_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
@@ -221,8 +197,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   /** 测试意图：终态 function_call 的 id/status/未来成员整体保留，durable 工具调用语义仍被严格比对。 */
   @Test
   void terminalFunctionCallItemReplaysLosslesslyAndKeepsDurableToolCall() throws Exception {
-    ProviderReplayState replayState =
-        accumulateTerminalItems(freezePrefixHash(), FUNCTION_CALL_ITEM);
+    ProviderReplayState replayState = accumulateTerminalItems(FUNCTION_CALL_ITEM);
     assertNotNull(replayState);
     JsonNode expectedItem = MAPPER.readTree(FUNCTION_CALL_ITEM);
     assertEquals(expectedItem, replayState.payload().path("output").get(0));
@@ -253,7 +228,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   void streamedEncryptedReasoningIsStillRetainedInLosslessReplay() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            request(List.of(userMessage())), createDescriptor(), freezePrefixHash(), e -> {});
+            request(List.of(userMessage())), createDescriptor(), e -> {});
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_enc\"}}"));
     accumulator.processEvent(
@@ -280,7 +255,7 @@ class OpenAiResponsesLosslessItemReplayTest {
   void functionCallArgumentsRepairedFromStreamKeepOfficialFields() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(
-            request(List.of(userMessage())), createDescriptor(), freezePrefixHash(), e -> {});
+            request(List.of(userMessage())), createDescriptor(), e -> {});
     accumulator.processEvent(
         MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_repair\"}}"));
     accumulator.processEvent(
@@ -324,7 +299,6 @@ class OpenAiResponsesLosslessItemReplayTest {
   /** 测试意图：结构损坏的已知 item 即使携带合法额外字段也仍然失败；未知 type 才是唯一的不透明通道。 */
   @Test
   void malformedKnownItemStillFailsEvenWithOfficialExtraFields() throws Exception {
-    String prefixHash = freezePrefixHash();
     ObjectNode payload = MAPPER.createObjectNode();
     payload
         .putArray("output")
@@ -338,7 +312,6 @@ class OpenAiResponsesLosslessItemReplayTest {
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
             createDescriptor().affinity("gpt-5.4-mini"),
-            prefixHash,
             payload);
 
     ProviderException ex =

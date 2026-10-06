@@ -9,13 +9,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -35,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.InputStream;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -61,27 +56,8 @@ class OpenAiResponsesWireTest {
   }
 
   private ModelDescriptor createModel() {
-    ModelPricing pricing =
-        new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            BigDecimal.ONE,
-            BigDecimal.ONE,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ONE);
     return new ModelDescriptor(
-        "openai_test",
-        "gpt-5.4-mini",
-        "gpt-5.4-mini",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        true,
-        pricing);
+        "openai_test", "gpt-5.4-mini", "gpt-5.4-mini", Set.of(ModelInputModality.TEXT), true, true);
   }
 
   private ProviderRequest request(
@@ -120,8 +96,7 @@ class OpenAiResponsesWireTest {
     // 1. completed -> COMPLETE
     JsonNode compNode = fixture.get("completed");
     OpenAiResponsesStreamAccumulator acc1 =
-        new OpenAiResponsesStreamAccumulator(
-            request(List.of()), createDescriptor(), VALID_PREFIX_HASH, e -> {});
+        new OpenAiResponsesStreamAccumulator(request(List.of()), createDescriptor(), e -> {});
     acc1.processEvent(
         MAPPER.createObjectNode().put("type", "response.created").set("response", compNode));
     acc1.processEvent(
@@ -132,8 +107,7 @@ class OpenAiResponsesWireTest {
     // 2. incomplete_max_tokens -> LENGTH
     JsonNode maxTokensNode = fixture.get("incomplete_max_tokens");
     OpenAiResponsesStreamAccumulator acc2 =
-        new OpenAiResponsesStreamAccumulator(
-            request(List.of()), createDescriptor(), VALID_PREFIX_HASH, e -> {});
+        new OpenAiResponsesStreamAccumulator(request(List.of()), createDescriptor(), e -> {});
     acc2.processEvent(
         MAPPER.createObjectNode().put("type", "response.created").set("response", maxTokensNode));
     acc2.processEvent(
@@ -147,8 +121,7 @@ class OpenAiResponsesWireTest {
     // 3. incomplete_content_filter -> FILTERED
     JsonNode filterNode = fixture.get("incomplete_content_filter");
     OpenAiResponsesStreamAccumulator acc3 =
-        new OpenAiResponsesStreamAccumulator(
-            request(List.of()), createDescriptor(), VALID_PREFIX_HASH, e -> {});
+        new OpenAiResponsesStreamAccumulator(request(List.of()), createDescriptor(), e -> {});
     acc3.processEvent(
         MAPPER.createObjectNode().put("type", "response.created").set("response", filterNode));
     acc3.processEvent(
@@ -166,8 +139,7 @@ class OpenAiResponsesWireTest {
 
     List<ProviderStreamEvent> events = new ArrayList<>();
     OpenAiResponsesStreamAccumulator acc =
-        new OpenAiResponsesStreamAccumulator(
-            request(List.of()), createDescriptor(), VALID_PREFIX_HASH, events::add);
+        new OpenAiResponsesStreamAccumulator(request(List.of()), createDescriptor(), events::add);
 
     for (String line : sseText.split("\n")) {
       if (line.startsWith("data: ")) {
@@ -201,8 +173,7 @@ class OpenAiResponsesWireTest {
             ProviderCacheControl.none());
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
     assertEquals("gpt-5.4-mini", root.path("model").asText());
@@ -234,8 +205,7 @@ class OpenAiResponsesWireTest {
                             "application/pdf", "https://example.com/spec.pdf")))));
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
     JsonNode content = root.get("input").get(0).get("content");
@@ -274,8 +244,7 @@ class OpenAiResponsesWireTest {
                             null)))),
             List.of(tool));
 
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, desc, OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, desc);
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
     JsonNode input = root.get("input");
@@ -310,8 +279,7 @@ class OpenAiResponsesWireTest {
             ProviderCacheControl.none());
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
     assertEquals("none", root.path("reasoning").path("effort").asText());
@@ -334,8 +302,7 @@ class OpenAiResponsesWireTest {
             ProviderCacheControl.none());
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    OpenAiResponsesEncodedRequest enc =
-        encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    OpenAiResponsesEncodedRequest enc = encoder.encode(req, createDescriptor());
     JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
 
     assertEquals("high", root.path("reasoning").path("effort").asText());
@@ -368,14 +335,8 @@ class OpenAiResponsesWireTest {
         request(
             new ModelVariant("v1", "medium"), messages, List.of(tool), ProviderCacheControl.none());
     ProviderCacheControl cacheControl =
-        new PromptCacheRequestFinalizer(
-                UUID.fromString("55555555-5555-5555-5555-555555555555"),
-                UUID.fromString("66666666-6666-6666-6666-666666666666"))
-            .apply(
-                base,
-                PromptCachePolicy.affinityShort(
-                    PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT))))
-            .cacheControl();
+        ProviderCacheControl.session(
+            PromptCacheRetention.SHORT, "55555555-5555-5555-5555-555555555555");
     ProviderRequest req =
         new ProviderRequest(
             base.model(),
@@ -387,20 +348,13 @@ class OpenAiResponsesWireTest {
             cacheControl);
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
-    JsonNode root =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    req,
-                    createDescriptor(),
-                    new OpenAiResponsesConfig(OpenAiPromptCacheMode.LEGACY))
-                .bodyUtf8Bytes());
+    JsonNode root = MAPPER.readTree(encoder.encode(req, createDescriptor()).bodyUtf8Bytes());
 
     // OpenAI Responses 只接受 >= 16 的输出上限，合法冻结预算必须原样编码。
     assertEquals(16, root.path("max_output_tokens").asInt());
     assertEquals("Test system instruction.", root.path("instructions").asText());
     assertEquals("user", root.get("input").get(0).path("role").asText());
-    assertEquals(cacheControl.affinityKey(), root.path("prompt_cache_key").asText());
+    assertEquals(cacheControl.key(), root.path("prompt_cache_key").asText());
     assertEquals("in_memory", root.path("prompt_cache_retention").asText());
     assertEquals("medium", root.path("reasoning").path("effort").asText());
 

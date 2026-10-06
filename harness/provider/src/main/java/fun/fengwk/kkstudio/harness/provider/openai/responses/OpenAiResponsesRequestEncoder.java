@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -48,20 +47,16 @@ import java.util.Set;
 /**
  * OpenAI Responses 协议的请求编码器。
  *
- * <p>负责将 {@link ProviderRequest} 规范化编码为 OpenAI {@code /responses} 端点的 UTF-8 JSON 请求体， 并计算冻结的
- * sourcePrefixHash。
+ * <p>负责将 {@link ProviderRequest} 规范化编码为 OpenAI {@code /responses} 端点的 UTF-8 JSON 请求体。
  *
  * <p>请求体以 variant 的厂商原生协议选项为 root：非 runtime 所有权字段无损并入，runtime 所有权字段（{@code model}/{@code
  * stream}/{@code store}/{@code instructions}/{@code input}/{@code max_output_tokens} 与 prompt cache
  * 控制字段）由 runtime 唯一决定，冲突一律 {@code INVALID_REQUEST} 且不回显值。
  *
- * <p>assistant replay 只在 payload 全部事实都能由 durable 语义等价重建时才允许在 affinity/sourcePrefixHash
- * 失配后退回语义编码：可等价重建的形态只有恰好 {@code type/role/content} 的 message item（{@code output_text} 块为 {@code
- * type/text}、{@code refusal} 块为 {@code type/refusal}）、{@code type/id/status/summary} 且摘要块为 {@code
- * type/text} 的 reasoning item，以及 {@code type/call_id/id/name/arguments} 的 function_call item。{@code
- * phase}/{@code annotations}/{@code logprobs} 等额外成员、reasoning 密文、opaque 块、未知或 hosted item 都是
- * durable 无法表达的原生事实，失配时必须 fail closed。只由空 reasoning 占位符构成（无密文、无可用摘要文本、无额外成员）的 payload
- * 不承载原生推理，仍可由语义编码承载 durable 思考。
+ * <p>assistant replay 直接在 affinity 匹配时原样回放 durable replay payload 的全部 output item（含 reasoning 密文、
+ * {@code phase}、native item 的 {@code id}/{@code type}/{@code call_id} 等原生事实）；affinity 失配或 payload 与
+ * durable 语义矛盾时才回退语义编码。回退只丢弃 native 事实，绝不因为 payload 存在 opaque item 就拒绝整个请求。payload 的真实形状（顶层字段、已知
+ * item 结构、与 durable 文本/思考/工具调用的一致性）始终严格校验，结构损坏一律 {@code INVALID_REQUEST}。
  */
 final class OpenAiResponsesRequestEncoder {
 
@@ -81,39 +76,17 @@ final class OpenAiResponsesRequestEncoder {
   private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
   private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
 
-  /** 可等价重建的 message item 成员：其余（id/status/phase 及未来新增成员）都是 native-only 事实。 */
-  private static final Set<String> MESSAGE_ITEM_FIELDS = Set.of("type", "role", "content");
-
-  /** 可等价重建的 output_text 块成员：annotations/logprobs 等额外成员是 native-only 事实。 */
-  private static final Set<String> OUTPUT_TEXT_BLOCK_FIELDS = Set.of("type", "text");
-
-  /** 可等价重建的 refusal 块成员。 */
-  private static final Set<String> REFUSAL_BLOCK_FIELDS = Set.of("type", "refusal");
-
-  /** 可等价重建的 function_call item 成员：status 与任何额外元数据都是 native-only 事实。 */
-  private static final Set<String> FUNCTION_CALL_ITEM_FIELDS =
-      Set.of("type", "call_id", "id", "name", "arguments");
-
-  /**
-   * 可等价重建的 reasoning item 成员：{@code id}/{@code status} 只是 item 元数据，{@code summary} 的文本可由 durable
-   * 思考等价重建；其余成员（密文、opaque {@code content} 块等）都属于 native-only。
-   */
+  /** 可等价重建的 reasoning item 成员：超出这些成员的额外成员是 durable 语义无法表达的原生事实。 */
   private static final Set<String> REASONING_ITEM_FIELDS =
       Set.of("type", "id", "status", "summary");
 
-  /** 可等价重建的 reasoning summary 块成员。 */
-  private static final Set<String> SUMMARY_BLOCK_FIELDS = Set.of("type", "text");
-
-  /**
-   * variant 原生选项绝不覆盖的 prompt cache 控制字段：是否下发、下发什么值完全由 runtime 的缓存策略与 affinity identity
-   * 决定，声明它们会让缓存键与冻结前缀哈希脱钩。
-   */
+  /** variant 原生选项绝不覆盖的 prompt cache 控制字段：是否下发、下发什么值完全由 runtime 冻结的缓存控制决定。 */
   private static final Set<String> RUNTIME_OWNED_CACHE_FIELDS =
       Set.of("prompt_cache_key", "prompt_cache_retention", "prompt_cache_options");
 
   /**
    * 与 stateless replay 不变量冲突的有状态字段：{@code previous_response_id}/{@code conversation} 会让服务端自带会话状态，
-   * 与本地 {@code store=false} + 前缀哈希回放相互矛盾，因此存在即明确拒绝，绝不静默改写或丢弃。
+   * 与本地 {@code store=false} 的 stateless replay 相互矛盾，因此存在即明确拒绝，绝不静默改写或丢弃。
    */
   private static final Set<String> STATEFUL_FIELD_NAMES =
       Set.of("previous_response_id", "conversation");
@@ -141,11 +114,9 @@ final class OpenAiResponsesRequestEncoder {
     this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
   }
 
-  OpenAiResponsesEncodedRequest encode(
-      ProviderRequest request, ProviderDescriptor descriptor, OpenAiResponsesConfig config) {
+  OpenAiResponsesEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
-    Objects.requireNonNull(config, "config");
 
     // variant 的厂商原生协议选项是请求体 root：官方字段默认无损并入，runtime 所有权字段单独裁决。
     ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
@@ -155,40 +126,15 @@ final class OpenAiResponsesRequestEncoder {
     applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
 
-    ArrayNode toolsArray = mergeTools(root, encodeTools(request.tools()));
+    mergeTools(root, encodeTools(request.tools()));
 
     ArrayNode inputItems = NODES.arrayNode();
-    List<ObjectNode> cacheInputs = new ArrayList<>();
-    List<ObjectNode> requestEndpoints = new ArrayList<>();
-
     for (ProviderMessage msg : request.messages()) {
-      // assistant 之前的最后输入就是历史模型请求边界；queued USER / 并行工具批只取末端。
-      if (msg.role() == ProviderMessageRole.ASSISTANT) {
-        recordRequestEndpoint(cacheInputs, requestEndpoints);
-      }
-      encodeMessage(
-          msg,
-          descriptor,
-          request.model(),
-          request.systemInstruction(),
-          toolsArray,
-          inputItems,
-          cacheInputs);
+      encodeMessage(msg, descriptor, request.model(), inputItems);
     }
-    recordRequestEndpoint(cacheInputs, requestEndpoints);
     applyRuntimeOwnedField(root, "input", inputItems);
 
-    // 计算冻结前缀哈希（在打 cache breakpoint 之前计算）
-    String sourcePrefixHash =
-        OpenAiResponsesPrefixHasher.calculateHash(
-            request.systemInstruction(), toolsArray, inputItems);
-
-    applyCacheControl(
-        root,
-        config.openAiPromptCacheMode(),
-        request.cacheControl(),
-        cacheInputs,
-        requestEndpoints);
+    applyCacheControl(root, request.cacheControl());
 
     byte[] utf8Bytes;
     try {
@@ -200,7 +146,7 @@ final class OpenAiResponsesRequestEncoder {
 
     bodySizeGuard.enforce(utf8Bytes);
 
-    return new OpenAiResponsesEncodedRequest(utf8Bytes, sourcePrefixHash);
+    return new OpenAiResponsesEncodedRequest(utf8Bytes);
   }
 
   /**
@@ -432,10 +378,7 @@ final class OpenAiResponsesRequestEncoder {
       ProviderMessage msg,
       ProviderDescriptor descriptor,
       ModelDescriptor model,
-      String systemInstruction,
-      ArrayNode toolsArray,
-      ArrayNode inputItems,
-      List<ObjectNode> cacheInputs) {
+      ArrayNode inputItems) {
     Objects.requireNonNull(msg, "msg");
     ProviderMessageRole role = msg.role();
 
@@ -449,21 +392,16 @@ final class OpenAiResponsesRequestEncoder {
           ObjectNode blockNode = encodeUserContentBlock(block);
           contents.add(blockNode);
         }
-        cacheInputs.add(userMsg);
       }
       case ASSISTANT -> {
         ProviderReplayState replayState = msg.replayState();
-        if (replayState != null) {
-          String currentPrefixHash =
-              OpenAiResponsesPrefixHasher.calculateHash(systemInstruction, toolsArray, inputItems);
-          if (canReplay(
-              replayState, descriptor, model.modelId(), currentPrefixHash, msg.contents())) {
-            ArrayNode outputArray = extractOutputArray(replayState.payload());
-            for (JsonNode item : outputArray) {
-              inputItems.add(item.deepCopy());
-            }
-            return;
+        if (replayState != null
+            && canReplay(replayState, descriptor, model.modelId(), msg.contents())) {
+          ArrayNode outputArray = extractOutputArray(replayState.payload());
+          for (JsonNode item : outputArray) {
+            inputItems.add(item.deepCopy());
           }
+          return;
         }
 
         // Semantic fallback
@@ -476,7 +414,6 @@ final class OpenAiResponsesRequestEncoder {
             toolOutput.put("type", "function_call_output");
             toolOutput.put("call_id", resultBlock.toolCallId());
             encodeToolResultContent(resultBlock, toolOutput);
-            cacheInputs.add(toolOutput);
           } else {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
@@ -627,11 +564,17 @@ final class OpenAiResponsesRequestEncoder {
             + block.getClass().getSimpleName());
   }
 
+  /**
+   * 判断 durable replay 是否可在本轮原位回放。
+   *
+   * <p>先严格校验 payload 与 durable 语义的一致性（结构损坏或与 durable 文本/思考/工具调用矛盾在此抛出 {@code INVALID_REQUEST}，与
+   * affinity 是否匹配无关）；随后 affinity 匹配时原位回放 payload 的全部 output item，否则回退语义编码。 opaque / native item
+   * 本身从不导致拒绝：affinity 匹配即原样回放，失配则随语义回退被丢弃。
+   */
   private static boolean canReplay(
       ProviderReplayState replayState,
       ProviderDescriptor descriptor,
       String requestedModel,
-      String currentPrefixHash,
       List<ProviderContentBlock> durableContents) {
     if (replayState == null) {
       return false;
@@ -641,32 +584,12 @@ final class OpenAiResponsesRequestEncoder {
     }
 
     ArrayNode outputArray = extractOutputArray(replayState.payload());
-    ReplayOutputFacts facts = validateReplayOutputAgainstDurable(outputArray, durableContents);
-
-    // 代际/前缀校验：失配时只有 payload 全部事实都可由 durable 语义等价重建才允许回退
-    boolean affinityMatches = replayState.affinity().equals(descriptor.affinity(requestedModel));
-    boolean prefixHashMatches = replayState.sourcePrefixHash().equals(currentPrefixHash);
-    if (!affinityMatches || !prefixHashMatches) {
-      if (facts.nativeOnly()) {
-        // native-only item 无法用 durable 语义表达：失配时只能 fail closed，绝不静默丢弃
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "native replay output items require matching affinity and source prefix hash");
-      }
+    if (declinesReplay(outputArray, durableContents)) {
+      // 只由空 reasoning 占位符构成：不承载原生推理，改由语义编码承载 durable 思考。
       return false;
     }
 
-    // 只含空 reasoning 占位符的 replay 不承载原生推理，但仍必须由语义编码承载 durable 思考：即便 affinity/前缀匹配也不原位回放。
-    if (facts.declinesReplay()) {
-      if (facts.nativeOnly()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "native replay output items cannot be replaced by semantic fallback");
-      }
-      return false;
-    }
-
-    return true;
+    return replayState.affinity().equals(descriptor.affinity(requestedModel));
   }
 
   private static ArrayNode extractOutputArray(JsonNode payload) {
@@ -685,27 +608,23 @@ final class OpenAiResponsesRequestEncoder {
   }
 
   /**
-   * 完成 native replay 的结构校验、已知类型语义校验与 durable 一致性校验，并返回该 replay 承载的事实分类。
+   * 严格校验 durable replay payload 的真实形状与 durable 语义一致性，并返回该 payload 是否只由空 reasoning 占位符构成。
    *
-   * <p>结构性损坏、与 durable 消息文本/工具调用矛盾、以及“有密文但无摘要”的 opaque reasoning 替换另一段 durable 思考，都属于必须在
-   * affinity/前缀校验之前失败的情形。唯一例外是无 {@code encrypted_content} 且没有任何可用摘要文本、也没有额外成员的空 reasoning
-   * 占位符：它是上游“原生推理不可用”的合法形态，本身不是损坏请求；当它无法承载 durable 语义思考时返回「需回退」，由调用方回退语义编码，而不是让后续轮次永远失败。
+   * <p>结构性损坏或与 durable 文本/思考/工具调用矛盾都在此抛出 {@code INVALID_REQUEST}，与 affinity 是否匹配无关。已知 {@code
+   * message}/{@code reasoning}/{@code function_call} 只对 durable 语义所必需的字段做结构/类型校验并逐项比对 durable 内容；超出
+   * durable 语义的官方响应字段（{@code phase}、{@code annotations}/{@code logprobs}、reasoning 密文、 {@code
+   * status} 及未来新增成员）与未知官方 item 都作为原生事实原样保留，不影响校验结果。
    *
-   * <p>已知 {@code message}/{@code reasoning}/{@code function_call} 只对 durable 语义所必需的字段做结构/类型
-   * 校验（role、content 块形态、摘要块形态、函数调用标识与参数）并逐项比对 durable 内容；超出可等价重建集合的官方响应事实（{@code phase}/output_text
-   * 的 {@code annotations}/{@code logprobs}、reasoning 密文、opaque content/summary 块、function_call 的
-   * {@code status} 及未来新增成员）都标记为 native-only：只允许在 affinity/前缀匹配时原样回放。 其余官方 output item（web/file
-   * search、code interpreter、image generation、custom tool call 等）同样不承载 durable 语义，作为 native-only
-   * 不透明事实处理。
+   * <p>无 {@code encrypted_content}、无可用摘要文本、也没有超出 {@code type/id/status/summary} 成员的 reasoning item
+   * 是上游“原生推理不可用”的合法空占位符：当 payload 只由这类占位符构成时不承载原生推理，返回 {@code true} 由调用方回退语义编码， 而不是判为损坏请求。
    */
-  private static ReplayOutputFacts validateReplayOutputAgainstDurable(
+  private static boolean declinesReplay(
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
     StringBuilder replayText = new StringBuilder();
     StringBuilder replayThinking = new StringBuilder();
     List<ProviderToolCall> replayToolCalls = new ArrayList<>();
     int reasoningItemCount = 0;
     int emptyReasoningPlaceholderCount = 0;
-    boolean nativeOnly = false;
 
     for (JsonNode item : outputArray) {
       if (!item.isObject()) {
@@ -728,10 +647,7 @@ final class OpenAiResponsesRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST,
                 "replay message item must have role='assistant'");
           }
-          // 只有 type/role/content 可等价重建：id/status/phase 与任何额外成员都是 native-only 事实
-          if (hasFieldOutside(item, MESSAGE_ITEM_FIELDS)) {
-            nativeOnly = true;
-          }
+          // id/status/phase 与任何额外成员都是原生事实，原样保留
           if (item.has("id")) {
             if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
               throw new ProviderException(
@@ -768,10 +684,7 @@ final class OpenAiResponsesRequestEncoder {
                       ProviderErrorKind.INVALID_REQUEST,
                       "replay output_text block must have string text");
                 }
-                // 只有 type+text 可等价重建：annotations/logprobs 与任何额外成员都是 native-only 事实
-                if (hasFieldOutside(block, OUTPUT_TEXT_BLOCK_FIELDS)) {
-                  nativeOnly = true;
-                }
+                // annotations/logprobs 与任何额外成员都是原生事实，原样保留
                 replayText.append(block.get("text").textValue());
               }
               case "refusal" -> {
@@ -779,9 +692,6 @@ final class OpenAiResponsesRequestEncoder {
                   throw new ProviderException(
                       ProviderErrorKind.INVALID_REQUEST,
                       "replay refusal block must have string refusal");
-                }
-                if (hasFieldOutside(block, REFUSAL_BLOCK_FIELDS)) {
-                  nativeOnly = true;
                 }
                 replayText.append(block.get("refusal").textValue());
               }
@@ -834,10 +744,7 @@ final class OpenAiResponsesRequestEncoder {
                     ProviderErrorKind.INVALID_REQUEST,
                     "replay reasoning summary block must have string text");
               }
-              // opaque summary 块（除 type/text 外还有成员）无法用 durable 思考等价重建
-              if (hasFieldOutside(s, SUMMARY_BLOCK_FIELDS)) {
-                nativeOnly = true;
-              }
+              // opaque summary 块（除 type/text 外还有成员）仍按原生事实原样保留
               String summaryText = s.get("text").textValue();
               replayThinking.append(summaryText);
               if (!summaryText.isBlank()) {
@@ -846,13 +753,9 @@ final class OpenAiResponsesRequestEncoder {
             }
           }
           reasoningItemCount++;
-          if (itemHasEncrypted) {
-            // 密文（原生推理链）无法由 durable 思考等价重建：只允许原位回放
-            nativeOnly = true;
-          } else if (hasFieldOutside(item, REASONING_ITEM_FIELDS)) {
-            // 除 type/id/status/summary 外还携带成员（如 opaque content 块）：承载了 durable 无法表达的原生事实
-            nativeOnly = true;
-          } else if (!itemHasUsableSummary) {
+          if (!itemHasEncrypted
+              && !hasFieldOutside(item, REASONING_ITEM_FIELDS)
+              && !itemHasUsableSummary) {
             // 无密文、无可用摘要文本、无额外成员：结构合法的空占位符（上游声明原生推理不可用），而不是损坏请求。
             emptyReasoningPlaceholderCount++;
           }
@@ -893,17 +796,11 @@ final class OpenAiResponsesRequestEncoder {
           }
           String args = item.get("arguments").textValue();
           parseJsonObject(args, "function_call arguments must be a JSON object");
-          // 只有 type/call_id/id/name/arguments 可等价重建：status 与任何额外成员都是 native-only 事实
-          if (hasFieldOutside(item, FUNCTION_CALL_ITEM_FIELDS)) {
-            nativeOnly = true;
-          }
           replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
         default -> {
           // 未知但可信的官方 item（web/file search、code interpreter、image generation、custom tool
-          // call、computer/shell 等）：不承载 durable 语义，因此不参与文本/思考/工具一致性比对，但同样只允许在
-          // affinity/前缀匹配时原样透传。
-          nativeOnly = true;
+          // call、computer/shell 等）：不承载 durable 语义，因此不参与文本/思考/工具一致性比对，只作为原生事实原样回放。
         }
       }
     }
@@ -966,10 +863,10 @@ final class OpenAiResponsesRequestEncoder {
       }
     }
 
-    return new ReplayOutputFacts(nativeOnly, replayIsEmptyPlaceholderOnly);
+    return replayIsEmptyPlaceholderOnly;
   }
 
-  /** 节点是否携带白名单之外的成员：这样的成员都是 durable 语义无法等价重建的原生事实。 */
+  /** 节点是否携带给定白名单之外的成员：reasoning 额外成员都是 durable 语义无法表达的原生事实。 */
   private static boolean hasFieldOutside(JsonNode node, Set<String> allowedFields) {
     Iterator<String> fields = node.fieldNames();
     while (fields.hasNext()) {
@@ -992,84 +889,18 @@ final class OpenAiResponsesRequestEncoder {
     }
   }
 
-  private static void applyCacheControl(
-      ObjectNode root,
-      OpenAiPromptCacheMode cacheMode,
-      ProviderCacheControl cacheControl,
-      List<ObjectNode> cacheInputs,
-      List<ObjectNode> requestEndpoints) {
-    if (cacheMode == OpenAiPromptCacheMode.AUTOMATIC) {
-      // AUTOMATIC: 不发任何 cache hint（防御性忽略可能传入的非 none cacheControl），匹配 OpenAI Chat 行为
+  /**
+   * 将 runtime 冻结的缓存控制映射为本协议 wire 字段：{@code retention = NONE} 不下发任何 cache hint；否则以会话 UUID 原样作为
+   * {@code prompt_cache_key}，并把留存档位映射为原有支持的 {@code prompt_cache_retention} 值。
+   */
+  private static void applyCacheControl(ObjectNode root, ProviderCacheControl cacheControl) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
-
-    if (cacheMode == OpenAiPromptCacheMode.LEGACY) {
-      if (cacheControl.retention() != PromptCacheRetention.NONE) {
-        root.put("prompt_cache_key", cacheControl.affinityKey());
-        String retentionValue =
-            cacheControl.retention() == PromptCacheRetention.SHORT ? "in_memory" : "24h";
-        root.put("prompt_cache_retention", retentionValue);
-      }
-      return;
-    }
-
-    if (cacheMode == OpenAiPromptCacheMode.GPT_5_6_EXPLICIT) {
-      ObjectNode options = root.putObject("prompt_cache_options");
-      options.put("mode", "explicit");
-      options.put("ttl", "30m");
-
-      if (cacheControl.retention() != PromptCacheRetention.NONE) {
-        root.put("prompt_cache_key", cacheControl.affinityKey());
-
-        // 哈希与所有 replay 校验完成后统一转换，避免断点滑动改变历史 wire 形态。
-        for (ObjectNode item : cacheInputs) {
-          JsonNode output = item.get("output");
-          if (output != null && output.isTextual()) {
-            item.putArray("output")
-                .addObject()
-                .put("type", "input_text")
-                .put("text", output.textValue());
-          }
-        }
-
-        // 系统指令是顶层 instructions 字符串，input 中没有可打标的内容块，因此本协议不支持 SYSTEM 断点。
-        if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)) {
-          for (int i = Math.max(0, requestEndpoints.size() - 4); i < requestEndpoints.size(); i++) {
-            ObjectNode block = lastCacheableBlock(requestEndpoints.get(i));
-            if (block != null) {
-              block.putObject("prompt_cache_breakpoint").put("mode", "explicit");
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /** 输入只追加、端点只前进，仅需按引用排除连续重复；相同内容的不同历史位置仍是独立端点。 */
-  private static void recordRequestEndpoint(
-      List<ObjectNode> cacheInputs, List<ObjectNode> endpoints) {
-    if (!cacheInputs.isEmpty()) {
-      ObjectNode last = cacheInputs.get(cacheInputs.size() - 1);
-      if (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != last) {
-        endpoints.add(last);
-      }
-    }
-  }
-
-  /** 只选择 runtime USER/TOOL 输入块，绝不触碰原生 assistant item 或签名。 */
-  private static ObjectNode lastCacheableBlock(ObjectNode item) {
-    JsonNode blocks = item.has("output") ? item.get("output") : item.path("content");
-    if (blocks.isArray()) {
-      for (int i = blocks.size() - 1; i >= 0; i--) {
-        JsonNode block = blocks.get(i);
-        if (block instanceof ObjectNode object
-            && Set.of("input_text", "input_image", "input_file")
-                .contains(block.path("type").asText())) {
-          return object;
-        }
-      }
-    }
-    return null;
+    root.put("prompt_cache_key", cacheControl.key());
+    root.put(
+        "prompt_cache_retention",
+        cacheControl.retention() == PromptCacheRetention.SHORT ? "in_memory" : "24h");
   }
 
   private static void validateImageType(String mediaType) {
@@ -1135,12 +966,4 @@ final class OpenAiResponsesRequestEncoder {
       throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
     }
   }
-
-  /**
-   * replay output 承载的事实分类。
-   *
-   * <p>{@code nativeOnly} 为真表示存在 durable 语义无法等价重建的原生事实：这样的 payload 只允许在 affinity/前缀匹配时原位回放。 {@code
-   * declinesReplay} 为真表示 output 只由空 reasoning 占位符构成：它必须由语义编码承载 durable 思考，因此即便 affinity/前缀匹配也不原位回放。
-   */
-  private record ReplayOutputFacts(boolean nativeOnly, boolean declinesReplay) {}
 }
