@@ -131,9 +131,15 @@ export function projectUnknownEntry(entry: HarnessSessionEntryDTO): EntryEventDi
   )
 }
 
+const NOTIFICATION_TITLE_KEYS: Record<string, string> = {
+  SUBAGENT_RESULT: 'ai.runtime.notification.entry.SUBAGENT_RESULTTitle',
+  TASK_BUDGET: 'ai.runtime.notification.entry.TASK_BUDGETTitle',
+}
+
 /**
  * 系统结果通知（NOTIFICATION）：它是 runtime 的上下文事实，不是人类输入。
  * 使用独立系统样式渲染，既不进入 composer 草稿，也不进入队列与上下键消息历史。
+ * kind 与来源以原文显式投影；未知 kind 不假定为子代理结果。
  */
 export function projectNotificationEntry(
   entry: HarnessSessionEntryDTO,
@@ -142,17 +148,26 @@ export function projectNotificationEntry(
   const record = payload != null && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as Record<string, unknown>
     : {}
-  const kind = record.kind === 'TASK_BUDGET' ? 'TASK_BUDGET' : 'SUBAGENT_RESULT'
+  const kind = typeof record.kind === 'string' ? record.kind : ''
+  const sourceThreadId = typeof record.sourceThreadId === 'string' && record.sourceThreadId
+    ? record.sourceThreadId
+    : null
   const message = record.message
   const text = message != null && typeof message === 'object' && !Array.isArray(message)
     ? messageContentsText((message as Record<string, unknown>).contents)
     : ''
-  return event(
-    entry,
-    'notification',
-    translate(`ai.runtime.notification.entry.${kind}Title`),
-    text || translate('ai.runtime.notification.entry.emptyText'),
-  )
+  const titleKey = NOTIFICATION_TITLE_KEYS[kind]
+  return {
+    ...event(
+      entry,
+      'notification',
+      titleKey != null
+        ? translate(titleKey)
+        : translate('ai.runtime.notification.entry.unknownTitle'),
+      text || translate('ai.runtime.notification.entry.emptyText'),
+    ),
+    notification: { kind, sourceThreadId },
+  }
 }
 
 /** NOTIFICATION 的 message 是 USER AgentMessage；只提取文本内容作为展示事实。 */
@@ -188,7 +203,6 @@ function event(
     kind,
     title,
     text,
-    rawPayloadJson: entry.payloadJson || '{}',
     subjectEntryId: entry.entryId,
     createdAt: entry.createTime,
     status: 'done',

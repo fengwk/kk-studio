@@ -1643,10 +1643,6 @@ export const aiCatalog = {
     'en-US': 'No text output',
     'zh-CN': '无文本输出',
   },
-  'ai.runtime.message.rawEntry': {
-    'en-US': 'View raw data',
-    'zh-CN': '查看原始数据',
-  },
   'ai.runtime.message.attachment': {
     'en-US': '{{type}} attachment',
     'zh-CN': '{{type}} 附件',
@@ -1750,6 +1746,30 @@ export const aiCatalog = {
   'ai.runtime.notification.entry.TASK_BUDGETTitle': {
     'en-US': 'Task budget reminder',
     'zh-CN': '任务预算提醒',
+  },
+  'ai.runtime.notification.entry.unknownTitle': {
+    'en-US': 'System notification',
+    'zh-CN': '系统通知',
+  },
+  'ai.runtime.notification.entry.source': {
+    'en-US': 'Source',
+    'zh-CN': '来源',
+  },
+  'ai.runtime.notification.entry.error': {
+    'en-US': 'Error',
+    'zh-CN': '错误',
+  },
+  'ai.runtime.notification.entry.cancelled': {
+    'en-US': 'Cancelled',
+    'zh-CN': '已取消',
+  },
+  'ai.runtime.notification.entry.partial': {
+    'en-US': 'Partial result',
+    'zh-CN': '部分结果',
+  },
+  'ai.runtime.notification.entry.invalidReceipt': {
+    'en-US': 'The subagent receipt is not a valid XML envelope and cannot be displayed.',
+    'zh-CN': '子 Thread 回执不是合法的 XML 信封，无法展示。',
   },
   'ai.runtime.notification.entry.emptyText': {
     'en-US': 'No text content was delivered with this notification.',
@@ -1868,20 +1888,20 @@ export const aiCatalog = {
     'zh-CN': '无法识别消息',
   },
   'ai.runtime.entry.unsupportedRoleText': {
-    'en-US': 'Message role not supported: {{role}}. Expand the raw data to inspect it.',
-    'zh-CN': '暂不支持的消息角色：{{role}}。可展开原始数据查看。',
+    'en-US': 'Message role not supported: {{role}}.',
+    'zh-CN': '暂不支持的消息角色：{{role}}。',
   },
   'ai.runtime.entry.unsupportedText': {
-    'en-US': 'Message role or data is invalid. Expand the raw data to inspect it.',
-    'zh-CN': '消息角色或数据无效，可展开原始数据查看。',
+    'en-US': 'Message role or data is invalid.',
+    'zh-CN': '消息角色或数据无效。',
   },
   'ai.runtime.entry.unknownTitle': {
     'en-US': 'Unrecognized Entry: {{type}}',
     'zh-CN': '未识别 Entry：{{type}}',
   },
   'ai.runtime.entry.unknownText': {
-    'en-US': 'This entry type cannot be displayed. Expand the raw data to inspect it.',
-    'zh-CN': '无法显示此类型的记录，可展开原始数据查看。',
+    'en-US': 'This entry type cannot be displayed.',
+    'zh-CN': '无法显示此类型的记录。',
   },
   'ai.runtime.event.list': {
     'en-US': 'Events',
