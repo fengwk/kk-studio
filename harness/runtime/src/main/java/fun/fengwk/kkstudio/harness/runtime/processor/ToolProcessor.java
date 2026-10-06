@@ -840,20 +840,34 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * 在已按 {@link #lockThreadWithSession} 持有执行树锁并锁定完整祖先链的事务内解析实际 YOLO 开关：执行根读自身 mode，子代理跟随其不可变 {@code
-   * FOLLOW(rootThreadId)} 读取真实执行根的 mode。根缺失或 Follow 目标不是执行根属于一致性破坏，显式抛出而不静默兜底。
+   * FOLLOW(rootThreadId)} 读取真实执行根的 mode。
+   *
+   * <p>Follow 目标必须等于当前事务已锁定的真实执行根（祖先链末位）；指向无关树或中间节点都是权限一致性破坏，显式抛出而不静默兜底，也绝不 为无关根额外加锁。根缺失或根策略异常同样
+   * fail closed。
    */
   private static boolean effectiveYoloEnabled(HarnessStore.Transaction tx, ThreadState thread) {
     ThreadYoloPolicy policy = thread.yoloPolicy();
     if (!policy.isFollow()) {
       return policy.isEnabled();
     }
+    List<UUID> chain = tx.findAncestorChain(thread.id());
+    UUID executionRootId = chain.isEmpty() ? thread.id() : chain.get(chain.size() - 1);
+    if (!executionRootId.equals(policy.rootThreadId())) {
+      throw new IllegalStateException(
+          "thread "
+              + thread.id()
+              + " follows "
+              + policy.rootThreadId()
+              + " which is not its execution root "
+              + executionRootId);
+    }
     ThreadState root =
-        tx.findThread(policy.rootThreadId())
+        tx.findThread(executionRootId)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "yolo execution root "
-                            + policy.rootThreadId()
+                            + executionRootId
                             + " does not exist for thread "
                             + thread.id()));
     if (root.yoloPolicy().isFollow()) {

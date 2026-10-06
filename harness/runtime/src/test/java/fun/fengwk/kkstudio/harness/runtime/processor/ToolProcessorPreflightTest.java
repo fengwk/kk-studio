@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -487,6 +488,74 @@ class ToolProcessorPreflightTest {
     assertEquals(0, fixture.gateway.preflightCallsCount);
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /**
+   * 权限一致性反例：child 的真实执行根 DISABLE，但 policy 错指另一棵 ENABLE 的无关根。必须 fail closed——不得读取无关根开关作为 Allow 依据，不得
+   * preflight / dispatch，也不得变更 invocation、child 或无关根行。
+   */
+  @Test
+  void followChildTargetingUnrelatedEnabledRootFailsClosed() {
+    ToolProcessorTestSupport.MisrootedFixture fixture =
+        ToolProcessorTestSupport.misrootedFollowChildFixture(null);
+    long childVersionBefore =
+        ToolProcessorTestSupport.thread(fixture.store(), fixture.child().threadId()).version();
+    long unrelatedRootVersionBefore =
+        ToolProcessorTestSupport.thread(fixture.store(), fixture.unrelatedRoot().threadId())
+            .version();
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            fixture
+                .processor()
+                .process(
+                    ToolProcessorTestSupport.claim(
+                        fixture.store(),
+                        fixture.seeded().toolInvocationId(),
+                        ToolProcessorTestSupport.NOW)));
+
+    assertEquals(0, fixture.gateway().preflightCallsCount);
+    assertEquals(0, fixture.gateway().startCalls);
+    assertFalse(fixture.processor().hasActiveExecution());
+    ToolInvocation tool =
+        ToolProcessorTestSupport.tool(fixture.store(), fixture.seeded().toolInvocationId());
+    assertEquals(ToolInvocationStatus.READY, tool.status());
+    assertEquals(0, tool.attempt());
+    assertNull(tool.approval());
+    assertEquals(
+        childVersionBefore,
+        ToolProcessorTestSupport.thread(fixture.store(), fixture.child().threadId()).version());
+    ThreadState unrelatedRoot =
+        ToolProcessorTestSupport.thread(fixture.store(), fixture.unrelatedRoot().threadId());
+    assertEquals(unrelatedRootVersionBefore, unrelatedRoot.version());
+    assertTrue(unrelatedRoot.yoloPolicy().isEnabled());
+  }
+
+  /** Follow 目标（根）不存在时同样 fail closed：不 preflight / dispatch，invocation 仍保持 READY。 */
+  @Test
+  void followChildTargetingMissingRootFailsClosed() {
+    ToolProcessorTestSupport.MisrootedFixture fixture =
+        ToolProcessorTestSupport.misrootedFollowChildFixture(new UUID(0L, 999L));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            fixture
+                .processor()
+                .process(
+                    ToolProcessorTestSupport.claim(
+                        fixture.store(),
+                        fixture.seeded().toolInvocationId(),
+                        ToolProcessorTestSupport.NOW)));
+
+    assertEquals(0, fixture.gateway().preflightCallsCount);
+    assertEquals(0, fixture.gateway().startCalls);
+    assertFalse(fixture.processor().hasActiveExecution());
+    assertEquals(
+        ToolInvocationStatus.READY,
+        ToolProcessorTestSupport.tool(fixture.store(), fixture.seeded().toolInvocationId())
+            .status());
   }
 
   /** preflight 期间 ownership 丢失（Stop deleteWork）：二次校验失败，完整 no-op，绝不 start。 */

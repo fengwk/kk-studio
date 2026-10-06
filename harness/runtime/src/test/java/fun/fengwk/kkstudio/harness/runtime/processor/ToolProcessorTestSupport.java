@@ -270,6 +270,15 @@ final class ToolProcessorTestSupport {
      * Session，与运行期跨 Session 的父子结构一致。
      */
     static Baseline seedFollowChild(InMemoryHarnessStore store, Baseline root, Scenario scenario) {
+      return seedFollowChild(store, root, root.threadId(), scenario);
+    }
+
+    /**
+     * 变体：子线程 parent 为 {@code parent.threadId()}，但 {@code FOLLOW} 目标写成 {@code
+     * followRootThreadId}。用于构造「Follow 目标不是真实执行根」的权限一致性反例。
+     */
+    static Baseline seedFollowChild(
+        InMemoryHarnessStore store, Baseline parent, UUID followRootThreadId, Scenario scenario) {
       return store.transaction(
           tx -> {
             UUID sessionId = tx.nextId();
@@ -310,11 +319,11 @@ final class ToolProcessorTestSupport {
                 new ThreadState(
                     threadId,
                     sessionId,
-                    root.threadId(),
+                    parent.threadId(),
                     turnStartEntryId,
                     ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                     "child",
-                    ThreadYoloPolicy.follow(root.threadId()),
+                    ThreadYoloPolicy.follow(followRootThreadId),
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     1L,
@@ -369,6 +378,47 @@ final class ToolProcessorTestSupport {
         newScheduler(),
         bashScenario(ToolSideEffect.READ_ONLY));
   }
+
+  /**
+   * 权限一致性反例 fixture：child 的真实执行根是 DISABLE 的 {@code realRoot}（parent 链），但其 {@code FOLLOW} 目标被写成另一棵
+   * ENABLE 的无关根（{@code followTargetOverride == null}）或一个不存在的 id。用于验证解析必须比对真实执行根而非盲目信任 policy。
+   */
+  static MisrootedFixture misrootedFollowChildFixture(UUID followTargetOverride) {
+    ScheduledExecutorService scheduler = newScheduler();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    Scenario scenario = bashScenario(ToolSideEffect.READ_ONLY);
+    Baseline realRoot = seedToolBaseline(store, NOW, false, scenario);
+    Baseline unrelatedRoot = seedToolBaseline(store, NOW, true, scenario);
+    UUID followTarget =
+        followTargetOverride == null ? unrelatedRoot.threadId() : followTargetOverride;
+    Baseline child = Fixture.seedFollowChild(store, realRoot, followTarget, scenario);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-1", scenario.toolName(), scenario.argumentsJson()),
+            scenario.binding());
+    Seeded seeded = seedTool(store, child, request, NOW, scenario);
+    FakeToolGateway gateway = new FakeToolGateway();
+    ToolProcessor processor =
+        new ToolProcessor(
+            store,
+            gateway,
+            new RecordingSink(),
+            new ToolProcessorConfig(
+                LEASE_CONFIG, () -> NO_RETRY, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
+            new MutableClock(NOW),
+            scheduler,
+            Runnable::run);
+    return new MisrootedFixture(store, gateway, realRoot, unrelatedRoot, child, seeded, processor);
+  }
+
+  record MisrootedFixture(
+      InMemoryHarnessStore store,
+      FakeToolGateway gateway,
+      Baseline realRoot,
+      Baseline unrelatedRoot,
+      Baseline child,
+      Seeded seeded,
+      ToolProcessor processor) {}
 
   /** {@code ask_user} fixture：READY 调用携带给定问卷，binding 来自内置 contributor。 */
   static Fixture askUserFixture(String argumentsJson) {
